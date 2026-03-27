@@ -15,6 +15,8 @@ RISpro Reception is now a real Node.js + PostgreSQL web app for the currently im
 - backup download and restore upload from the browser
 - modality staff role with a completion worklist
 - supervisor user management
+- supervisor audit log viewer with filters and CSV export inside settings
+- printer and scanner groundwork with browser-print profiles and scan preparation
 
 The old prototype-only browser login and fake local data have been removed from the main production flow.
 
@@ -35,8 +37,8 @@ This deployment intentionally hides unfinished modules instead of showing screen
 
 Not enabled yet:
 
-- advanced printer-specific integrations
-- local scanner bridge integrations
+- direct printer bridge execution
+- local scanner bridge execution
 
 ## Local run
 
@@ -96,6 +98,8 @@ docker run --env-file .env -p 3000:3000 rispro-reception
 - make sure `TRUST_PROXY` matches your deployment setup
 - run `npm run migrate` during deployment before starting the app
 - verify `/api/ready` returns `{ "ok": true }`
+
+Detailed rollout steps are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
 
 ## Validation
 

@@ -9,6 +9,7 @@ import {
   writeSessionCookie,
   writeSupervisorReauthCookie
 } from "../services/auth-service.js";
+import { logAuditEntry } from "../services/audit-service.js";
 import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 
 export const authRouter = express.Router();
@@ -25,6 +26,15 @@ authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
     clearSupervisorReauthCookie(res);
+
+    await logAuditEntry({
+      entityType: "auth",
+      entityId: user.id,
+      actionType: "login",
+      oldValues: null,
+      newValues: { username: user.username, role: user.role },
+      changedByUserId: user.id
+    });
 
     res.json({
       user: {
@@ -60,6 +70,15 @@ authRouter.post("/re-auth", requireAuth, async (req, res, next) => {
     const user = await authenticateUser(req.user.username, password);
     const reauthToken = buildSupervisorReauthToken(user);
     writeSupervisorReauthCookie(res, reauthToken);
+
+    await logAuditEntry({
+      entityType: "auth",
+      entityId: user.id,
+      actionType: "supervisor_reauth",
+      oldValues: null,
+      newValues: { username: user.username },
+      changedByUserId: user.id
+    });
 
     res.json({
       ok: true,

@@ -17,7 +17,7 @@ usersRouter.get("/", async (_req, res, next) => {
 
 usersRouter.post("/", async (req, res, next) => {
   try {
-    const user = await createUser(req.body || {});
+    const user = await createUser(req.body || {}, req.user.sub);
     res.status(201).json({ user });
   } catch (error) {
     next(error);

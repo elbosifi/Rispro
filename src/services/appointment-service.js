@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -563,6 +564,18 @@ export async function createAppointment(payload, currentUser) {
       [rows[0].id, currentUser.sub, isOverbooked ? overbookingReason : null]
     );
 
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: rows[0].id,
+        actionType: "create",
+        oldValues: null,
+        newValues: rows[0],
+        changedByUserId: currentUser.sub
+      },
+      client
+    );
+
     await client.query("commit");
 
     return {
@@ -670,6 +683,18 @@ export async function updateAppointment(appointmentId, payload, currentUser) {
       [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Appointment edited or rescheduled"]
     );
 
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "update",
+        oldValues: existingAppointment,
+        newValues: rows[0],
+        changedByUserId: currentUser.sub
+      },
+      client
+    );
+
     await client.query("commit");
     return rows[0];
   } catch (error) {
@@ -726,6 +751,18 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
         values ($1, $2, 'cancelled', $3, $4)
       `,
       [cleanAppointmentId, appointment.status, currentUserId, cleanReason]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "cancel",
+        oldValues: appointment,
+        newValues: { status: "cancelled", cancel_reason: cleanReason },
+        changedByUserId: currentUserId
+      },
+      client
     );
 
     await client.query("commit");

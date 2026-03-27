@@ -10,8 +10,10 @@ import { patientsRouter } from "./routes/patients.js";
 import { appointmentsRouter } from "./routes/appointments.js";
 import { queueRouter } from "./routes/queue.js";
 import { documentsRouter } from "./routes/documents.js";
+import { integrationsRouter } from "./routes/integrations.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
+import { auditRouter } from "./routes/audit.js";
 import { settingsRouter } from "./routes/settings.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
@@ -64,8 +66,10 @@ export function createApp() {
   app.use("/api/appointments", appointmentsRouter);
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
+  app.use("/api/integrations", integrationsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/modality", modalityRouter);
+  app.use("/api/audit", auditRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api", notFoundHandler);
 

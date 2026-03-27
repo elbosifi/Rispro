@@ -48,6 +48,12 @@ const state = {
   noShowReasons: {},
   printLoading: false,
   printError: "",
+  integrationLoading: false,
+  integrationError: "",
+  integrationSuccess: "",
+  integrationStatus: null,
+  scanPreparationLoading: false,
+  printPreparationLoading: false,
   printResults: [],
   printFilters: defaultPrintFilters(),
   selectedPrintAppointment: null,
@@ -115,6 +121,16 @@ const state = {
   settingsCatalog: {},
   settingsSavingCategory: "",
   settingsSuccess: "",
+  auditFilters: defaultAuditFilters(),
+  auditMeta: {
+    entityTypes: [],
+    actionTypes: [],
+    users: []
+  },
+  auditLoading: false,
+  auditError: "",
+  auditEntries: [],
+  auditExportLoading: false,
   reauthPassword: "",
   reauthLoading: false,
   reauthError: "",
@@ -298,6 +314,18 @@ const copy = {
       slipPreview: "Appointment slip preview",
       labelPreview: "Patient label preview",
       documentsTitle: "Request documents",
+      hardwareTitle: "Printer and scanner readiness",
+      printerReady: "Printer setup",
+      scannerReady: "Scanner setup",
+      prepareSlip: "Prepare slip print",
+      prepareLabel: "Prepare label print",
+      prepareScan: "Prepare scan session",
+      printerProfile: "Printer profile",
+      printerMode: "Print mode",
+      scannerMode: "Scanner mode",
+      scannerProfile: "Scanner profile",
+      allowedTypes: "Allowed file types",
+      noHardwareStatus: "Hardware setup will appear here after loading.",
       uploadButton: "Upload request document",
       fileButton: "Choose file",
       fileNone: "No file selected",
@@ -340,11 +368,22 @@ const copy = {
       downloadBackup: "Download backup",
       restoreBackup: "Restore backup",
       restoreFile: "Backup file",
+      auditTitle: "Audit log",
+      refreshAudit: "Refresh audit log",
+      exportAudit: "Export CSV",
+      clearAudit: "Clear filters",
+      auditFilters: "Audit filters",
+      auditRows: "Rows shown",
       fields: {
         username: "Username",
         fullName: "Full name",
         password: "Password",
-        role: "Role"
+        role: "Role",
+        entityType: "Entity type",
+        actionType: "Action type",
+        changedBy: "Changed by",
+        dateFrom: "From date",
+        dateTo: "To date"
       }
     },
     roles: {
@@ -536,6 +575,18 @@ const copy = {
       slipPreview: "معاينة وصل الموعد",
       labelPreview: "معاينة ملصق المريض",
       documentsTitle: "وثائق طلب الفحص",
+      hardwareTitle: "جاهزية الطابعة والماسح",
+      printerReady: "إعداد الطابعة",
+      scannerReady: "إعداد الماسح",
+      prepareSlip: "تجهيز طباعة الوصل",
+      prepareLabel: "تجهيز طباعة الملصق",
+      prepareScan: "تجهيز جلسة مسح",
+      printerProfile: "إعداد الطابعة",
+      printerMode: "وضع الطباعة",
+      scannerMode: "وضع المسح",
+      scannerProfile: "إعداد الماسح",
+      allowedTypes: "أنواع الملفات المقبولة",
+      noHardwareStatus: "ستظهر إعدادات العتاد هنا بعد التحميل.",
       uploadButton: "رفع طلب الفحص",
       fileButton: "اختيار ملف",
       fileNone: "لم يتم اختيار ملف",
@@ -578,11 +629,22 @@ const copy = {
       downloadBackup: "تنزيل النسخة الاحتياطية",
       restoreBackup: "استعادة النسخة",
       restoreFile: "ملف النسخة",
+      auditTitle: "سجل التدقيق",
+      refreshAudit: "تحديث سجل التدقيق",
+      exportAudit: "تصدير CSV",
+      clearAudit: "مسح الفلاتر",
+      auditFilters: "فلاتر السجل",
+      auditRows: "الصفوف المعروضة",
       fields: {
         username: "اسم المستخدم",
         fullName: "الاسم الكامل",
         password: "كلمة المرور",
-        role: "الدور"
+        role: "الدور",
+        entityType: "نوع الكيان",
+        actionType: "نوع الإجراء",
+        changedBy: "تم التغيير بواسطة",
+        dateFrom: "من تاريخ",
+        dateTo: "إلى تاريخ"
       }
     },
     roles: {
@@ -735,7 +797,10 @@ const SETTINGS_META = {
       appointment_slip: { en: "Appointment slip", ar: "وصل الموعد" },
       patient_label: { en: "Patient label", ar: "ملصق المريض" },
       barcode_value_source: { en: "Barcode value source", ar: "مصدر قيمة الباركود" },
-      label_printer_profile: { en: "Label printer profile", ar: "إعداد طابعة الملصقات" }
+      label_printer_profile: { en: "Label printer profile", ar: "إعداد طابعة الملصقات" },
+      slip_printer_profile: { en: "Slip printer profile", ar: "إعداد طابعة الوصل" },
+      label_output_mode: { en: "Label output mode", ar: "وضع إخراج الملصق" },
+      direct_print_bridge_mode: { en: "Direct print bridge", ar: "ربط الطباعة المباشرة" }
     }
   },
   documents_and_uploads: {
@@ -747,7 +812,12 @@ const SETTINGS_META = {
       referral_upload: { en: "Referral upload", ar: "رفع طلب الفحص" },
       allowed_file_types: { en: "Allowed file types", ar: "أنواع الملفات المقبولة" },
       document_link_scope: { en: "Document linking scope", ar: "نطاق ربط الوثيقة" },
-      scanner_bridge_mode: { en: "Scanner bridge mode", ar: "وضع الربط مع الماسح" }
+      scanner_bridge_mode: { en: "Scanner bridge mode", ar: "وضع الربط مع الماسح" },
+      scanner_profile_name: { en: "Scanner profile name", ar: "اسم إعداد الماسح" },
+      scanner_source: { en: "Scanner source", ar: "مصدر الماسح" },
+      scan_dpi: { en: "Scan DPI", ar: "دقة المسح" },
+      scan_color_mode: { en: "Scan color mode", ar: "نمط ألوان المسح" },
+      scan_file_format: { en: "Scan file format", ar: "صيغة ملف المسح" }
     }
   },
   dashboard_and_ui: {
@@ -870,6 +940,16 @@ function defaultModalityFilters() {
   };
 }
 
+function defaultAuditFilters() {
+  return {
+    entityType: "",
+    actionType: "",
+    changedByUserId: "",
+    dateFrom: "",
+    dateTo: ""
+  };
+}
+
 function t() {
   return copy[state.language];
 }
@@ -894,6 +974,53 @@ function localizedDate() {
 
 function formatRole(role) {
   return t().roles[role] || role;
+}
+
+function humanizeAuditValue(value) {
+  return String(value || "")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatAuditEntityType(value) {
+  const labels = {
+    auth: { en: "Authentication", ar: "تسجيل الدخول" },
+    user: { en: "User", ar: "مستخدم" },
+    patient: { en: "Patient", ar: "مريض" },
+    patient_merge: { en: "Patient merge", ar: "دمج المرضى" },
+    appointment: { en: "Appointment", ar: "موعد" },
+    queue_entry: { en: "Queue", ar: "الطابور" },
+    document: { en: "Document", ar: "وثيقة" },
+    system_setting: { en: "System setting", ar: "إعداد نظام" },
+    backup: { en: "Backup", ar: "نسخة احتياطية" },
+    audit_log: { en: "Audit log", ar: "سجل التدقيق" },
+    integration: { en: "Integration", ar: "تكامل" }
+  };
+
+  return labels[value]?.[state.language] || humanizeAuditValue(value);
+}
+
+function formatAuditActionType(value) {
+  const labels = {
+    login: { en: "Login", ar: "تسجيل الدخول" },
+    supervisor_reauth: { en: "Supervisor re-auth", ar: "إعادة تحقق المشرف" },
+    create: { en: "Create", ar: "إنشاء" },
+    update: { en: "Update", ar: "تعديل" },
+    merge: { en: "Merge", ar: "دمج" },
+    cancel: { en: "Cancel", ar: "إلغاء" },
+    complete: { en: "Complete", ar: "إكمال" },
+    upload: { en: "Upload", ar: "رفع" },
+    upsert: { en: "Save setting", ar: "حفظ إعداد" },
+    download: { en: "Download", ar: "تنزيل" },
+    restore: { en: "Restore", ar: "استعادة" },
+    confirm_no_show: { en: "Confirm no-show", ar: "تأكيد عدم الحضور" },
+    scan_into_queue: { en: "Scan into queue", ar: "إدخال للطابور" },
+    export: { en: "Export", ar: "تصدير" },
+    prepare_print: { en: "Prepare print", ar: "تجهيز طباعة" },
+    prepare_scan: { en: "Prepare scan", ar: "تجهيز مسح" }
+  };
+
+  return labels[value]?.[state.language] || humanizeAuditValue(value);
 }
 
 function getSettingsMeta(category) {
@@ -969,6 +1096,21 @@ function formatDisplayDate(value) {
     day: "numeric",
     month: "short",
     year: "numeric"
+  }).format(new Date(value));
+}
+
+function formatDisplayDateTime(value) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat(state.language === "ar" ? "ar-LY" : "en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
   }).format(new Date(value));
 }
 
@@ -1188,6 +1330,22 @@ async function loadPrintAppointments() {
   }
 }
 
+async function loadIntegrationStatus() {
+  state.integrationLoading = true;
+  state.integrationError = "";
+  render();
+
+  try {
+    const result = await api("/api/integrations/status", { method: "GET" });
+    state.integrationStatus = result.status || null;
+  } catch (error) {
+    state.integrationError = error.message;
+  } finally {
+    state.integrationLoading = false;
+    render();
+  }
+}
+
 async function loadAppointmentDocuments(appointmentId) {
   if (!appointmentId) {
     state.appointmentDocuments = [];
@@ -1317,6 +1475,49 @@ async function loadSettings() {
   }
 }
 
+async function loadAuditEntries() {
+  if (!isSupervisor() || !hasRecentSupervisorReauth()) {
+    return;
+  }
+
+  state.auditLoading = true;
+  state.auditError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams({ limit: "80" });
+
+    if (state.auditFilters.entityType) {
+      params.set("entityType", state.auditFilters.entityType);
+    }
+
+    if (state.auditFilters.actionType) {
+      params.set("actionType", state.auditFilters.actionType);
+    }
+
+    if (state.auditFilters.changedByUserId) {
+      params.set("changedByUserId", state.auditFilters.changedByUserId);
+    }
+
+    if (state.auditFilters.dateFrom) {
+      params.set("dateFrom", state.auditFilters.dateFrom);
+    }
+
+    if (state.auditFilters.dateTo) {
+      params.set("dateTo", state.auditFilters.dateTo);
+    }
+
+    const result = await api(`/api/audit?${params.toString()}`, { method: "GET" });
+    state.auditEntries = result.entries || [];
+    state.auditMeta = result.meta || { entityTypes: [], actionTypes: [], users: [] };
+  } catch (error) {
+    state.auditError = error.message;
+  } finally {
+    state.auditLoading = false;
+    render();
+  }
+}
+
 async function hydrateRoute() {
   if (!state.session) {
     return;
@@ -1329,7 +1530,7 @@ async function hydrateRoute() {
 
   if (state.route === "settings") {
     if (hasRecentSupervisorReauth()) {
-      await Promise.all([loadUsers(), loadSettings()]);
+      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
     }
     return;
   }
@@ -1350,7 +1551,7 @@ async function hydrateRoute() {
   }
 
   if (state.route === "print") {
-    await Promise.all([loadAppointmentLookups(), loadPrintAppointments()]);
+    await Promise.all([loadAppointmentLookups(), loadPrintAppointments(), loadIntegrationStatus()]);
   }
 }
 
@@ -1408,6 +1609,11 @@ async function signOut() {
     state.modalityFilters = defaultModalityFilters();
     state.modalityError = "";
     state.modalitySuccess = "";
+    state.auditEntries = [];
+    state.auditError = "";
+    state.auditFilters = defaultAuditFilters();
+    state.auditMeta = { entityTypes: [], actionTypes: [], users: [] };
+    state.auditExportLoading = false;
     state.reauthPassword = "";
     state.reauthError = "";
     state.backupSuccess = "";
@@ -1417,6 +1623,12 @@ async function signOut() {
     state.restoreFileName = "";
     state.restorePayloadText = "";
     state.printResults = [];
+    state.integrationStatus = null;
+    state.integrationError = "";
+    state.integrationSuccess = "";
+    state.integrationLoading = false;
+    state.scanPreparationLoading = false;
+    state.printPreparationLoading = false;
     state.printFilters = defaultPrintFilters();
     state.selectedPrintAppointment = null;
     state.appointmentDocuments = [];
@@ -1627,7 +1839,7 @@ async function submitSupervisorReauth() {
     });
     state.reauthPassword = "";
     await refreshSession();
-    await Promise.all([loadUsers(), loadSettings()]);
+    await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
   } catch (error) {
     state.reauthError = error.message;
   } finally {
@@ -1673,6 +1885,66 @@ async function downloadBackup() {
   }
 }
 
+async function downloadAuditExport() {
+  if (!isSupervisor() || !hasRecentSupervisorReauth()) {
+    return;
+  }
+
+  state.auditExportLoading = true;
+  state.auditError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams({ limit: "2000" });
+
+    if (state.auditFilters.entityType) {
+      params.set("entityType", state.auditFilters.entityType);
+    }
+
+    if (state.auditFilters.actionType) {
+      params.set("actionType", state.auditFilters.actionType);
+    }
+
+    if (state.auditFilters.changedByUserId) {
+      params.set("changedByUserId", state.auditFilters.changedByUserId);
+    }
+
+    if (state.auditFilters.dateFrom) {
+      params.set("dateFrom", state.auditFilters.dateFrom);
+    }
+
+    if (state.auditFilters.dateTo) {
+      params.set("dateTo", state.auditFilters.dateTo);
+    }
+
+    const response = await fetch(`/api/audit/export?${params.toString()}`, {
+      method: "GET",
+      credentials: "same-origin"
+    });
+
+    if (!response.ok) {
+      const payload = await response.json();
+      throw new Error(payload?.error?.message || "Audit export failed.");
+    }
+
+    const csv = await response.text();
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `rispro-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    state.auditError = error.message;
+  } finally {
+    state.auditExportLoading = false;
+    render();
+  }
+}
+
 async function restoreBackup() {
   if (!state.restorePayloadText) {
     state.restoreError =
@@ -1697,7 +1969,7 @@ async function restoreBackup() {
     state.restoreFileName = "";
     state.restorePayloadText = "";
     await refreshSession();
-    await Promise.all([loadUsers(), loadSettings()]);
+    await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
   } catch (error) {
     state.restoreError = error.message;
   } finally {
@@ -1946,6 +2218,78 @@ async function uploadAppointmentDocument() {
     state.uploadError = error.message;
   } finally {
     state.uploadSaving = false;
+    render();
+  }
+}
+
+async function preparePrintOutput(outputType) {
+  if (!state.selectedPrintAppointment) {
+    state.integrationError = t().print.noAppointment;
+    render();
+    return;
+  }
+
+  state.printPreparationLoading = true;
+  state.integrationError = "";
+  state.integrationSuccess = "";
+  render();
+
+  try {
+    const result = await api("/api/integrations/print-prepare", {
+      method: "POST",
+      body: JSON.stringify({
+        appointmentId: state.selectedPrintAppointment.id,
+        outputType
+      })
+    });
+
+    const preparation = result.preparation;
+    state.integrationSuccess =
+      state.language === "ar"
+        ? `تم تجهيز ${outputType === "label" ? "طباعة الملصق" : "طباعة الوصل"} باستخدام الإعداد ${preparation.printerProfile}.`
+        : `${outputType === "label" ? "Label" : "Slip"} print prepared with profile ${preparation.printerProfile}.`;
+  } catch (error) {
+    state.integrationError = error.message;
+  } finally {
+    state.printPreparationLoading = false;
+    render();
+  }
+}
+
+async function prepareScanSession() {
+  if (!state.selectedPrintAppointment) {
+    state.integrationError = t().print.noAppointment;
+    render();
+    return;
+  }
+
+  state.scanPreparationLoading = true;
+  state.integrationError = "";
+  state.integrationSuccess = "";
+  render();
+
+  try {
+    const result = await api("/api/integrations/scan-prepare", {
+      method: "POST",
+      body: JSON.stringify({
+        appointmentId: state.selectedPrintAppointment.id,
+        documentType: state.uploadForm.documentType || "referral_request"
+      })
+    });
+
+    const preparation = result.preparation;
+    state.integrationSuccess =
+      state.language === "ar"
+        ? `تم تجهيز جلسة المسح ${preparation.sessionCode}. ${preparation.guidance}`
+        : `Scan session ${preparation.sessionCode} is ready. ${preparation.guidance}`;
+
+    if (!state.uploadForm.fileName) {
+      state.uploadForm.fileName = preparation.suggestedFileName || state.uploadForm.fileName;
+    }
+  } catch (error) {
+    state.integrationError = error.message;
+  } finally {
+    state.scanPreparationLoading = false;
     render();
   }
 }
@@ -3217,6 +3561,71 @@ function renderPrintLabelPreview() {
   `;
 }
 
+function renderIntegrationStatusPanel() {
+  if (state.integrationLoading && !state.integrationStatus) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.integrationStatus) {
+    return `<div class="empty">${escapeHtml(t().print.noHardwareStatus)}</div>`;
+  }
+
+  const printer = state.integrationStatus.printer;
+  const scanner = state.integrationStatus.scanner;
+
+  return `
+    <div class="dual-grid">
+      <article class="surface surface-compact">
+        <div class="section-head">
+          <h3 class="section-title">${escapeHtml(t().print.printerReady)}</h3>
+          <span class="chip ${printer.directLabelPrintReady ? "success" : "subtle"}">${escapeHtml(
+            printer.directLabelPrintReady
+              ? state.language === "ar"
+                ? "الربط جاهز"
+                : "Bridge ready"
+              : state.language === "ar"
+                ? "طباعة المتصفح"
+                : "Browser print"
+          )}</span>
+        </div>
+        <div class="stack">
+          <div class="info-grid">
+            ${infoTile(t().print.printerProfile, printer.labelPrinterProfile || "customize_later", "tone-good")}
+            ${infoTile(t().print.printerMode, printer.labelOutputMode || "browser_print", "")}
+          </div>
+          <div class="form-actions">
+            <button class="button-secondary" type="button" data-action="prepare-slip-print">${escapeHtml(
+              state.printPreparationLoading ? t().common.loading : t().print.prepareSlip
+            )}</button>
+            <button class="button-primary" type="button" data-action="prepare-label-print">${escapeHtml(
+              state.printPreparationLoading ? t().common.loading : t().print.prepareLabel
+            )}</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="surface surface-compact">
+        <div class="section-head">
+          <h3 class="section-title">${escapeHtml(t().print.scannerReady)}</h3>
+          <span class="chip ${scanner.bridgeReady ? "success" : "subtle"}">${escapeHtml(scanner.scannerBridgeMode)}</span>
+        </div>
+        <div class="stack">
+          <div class="info-grid">
+            ${infoTile(t().print.scannerProfile, scanner.scannerProfileName || "default_twain_profile", "tone-warm")}
+            ${infoTile(t().print.scannerMode, scanner.scanFileFormat ? `${scanner.scannerSource} • ${scanner.scanFileFormat}` : "—", "")}
+          </div>
+          <div class="small">${escapeHtml(`${t().print.allowedTypes}: ${(scanner.allowedFileTypes || []).join(", ") || "—"}`)}</div>
+          <div class="form-actions">
+            <button class="button-primary" type="button" data-action="prepare-scan-session">${escapeHtml(
+              state.scanPreparationLoading ? t().common.loading : t().print.prepareScan
+            )}</button>
+          </div>
+        </div>
+      </article>
+    </div>
+  `;
+}
+
 function renderDocumentsList() {
   if (state.documentsLoading) {
     return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
@@ -3356,8 +3765,8 @@ function renderPrint() {
         "",
         t().print.selectedAppointment
       )}
-      ${alertMarkup("error", state.printError || state.documentsError || state.uploadError)}
-      ${alertMarkup("success", state.uploadSuccess)}
+      ${alertMarkup("error", state.printError || state.documentsError || state.uploadError || state.integrationError)}
+      ${alertMarkup("success", state.uploadSuccess || state.integrationSuccess)}
 
       <section class="split-grid">
         <div class="stack">
@@ -3404,6 +3813,14 @@ function renderPrint() {
         </div>
 
         <div class="stack">
+          <article class="surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().print.hardwareTitle)}</h2>
+              <span class="chip subtle">${escapeHtml(state.selectedPrintAppointment?.accession_number || t().common.noData)}</span>
+            </div>
+            ${renderIntegrationStatusPanel()}
+          </article>
+
           <article class="surface slip-surface">
             <div class="section-head">
               <h2 class="section-title">${escapeHtml(t().print.slipPreview)}</h2>
@@ -3772,6 +4189,112 @@ function renderSettingsCatalog() {
   `;
 }
 
+function renderAuditList() {
+  if (state.auditLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.auditEntries.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.auditEntries
+        .map(
+          (entry) => `
+            <div class="item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(formatAuditActionType(entry.action_type))} • ${escapeHtml(
+                  formatAuditEntityType(entry.entity_type)
+                )}</div>
+                <div class="item-subtitle">${escapeHtml(entry.changed_by_name || entry.changed_by_username || "System")} • ${escapeHtml(
+                  formatDisplayDateTime(entry.created_at)
+                )}</div>
+              </div>
+              <div class="badge-row">
+                <span class="chip subtle">${escapeHtml(String(entry.entity_id ?? "—"))}</span>
+                <span class="chip accent">${escapeHtml(entry.changed_by_username || "system")}</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderAuditFilters() {
+  const allLabel = state.language === "ar" ? "الكل" : "All";
+
+  return `
+    <form id="audit-filter-form" class="stack">
+      <div class="form-grid">
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.fields.entityType)}</span>
+          <select class="select" name="entityType" data-audit-filter="true">
+            <option value="">${escapeHtml(allLabel)}</option>
+            ${state.auditMeta.entityTypes
+              .map(
+                (entityType) => `<option value="${escapeHtml(entityType)}" ${
+                  state.auditFilters.entityType === entityType ? "selected" : ""
+                }>${escapeHtml(formatAuditEntityType(entityType))}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.fields.actionType)}</span>
+          <select class="select" name="actionType" data-audit-filter="true">
+            <option value="">${escapeHtml(allLabel)}</option>
+            ${state.auditMeta.actionTypes
+              .map(
+                (actionType) => `<option value="${escapeHtml(actionType)}" ${
+                  state.auditFilters.actionType === actionType ? "selected" : ""
+                }>${escapeHtml(formatAuditActionType(actionType))}</option>`
+              )
+              .join("")}
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.fields.changedBy)}</span>
+          <select class="select" name="changedByUserId" data-audit-filter="true">
+            <option value="">${escapeHtml(allLabel)}</option>
+            ${state.auditMeta.users
+              .map((user) => {
+                const label = user.full_name ? `${user.full_name} (${user.username})` : user.username;
+                return `<option value="${escapeHtml(String(user.id))}" ${
+                  String(state.auditFilters.changedByUserId) === String(user.id) ? "selected" : ""
+                }>${escapeHtml(label)}</option>`;
+              })
+              .join("")}
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.fields.dateFrom)}</span>
+          <input class="input field-en" type="date" name="dateFrom" data-audit-filter="true" value="${escapeHtml(state.auditFilters.dateFrom)}" />
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.fields.dateTo)}</span>
+          <input class="input field-en" type="date" name="dateTo" data-audit-filter="true" value="${escapeHtml(state.auditFilters.dateTo)}" />
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button class="button-secondary" type="submit">${escapeHtml(t().settings.refreshAudit)}</button>
+        <button class="button-ghost" type="button" data-action="clear-audit-filters">${escapeHtml(t().settings.clearAudit)}</button>
+        <button class="button-primary" type="button" data-action="export-audit">${escapeHtml(
+          state.auditExportLoading ? t().common.loading : t().settings.exportAudit
+        )}</button>
+      </div>
+    </form>
+  `;
+}
+
 function renderSettings() {
   if (!isSupervisor()) {
     return `
@@ -3875,6 +4398,16 @@ function renderSettings() {
           <span class="chip subtle">${escapeHtml(`${Object.keys(state.settingsCatalog).length} categories`)}</span>
         </div>
         ${renderSettingsCatalog()}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.auditTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(`${t().settings.auditRows}: ${state.auditEntries.length}`)}</span>
+        </div>
+        ${alertMarkup("error", state.auditError)}
+        ${renderAuditFilters()}
+        ${renderAuditList()}
       </section>
 
       <section class="surface">
@@ -4042,6 +4575,11 @@ function handleInput(event) {
 
   if (target.closest("#reauth-form")) {
     state.reauthPassword = target.value;
+    return;
+  }
+
+  if (target.closest("#audit-filter-form")) {
+    state.auditFilters[target.name] = target.value;
     return;
   }
 
@@ -4349,6 +4887,8 @@ function handleClick(event) {
     ) || null;
     state.printError = "";
     state.uploadError = "";
+    state.integrationError = "";
+    state.integrationSuccess = "";
     state.appointmentEditError = "";
     state.appointmentEditSuccess = "";
     state.cancelReason = "";
@@ -4374,7 +4914,7 @@ function handleClick(event) {
 
   if (target.dataset.action === "refresh-settings") {
     event.preventDefault();
-    void Promise.all([loadUsers(), loadSettings()]);
+    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
     return;
   }
 
@@ -4396,9 +4936,46 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "prepare-slip-print") {
+    event.preventDefault();
+    void preparePrintOutput("slip");
+    return;
+  }
+
+  if (target.dataset.action === "prepare-label-print") {
+    event.preventDefault();
+    void preparePrintOutput("label");
+    return;
+  }
+
+  if (target.dataset.action === "prepare-scan-session") {
+    event.preventDefault();
+    void prepareScanSession();
+    return;
+  }
+
   if (target.dataset.action === "download-backup") {
     event.preventDefault();
     void downloadBackup();
+    return;
+  }
+
+  if (target.dataset.action === "refresh-audit") {
+    event.preventDefault();
+    void loadAuditEntries();
+    return;
+  }
+
+  if (target.dataset.action === "clear-audit-filters") {
+    event.preventDefault();
+    state.auditFilters = defaultAuditFilters();
+    void loadAuditEntries();
+    return;
+  }
+
+  if (target.dataset.action === "export-audit") {
+    event.preventDefault();
+    void downloadAuditExport();
   }
 }
 
@@ -4569,6 +5146,12 @@ function handleSubmit(event) {
   if (event.target.id === "user-form") {
     event.preventDefault();
     void createUser();
+    return;
+  }
+
+  if (event.target.id === "audit-filter-form") {
+    event.preventDefault();
+    void loadAuditEntries();
     return;
   }
 

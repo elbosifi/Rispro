@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { createAppointment } from "./appointment-service.js";
+import { logAuditEntry } from "./audit-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
@@ -307,6 +308,18 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
       await updateAppointmentStatus(client, appointment.id, appointment.status, "waiting", currentUser.sub);
     }
 
+    await logAuditEntry(
+      {
+        entityType: "queue_entry",
+        entityId: appointment.id,
+        actionType: "scan_into_queue",
+        oldValues: { status: appointment.status },
+        newValues: { status: "waiting", accession_number: appointment.accession_number },
+        changedByUserId: currentUser.sub
+      },
+      client
+    );
+
     await client.query("commit");
 
     return {
@@ -429,6 +442,18 @@ export async function confirmNoShow(appointmentId, reason, currentUser) {
         values ($1, 'scheduled', 'no-show', $2, $3)
       `,
       [cleanAppointmentId, currentUser.sub, cleanReason]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "confirm_no_show",
+        oldValues: appointment,
+        newValues: { status: "no-show", no_show_reason: cleanReason },
+        changedByUserId: currentUser.sub
+      },
+      client
     );
 
     await client.query("commit");

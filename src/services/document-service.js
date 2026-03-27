@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -137,6 +138,15 @@ export async function uploadDocument(payload, currentUserId) {
     `,
     [patientId, appointmentId, documentType, originalFilename, relativeStoredPath, mimeType, fileBuffer.length, currentUserId]
   );
+
+  await logAuditEntry({
+    entityType: "document",
+    entityId: rows[0].id,
+    actionType: "upload",
+    oldValues: null,
+    newValues: rows[0],
+    changedByUserId: currentUserId
+  });
 
   return rows[0];
 }

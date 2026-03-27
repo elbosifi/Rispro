@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 export async function listUsers() {
   const { rows } = await pool.query(`
@@ -12,7 +13,7 @@ export async function listUsers() {
   return rows;
 }
 
-export async function createUser({ username, fullName, password, role, isActive = true }) {
+export async function createUser({ username, fullName, password, role, isActive = true }, createdByUserId = null) {
   if (!username || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
@@ -31,6 +32,17 @@ export async function createUser({ username, fullName, password, role, isActive 
         returning id, username, full_name, role, is_active, created_at, updated_at
       `,
       [username, fullName, passwordHash, role, isActive]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "user",
+        entityId: rows[0].id,
+        actionType: "create",
+        oldValues: null,
+        newValues: rows[0],
+        changedByUserId: createdByUserId
+      }
     );
 
     return rows[0];

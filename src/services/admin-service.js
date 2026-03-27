@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +81,18 @@ export async function buildBackupSnapshot(currentUserId) {
         values ($1, 'browser_download', $2, $3)
       `,
       [backupName, "browser_download", currentUserId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "backup",
+        entityId: null,
+        actionType: "download",
+        oldValues: null,
+        newValues: { backupName },
+        changedByUserId: currentUserId
+      },
+      client
     );
 
     return {
@@ -187,6 +200,18 @@ export async function restoreBackupSnapshot(payload, currentUserId) {
         values ($1, 'restore_upload', $2, $3)
       `,
       [`restore-${new Date().toISOString()}`, "restore_upload", restoreInitiator]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "backup",
+        entityId: null,
+        actionType: "restore",
+        oldValues: null,
+        newValues: { restoredAt: new Date().toISOString() },
+        changedByUserId: restoreInitiator
+      },
+      client
     );
 
     await client.query("commit");

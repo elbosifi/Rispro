@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -137,6 +138,18 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         values ($1, $2, 'completed', $3, 'Marked completed by modality staff')
       `,
       [cleanAppointmentId, appointment.status, currentUserId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "complete",
+        oldValues: appointment,
+        newValues: { status: "completed" },
+        changedByUserId: currentUserId
+      },
+      client
     );
 
     await client.query("commit");

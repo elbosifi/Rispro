@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 
 export async function listSettingsCatalog() {
   const { rows } = await pool.query(
@@ -53,6 +54,18 @@ export async function upsertSettings(category, entries, updatedByUserId) {
         throw new HttpError(400, "Each settings entry must include a key.");
       }
 
+      const previousResult = await client.query(
+        `
+          select category, setting_key, setting_value, updated_at
+          from system_settings
+          where category = $1 and setting_key = $2
+          limit 1
+        `,
+        [category, entry.key]
+      );
+
+      const previousSetting = previousResult.rows[0] || null;
+
       const { rows } = await client.query(
         `
           insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
@@ -65,6 +78,18 @@ export async function upsertSettings(category, entries, updatedByUserId) {
           returning category, setting_key, setting_value, updated_at
         `,
         [category, entry.key, JSON.stringify(entry.value ?? {}), updatedByUserId]
+      );
+
+      await logAuditEntry(
+        {
+          entityType: "system_setting",
+          entityId: rows[0].setting_key,
+          actionType: "upsert",
+          oldValues: previousSetting,
+          newValues: rows[0],
+          changedByUserId: updatedByUserId
+        },
+        client
       );
 
       results.push(rows[0]);

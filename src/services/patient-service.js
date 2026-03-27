@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
 import {
   buildEstimatedDobFromAge,
   formatDateForSql,
@@ -188,6 +189,17 @@ export async function createPatient(payload, createdByUserId) {
       ]
     );
 
+    await logAuditEntry(
+      {
+        entityType: "patient",
+        entityId: rows[0].id,
+        actionType: "create",
+        oldValues: null,
+        newValues: rows[0],
+        changedByUserId: createdByUserId
+      }
+    );
+
     return rows[0];
   } catch (error) {
     if (error.code === "23505") {
@@ -200,9 +212,8 @@ export async function createPatient(payload, createdByUserId) {
 
 export async function updatePatient(patientId, payload, updatedByUserId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const previousPatient = await getPatientById(cleanPatientId);
   const validated = validatePatientPayload(payload);
-
-  await getPatientById(cleanPatientId);
 
   try {
     const { rows } = await pool.query(
@@ -240,6 +251,17 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
         validated.address,
         updatedByUserId
       ]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "patient",
+        entityId: rows[0].id,
+        actionType: "update",
+        oldValues: previousPatient,
+        newValues: rows[0],
+        changedByUserId: updatedByUserId
+      }
     );
 
     return rows[0];
@@ -301,6 +323,18 @@ export async function mergePatients(payload, updatedByUserId) {
         limit 1
       `,
       [targetPatientId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "patient_merge",
+        entityId: targetPatientId,
+        actionType: "merge",
+        oldValues: { sourcePatientId, targetPatientId },
+        newValues: { mergedInto: targetPatientId, removedPatientId: sourcePatientId },
+        changedByUserId: updatedByUserId
+      },
+      client
     );
 
     await client.query("commit");

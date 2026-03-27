@@ -164,6 +164,17 @@ Need:
 - `POST /api/queue/scan`
 - `POST /api/queue/walk-in`
 
+### Audit
+
+- `GET /api/audit`
+- `GET /api/audit/export`
+
+### Integrations
+
+- `GET /api/integrations/status`
+- `POST /api/integrations/print-prepare`
+- `POST /api/integrations/scan-prepare`
+
 ### Settings
 
 - `GET /api/settings/system`
