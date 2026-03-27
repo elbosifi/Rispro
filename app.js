@@ -40,7 +40,7 @@ function saveCityOptions(list) {
   localStorage.setItem("rispro-city-options", JSON.stringify(list));
 }
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "registrations", "queue", "modality", "doctor", "print", "search", "settings"];
+const allowedRoutes = ["dashboard", "patients", "appointments", "registrations", "queue", "modality", "doctor", "print", "statistics", "search", "settings"];
 const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
@@ -86,6 +86,10 @@ const state = {
   printPreparationLoading: false,
   printResults: [],
   printFilters: defaultPrintFilters(),
+  statisticsFilters: defaultStatisticsFilters(),
+  statisticsLoading: false,
+  statisticsError: "",
+  statisticsSnapshot: null,
   registrationsFilters: defaultRegistrationsFilters(),
   selectedPrintAppointment: null,
   doctorLoading: false,
@@ -184,6 +188,7 @@ const state = {
   settingsLoading: false,
   settingsError: "",
   settingsCatalog: {},
+  settingsSection: "menu",
   settingsSavingCategory: "",
   settingsSuccess: "",
   auditFilters: defaultAuditFilters(),
@@ -236,6 +241,7 @@ const copy = {
       modality: "Modality board",
       doctor: "Doctor home",
       print: "Printing",
+      statistics: "Statistics",
       search: "Search patients",
       settings: "Settings"
     },
@@ -445,6 +451,35 @@ const copy = {
         examInstructions: "Exam instructions"
       }
     },
+    statistics: {
+      title: "Appointment statistics",
+      body: "Track appointment totals, modality workload, queue progress, and no-show trends for the selected period.",
+      filtersTitle: "Statistics filters",
+      print: "Print statistics",
+      date: "Date",
+      dateFrom: "From",
+      dateTo: "To",
+      modality: "Modality",
+      load: "Load statistics",
+      summaryTitle: "Summary",
+      byModalityTitle: "By modality",
+      byStatusTitle: "By status",
+      byDayTitle: "Daily trend",
+      totalAppointments: "Total appointments",
+      uniquePatients: "Unique patients",
+      completed: "Completed",
+      noShowRate: "No-show rate",
+      walkIn: "Walk-ins",
+      inQueue: "In queue",
+      statuses: {
+        scheduled: "Scheduled",
+        arrived: "Arrived",
+        waiting: "Waiting",
+        completed: "Completed",
+        "no-show": "No-show",
+        cancelled: "Cancelled"
+      }
+    },
     doctor: {
       title: "Doctor home",
       body: "Review daily requests by modality, confirm patient demographics, view uploaded documents, and assign the protocol.",
@@ -470,6 +505,25 @@ const copy = {
     settings: {
       title: "Supervisor settings",
       body: "Create staff accounts, review access, and control the saved system behavior category by category.",
+      menuTitle: "Settings sections",
+      menuBody: "Open one section at a time to keep settings clear and easier to manage.",
+      sectionOpen: "Open section",
+      sectionBack: "Back to settings menu",
+      sectionUsers: "Users and access",
+      sectionPatientRules: "Registration rules",
+      sectionDictionary: "Custom dictionary",
+      sectionExamTypes: "Exam types",
+      sectionCapacity: "Scheduling capacity",
+      sectionCategories: "System behavior",
+      sectionAudit: "Audit log",
+      sectionBackup: "Backup and restore",
+      capacityTitle: "Maximum appointments per modality",
+      capacityBody:
+        "Set the maximum number of appointments allowed per modality per day. Leave blank to use each modality capacity only.",
+      capacitySave: "Save capacity settings",
+      maxCasesPerModalityLabel: "Global maximum per modality/day",
+      maxCasesPerModalityHint:
+        "When this limit is reached, overbooking requires supervisor password confirmation and reason.",
       reauthTitle: "Supervisor confirmation",
       reauthBody: "Enter the supervisor password again before opening sensitive settings and backup tools.",
       reauthButton: "Confirm supervisor access",
@@ -569,6 +623,7 @@ const copy = {
       modality: "لوحة الجهاز",
       doctor: "لوحة الطبيب",
       print: "الطباعة",
+      statistics: "الإحصائيات",
       search: "البحث عن مريض",
       settings: "الإعدادات"
     },
@@ -778,6 +833,35 @@ const copy = {
         examInstructions: "تعليمات الفحص"
       }
     },
+    statistics: {
+      title: "إحصائيات المواعيد",
+      body: "تابع إجمالي المواعيد وحمل الأجهزة وحالة الطابور واتجاه عدم الحضور خلال الفترة المحددة.",
+      filtersTitle: "فلاتر الإحصائيات",
+      print: "طباعة الإحصائيات",
+      date: "التاريخ",
+      dateFrom: "من",
+      dateTo: "إلى",
+      modality: "الجهاز",
+      load: "تحميل الإحصائيات",
+      summaryTitle: "ملخص",
+      byModalityTitle: "حسب الجهاز",
+      byStatusTitle: "حسب الحالة",
+      byDayTitle: "الاتجاه اليومي",
+      totalAppointments: "إجمالي المواعيد",
+      uniquePatients: "المرضى الفريدون",
+      completed: "المكتمل",
+      noShowRate: "نسبة عدم الحضور",
+      walkIn: "المرضى المباشرون",
+      inQueue: "في الطابور",
+      statuses: {
+        scheduled: "مجدول",
+        arrived: "وصل",
+        waiting: "منتظر",
+        completed: "مكتمل",
+        "no-show": "عدم حضور",
+        cancelled: "ملغي"
+      }
+    },
     doctor: {
       title: "لوحة الطبيب",
       body: "استعرض طلبات اليوم حسب الجهاز، وتحقق من بيانات المريض، واطلع على الوثائق المرفوعة، وحدد البروتوكول.",
@@ -803,6 +887,25 @@ const copy = {
     settings: {
       title: "إعدادات المشرف",
       body: "إنشاء حسابات الموظفين ومراجعة الوصول والتحكم بسلوك النظام المحفوظ حسب الفئات.",
+      menuTitle: "أقسام الإعدادات",
+      menuBody: "افتح كل قسم بشكل منفصل ليكون الضبط أوضح وأسهل في الإدارة.",
+      sectionOpen: "فتح القسم",
+      sectionBack: "العودة لقائمة الإعدادات",
+      sectionUsers: "المستخدمون والصلاحيات",
+      sectionPatientRules: "قواعد التسجيل",
+      sectionDictionary: "القاموس المخصص",
+      sectionExamTypes: "أنواع الفحوصات",
+      sectionCapacity: "سعة الجدولة",
+      sectionCategories: "سلوك النظام",
+      sectionAudit: "سجل التدقيق",
+      sectionBackup: "النسخ الاحتياطي والاستعادة",
+      capacityTitle: "الحد الأقصى للمواعيد لكل جهاز",
+      capacityBody:
+        "حدد الحد الأقصى لعدد المواعيد المسموح بها لكل جهاز في اليوم. اتركه فارغاً لاستخدام سعة كل جهاز فقط.",
+      capacitySave: "حفظ إعدادات السعة",
+      maxCasesPerModalityLabel: "الحد العام لكل جهاز/يوم",
+      maxCasesPerModalityHint:
+        "عند الوصول لهذا الحد، يلزم تأكيد كلمة مرور المشرف وسبب التجاوز.",
       reauthTitle: "تأكيد المشرف",
       reauthBody: "أدخل كلمة مرور المشرف مرة أخرى قبل فتح الإعدادات الحساسة وأدوات النسخ الاحتياطي.",
       reauthButton: "تأكيد صلاحية المشرف",
@@ -982,7 +1085,8 @@ const SETTINGS_META = {
       capacity_mode: { en: "Capacity mode", ar: "نمط السعة" },
       calendar_window_days: { en: "Calendar window in days", ar: "عدد أيام التقويم" },
       double_booking_prevention: { en: "Prevent double booking", ar: "منع التكرار" },
-      overbooking_reason_required: { en: "Require overbooking reason", ar: "إلزام سبب تجاوز السعة" }
+      overbooking_reason_required: { en: "Require overbooking reason", ar: "إلزام سبب تجاوز السعة" },
+      max_cases_per_modality: { en: "Max cases per modality/day", ar: "الحد الأقصى لكل جهاز/يوم" }
     }
   },
   queue_and_arrival: {
@@ -1120,6 +1224,15 @@ function defaultPrintFilters() {
     dateTo: "",
     modalityId: "",
     query: ""
+  };
+}
+
+function defaultStatisticsFilters() {
+  return {
+    date: getCurrentDateInputValue(),
+    dateFrom: "",
+    dateTo: "",
+    modalityId: ""
   };
 }
 
@@ -1318,6 +1431,30 @@ function getSettingsFieldValue(entry) {
   return String(entry?.setting_value ?? "");
 }
 
+function ensureRequiredSettingsDefaults(catalog) {
+  const nextCatalog = { ...(catalog || {}) };
+  const category = "scheduling_and_capacity";
+  const requiredEntries = [{ key: "max_cases_per_modality", value: "" }];
+  const existingEntries = Array.isArray(nextCatalog[category]) ? [...nextCatalog[category]] : [];
+
+  for (const required of requiredEntries) {
+    const hasEntry = existingEntries.some((entry) => entry.setting_key === required.key);
+
+    if (!hasEntry) {
+      existingEntries.push({
+        category,
+        setting_key: required.key,
+        setting_value: { value: required.value },
+        updated_at: null
+      });
+    }
+  }
+
+  existingEntries.sort((left, right) => String(left.setting_key).localeCompare(String(right.setting_key)));
+  nextCatalog[category] = existingEntries;
+  return nextCatalog;
+}
+
 function initials(name) {
   return String(name || "RS")
     .trim()
@@ -1428,6 +1565,18 @@ function formatPriorityName(entry) {
   );
 }
 
+function formatAppointmentStatus(status) {
+  return t().statistics?.statuses?.[status] || status || "—";
+}
+
+function formatPercent(value, total) {
+  if (!total) {
+    return "0%";
+  }
+
+  return `${Math.round((Number(value || 0) / Number(total || 1)) * 100)}%`;
+}
+
 const CODE39_PATTERNS = {
   "0": "nnnwwnwnn",
   "1": "wnnwnnnnw",
@@ -1475,16 +1624,20 @@ const CODE39_PATTERNS = {
   "*": "nwnnwnwnn"
 };
 
-function buildCode39Markup(value) {
+function buildCode39Svg(value) {
   const cleanValue = String(value || "")
     .toUpperCase()
     .split("")
     .map((char) => (CODE39_PATTERNS[char] ? char : "-"))
     .join("");
   const encoded = `*${cleanValue}*`;
-  let bars = "";
+  const height = 72;
+  const narrowWidth = 2;
+  const wideWidth = 6;
+  let x = 0;
+  const rects = [];
 
-  for (const character of encoded) {
+  for (const character of encoded || "**") {
     const pattern = CODE39_PATTERNS[character];
     if (!pattern) {
       continue;
@@ -1492,14 +1645,19 @@ function buildCode39Markup(value) {
 
     for (let index = 0; index < pattern.length; index += 1) {
       const isBar = index % 2 === 0;
-      const width = pattern[index] === "w" ? 6 : 2;
-      bars += `<span class="${isBar ? "bar" : "space"}" style="width:${width}px"></span>`;
+      const width = pattern[index] === "w" ? wideWidth : narrowWidth;
+
+      if (isBar) {
+        rects.push(`<rect x="${x}" y="0" width="${width}" height="${height}" fill="#111827"></rect>`);
+      }
+
+      x += width;
     }
 
-    bars += '<span class="space" style="width:2px"></span>';
+    x += narrowWidth;
   }
 
-  return bars;
+  return `<svg class="barcode-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${Math.max(x, 1)} ${height}" role="img" aria-label="${escapeHtml(`Barcode ${cleanValue || "-"}`)}">${rects.join("")}</svg>`;
 }
 
 function buildAppointmentSlipData(source) {
@@ -1559,7 +1717,7 @@ function openAppointmentSlipPrint(source) {
     state.language === "ar"
       ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
       : "Registration date (date the appointment was booked, not exam date)";
-  const barcodeMarkup = buildCode39Markup(slip.accessionNumber);
+  const barcodeMarkup = buildCode39Svg(slip.accessionNumber);
 
   printWindow.document.write(`
     <!doctype html>
@@ -1582,9 +1740,8 @@ function openAppointmentSlipPrint(source) {
           .value { font-size: 16px; font-weight: 600; }
           .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
           .barcode { margin-top: 24px; border: 1px dashed #9ca3af; border-radius: 10px; padding: 16px; text-align: center; }
-          .barcode-lines { display: inline-flex; align-items: stretch; height: 72px; margin-bottom: 10px; background: #fff; padding: 6px; }
-          .barcode-lines .bar { display: inline-block; height: 100%; background: #111827; }
-          .barcode-lines .space { display: inline-block; height: 100%; background: transparent; }
+          .barcode-lines { margin-bottom: 10px; background: #fff; padding: 6px; display: flex; justify-content: center; }
+          .barcode-svg { display: block; height: 72px; width: min(540px, 100%); }
           .barcode-text { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
           .footnote { margin-top: 10px; font-size: 11px; color: #6b7280; text-align: left; line-height: 1.45; }
         </style>
@@ -1729,6 +1886,167 @@ function openDailyListPrint(appointments, title) {
   printWindow.print();
 }
 
+function openStatisticsPrint(snapshot, filters = {}) {
+  const summary = snapshot?.summary || {};
+  const modalityBreakdown = snapshot?.modalityBreakdown || [];
+  const statusBreakdown = snapshot?.statusBreakdown || [];
+  const dailyBreakdown = snapshot?.dailyBreakdown || [];
+  const totalAppointments = Number(summary.total_appointments || 0);
+
+  if (!totalAppointments && !modalityBreakdown.length && !statusBreakdown.length && !dailyBreakdown.length) {
+    throw new Error(state.language === "ar" ? "لا توجد إحصائيات للطباعة." : "No statistics available to print.");
+  }
+
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+
+  if (!printWindow) {
+    throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
+  }
+
+  const selectedModality = state.appointmentLookups.modalities.find(
+    (entry) => String(entry.id) === String(filters.modalityId || "")
+  );
+  const modalityLabel = selectedModality ? formatModalityName(selectedModality) : t().common.optional;
+  const rangeText =
+    filters.dateFrom || filters.dateTo
+      ? `${filters.dateFrom || filters.dateTo} → ${filters.dateTo || filters.dateFrom}`
+      : filters.date || "";
+
+  const modalityRows = modalityBreakdown
+    .map((entry) => {
+      const total = Number(entry.total_count || 0);
+      const noShowRate = formatPercent(entry.no_show_count, total);
+      return `
+        <tr>
+          <td>${escapeHtml(formatModalityName(entry) || `#${entry.modality_id}`)}</td>
+          <td>${escapeHtml(String(total))}</td>
+          <td>${escapeHtml(String(entry.completed_count || 0))}</td>
+          <td>${escapeHtml(noShowRate)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const statusRows = statusBreakdown
+    .map(
+      (entry) => `
+        <tr>
+          <td>${escapeHtml(formatAppointmentStatus(entry.status))}</td>
+          <td>${escapeHtml(String(entry.total_count || 0))}</td>
+          <td>${escapeHtml(formatPercent(entry.total_count, totalAppointments))}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const dailyRows = dailyBreakdown
+    .map((entry) => {
+      const total = Number(entry.total_count || 0);
+      const noShowRate = formatPercent(entry.no_show_count, total);
+      return `
+        <tr>
+          <td>${escapeHtml(normalizeDateText(entry.appointment_date))}</td>
+          <td>${escapeHtml(String(total))}</td>
+          <td>${escapeHtml(String(entry.completed_count || 0))}</td>
+          <td>${escapeHtml(noShowRate)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(t().statistics.title)}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .wrap { padding: 4mm 0; }
+          .head { margin-bottom: 16px; }
+          .title { font-size: 22px; font-weight: 700; }
+          .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+          .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+          .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
+          .card .label { color: #6b7280; font-size: 11px; margin-bottom: 6px; }
+          .card .value { font-size: 18px; font-weight: 700; }
+          h2 { margin: 20px 0 8px; font-size: 15px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+          th { background: #f3f4f6; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="head">
+            <div class="title">${escapeHtml(t().statistics.title)}</div>
+            <div class="meta">${escapeHtml(`${t().print.date}: ${rangeText || "—"}`)}</div>
+            <div class="meta">${escapeHtml(`${t().statistics.modality}: ${modalityLabel}`)}</div>
+          </div>
+
+          <div class="summary">
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.totalAppointments)}</div>
+              <div class="value">${escapeHtml(String(totalAppointments))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.uniquePatients)}</div>
+              <div class="value">${escapeHtml(String(summary.unique_patients || 0))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.noShowRate)}</div>
+              <div class="value">${escapeHtml(formatPercent(summary.no_show_count, totalAppointments))}</div>
+            </div>
+          </div>
+
+          <h2>${escapeHtml(t().statistics.byModalityTitle)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().statistics.modality)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.completed)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${modalityRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+          </table>
+
+          <h2>${escapeHtml(t().statistics.byStatusTitle)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().common.status)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${statusRows || `<tr><td colspan="3">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+          </table>
+
+          <h2>${escapeHtml(t().statistics.byDayTitle)}</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().print.date)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.completed)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${dailyRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+          </table>
+        </div>
+      </body>
+    </html>
+  `);
+
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
 function appointmentFieldLabel(key) {
   if (state.language === "ar" && ["modality", "examType", "priority", "notes"].includes(key)) {
     return copy.en.appointments.fields[key] || t().appointments.fields[key] || key;
@@ -1848,6 +2166,9 @@ function setLanguage(language) {
 
 function setRoute(route) {
   state.route = allowedRoutes.includes(route) ? route : DEFAULT_ROUTE;
+  if (state.route === "settings") {
+    state.settingsSection = "menu";
+  }
   localStorage.setItem("rispro-route", state.route);
   render();
   void hydrateRoute();
@@ -2077,6 +2398,38 @@ async function loadPrintAppointments() {
     state.printError = error.message;
   } finally {
     state.printLoading = false;
+    render();
+  }
+}
+
+async function loadStatistics() {
+  state.statisticsLoading = true;
+  state.statisticsError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams();
+    if (state.statisticsFilters.dateFrom || state.statisticsFilters.dateTo) {
+      if (state.statisticsFilters.dateFrom) {
+        params.set("dateFrom", state.statisticsFilters.dateFrom);
+      }
+      if (state.statisticsFilters.dateTo) {
+        params.set("dateTo", state.statisticsFilters.dateTo);
+      }
+    } else {
+      params.set("date", state.statisticsFilters.date);
+    }
+
+    if (state.statisticsFilters.modalityId) {
+      params.set("modalityId", state.statisticsFilters.modalityId);
+    }
+
+    const result = await api(`/api/appointments/statistics?${params.toString()}`, { method: "GET" });
+    state.statisticsSnapshot = result;
+  } catch (error) {
+    state.statisticsError = error.message;
+  } finally {
+    state.statisticsLoading = false;
     render();
   }
 }
@@ -2369,7 +2722,7 @@ async function loadSettings() {
 
   try {
     const result = await api("/api/settings", { method: "GET" });
-    state.settingsCatalog = result.settings || {};
+    state.settingsCatalog = ensureRequiredSettingsDefaults(result.settings || {});
   } catch (error) {
     state.settingsError = error.message;
   } finally {
@@ -2463,6 +2816,11 @@ async function hydrateRoute() {
     return;
   }
 
+  if (state.route === "statistics") {
+    await Promise.all([loadAppointmentLookups(), loadStatistics()]);
+    return;
+  }
+
   if (state.route === "registrations") {
     await Promise.all([loadAppointmentLookups(), loadRegistrations()]);
   }
@@ -2505,6 +2863,7 @@ async function signOut() {
     state.session = null;
     state.users = [];
     state.settingsCatalog = {};
+    state.settingsSection = "menu";
     state.settingsSuccess = "";
     state.nameDictionaryEntries = [];
     state.nameDictionary = { ...BASE_DICTIONARY };
@@ -2560,6 +2919,9 @@ async function signOut() {
     state.scanPreparationLoading = false;
     state.printPreparationLoading = false;
     state.printFilters = defaultPrintFilters();
+    state.statisticsFilters = defaultStatisticsFilters();
+    state.statisticsError = "";
+    state.statisticsSnapshot = null;
     state.registrationsFilters = defaultRegistrationsFilters();
     state.selectedPrintAppointment = null;
     state.appointmentDocuments = [];
@@ -2971,6 +3333,34 @@ async function createExamType() {
   }
 }
 
+function isSupervisorReauthNeededForOverbooking(error) {
+  const message = String(error?.message || "").toLowerCase();
+  return message.includes("password confirmation is required") && message.includes("overbook");
+}
+
+async function requestSupervisorOverbookingReauth() {
+  if (!isSupervisor()) {
+    return false;
+  }
+
+  const promptText =
+    state.language === "ar"
+      ? "أدخل كلمة مرور المشرف لتأكيد تجاوز السعة:"
+      : "Enter supervisor password to confirm overbooking:";
+  const password = window.prompt(promptText, "");
+
+  if (!password || !password.trim()) {
+    return false;
+  }
+
+  await api("/api/auth/re-auth", {
+    method: "POST",
+    body: JSON.stringify({ password })
+  });
+  await refreshSession();
+  return true;
+}
+
 async function saveAppointment() {
   normalizeAppointmentFormSelections();
 
@@ -3001,10 +3391,23 @@ async function saveAppointment() {
       overbookingReason: state.appointmentForm.overbookingReason,
       isWalkIn: state.appointmentForm.isWalkIn
     };
-    const result = await api("/api/appointments", {
-      method: "POST",
-      body: JSON.stringify(payload)
-    });
+    let result;
+
+    try {
+      result = await api("/api/appointments", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
+        result = await api("/api/appointments", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+      } else {
+        throw error;
+      }
+    }
 
     state.appointmentSuccess = t().appointments.appointmentSaved;
     pushToast("success", state.appointmentSuccess);
@@ -3069,17 +3472,31 @@ async function saveWalkInQueueEntry() {
   render();
 
   try {
-    await api("/api/queue/walk-in", {
-      method: "POST",
-      body: JSON.stringify({
-        patientId: state.queueSelectedPatient.id,
-        modalityId: state.queueWalkInForm.modalityId,
-        examTypeId: state.queueWalkInForm.examTypeId,
-        reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
-        notes: state.queueWalkInForm.notes,
-        overbookingReason: state.queueWalkInForm.overbookingReason
-      })
-    });
+    const payload = {
+      patientId: state.queueSelectedPatient.id,
+      modalityId: state.queueWalkInForm.modalityId,
+      examTypeId: state.queueWalkInForm.examTypeId,
+      reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
+      notes: state.queueWalkInForm.notes,
+      overbookingReason: state.queueWalkInForm.overbookingReason
+    };
+
+    try {
+      await api("/api/queue/walk-in", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    } catch (error) {
+      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
+        await api("/api/queue/walk-in", {
+          method: "POST",
+          body: JSON.stringify(payload)
+        });
+      } else {
+        throw error;
+      }
+    }
+
     state.queueSuccess = t().queue.walkInSuccess;
     state.queueWalkInForm = {
       ...defaultQueueWalkInForm(),
@@ -3397,10 +3814,22 @@ async function updateSelectedAppointment() {
   render();
 
   try {
-    const result = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
-      method: "PUT",
-      body: JSON.stringify(state.appointmentEditForm)
-    });
+    try {
+      await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
+        method: "PUT",
+        body: JSON.stringify(state.appointmentEditForm)
+      });
+    } catch (error) {
+      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
+        await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
+          method: "PUT",
+          body: JSON.stringify(state.appointmentEditForm)
+        });
+      } else {
+        throw error;
+      }
+    }
+
     const refreshed = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
       method: "GET"
     });
@@ -4930,6 +5359,7 @@ function renderPrintSlipPreview() {
     state.language === "ar"
       ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
       : "Registration date (date the appointment was booked, not exam date)";
+  const barcodeMarkup = buildCode39Svg(appointment.accession_number);
 
   return `
     <div class="slip-card">
@@ -4984,7 +5414,7 @@ function renderPrintSlipPreview() {
 
       <div class="barcode-block">
         <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
-        <div class="barcode-visual"></div>
+        <div class="barcode-visual">${barcodeMarkup}</div>
         <div class="barcode-text">${escapeHtml(appointment.accession_number)}</div>
         <div class="small">${escapeHtml(`${registrationDateLabel}: ${registrationDate}`)}</div>
       </div>
@@ -4999,12 +5429,14 @@ function renderPrintLabelPreview() {
     return `<div class="empty">${escapeHtml(t().print.noAppointment)}</div>`;
   }
 
+  const barcodeMarkup = buildCode39Svg(appointment.accession_number);
+
   return `
     <div class="label-card">
       <div class="item-title">${escapeHtml(appointment.arabic_full_name)}</div>
       <div class="item-subtitle">${escapeHtml(appointment.english_full_name)}</div>
       <div class="barcode-panel">
-        <div class="barcode-visual small-barcode"></div>
+        <div class="barcode-visual small-barcode">${barcodeMarkup}</div>
         <div class="barcode-text">${escapeHtml(appointment.accession_number)}</div>
       </div>
     </div>
@@ -5529,6 +5961,191 @@ function renderPrint() {
           </div>
           ${renderPrintGroupedByModality()}
         </article>
+      </section>
+    </div>
+  `;
+}
+
+function renderStatisticsStatusBreakdown(statusBreakdown, totalAppointments) {
+  if (!statusBreakdown.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="statistics-status-grid">
+      ${statusBreakdown
+        .map(
+          (entry) => `
+            <div class="statistics-status-pill">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(formatAppointmentStatus(entry.status))}</div>
+                <div class="item-subtitle">${escapeHtml(formatPercent(entry.total_count, totalAppointments))}</div>
+              </div>
+              <span class="chip accent">${escapeHtml(String(entry.total_count || 0))}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStatisticsModalityBreakdown(modalityBreakdown) {
+  if (!modalityBreakdown.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="statistics-table">
+      <div class="statistics-row statistics-head">
+        <span>${escapeHtml(t().statistics.modality)}</span>
+        <span>${escapeHtml(t().statistics.totalAppointments)}</span>
+        <span>${escapeHtml(t().statistics.completed)}</span>
+        <span>${escapeHtml(t().statistics.noShowRate)}</span>
+      </div>
+      ${modalityBreakdown
+        .map((entry) => {
+          const total = Number(entry.total_count || 0);
+          const noShowRate = formatPercent(entry.no_show_count, total);
+
+          return `
+            <div class="statistics-row">
+              <span>${escapeHtml(formatModalityName(entry) || `#${entry.modality_id}`)}</span>
+              <span>${escapeHtml(String(total))}</span>
+              <span>${escapeHtml(String(entry.completed_count || 0))}</span>
+              <span>${escapeHtml(noShowRate)}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStatisticsDailyBreakdown(dailyBreakdown) {
+  if (!dailyBreakdown.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="statistics-table">
+      <div class="statistics-row statistics-head">
+        <span>${escapeHtml(t().print.date)}</span>
+        <span>${escapeHtml(t().statistics.totalAppointments)}</span>
+        <span>${escapeHtml(t().statistics.completed)}</span>
+        <span>${escapeHtml(t().statistics.noShowRate)}</span>
+      </div>
+      ${dailyBreakdown
+        .map((entry) => {
+          const total = Number(entry.total_count || 0);
+          const noShowRate = formatPercent(entry.no_show_count, total);
+
+          return `
+            <div class="statistics-row">
+              <span>${escapeHtml(normalizeDateText(entry.appointment_date))}</span>
+              <span>${escapeHtml(String(total))}</span>
+              <span>${escapeHtml(String(entry.completed_count || 0))}</span>
+              <span>${escapeHtml(noShowRate)}</span>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderStatistics() {
+  const snapshot = state.statisticsSnapshot || {};
+  const summary = snapshot.summary || {};
+  const totalAppointments = Number(summary.total_appointments || 0);
+  const noShowRate = formatPercent(summary.no_show_count, totalAppointments);
+  const completionRate = formatPercent(summary.completed_count, totalAppointments);
+
+  return `
+    <div class="page">
+      ${pageHero(
+        t().statistics.title,
+        t().statistics.body,
+        `<button class="button-secondary" type="button" data-action="refresh-statistics">${escapeHtml(t().common.refresh)}</button>
+         <button class="button-primary" type="button" data-action="print-statistics">${escapeHtml(t().statistics.print)}</button>`,
+        t().statistics.summaryTitle
+      )}
+      ${alertMarkup("error", state.statisticsError)}
+
+      <section class="surface">
+        <form id="statistics-filter-form" class="stack">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().statistics.filtersTitle)}</h2>
+            <span class="chip accent">${escapeHtml(t().statistics.load)}</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="label">${escapeHtml(t().statistics.date)}</span>
+              <input class="input field-en" type="date" name="date" value="${escapeHtml(state.statisticsFilters.date)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().statistics.dateFrom)}</span>
+              <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.statisticsFilters.dateFrom)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().statistics.dateTo)}</span>
+              <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.statisticsFilters.dateTo)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().statistics.modality)}</span>
+              <select class="select" name="modalityId">
+                <option value="">${escapeHtml(t().common.optional)}</option>
+                ${state.appointmentLookups.modalities
+                  .map(
+                    (entry) => `
+                      <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.statisticsFilters.modalityId) ? "selected" : ""}>
+                        ${escapeHtml(formatModalityName(entry))}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="button-primary" type="submit">${escapeHtml(state.statisticsLoading ? t().common.loading : t().statistics.load)}</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card-grid">
+        ${statCard(t().statistics.totalAppointments, String(totalAppointments), t().statistics.summaryTitle, "var(--blue)")}
+        ${statCard(t().statistics.uniquePatients, String(summary.unique_patients || 0), t().statistics.summaryTitle, "var(--teal)")}
+        ${statCard(t().statistics.completed, `${summary.completed_count || 0} (${completionRate})`, t().statistics.byStatusTitle, "var(--green)")}
+        ${statCard(t().statistics.noShowRate, noShowRate, `${summary.no_show_count || 0} ${formatAppointmentStatus("no-show")}`, "var(--red)")}
+        ${statCard(t().statistics.walkIn, String(summary.walk_in_count || 0), t().statistics.byStatusTitle, "var(--amber)")}
+        ${statCard(t().statistics.inQueue, String(summary.in_queue_count || 0), formatAppointmentStatus("arrived"), "var(--brown)")}
+      </section>
+
+      <section class="statistics-grid">
+        <article class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().statistics.byModalityTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String((snapshot.modalityBreakdown || []).length))}</span>
+          </div>
+          ${renderStatisticsModalityBreakdown(snapshot.modalityBreakdown || [])}
+        </article>
+
+        <article class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().statistics.byStatusTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String((snapshot.statusBreakdown || []).length))}</span>
+          </div>
+          ${renderStatisticsStatusBreakdown(snapshot.statusBreakdown || [], totalAppointments)}
+        </article>
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().statistics.byDayTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(String((snapshot.dailyBreakdown || []).length))}</span>
+        </div>
+        ${renderStatisticsDailyBreakdown(snapshot.dailyBreakdown || [])}
       </section>
     </div>
   `;
@@ -6368,6 +6985,299 @@ function renderExamTypeSettings() {
   `;
 }
 
+function renderSettingsMenu() {
+  const sections = [
+    {
+      id: "users",
+      title: t().settings.sectionUsers,
+      body: t().settings.body,
+      count: `${t().common.usersShown}: ${state.users.length}`
+    },
+    {
+      id: "patient-rules",
+      title: t().settings.sectionPatientRules,
+      body: t().settings.patientRulesBody,
+      count: t().common.required
+    },
+    {
+      id: "dictionary",
+      title: t().settings.sectionDictionary,
+      body: t().settings.dictionaryBody,
+      count: String(state.nameDictionaryEntries.length)
+    },
+    {
+      id: "exam-types",
+      title: t().settings.sectionExamTypes,
+      body: t().settings.examTypesBody,
+      count: String(state.examTypeSettingsEntries.length)
+    },
+    {
+      id: "capacity",
+      title: t().settings.sectionCapacity,
+      body: t().settings.capacityBody,
+      count: getSettingsEntryValue("scheduling_and_capacity", "max_cases_per_modality", "—") || "—"
+    },
+    {
+      id: "categories",
+      title: t().settings.sectionCategories,
+      body: t().settings.body,
+      count: `${Object.keys(state.settingsCatalog).length}`
+    },
+    {
+      id: "audit",
+      title: t().settings.sectionAudit,
+      body: t().settings.auditFilters,
+      count: `${t().settings.auditRows}: ${state.auditEntries.length}`
+    },
+    {
+      id: "backup",
+      title: t().settings.sectionBackup,
+      body: t().settings.backupTitle,
+      count: t().common.required
+    }
+  ];
+
+  return `
+    <section class="surface">
+      <div class="section-head">
+        <h2 class="section-title">${escapeHtml(t().settings.menuTitle)}</h2>
+        <span class="chip accent">${escapeHtml(String(sections.length))}</span>
+      </div>
+      <div class="settings-summary">${escapeHtml(t().settings.menuBody)}</div>
+      <div class="action-grid">
+        ${sections
+          .map(
+            (section, index) => `
+              <button class="action-card" type="button" data-action="set-settings-section" data-section="${escapeHtml(section.id)}">
+                <span class="action-index">${escapeHtml(`${String(index + 1).padStart(2, "0")}`)}</span>
+                <span class="item-title">${escapeHtml(section.title)}</span>
+                <span class="item-subtitle">${escapeHtml(section.body)}</span>
+                <span class="chip subtle">${escapeHtml(section.count)}</span>
+                <span class="small">${escapeHtml(t().settings.sectionOpen)}</span>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderSettingsUsersSection() {
+  return `
+    <section class="split-grid">
+      <article class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.users)}</h2>
+          <span class="chip accent">${escapeHtml(`${t().common.usersShown}: ${state.users.length}`)}</span>
+        </div>
+        ${renderUsersList()}
+      </article>
+
+      <article class="surface">
+        <form id="user-form" class="stack">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.addUser)}</h2>
+            <span class="chip success">${escapeHtml(formatRole(state.userForm.role))}</span>
+          </div>
+
+          <div class="form-grid">
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.fields.username)}</span>
+              <input class="input field-en" name="username" data-user-field="true" value="${escapeHtml(state.userForm.username)}" autocomplete="off" />
+            </label>
+
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.fields.fullName)}</span>
+              <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="fullName" data-user-field="true" value="${escapeHtml(state.userForm.fullName)}" />
+            </label>
+
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.fields.password)}</span>
+              <input class="input field-en" type="password" name="password" data-user-field="true" value="${escapeHtml(state.userForm.password)}" autocomplete="new-password" />
+            </label>
+
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.fields.role)}</span>
+              <select class="select" name="role" data-user-field="true">
+                <option value="receptionist" ${state.userForm.role === "receptionist" ? "selected" : ""}>${escapeHtml(formatRole("receptionist"))}</option>
+                <option value="modality_staff" ${state.userForm.role === "modality_staff" ? "selected" : ""}>${escapeHtml(formatRole("modality_staff"))}</option>
+                <option value="supervisor" ${state.userForm.role === "supervisor" ? "selected" : ""}>${escapeHtml(formatRole("supervisor"))}</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="form-actions">
+            <button class="button-primary" type="submit">${escapeHtml(state.userSaving ? t().common.loading : t().settings.addUser)}</button>
+          </div>
+        </form>
+      </article>
+    </section>
+  `;
+}
+
+function renderSettingsCapacitySection() {
+  const currentLimit = getSettingsEntryValue("scheduling_and_capacity", "max_cases_per_modality", "");
+
+  return `
+    <section class="surface">
+      <div class="section-head">
+        <h2 class="section-title">${escapeHtml(t().settings.capacityTitle)}</h2>
+        <span class="chip accent">${escapeHtml(t().common.required)}</span>
+      </div>
+      <div class="settings-summary">${escapeHtml(t().settings.capacityBody)}</div>
+      <form class="stack" data-settings-form="scheduling_and_capacity">
+        <div class="form-grid">
+          <label class="field">
+            <span class="label">${escapeHtml(t().settings.maxCasesPerModalityLabel)}</span>
+            <input
+              class="input field-en"
+              inputmode="numeric"
+              min="1"
+              step="1"
+              data-setting-field="true"
+              data-setting-category="scheduling_and_capacity"
+              data-setting-key="max_cases_per_modality"
+              value="${escapeHtml(currentLimit)}"
+              placeholder="12"
+              autocomplete="off"
+            />
+            <span class="small">${escapeHtml(t().settings.maxCasesPerModalityHint)}</span>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="button-primary" type="submit">${escapeHtml(
+            state.settingsSavingCategory === "scheduling_and_capacity" ? t().common.loading : t().settings.capacitySave
+          )}</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderSettingsSectionContent() {
+  switch (state.settingsSection) {
+    case "users":
+      return renderSettingsUsersSection();
+    case "patient-rules":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.patientRulesTitle)}</h2>
+            <span class="chip accent">${escapeHtml(t().common.required)}</span>
+          </div>
+          <div class="settings-summary">${escapeHtml(t().settings.patientRulesBody)}</div>
+          ${renderPatientRegistrationRules()}
+        </section>
+      `;
+    case "dictionary":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.dictionaryTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String(state.nameDictionaryEntries.length))}</span>
+          </div>
+          <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
+          ${alertMarkup("error", state.nameDictionaryError)}
+          ${alertMarkup("success", state.nameDictionarySuccess)}
+          <form id="name-dictionary-form" class="stack">
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">${escapeHtml(t().settings.dictionaryArabic)}</span>
+                <input class="input field-ar" name="arabicText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.arabicText)}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().settings.dictionaryEnglish)}</span>
+                <input class="input field-en" name="englishText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.englishText)}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
+                <input type="checkbox" name="isActive" data-name-dictionary-new-field="true" ${state.nameDictionaryForm.isActive ? "checked" : ""} />
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="button-primary" type="submit">${escapeHtml(
+                state.nameDictionarySavingId === "new" ? t().common.loading : t().settings.dictionaryAdd
+              )}</button>
+            </div>
+          </form>
+          ${renderNameDictionaryList()}
+        </section>
+      `;
+    case "exam-types":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.examTypesTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String(state.examTypeSettingsEntries.length))}</span>
+          </div>
+          <div class="settings-summary">${escapeHtml(t().settings.examTypesBody)}</div>
+          ${renderExamTypeSettings()}
+        </section>
+      `;
+    case "capacity":
+      return renderSettingsCapacitySection();
+    case "categories":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.categories)}</h2>
+            <span class="chip subtle">${escapeHtml(`${Object.keys(state.settingsCatalog).length} categories`)}</span>
+          </div>
+          ${renderSettingsCatalog()}
+        </section>
+      `;
+    case "audit":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.auditTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(`${t().settings.auditRows}: ${state.auditEntries.length}`)}</span>
+          </div>
+          ${alertMarkup("error", state.auditError)}
+          ${renderAuditFilters()}
+          ${renderAuditList()}
+        </section>
+      `;
+    case "backup":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.backupTitle)}</h2>
+            <span class="chip accent">${escapeHtml(t().common.required)}</span>
+          </div>
+          ${alertMarkup("error", state.backupError || state.restoreError)}
+          ${alertMarkup("success", state.backupSuccess || state.restoreSuccess)}
+          <div class="split-grid">
+            <article class="surface surface-compact">
+              <div class="stack">
+                <h3 class="section-title">${escapeHtml(t().settings.downloadBackup)}</h3>
+                <div class="form-actions">
+                  <button class="button-primary" type="button" data-action="download-backup">${escapeHtml(state.backupLoading ? t().common.loading : t().settings.downloadBackup)}</button>
+                </div>
+              </div>
+            </article>
+            <article class="surface surface-compact">
+              <form id="restore-form" class="stack">
+                <h3 class="section-title">${escapeHtml(t().settings.restoreBackup)}</h3>
+                <label class="field">
+                  <span class="label">${escapeHtml(t().settings.restoreFile)}</span>
+                  <input class="input" type="file" name="restoreFile" data-restore-file="true" />
+                </label>
+                <div class="small">${escapeHtml(state.restoreFileName || t().print.fileNone)}</div>
+                <div class="form-actions">
+                  <button class="button-secondary" type="submit">${escapeHtml(state.restoreLoading ? t().common.loading : t().settings.restoreBackup)}</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+      `;
+    default:
+      return renderSettingsMenu();
+  }
+}
+
 function renderSettings() {
   if (!isSupervisor()) {
     return `
@@ -6405,163 +7315,19 @@ function renderSettings() {
     `;
   }
 
+  const isMenu = state.settingsSection === "menu";
+  const heroBody = isMenu ? t().settings.menuBody : t().settings.body;
+  const heroActions = `
+    <button class="button-secondary" type="button" data-action="refresh-settings">${escapeHtml(t().settings.refreshAll)}</button>
+    ${!isMenu ? `<button class="button-ghost" type="button" data-action="settings-home">${escapeHtml(t().settings.sectionBack)}</button>` : ""}
+  `;
+
   return `
     <div class="page">
-      ${pageHero(
-        t().settings.title,
-        t().settings.body,
-        `<button class="button-secondary" type="button" data-action="refresh-settings">${escapeHtml(t().settings.refreshAll)}</button>`,
-        t().common.required
-      )}
+      ${pageHero(t().settings.title, heroBody, heroActions, t().common.required)}
       ${alertMarkup("error", state.settingsError || state.userError)}
       ${alertMarkup("success", state.settingsSuccess || state.userSuccess)}
-
-      <section class="split-grid">
-        <article class="surface">
-          <div class="section-head">
-            <h2 class="section-title">${escapeHtml(t().settings.users)}</h2>
-            <span class="chip accent">${escapeHtml(`${t().common.usersShown}: ${state.users.length}`)}</span>
-          </div>
-          ${renderUsersList()}
-        </article>
-
-        <article class="surface">
-          <form id="user-form" class="stack">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().settings.addUser)}</h2>
-              <span class="chip success">${escapeHtml(formatRole(state.userForm.role))}</span>
-            </div>
-
-            <div class="form-grid">
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.fields.username)}</span>
-                <input class="input field-en" name="username" data-user-field="true" value="${escapeHtml(state.userForm.username)}" autocomplete="off" />
-              </label>
-
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.fields.fullName)}</span>
-                <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="fullName" data-user-field="true" value="${escapeHtml(state.userForm.fullName)}" />
-              </label>
-
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.fields.password)}</span>
-                <input class="input field-en" type="password" name="password" data-user-field="true" value="${escapeHtml(state.userForm.password)}" autocomplete="new-password" />
-              </label>
-
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.fields.role)}</span>
-                <select class="select" name="role" data-user-field="true">
-                  <option value="receptionist" ${state.userForm.role === "receptionist" ? "selected" : ""}>${escapeHtml(formatRole("receptionist"))}</option>
-                  <option value="modality_staff" ${state.userForm.role === "modality_staff" ? "selected" : ""}>${escapeHtml(formatRole("modality_staff"))}</option>
-                  <option value="supervisor" ${state.userForm.role === "supervisor" ? "selected" : ""}>${escapeHtml(formatRole("supervisor"))}</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="form-actions">
-              <button class="button-primary" type="submit">${escapeHtml(state.userSaving ? t().common.loading : t().settings.addUser)}</button>
-            </div>
-          </form>
-        </article>
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.patientRulesTitle)}</h2>
-          <span class="chip accent">${escapeHtml(t().common.required)}</span>
-        </div>
-        <div class="settings-summary">${escapeHtml(t().settings.patientRulesBody)}</div>
-        ${renderPatientRegistrationRules()}
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.dictionaryTitle)}</h2>
-          <span class="chip subtle">${escapeHtml(String(state.nameDictionaryEntries.length))}</span>
-        </div>
-        <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
-        ${alertMarkup("error", state.nameDictionaryError)}
-        ${alertMarkup("success", state.nameDictionarySuccess)}
-        <form id="name-dictionary-form" class="stack">
-          <div class="form-grid">
-            <label class="field">
-              <span class="label">${escapeHtml(t().settings.dictionaryArabic)}</span>
-              <input class="input field-ar" name="arabicText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.arabicText)}" />
-            </label>
-            <label class="field">
-              <span class="label">${escapeHtml(t().settings.dictionaryEnglish)}</span>
-              <input class="input field-en" name="englishText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.englishText)}" />
-            </label>
-            <label class="field">
-              <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
-              <input type="checkbox" name="isActive" data-name-dictionary-new-field="true" ${state.nameDictionaryForm.isActive ? "checked" : ""} />
-            </label>
-          </div>
-          <div class="form-actions">
-            <button class="button-primary" type="submit">${escapeHtml(state.nameDictionarySavingId === "new" ? t().common.loading : t().settings.dictionaryAdd)}</button>
-          </div>
-        </form>
-        ${renderNameDictionaryList()}
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.examTypesTitle)}</h2>
-          <span class="chip subtle">${escapeHtml(String(state.examTypeSettingsEntries.length))}</span>
-        </div>
-        <div class="settings-summary">${escapeHtml(t().settings.examTypesBody)}</div>
-        ${renderExamTypeSettings()}
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.categories)}</h2>
-          <span class="chip subtle">${escapeHtml(`${Object.keys(state.settingsCatalog).length} categories`)}</span>
-        </div>
-        ${renderSettingsCatalog()}
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.auditTitle)}</h2>
-          <span class="chip subtle">${escapeHtml(`${t().settings.auditRows}: ${state.auditEntries.length}`)}</span>
-        </div>
-        ${alertMarkup("error", state.auditError)}
-        ${renderAuditFilters()}
-        ${renderAuditList()}
-      </section>
-
-      <section class="surface">
-        <div class="section-head">
-          <h2 class="section-title">${escapeHtml(t().settings.backupTitle)}</h2>
-          <span class="chip accent">${escapeHtml(t().common.required)}</span>
-        </div>
-        ${alertMarkup("error", state.backupError || state.restoreError)}
-        ${alertMarkup("success", state.backupSuccess || state.restoreSuccess)}
-        <div class="split-grid">
-          <article class="surface surface-compact">
-            <div class="stack">
-              <h3 class="section-title">${escapeHtml(t().settings.downloadBackup)}</h3>
-              <div class="form-actions">
-                <button class="button-primary" type="button" data-action="download-backup">${escapeHtml(state.backupLoading ? t().common.loading : t().settings.downloadBackup)}</button>
-              </div>
-            </div>
-          </article>
-          <article class="surface surface-compact">
-            <form id="restore-form" class="stack">
-              <h3 class="section-title">${escapeHtml(t().settings.restoreBackup)}</h3>
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.restoreFile)}</span>
-                <input class="input" type="file" name="restoreFile" data-restore-file="true" />
-              </label>
-              <div class="small">${escapeHtml(state.restoreFileName || t().print.fileNone)}</div>
-              <div class="form-actions">
-                <button class="button-secondary" type="submit">${escapeHtml(state.restoreLoading ? t().common.loading : t().settings.restoreBackup)}</button>
-              </div>
-            </form>
-          </article>
-        </div>
-      </section>
+      ${renderSettingsSectionContent()}
     </div>
   `;
 }
@@ -6582,6 +7348,8 @@ function renderPage() {
       return renderDoctor();
     case "print":
       return renderPrint();
+    case "statistics":
+      return renderStatistics();
     case "search":
       return renderSearch();
     case "settings":
@@ -6786,6 +7554,15 @@ function handleInput(event) {
     if (target.name === "date") {
       state.printFilters.dateFrom = "";
       state.printFilters.dateTo = "";
+    }
+    return;
+  }
+
+  if (target.closest("#statistics-filter-form")) {
+    state.statisticsFilters[target.name] = target.value;
+    if (target.name === "date") {
+      state.statisticsFilters.dateFrom = "";
+      state.statisticsFilters.dateTo = "";
     }
     return;
   }
@@ -7181,6 +7958,20 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "set-settings-section") {
+    event.preventDefault();
+    state.settingsSection = target.dataset.section || "menu";
+    render();
+    return;
+  }
+
+  if (target.dataset.action === "settings-home") {
+    event.preventDefault();
+    state.settingsSection = "menu";
+    render();
+    return;
+  }
+
   if (target.dataset.action === "save-exam-type-entry") {
     event.preventDefault();
     void updateSettingsExamType(target.dataset.examTypeId);
@@ -7196,6 +7987,24 @@ function handleClick(event) {
   if (target.dataset.action === "refresh-queue") {
     event.preventDefault();
     void loadQueueSnapshot();
+    return;
+  }
+
+  if (target.dataset.action === "refresh-statistics") {
+    event.preventDefault();
+    void loadStatistics();
+    return;
+  }
+
+  if (target.dataset.action === "print-statistics") {
+    event.preventDefault();
+    try {
+      state.statisticsError = "";
+      openStatisticsPrint(state.statisticsSnapshot, state.statisticsFilters);
+    } catch (error) {
+      state.statisticsError = error.message;
+    }
+    render();
     return;
   }
 
@@ -7498,6 +8307,12 @@ function handleSubmit(event) {
   if (event.target.id === "print-filter-form") {
     event.preventDefault();
     void loadPrintAppointments();
+    return;
+  }
+
+  if (event.target.id === "statistics-filter-form") {
+    event.preventDefault();
+    void loadStatistics();
     return;
   }
 

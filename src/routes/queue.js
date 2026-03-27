@@ -1,5 +1,5 @@
 import express from "express";
-import { requireAuth } from "../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import {
   confirmNoShow,
@@ -31,7 +31,9 @@ queueRouter.post(
 queueRouter.post(
   "/walk-in",
   asyncRoute(async (req, res) => {
-    const result = await createWalkInQueueEntry(req.body || {}, req.user);
+    const result = await createWalkInQueueEntry(req.body || {}, req.user, {
+      supervisorReauthOk: hasRecentSupervisorReauth(req)
+    });
     res.status(201).json(result);
   })
 );

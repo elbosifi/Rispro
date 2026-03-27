@@ -40,6 +40,40 @@ function normalizeOptionalText(value) {
   return String(value || "").trim();
 }
 
+function normalizeCapacityLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+async function getMaxCasesPerModality(client) {
+  const { rows } = await client.query(
+    `
+      select setting_value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key = 'max_cases_per_modality'
+      limit 1
+    `
+  );
+
+  const raw = rows[0]?.setting_value?.value;
+  return normalizeCapacityLimit(raw);
+}
+
+function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
+  const modalityValue = normalizeCapacityLimit(modalityCapacity);
+  const globalValue = normalizeCapacityLimit(maxCasesPerModality);
+
+  if (modalityValue && globalValue) {
+    return Math.min(modalityValue, globalValue);
+  }
+
+  return modalityValue || globalValue || 1;
+}
+
 async function getAppointmentById(client, appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const { rows } = await client.query(
@@ -359,6 +393,150 @@ export async function listAppointmentsForPrint(filters = {}) {
   return rows;
 }
 
+export async function listAppointmentStatistics(filters = {}) {
+  const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
+  const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
+  const appointmentDate = !dateFrom && !dateTo ? normalizeDateOrToday(filters.date) : null;
+  const modalityId = filters.modalityId ? normalizePositiveInteger(filters.modalityId, "modalityId") : null;
+  const params = [];
+  const clauses = [];
+
+  if (dateFrom || dateTo) {
+    const start = dateFrom || dateTo;
+    const end = dateTo || dateFrom;
+
+    if (start > end) {
+      throw new HttpError(400, "dateFrom cannot be later than dateTo.");
+    }
+
+    params.push(start, end);
+    clauses.push(`appointment_date between $${params.length - 1}::date and $${params.length}::date`);
+  } else {
+    params.push(appointmentDate);
+    clauses.push(`appointment_date = $${params.length}::date`);
+  }
+
+  if (modalityId) {
+    params.push(modalityId);
+    clauses.push(`modality_id = $${params.length}`);
+  }
+
+  const whereClause = clauses.join(" and ");
+
+  const [summaryResult, modalityResult, statusResult, dailyResult] = await Promise.all([
+    pool.query(
+      `
+        select
+          count(*) as total_appointments,
+          count(distinct patient_id) as unique_patients,
+          count(distinct modality_id) as unique_modalities,
+          count(*) filter (where status = 'scheduled') as scheduled_count,
+          count(*) filter (where status in ('arrived', 'waiting')) as in_queue_count,
+          count(*) filter (where status = 'completed') as completed_count,
+          count(*) filter (where status = 'no-show') as no_show_count,
+          count(*) filter (where status = 'cancelled') as cancelled_count,
+          count(*) filter (where is_walk_in = true) as walk_in_count
+        from appointments
+        where ${whereClause}
+      `,
+      params
+    ),
+    pool.query(
+      `
+        select
+          modalities.id as modality_id,
+          modalities.code as modality_code,
+          modalities.name_ar as modality_name_ar,
+          modalities.name_en as modality_name_en,
+          count(*) as total_count,
+          count(*) filter (where appointments.status = 'scheduled') as scheduled_count,
+          count(*) filter (where appointments.status in ('arrived', 'waiting')) as in_queue_count,
+          count(*) filter (where appointments.status = 'completed') as completed_count,
+          count(*) filter (where appointments.status = 'no-show') as no_show_count,
+          count(*) filter (where appointments.status = 'cancelled') as cancelled_count
+        from appointments
+        join modalities on modalities.id = appointments.modality_id
+        where ${whereClause}
+        group by modalities.id, modalities.code, modalities.name_ar, modalities.name_en
+        order by total_count desc, modalities.name_en asc
+      `,
+      params
+    ),
+    pool.query(
+      `
+        select
+          status,
+          count(*) as total_count
+        from appointments
+        where ${whereClause}
+        group by status
+        order by total_count desc, status asc
+      `,
+      params
+    ),
+    pool.query(
+      `
+        select
+          appointment_date,
+          count(*) as total_count,
+          count(*) filter (where status = 'completed') as completed_count,
+          count(*) filter (where status = 'cancelled') as cancelled_count,
+          count(*) filter (where status = 'no-show') as no_show_count
+        from appointments
+        where ${whereClause}
+        group by appointment_date
+        order by appointment_date asc
+      `,
+      params
+    )
+  ]);
+
+  const summary = summaryResult.rows[0] || {};
+
+  return {
+    filters: {
+      date: appointmentDate,
+      dateFrom: dateFrom || "",
+      dateTo: dateTo || "",
+      modalityId: modalityId ? String(modalityId) : ""
+    },
+    summary: {
+      total_appointments: Number(summary.total_appointments || 0),
+      unique_patients: Number(summary.unique_patients || 0),
+      unique_modalities: Number(summary.unique_modalities || 0),
+      scheduled_count: Number(summary.scheduled_count || 0),
+      in_queue_count: Number(summary.in_queue_count || 0),
+      completed_count: Number(summary.completed_count || 0),
+      no_show_count: Number(summary.no_show_count || 0),
+      cancelled_count: Number(summary.cancelled_count || 0),
+      walk_in_count: Number(summary.walk_in_count || 0)
+    },
+    modalityBreakdown: modalityResult.rows.map((row) => ({
+      modality_id: row.modality_id,
+      modality_code: row.modality_code,
+      modality_name_ar: row.modality_name_ar,
+      modality_name_en: row.modality_name_en,
+      total_count: Number(row.total_count || 0),
+      scheduled_count: Number(row.scheduled_count || 0),
+      in_queue_count: Number(row.in_queue_count || 0),
+      completed_count: Number(row.completed_count || 0),
+      no_show_count: Number(row.no_show_count || 0),
+      cancelled_count: Number(row.cancelled_count || 0)
+    })),
+    statusBreakdown: statusResult.rows.map((row) => ({
+      status: row.status,
+      total_count: Number(row.total_count || 0)
+    })),
+    dailyBreakdown: dailyResult.rows.map((row) => ({
+      appointment_date: row.appointment_date,
+      total_count: Number(row.total_count || 0),
+      completed_count: Number(row.completed_count || 0),
+      cancelled_count: Number(row.cancelled_count || 0),
+      no_show_count: Number(row.no_show_count || 0)
+    }))
+  };
+}
+
 export async function getAppointmentPrintDetails(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
@@ -654,7 +832,8 @@ export async function deleteExamType(examTypeId, currentUserId) {
   }
 }
 
-export async function createAppointment(payload, currentUser) {
+export async function createAppointment(payload, currentUser, options = {}) {
+  const supervisorReauthOk = Boolean(options.supervisorReauthOk);
   const patientId = normalizePositiveInteger(payload.patientId, "patientId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
@@ -699,14 +878,19 @@ export async function createAppointment(payload, currentUser) {
       [appointmentDate]
     );
 
+    const maxCasesPerModality = await getMaxCasesPerModality(client);
     const bookedCount = Number(bookingStats.rows[0]?.booked_count || 0);
     const nextSlotNumber = Number(bookingStats.rows[0]?.last_slot_number || 0) + 1;
     const nextDailySequence = Number(globalStats.rows[0]?.last_daily_sequence || 0) + 1;
-    const capacity = Number(modality.daily_capacity || 0);
+    const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = bookedCount >= capacity;
 
     if (isOverbooked && currentUser.role !== "supervisor") {
       throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
+    }
+
+    if (isOverbooked && !supervisorReauthOk) {
+      throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
     }
 
     if (isOverbooked && !overbookingReason) {
@@ -810,7 +994,8 @@ export async function createAppointment(payload, currentUser) {
   }
 }
 
-export async function updateAppointment(appointmentId, payload, currentUser) {
+export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
+  const supervisorReauthOk = Boolean(options.supervisorReauthOk);
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
@@ -837,11 +1022,16 @@ export async function updateAppointment(appointmentId, payload, currentUser) {
     const examType = await getExamTypeById(client, examTypeId, modalityId);
     const priority = await getPriorityById(client, reportingPriorityId);
     const slotStats = await nextModalitySlotNumber(client, modalityId, appointmentDate, cleanAppointmentId);
-    const capacity = Number(modality.daily_capacity || 0);
+    const maxCasesPerModality = await getMaxCasesPerModality(client);
+    const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = slotStats.bookedCount >= capacity;
 
     if (isOverbooked && currentUser.role !== "supervisor") {
       throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
+    }
+
+    if (isOverbooked && !supervisorReauthOk) {
+      throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
     }
 
     if (isOverbooked && !overbookingReason) {

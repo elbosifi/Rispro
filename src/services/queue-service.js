@@ -343,7 +343,7 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
   }
 }
 
-export async function createWalkInQueueEntry(payload, currentUser) {
+export async function createWalkInQueueEntry(payload, currentUser, options = {}) {
   const queueDate = getTripoliToday();
   const appointmentResult = await createAppointment(
     {
@@ -351,7 +351,8 @@ export async function createWalkInQueueEntry(payload, currentUser) {
       appointmentDate: queueDate,
       isWalkIn: true
     },
-    currentUser
+    currentUser,
+    options
   );
 
   const scanResult = await scanAppointmentIntoQueue(appointmentResult.barcodeValue, currentUser);

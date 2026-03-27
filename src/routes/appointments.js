@@ -1,11 +1,12 @@
 import express from "express";
-import { requireAuth } from "../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import {
   cancelAppointment,
   createAppointment,
   createExamType,
   getAppointmentPrintDetails,
+  listAppointmentStatistics,
   listAppointmentLookups,
   listAppointmentsForPrint,
   listAvailability,
@@ -49,6 +50,19 @@ appointmentsRouter.get(
 );
 
 appointmentsRouter.get(
+  "/statistics",
+  asyncRoute(async (req, res) => {
+    const statistics = await listAppointmentStatistics({
+      date: req.query.date,
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
+      modalityId: req.query.modalityId
+    });
+    res.json(statistics);
+  })
+);
+
+appointmentsRouter.get(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
     const appointment = await getAppointmentPrintDetails(req.params.appointmentId);
@@ -67,7 +81,9 @@ appointmentsRouter.post(
 appointmentsRouter.post(
   "/",
   asyncRoute(async (req, res) => {
-    const result = await createAppointment(req.body || {}, req.user);
+    const result = await createAppointment(req.body || {}, req.user, {
+      supervisorReauthOk: hasRecentSupervisorReauth(req)
+    });
     res.status(201).json(result);
   })
 );
@@ -75,7 +91,9 @@ appointmentsRouter.post(
 appointmentsRouter.put(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
-    const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user);
+    const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user, {
+      supervisorReauthOk: hasRecentSupervisorReauth(req)
+    });
     res.json({ appointment });
   })
 );
