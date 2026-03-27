@@ -54,6 +54,7 @@ const state = {
   loginLoading: false,
   loginError: "",
   appError: "",
+  toasts: [],
   dashboardLoading: false,
   dashboardReady: null,
   dashboardError: "",
@@ -138,6 +139,13 @@ const state = {
   nameDictionaryError: "",
   nameDictionarySuccess: "",
   nameDictionarySavingId: "",
+  examTypeSettingsEntries: [],
+  examTypeSettingsModalities: [],
+  examTypeSettingsLoading: false,
+  examTypeSettingsError: "",
+  examTypeSettingsSuccess: "",
+  examTypeSettingsSavingId: "",
+  examTypeSettingsForm: defaultExamTypeForm(),
   nameDictionaryForm: {
     arabicText: "",
     englishText: "",
@@ -454,6 +462,13 @@ const copy = {
       dictionaryActive: "Active",
       dictionarySave: "Save entry",
       dictionaryDelete: "Remove",
+      examTypesTitle: "Exam types",
+      examTypesBody: "Add, edit, or remove exam types and link each one to a modality.",
+      examTypesAdd: "Add exam type",
+      examTypesSave: "Save exam type",
+      examTypesDelete: "Delete exam type",
+      examTypesModality: "Modality",
+      examTypesEmpty: "No exam types have been added yet.",
       users: "Users",
       addUser: "Create user",
       refresh: "Refresh list",
@@ -759,6 +774,13 @@ const copy = {
       dictionaryActive: "مفعّل",
       dictionarySave: "حفظ المدخل",
       dictionaryDelete: "حذف",
+      examTypesTitle: "أنواع الفحوصات",
+      examTypesBody: "أضف أو عدّل أو احذف أنواع الفحوصات واربط كل نوع بالجهاز المناسب.",
+      examTypesAdd: "إضافة نوع فحص",
+      examTypesSave: "حفظ نوع الفحص",
+      examTypesDelete: "حذف نوع الفحص",
+      examTypesModality: "الجهاز",
+      examTypesEmpty: "لا توجد أنواع فحوصات مضافة بعد.",
       users: "المستخدمون",
       addUser: "إنشاء مستخدم",
       refresh: "تحديث القائمة",
@@ -1399,6 +1421,57 @@ function filteredExamTypes() {
   );
 }
 
+function normalizeAppointmentFormSelections() {
+  const modalities = state.appointmentLookups.modalities || [];
+  const priorities = state.appointmentLookups.priorities || [];
+  const firstModalityId = modalities[0] ? String(modalities[0].id) : "";
+  const hasSelectedModality = modalities.some(
+    (modality) => String(modality.id) === String(state.appointmentForm.modalityId)
+  );
+
+  if (!hasSelectedModality) {
+    state.appointmentForm.modalityId = firstModalityId;
+  }
+
+  const validExamTypeIds = new Set(
+    state.appointmentLookups.examTypes
+      .filter((examType) => String(examType.modality_id) === String(state.appointmentForm.modalityId))
+      .map((examType) => String(examType.id))
+  );
+
+  if (!validExamTypeIds.has(String(state.appointmentForm.examTypeId || ""))) {
+    state.appointmentForm.examTypeId = "";
+  }
+
+  const hasSelectedPriority =
+    !state.appointmentForm.reportingPriorityId ||
+    priorities.some((priority) => String(priority.id) === String(state.appointmentForm.reportingPriorityId));
+
+  if (!hasSelectedPriority) {
+    state.appointmentForm.reportingPriorityId = "";
+  }
+
+  state.examTypeForm.modalityId = state.appointmentForm.modalityId || "";
+
+  const queueHasSelectedModality = modalities.some(
+    (modality) => String(modality.id) === String(state.queueWalkInForm.modalityId)
+  );
+
+  if (!queueHasSelectedModality) {
+    state.queueWalkInForm.modalityId = firstModalityId;
+  }
+
+  const validQueueExamTypeIds = new Set(
+    state.appointmentLookups.examTypes
+      .filter((examType) => String(examType.modality_id) === String(state.queueWalkInForm.modalityId))
+      .map((examType) => String(examType.id))
+  );
+
+  if (!validQueueExamTypeIds.has(String(state.queueWalkInForm.examTypeId || ""))) {
+    state.queueWalkInForm.examTypeId = "";
+  }
+}
+
 function selectedAppointmentDay() {
   return state.appointmentCalendar.find(
     (day) => normalizeDateText(day.appointment_date) === normalizeDateText(state.appointmentForm.appointmentDate)
@@ -1743,7 +1816,7 @@ async function loadNameDictionary() {
   try {
     const endpoint =
       isSupervisor() && hasRecentSupervisorReauth()
-        ? "/api/settings/name-dictionary?includeInactive=true"
+        ? "/api/name-dictionary?includeInactive=true"
         : "/api/name-dictionary";
     const result = await api(endpoint, { method: "GET" });
     state.nameDictionaryEntries = result.entries || [];
@@ -1752,6 +1825,37 @@ async function loadNameDictionary() {
     state.nameDictionaryError = error.message;
   } finally {
     state.nameDictionaryLoading = false;
+    render();
+  }
+}
+
+async function loadExamTypeSettings() {
+  if (!isSupervisor() || !hasRecentSupervisorReauth()) {
+    return;
+  }
+
+  state.examTypeSettingsLoading = true;
+  state.examTypeSettingsError = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/exam-types", { method: "GET" });
+    state.examTypeSettingsEntries = result.examTypes || [];
+    state.examTypeSettingsModalities = result.modalities || [];
+
+    state.appointmentLookups = {
+      ...state.appointmentLookups,
+      modalities: result.modalities || state.appointmentLookups.modalities,
+      examTypes: result.examTypes || state.appointmentLookups.examTypes
+    };
+
+    if (!state.examTypeSettingsForm.modalityId && state.examTypeSettingsModalities[0]) {
+      state.examTypeSettingsForm.modalityId = String(state.examTypeSettingsModalities[0].id);
+    }
+  } catch (error) {
+    state.examTypeSettingsError = error.message;
+  } finally {
+    state.examTypeSettingsLoading = false;
     render();
   }
 }
@@ -1790,15 +1894,7 @@ async function loadAppointmentLookups() {
       examTypes: result.examTypes || [],
       priorities: result.priorities || []
     };
-
-    if (!state.appointmentForm.modalityId && state.appointmentLookups.modalities[0]) {
-      state.appointmentForm.modalityId = String(state.appointmentLookups.modalities[0].id);
-      state.examTypeForm.modalityId = state.appointmentForm.modalityId;
-    }
-
-    if (!state.queueWalkInForm.modalityId && state.appointmentLookups.modalities[0]) {
-      state.queueWalkInForm.modalityId = String(state.appointmentLookups.modalities[0].id);
-    }
+    normalizeAppointmentFormSelections();
 
     if (state.appointmentForm.modalityId) {
       await loadAppointmentAvailability();
@@ -1940,7 +2036,7 @@ async function hydrateRoute() {
 
   if (state.route === "settings") {
     if (hasRecentSupervisorReauth()) {
-      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary()]);
+      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary(), loadExamTypeSettings()]);
     }
     return;
   }
@@ -2014,6 +2110,12 @@ async function signOut() {
     state.nameDictionarySuccess = "";
     state.nameDictionarySavingId = "";
     state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
+    state.examTypeSettingsEntries = [];
+    state.examTypeSettingsModalities = [];
+    state.examTypeSettingsError = "";
+    state.examTypeSettingsSuccess = "";
+    state.examTypeSettingsSavingId = "";
+    state.examTypeSettingsForm = defaultExamTypeForm();
     state.appointmentLookups = { modalities: [], examTypes: [], priorities: [] };
     state.appointmentCalendar = [];
     state.selectedAppointmentPatient = null;
@@ -2141,12 +2243,14 @@ async function savePatient() {
 
     state.savedPatient = result.patient;
     state.patientSuccess = t().patients.success;
+    pushToast("success", state.patientSuccess);
     state.patientForm = defaultPatientForm();
     state.patientAddressMode = "select";
     state.manualEnglishName = false;
     state.patientSuggestions = [];
   } catch (error) {
     state.patientError = error.message;
+    pushToast("error", state.patientError);
   } finally {
     state.patientSaving = false;
     render();
@@ -2275,7 +2379,7 @@ async function submitSupervisorReauth() {
     });
     state.reauthPassword = "";
     await refreshSession();
-    await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
+    await Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadExamTypeSettings()]);
   } catch (error) {
     state.reauthError = error.message;
   } finally {
@@ -2444,6 +2548,8 @@ async function createExamType() {
 }
 
 async function saveAppointment() {
+  normalizeAppointmentFormSelections();
+
   if (!state.selectedAppointmentPatient) {
     state.appointmentError = t().appointments.noneSelected;
     render();
@@ -2478,6 +2584,7 @@ async function saveAppointment() {
     });
 
     state.appointmentSuccess = t().appointments.appointmentSaved;
+    pushToast("success", state.appointmentSuccess);
     state.savedAppointment = result;
     state.appointmentForm = {
       ...defaultAppointmentForm(),
@@ -2487,6 +2594,7 @@ async function saveAppointment() {
     await loadAppointmentAvailability();
   } catch (error) {
     state.appointmentError = error.message;
+    pushToast("error", state.appointmentError);
   } finally {
     state.appointmentSaving = false;
     render();
@@ -3003,8 +3111,11 @@ async function saveSettingsCategory(category) {
       state.language === "ar"
         ? `تم حفظ فئة ${getSettingsCategoryTitle(category)} بنجاح.`
         : `${getSettingsCategoryTitle(category)} was saved successfully.`;
+    pushToast("success", state.settingsSuccess);
+    await loadSettings();
   } catch (error) {
     state.settingsError = error.message;
+    pushToast("error", state.settingsError);
   } finally {
     state.settingsSavingCategory = "";
     render();
@@ -3030,7 +3141,7 @@ async function createNameDictionaryEntry() {
   render();
 
   try {
-    const result = await api("/api/settings/name-dictionary", {
+    const result = await api("/api/name-dictionary", {
       method: "POST",
       body: JSON.stringify(state.nameDictionaryForm)
     });
@@ -3062,7 +3173,7 @@ async function updateNameDictionaryEntry(entryId) {
   render();
 
   try {
-    const result = await api(`/api/settings/name-dictionary/${encodeURIComponent(entryId)}`, {
+    const result = await api(`/api/name-dictionary/${encodeURIComponent(entryId)}`, {
       method: "PUT",
       body: JSON.stringify({
         englishText: entry.english_text,
@@ -3091,7 +3202,7 @@ async function deleteNameDictionaryEntry(entryId) {
   render();
 
   try {
-    await api(`/api/settings/name-dictionary/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+    await api(`/api/name-dictionary/${encodeURIComponent(entryId)}`, { method: "DELETE" });
     state.nameDictionaryEntries = state.nameDictionaryEntries.filter((item) => String(item.id) !== String(entryId));
     rebuildNameDictionary(state.nameDictionaryEntries);
     state.nameDictionarySuccess =
@@ -3100,6 +3211,113 @@ async function deleteNameDictionaryEntry(entryId) {
     state.nameDictionaryError = error.message;
   } finally {
     state.nameDictionarySavingId = "";
+    render();
+  }
+}
+
+async function createSettingsExamType() {
+  const payload = {
+    modalityId: state.examTypeSettingsForm.modalityId,
+    nameAr: state.examTypeSettingsForm.nameAr,
+    nameEn: state.examTypeSettingsForm.nameEn,
+    specificInstructionAr: state.examTypeSettingsForm.specificInstructionAr,
+    specificInstructionEn: state.examTypeSettingsForm.specificInstructionEn
+  };
+
+  state.examTypeSettingsSavingId = "new";
+  state.examTypeSettingsError = "";
+  state.examTypeSettingsSuccess = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/exam-types", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+
+    state.examTypeSettingsEntries = [result.examType, ...state.examTypeSettingsEntries];
+    state.appointmentLookups.examTypes = [result.examType, ...state.appointmentLookups.examTypes];
+    state.examTypeSettingsForm = {
+      ...defaultExamTypeForm(),
+      modalityId: state.examTypeSettingsModalities[0] ? String(state.examTypeSettingsModalities[0].id) : ""
+    };
+    state.examTypeSettingsSuccess =
+      state.language === "ar" ? "تمت إضافة نوع الفحص بنجاح." : "Exam type added successfully.";
+    pushToast("success", state.examTypeSettingsSuccess);
+  } catch (error) {
+    state.examTypeSettingsError = error.message;
+    pushToast("error", state.examTypeSettingsError);
+  } finally {
+    state.examTypeSettingsSavingId = "";
+    render();
+  }
+}
+
+async function updateSettingsExamType(entryId) {
+  const entry = state.examTypeSettingsEntries.find((item) => String(item.id) === String(entryId));
+
+  if (!entry) {
+    return;
+  }
+
+  state.examTypeSettingsSavingId = String(entryId);
+  state.examTypeSettingsError = "";
+  state.examTypeSettingsSuccess = "";
+  render();
+
+  try {
+    const result = await api(`/api/settings/exam-types/${encodeURIComponent(entryId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        modalityId: entry.modality_id,
+        nameAr: entry.name_ar,
+        nameEn: entry.name_en,
+        specificInstructionAr: entry.specific_instruction_ar,
+        specificInstructionEn: entry.specific_instruction_en
+      })
+    });
+
+    state.examTypeSettingsEntries = state.examTypeSettingsEntries.map((item) =>
+      String(item.id) === String(entryId) ? result.examType : item
+    );
+    state.appointmentLookups.examTypes = state.appointmentLookups.examTypes.map((item) =>
+      String(item.id) === String(entryId) ? result.examType : item
+    );
+    state.examTypeSettingsSuccess =
+      state.language === "ar" ? "تم تحديث نوع الفحص بنجاح." : "Exam type updated successfully.";
+    pushToast("success", state.examTypeSettingsSuccess);
+  } catch (error) {
+    state.examTypeSettingsError = error.message;
+    pushToast("error", state.examTypeSettingsError);
+  } finally {
+    state.examTypeSettingsSavingId = "";
+    render();
+  }
+}
+
+async function deleteSettingsExamType(entryId) {
+  state.examTypeSettingsSavingId = `delete-${entryId}`;
+  state.examTypeSettingsError = "";
+  state.examTypeSettingsSuccess = "";
+  render();
+
+  try {
+    await api(`/api/settings/exam-types/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+    state.examTypeSettingsEntries = state.examTypeSettingsEntries.filter((item) => String(item.id) !== String(entryId));
+    state.appointmentLookups.examTypes = state.appointmentLookups.examTypes.filter(
+      (item) => String(item.id) !== String(entryId)
+    );
+    if (String(state.appointmentForm.examTypeId) === String(entryId)) {
+      state.appointmentForm.examTypeId = "";
+    }
+    state.examTypeSettingsSuccess =
+      state.language === "ar" ? "تم حذف نوع الفحص." : "Exam type deleted.";
+    pushToast("success", state.examTypeSettingsSuccess);
+  } catch (error) {
+    state.examTypeSettingsError = error.message;
+    pushToast("error", state.examTypeSettingsError);
+  } finally {
+    state.examTypeSettingsSavingId = "";
     render();
   }
 }
@@ -3142,6 +3360,51 @@ function alertMarkup(kind, message) {
   }
 
   return `<div class="alert alert-${kind}">${escapeHtml(message)}</div>`;
+}
+
+function pushToast(kind, message, durationMs = 4500) {
+  if (!message) {
+    return;
+  }
+
+  const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  state.toasts = [...state.toasts, { id, kind, message }];
+  render();
+
+  window.setTimeout(() => {
+    dismissToast(id);
+  }, durationMs);
+}
+
+function dismissToast(id) {
+  const nextToasts = state.toasts.filter((toast) => toast.id !== id);
+  if (nextToasts.length === state.toasts.length) {
+    return;
+  }
+
+  state.toasts = nextToasts;
+  render();
+}
+
+function renderToasts() {
+  if (!state.toasts.length) {
+    return "";
+  }
+
+  return `
+    <div class="toast-stack" role="status" aria-live="polite">
+      ${state.toasts
+        .map(
+          (toast) => `
+            <div class="toast toast-${escapeHtml(toast.kind)}">
+              <div class="toast-message">${escapeHtml(toast.message)}</div>
+              <button class="toast-close" type="button" data-action="dismiss-toast" data-toast-id="${escapeHtml(toast.id)}">×</button>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
 }
 
 function languageToggle() {
@@ -5338,6 +5601,192 @@ function renderNameDictionaryList() {
   `;
 }
 
+function renderExamTypeSettings() {
+  if (state.examTypeSettingsLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  const modalityOptions = state.examTypeSettingsModalities
+    .map(
+      (modality) => `
+        <option
+          value="${escapeHtml(String(modality.id))}"
+          ${String(modality.id) === String(state.examTypeSettingsForm.modalityId) ? "selected" : ""}
+        >
+          ${escapeHtml(formatModalityName(modality))}
+        </option>
+      `
+    )
+    .join("");
+
+  return `
+    ${alertMarkup("error", state.examTypeSettingsError)}
+    ${alertMarkup("success", state.examTypeSettingsSuccess)}
+    <form id="exam-type-settings-form" class="stack">
+      <div class="form-grid">
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.examTypesModality)}</span>
+          <select class="select" name="modalityId" data-exam-type-settings-new-field="true">
+            ${modalityOptions}
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().appointments.fields.examNameAr)}</span>
+          <input
+            class="input field-ar"
+            name="nameAr"
+            data-exam-type-settings-new-field="true"
+            value="${escapeHtml(state.examTypeSettingsForm.nameAr)}"
+          />
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().appointments.fields.examNameEn)}</span>
+          <input
+            class="input field-en"
+            name="nameEn"
+            data-exam-type-settings-new-field="true"
+            value="${escapeHtml(state.examTypeSettingsForm.nameEn)}"
+          />
+        </label>
+
+        <label class="field full">
+          <span class="label">${escapeHtml(t().appointments.fields.specificInstructionAr)}</span>
+          <textarea
+            class="textarea field-ar"
+            name="specificInstructionAr"
+            data-exam-type-settings-new-field="true"
+          >${escapeHtml(state.examTypeSettingsForm.specificInstructionAr)}</textarea>
+        </label>
+
+        <label class="field full">
+          <span class="label">${escapeHtml(t().appointments.fields.specificInstructionEn)}</span>
+          <textarea
+            class="textarea field-en"
+            name="specificInstructionEn"
+            data-exam-type-settings-new-field="true"
+          >${escapeHtml(state.examTypeSettingsForm.specificInstructionEn)}</textarea>
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button class="button-primary" type="submit">${escapeHtml(
+          state.examTypeSettingsSavingId === "new" ? t().common.loading : t().settings.examTypesAdd
+        )}</button>
+      </div>
+    </form>
+
+    ${
+      state.examTypeSettingsEntries.length
+        ? `
+          <div class="list">
+            ${state.examTypeSettingsEntries
+              .map(
+                (entry) => `
+                  <div class="item dictionary-item">
+                    <div class="item-copy" style="width:100%;">
+                      <div class="form-grid">
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.examTypesModality)}</span>
+                          <select
+                            class="select"
+                            name="modality_id"
+                            data-exam-type-settings-field="true"
+                            data-exam-type-id="${escapeHtml(String(entry.id))}"
+                          >
+                            ${state.examTypeSettingsModalities
+                              .map(
+                                (modality) => `
+                                  <option value="${escapeHtml(String(modality.id))}" ${
+                                    String(modality.id) === String(entry.modality_id) ? "selected" : ""
+                                  }>
+                                    ${escapeHtml(formatModalityName(modality))}
+                                  </option>
+                                `
+                              )
+                              .join("")}
+                          </select>
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().appointments.fields.examNameAr)}</span>
+                          <input
+                            class="input field-ar"
+                            name="name_ar"
+                            data-exam-type-settings-field="true"
+                            data-exam-type-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(entry.name_ar)}"
+                          />
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().appointments.fields.examNameEn)}</span>
+                          <input
+                            class="input field-en"
+                            name="name_en"
+                            data-exam-type-settings-field="true"
+                            data-exam-type-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(entry.name_en)}"
+                          />
+                        </label>
+
+                        <label class="field full">
+                          <span class="label">${escapeHtml(t().appointments.fields.specificInstructionAr)}</span>
+                          <textarea
+                            class="textarea field-ar"
+                            name="specific_instruction_ar"
+                            data-exam-type-settings-field="true"
+                            data-exam-type-id="${escapeHtml(String(entry.id))}"
+                          >${escapeHtml(entry.specific_instruction_ar || "")}</textarea>
+                        </label>
+
+                        <label class="field full">
+                          <span class="label">${escapeHtml(t().appointments.fields.specificInstructionEn)}</span>
+                          <textarea
+                            class="textarea field-en"
+                            name="specific_instruction_en"
+                            data-exam-type-settings-field="true"
+                            data-exam-type-id="${escapeHtml(String(entry.id))}"
+                          >${escapeHtml(entry.specific_instruction_en || "")}</textarea>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="dictionary-actions">
+                      <button
+                        class="button-secondary"
+                        type="button"
+                        data-action="save-exam-type-entry"
+                        data-exam-type-id="${escapeHtml(String(entry.id))}"
+                      >
+                        ${escapeHtml(
+                          state.examTypeSettingsSavingId === String(entry.id) ? t().common.loading : t().settings.examTypesSave
+                        )}
+                      </button>
+                      <button
+                        class="button-ghost"
+                        type="button"
+                        data-action="delete-exam-type-entry"
+                        data-exam-type-id="${escapeHtml(String(entry.id))}"
+                      >
+                        ${escapeHtml(
+                          state.examTypeSettingsSavingId === `delete-${entry.id}`
+                            ? t().common.loading
+                            : t().settings.examTypesDelete
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `
+        : `<div class="empty">${escapeHtml(t().settings.examTypesEmpty)}</div>`
+    }
+  `;
+}
+
 function renderSettings() {
   if (!isSupervisor()) {
     return `
@@ -5472,6 +5921,15 @@ function renderSettings() {
           </div>
         </form>
         ${renderNameDictionaryList()}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.examTypesTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(String(state.examTypeSettingsEntries.length))}</span>
+        </div>
+        <div class="settings-summary">${escapeHtml(t().settings.examTypesBody)}</div>
+        ${renderExamTypeSettings()}
       </section>
 
       <section class="surface">
@@ -5615,6 +6073,7 @@ function renderAppFrame(content) {
         </div>
       </div>
     </div>
+    ${renderToasts()}
   `;
 }
 
@@ -5870,6 +6329,11 @@ function handleInput(event) {
     return;
   }
 
+  if (target.hasAttribute("data-exam-type-settings-new-field")) {
+    state.examTypeSettingsForm[target.name] = target.value;
+    return;
+  }
+
   if (target.hasAttribute("data-name-dictionary-field")) {
     const entryId = target.dataset.dictionaryId;
     if (!entryId) {
@@ -5881,6 +6345,23 @@ function handleInput(event) {
         ? {
             ...entry,
             [target.name]: target.type === "checkbox" ? target.checked : target.value
+          }
+        : entry
+    );
+    return;
+  }
+
+  if (target.hasAttribute("data-exam-type-settings-field")) {
+    const entryId = target.dataset.examTypeId;
+    if (!entryId) {
+      return;
+    }
+
+    state.examTypeSettingsEntries = state.examTypeSettingsEntries.map((entry) =>
+      String(entry.id) === String(entryId)
+        ? {
+            ...entry,
+            [target.name]: target.value
           }
         : entry
     );
@@ -5918,6 +6399,15 @@ function handleClick(event) {
   if (target.id === "logout-button") {
     event.preventDefault();
     void signOut();
+    return;
+  }
+
+  if (target.dataset.action === "dismiss-toast") {
+    event.preventDefault();
+    const toastId = target.dataset.toastId;
+    if (toastId) {
+      dismissToast(toastId);
+    }
     return;
   }
 
@@ -6071,7 +6561,19 @@ function handleClick(event) {
 
   if (target.dataset.action === "refresh-settings") {
     event.preventDefault();
-    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary()]);
+    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary(), loadExamTypeSettings()]);
+    return;
+  }
+
+  if (target.dataset.action === "save-exam-type-entry") {
+    event.preventDefault();
+    void updateSettingsExamType(target.dataset.examTypeId);
+    return;
+  }
+
+  if (target.dataset.action === "delete-exam-type-entry") {
+    event.preventDefault();
+    void deleteSettingsExamType(target.dataset.examTypeId);
     return;
   }
 
@@ -6384,6 +6886,12 @@ function handleSubmit(event) {
   if (event.target.id === "name-dictionary-form") {
     event.preventDefault();
     void createNameDictionaryEntry();
+    return;
+  }
+
+  if (event.target.id === "exam-type-settings-form") {
+    event.preventDefault();
+    void createSettingsExamType();
     return;
   }
 

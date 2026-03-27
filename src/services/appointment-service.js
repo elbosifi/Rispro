@@ -172,7 +172,7 @@ async function getExamTypeById(client, examTypeId, modalityId) {
     throw new HttpError(404, "Exam type not found.");
   }
 
-  if (rows[0].modality_id !== modalityId) {
+  if (Number(rows[0].modality_id) !== Number(modalityId)) {
     throw new HttpError(400, "The selected exam type does not belong to the selected modality.");
   }
 
@@ -232,6 +232,32 @@ export async function listAppointmentLookups() {
     modalities: modalitiesResult.rows,
     examTypes: examTypesResult.rows,
     priorities: prioritiesResult.rows
+  };
+}
+
+export async function listExamTypesForSettings() {
+  const [modalitiesResult, examTypesResult] = await Promise.all([
+    pool.query(
+      `
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en
+        from modalities
+        where is_active = true
+        order by name_en asc
+      `
+    ),
+    pool.query(
+      `
+        select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        from exam_types
+        where is_active = true
+        order by name_en asc, name_ar asc
+      `
+    )
+  ]);
+
+  return {
+    modalities: modalitiesResult.rows,
+    examTypes: examTypesResult.rows
   };
 }
 
@@ -422,7 +448,7 @@ export async function listAvailability(modalityId, days = 14) {
   });
 }
 
-export async function createExamType(payload) {
+export async function createExamType(payload, currentUserId = null) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const nameAr = String(payload.nameAr || "").trim();
   const nameEn = String(payload.nameEn || "").trim();
@@ -436,6 +462,7 @@ export async function createExamType(payload) {
   const client = await pool.connect();
 
   try {
+    await client.query("begin");
     await getModalityById(client, modalityId);
     const { rows } = await client.query(
       `
@@ -452,7 +479,156 @@ export async function createExamType(payload) {
       [modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
 
+    if (currentUserId) {
+      await logAuditEntry(
+        {
+          entityType: "exam_type",
+          entityId: rows[0].id,
+          actionType: "create",
+          oldValues: null,
+          newValues: rows[0],
+          changedByUserId: currentUserId
+        },
+        client
+      );
+    }
+
+    await client.query("commit");
     return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateExamType(examTypeId, payload, currentUserId) {
+  const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
+  const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
+  const nameAr = String(payload.nameAr || "").trim();
+  const nameEn = String(payload.nameEn || "").trim();
+  const specificInstructionAr = String(payload.specificInstructionAr || "").trim();
+  const specificInstructionEn = String(payload.specificInstructionEn || "").trim();
+
+  if (!nameAr || !nameEn) {
+    throw new HttpError(400, "nameAr and nameEn are required.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        from exam_types
+        where id = $1
+        limit 1
+      `,
+      [cleanExamTypeId]
+    );
+
+    const existing = existingResult.rows[0];
+
+    if (!existing || !existing.is_active) {
+      throw new HttpError(404, "Exam type not found.");
+    }
+
+    await getModalityById(client, modalityId);
+
+    const { rows } = await client.query(
+      `
+        update exam_types
+        set
+          modality_id = $2,
+          name_ar = $3,
+          name_en = $4,
+          specific_instruction_ar = nullif($5, ''),
+          specific_instruction_en = nullif($6, ''),
+          is_active = true,
+          updated_at = now()
+        where id = $1
+        returning id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+      `,
+      [cleanExamTypeId, modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "exam_type",
+        entityId: cleanExamTypeId,
+        actionType: "update",
+        oldValues: existing,
+        newValues: rows[0],
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteExamType(examTypeId, currentUserId) {
+  const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        from exam_types
+        where id = $1
+        limit 1
+      `,
+      [cleanExamTypeId]
+    );
+
+    const existing = existingResult.rows[0];
+
+    if (!existing || !existing.is_active) {
+      throw new HttpError(404, "Exam type not found.");
+    }
+
+    const { rows } = await client.query(
+      `
+        update exam_types
+        set
+          is_active = false,
+          updated_at = now()
+        where id = $1
+        returning id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+      `,
+      [cleanExamTypeId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "exam_type",
+        entityId: cleanExamTypeId,
+        actionType: "delete",
+        oldValues: existing,
+        newValues: rows[0],
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
   } finally {
     client.release();
   }

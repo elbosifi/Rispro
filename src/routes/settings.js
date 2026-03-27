@@ -2,6 +2,12 @@ import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
 import {
+  createExamType,
+  deleteExamType,
+  listExamTypesForSettings,
+  updateExamType
+} from "../services/appointment-service.js";
+import {
   deleteNameDictionaryEntry,
   listNameDictionary,
   updateNameDictionaryEntry,
@@ -53,6 +59,42 @@ settingsRouter.delete("/name-dictionary/:entryId", async (req, res, next) => {
   try {
     const entry = await deleteNameDictionaryEntry(req.params.entryId, req.user.sub);
     res.json({ entry });
+  } catch (error) {
+    next(error);
+  }
+});
+
+settingsRouter.get("/exam-types", async (_req, res, next) => {
+  try {
+    const result = await listExamTypesForSettings();
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+});
+
+settingsRouter.post("/exam-types", async (req, res, next) => {
+  try {
+    const examType = await createExamType(req.body || {}, req.user.sub);
+    res.status(201).json({ examType });
+  } catch (error) {
+    next(error);
+  }
+});
+
+settingsRouter.put("/exam-types/:examTypeId", async (req, res, next) => {
+  try {
+    const examType = await updateExamType(req.params.examTypeId, req.body || {}, req.user.sub);
+    res.json({ examType });
+  } catch (error) {
+    next(error);
+  }
+});
+
+settingsRouter.delete("/exam-types/:examTypeId", async (req, res, next) => {
+  try {
+    const examType = await deleteExamType(req.params.examTypeId, req.user.sub);
+    res.json({ examType });
   } catch (error) {
     next(error);
   }

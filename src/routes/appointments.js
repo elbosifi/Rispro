@@ -60,7 +60,7 @@ appointmentsRouter.get("/:appointmentId", async (req, res, next) => {
 
 appointmentsRouter.post("/exam-types", async (req, res, next) => {
   try {
-    const examType = await createExamType(req.body || {});
+    const examType = await createExamType(req.body || {}, req.user.sub);
     res.status(201).json({ examType });
   } catch (error) {
     next(error);
