@@ -3,10 +3,13 @@ import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   authenticateUser,
   buildSessionToken,
+  buildSupervisorReauthToken,
+  clearSupervisorReauthCookie,
   clearSessionCookie,
-  writeSessionCookie
+  writeSessionCookie,
+  writeSupervisorReauthCookie
 } from "../services/auth-service.js";
-import { requireAuth } from "../middleware/auth.js";
+import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 
 export const authRouter = express.Router();
 const loginRateLimiter = createRateLimiter({
@@ -21,6 +24,7 @@ authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
     const user = await authenticateUser(username, password);
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
+    clearSupervisorReauthCookie(res);
 
     res.json({
       user: {
@@ -36,18 +40,26 @@ authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
 });
 
 authRouter.post("/logout", (_req, res) => {
+  clearSupervisorReauthCookie(res);
   clearSessionCookie(res);
   res.status(204).end();
 });
 
 authRouter.get("/me", requireAuth, (req, res) => {
-  res.json({ user: req.user });
+  res.json({
+    user: {
+      ...req.user,
+      recentSupervisorReauth: hasRecentSupervisorReauth(req)
+    }
+  });
 });
 
 authRouter.post("/re-auth", requireAuth, async (req, res, next) => {
   try {
     const { password = "" } = req.body || {};
     const user = await authenticateUser(req.user.username, password);
+    const reauthToken = buildSupervisorReauthToken(user);
+    writeSupervisorReauthCookie(res, reauthToken);
 
     res.json({
       ok: true,
@@ -55,7 +67,8 @@ authRouter.post("/re-auth", requireAuth, async (req, res, next) => {
         id: user.id,
         username: user.username,
         fullName: user.full_name,
-        role: user.role
+        role: user.role,
+        recentSupervisorReauth: true
       }
     });
   } catch (error) {

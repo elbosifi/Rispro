@@ -81,8 +81,9 @@ Can do everything a receptionist can do, plus:
 ### Main identifiers
 
 - `National ID` is the main patient identifier.
-- National ID must be `13 digits`.
+- National ID must be `11 digits`.
 - National ID must be entered twice for confirmation.
+- The confirmation field must be entered manually and should not allow pasting.
 - The system also generates an `MRN`.
 - MRN may be edited later by users.
 
@@ -135,7 +136,7 @@ Core fields:
 ## 6. Phone rules
 
 - Libyan local phone format should be used.
-- Phone numbers should be validated as `11 digits`.
+- Phone numbers should be validated as `10 digits`.
 - Phone formatting behavior can be expanded later, but V1 should enforce the basic rule.
 
 ## 7. Appointment creation

@@ -1,6 +1,27 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 
+export async function listSettingsCatalog() {
+  const { rows } = await pool.query(
+    `
+      select category, setting_key, setting_value, updated_at
+      from system_settings
+      order by category asc, setting_key asc
+    `
+  );
+
+  const grouped = rows.reduce((accumulator, row) => {
+    if (!accumulator[row.category]) {
+      accumulator[row.category] = [];
+    }
+
+    accumulator[row.category].push(row);
+    return accumulator;
+  }, {});
+
+  return grouped;
+}
+
 export async function getSettingsByCategory(category) {
   const { rows } = await pool.query(
     `

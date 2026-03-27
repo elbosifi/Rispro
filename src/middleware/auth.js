@@ -6,6 +6,10 @@ export function readToken(req) {
   return req.cookies?.[env.cookieName] || "";
 }
 
+export function readSupervisorReauthToken(req) {
+  return req.cookies?.[env.reauthCookieName] || "";
+}
+
 export function requireAuth(req, _res, next) {
   try {
     const token = readToken(req);
@@ -32,6 +36,33 @@ export function requireSupervisor(req, _res, next) {
 
   if (req.user.role !== "supervisor") {
     return next(new HttpError(403, "Supervisor access required."));
+  }
+
+  return next();
+}
+
+export function hasRecentSupervisorReauth(req) {
+  try {
+    const token = readSupervisorReauthToken(req);
+
+    if (!token || !req.user || req.user.role !== "supervisor") {
+      return false;
+    }
+
+    const payload = jwt.verify(token, env.jwtSecret);
+    return (
+      payload?.purpose === "supervisor-reauth" &&
+      Number(payload?.sub) === Number(req.user.sub) &&
+      payload?.role === "supervisor"
+    );
+  } catch {
+    return false;
+  }
+}
+
+export function requireRecentSupervisorReauth(req, _res, next) {
+  if (!hasRecentSupervisorReauth(req)) {
+    return next(new HttpError(403, "Recent supervisor re-authentication is required."));
   }
 
   return next();

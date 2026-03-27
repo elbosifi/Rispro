@@ -7,6 +7,10 @@ import { pingDatabase } from "./db/pool.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { patientsRouter } from "./routes/patients.js";
+import { appointmentsRouter } from "./routes/appointments.js";
+import { queueRouter } from "./routes/queue.js";
+import { documentsRouter } from "./routes/documents.js";
+import { adminRouter } from "./routes/admin.js";
 import { settingsRouter } from "./routes/settings.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
@@ -56,6 +60,10 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/patients", patientsRouter);
+  app.use("/api/appointments", appointmentsRouter);
+  app.use("/api/queue", queueRouter);
+  app.use("/api/documents", documentsRouter);
+  app.use("/api/admin", adminRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api", notFoundHandler);
 

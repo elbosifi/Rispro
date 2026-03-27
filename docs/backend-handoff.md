@@ -45,11 +45,12 @@ Need:
 - save automatic transliteration result with manual override
 - save national ID as main patient identifier
 - confirm national ID by entering it twice
+- require manual entry in the confirmation field with paste blocked
 - generate MRN automatically
 - allow MRN to be edited later
 - store age and estimate DOB when age is provided
 - ignore Arabic spelling variants during duplicate search
-- validate Libyan phone numbers as 11 digits
+- validate Libyan phone numbers as 10 digits
 
 ### 3. Appointments
 

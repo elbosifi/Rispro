@@ -5,6 +5,14 @@ RISpro Reception is now a real Node.js + PostgreSQL web app for the currently im
 - real username/password login with cookie-based sessions
 - patient registration saved to PostgreSQL
 - patient search from PostgreSQL
+- appointment creation with live modality availability
+- queue scanning, walk-in queue, and no-show confirmation
+- printing daily lists and slips from live appointments
+- document uploads saved on the server with metadata in PostgreSQL
+- patient editing and duplicate merge after confirmation
+- appointment editing, rescheduling, and cancellation
+- supervisor re-authentication for settings and admin tools
+- backup download and restore upload from the browser
 - supervisor user management
 
 The old prototype-only browser login and fake local data have been removed from the main production flow.
@@ -26,10 +34,8 @@ This deployment intentionally hides unfinished modules instead of showing screen
 
 Not enabled yet:
 
-- appointments
-- queue management
-- printing
-- document uploads
+- advanced printer-specific integrations
+- local scanner bridge integrations
 
 ## Local run
 

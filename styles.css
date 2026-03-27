@@ -522,6 +522,15 @@ html[dir="ltr"] .nav-link.active {
   grid-column: 1 / -1;
 }
 
+.checkbox-field {
+  align-content: end;
+}
+
+.checkbox-field input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+}
+
 .label,
 .metric-label,
 .slip-value {
@@ -657,6 +666,10 @@ html[dir="ltr"] .nav-link.active {
 .day.active {
   border-color: rgba(15, 118, 110, 0.34);
   box-shadow: 0 16px 32px rgba(15, 118, 110, 0.12);
+}
+
+.day-full {
+  background: rgba(185, 28, 28, 0.05);
 }
 
 .day-date {
@@ -822,8 +835,26 @@ html[dir="ltr"] .nav-link.active {
   border: 1px solid rgba(86, 60, 38, 0.08);
 }
 
+.modal-surface {
+  position: fixed;
+  inset: 40px;
+  z-index: 30;
+  overflow: auto;
+  max-width: 960px;
+  margin: auto;
+  box-shadow: 0 30px 80px rgba(30, 20, 10, 0.24);
+}
+
 .timeline-text {
   line-height: 1.6;
+}
+
+.queue-review-item {
+  align-items: flex-start;
+}
+
+.queue-reason-input {
+  margin-top: 12px;
 }
 
 .search-bar {

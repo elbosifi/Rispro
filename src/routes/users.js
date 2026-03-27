@@ -1,10 +1,10 @@
 import express from "express";
-import { requireAuth, requireSupervisor } from "../middleware/auth.js";
+import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { createUser, listUsers } from "../services/user-service.js";
 
 export const usersRouter = express.Router();
 
-usersRouter.use(requireAuth, requireSupervisor);
+usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 
 usersRouter.get("/", async (_req, res, next) => {
   try {

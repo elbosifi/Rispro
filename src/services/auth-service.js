@@ -40,6 +40,19 @@ export function buildSessionToken(user) {
   );
 }
 
+export function buildSupervisorReauthToken(user) {
+  return jwt.sign(
+    {
+      sub: user.id,
+      username: user.username,
+      role: user.role,
+      purpose: "supervisor-reauth"
+    },
+    env.jwtSecret,
+    { expiresIn: `${env.supervisorReauthMinutes}m` }
+  );
+}
+
 function sessionCookieOptions() {
   return {
     httpOnly: true,
@@ -50,10 +63,28 @@ function sessionCookieOptions() {
   };
 }
 
+function reauthCookieOptions() {
+  return {
+    httpOnly: true,
+    sameSite: env.cookieSameSite,
+    secure: env.cookieSecure,
+    maxAge: env.supervisorReauthMinutes * 60 * 1000,
+    path: "/"
+  };
+}
+
 export function writeSessionCookie(res, token) {
   res.cookie(env.cookieName, token, sessionCookieOptions());
 }
 
+export function writeSupervisorReauthCookie(res, token) {
+  res.cookie(env.reauthCookieName, token, reauthCookieOptions());
+}
+
 export function clearSessionCookie(res) {
   res.clearCookie(env.cookieName, sessionCookieOptions());
+}
+
+export function clearSupervisorReauthCookie(res) {
+  res.clearCookie(env.reauthCookieName, reauthCookieOptions());
 }
