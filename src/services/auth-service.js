@@ -36,19 +36,24 @@ export function buildSessionToken(user) {
       role: user.role
     },
     env.jwtSecret,
-    { expiresIn: "8h" }
+    { expiresIn: `${env.sessionHours}h` }
   );
 }
 
-export function writeSessionCookie(res, token) {
-  res.cookie(env.cookieName, token, {
+function sessionCookieOptions() {
+  return {
     httpOnly: true,
-    sameSite: "lax",
-    secure: false,
-    maxAge: 8 * 60 * 60 * 1000
-  });
+    sameSite: env.cookieSameSite,
+    secure: env.cookieSecure,
+    maxAge: env.sessionHours * 60 * 60 * 1000,
+    path: "/"
+  };
+}
+
+export function writeSessionCookie(res, token) {
+  res.cookie(env.cookieName, token, sessionCookieOptions());
 }
 
 export function clearSessionCookie(res) {
-  res.clearCookie(env.cookieName);
+  res.clearCookie(env.cookieName, sessionCookieOptions());
 }

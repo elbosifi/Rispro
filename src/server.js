@@ -1,41 +1,65 @@
-import express from "express";
-import cookieParser from "cookie-parser";
-import path from "path";
-import { fileURLToPath } from "url";
+import http from "http";
 import { env } from "./config/env.js";
-import { authRouter } from "./routes/auth.js";
-import { usersRouter } from "./routes/users.js";
-import { patientsRouter } from "./routes/patients.js";
-import { settingsRouter } from "./routes/settings.js";
-import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
+import { createApp } from "./app.js";
+import { pingDatabase, pool } from "./db/pool.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..");
+const app = createApp();
+const server = http.createServer(app);
+let isShuttingDown = false;
 
-const app = express();
+async function shutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
 
-app.use(express.json());
-app.use(cookieParser());
+  isShuttingDown = true;
+  console.log(`Received ${signal}. Shutting down gracefully.`);
 
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
+  server.close(async (serverError) => {
+    try {
+      await pool.end();
+    } catch (poolError) {
+      console.error("Failed to close PostgreSQL pool cleanly.", poolError);
+    }
+
+    if (serverError) {
+      console.error("HTTP server shutdown failed.", serverError);
+      process.exit(1);
+    }
+
+    process.exit(0);
+  });
+
+  setTimeout(() => {
+    console.error("Forced shutdown after timeout.");
+    process.exit(1);
+  }, 10000).unref();
+}
+
+server.on("error", (error) => {
+  console.error("Failed to start HTTP server.", error);
+  process.exit(1);
 });
 
-app.use("/api/auth", authRouter);
-app.use("/api/users", usersRouter);
-app.use("/api/patients", patientsRouter);
-app.use("/api/settings", settingsRouter);
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
 
-app.use(express.static(rootDir));
+async function start() {
+  await pingDatabase();
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(rootDir, "index.html"));
-});
+  server.listen(env.port, () => {
+    console.log(`RISpro backend listening on http://localhost:${env.port}`);
+  });
+}
 
-app.use(notFoundHandler);
-app.use(errorHandler);
+start().catch(async (error) => {
+  console.error("RISpro failed to start.", error);
 
-app.listen(env.port, () => {
-  console.log(`RISpro backend listening on http://localhost:${env.port}`);
+  try {
+    await pool.end();
+  } catch (poolError) {
+    console.error("Failed to close PostgreSQL pool after startup error.", poolError);
+  }
+
+  process.exit(1);
 });

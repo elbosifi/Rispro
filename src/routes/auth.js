@@ -1,4 +1,5 @@
 import express from "express";
+import { createRateLimiter } from "../middleware/rate-limit.js";
 import {
   authenticateUser,
   buildSessionToken,
@@ -8,8 +9,13 @@ import {
 import { requireAuth } from "../middleware/auth.js";
 
 export const authRouter = express.Router();
+const loginRateLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  maxRequests: 10,
+  message: "Too many login attempts. Please wait a few minutes and try again."
+});
 
-authRouter.post("/login", async (req, res, next) => {
+authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
   try {
     const { username = "", password = "" } = req.body || {};
     const user = await authenticateUser(username, password);

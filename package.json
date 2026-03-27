@@ -3,12 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "migrate": "node src/db/migrate.js",
     "seed:supervisor": "node src/db/seed-supervisor.js",
-    "check": "node --check src/server.js && node --check src/db/migrate.js && node --check src/db/seed-supervisor.js && node --check src/routes/auth.js && node --check src/routes/users.js && node --check src/routes/patients.js && node --check src/routes/settings.js && node --check src/services/auth-service.js && node --check src/services/user-service.js && node --check src/services/patient-service.js && node --check src/services/settings-service.js"
+    "check": "node --check src/app.js && node --check src/server.js && node --check src/db/migrate.js && node --check src/db/seed-supervisor.js && node --check src/routes/auth.js && node --check src/routes/users.js && node --check src/routes/patients.js && node --check src/routes/settings.js && node --check src/services/auth-service.js && node --check src/services/user-service.js && node --check src/services/patient-service.js && node --check src/services/settings-service.js && node --check src/middleware/security.js && node --check src/middleware/rate-limit.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

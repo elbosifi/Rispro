@@ -1,69 +1,99 @@
-# RISpro Reception Prototype
+# RISpro Reception
 
-This is a frontend-first prototype for a diagnostic radiology reception module.
+RISpro Reception is now a real Node.js + PostgreSQL web app for the currently implemented workflows:
 
-## What is included
+- real username/password login with cookie-based sessions
+- patient registration saved to PostgreSQL
+- patient search from PostgreSQL
+- supervisor user management
 
-- Arabic and English interface switching
-- RTL and LTR layout support
-- Home dashboard
-- Patient registration
-- Appointment creation
-- Queue screen
-- Patient search
-- Daily print screen
-- Settings screen with user management
+The old prototype-only browser login and fake local data have been removed from the main production flow.
 
-## How to open it
+## What is production-ready now
 
-Open `index.html` in your browser.
+- Express server with health and readiness endpoints
+- PostgreSQL connection checks during startup
+- migration tracking with `schema_migrations`
+- secure production cookie settings through environment variables
+- login rate limiting
+- production security headers
+- graceful shutdown handling
+- Dockerfile for container deployment
 
-The prototype is built as a static web app, so it does not need installation to review the interface.
+## Current scope
 
-## Backend foundation
+This deployment intentionally hides unfinished modules instead of showing screens that are not backed by real APIs yet.
 
-The project now also includes a real backend foundation for the next phase:
+Not enabled yet:
 
-- Express API
-- PostgreSQL migration script
-- authentication routes
-- user management routes
-- patient routes
-- settings routes
+- appointments
+- queue management
+- printing
+- document uploads
 
-### Basic backend setup
+## Local run
 
 1. Copy `.env.example` to `.env`
-2. Set your PostgreSQL connection in `.env`
+2. Fill in real production-safe values
 3. Run `npm install`
 4. Run `npm run migrate`
 5. Run `npm run seed:supervisor`
-6. Run `npm run dev`
+6. Run `npm start`
 
-### Important note
+## Production environment variables
 
-The sandbox used during development here blocks opening local ports, so the backend server could not be started inside this environment.
+Required:
 
-The code and syntax checks are complete, but the live server should be started on your machine or deployment container.
+- `NODE_ENV=production`
+- `PORT`
+- `DATABASE_URL`
+- `JWT_SECRET`
+- `COOKIE_SECURE=true`
+- `TRUST_PROXY=1` when running behind a reverse proxy
 
-## Current status
+Useful:
 
-This version is a visual and workflow prototype.
+- `DATABASE_SSL=true`
+- `DATABASE_SSL_REJECT_UNAUTHORIZED=false` for managed databases that use public certificates differently
+- `DB_POOL_MAX=10`
+- `COOKIE_SAME_SITE=lax`
+- `SESSION_HOURS=8`
+- `REQUEST_BODY_LIMIT=1mb`
 
-It does not yet save data to a database.
+## Health checks
 
-## Final V1 documents
+- `/api/health` for process-level health
+- `/api/ready` for database readiness
 
-Use these two documents as the source of truth before backend implementation:
+## Docker deployment
 
-- `docs/v1-specification.md`
-- `docs/backend-handoff.md`
+Build:
 
-## Next implementation step
+```bash
+docker build -t rispro-reception .
+```
 
-Use the V1 decisions in `docs/backend-handoff.md` to connect this prototype to:
+Run:
 
-- PostgreSQL
-- backend APIs
-- real authentication
-- saved patients and appointments
+```bash
+docker run --env-file .env -p 3000:3000 rispro-reception
+```
+
+## Recommended production checklist
+
+- use a managed PostgreSQL database
+- set a long random `JWT_SECRET`
+- set a strong `SEED_SUPERVISOR_PASSWORD` before seeding
+- terminate HTTPS at your load balancer or proxy
+- make sure `COOKIE_SECURE=true`
+- make sure `TRUST_PROXY` matches your deployment setup
+- run `npm run migrate` during deployment before starting the app
+- verify `/api/ready` returns `{ "ok": true }`
+
+## Validation
+
+Basic syntax validation is available with:
+
+```bash
+npm run check
+```

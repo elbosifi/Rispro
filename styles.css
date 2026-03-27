@@ -339,6 +339,12 @@ html[dir="ltr"] .nav-link.active {
   gap: 20px;
 }
 
+.form-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .board-grid,
 .action-grid,
 .queue-summary-grid {
@@ -1056,6 +1062,25 @@ html[dir="ltr"] .nav-link.active {
   background: rgba(255, 255, 255, 0.56);
 }
 
+.alert {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  line-height: 1.6;
+}
+
+.alert-error {
+  color: var(--red);
+  background: rgba(185, 28, 28, 0.08);
+  border-color: rgba(185, 28, 28, 0.14);
+}
+
+.alert-success {
+  color: var(--green);
+  background: rgba(21, 128, 61, 0.08);
+  border-color: rgba(21, 128, 61, 0.14);
+}
+
 .login-shell {
   min-height: 100vh;
   display: grid;
@@ -1175,6 +1200,11 @@ html[dir="ltr"] .nav-link.active {
 
   .search-bar {
     grid-template-columns: 1fr;
+  }
+
+  .form-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .timeline-row {

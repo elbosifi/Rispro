@@ -17,7 +17,11 @@ export function requireAuth(req, _res, next) {
     req.user = jwt.verify(token, env.jwtSecret);
     next();
   } catch (error) {
-    next(error.name === "JsonWebTokenError" ? new HttpError(401, "Invalid session.") : error);
+    next(
+      ["JsonWebTokenError", "TokenExpiredError"].includes(error.name)
+        ? new HttpError(401, "Invalid session.")
+        : error
+    );
   }
 }
 

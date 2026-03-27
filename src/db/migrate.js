@@ -10,9 +10,50 @@ async function run() {
   const migrationsDir = path.join(__dirname, "migrations");
   const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
 
+  await pool.query(`
+    create table if not exists schema_migrations (
+      filename text primary key,
+      applied_at timestamptz not null default now()
+    )
+  `);
+
   for (const file of files) {
+    const existingMigration = await pool.query(
+      `
+        select filename
+        from schema_migrations
+        where filename = $1
+        limit 1
+      `,
+      [file]
+    );
+
+    if (existingMigration.rowCount) {
+      console.log(`Skipped migration: ${file}`);
+      continue;
+    }
+
     const sql = await fs.readFile(path.join(migrationsDir, file), "utf8");
-    await pool.query(sql);
+    const client = await pool.connect();
+
+    try {
+      await client.query("begin");
+      await client.query(sql);
+      await client.query(
+        `
+          insert into schema_migrations (filename)
+          values ($1)
+        `,
+        [file]
+      );
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+
     console.log(`Applied migration: ${file}`);
   }
 
