@@ -86,6 +86,7 @@ const state = {
   printPreparationLoading: false,
   printResults: [],
   printFilters: defaultPrintFilters(),
+  registrationsFilters: defaultRegistrationsFilters(),
   selectedPrintAppointment: null,
   doctorLoading: false,
   doctorError: "",
@@ -1120,6 +1121,16 @@ function defaultPrintFilters() {
   };
 }
 
+function defaultRegistrationsFilters() {
+  return {
+    date: getCurrentDateInputValue(),
+    dateFrom: "",
+    dateTo: "",
+    modalityId: "",
+    query: ""
+  };
+}
+
 function defaultDoctorFilters() {
   return {
     date: getCurrentDateInputValue(),
@@ -1917,6 +1928,55 @@ async function loadPrintAppointments() {
   }
 }
 
+async function loadRegistrations() {
+  state.printLoading = true;
+  state.printError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams();
+    if (state.registrationsFilters.dateFrom || state.registrationsFilters.dateTo) {
+      if (state.registrationsFilters.dateFrom) {
+        params.set("dateFrom", state.registrationsFilters.dateFrom);
+      }
+      if (state.registrationsFilters.dateTo) {
+        params.set("dateTo", state.registrationsFilters.dateTo);
+      }
+    } else {
+      params.set("date", state.registrationsFilters.date);
+    }
+
+    if (state.registrationsFilters.modalityId) {
+      params.set("modalityId", state.registrationsFilters.modalityId);
+    }
+
+    if (state.registrationsFilters.query.trim()) {
+      params.set("q", state.registrationsFilters.query.trim());
+    }
+
+    const result = await api(`/api/appointments?${params.toString()}`, { method: "GET" });
+    state.printResults = result.appointments || [];
+
+    if (
+      state.selectedPrintAppointment &&
+      !state.printResults.some((appointment) => appointment.id === state.selectedPrintAppointment.id)
+    ) {
+      state.selectedPrintAppointment = null;
+      state.appointmentDocuments = [];
+    }
+
+    if (!state.selectedPrintAppointment && state.printResults[0]) {
+      state.selectedPrintAppointment = state.printResults[0];
+      fillAppointmentEditForm(state.selectedPrintAppointment);
+    }
+  } catch (error) {
+    state.printError = error.message;
+  } finally {
+    state.printLoading = false;
+    render();
+  }
+}
+
 async function loadDoctorRequests() {
   state.doctorLoading = true;
   state.doctorError = "";
@@ -2251,7 +2311,7 @@ async function hydrateRoute() {
   }
 
   if (state.route === "registrations") {
-    await Promise.all([loadAppointmentLookups(), loadPrintAppointments()]);
+    await Promise.all([loadAppointmentLookups(), loadRegistrations()]);
   }
 }
 
@@ -2347,6 +2407,7 @@ async function signOut() {
     state.scanPreparationLoading = false;
     state.printPreparationLoading = false;
     state.printFilters = defaultPrintFilters();
+    state.registrationsFilters = defaultRegistrationsFilters();
     state.selectedPrintAppointment = null;
     state.appointmentDocuments = [];
     state.doctorFilters = defaultDoctorFilters();
@@ -5338,7 +5399,7 @@ function renderRegistrations() {
       <section class="split-grid">
         <div class="stack">
           <article class="surface">
-            <form id="print-filter-form" class="stack">
+            <form id="registrations-filter-form" class="stack">
               <div class="section-head">
                 <h2 class="section-title">${escapeHtml(t().registrations.filtersTitle)}</h2>
                 <span class="chip accent">${escapeHtml(t().registrations.load)}</span>
@@ -5346,21 +5407,21 @@ function renderRegistrations() {
               <div class="form-grid">
                 <label class="field full">
                   <span class="label">${escapeHtml(t().search.placeholder)}</span>
-                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.printFilters.query)}" placeholder="${escapeHtml(
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.registrationsFilters.query)}" placeholder="${escapeHtml(
                     t().appointments.patientPlaceholder
                   )}" />
                 </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.date)}</span>
-                  <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
+                  <input class="input field-en" type="date" name="date" value="${escapeHtml(state.registrationsFilters.date)}" />
                 </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.dateFrom)}</span>
-                  <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.printFilters.dateFrom)}" />
+                  <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.registrationsFilters.dateFrom)}" />
                 </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.dateTo)}</span>
-                  <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.printFilters.dateTo)}" />
+                  <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.registrationsFilters.dateTo)}" />
                 </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.modality)}</span>
@@ -5369,7 +5430,7 @@ function renderRegistrations() {
                     ${state.appointmentLookups.modalities
                       .map(
                         (entry) => `
-                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.printFilters.modalityId) ? "selected" : ""}>
+                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.registrationsFilters.modalityId) ? "selected" : ""}>
                             ${escapeHtml(formatModalityName(entry))}
                           </option>
                         `
@@ -6549,6 +6610,15 @@ function handleInput(event) {
     return;
   }
 
+  if (target.closest("#registrations-filter-form")) {
+    state.registrationsFilters[target.name] = target.value;
+    if (target.name === "date") {
+      state.registrationsFilters.dateFrom = "";
+      state.registrationsFilters.dateTo = "";
+    }
+    return;
+  }
+
   if (target.closest("#doctor-filter-form")) {
     state.doctorFilters[target.name] = target.value;
     return;
@@ -7228,6 +7298,12 @@ function handleSubmit(event) {
   if (event.target.id === "print-filter-form") {
     event.preventDefault();
     void loadPrintAppointments();
+    return;
+  }
+
+  if (event.target.id === "registrations-filter-form") {
+    event.preventDefault();
+    void loadRegistrations();
     return;
   }
 
