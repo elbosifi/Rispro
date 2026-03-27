@@ -17,8 +17,8 @@ export async function createUser({ username, fullName, password, role, isActive 
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
 
-  if (!["receptionist", "supervisor"].includes(role)) {
-    throw new HttpError(400, "role must be receptionist or supervisor.");
+  if (!["receptionist", "supervisor", "modality_staff"].includes(role)) {
+    throw new HttpError(400, "role must be receptionist, supervisor, or modality_staff.");
   }
 
   const passwordHash = await bcrypt.hash(password, 10);

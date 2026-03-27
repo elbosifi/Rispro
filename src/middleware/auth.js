@@ -41,6 +41,20 @@ export function requireSupervisor(req, _res, next) {
   return next();
 }
 
+export function requireAnyRole(allowedRoles) {
+  return function roleGuard(req, _res, next) {
+    if (!req.user) {
+      return next(new HttpError(401, "Authentication required."));
+    }
+
+    if (!allowedRoles.includes(req.user.role)) {
+      return next(new HttpError(403, "This role cannot access this area."));
+    }
+
+    return next();
+  };
+}
+
 export function hasRecentSupervisorReauth(req) {
   try {
     const token = readSupervisorReauthToken(req);

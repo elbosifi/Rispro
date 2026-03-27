@@ -13,7 +13,7 @@ const dictionary = {
   "التركي": "Al-Turki"
 };
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "queue", "print", "search", "settings"];
+const allowedRoutes = ["dashboard", "patients", "appointments", "queue", "modality", "print", "search", "settings"];
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
   route: allowedRoutes.includes(localStorage.getItem("rispro-route")) ? localStorage.getItem("rispro-route") : "dashboard",
@@ -29,6 +29,11 @@ const state = {
   dashboardLoading: false,
   dashboardReady: null,
   dashboardError: "",
+  modalityLoading: false,
+  modalityError: "",
+  modalitySuccess: "",
+  modalityResults: [],
+  modalityFilters: defaultModalityFilters(),
   queueLoading: false,
   queueError: "",
   queueSuccess: "",
@@ -146,6 +151,7 @@ const copy = {
       patients: "Register patient",
       appointments: "Create appointment",
       queue: "Queue",
+      modality: "Modality board",
       print: "Printing",
       search: "Search patients",
       settings: "Settings"
@@ -272,6 +278,15 @@ const copy = {
       scannedSuccess: "Patient added to the queue successfully.",
       walkInSuccess: "Walk-in patient added to the queue successfully."
     },
+    modality: {
+      title: "Modality workflow",
+      body: "A focused board for modality staff to review today's studies and mark them completed.",
+      filtersTitle: "Worklist filters",
+      load: "Load worklist",
+      complete: "Mark completed",
+      blocked: "Only modality staff or supervisors can use this page.",
+      completed: "Appointment marked completed successfully."
+    },
     print: {
       title: "Printing and documents",
       body: "Print the daily appointment list, preview slips and labels, and upload the scanned request to the saved appointment.",
@@ -334,7 +349,8 @@ const copy = {
     },
     roles: {
       supervisor: "Supervisor",
-      receptionist: "Receptionist"
+      receptionist: "Receptionist",
+      modality_staff: "Modality staff"
     },
     common: {
       logout: "Sign out",
@@ -373,6 +389,7 @@ const copy = {
       patients: "تسجيل مريض",
       appointments: "إنشاء موعد",
       queue: "الطابور",
+      modality: "لوحة الجهاز",
       print: "الطباعة",
       search: "البحث عن مريض",
       settings: "الإعدادات"
@@ -499,6 +516,15 @@ const copy = {
       scannedSuccess: "تمت إضافة المريض إلى الطابور بنجاح.",
       walkInSuccess: "تمت إضافة المريض المباشر إلى الطابور بنجاح."
     },
+    modality: {
+      title: "سير عمل الجهاز",
+      body: "لوحة مركزة لموظفي الأجهزة لمراجعة فحوصات اليوم ووضعها كمكتملة.",
+      filtersTitle: "فلاتر قائمة العمل",
+      load: "تحميل القائمة",
+      complete: "تحديد كمكتمل",
+      blocked: "هذه الصفحة لموظفي الأجهزة أو المشرف فقط.",
+      completed: "تم تحديد الموعد كمكتمل بنجاح."
+    },
     print: {
       title: "الطباعة والوثائق",
       body: "اطبع قائمة مواعيد اليوم، وعاين وصل الموعد وملصق المريض، وارفع طلب الفحص الممسوح ضوئياً إلى الموعد المحفوظ.",
@@ -561,7 +587,8 @@ const copy = {
     },
     roles: {
       supervisor: "مشرف",
-      receptionist: "استقبال"
+      receptionist: "استقبال",
+      modality_staff: "موظف جهاز"
     },
     common: {
       logout: "تسجيل الخروج",
@@ -836,6 +863,13 @@ function defaultAppointmentEditForm() {
   };
 }
 
+function defaultModalityFilters() {
+  return {
+    date: new Date().toISOString().slice(0, 10),
+    modalityId: ""
+  };
+}
+
 function t() {
   return copy[state.language];
 }
@@ -1011,6 +1045,10 @@ function hasRecentSupervisorReauth() {
   return Boolean(state.session?.recentSupervisorReauth);
 }
 
+function canAccessModalityBoard() {
+  return ["modality_staff", "supervisor"].includes(state.session?.role);
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: "same-origin",
@@ -1082,6 +1120,33 @@ async function loadQueueSnapshot() {
     state.queueError = error.message;
   } finally {
     state.queueLoading = false;
+    render();
+  }
+}
+
+async function loadModalityWorklist() {
+  if (!canAccessModalityBoard()) {
+    return;
+  }
+
+  state.modalityLoading = true;
+  state.modalityError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams();
+    params.set("date", state.modalityFilters.date);
+
+    if (state.modalityFilters.modalityId) {
+      params.set("modalityId", state.modalityFilters.modalityId);
+    }
+
+    const result = await api(`/api/modality/worklist?${params.toString()}`, { method: "GET" });
+    state.modalityResults = result.appointments || [];
+  } catch (error) {
+    state.modalityError = error.message;
+  } finally {
+    state.modalityLoading = false;
     render();
   }
 }
@@ -1276,6 +1341,11 @@ async function hydrateRoute() {
 
   if (state.route === "queue") {
     await Promise.all([loadQueueSnapshot(), loadAppointmentLookups()]);
+    return;
+  }
+
+  if (state.route === "modality") {
+    await Promise.all([loadAppointmentLookups(), loadModalityWorklist()]);
     return;
   }
 
@@ -1808,6 +1878,27 @@ async function confirmQueueNoShow(appointmentId) {
     state.queueError = error.message;
   } finally {
     state.queueLoading = false;
+    render();
+  }
+}
+
+async function completeModalityAppointment(appointmentId) {
+  state.modalityLoading = true;
+  state.modalityError = "";
+  state.modalitySuccess = "";
+  render();
+
+  try {
+    await api(`/api/modality/${encodeURIComponent(appointmentId)}/complete`, {
+      method: "POST"
+    });
+    state.modalitySuccess = t().modality.completed;
+    await loadModalityWorklist();
+    await loadQueueSnapshot();
+  } catch (error) {
+    state.modalityError = error.message;
+  } finally {
+    state.modalityLoading = false;
     render();
   }
 }
