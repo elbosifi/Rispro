@@ -82,6 +82,8 @@ export async function getIntegrationStatus() {
   const settings = await loadSettingsMap(["printing_and_labels", "documents_and_uploads"]);
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
+  const rawScannerMode = documentSettings.scanner_bridge_mode || "";
+  const scannerBridgeMode = rawScannerMode === "future_local_bridge" ? "manual_browser_upload" : rawScannerMode || "manual_browser_upload";
 
   return {
     printer: {
@@ -99,13 +101,13 @@ export async function getIntegrationStatus() {
       referralUploadEnabled: parseEnabled(documentSettings.referral_upload),
       allowedFileTypes: parseCsvList(documentSettings.allowed_file_types || "pdf,jpg,png"),
       documentLinkScope: documentSettings.document_link_scope || "patient_and_appointment",
-      scannerBridgeMode: documentSettings.scanner_bridge_mode || "future_local_bridge",
+      scannerBridgeMode,
       scannerProfileName: documentSettings.scanner_profile_name || "default_twain_profile",
       scannerSource: documentSettings.scanner_source || "feeder",
       scanDpi: documentSettings.scan_dpi || "300",
       scanColorMode: documentSettings.scan_color_mode || "grayscale",
       scanFileFormat: documentSettings.scan_file_format || "pdf",
-      bridgeReady: String(documentSettings.scanner_bridge_mode || "") === "local_bridge_ready"
+      bridgeReady: String(scannerBridgeMode || "") === "local_bridge_ready"
     }
   };
 }
@@ -134,8 +136,8 @@ export async function preparePrintJob(payload, currentUserId) {
     patientName: appointment.english_full_name || appointment.arabic_full_name,
     guidance:
       mode === "browser_print"
-        ? "Use the browser print dialog for now. Direct printer bridge can be enabled later from settings."
-        : "A direct printer bridge profile is selected. The workstation bridge can be connected in the next phase."
+        ? "Ready to print through the browser print dialog."
+        : "Ready to send to the connected printer bridge profile."
   };
 
   await logAuditEntry({
@@ -183,8 +185,8 @@ export async function prepareScanSession(payload, currentUserId) {
     suggestedFileName,
     guidance:
       mode === "local_bridge_ready"
-        ? "The workstation can use a local scanner bridge when it is installed. The session code is ready for that next step."
-        : "Use the upload area for now. This session keeps the preferred scanner settings ready for later bridge integration."
+        ? "Scanner bridge is ready for this workstation session."
+        : "Upload the scanned file in this session to attach it immediately."
   };
 
   await logAuditEntry({

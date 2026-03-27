@@ -15,6 +15,7 @@ import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
 import { settingsRouter } from "./routes/settings.js";
+import { nameDictionaryRouter } from "./routes/name-dictionary.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
 
@@ -71,6 +72,7 @@ export function createApp() {
   app.use("/api/modality", modalityRouter);
   app.use("/api/audit", auditRouter);
   app.use("/api/settings", settingsRouter);
+  app.use("/api/name-dictionary", nameDictionaryRouter);
   app.use("/api", notFoundHandler);
 
   app.get("/", sendFrontendFile("index.html"));

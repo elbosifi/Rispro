@@ -32,14 +32,29 @@ function normalizeDate(value) {
 }
 
 export async function listModalityWorklist(filters = {}) {
-  const workDate = normalizeDate(filters.date);
-  const params = [workDate];
+  const scope = String(filters.scope || "").trim();
+  const useAllDates = scope === "all";
+  const params = [];
   let modalityFilterSql = "";
 
   if (filters.modalityId) {
     params.push(normalizePositiveInteger(filters.modalityId, "modalityId"));
     modalityFilterSql = `and appointments.modality_id = $${params.length}`;
   }
+
+  if (!useAllDates) {
+    const workDate = normalizeDate(filters.date);
+    params.unshift(workDate);
+    if (modalityFilterSql) {
+      modalityFilterSql = modalityFilterSql.replace("$1", "$2");
+    }
+  }
+
+  const dateClause = useAllDates ? "1=1" : "appointments.appointment_date = $1::date";
+  const orderClause = useAllDates
+    ? "appointments.appointment_date desc, appointments.daily_sequence desc"
+    : "modality_name_en asc, appointments.modality_slot_number asc nulls last, appointments.daily_sequence asc";
+  const limitClause = useAllDates ? "limit 200" : "";
 
   const { rows } = await pool.query(
     `
@@ -71,9 +86,10 @@ export async function listModalityWorklist(filters = {}) {
       join modalities on modalities.id = appointments.modality_id
       left join exam_types on exam_types.id = appointments.exam_type_id
       left join reporting_priorities on reporting_priorities.id = appointments.reporting_priority_id
-      where appointments.appointment_date = $1::date
+      where ${dateClause}
         ${modalityFilterSql}
-      order by modalities.name_en asc, appointments.modality_slot_number asc nulls last, appointments.daily_sequence asc
+      order by ${orderClause}
+      ${limitClause}
     `,
     params
   );

@@ -331,6 +331,10 @@ html[dir="ltr"] .nav-link.active {
   gap: 20px;
 }
 
+.patient-grid {
+  grid-template-columns: minmax(520px, 2fr) minmax(280px, 1fr);
+}
+
 .dual-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -340,6 +344,30 @@ html[dir="ltr"] .nav-link.active {
 .stack {
   display: grid;
   gap: 20px;
+}
+
+.address-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-field {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.pill-row,
+.quick-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.active-pill {
+  border-color: rgba(15, 118, 110, 0.4);
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
 .form-actions {
@@ -371,6 +399,10 @@ html[dir="ltr"] .nav-link.active {
   background: var(--surface);
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
+}
+
+.patient-side .surface {
+  padding: 18px;
 }
 
 .surface-compact {
@@ -652,14 +684,14 @@ html[dir="ltr"] .nav-link.active {
 
 .calendar {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
 }
 
 .day {
-  padding: 16px 12px;
+  padding: 18px 14px;
   border-radius: 18px;
-  min-height: 128px;
+  min-height: 160px;
   border: 1px solid rgba(86, 60, 38, 0.1);
   background: rgba(255, 255, 255, 0.78);
   display: grid;
@@ -1003,6 +1035,22 @@ html[dir="ltr"] .nav-link.active {
   align-items: center;
 }
 
+.dictionary-item {
+  align-items: flex-start;
+}
+
+.dictionary-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+}
+
+.field-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .info-grid .metric-tile {
   min-height: 92px;
 }
@@ -1186,6 +1234,7 @@ html[dir="ltr"] .nav-link.active {
   }
 
   .split-grid,
+  .patient-grid,
   .dual-grid,
   .login-card {
     grid-template-columns: 1fr;

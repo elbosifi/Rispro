@@ -1,6 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
-import { listDocuments, uploadDocument } from "../services/document-service.js";
+import { getDocumentAbsolutePath, getDocumentById, listDocuments, uploadDocument } from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
 
@@ -13,6 +13,21 @@ documentsRouter.get("/", async (req, res, next) => {
       appointmentId: req.query.appointmentId
     });
     res.json({ documents });
+  } catch (error) {
+    next(error);
+  }
+});
+
+documentsRouter.get("/:documentId/view", async (req, res, next) => {
+  try {
+    const document = await getDocumentById(req.params.documentId);
+    const absolutePath = getDocumentAbsolutePath(document);
+    res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${String(document.original_filename || "document").replace(/"/g, "")}"`
+    );
+    res.sendFile(absolutePath);
   } catch (error) {
     next(error);
   }

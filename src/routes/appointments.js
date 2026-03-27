@@ -8,7 +8,8 @@ import {
   listAppointmentLookups,
   listAppointmentsForPrint,
   listAvailability,
-  updateAppointment
+  updateAppointment,
+  updateAppointmentProtocol
 } from "../services/appointment-service.js";
 
 export const appointmentsRouter = express.Router();
@@ -28,6 +29,8 @@ appointmentsRouter.get("/", async (req, res, next) => {
   try {
     const appointments = await listAppointmentsForPrint({
       date: req.query.date,
+      dateFrom: req.query.dateFrom,
+      dateTo: req.query.dateTo,
       modalityId: req.query.modalityId
     });
     res.json({ appointments });
@@ -76,6 +79,16 @@ appointmentsRouter.post("/", async (req, res, next) => {
 appointmentsRouter.put("/:appointmentId", async (req, res, next) => {
   try {
     const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user);
+    res.json({ appointment });
+  } catch (error) {
+    next(error);
+  }
+});
+
+appointmentsRouter.put("/:appointmentId/protocol", async (req, res, next) => {
+  try {
+    await updateAppointmentProtocol(req.params.appointmentId, req.body || {}, req.user);
+    const appointment = await getAppointmentPrintDetails(req.params.appointmentId);
     res.json({ appointment });
   } catch (error) {
     next(error);

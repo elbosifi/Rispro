@@ -48,6 +48,16 @@ function decodeBase64File(fileContentBase64) {
   return Buffer.from(normalized, "base64");
 }
 
+function resolveStoredPath(storedPath) {
+  const absolutePath = path.resolve(rootDir, storedPath || "");
+
+  if (!absolutePath.startsWith(rootDir)) {
+    throw new HttpError(400, "Invalid document path.");
+  }
+
+  return absolutePath;
+}
+
 async function ensureRelatedRecords(patientId, appointmentId) {
   if (!patientId && !appointmentId) {
     throw new HttpError(400, "patientId or appointmentId is required.");
@@ -97,6 +107,29 @@ export async function listDocuments(filters = {}) {
   );
 
   return rows;
+}
+
+export async function getDocumentById(documentId) {
+  const cleanDocumentId = normalizePositiveInteger(documentId, "documentId");
+  const { rows } = await pool.query(
+    `
+      select id, patient_id, appointment_id, document_type, original_filename, stored_path, mime_type, file_size, created_at
+      from documents
+      where id = $1
+      limit 1
+    `,
+    [cleanDocumentId]
+  );
+
+  if (!rows[0]) {
+    throw new HttpError(404, "Document not found.");
+  }
+
+  return rows[0];
+}
+
+export function getDocumentAbsolutePath(document) {
+  return resolveStoredPath(document.stored_path);
 }
 
 export async function uploadDocument(payload, currentUserId) {

@@ -1,4 +1,4 @@
-const dictionary = {
+const BASE_DICTIONARY = {
   "محمد": "Mohammad",
   "احمد": "Ahmed",
   "أحمد": "Ahmed",
@@ -13,10 +13,38 @@ const dictionary = {
   "التركي": "Al-Turki"
 };
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "queue", "modality", "print", "search", "settings"];
+const DEFAULT_CITY_OPTIONS = [
+  "Tripoli",
+  "Benghazi",
+  "Misrata",
+  "Sabha",
+  "Zawiya",
+  "Sirte",
+  "Gharyan",
+  "Zliten",
+  "Tobruk",
+  "Derna"
+];
+
+function loadCityOptions() {
+  try {
+    const stored = JSON.parse(localStorage.getItem("rispro-city-options") || "[]");
+    const merged = [...DEFAULT_CITY_OPTIONS, ...stored].map((entry) => String(entry || "").trim()).filter(Boolean);
+    return Array.from(new Set(merged));
+  } catch (error) {
+    return [...DEFAULT_CITY_OPTIONS];
+  }
+}
+
+function saveCityOptions(list) {
+  localStorage.setItem("rispro-city-options", JSON.stringify(list));
+}
+
+const allowedRoutes = ["dashboard", "patients", "appointments", "queue", "modality", "doctor", "print", "search", "settings"];
+const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
-  route: allowedRoutes.includes(localStorage.getItem("rispro-route")) ? localStorage.getItem("rispro-route") : "dashboard",
+  route: allowedRoutes.includes(localStorage.getItem("rispro-route")) ? localStorage.getItem("rispro-route") : DEFAULT_ROUTE,
   authChecked: false,
   session: null,
   loginForm: {
@@ -57,6 +85,18 @@ const state = {
   printResults: [],
   printFilters: defaultPrintFilters(),
   selectedPrintAppointment: null,
+  doctorLoading: false,
+  doctorError: "",
+  doctorResults: [],
+  doctorFilters: defaultDoctorFilters(),
+  doctorSelectedAppointment: null,
+  doctorDocumentsLoading: false,
+  doctorDocumentsError: "",
+  doctorDocuments: [],
+  doctorProtocolExamTypeId: "",
+  doctorProtocolSaving: false,
+  doctorProtocolError: "",
+  doctorProtocolSuccess: "",
   documentsLoading: false,
   documentsError: "",
   appointmentDocuments: [],
@@ -89,6 +129,20 @@ const state = {
   savedPatient: null,
   patientSuggestions: [],
   suggestionsLoading: false,
+  addressOptions: loadCityOptions(),
+  patientAddressMode: "select",
+  patientEditAddressMode: "select",
+  nameDictionary: { ...BASE_DICTIONARY },
+  nameDictionaryEntries: [],
+  nameDictionaryLoading: false,
+  nameDictionaryError: "",
+  nameDictionarySuccess: "",
+  nameDictionarySavingId: "",
+  nameDictionaryForm: {
+    arabicText: "",
+    englishText: "",
+    isActive: true
+  },
   appointmentLookupsLoading: false,
   appointmentCalendarLoading: false,
   appointmentSaving: false,
@@ -157,32 +211,33 @@ const state = {
 const copy = {
   en: {
     appName: "RISpro Reception",
-    appSubtitle: "Production-ready reception workspace",
+    appSubtitle: "Reception workspace",
     topTitle: "Reception operations",
-    topSubtitle: "Real login, real patient registration, and supervisor tools backed by the live API.",
+    topSubtitle: "Patient intake, scheduling, and supervision tools.",
     userRoleLabel: "Signed in as",
-    note: "This build only shows features that are already connected to the backend.",
+    note: "Operations status for today’s reception shift.",
     nav: {
       dashboard: "Dashboard",
       patients: "Register patient",
       appointments: "Create appointment",
       queue: "Queue",
       modality: "Modality board",
+      doctor: "Doctor home",
       print: "Printing",
       search: "Search patients",
       settings: "Settings"
     },
     login: {
-      title: "A calm reception desk with real backend access",
-      body: "Sign in with your actual account to use the production workspace. Sessions are handled by the backend and stored in secure cookies.",
+      title: "Welcome to RISpro Reception",
+      body: "Sign in with your account to begin reception work. Sessions are secured by the backend.",
       signIn: "Sign in",
       username: "Username",
       password: "Password",
-      note: "Use the seeded supervisor or any receptionist account created by a supervisor."
+      note: "Use your supervisor or receptionist account."
     },
     dashboard: {
       title: "System dashboard",
-      body: "A quick health check plus today's queue and no-show review status for the live reception workflow.",
+      body: "A quick health check plus today's queue and no-show review status.",
       primary: "Register patient",
       secondary: "Search patients",
       db: "Database status",
@@ -200,12 +255,12 @@ const copy = {
       ready: "Ready",
       notReady: "Attention needed",
       moduleListTitle: "Enabled in this deployment",
-      plannedListTitle: "Not enabled yet",
-      plannedNote: "Advanced printer-specific output and scanner bridge integrations are still planned for a later phase."
+      plannedListTitle: "Operational reminders",
+      plannedNote: "Keep an eye on queue flow, printing, and end-of-day confirmations."
     },
     patients: {
       title: "Patient registration",
-      body: "Create a real patient record in PostgreSQL. The form only includes fields that are validated and saved by the backend today.",
+      body: "Create a patient record with the required registration fields.",
       save: "Save patient",
       clear: "Clear form",
       duplicates: "Check duplicates",
@@ -224,7 +279,7 @@ const copy = {
       },
       savedRecord: "Latest saved patient",
       possibleMatches: "Possible existing matches",
-      supportNote: "To avoid bad production data, unsupported prototype-only fields were removed from this form."
+      supportNote: "Use duplicate checks before saving to keep records clean."
     },
     patientActions: {
       edit: "Edit patient",
@@ -238,7 +293,7 @@ const copy = {
     },
     appointments: {
       title: "Appointment creation",
-      body: "Search for a real patient first, then choose the modality, exam, and day with live availability from PostgreSQL.",
+      body: "Search for a patient, then choose the modality, exam, and day with availability.",
       patientSearch: "Find patient",
       patientPlaceholder: "Search by name, phone, MRN, or national ID",
       patientSelect: "Use this patient",
@@ -253,6 +308,7 @@ const copy = {
       createExamSave: "Save exam type",
       examAdded: "Exam type created successfully.",
       appointmentSaved: "Appointment saved successfully.",
+      printSlip: "Print appointment slip",
       dateRequired: "Choose an appointment date before saving.",
       dateInputHint: "You can click an available day below or pick the exact date here.",
       selectedDateLabel: "Selected date",
@@ -302,6 +358,12 @@ const copy = {
       body: "A focused board for modality staff to review today's studies and mark them completed.",
       filtersTitle: "Worklist filters",
       load: "Load worklist",
+      allDates: "All dates",
+      dayOnly: "Single day",
+      quickToday: "Today",
+      quickTomorrow: "Tomorrow",
+      quickNextWeek: "Next week",
+      printList: "Print modality list",
       complete: "Mark completed",
       blocked: "Only modality staff or supervisors can use this page.",
       completed: "Appointment marked completed successfully."
@@ -311,8 +373,15 @@ const copy = {
       body: "Print the daily appointment list, preview slips and labels, and upload the scanned request to the saved appointment.",
       filtersTitle: "Daily list filters",
       date: "Date",
+      dateFrom: "From",
+      dateTo: "To",
       modality: "Modality",
       load: "Load list",
+      quickToday: "Today",
+      quickTomorrow: "Tomorrow",
+      quickNextWeek: "Next 7 days",
+      quickClear: "Single day",
+      printDaily: "Print daily list",
       dailyList: "Daily appointment list",
       slipPreview: "Appointment slip preview",
       labelPreview: "Patient label preview",
@@ -346,6 +415,21 @@ const copy = {
         notes: "Notes"
       }
     },
+    doctor: {
+      title: "Doctor home",
+      body: "Review daily requests by modality, confirm patient demographics, view uploaded documents, and assign the protocol.",
+      filtersTitle: "Request filters",
+      load: "Load requests",
+      dailyList: "Daily requests",
+      selectedRequest: "Selected request",
+      protocolTitle: "Protocol assignment",
+      protocolHint: "Choose the protocol (exam type) for this request.",
+      protocolSave: "Save protocol",
+      protocolSaved: "Protocol updated successfully.",
+      noSelection: "Pick a request from the list to view details.",
+      documentsTitle: "Uploaded request documents",
+      demographicsTitle: "Patient demographics"
+    },
     search: {
       title: "Patient search",
       body: "Search by Arabic name, English name, phone number, or national ID before creating a new record.",
@@ -359,6 +443,17 @@ const copy = {
       reauthTitle: "Supervisor confirmation",
       reauthBody: "Enter the supervisor password again before opening sensitive settings and backup tools.",
       reauthButton: "Confirm supervisor access",
+      patientRulesTitle: "Registration requirements",
+      patientRulesBody: "Choose which fields are mandatory during patient registration.",
+      patientRulesSave: "Save registration rules",
+      dictionaryTitle: "Name dictionary",
+      dictionaryBody: "Add Arabic-to-English name overrides for transliteration.",
+      dictionaryAdd: "Add name",
+      dictionaryArabic: "Arabic name",
+      dictionaryEnglish: "English name",
+      dictionaryActive: "Active",
+      dictionarySave: "Save entry",
+      dictionaryDelete: "Remove",
       users: "Users",
       addUser: "Create user",
       refresh: "Refresh list",
@@ -421,32 +516,33 @@ const copy = {
   },
   ar: {
     appName: "نظام الاستقبال RISpro",
-    appSubtitle: "واجهة إنتاجية حقيقية للاستقبال",
+    appSubtitle: "واجهة عمل الاستقبال",
     topTitle: "تشغيل الاستقبال",
-    topSubtitle: "دخول حقيقي وتسجيل مرضى فعلي وأدوات إشرافية مربوطة بالخادم.",
+    topSubtitle: "تسجيل المرضى والجدولة وأدوات الإشراف.",
     userRoleLabel: "تم تسجيل الدخول كـ",
-    note: "هذه النسخة تعرض فقط الوظائف المربوطة فعلياً بالخادم.",
+    note: "حالة التشغيل لدوام الاستقبال اليوم.",
     nav: {
       dashboard: "الرئيسية",
       patients: "تسجيل مريض",
       appointments: "إنشاء موعد",
       queue: "الطابور",
       modality: "لوحة الجهاز",
+      doctor: "لوحة الطبيب",
       print: "الطباعة",
       search: "البحث عن مريض",
       settings: "الإعدادات"
     },
     login: {
-      title: "واجهة استقبال هادئة مع ربط حقيقي بالخادم",
-      body: "سجّل الدخول بحسابك الفعلي لاستخدام بيئة الإنتاج. الجلسات تُدار من الخادم وتُحفظ في ملفات تعريف ارتباط آمنة.",
+      title: "مرحباً بك في RISpro Reception",
+      body: "سجّل الدخول بحسابك لبدء عمل الاستقبال. الجلسات مؤمنة عبر الخادم.",
       signIn: "تسجيل الدخول",
       username: "اسم المستخدم",
       password: "كلمة المرور",
-      note: "استخدم حساب المشرف المُنشأ أولاً أو أي حساب استقبال يضيفه المشرف."
+      note: "استخدم حساب المشرف أو الاستقبال."
     },
     dashboard: {
       title: "لوحة حالة النظام",
-      body: "فحص سريع لصحة النشر مع متابعة طابور اليوم وتنبيهات مراجعة عدم الحضور.",
+      body: "فحص سريع للحالة مع متابعة طابور اليوم ومراجعة عدم الحضور.",
       primary: "تسجيل مريض",
       secondary: "البحث عن مريض",
       db: "حالة قاعدة البيانات",
@@ -464,12 +560,12 @@ const copy = {
       ready: "جاهز",
       notReady: "يحتاج متابعة",
       moduleListTitle: "المفعّل في هذا النشر",
-      plannedListTitle: "غير مفعّل بعد",
-      plannedNote: "ما زالت تكاملات الطابعات المتخصصة وربط الماسح الضوئي المحلي مؤجلة لمرحلة لاحقة."
+      plannedListTitle: "تذكيرات تشغيلية",
+      plannedNote: "تابع حركة الطابور والطباعة وتأكيدات نهاية اليوم."
     },
     patients: {
       title: "تسجيل المريض",
-      body: "إنشاء سجل مريض حقيقي داخل PostgreSQL. النموذج يحتوي فقط على الحقول التي يتحقق منها الخادم ويحفظها اليوم.",
+      body: "أنشئ سجل مريض مع حقول التسجيل المطلوبة.",
       save: "حفظ المريض",
       clear: "تفريغ النموذج",
       duplicates: "فحص السجلات المشابهة",
@@ -488,7 +584,7 @@ const copy = {
       },
       savedRecord: "آخر مريض تم حفظه",
       possibleMatches: "سجلات محتملة موجودة",
-      supportNote: "حتى لا ندخل بيانات غير مدعومة في الإنتاج، تم حذف الحقول التجريبية غير المكتملة من هذا النموذج."
+      supportNote: "تحقق من التكرار قبل الحفظ للحفاظ على نظافة البيانات."
     },
     patientActions: {
       edit: "تعديل المريض",
@@ -502,7 +598,7 @@ const copy = {
     },
     appointments: {
       title: "إنشاء موعد",
-      body: "ابحث أولاً عن مريض فعلي ثم اختر الجهاز والفحص واليوم مع إتاحة حقيقية من PostgreSQL.",
+      body: "ابحث عن المريض ثم اختر الجهاز ونوع الفحص واليوم حسب التوفر.",
       patientSearch: "البحث عن مريض",
       patientPlaceholder: "ابحث بالاسم أو الهاتف أو رقم الملف أو الرقم الوطني",
       patientSelect: "اختيار هذا المريض",
@@ -517,6 +613,7 @@ const copy = {
       createExamSave: "حفظ نوع الفحص",
       examAdded: "تم إنشاء نوع الفحص بنجاح.",
       appointmentSaved: "تم حفظ الموعد بنجاح.",
+      printSlip: "طباعة وصل الموعد",
       dateRequired: "اختر تاريخ الموعد قبل الحفظ.",
       dateInputHint: "يمكنك الضغط على يوم متاح أدناه أو اختيار التاريخ مباشرة من هنا.",
       selectedDateLabel: "التاريخ المختار",
@@ -525,10 +622,10 @@ const copy = {
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
       savedCard: "آخر موعد تم حفظه",
       fields: {
-        modality: "الجهاز",
-        examType: "نوع الفحص",
-        priority: "أولوية التقرير",
-        notes: "ملاحظات",
+        modality: "Modality",
+        examType: "Exam type",
+        priority: "Reporting priority",
+        notes: "Notes",
         overbookingReason: "سبب تجاوز السعة",
         appointmentDate: "تاريخ الموعد",
         dailyCapacity: "السعة اليومية",
@@ -566,6 +663,12 @@ const copy = {
       body: "لوحة مركزة لموظفي الأجهزة لمراجعة فحوصات اليوم ووضعها كمكتملة.",
       filtersTitle: "فلاتر قائمة العمل",
       load: "تحميل القائمة",
+      allDates: "كل التواريخ",
+      dayOnly: "يوم واحد",
+      quickToday: "اليوم",
+      quickTomorrow: "غداً",
+      quickNextWeek: "الأسبوع القادم",
+      printList: "طباعة قائمة الجهاز",
       complete: "تحديد كمكتمل",
       blocked: "هذه الصفحة لموظفي الأجهزة أو المشرف فقط.",
       completed: "تم تحديد الموعد كمكتمل بنجاح."
@@ -575,8 +678,15 @@ const copy = {
       body: "اطبع قائمة مواعيد اليوم، وعاين وصل الموعد وملصق المريض، وارفع طلب الفحص الممسوح ضوئياً إلى الموعد المحفوظ.",
       filtersTitle: "فلاتر القائمة اليومية",
       date: "التاريخ",
-      modality: "الجهاز",
+      dateFrom: "من",
+      dateTo: "إلى",
+      modality: "Modality",
       load: "تحميل القائمة",
+      quickToday: "اليوم",
+      quickTomorrow: "غداً",
+      quickNextWeek: "الأسبوع القادم",
+      quickClear: "يوم واحد",
+      printDaily: "طباعة القائمة اليومية",
       dailyList: "قائمة مواعيد اليوم",
       slipPreview: "معاينة وصل الموعد",
       labelPreview: "معاينة ملصق المريض",
@@ -607,8 +717,23 @@ const copy = {
       fields: {
         documentType: "نوع الوثيقة",
         fileName: "الملف",
-        notes: "ملاحظات"
+        notes: "Notes"
       }
+    },
+    doctor: {
+      title: "لوحة الطبيب",
+      body: "استعرض طلبات اليوم حسب الجهاز، وتحقق من بيانات المريض، واطلع على الوثائق المرفوعة، وحدد البروتوكول.",
+      filtersTitle: "فلاتر الطلبات",
+      load: "تحميل الطلبات",
+      dailyList: "طلبات اليوم",
+      selectedRequest: "الطلب المختار",
+      protocolTitle: "تحديد البروتوكول",
+      protocolHint: "اختر البروتوكول (نوع الفحص) لهذا الطلب.",
+      protocolSave: "حفظ البروتوكول",
+      protocolSaved: "تم تحديث البروتوكول بنجاح.",
+      noSelection: "اختر طلباً من القائمة لعرض التفاصيل.",
+      documentsTitle: "وثائق الطلب المرفوعة",
+      demographicsTitle: "بيانات المريض"
     },
     search: {
       title: "البحث عن مريض",
@@ -623,6 +748,17 @@ const copy = {
       reauthTitle: "تأكيد المشرف",
       reauthBody: "أدخل كلمة مرور المشرف مرة أخرى قبل فتح الإعدادات الحساسة وأدوات النسخ الاحتياطي.",
       reauthButton: "تأكيد صلاحية المشرف",
+      patientRulesTitle: "متطلبات التسجيل",
+      patientRulesBody: "اختر الحقول الإلزامية عند تسجيل المريض.",
+      patientRulesSave: "حفظ متطلبات التسجيل",
+      dictionaryTitle: "قاموس الأسماء",
+      dictionaryBody: "أضف تحويلات مخصصة من العربية إلى الإنجليزية.",
+      dictionaryAdd: "إضافة اسم",
+      dictionaryArabic: "الاسم بالعربية",
+      dictionaryEnglish: "الاسم بالإنجليزية",
+      dictionaryActive: "مفعّل",
+      dictionarySave: "حفظ المدخل",
+      dictionaryDelete: "حذف",
       users: "المستخدمون",
       addUser: "إنشاء مستخدم",
       refresh: "تحديث القائمة",
@@ -914,6 +1050,15 @@ function defaultQueueWalkInForm() {
 function defaultPrintFilters() {
   return {
     date: getCurrentDateInputValue(),
+    dateFrom: "",
+    dateTo: "",
+    modalityId: ""
+  };
+}
+
+function defaultDoctorFilters() {
+  return {
+    date: getCurrentDateInputValue(),
     modalityId: ""
   };
 }
@@ -942,7 +1087,8 @@ function defaultAppointmentEditForm() {
 function defaultModalityFilters() {
   return {
     date: getCurrentDateInputValue(),
-    modalityId: ""
+    modalityId: "",
+    scope: "day"
   };
 }
 
@@ -958,6 +1104,33 @@ function defaultAuditFilters() {
 
 function t() {
   return copy[state.language];
+}
+
+function formatDateInput(date) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Tripoli",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+
+  const parts = formatter.formatToParts(date).reduce((accumulator, part) => {
+    if (part.type !== "literal") {
+      accumulator[part.type] = part.value;
+    }
+
+    return accumulator;
+  }, {});
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function addDaysToDateInput(dateString, days) {
+  const value = dateString || getCurrentDateInputValue();
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return formatDateInput(date);
 }
 
 function escapeHtml(value) {
@@ -1082,7 +1255,7 @@ function transliterateName(value) {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map((chunk) => dictionary[chunk] || chunk)
+    .map((chunk) => state.nameDictionary[chunk] || chunk)
     .join(" ");
 }
 
@@ -1125,22 +1298,7 @@ function normalizeDateText(value) {
 }
 
 function getCurrentDateInputValue() {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Tripoli",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  });
-
-  const parts = formatter.formatToParts(new Date()).reduce((accumulator, part) => {
-    if (part.type !== "literal") {
-      accumulator[part.type] = part.value;
-    }
-
-    return accumulator;
-  }, {});
-
-  return `${parts.year}-${parts.month}-${parts.day}`;
+  return formatDateInput(new Date());
 }
 
 function formatSex(value) {
@@ -1149,6 +1307,84 @@ function formatSex(value) {
   }
 
   return t().common.male;
+}
+
+function rebuildNameDictionary(entries) {
+  state.nameDictionary = {
+    ...BASE_DICTIONARY,
+    ...(entries || []).reduce((accumulator, entry) => {
+      if (entry?.arabic_text && entry?.english_text && entry?.is_active !== false) {
+        accumulator[entry.arabic_text] = entry.english_text;
+      }
+      return accumulator;
+    }, {})
+  };
+}
+
+function formatModalityName(entry) {
+  return (
+    entry?.name_en ||
+    entry?.modality_name_en ||
+    entry?.name_ar ||
+    entry?.modality_name_ar ||
+    ""
+  );
+}
+
+function formatExamName(entry) {
+  return (
+    entry?.name_en ||
+    entry?.exam_name_en ||
+    entry?.name_ar ||
+    entry?.exam_name_ar ||
+    "—"
+  );
+}
+
+function formatPriorityName(entry) {
+  return (
+    entry?.name_en ||
+    entry?.priority_name_en ||
+    entry?.name_ar ||
+    entry?.priority_name_ar ||
+    "—"
+  );
+}
+
+function appointmentFieldLabel(key) {
+  if (state.language === "ar" && ["modality", "examType", "priority", "notes"].includes(key)) {
+    return copy.en.appointments.fields[key] || t().appointments.fields[key] || key;
+  }
+
+  return t().appointments.fields[key] || key;
+}
+
+function isKnownCity(value) {
+  return state.addressOptions.some((entry) => entry.toLowerCase() === String(value || "").toLowerCase());
+}
+
+function updateAddressForm(form, target, modeKey) {
+  if (target.name === "addressSelect") {
+    if (target.value === "__custom") {
+      if (modeKey) {
+        state[modeKey] = "custom";
+      }
+      form.address = isKnownCity(form.address) ? "" : form.address || "";
+    } else {
+      if (modeKey) {
+        state[modeKey] = "select";
+      }
+      form.address = target.value;
+    }
+    return;
+  }
+
+  if (target.name === "addressCustom") {
+    if (modeKey) {
+      state[modeKey] = "custom";
+    }
+    form.address = target.value;
+  }
 }
 
 function currentAppointmentModality() {
@@ -1194,14 +1430,63 @@ function setLanguage(language) {
 }
 
 function setRoute(route) {
-  state.route = allowedRoutes.includes(route) ? route : "dashboard";
+  state.route = allowedRoutes.includes(route) ? route : DEFAULT_ROUTE;
   localStorage.setItem("rispro-route", state.route);
   render();
   void hydrateRoute();
 }
 
+function setPrintRange(range) {
+  const today = getCurrentDateInputValue();
+
+  if (range === "today") {
+    state.printFilters.dateFrom = today;
+    state.printFilters.dateTo = today;
+    state.printFilters.date = today;
+  }
+
+  if (range === "tomorrow") {
+    const tomorrow = addDaysToDateInput(today, 1);
+    state.printFilters.dateFrom = tomorrow;
+    state.printFilters.dateTo = tomorrow;
+    state.printFilters.date = tomorrow;
+  }
+
+  if (range === "next_week") {
+    state.printFilters.dateFrom = today;
+    state.printFilters.dateTo = addDaysToDateInput(today, 7);
+    state.printFilters.date = today;
+  }
+
+  if (range === "clear") {
+    state.printFilters.dateFrom = "";
+    state.printFilters.dateTo = "";
+    state.printFilters.date = today;
+  }
+
+  render();
+}
+
+function setModalityQuickDate(range) {
+  const today = getCurrentDateInputValue();
+  let value = today;
+
+  if (range === "tomorrow") {
+    value = addDaysToDateInput(today, 1);
+  }
+
+  if (range === "next_week") {
+    value = addDaysToDateInput(today, 7);
+  }
+
+  state.modalityFilters.scope = "day";
+  state.modalityFilters.date = value;
+  render();
+}
+
 function resetPatientForm() {
   state.patientForm = defaultPatientForm();
+  state.patientAddressMode = "select";
   state.manualEnglishName = false;
   state.patientError = "";
   state.patientSuccess = "";
@@ -1308,7 +1593,12 @@ async function loadModalityWorklist() {
 
   try {
     const params = new URLSearchParams();
-    params.set("date", state.modalityFilters.date);
+
+    if (state.modalityFilters.scope === "all") {
+      params.set("scope", "all");
+    } else {
+      params.set("date", state.modalityFilters.date);
+    }
 
     if (state.modalityFilters.modalityId) {
       params.set("modalityId", state.modalityFilters.modalityId);
@@ -1331,7 +1621,16 @@ async function loadPrintAppointments() {
 
   try {
     const params = new URLSearchParams();
-    params.set("date", state.printFilters.date);
+    if (state.printFilters.dateFrom || state.printFilters.dateTo) {
+      if (state.printFilters.dateFrom) {
+        params.set("dateFrom", state.printFilters.dateFrom);
+      }
+      if (state.printFilters.dateTo) {
+        params.set("dateTo", state.printFilters.dateTo);
+      }
+    } else {
+      params.set("date", state.printFilters.date);
+    }
 
     if (state.printFilters.modalityId) {
       params.set("modalityId", state.printFilters.modalityId);
@@ -1361,6 +1660,65 @@ async function loadPrintAppointments() {
   }
 }
 
+async function loadDoctorRequests() {
+  state.doctorLoading = true;
+  state.doctorError = "";
+  render();
+
+  try {
+    const params = new URLSearchParams();
+    params.set("date", state.doctorFilters.date);
+
+    if (state.doctorFilters.modalityId) {
+      params.set("modalityId", state.doctorFilters.modalityId);
+    }
+
+    const result = await api(`/api/appointments?${params.toString()}`, { method: "GET" });
+    state.doctorResults = result.appointments || [];
+
+    if (
+      state.doctorSelectedAppointment &&
+      !state.doctorResults.some((appointment) => appointment.id === state.doctorSelectedAppointment.id)
+    ) {
+      state.doctorSelectedAppointment = null;
+      state.doctorDocuments = [];
+    }
+
+    if (!state.doctorSelectedAppointment && state.doctorResults[0]) {
+      state.doctorSelectedAppointment = state.doctorResults[0];
+      state.doctorProtocolExamTypeId = String(state.doctorSelectedAppointment.exam_type_id || "");
+      await loadDoctorDocuments(state.doctorSelectedAppointment.id);
+    }
+  } catch (error) {
+    state.doctorError = error.message;
+  } finally {
+    state.doctorLoading = false;
+    render();
+  }
+}
+
+async function loadDoctorDocuments(appointmentId) {
+  if (!appointmentId) {
+    state.doctorDocuments = [];
+    render();
+    return;
+  }
+
+  state.doctorDocumentsLoading = true;
+  state.doctorDocumentsError = "";
+  render();
+
+  try {
+    const result = await api(`/api/documents?appointmentId=${encodeURIComponent(appointmentId)}`, { method: "GET" });
+    state.doctorDocuments = result.documents || [];
+  } catch (error) {
+    state.doctorDocumentsError = error.message;
+  } finally {
+    state.doctorDocumentsLoading = false;
+    render();
+  }
+}
+
 async function loadIntegrationStatus() {
   state.integrationLoading = true;
   state.integrationError = "";
@@ -1373,6 +1731,27 @@ async function loadIntegrationStatus() {
     state.integrationError = error.message;
   } finally {
     state.integrationLoading = false;
+    render();
+  }
+}
+
+async function loadNameDictionary() {
+  state.nameDictionaryLoading = true;
+  state.nameDictionaryError = "";
+  render();
+
+  try {
+    const endpoint =
+      isSupervisor() && hasRecentSupervisorReauth()
+        ? "/api/settings/name-dictionary?includeInactive=true"
+        : "/api/name-dictionary";
+    const result = await api(endpoint, { method: "GET" });
+    state.nameDictionaryEntries = result.entries || [];
+    rebuildNameDictionary(state.nameDictionaryEntries);
+  } catch (error) {
+    state.nameDictionaryError = error.message;
+  } finally {
+    state.nameDictionaryLoading = false;
     render();
   }
 }
@@ -1561,7 +1940,7 @@ async function hydrateRoute() {
 
   if (state.route === "settings") {
     if (hasRecentSupervisorReauth()) {
-      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
+      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary()]);
     }
     return;
   }
@@ -1578,6 +1957,11 @@ async function hydrateRoute() {
 
   if (state.route === "modality") {
     await Promise.all([loadAppointmentLookups(), loadModalityWorklist()]);
+    return;
+  }
+
+  if (state.route === "doctor") {
+    await Promise.all([loadAppointmentLookups(), loadDoctorRequests()]);
     return;
   }
 
@@ -1601,6 +1985,9 @@ async function signIn() {
     if (!state.session) {
       throw new Error("Login did not return an active session.");
     }
+    state.route = DEFAULT_ROUTE;
+    localStorage.setItem("rispro-route", state.route);
+    await loadNameDictionary();
     await hydrateRoute();
   } catch (error) {
     state.loginError = error.message;
@@ -1621,6 +2008,12 @@ async function signOut() {
     state.users = [];
     state.settingsCatalog = {};
     state.settingsSuccess = "";
+    state.nameDictionaryEntries = [];
+    state.nameDictionary = { ...BASE_DICTIONARY };
+    state.nameDictionaryError = "";
+    state.nameDictionarySuccess = "";
+    state.nameDictionarySavingId = "";
+    state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
     state.appointmentLookups = { modalities: [], examTypes: [], priorities: [] };
     state.appointmentCalendar = [];
     state.selectedAppointmentPatient = null;
@@ -1663,10 +2056,20 @@ async function signOut() {
     state.printFilters = defaultPrintFilters();
     state.selectedPrintAppointment = null;
     state.appointmentDocuments = [];
+    state.doctorFilters = defaultDoctorFilters();
+    state.doctorResults = [];
+    state.doctorSelectedAppointment = null;
+    state.doctorDocuments = [];
+    state.doctorProtocolExamTypeId = "";
+    state.doctorProtocolError = "";
+    state.doctorProtocolSuccess = "";
+    state.doctorError = "";
     state.uploadForm = defaultUploadForm();
     state.uploadSuccess = "";
     state.searchSelectedPatient = null;
     state.patientEditForm = defaultPatientForm();
+    state.patientAddressMode = "select";
+    state.patientEditAddressMode = "select";
     state.mergeSourcePatient = null;
     state.mergeTargetPatient = null;
     state.mergeConfirmationText = "";
@@ -1674,7 +2077,8 @@ async function signOut() {
     state.cancelReason = "";
     state.searchResults = [];
     state.searchQuery = "";
-    state.route = "dashboard";
+    state.route = DEFAULT_ROUTE;
+    localStorage.setItem("rispro-route", state.route);
     render();
   }
 }
@@ -1738,6 +2142,7 @@ async function savePatient() {
     state.savedPatient = result.patient;
     state.patientSuccess = t().patients.success;
     state.patientForm = defaultPatientForm();
+    state.patientAddressMode = "select";
     state.manualEnglishName = false;
     state.patientSuggestions = [];
   } catch (error) {
@@ -2293,6 +2698,53 @@ async function preparePrintOutput(outputType) {
   }
 }
 
+async function prepareAppointmentSlipFromCreation() {
+  if (!state.savedAppointment?.appointment) {
+    state.appointmentError =
+      state.language === "ar" ? "احفظ الموعد أولاً للطباعة." : "Save the appointment before printing.";
+    render();
+    return;
+  }
+
+  state.printPreparationLoading = true;
+  state.appointmentError = "";
+  state.appointmentSuccess = "";
+  render();
+
+  try {
+    const appointmentId = state.savedAppointment.appointment.id;
+    const appointmentDate = normalizeDateText(state.savedAppointment.appointment.appointment_date);
+
+    await api("/api/integrations/print-prepare", {
+      method: "POST",
+      body: JSON.stringify({
+        appointmentId,
+        outputType: "slip"
+      })
+    });
+    state.printFilters.date = appointmentDate || getCurrentDateInputValue();
+    state.printFilters.dateFrom = appointmentDate;
+    state.printFilters.dateTo = appointmentDate;
+    state.selectedPrintAppointment = null;
+    state.route = "print";
+    localStorage.setItem("rispro-route", state.route);
+    await loadPrintAppointments();
+    const match = state.printResults.find((item) => item.id === appointmentId);
+    if (match) {
+      state.selectedPrintAppointment = match;
+      fillAppointmentEditForm(match);
+      await loadAppointmentDocuments(match.id);
+    }
+    state.appointmentSuccess =
+      state.language === "ar" ? "تم تجهيز وصل الموعد للطباعة." : "Appointment slip prepared for printing.";
+  } catch (error) {
+    state.appointmentError = error.message;
+  } finally {
+    state.printPreparationLoading = false;
+    render();
+  }
+}
+
 async function prepareScanSession() {
   if (!state.selectedPrintAppointment) {
     state.integrationError = t().print.noAppointment;
@@ -2344,6 +2796,7 @@ function fillPatientEditForm(patient) {
     phone2: patient.phone_2 || "",
     address: patient.address || ""
   };
+  state.patientEditAddressMode = patient.address && !isKnownCity(patient.address) ? "custom" : "select";
 }
 
 function fillAppointmentEditForm(appointment) {
@@ -2458,6 +2911,43 @@ async function updateSelectedAppointment() {
   }
 }
 
+async function saveDoctorProtocol() {
+  if (!state.doctorSelectedAppointment) {
+    state.doctorProtocolError = t().doctor.noSelection;
+    render();
+    return;
+  }
+
+  state.doctorProtocolSaving = true;
+  state.doctorProtocolError = "";
+  state.doctorProtocolSuccess = "";
+  render();
+
+  try {
+    const result = await api(`/api/appointments/${encodeURIComponent(state.doctorSelectedAppointment.id)}/protocol`, {
+      method: "PUT",
+      body: JSON.stringify({
+        examTypeId: state.doctorProtocolExamTypeId || null
+      })
+    });
+
+    if (result?.appointment) {
+      state.doctorSelectedAppointment = result.appointment;
+      state.doctorProtocolExamTypeId = String(result.appointment.exam_type_id || "");
+      state.doctorResults = state.doctorResults.map((appointment) =>
+        appointment.id === result.appointment.id ? result.appointment : appointment
+      );
+    }
+
+    state.doctorProtocolSuccess = t().doctor.protocolSaved;
+  } catch (error) {
+    state.doctorProtocolError = error.message;
+  } finally {
+    state.doctorProtocolSaving = false;
+    render();
+  }
+}
+
 async function cancelSelectedAppointment() {
   if (!state.selectedPrintAppointment) {
     return;
@@ -2517,6 +3007,99 @@ async function saveSettingsCategory(category) {
     state.settingsError = error.message;
   } finally {
     state.settingsSavingCategory = "";
+    render();
+  }
+}
+
+function getSettingsEntryValue(category, key, fallback = "") {
+  const entry = (state.settingsCatalog[category] || []).find((item) => item.setting_key === key);
+  return entry ? getSettingsFieldValue(entry) : fallback;
+}
+
+async function createNameDictionaryEntry() {
+  if (!state.nameDictionaryForm.arabicText.trim() || !state.nameDictionaryForm.englishText.trim()) {
+    state.nameDictionaryError =
+      state.language === "ar" ? "أدخل الاسم العربي والإنجليزي." : "Enter both the Arabic and English names.";
+    render();
+    return;
+  }
+
+  state.nameDictionarySavingId = "new";
+  state.nameDictionaryError = "";
+  state.nameDictionarySuccess = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/name-dictionary", {
+      method: "POST",
+      body: JSON.stringify(state.nameDictionaryForm)
+    });
+    const entry = result.entry;
+    const entries = [entry, ...state.nameDictionaryEntries.filter((item) => item.id !== entry.id)];
+    state.nameDictionaryEntries = entries;
+    rebuildNameDictionary(entries);
+    state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
+    state.nameDictionarySuccess =
+      state.language === "ar" ? "تم حفظ القاموس بنجاح." : "Dictionary entry saved successfully.";
+  } catch (error) {
+    state.nameDictionaryError = error.message;
+  } finally {
+    state.nameDictionarySavingId = "";
+    render();
+  }
+}
+
+async function updateNameDictionaryEntry(entryId) {
+  const entry = state.nameDictionaryEntries.find((item) => String(item.id) === String(entryId));
+
+  if (!entry) {
+    return;
+  }
+
+  state.nameDictionarySavingId = String(entryId);
+  state.nameDictionaryError = "";
+  state.nameDictionarySuccess = "";
+  render();
+
+  try {
+    const result = await api(`/api/settings/name-dictionary/${encodeURIComponent(entryId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        englishText: entry.english_text,
+        isActive: entry.is_active
+      })
+    });
+    const updated = result.entry;
+    state.nameDictionaryEntries = state.nameDictionaryEntries.map((item) =>
+      item.id === updated.id ? updated : item
+    );
+    rebuildNameDictionary(state.nameDictionaryEntries);
+    state.nameDictionarySuccess =
+      state.language === "ar" ? "تم تحديث القاموس بنجاح." : "Dictionary entry updated successfully.";
+  } catch (error) {
+    state.nameDictionaryError = error.message;
+  } finally {
+    state.nameDictionarySavingId = "";
+    render();
+  }
+}
+
+async function deleteNameDictionaryEntry(entryId) {
+  state.nameDictionarySavingId = `delete-${entryId}`;
+  state.nameDictionaryError = "";
+  state.nameDictionarySuccess = "";
+  render();
+
+  try {
+    await api(`/api/settings/name-dictionary/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+    state.nameDictionaryEntries = state.nameDictionaryEntries.filter((item) => String(item.id) !== String(entryId));
+    rebuildNameDictionary(state.nameDictionaryEntries);
+    state.nameDictionarySuccess =
+      state.language === "ar" ? "تم حذف المدخل من القاموس." : "Dictionary entry deleted.";
+  } catch (error) {
+    state.nameDictionaryError = error.message;
+  } finally {
+    state.nameDictionarySavingId = "";
     render();
   }
 }
@@ -2682,7 +3265,7 @@ function renderDashboard() {
                               state.language === "ar" ? entry.arabic_full_name : entry.english_full_name
                             )}</div>
                             <div class="item-subtitle">${escapeHtml(entry.accession_number)} • ${escapeHtml(
-                              state.language === "ar" ? entry.modality_name_ar : entry.modality_name_en
+                              formatModalityName(entry)
                             )}</div>
                           </div>
                           <span class="chip accent">${escapeHtml(entry.queue_status)}</span>
@@ -2716,7 +3299,7 @@ function renderDashboard() {
                                 state.language === "ar" ? candidate.arabic_full_name : candidate.english_full_name
                               )}</div>
                               <div class="item-subtitle">${escapeHtml(candidate.accession_number)} • ${escapeHtml(
-                                state.language === "ar" ? candidate.modality_name_ar : candidate.modality_name_en
+                                formatModalityName(candidate)
                               )}</div>
                               <input
                                 class="input ${state.language === "ar" ? "field-ar" : ""} queue-reason-input"
@@ -2792,6 +3375,45 @@ function renderPatientResults(items, emptyText) {
   `;
 }
 
+function renderAddressField(value, target) {
+  const mode = target === "patient" ? state.patientAddressMode : state.patientEditAddressMode;
+  const isCustom = mode === "custom" || (value && !isKnownCity(value));
+  const selectValue = isCustom ? "__custom" : value || "";
+
+  return `
+    <label class="field full">
+      <span class="label">${escapeHtml(t().patients.fields.address)}</span>
+      <div class="stack address-stack">
+        <select class="select" name="addressSelect" data-address-target="${escapeHtml(target)}">
+          <option value="">${escapeHtml(t().common.optional)}</option>
+          ${state.addressOptions
+            .map(
+              (entry) => `
+                <option value="${escapeHtml(entry)}" ${entry === value ? "selected" : ""}>${escapeHtml(entry)}</option>
+              `
+            )
+            .join("")}
+          <option value="__custom" ${selectValue === "__custom" ? "selected" : ""}>${escapeHtml(
+            state.language === "ar" ? "إضافة مدينة" : "Add a city"
+          )}</option>
+        </select>
+        ${
+          selectValue === "__custom"
+            ? `<div class="inline-field">
+                <input class="input field-en" name="addressCustom" data-address-target="${escapeHtml(target)}" value="${escapeHtml(value)}" placeholder="${escapeHtml(
+                  state.language === "ar" ? "أدخل المدينة" : "Enter city"
+                )}" />
+                <button class="button-ghost" type="button" data-action="add-city-option" data-city="${escapeHtml(value)}">${escapeHtml(
+                  state.language === "ar" ? "إضافة للقائمة" : "Add to list"
+                )}</button>
+              </div>`
+            : ""
+        }
+      </div>
+    </label>
+  `;
+}
+
 function renderPatients() {
   return `
     <div class="page">
@@ -2799,7 +3421,7 @@ function renderPatients() {
       ${alertMarkup("error", state.patientError)}
       ${alertMarkup("success", state.patientSuccess)}
 
-      <section class="split-grid">
+      <section class="split-grid patient-grid">
         <article class="surface">
           <form id="patient-form" class="stack">
             <div class="section-head">
@@ -2811,9 +3433,9 @@ function renderPatients() {
             </div>
 
             <div class="form-grid">
-              <label class="field">
-                <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
-                <input class="input field-en" name="mrn" value="${escapeHtml(state.patientForm.mrn)}" />
+              <label class="field full">
+                <span class="label">${escapeHtml(t().patients.fields.arabicFullName)}</span>
+                <input class="input field-ar" lang="ar" dir="rtl" name="arabicFullName" value="${escapeHtml(state.patientForm.arabicFullName)}" />
               </label>
 
               <label class="field">
@@ -2822,13 +3444,13 @@ function renderPatients() {
               </label>
 
               <label class="field full">
-                <span class="label">${escapeHtml(t().patients.fields.arabicFullName)}</span>
-                <input class="input field-ar" lang="ar" dir="rtl" name="arabicFullName" value="${escapeHtml(state.patientForm.arabicFullName)}" />
-              </label>
-
-              <label class="field full">
                 <span class="label">${escapeHtml(t().patients.fields.englishFullName)}</span>
                 <input class="input field-en" lang="en" dir="ltr" name="englishFullName" value="${escapeHtml(state.patientForm.englishFullName)}" />
+              </label>
+
+              <label class="field">
+                <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
+                <input class="input field-en" name="mrn" value="${escapeHtml(state.patientForm.mrn)}" />
               </label>
 
               <label class="field">
@@ -2858,11 +3480,7 @@ function renderPatients() {
                 <span class="label">${escapeHtml(t().patients.fields.nationalIdConfirmation)}</span>
                 <input class="input field-en" name="nationalIdConfirmation" value="${escapeHtml(state.patientForm.nationalIdConfirmation)}" inputmode="numeric" maxlength="11" autocomplete="off" data-prevent-paste="true" />
               </label>
-
-              <label class="field full">
-                <span class="label">${escapeHtml(t().patients.fields.address)}</span>
-                <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="address">${escapeHtml(state.patientForm.address)}</textarea>
-              </label>
+              ${renderAddressField(state.patientForm.address, "patient")}
             </div>
 
             <div class="form-actions">
@@ -2873,8 +3491,8 @@ function renderPatients() {
           </form>
         </article>
 
-        <div class="stack">
-          <article class="surface">
+        <div class="stack patient-side">
+          <article class="surface surface-compact">
             <div class="section-head">
               <h2 class="section-title">${escapeHtml(t().patients.savedRecord)}</h2>
               <span class="chip accent">${escapeHtml(t().common.latest)}</span>
@@ -2882,7 +3500,7 @@ function renderPatients() {
             ${renderSavedPatient()}
           </article>
 
-          <article class="surface">
+          <article class="surface surface-compact">
             <div class="section-head">
               <h2 class="section-title">${escapeHtml(t().patients.possibleMatches)}</h2>
               <span class="chip subtle">${escapeHtml(String(state.patientSuggestions.length))}</span>
@@ -2893,7 +3511,7 @@ function renderPatients() {
             )}
           </article>
 
-          <article class="surface">
+          <article class="surface surface-compact">
             <h2 class="section-title">${escapeHtml(t().common.readOnly)}</h2>
             <div class="empty">${escapeHtml(t().patients.supportNote)}</div>
           </article>
@@ -3005,7 +3623,7 @@ function renderSavedAppointment() {
       <div class="item">
         <div class="item-copy">
           <div class="item-title">${escapeHtml(result.barcodeValue)}</div>
-          <div class="item-subtitle">${escapeHtml(formatDisplayDate(result.appointment.appointment_date))} • ${escapeHtml(state.language === "ar" ? result.modality.name_ar : result.modality.name_en)}</div>
+          <div class="item-subtitle">${escapeHtml(formatDisplayDate(result.appointment.appointment_date))} • ${escapeHtml(formatModalityName(result.modality))}</div>
         </div>
         <span class="chip ${result.appointment.is_overbooked ? "subtle" : "success"}">${escapeHtml(
           `${t().appointments.fields.slotNumber}: ${result.appointment.modality_slot_number}`
@@ -3126,19 +3744,19 @@ function renderAppointments() {
               <div class="section-head">
                 <h2 class="section-title">${escapeHtml(t().appointments.title)}</h2>
                 <div class="badge-row">
-                  <span class="chip accent">${escapeHtml(modality ? (state.language === "ar" ? modality.name_ar : modality.name_en) : t().appointments.lookupsLoading)}</span>
+                  <span class="chip accent">${escapeHtml(modality ? formatModalityName(modality) : t().appointments.lookupsLoading)}</span>
                 </div>
               </div>
 
               <div class="form-grid">
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
                   <select class="select" name="modalityId">
                     ${state.appointmentLookups.modalities
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentForm.modalityId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatModalityName(entry))}
                           </option>
                         `
                       )
@@ -3147,14 +3765,14 @@ function renderAppointments() {
                 </label>
 
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.examType)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
                   <select class="select" name="examTypeId">
                     <option value="">${escapeHtml(t().common.optional)}</option>
                     ${examTypes
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentForm.examTypeId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatExamName(entry))}
                           </option>
                         `
                       )
@@ -3163,14 +3781,14 @@ function renderAppointments() {
                 </label>
 
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.priority)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("priority"))}</span>
                   <select class="select" name="reportingPriorityId">
                     <option value="">${escapeHtml(t().common.optional)}</option>
                     ${state.appointmentLookups.priorities
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentForm.reportingPriorityId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatPriorityName(entry))}
                           </option>
                         `
                       )
@@ -3195,8 +3813,8 @@ function renderAppointments() {
                 </label>
 
                 <label class="field full">
-                  <span class="label">${escapeHtml(t().appointments.fields.notes)}</span>
-                  <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="notes">${escapeHtml(state.appointmentForm.notes)}</textarea>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("notes"))}</span>
+                  <textarea class="textarea field-en" name="notes">${escapeHtml(state.appointmentForm.notes)}</textarea>
                 </label>
 
                 ${selectedDay?.is_full ? `
@@ -3211,6 +3829,7 @@ function renderAppointments() {
 
               <div class="form-actions">
                 <button class="button-secondary" type="button" data-action="open-exam-type-modal">${escapeHtml(t().appointments.createExam)}</button>
+                <button class="button-secondary" type="button" data-action="prepare-appointment-slip">${escapeHtml(t().appointments.printSlip)}</button>
                 <button class="button-primary" type="submit">${escapeHtml(
                   state.appointmentSaving ? t().common.loading : t().appointments.save
                 )}</button>
@@ -3305,7 +3924,7 @@ function renderQueueEntries() {
                   state.language === "ar" ? entry.arabic_full_name : entry.english_full_name
                 )}</div>
                 <div class="item-subtitle">${escapeHtml(entry.accession_number)} • ${escapeHtml(
-                  state.language === "ar" ? entry.modality_name_ar : entry.modality_name_en
+                  formatModalityName(entry)
                 )}${entry.is_walk_in ? ` • ${escapeHtml(t().appointments.walkIn)}` : ""}</div>
               </div>
               <span class="chip accent">${escapeHtml(entry.queue_status)}</span>
@@ -3340,7 +3959,7 @@ function renderQueueNoShowReview() {
                   state.language === "ar" ? candidate.arabic_full_name : candidate.english_full_name
                 )}</div>
                 <div class="item-subtitle">${escapeHtml(candidate.accession_number)} • ${escapeHtml(
-                  state.language === "ar" ? candidate.modality_name_ar : candidate.modality_name_en
+                  formatModalityName(candidate)
                 )}</div>
                 <input
                   class="input ${state.language === "ar" ? "field-ar" : ""} queue-reason-input"
@@ -3445,14 +4064,14 @@ function renderQueue() {
 
               <div class="form-grid">
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
                   <select class="select" name="modalityId">
                     <option value="">${escapeHtml(t().common.required)}</option>
                     ${state.appointmentLookups.modalities
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.queueWalkInForm.modalityId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatModalityName(entry))}
                           </option>
                         `
                       )
@@ -3461,14 +4080,14 @@ function renderQueue() {
                 </label>
 
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.examType)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
                   <select class="select" name="examTypeId">
                     <option value="">${escapeHtml(t().common.optional)}</option>
                     ${walkInExamTypes
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.queueWalkInForm.examTypeId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatExamName(entry))}
                           </option>
                         `
                       )
@@ -3477,14 +4096,14 @@ function renderQueue() {
                 </label>
 
                 <label class="field">
-                  <span class="label">${escapeHtml(t().appointments.fields.priority)}</span>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("priority"))}</span>
                   <select class="select" name="reportingPriorityId">
                     <option value="">${escapeHtml(t().common.optional)}</option>
                     ${state.appointmentLookups.priorities
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.queueWalkInForm.reportingPriorityId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatPriorityName(entry))}
                           </option>
                         `
                       )
@@ -3493,8 +4112,8 @@ function renderQueue() {
                 </label>
 
                 <label class="field full">
-                  <span class="label">${escapeHtml(t().appointments.fields.notes)}</span>
-                  <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="notes">${escapeHtml(state.queueWalkInForm.notes)}</textarea>
+                  <span class="label">${escapeHtml(appointmentFieldLabel("notes"))}</span>
+                  <textarea class="textarea field-en" name="notes">${escapeHtml(state.queueWalkInForm.notes)}</textarea>
                 </label>
 
                 <label class="field full">
@@ -3527,21 +4146,27 @@ function renderPrintList() {
     <div class="list">
       ${state.printResults
         .map(
-          (appointment) => `
+          (appointment) => {
+            const showDate = Boolean(state.printFilters.dateFrom || state.printFilters.dateTo);
+            const dateNote = showDate ? ` • ${escapeHtml(formatDisplayDate(appointment.appointment_date))}` : "";
+            return `
             <div class="item patient-result">
               <div class="item-copy">
                 <div class="item-title">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
                   state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
                 )}</div>
                 <div class="item-subtitle">${escapeHtml(
-                  state.language === "ar" ? appointment.modality_name_ar : appointment.modality_name_en
-                )} • ${escapeHtml(appointment.exam_name_ar ? (state.language === "ar" ? appointment.exam_name_ar : appointment.exam_name_en) : "—")}</div>
+                  formatModalityName(appointment)
+                )} • ${escapeHtml(state.language === "ar" ? "البروتوكول" : "Protocol")}: ${escapeHtml(
+                  formatExamName(appointment)
+                )}${dateNote}</div>
               </div>
               <button class="button-secondary" type="button" data-action="select-print-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">
                 ${escapeHtml(t().common.open)}
               </button>
             </div>
-          `
+          `;
+          }
         )
         .join("")}
     </div>
@@ -3576,15 +4201,15 @@ function renderPrintSlipPreview() {
           <div>${escapeHtml(appointment.english_full_name)}</div>
         </div>
         <div class="slip-info">
-          <div class="label">${escapeHtml(t().appointments.fields.modality)}</div>
-          <div>${escapeHtml(state.language === "ar" ? appointment.modality_name_ar : appointment.modality_name_en)}</div>
+          <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
+          <div>${escapeHtml(formatModalityName(appointment))}</div>
         </div>
         <div class="slip-info">
-          <div class="label">${escapeHtml(t().appointments.fields.examType)}</div>
-          <div>${escapeHtml(appointment.exam_name_ar ? (state.language === "ar" ? appointment.exam_name_ar : appointment.exam_name_en) : "—")}</div>
+          <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
+          <div>${escapeHtml(formatExamName(appointment))}</div>
         </div>
         <div class="slip-info full-span">
-          <div class="label">${escapeHtml(t().appointments.fields.notes)}</div>
+          <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
           <div>${escapeHtml(appointment.notes || selectedPrintInstruction(appointment) || "—")}</div>
         </div>
       </div>
@@ -3663,7 +4288,7 @@ function renderIntegrationStatusPanel() {
       <article class="surface surface-compact">
         <div class="section-head">
           <h3 class="section-title">${escapeHtml(t().print.scannerReady)}</h3>
-          <span class="chip ${scanner.bridgeReady ? "success" : "subtle"}">${escapeHtml(scanner.scannerBridgeMode)}</span>
+          <span class="chip ${scanner.bridgeReady ? "success" : "subtle"}">${escapeHtml(humanizeAuditValue(scanner.scannerBridgeMode))}</span>
         </div>
         <div class="stack">
           <div class="info-grid">
@@ -3701,7 +4326,14 @@ function renderDocumentsList() {
                 <div class="item-title">${escapeHtml(document.original_filename)}</div>
                 <div class="item-subtitle">${escapeHtml(document.document_type)} • ${escapeHtml(String(document.file_size || 0))} bytes</div>
               </div>
-              <span class="chip subtle">${escapeHtml(document.mime_type || "file")}</span>
+              <div class="badge-row">
+                ${
+                  document.id
+                    ? `<a class="button-secondary" href="/api/documents/${escapeHtml(String(document.id))}/view" target="_blank" rel="noopener">${escapeHtml(t().common.open)}</a>`
+                    : ""
+                }
+                <span class="chip subtle">${escapeHtml(document.mime_type || "file")}</span>
+              </div>
             </div>
           `
         )
@@ -3723,15 +4355,18 @@ function renderModalityWorklist() {
     <div class="list">
       ${state.modalityResults
         .map(
-          (appointment) => `
+          (appointment) => {
+            const showDate = state.modalityFilters.scope === "all";
+            const dateLabel = showDate ? ` • ${escapeHtml(formatDisplayDate(appointment.appointment_date))}` : "";
+            return `
             <div class="item patient-result">
               <div class="item-copy">
                 <div class="item-title">#${escapeHtml(String(appointment.modality_slot_number || "—"))} • ${escapeHtml(
                   state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
                 )}</div>
                 <div class="item-subtitle">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
-                  state.language === "ar" ? appointment.modality_name_ar : appointment.modality_name_en
-                )} • ${escapeHtml(appointment.exam_name_ar ? (state.language === "ar" ? appointment.exam_name_ar : appointment.exam_name_en) : "—")}</div>
+                  formatModalityName(appointment)
+                )} • ${escapeHtml(formatExamName(appointment))}${dateLabel}</div>
               </div>
               ${
                 appointment.status === "completed"
@@ -3739,7 +4374,8 @@ function renderModalityWorklist() {
                   : `<button class="button-secondary" type="button" data-action="complete-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">${escapeHtml(t().modality.complete)}</button>`
               }
             </div>
-          `
+          `;
+          }
         )
         .join("")}
     </div>
@@ -3777,26 +4413,43 @@ function renderModality() {
           <div class="form-grid">
             <label class="field">
               <span class="label">${escapeHtml(t().print.date)}</span>
-              <input class="input field-en" type="date" name="date" value="${escapeHtml(state.modalityFilters.date)}" />
+              <input class="input field-en" type="date" name="date" value="${escapeHtml(state.modalityFilters.date)}" ${state.modalityFilters.scope === "all" ? "disabled" : ""} />
             </label>
             <label class="field">
-              <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+              <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
               <select class="select" name="modalityId">
                 <option value="">${escapeHtml(t().common.optional)}</option>
                 ${state.appointmentLookups.modalities
                   .map(
                     (entry) => `
                       <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.modalityFilters.modalityId) ? "selected" : ""}>
-                        ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                        ${escapeHtml(formatModalityName(entry))}
                       </option>
                     `
                   )
                   .join("")}
               </select>
             </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().modality.filtersTitle)}</span>
+              <div class="pill-row">
+                <button class="button-ghost ${state.modalityFilters.scope === "day" ? "active-pill" : ""}" type="button" data-action="set-modality-scope" data-scope="day">${escapeHtml(
+                  t().modality.dayOnly
+                )}</button>
+                <button class="button-ghost ${state.modalityFilters.scope === "all" ? "active-pill" : ""}" type="button" data-action="set-modality-scope" data-scope="all">${escapeHtml(
+                  t().modality.allDates
+                )}</button>
+              </div>
+            </label>
           </div>
           <div class="form-actions">
+            <div class="quick-actions">
+              <button class="button-ghost" type="button" data-action="set-modality-quick-date" data-range="today">${escapeHtml(t().modality.quickToday)}</button>
+              <button class="button-ghost" type="button" data-action="set-modality-quick-date" data-range="tomorrow">${escapeHtml(t().modality.quickTomorrow)}</button>
+              <button class="button-ghost" type="button" data-action="set-modality-quick-date" data-range="next_week">${escapeHtml(t().modality.quickNextWeek)}</button>
+            </div>
             <button class="button-primary" type="submit">${escapeHtml(state.modalityLoading ? t().common.loading : t().modality.load)}</button>
+            <button class="button-secondary" type="button" data-action="print-modality-list">${escapeHtml(t().modality.printList)}</button>
           </div>
         </form>
       </section>
@@ -3807,6 +4460,211 @@ function renderModality() {
           <span class="chip subtle">${escapeHtml(String(state.modalityResults.length))}</span>
         </div>
         ${renderModalityWorklist()}
+      </section>
+    </div>
+  `;
+}
+
+function renderDoctorList() {
+  if (state.doctorLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.doctorResults.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.doctorResults
+        .map(
+          (appointment) => `
+            <div class="item patient-result">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
+                  state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
+                )}</div>
+                <div class="item-subtitle">${escapeHtml(
+                  formatModalityName(appointment)
+                )} • ${escapeHtml(formatExamName(appointment))}</div>
+              </div>
+              <button class="button-secondary" type="button" data-action="select-doctor-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">
+                ${escapeHtml(t().common.open)}
+              </button>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderDoctorDocumentsList() {
+  if (state.doctorDocumentsLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.doctorDocuments.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.doctorDocuments
+        .map(
+          (document) => `
+            <div class="item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(document.original_filename)}</div>
+                <div class="item-subtitle">${escapeHtml(document.document_type)} • ${escapeHtml(String(document.file_size || 0))} bytes</div>
+              </div>
+              <div class="badge-row">
+                ${
+                  document.id
+                    ? `<a class="button-secondary" href="/api/documents/${escapeHtml(String(document.id))}/view" target="_blank" rel="noopener">${escapeHtml(t().common.open)}</a>`
+                    : ""
+                }
+                <span class="chip subtle">${escapeHtml(document.mime_type || "file")}</span>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderDoctorDetails() {
+  const appointment = state.doctorSelectedAppointment;
+
+  if (!appointment) {
+    return `<div class="empty">${escapeHtml(t().doctor.noSelection)}</div>`;
+  }
+
+  const protocolOptions = state.appointmentLookups.examTypes.filter(
+    (entry) => String(entry.modality_id) === String(appointment.modality_id)
+  );
+
+  return `
+    <div class="stack">
+      <article class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().doctor.demographicsTitle)}</h2>
+          <span class="chip accent">${escapeHtml(appointment.mrn || `#${appointment.patient_id}`)}</span>
+        </div>
+        <div class="info-grid">
+          ${infoTile(t().patients.fields.arabicFullName, appointment.arabic_full_name || "—", "tone-good")}
+          ${infoTile(t().patients.fields.englishFullName, appointment.english_full_name || "—", "")}
+          ${infoTile(t().patients.fields.nationalId, appointment.national_id || "—", "")}
+          ${infoTile(t().patients.fields.ageYears, appointment.age_years ? `${appointment.age_years}` : "—", "")}
+          ${infoTile(t().patients.fields.sex, appointment.sex ? formatSex(appointment.sex) : "—", "")}
+          ${infoTile(t().patients.fields.phone1, appointment.phone_1 || "—", "")}
+          ${infoTile(t().patients.fields.address, appointment.address || "—", "")}
+        </div>
+      </article>
+
+      <article class="surface">
+        <form id="doctor-protocol-form" class="stack">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().doctor.protocolTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(appointment.accession_number)}</span>
+          </div>
+          <div class="small">${escapeHtml(t().doctor.protocolHint)}</div>
+          ${alertMarkup("error", state.doctorProtocolError)}
+          ${alertMarkup("success", state.doctorProtocolSuccess)}
+          <div class="form-grid">
+            <label class="field">
+              <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
+              <select class="select" name="protocolExamTypeId">
+                <option value="">${escapeHtml(t().common.optional)}</option>
+                ${protocolOptions
+                  .map(
+                    (entry) => `
+                      <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.doctorProtocolExamTypeId) ? "selected" : ""}>
+                        ${escapeHtml(formatExamName(entry))}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="button-primary" type="submit">${escapeHtml(
+              state.doctorProtocolSaving ? t().common.loading : t().doctor.protocolSave
+            )}</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().doctor.documentsTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(String(state.doctorDocuments.length))}</span>
+        </div>
+        ${alertMarkup("error", state.doctorDocumentsError)}
+        ${renderDoctorDocumentsList()}
+      </article>
+    </div>
+  `;
+}
+
+function renderDoctor() {
+  return `
+    <div class="page">
+      ${pageHero(
+        t().doctor.title,
+        t().doctor.body,
+        `<button class="button-secondary" type="button" data-action="refresh-doctor">${escapeHtml(t().common.refresh)}</button>`,
+        t().doctor.selectedRequest
+      )}
+      ${alertMarkup("error", state.doctorError)}
+
+      <section class="split-grid">
+        <div class="stack">
+          <article class="surface">
+            <form id="doctor-filter-form" class="stack">
+              <div class="section-head">
+                <h2 class="section-title">${escapeHtml(t().doctor.filtersTitle)}</h2>
+                <span class="chip accent">${escapeHtml(t().doctor.load)}</span>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="label">${escapeHtml(t().print.date)}</span>
+                  <input class="input field-en" type="date" name="date" value="${escapeHtml(state.doctorFilters.date)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
+                  <select class="select" name="modalityId">
+                    <option value="">${escapeHtml(t().common.optional)}</option>
+                    ${state.appointmentLookups.modalities
+                      .map(
+                        (entry) => `
+                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.doctorFilters.modalityId) ? "selected" : ""}>
+                            ${escapeHtml(formatModalityName(entry))}
+                          </option>
+                        `
+                      )
+                      .join("")}
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="button-primary" type="submit">${escapeHtml(state.doctorLoading ? t().common.loading : t().doctor.load)}</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().doctor.dailyList)}</h2>
+              <span class="chip subtle">${escapeHtml(String(state.doctorResults.length))}</span>
+            </div>
+            ${renderDoctorList()}
+          </article>
+        </div>
+
+        ${renderDoctorDetails()}
       </section>
     </div>
   `;
@@ -3838,6 +4696,14 @@ function renderPrint() {
                   <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
                 </label>
                 <label class="field">
+                  <span class="label">${escapeHtml(t().print.dateFrom)}</span>
+                  <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.printFilters.dateFrom)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(t().print.dateTo)}</span>
+                  <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.printFilters.dateTo)}" />
+                </label>
+                <label class="field">
                   <span class="label">${escapeHtml(t().print.modality)}</span>
                   <select class="select" name="modalityId">
                     <option value="">${escapeHtml(t().common.optional)}</option>
@@ -3845,7 +4711,7 @@ function renderPrint() {
                       .map(
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.printFilters.modalityId) ? "selected" : ""}>
-                            ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                            ${escapeHtml(formatModalityName(entry))}
                           </option>
                         `
                       )
@@ -3854,7 +4720,14 @@ function renderPrint() {
                 </label>
               </div>
               <div class="form-actions">
+                <div class="quick-actions">
+                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="today">${escapeHtml(t().print.quickToday)}</button>
+                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="tomorrow">${escapeHtml(t().print.quickTomorrow)}</button>
+                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="next_week">${escapeHtml(t().print.quickNextWeek)}</button>
+                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="clear">${escapeHtml(t().print.quickClear)}</button>
+                </div>
                 <button class="button-primary" type="submit">${escapeHtml(state.printLoading ? t().common.loading : t().print.load)}</button>
+                <button class="button-secondary" type="button" data-action="print-daily-list">${escapeHtml(t().print.printDaily)}</button>
               </div>
             </form>
           </article>
@@ -3932,13 +4805,13 @@ function renderPrint() {
                 ? `<form id="appointment-edit-form" class="stack">
                     <div class="form-grid">
                       <label class="field">
-                        <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+                        <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
                         <select class="select" name="modalityId">
                           ${state.appointmentLookups.modalities
                             .map(
                               (entry) => `
                                 <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentEditForm.modalityId) ? "selected" : ""}>
-                                  ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                                  ${escapeHtml(formatModalityName(entry))}
                                 </option>
                               `
                             )
@@ -3946,7 +4819,7 @@ function renderPrint() {
                         </select>
                       </label>
                       <label class="field">
-                        <span class="label">${escapeHtml(t().appointments.fields.examType)}</span>
+                        <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
                         <select class="select" name="examTypeId">
                           <option value="">${escapeHtml(t().common.optional)}</option>
                           ${state.appointmentLookups.examTypes
@@ -3954,7 +4827,7 @@ function renderPrint() {
                             .map(
                               (entry) => `
                                 <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentEditForm.examTypeId) ? "selected" : ""}>
-                                  ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                                  ${escapeHtml(formatExamName(entry))}
                                 </option>
                               `
                             )
@@ -3962,14 +4835,14 @@ function renderPrint() {
                         </select>
                       </label>
                       <label class="field">
-                        <span class="label">${escapeHtml(t().appointments.fields.priority)}</span>
+                        <span class="label">${escapeHtml(appointmentFieldLabel("priority"))}</span>
                         <select class="select" name="reportingPriorityId">
                           <option value="">${escapeHtml(t().common.optional)}</option>
                           ${state.appointmentLookups.priorities
                             .map(
                               (entry) => `
                                 <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentEditForm.reportingPriorityId) ? "selected" : ""}>
-                                  ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                                  ${escapeHtml(formatPriorityName(entry))}
                                 </option>
                               `
                             )
@@ -3981,8 +4854,8 @@ function renderPrint() {
                         <input class="input field-en" type="date" name="appointmentDate" value="${escapeHtml(state.appointmentEditForm.appointmentDate)}" />
                       </label>
                       <label class="field full">
-                        <span class="label">${escapeHtml(t().appointments.fields.notes)}</span>
-                        <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="notes">${escapeHtml(state.appointmentEditForm.notes)}</textarea>
+                        <span class="label">${escapeHtml(appointmentFieldLabel("notes"))}</span>
+                        <textarea class="textarea field-en" name="notes">${escapeHtml(state.appointmentEditForm.notes)}</textarea>
                       </label>
                       <label class="field full">
                         <span class="label">${escapeHtml(t().appointments.fields.overbookingReason)}</span>
@@ -4071,24 +4944,24 @@ function renderSearch() {
             </div>
             ${alertMarkup("error", state.patientUpdateError)}
             ${
-              state.searchSelectedPatient
+                  state.searchSelectedPatient
                 ? `<form id="patient-edit-form" class="stack">
                     <div class="form-grid">
-                      <label class="field">
-                        <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
-                        <input class="input field-en" name="mrn" value="${escapeHtml(state.patientEditForm.mrn)}" />
+                      <label class="field full">
+                        <span class="label">${escapeHtml(t().patients.fields.arabicFullName)}</span>
+                        <input class="input field-ar" name="arabicFullName" value="${escapeHtml(state.patientEditForm.arabicFullName)}" />
                       </label>
                       <label class="field">
                         <span class="label">${escapeHtml(t().patients.fields.ageYears)}</span>
                         <input class="input field-en" name="ageYears" value="${escapeHtml(state.patientEditForm.ageYears)}" inputmode="numeric" />
                       </label>
                       <label class="field full">
-                        <span class="label">${escapeHtml(t().patients.fields.arabicFullName)}</span>
-                        <input class="input field-ar" name="arabicFullName" value="${escapeHtml(state.patientEditForm.arabicFullName)}" />
-                      </label>
-                      <label class="field full">
                         <span class="label">${escapeHtml(t().patients.fields.englishFullName)}</span>
                         <input class="input field-en" name="englishFullName" value="${escapeHtml(state.patientEditForm.englishFullName)}" />
+                      </label>
+                      <label class="field">
+                        <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
+                        <input class="input field-en" name="mrn" value="${escapeHtml(state.patientEditForm.mrn)}" />
                       </label>
                       <label class="field">
                         <span class="label">${escapeHtml(t().patients.fields.sex)}</span>
@@ -4113,10 +4986,7 @@ function renderSearch() {
                         <span class="label">${escapeHtml(t().patients.fields.nationalIdConfirmation)}</span>
                         <input class="input field-en" name="nationalIdConfirmation" value="${escapeHtml(state.patientEditForm.nationalIdConfirmation)}" inputmode="numeric" maxlength="11" data-prevent-paste="true" />
                       </label>
-                      <label class="field full">
-                        <span class="label">${escapeHtml(t().patients.fields.address)}</span>
-                        <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="address">${escapeHtml(state.patientEditForm.address)}</textarea>
-                      </label>
+                      ${renderAddressField(state.patientEditForm.address, "edit")}
                     </div>
                     <div class="form-actions">
                       <button class="button-primary" type="submit">${escapeHtml(state.patientUpdateSaving ? t().common.loading : t().patientActions.saveEdit)}</button>
@@ -4351,6 +5221,123 @@ function renderAuditFilters() {
   `;
 }
 
+function renderPatientRegistrationRules() {
+  if (!state.settingsCatalog.patient_registration?.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  const phoneRule = getSettingsEntryValue("patient_registration", "phone1_required");
+  const dobRule = getSettingsEntryValue("patient_registration", "dob_or_age_rule");
+  const nationalIdRule = getSettingsEntryValue("patient_registration", "national_id_required");
+  const phoneLabel = state.language === "ar" ? "الهاتف 1" : "Phone 1";
+  const dobLabel = state.language === "ar" ? "العمر / تاريخ الميلاد" : "Age / DOB";
+  const nationalLabel = state.language === "ar" ? "الرقم الوطني" : "National ID";
+
+  return `
+    <form class="stack" data-settings-form="patient_registration">
+      <div class="form-grid">
+        <label class="field">
+          <span class="label">${escapeHtml(phoneLabel)}</span>
+          <select class="select" data-setting-field="true" data-setting-category="patient_registration" data-setting-key="phone1_required">
+            <option value="required" ${phoneRule === "required" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "إلزامي" : "Required"
+            )}</option>
+            <option value="optional" ${phoneRule === "optional" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "اختياري" : "Optional"
+            )}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(dobLabel)}</span>
+          <select class="select" data-setting-field="true" data-setting-category="patient_registration" data-setting-key="dob_or_age_rule">
+            <option value="age_or_dob_required" ${dobRule === "age_or_dob_required" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "العمر أو تاريخ الميلاد" : "Age or DOB required"
+            )}</option>
+            <option value="age_required" ${dobRule === "age_required" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "العمر فقط" : "Age required"
+            )}</option>
+            <option value="dob_required" ${dobRule === "dob_required" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "تاريخ الميلاد فقط" : "DOB required"
+            )}</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(nationalLabel)}</span>
+          <select class="select" data-setting-field="true" data-setting-category="patient_registration" data-setting-key="national_id_required">
+            <option value="required_with_confirmation" ${nationalIdRule === "required_with_confirmation" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "إلزامي مع تأكيد" : "Required with confirmation"
+            )}</option>
+            <option value="required" ${nationalIdRule === "required" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "إلزامي" : "Required"
+            )}</option>
+            <option value="optional" ${nationalIdRule === "optional" ? "selected" : ""}>${escapeHtml(
+              state.language === "ar" ? "اختياري" : "Optional"
+            )}</option>
+          </select>
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="button-primary" type="submit">${escapeHtml(
+          state.settingsSavingCategory === "patient_registration" ? t().common.loading : t().settings.patientRulesSave
+        )}</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderNameDictionaryList() {
+  if (state.nameDictionaryLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.nameDictionaryEntries.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.nameDictionaryEntries
+        .map(
+          (entry) => `
+            <div class="item dictionary-item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(entry.arabic_text)}</div>
+                <input
+                  class="input field-en"
+                  name="english_text"
+                  data-name-dictionary-field="true"
+                  data-dictionary-id="${escapeHtml(String(entry.id))}"
+                  value="${escapeHtml(entry.english_text)}"
+                />
+              </div>
+              <div class="dictionary-actions">
+                <label class="field-inline">
+                  <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
+                  <input
+                    type="checkbox"
+                    name="is_active"
+                    data-name-dictionary-field="true"
+                    data-dictionary-id="${escapeHtml(String(entry.id))}"
+                    ${entry.is_active ? "checked" : ""}
+                  />
+                </label>
+                <button class="button-secondary" type="button" data-action="save-dictionary-entry" data-dictionary-id="${escapeHtml(String(entry.id))}">
+                  ${escapeHtml(state.nameDictionarySavingId === String(entry.id) ? t().common.loading : t().settings.dictionarySave)}
+                </button>
+                <button class="button-ghost" type="button" data-action="delete-dictionary-entry" data-dictionary-id="${escapeHtml(String(entry.id))}">
+                  ${escapeHtml(state.nameDictionarySavingId === `delete-${entry.id}` ? t().common.loading : t().settings.dictionaryDelete)}
+                </button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderSettings() {
   if (!isSupervisor()) {
     return `
@@ -4450,6 +5437,45 @@ function renderSettings() {
 
       <section class="surface">
         <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.patientRulesTitle)}</h2>
+          <span class="chip accent">${escapeHtml(t().common.required)}</span>
+        </div>
+        <div class="settings-summary">${escapeHtml(t().settings.patientRulesBody)}</div>
+        ${renderPatientRegistrationRules()}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.dictionaryTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(String(state.nameDictionaryEntries.length))}</span>
+        </div>
+        <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
+        ${alertMarkup("error", state.nameDictionaryError)}
+        ${alertMarkup("success", state.nameDictionarySuccess)}
+        <form id="name-dictionary-form" class="stack">
+          <div class="form-grid">
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.dictionaryArabic)}</span>
+              <input class="input field-ar" name="arabicText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.arabicText)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.dictionaryEnglish)}</span>
+              <input class="input field-en" name="englishText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.englishText)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
+              <input type="checkbox" name="isActive" data-name-dictionary-new-field="true" ${state.nameDictionaryForm.isActive ? "checked" : ""} />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="button-primary" type="submit">${escapeHtml(state.nameDictionarySavingId === "new" ? t().common.loading : t().settings.dictionaryAdd)}</button>
+          </div>
+        </form>
+        ${renderNameDictionaryList()}
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
           <h2 class="section-title">${escapeHtml(t().settings.categories)}</h2>
           <span class="chip subtle">${escapeHtml(`${Object.keys(state.settingsCatalog).length} categories`)}</span>
         </div>
@@ -4511,6 +5537,8 @@ function renderPage() {
       return renderQueue();
     case "modality":
       return renderModality();
+    case "doctor":
+      return renderDoctor();
     case "print":
       return renderPrint();
     case "search":
@@ -4606,7 +5634,7 @@ function renderLoading() {
 
 function render() {
   document.documentElement.lang = state.language;
-  document.documentElement.dir = state.language === "ar" ? "rtl" : "ltr";
+  document.documentElement.dir = "ltr";
   const app = document.getElementById("app");
 
   if (!state.authChecked) {
@@ -4648,6 +5676,11 @@ function handleInput(event) {
       target.value = keepDigits(target.value, 10);
     }
 
+    if (target.dataset.addressTarget === "patient") {
+      updateAddressForm(state.patientForm, target, "patientAddressMode");
+      return;
+    }
+
     state.patientForm[target.name] = target.value;
 
     if (target.name === "arabicFullName" && !state.manualEnglishName) {
@@ -4682,6 +5715,11 @@ function handleInput(event) {
       target.value = keepDigits(target.value, 10);
     }
 
+    if (target.dataset.addressTarget === "edit") {
+      updateAddressForm(state.patientEditForm, target, "patientEditAddressMode");
+      return;
+    }
+
     state.patientEditForm[target.name] = target.value;
     return;
   }
@@ -4703,11 +5741,23 @@ function handleInput(event) {
 
   if (target.closest("#print-filter-form")) {
     state.printFilters[target.name] = target.value;
+    if (target.name === "date") {
+      state.printFilters.dateFrom = "";
+      state.printFilters.dateTo = "";
+    }
+    return;
+  }
+
+  if (target.closest("#doctor-filter-form")) {
+    state.doctorFilters[target.name] = target.value;
     return;
   }
 
   if (target.closest("#modality-filter-form")) {
     state.modalityFilters[target.name] = target.value;
+    if (target.name === "date") {
+      state.modalityFilters.scope = "day";
+    }
     return;
   }
 
@@ -4741,6 +5791,11 @@ function handleInput(event) {
       state.appointmentEditForm.examTypeId = "";
     }
 
+    return;
+  }
+
+  if (target.closest("#doctor-protocol-form")) {
+    state.doctorProtocolExamTypeId = target.value;
     return;
   }
 
@@ -4804,6 +5859,28 @@ function handleInput(event) {
               ...(entry.setting_value || {}),
               value: target.value
             }
+          }
+        : entry
+    );
+    return;
+  }
+
+  if (target.hasAttribute("data-name-dictionary-new-field")) {
+    state.nameDictionaryForm[target.name] = target.type === "checkbox" ? target.checked : target.value;
+    return;
+  }
+
+  if (target.hasAttribute("data-name-dictionary-field")) {
+    const entryId = target.dataset.dictionaryId;
+    if (!entryId) {
+      return;
+    }
+
+    state.nameDictionaryEntries = state.nameDictionaryEntries.map((entry) =>
+      String(entry.id) === String(entryId)
+        ? {
+            ...entry,
+            [target.name]: target.type === "checkbox" ? target.checked : target.value
           }
         : entry
     );
@@ -4961,6 +6038,25 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "select-doctor-appointment") {
+    event.preventDefault();
+    const appointmentId = target.dataset.appointmentId;
+    state.doctorSelectedAppointment = state.doctorResults.find(
+      (appointment) => String(appointment.id) === String(appointmentId)
+    ) || null;
+    state.doctorProtocolError = "";
+    state.doctorProtocolSuccess = "";
+    state.doctorDocumentsError = "";
+    if (state.doctorSelectedAppointment) {
+      state.doctorProtocolExamTypeId = String(state.doctorSelectedAppointment.exam_type_id || "");
+    } else {
+      state.doctorProtocolExamTypeId = "";
+    }
+    void loadDoctorDocuments(appointmentId);
+    render();
+    return;
+  }
+
   if (target.dataset.action === "confirm-no-show") {
     event.preventDefault();
     void confirmQueueNoShow(target.dataset.appointmentId);
@@ -4975,7 +6071,7 @@ function handleClick(event) {
 
   if (target.dataset.action === "refresh-settings") {
     event.preventDefault();
-    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
+    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary()]);
     return;
   }
 
@@ -4991,7 +6087,38 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "set-modality-scope") {
+    event.preventDefault();
+    state.modalityFilters.scope = target.dataset.scope || "day";
+    render();
+    return;
+  }
+
+  if (target.dataset.action === "set-modality-quick-date") {
+    event.preventDefault();
+    setModalityQuickDate(target.dataset.range);
+    return;
+  }
+
+  if (target.dataset.action === "refresh-doctor") {
+    event.preventDefault();
+    void loadDoctorRequests();
+    return;
+  }
+
   if (target.dataset.action === "browser-print") {
+    event.preventDefault();
+    window.print();
+    return;
+  }
+
+  if (target.dataset.action === "print-daily-list") {
+    event.preventDefault();
+    window.print();
+    return;
+  }
+
+  if (target.dataset.action === "print-modality-list") {
     event.preventDefault();
     window.print();
     return;
@@ -5012,6 +6139,44 @@ function handleClick(event) {
   if (target.dataset.action === "prepare-scan-session") {
     event.preventDefault();
     void prepareScanSession();
+    return;
+  }
+
+  if (target.dataset.action === "prepare-appointment-slip") {
+    event.preventDefault();
+    void prepareAppointmentSlipFromCreation();
+    return;
+  }
+
+  if (target.dataset.action === "set-print-range") {
+    event.preventDefault();
+    setPrintRange(target.dataset.range);
+    return;
+  }
+
+  if (target.dataset.action === "add-city-option") {
+    event.preventDefault();
+    const city = String(target.dataset.city || "").trim();
+    const value = city || state.patientForm.address || state.patientEditForm.address || "";
+    if (value && !isKnownCity(value)) {
+      state.addressOptions = [...state.addressOptions, value];
+      saveCityOptions(state.addressOptions);
+      state.patientSuccess =
+        state.language === "ar" ? "تمت إضافة المدينة إلى القائمة." : "City added to the list.";
+    }
+    render();
+    return;
+  }
+
+  if (target.dataset.action === "save-dictionary-entry") {
+    event.preventDefault();
+    void updateNameDictionaryEntry(target.dataset.dictionaryId);
+    return;
+  }
+
+  if (target.dataset.action === "delete-dictionary-entry") {
+    event.preventDefault();
+    void deleteNameDictionaryEntry(target.dataset.dictionaryId);
     return;
   }
 
@@ -5168,6 +6333,12 @@ function handleSubmit(event) {
     return;
   }
 
+  if (event.target.id === "doctor-filter-form") {
+    event.preventDefault();
+    void loadDoctorRequests();
+    return;
+  }
+
   if (event.target.id === "modality-filter-form") {
     event.preventDefault();
     void loadModalityWorklist();
@@ -5177,6 +6348,12 @@ function handleSubmit(event) {
   if (event.target.id === "appointment-edit-form") {
     event.preventDefault();
     void updateSelectedAppointment();
+    return;
+  }
+
+  if (event.target.id === "doctor-protocol-form") {
+    event.preventDefault();
+    void saveDoctorProtocol();
     return;
   }
 
@@ -5201,6 +6378,12 @@ function handleSubmit(event) {
   if (event.target.id === "exam-type-form") {
     event.preventDefault();
     void createExamType();
+    return;
+  }
+
+  if (event.target.id === "name-dictionary-form") {
+    event.preventDefault();
+    void createNameDictionaryEntry();
     return;
   }
 
@@ -5232,6 +6415,7 @@ async function bootstrap() {
   await refreshSession();
 
   if (state.session) {
+    await loadNameDictionary();
     await hydrateRoute();
   }
 

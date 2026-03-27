@@ -10,7 +10,8 @@ modalityRouter.get("/worklist", async (req, res, next) => {
   try {
     const appointments = await listModalityWorklist({
       date: req.query.date,
-      modalityId: req.query.modalityId
+      modalityId: req.query.modalityId,
+      scope: req.query.scope
     });
     res.json({ appointments });
   } catch (error) {

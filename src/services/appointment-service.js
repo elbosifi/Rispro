@@ -21,11 +21,11 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
-function normalizeAppointmentDate(value) {
+function normalizeAppointmentDate(value, fieldName = "appointmentDate") {
   const raw = String(value || "").trim();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    throw new HttpError(400, "appointmentDate must be in YYYY-MM-DD format.");
+    throw new HttpError(400, `${fieldName} must be in YYYY-MM-DD format.`);
   }
 
   return raw;
@@ -236,9 +236,27 @@ export async function listAppointmentLookups() {
 }
 
 export async function listAppointmentsForPrint(filters = {}) {
-  const appointmentDate = normalizeDateOrToday(filters.date);
-  const params = [appointmentDate];
+  const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
+  const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
+  const appointmentDate = !dateFrom && !dateTo ? normalizeDateOrToday(filters.date) : null;
+  const params = [];
+  let dateClause = "";
   let modalityFilterSql = "";
+
+  if (dateFrom || dateTo) {
+    const start = dateFrom || dateTo;
+    const end = dateTo || dateFrom;
+
+    if (start > end) {
+      throw new HttpError(400, "dateFrom cannot be later than dateTo.");
+    }
+
+    params.push(start, end);
+    dateClause = `appointments.appointment_date between $${params.length - 1}::date and $${params.length}::date`;
+  } else {
+    params.push(appointmentDate);
+    dateClause = `appointments.appointment_date = $${params.length}::date`;
+  }
 
   if (filters.modalityId) {
     const modalityId = normalizePositiveInteger(filters.modalityId, "modalityId");
@@ -246,6 +264,7 @@ export async function listAppointmentsForPrint(filters = {}) {
     modalityFilterSql = ` and appointments.modality_id = $${params.length}`;
   }
 
+  const orderClause = dateFrom || dateTo ? "appointments.appointment_date asc, appointments.daily_sequence asc" : "appointments.daily_sequence asc";
   const { rows } = await pool.query(
     `
       select
@@ -285,9 +304,9 @@ export async function listAppointmentsForPrint(filters = {}) {
       join modalities on modalities.id = appointments.modality_id
       left join exam_types on exam_types.id = appointments.exam_type_id
       left join reporting_priorities on reporting_priorities.id = appointments.reporting_priority_id
-      where appointments.appointment_date = $1::date
+      where ${dateClause}
       ${modalityFilterSql}
-      order by appointments.daily_sequence asc
+      order by ${orderClause}
     `,
     params
   );
@@ -682,6 +701,64 @@ export async function updateAppointment(appointmentId, payload, currentUser) {
         values ($1, $2, $2, $3, $4)
       `,
       [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Appointment edited or rescheduled"]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "update",
+        oldValues: existingAppointment,
+        newValues: rows[0],
+        changedByUserId: currentUser.sub
+      },
+      client
+    );
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
+  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
+
+    if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
+      throw new HttpError(409, "Only active reception appointments can be updated.");
+    }
+
+    const examType = await getExamTypeById(client, examTypeId, existingAppointment.modality_id);
+
+    const { rows } = await client.query(
+      `
+        update appointments
+        set
+          exam_type_id = $2,
+          updated_by_user_id = $3,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [cleanAppointmentId, examType?.id || null, currentUser.sub]
+    );
+
+    await client.query(
+      `
+        insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
+        values ($1, $2, $2, $3, $4)
+      `,
+      [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Protocol updated"]
     );
 
     await logAuditEntry(
