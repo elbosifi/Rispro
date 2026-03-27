@@ -40,7 +40,7 @@ function saveCityOptions(list) {
   localStorage.setItem("rispro-city-options", JSON.stringify(list));
 }
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "queue", "modality", "doctor", "print", "search", "settings"];
+const allowedRoutes = ["dashboard", "patients", "appointments", "registrations", "queue", "modality", "doctor", "print", "search", "settings"];
 const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
@@ -77,6 +77,7 @@ const state = {
   noShowReasons: {},
   printLoading: false,
   printError: "",
+  printSuccess: "",
   integrationLoading: false,
   integrationError: "",
   integrationSuccess: "",
@@ -128,6 +129,7 @@ const state = {
   patientError: "",
   patientSuccess: "",
   savedPatient: null,
+  appointmentCreatedDialogOpen: false,
   patientSuggestions: [],
   suggestionsLoading: false,
   addressOptions: loadCityOptions(),
@@ -228,6 +230,7 @@ const copy = {
       dashboard: "Dashboard",
       patients: "Register patient",
       appointments: "Create appointment",
+      registrations: "Registrations",
       queue: "Queue",
       modality: "Modality board",
       doctor: "Doctor home",
@@ -270,6 +273,7 @@ const copy = {
       title: "Patient registration",
       body: "Create a patient record with the required registration fields.",
       save: "Save patient",
+      createAppointment: "Create appointment",
       clear: "Clear form",
       duplicates: "Check duplicates",
       success: "Patient saved successfully.",
@@ -316,6 +320,9 @@ const copy = {
       createExamSave: "Save exam type",
       examAdded: "Exam type created successfully.",
       appointmentSaved: "Appointment saved successfully.",
+      createdTitle: "Appointment created",
+      createdBody: "The appointment was created successfully. You can print the appointment slip now.",
+      printNow: "Print appointment slip",
       printSlip: "Print appointment slip",
       dateRequired: "Choose an appointment date before saving.",
       dateInputHint: "You can click an available day below or pick the exact date here.",
@@ -341,6 +348,16 @@ const copy = {
         specificInstructionAr: "Arabic instruction",
         specificInstructionEn: "English instruction"
       }
+    },
+    registrations: {
+      title: "Daily registrations",
+      body: "View registrations by day, open one record, edit it, print its slip, or delete it.",
+      filtersTitle: "Registration filters",
+      listTitle: "Registered patients",
+      detailsTitle: "Registration details",
+      load: "Load registrations",
+      delete: "Delete registration",
+      noSelection: "Choose a registration from the list first."
     },
     queue: {
       title: "Queue and arrival",
@@ -377,8 +394,8 @@ const copy = {
       completed: "Appointment marked completed successfully."
     },
     print: {
-      title: "Printing and documents",
-      body: "Print the daily appointment list, preview slips and labels, and upload the scanned request to the saved appointment.",
+      title: "Appointment slip printing",
+      body: "Load appointments, choose one record, and print a simple A5 appointment slip.",
       filtersTitle: "Daily list filters",
       date: "Date",
       dateFrom: "From",
@@ -410,7 +427,7 @@ const copy = {
       fileButton: "Choose file",
       fileNone: "No file selected",
       selectedAppointment: "Selected appointment",
-      noAppointment: "Load the list and choose an appointment to print or upload documents.",
+      noAppointment: "Load the list and choose an appointment to print.",
       editAppointment: "Edit appointment",
       saveAppointment: "Save appointment changes",
       cancelAppointment: "Cancel appointment",
@@ -509,6 +526,7 @@ const copy = {
       loading: "Loading...",
       optional: "Optional",
       required: "Required",
+      close: "Close",
       open: "Open",
       refresh: "Refresh",
       arabic: "Arabic",
@@ -540,6 +558,7 @@ const copy = {
       dashboard: "الرئيسية",
       patients: "تسجيل مريض",
       appointments: "إنشاء موعد",
+      registrations: "التسجيلات",
       queue: "الطابور",
       modality: "لوحة الجهاز",
       doctor: "لوحة الطبيب",
@@ -582,6 +601,7 @@ const copy = {
       title: "تسجيل المريض",
       body: "أنشئ سجل مريض مع حقول التسجيل المطلوبة.",
       save: "حفظ المريض",
+      createAppointment: "إنشاء موعد",
       clear: "تفريغ النموذج",
       duplicates: "فحص السجلات المشابهة",
       success: "تم حفظ المريض بنجاح.",
@@ -628,6 +648,9 @@ const copy = {
       createExamSave: "حفظ نوع الفحص",
       examAdded: "تم إنشاء نوع الفحص بنجاح.",
       appointmentSaved: "تم حفظ الموعد بنجاح.",
+      createdTitle: "تم إنشاء الموعد",
+      createdBody: "تم إنشاء الموعد بنجاح. يمكنك الآن طباعة وصل الموعد.",
+      printNow: "طباعة وصل الموعد",
       printSlip: "طباعة وصل الموعد",
       dateRequired: "اختر تاريخ الموعد قبل الحفظ.",
       dateInputHint: "يمكنك الضغط على يوم متاح أدناه أو اختيار التاريخ مباشرة من هنا.",
@@ -653,6 +676,16 @@ const copy = {
         specificInstructionAr: "تعليمات بالعربية",
         specificInstructionEn: "تعليمات بالإنجليزية"
       }
+    },
+    registrations: {
+      title: "تسجيلات اليوم",
+      body: "اعرض التسجيلات حسب اليوم، وافتح السجل، وعدّله، واطبع الوصل، أو احذفه.",
+      filtersTitle: "فلاتر التسجيلات",
+      listTitle: "المرضى المسجلون",
+      detailsTitle: "تفاصيل التسجيل",
+      load: "تحميل التسجيلات",
+      delete: "حذف التسجيل",
+      noSelection: "اختر تسجيلاً من القائمة أولاً."
     },
     queue: {
       title: "الطابور والوصول",
@@ -689,8 +722,8 @@ const copy = {
       completed: "تم تحديد الموعد كمكتمل بنجاح."
     },
     print: {
-      title: "الطباعة والوثائق",
-      body: "اطبع قائمة مواعيد اليوم، وعاين وصل الموعد وملصق المريض، وارفع طلب الفحص الممسوح ضوئياً إلى الموعد المحفوظ.",
+      title: "طباعة وصل الموعد",
+      body: "حمّل المواعيد واختر سجلاً واحداً ثم اطبع وصل موعد بسيط على ورق A5.",
       filtersTitle: "فلاتر القائمة اليومية",
       date: "التاريخ",
       dateFrom: "من",
@@ -722,7 +755,7 @@ const copy = {
       fileButton: "اختيار ملف",
       fileNone: "لم يتم اختيار ملف",
       selectedAppointment: "الموعد المختار",
-      noAppointment: "حمّل القائمة ثم اختر موعداً للطباعة أو رفع الوثائق.",
+      noAppointment: "حمّل القائمة ثم اختر موعداً للطباعة.",
       editAppointment: "تعديل الموعد",
       saveAppointment: "حفظ تعديلات الموعد",
       cancelAppointment: "إلغاء الموعد",
@@ -821,6 +854,7 @@ const copy = {
       loading: "جارٍ التحميل...",
       optional: "اختياري",
       required: "إلزامي",
+      close: "إغلاق",
       open: "فتح",
       refresh: "تحديث",
       arabic: "العربية",
@@ -1371,6 +1405,138 @@ function formatPriorityName(entry) {
     entry?.priority_name_ar ||
     "—"
   );
+}
+
+function buildAppointmentSlipData(source) {
+  if (!source) {
+    return null;
+  }
+
+  if (source.appointment) {
+    return {
+      accessionNumber: source.barcodeValue || source.appointment.accession_number || "",
+      appointmentDate: normalizeDateText(source.appointment.appointment_date),
+      patientArabicName: source.patient?.arabic_full_name || "",
+      patientEnglishName: source.patient?.english_full_name || "",
+      modalityName: formatModalityName(source.modality),
+      examName: formatExamName(source.examType),
+      notes: source.appointment?.notes || selectedPrintInstruction(source.examType || source.modality) || "",
+      slotNumber: source.appointment?.modality_slot_number || "",
+      patientPhone: source.patient?.phone_1 || "",
+      patientNationalId: source.patient?.national_id || ""
+    };
+  }
+
+  return {
+    accessionNumber: source.accession_number || "",
+    appointmentDate: normalizeDateText(source.appointment_date),
+    patientArabicName: source.arabic_full_name || "",
+    patientEnglishName: source.english_full_name || "",
+    modalityName: formatModalityName(source),
+    examName: formatExamName(source),
+    notes: source.notes || selectedPrintInstruction(source) || "",
+    slotNumber: source.modality_slot_number || "",
+    patientPhone: source.phone_1 || "",
+    patientNationalId: source.national_id || ""
+  };
+}
+
+function openAppointmentSlipPrint(source) {
+  const slip = buildAppointmentSlipData(source);
+
+  if (!slip) {
+    return;
+  }
+
+  const printWindow = window.open("", "_blank", "width=900,height=700");
+
+  if (!printWindow) {
+    throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
+  }
+
+  const noteText = slip.notes || "—";
+  const patientEnglish = slip.patientEnglishName || "—";
+  const patientPhone = slip.patientPhone || "—";
+  const patientNationalId = slip.patientNationalId || "—";
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(slip.accessionNumber)}</title>
+        <style>
+          @page { size: A5 portrait; margin: 10mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .sheet { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 18px; box-sizing: border-box; }
+          .top { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 18px; }
+          .eyebrow { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; }
+          .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
+          .subtitle { color: #4b5563; font-size: 15px; }
+          .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 8px 12px; font-size: 13px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+          .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+          .full { grid-column: 1 / -1; }
+          .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+          .value { font-size: 16px; font-weight: 600; }
+          .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
+          .barcode { margin-top: 24px; border: 1px dashed #9ca3af; border-radius: 10px; padding: 16px; text-align: center; }
+          .barcode-lines { height: 54px; background: repeating-linear-gradient(90deg, #111827, #111827 2px, transparent 2px, transparent 4px); margin-bottom: 10px; }
+          .barcode-text { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
+        </style>
+      </head>
+      <body>
+        <div class="sheet">
+          <div class="top">
+            <div>
+              <div class="eyebrow">${escapeHtml(t().print.slipPreview)}</div>
+              <div class="title">${escapeHtml(slip.accessionNumber)}</div>
+              <div class="subtitle">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
+            </div>
+            <div class="badge">${escapeHtml(`${t().appointments.fields.slotNumber}: ${slip.slotNumber || "—"}`)}</div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
+              <div class="value">${escapeHtml(slip.patientArabicName)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
+              <div class="value">${escapeHtml(patientEnglish)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
+              <div class="value">${escapeHtml(slip.modalityName)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
+              <div class="value">${escapeHtml(slip.examName)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.phone1)}</div>
+              <div class="value">${escapeHtml(patientPhone)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.nationalId)}</div>
+              <div class="value">${escapeHtml(patientNationalId)}</div>
+            </div>
+            <div class="card full">
+              <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
+              <div class="value small">${escapeHtml(noteText)}</div>
+            </div>
+          </div>
+          <div class="barcode">
+            <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
+            <div class="barcode-lines"></div>
+            <div class="barcode-text">${escapeHtml(slip.accessionNumber)}</div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
 }
 
 function appointmentFieldLabel(key) {
@@ -2062,7 +2228,12 @@ async function hydrateRoute() {
   }
 
   if (state.route === "print") {
-    await Promise.all([loadAppointmentLookups(), loadPrintAppointments(), loadIntegrationStatus()]);
+    await Promise.all([loadAppointmentLookups(), loadPrintAppointments()]);
+    return;
+  }
+
+  if (state.route === "registrations") {
+    await Promise.all([loadAppointmentLookups(), loadPrintAppointments()]);
   }
 }
 
@@ -2122,6 +2293,7 @@ async function signOut() {
     state.appointmentPatientResults = [];
     state.appointmentPatientQuery = "";
     state.appointmentForm = defaultAppointmentForm();
+    state.appointmentCreatedDialogOpen = false;
     state.savedAppointment = null;
     state.queueSnapshot = null;
     state.queueScanValue = "";
@@ -2149,6 +2321,7 @@ async function signOut() {
     state.restoreFileName = "";
     state.restorePayloadText = "";
     state.printResults = [];
+    state.printSuccess = "";
     state.integrationStatus = null;
     state.integrationError = "";
     state.integrationSuccess = "";
@@ -2255,6 +2428,26 @@ async function savePatient() {
     state.patientSaving = false;
     render();
   }
+}
+
+async function startAppointmentForPatient(patient) {
+  if (!patient) {
+    return;
+  }
+
+  state.selectedAppointmentPatient = patient;
+  state.appointmentPatientQuery = "";
+  state.appointmentPatientResults = [];
+  state.appointmentError = "";
+  state.appointmentSuccess = "";
+  state.route = "appointments";
+  localStorage.setItem("rispro-route", state.route);
+
+  if (!state.appointmentLookups.modalities.length) {
+    await loadAppointmentLookups();
+  }
+
+  render();
 }
 
 async function searchPatients() {
@@ -2586,6 +2779,7 @@ async function saveAppointment() {
     state.appointmentSuccess = t().appointments.appointmentSaved;
     pushToast("success", state.appointmentSuccess);
     state.savedAppointment = result;
+    state.appointmentCreatedDialogOpen = true;
     state.appointmentForm = {
       ...defaultAppointmentForm(),
       modalityId: state.appointmentForm.modalityId,
@@ -2820,31 +3014,8 @@ async function prepareAppointmentSlipFromCreation() {
   render();
 
   try {
-    const appointmentId = state.savedAppointment.appointment.id;
-    const appointmentDate = normalizeDateText(state.savedAppointment.appointment.appointment_date);
-
-    await api("/api/integrations/print-prepare", {
-      method: "POST",
-      body: JSON.stringify({
-        appointmentId,
-        outputType: "slip"
-      })
-    });
-    state.printFilters.date = appointmentDate || getCurrentDateInputValue();
-    state.printFilters.dateFrom = appointmentDate;
-    state.printFilters.dateTo = appointmentDate;
-    state.selectedPrintAppointment = null;
-    state.route = "print";
-    localStorage.setItem("rispro-route", state.route);
-    await loadPrintAppointments();
-    const match = state.printResults.find((item) => item.id === appointmentId);
-    if (match) {
-      state.selectedPrintAppointment = match;
-      fillAppointmentEditForm(match);
-      await loadAppointmentDocuments(match.id);
-    }
-    state.appointmentSuccess =
-      state.language === "ar" ? "تم تجهيز وصل الموعد للطباعة." : "Appointment slip prepared for printing.";
+    openAppointmentSlipPrint(state.savedAppointment);
+    state.appointmentCreatedDialogOpen = false;
   } catch (error) {
     state.appointmentError = error.message;
   } finally {
@@ -3608,7 +3779,12 @@ function renderSavedPatient() {
           <div class="item-title">${escapeHtml(state.language === "ar" ? state.savedPatient.arabic_full_name : state.savedPatient.english_full_name)}</div>
           <div class="item-subtitle">${escapeHtml(state.savedPatient.national_id)} • ${escapeHtml(state.savedPatient.phone_1)}</div>
         </div>
-        <span class="chip success">#${escapeHtml(state.savedPatient.id)}</span>
+        <div class="badge-row">
+          <span class="chip success">#${escapeHtml(state.savedPatient.id)}</span>
+          <button class="button-secondary" type="button" data-action="create-appointment-for-saved-patient">${escapeHtml(
+            t().patients.createAppointment
+          )}</button>
+        </div>
       </div>
     </div>
   `;
@@ -3944,6 +4120,33 @@ function renderExamTypeModal() {
   `;
 }
 
+function renderAppointmentCreatedDialog() {
+  if (!state.appointmentCreatedDialogOpen || !state.savedAppointment?.appointment) {
+    return "";
+  }
+
+  return `
+    <section class="surface modal-surface">
+      <div class="stack">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().appointments.createdTitle)}</h2>
+          <button class="button-ghost" type="button" data-action="close-appointment-created-dialog">×</button>
+        </div>
+        <p class="settings-summary">${escapeHtml(t().appointments.createdBody)}</p>
+        ${renderSavedAppointment()}
+        <div class="form-actions">
+          <button class="button-secondary" type="button" data-action="close-appointment-created-dialog">${escapeHtml(
+            t().common.close
+          )}</button>
+          <button class="button-primary" type="button" data-action="print-created-appointment-slip">${escapeHtml(
+            t().appointments.printNow
+          )}</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderAppointments() {
   const modality = currentAppointmentModality();
   const examTypes = filteredExamTypes();
@@ -4092,7 +4295,6 @@ function renderAppointments() {
 
               <div class="form-actions">
                 <button class="button-secondary" type="button" data-action="open-exam-type-modal">${escapeHtml(t().appointments.createExam)}</button>
-                <button class="button-secondary" type="button" data-action="prepare-appointment-slip">${escapeHtml(t().appointments.printSlip)}</button>
                 <button class="button-primary" type="submit">${escapeHtml(
                   state.appointmentSaving ? t().common.loading : t().appointments.save
                 )}</button>
@@ -4122,6 +4324,7 @@ function renderAppointments() {
       </section>
 
       ${renderExamTypeModal()}
+      ${renderAppointmentCreatedDialog()}
     </div>
   `;
 }
@@ -4630,11 +4833,18 @@ function renderModalityWorklist() {
                 <div class="item-subtitle">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
                   formatModalityName(appointment)
                 )} • ${escapeHtml(formatExamName(appointment))}${dateLabel}</div>
+                <div class="item-subtitle">${escapeHtml(
+                  `${t().patients.fields.nationalId}: ${appointment.national_id || "—"} • ${t().patients.fields.ageYears}: ${
+                    appointment.age_years || "—"
+                  } • ${t().appointments.fields.priority}: ${formatPriorityName(appointment)}`
+                )}</div>
               </div>
               ${
-                appointment.status === "completed"
-                  ? `<span class="chip success">${escapeHtml(appointment.status)}</span>`
-                  : `<button class="button-secondary" type="button" data-action="complete-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">${escapeHtml(t().modality.complete)}</button>`
+                ["waiting", "arrived"].includes(appointment.status)
+                  ? `<button class="button-secondary" type="button" data-action="complete-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">${escapeHtml(t().modality.complete)}</button>`
+                  : appointment.status === "completed"
+                    ? `<span class="chip success">${escapeHtml(appointment.status)}</span>`
+                    : `<span class="chip subtle">${escapeHtml(appointment.status)}</span>`
               }
             </div>
           `;
@@ -4657,6 +4867,10 @@ function renderModality() {
     `;
   }
 
+  const waitingCount = state.modalityResults.filter((item) => item.status === "waiting").length;
+  const arrivedCount = state.modalityResults.filter((item) => item.status === "arrived").length;
+  const completedCount = state.modalityResults.filter((item) => item.status === "completed").length;
+
   return `
     <div class="page">
       ${pageHero(
@@ -4667,6 +4881,13 @@ function renderModality() {
       )}
       ${alertMarkup("error", state.modalityError)}
       ${alertMarkup("success", state.modalitySuccess)}
+
+      <section class="card-grid">
+        ${statCard(t().dashboard.waiting, String(waitingCount), t().modality.title, "var(--amber)")}
+        ${statCard(state.language === "ar" ? "وصلوا" : "Arrived", String(arrivedCount), t().modality.filtersTitle, "var(--teal)")}
+        ${statCard(state.language === "ar" ? "مكتمل" : "Completed", String(completedCount), t().modality.complete, "var(--green)")}
+      </section>
+
       <section class="surface">
         <form id="modality-filter-form" class="stack">
           <div class="section-head">
@@ -4712,7 +4933,6 @@ function renderModality() {
               <button class="button-ghost" type="button" data-action="set-modality-quick-date" data-range="next_week">${escapeHtml(t().modality.quickNextWeek)}</button>
             </div>
             <button class="button-primary" type="submit">${escapeHtml(state.modalityLoading ? t().common.loading : t().modality.load)}</button>
-            <button class="button-secondary" type="button" data-action="print-modality-list">${escapeHtml(t().modality.printList)}</button>
           </div>
         </form>
       </section>
@@ -4942,8 +5162,8 @@ function renderPrint() {
         "",
         t().print.selectedAppointment
       )}
-      ${alertMarkup("error", state.printError || state.documentsError || state.uploadError || state.integrationError)}
-      ${alertMarkup("success", state.uploadSuccess || state.integrationSuccess)}
+      ${alertMarkup("error", state.printError)}
+      ${alertMarkup("success", state.printSuccess || state.integrationSuccess)}
 
       <section class="split-grid">
         <div class="stack">
@@ -4990,7 +5210,6 @@ function renderPrint() {
                   <button class="button-ghost" type="button" data-action="set-print-range" data-range="clear">${escapeHtml(t().print.quickClear)}</button>
                 </div>
                 <button class="button-primary" type="submit">${escapeHtml(state.printLoading ? t().common.loading : t().print.load)}</button>
-                <button class="button-secondary" type="button" data-action="print-daily-list">${escapeHtml(t().print.printDaily)}</button>
               </div>
             </form>
           </article>
@@ -5005,64 +5224,152 @@ function renderPrint() {
         </div>
 
         <div class="stack">
-          <article class="surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.hardwareTitle)}</h2>
-              <span class="chip subtle">${escapeHtml(state.selectedPrintAppointment?.accession_number || t().common.noData)}</span>
-            </div>
-            ${renderIntegrationStatusPanel()}
-          </article>
-
           <article class="surface slip-surface">
             <div class="section-head">
               <h2 class="section-title">${escapeHtml(t().print.slipPreview)}</h2>
-              <button class="button-secondary" type="button" data-action="browser-print">${escapeHtml(t().nav.print)}</button>
+              <button class="button-primary" type="button" data-action="browser-print">${escapeHtml(t().appointments.printNow)}</button>
             </div>
             ${renderPrintSlipPreview()}
           </article>
 
           <article class="surface">
             <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.labelPreview)}</h2>
+              <h2 class="section-title">${escapeHtml(t().print.selectedAppointment)}</h2>
+              <span class="chip subtle">${escapeHtml(state.selectedPrintAppointment?.accession_number || t().common.noData)}</span>
             </div>
-            ${renderPrintLabelPreview()}
+            <div class="settings-summary">${escapeHtml(
+              state.language === "ar"
+                ? "تم تبسيط هذه الصفحة لطباعة وصل الموعد على ورق A5 مباشرة."
+                : "This page is simplified to print the appointment slip directly on A5 paper."
+            )}</div>
+            ${
+              state.selectedPrintAppointment
+                ? `
+                  <div class="info-grid">
+                    ${infoTile(t().patients.fields.arabicFullName, state.selectedPrintAppointment.arabic_full_name, "tone-good")}
+                    ${infoTile(t().patients.fields.englishFullName, state.selectedPrintAppointment.english_full_name || "—", "")}
+                    ${infoTile(appointmentFieldLabel("modality"), formatModalityName(state.selectedPrintAppointment), "")}
+                    ${infoTile(appointmentFieldLabel("examType"), formatExamName(state.selectedPrintAppointment), "")}
+                    ${infoTile(t().patients.fields.phone1, state.selectedPrintAppointment.phone_1 || "—", "tone-warm")}
+                    ${infoTile(t().patients.fields.nationalId, state.selectedPrintAppointment.national_id || "—", "")}
+                  </div>
+                `
+                : `<div class="empty">${escapeHtml(t().print.noAppointment)}</div>`
+            }
           </article>
+        </div>
+      </section>
+    </div>
+  `;
+}
 
-          <article class="surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.documentsTitle)}</h2>
-              <span class="chip accent">${escapeHtml(String(state.appointmentDocuments.length))}</span>
+function renderRegistrationsList() {
+  if (state.printLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.printResults.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.printResults
+        .map(
+          (appointment) => `
+            <div class="item patient-result">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(
+                  state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
+                )}</div>
+                <div class="item-subtitle">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
+                  formatDisplayDate(appointment.appointment_date)
+                )} • ${escapeHtml(formatModalityName(appointment))}</div>
+              </div>
+              <button class="button-secondary" type="button" data-action="select-registration" data-appointment-id="${escapeHtml(String(appointment.id))}">
+                ${escapeHtml(t().common.open)}
+              </button>
             </div>
-            ${renderDocumentsList()}
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
 
-            <form id="document-upload-form" class="stack">
+function renderRegistrations() {
+  return `
+    <div class="page">
+      ${pageHero(t().registrations.title, t().registrations.body, "", t().registrations.detailsTitle)}
+      ${alertMarkup("error", state.printError || state.appointmentEditError)}
+      ${alertMarkup("success", state.printSuccess || state.appointmentEditSuccess)}
+
+      <section class="split-grid">
+        <div class="stack">
+          <article class="surface">
+            <form id="print-filter-form" class="stack">
+              <div class="section-head">
+                <h2 class="section-title">${escapeHtml(t().registrations.filtersTitle)}</h2>
+                <span class="chip accent">${escapeHtml(t().registrations.load)}</span>
+              </div>
               <div class="form-grid">
                 <label class="field">
-                  <span class="label">${escapeHtml(t().print.fields.documentType)}</span>
-                  <input class="input field-en" name="documentType" value="${escapeHtml(state.uploadForm.documentType)}" />
+                  <span class="label">${escapeHtml(t().print.date)}</span>
+                  <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
                 </label>
                 <label class="field">
-                  <span class="label">${escapeHtml(t().print.fields.fileName)}</span>
-                  <input class="input field-en" value="${escapeHtml(state.uploadForm.fileName || t().print.fileNone)}" readonly />
+                  <span class="label">${escapeHtml(t().print.dateFrom)}</span>
+                  <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.printFilters.dateFrom)}" />
                 </label>
-                <label class="field full">
-                  <span class="label">${escapeHtml(t().print.fileButton)}</span>
-                  <input class="input" type="file" name="documentFile" data-upload-file="true" />
+                <label class="field">
+                  <span class="label">${escapeHtml(t().print.dateTo)}</span>
+                  <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.printFilters.dateTo)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(t().print.modality)}</span>
+                  <select class="select" name="modalityId">
+                    <option value="">${escapeHtml(t().common.optional)}</option>
+                    ${state.appointmentLookups.modalities
+                      .map(
+                        (entry) => `
+                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.printFilters.modalityId) ? "selected" : ""}>
+                            ${escapeHtml(formatModalityName(entry))}
+                          </option>
+                        `
+                      )
+                      .join("")}
+                  </select>
                 </label>
               </div>
               <div class="form-actions">
-                <button class="button-primary" type="submit">${escapeHtml(state.uploadSaving ? t().common.loading : t().print.uploadButton)}</button>
+                <button class="button-primary" type="submit">${escapeHtml(state.printLoading ? t().common.loading : t().registrations.load)}</button>
               </div>
             </form>
           </article>
 
           <article class="surface">
             <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.editAppointment)}</h2>
+              <h2 class="section-title">${escapeHtml(t().registrations.listTitle)}</h2>
+              <span class="chip subtle">${escapeHtml(String(state.printResults.length))}</span>
+            </div>
+            ${renderRegistrationsList()}
+          </article>
+        </div>
+
+        <div class="stack">
+          <article class="surface slip-surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().print.slipPreview)}</h2>
+              <button class="button-primary" type="button" data-action="browser-print">${escapeHtml(t().appointments.printNow)}</button>
+            </div>
+            ${renderPrintSlipPreview()}
+          </article>
+
+          <article class="surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().registrations.detailsTitle)}</h2>
               <span class="chip subtle">${escapeHtml(state.selectedPrintAppointment?.accession_number || t().common.noData)}</span>
             </div>
-            ${alertMarkup("error", state.appointmentEditError)}
-            ${alertMarkup("success", state.appointmentEditSuccess)}
             ${
               state.selectedPrintAppointment
                 ? `<form id="appointment-edit-form" class="stack">
@@ -5135,10 +5442,10 @@ function renderPrint() {
                       <textarea class="textarea ${state.language === "ar" ? "field-ar" : ""}" name="cancelReason">${escapeHtml(state.cancelReason)}</textarea>
                     </label>
                     <div class="form-actions">
-                      <button class="button-secondary" type="submit">${escapeHtml(state.appointmentCancelSaving ? t().common.loading : t().print.cancelAppointment)}</button>
+                      <button class="button-secondary" type="submit">${escapeHtml(state.appointmentCancelSaving ? t().common.loading : t().registrations.delete)}</button>
                     </div>
                   </form>`
-                : `<div class="empty">${escapeHtml(t().print.noAppointment)}</div>`
+                : `<div class="empty">${escapeHtml(t().registrations.noSelection)}</div>`
             }
           </article>
         </div>
@@ -5991,6 +6298,8 @@ function renderPage() {
       return renderPatients();
     case "appointments":
       return renderAppointments();
+    case "registrations":
+      return renderRegistrations();
     case "queue":
       return renderQueue();
     case "modality":
@@ -6093,7 +6402,7 @@ function renderLoading() {
 
 function render() {
   document.documentElement.lang = state.language;
-  document.documentElement.dir = "ltr";
+  document.documentElement.dir = state.language === "ar" ? "rtl" : "ltr";
   const app = document.getElementById("app");
 
   if (!state.authChecked) {
@@ -6423,6 +6732,12 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "create-appointment-for-saved-patient") {
+    event.preventDefault();
+    void startAppointmentForPatient(state.savedPatient);
+    return;
+  }
+
   if (target.dataset.action === "select-appointment-patient") {
     event.preventDefault();
     const patientId = target.dataset.patientId;
@@ -6528,6 +6843,24 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "select-registration") {
+    event.preventDefault();
+    const appointmentId = target.dataset.appointmentId;
+    state.selectedPrintAppointment = state.printResults.find(
+      (appointment) => String(appointment.id) === String(appointmentId)
+    ) || null;
+    state.printError = "";
+    state.printSuccess = "";
+    state.appointmentEditError = "";
+    state.appointmentEditSuccess = "";
+    state.cancelReason = "";
+    if (state.selectedPrintAppointment) {
+      fillAppointmentEditForm(state.selectedPrintAppointment);
+    }
+    render();
+    return;
+  }
+
   if (target.dataset.action === "select-doctor-appointment") {
     event.preventDefault();
     const appointmentId = target.dataset.appointmentId;
@@ -6610,7 +6943,24 @@ function handleClick(event) {
 
   if (target.dataset.action === "browser-print") {
     event.preventDefault();
-    window.print();
+    if (!state.selectedPrintAppointment) {
+      state.printError = t().print.noAppointment;
+      render();
+      return;
+    }
+
+    try {
+      state.printError = "";
+      state.printSuccess = "";
+      openAppointmentSlipPrint(state.selectedPrintAppointment);
+      state.printSuccess =
+        state.language === "ar" ? "تم فتح وصل الموعد للطباعة." : "The appointment slip was opened for printing.";
+      pushToast("success", state.printSuccess);
+    } catch (error) {
+      state.printError = error.message;
+      pushToast("error", state.printError);
+    }
+    render();
     return;
   }
 
@@ -6645,6 +6995,19 @@ function handleClick(event) {
   }
 
   if (target.dataset.action === "prepare-appointment-slip") {
+    event.preventDefault();
+    void prepareAppointmentSlipFromCreation();
+    return;
+  }
+
+  if (target.dataset.action === "close-appointment-created-dialog") {
+    event.preventDefault();
+    state.appointmentCreatedDialogOpen = false;
+    render();
+    return;
+  }
+
+  if (target.dataset.action === "print-created-appointment-slip") {
     event.preventDefault();
     void prepareAppointmentSlipFromCreation();
     return;
