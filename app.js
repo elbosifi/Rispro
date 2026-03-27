@@ -1404,6 +1404,10 @@ async function signOut() {
     state.queueWalkInForm = defaultQueueWalkInForm();
     state.queueSuccess = "";
     state.noShowReasons = {};
+    state.modalityResults = [];
+    state.modalityFilters = defaultModalityFilters();
+    state.modalityError = "";
+    state.modalitySuccess = "";
     state.reauthPassword = "";
     state.reauthError = "";
     state.backupSuccess = "";
@@ -2257,7 +2261,7 @@ function renderDashboard() {
         ${statCard(t().dashboard.session, formatRole(state.session.role), state.session.fullName, "var(--amber)")}
         ${statCard(t().dashboard.waiting, String(summary.waiting_count || 0), `${queueEntries.length} ${t().queue.waitingList}`, "var(--blue)")}
         ${statCard(t().dashboard.noShowReview, String(noShowCandidates.length), `${t().dashboard.reviewStarts} ${reviewTime}`, "var(--red)")}
-        ${statCard(t().dashboard.modules, "7", state.language === "ar" ? "الرئيسية + المرضى + المواعيد + الطابور + الطباعة + البحث + الإعدادات" : "Dashboard + Patients + Appointments + Queue + Print + Search + Settings", "var(--blue)")}
+        ${statCard(t().dashboard.modules, "8", state.language === "ar" ? "الرئيسية + المرضى + المواعيد + الطابور + لوحة الجهاز + الطباعة + البحث + الإعدادات" : "Dashboard + Patients + Appointments + Queue + Modality + Print + Search + Settings", "var(--blue)")}
         ${statCard(t().dashboard.date, localizedDate(), t().common.environment + `: ${state.dashboardLoading || state.queueLoading ? t().common.loading : "API"}`, "var(--green)")}
       </section>
 
@@ -2272,6 +2276,7 @@ function renderDashboard() {
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.patients)}</div><div class="item-subtitle">/api/patients POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.appointments)}</div><div class="item-subtitle">/api/appointments POST, /api/appointments/lookups</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.queue)}</div><div class="item-subtitle">/api/queue GET, /api/queue/scan, /api/queue/walk-in</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.modality)}</div><div class="item-subtitle">/api/modality/worklist, /api/modality/:id/complete</div></div><span class="chip accent">${escapeHtml(canAccessModalityBoard() ? t().common.active : t().common.readOnly)}</span></div>
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.print)}</div><div class="item-subtitle">/api/appointments GET, /api/documents POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.search)}</div><div class="item-subtitle">/api/patients GET</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
             <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.settings)}</div><div class="item-subtitle">/api/users GET/POST</div></div><span class="chip accent">${escapeHtml(isSupervisor() ? t().common.active : t().common.readOnly)}</span></div>
@@ -3240,6 +3245,108 @@ function renderDocumentsList() {
   `;
 }
 
+function renderModalityWorklist() {
+  if (state.modalityLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.modalityResults.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.modalityResults
+        .map(
+          (appointment) => `
+            <div class="item patient-result">
+              <div class="item-copy">
+                <div class="item-title">#${escapeHtml(String(appointment.modality_slot_number || "—"))} • ${escapeHtml(
+                  state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
+                )}</div>
+                <div class="item-subtitle">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
+                  state.language === "ar" ? appointment.modality_name_ar : appointment.modality_name_en
+                )} • ${escapeHtml(appointment.exam_name_ar ? (state.language === "ar" ? appointment.exam_name_ar : appointment.exam_name_en) : "—")}</div>
+              </div>
+              ${
+                appointment.status === "completed"
+                  ? `<span class="chip success">${escapeHtml(appointment.status)}</span>`
+                  : `<button class="button-secondary" type="button" data-action="complete-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">${escapeHtml(t().modality.complete)}</button>`
+              }
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderModality() {
+  if (!canAccessModalityBoard()) {
+    return `
+      <div class="page">
+        ${pageHero(t().modality.title, t().modality.body, "", t().common.readOnly)}
+        <section class="surface">
+          <div class="empty">${escapeHtml(t().modality.blocked)}</div>
+        </section>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="page">
+      ${pageHero(
+        t().modality.title,
+        t().modality.body,
+        `<button class="button-secondary" type="button" data-action="refresh-modality">${escapeHtml(t().common.refresh)}</button>`,
+        t().nav.modality
+      )}
+      ${alertMarkup("error", state.modalityError)}
+      ${alertMarkup("success", state.modalitySuccess)}
+      <section class="surface">
+        <form id="modality-filter-form" class="stack">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().modality.filtersTitle)}</h2>
+            <span class="chip accent">${escapeHtml(t().modality.load)}</span>
+          </div>
+          <div class="form-grid">
+            <label class="field">
+              <span class="label">${escapeHtml(t().print.date)}</span>
+              <input class="input field-en" type="date" name="date" value="${escapeHtml(state.modalityFilters.date)}" />
+            </label>
+            <label class="field">
+              <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+              <select class="select" name="modalityId">
+                <option value="">${escapeHtml(t().common.optional)}</option>
+                ${state.appointmentLookups.modalities
+                  .map(
+                    (entry) => `
+                      <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.modalityFilters.modalityId) ? "selected" : ""}>
+                        ${escapeHtml(state.language === "ar" ? entry.name_ar : entry.name_en)}
+                      </option>
+                    `
+                  )
+                  .join("")}
+              </select>
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="button-primary" type="submit">${escapeHtml(state.modalityLoading ? t().common.loading : t().modality.load)}</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().modality.title)}</h2>
+          <span class="chip subtle">${escapeHtml(String(state.modalityResults.length))}</span>
+        </div>
+        ${renderModalityWorklist()}
+      </section>
+    </div>
+  `;
+}
+
 function renderPrint() {
   return `
     <div class="page">
@@ -3749,6 +3856,7 @@ function renderSettings() {
                 <span class="label">${escapeHtml(t().settings.fields.role)}</span>
                 <select class="select" name="role" data-user-field="true">
                   <option value="receptionist" ${state.userForm.role === "receptionist" ? "selected" : ""}>${escapeHtml(formatRole("receptionist"))}</option>
+                  <option value="modality_staff" ${state.userForm.role === "modality_staff" ? "selected" : ""}>${escapeHtml(formatRole("modality_staff"))}</option>
                   <option value="supervisor" ${state.userForm.role === "supervisor" ? "selected" : ""}>${escapeHtml(formatRole("supervisor"))}</option>
                 </select>
               </label>
@@ -3812,6 +3920,8 @@ function renderPage() {
       return renderAppointments();
     case "queue":
       return renderQueue();
+    case "modality":
+      return renderModality();
     case "print":
       return renderPrint();
     case "search":
@@ -4002,6 +4112,11 @@ function handleInput(event) {
     return;
   }
 
+  if (target.closest("#modality-filter-form")) {
+    state.modalityFilters[target.name] = target.value;
+    return;
+  }
+
   if (target.closest("#patient-merge-form")) {
     state.mergeConfirmationText = target.value;
     return;
@@ -4182,6 +4297,12 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "complete-appointment") {
+    event.preventDefault();
+    void completeModalityAppointment(target.dataset.appointmentId);
+    return;
+  }
+
   if (target.dataset.action === "select-appointment-day") {
     event.preventDefault();
     state.appointmentForm.appointmentDate = target.dataset.date || "";
@@ -4260,6 +4381,12 @@ function handleClick(event) {
   if (target.dataset.action === "refresh-queue") {
     event.preventDefault();
     void loadQueueSnapshot();
+    return;
+  }
+
+  if (target.dataset.action === "refresh-modality") {
+    event.preventDefault();
+    void loadModalityWorklist();
     return;
   }
 
@@ -4400,6 +4527,12 @@ function handleSubmit(event) {
   if (event.target.id === "print-filter-form") {
     event.preventDefault();
     void loadPrintAppointments();
+    return;
+  }
+
+  if (event.target.id === "modality-filter-form") {
+    event.preventDefault();
+    void loadModalityWorklist();
     return;
   }
 

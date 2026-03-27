@@ -13,6 +13,7 @@ RISpro Reception is now a real Node.js + PostgreSQL web app for the currently im
 - appointment editing, rescheduling, and cancellation
 - supervisor re-authentication for settings and admin tools
 - backup download and restore upload from the browser
+- modality staff role with a completion worklist
 - supervisor user management
 
 The old prototype-only browser login and fake local data have been removed from the main production flow.
