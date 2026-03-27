@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
@@ -110,7 +111,7 @@ async function nextModalitySlotNumber(client, modalityId, appointmentDate, exclu
 
 function normalizeDateOrToday(value) {
   if (!value) {
-    return new Date().toISOString().slice(0, 10);
+    return getTripoliToday();
   }
 
   return normalizeAppointmentDate(value);
@@ -296,7 +297,7 @@ export async function listAppointmentsForPrint(filters = {}) {
 
 export async function getAppointmentPrintDetails(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
-  const appointments = await listAppointmentsForPrint({ date: new Date().toISOString().slice(0, 10) });
+  const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
   const appointment = appointments.find((item) => item.id === cleanAppointmentId);
 
   if (appointment) {

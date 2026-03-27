@@ -153,6 +153,9 @@ html[dir="ltr"] .nav-link.active {
 
 .content {
   padding: 26px;
+  width: 100%;
+  max-width: 1520px;
+  margin: 0 auto;
 }
 
 .topbar {
@@ -318,13 +321,13 @@ html[dir="ltr"] .nav-link.active {
 
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 18px;
 }
 
 .split-grid {
   display: grid;
-  grid-template-columns: 1.35fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
   gap: 20px;
 }
 
@@ -509,7 +512,7 @@ html[dir="ltr"] .nav-link.active {
 .form-grid,
 .info-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 18px;
 }
 
@@ -649,7 +652,7 @@ html[dir="ltr"] .nav-link.active {
 
 .calendar {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
   gap: 12px;
 }
 
@@ -666,6 +669,7 @@ html[dir="ltr"] .nav-link.active {
 .day.active {
   border-color: rgba(15, 118, 110, 0.34);
   box-shadow: 0 16px 32px rgba(15, 118, 110, 0.12);
+  background: linear-gradient(180deg, rgba(15, 118, 110, 0.08), rgba(255, 255, 255, 0.92));
 }
 
 .day-full {
@@ -883,8 +887,12 @@ html[dir="ltr"] .nav-link.active {
 
 .settings-catalog {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 20px;
+}
+
+.date-selection-summary {
+  margin-bottom: 16px;
 }
 
 .settings-category {

@@ -1,10 +1,10 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { createAppointment } from "./appointment-service.js";
 import { logAuditEntry } from "./audit-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
-const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
 
 function getTripoliParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -27,11 +27,6 @@ function getTripoliParts(date = new Date()) {
   }, {});
 }
 
-function getTripoliToday() {
-  const parts = getTripoliParts();
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
 function getTripoliMinutesSinceMidnight() {
   const parts = getTripoliParts();
   return Number(parts.hour) * 60 + Number(parts.minute);
@@ -48,13 +43,6 @@ function parseTimeToMinutes(value) {
   return Number(match[1]) * 60 + Number(match[2]);
 }
 
-function normalizeDateValue(value) {
-  if (value instanceof Date) {
-    return value.toISOString().slice(0, 10);
-  }
-
-  return String(value || "").slice(0, 10);
-}
 
 async function getNoShowReviewTime() {
   const { rows } = await pool.query(

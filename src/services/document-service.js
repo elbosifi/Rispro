@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -112,7 +113,7 @@ export async function uploadDocument(payload, currentUserId) {
 
   await ensureRelatedRecords(patientId, appointmentId);
 
-  const dateFolder = new Date().toISOString().slice(0, 10);
+  const dateFolder = getTripoliToday();
   const targetDirectory = path.join(rootDir, env.uploadsDir, dateFolder);
   await fs.mkdir(targetDirectory, { recursive: true });
 

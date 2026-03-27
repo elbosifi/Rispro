@@ -253,6 +253,9 @@ const copy = {
       createExamSave: "Save exam type",
       examAdded: "Exam type created successfully.",
       appointmentSaved: "Appointment saved successfully.",
+      dateRequired: "Choose an appointment date before saving.",
+      dateInputHint: "You can click an available day below or pick the exact date here.",
+      selectedDateLabel: "Selected date",
       fullDay: "Full day",
       availableDay: "Available",
       overbookNotice: "This day is full. Supervisor overbooking is required.",
@@ -514,6 +517,9 @@ const copy = {
       createExamSave: "حفظ نوع الفحص",
       examAdded: "تم إنشاء نوع الفحص بنجاح.",
       appointmentSaved: "تم حفظ الموعد بنجاح.",
+      dateRequired: "اختر تاريخ الموعد قبل الحفظ.",
+      dateInputHint: "يمكنك الضغط على يوم متاح أدناه أو اختيار التاريخ مباشرة من هنا.",
+      selectedDateLabel: "التاريخ المختار",
       fullDay: "اليوم ممتلئ",
       availableDay: "متاح",
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
@@ -907,7 +913,7 @@ function defaultQueueWalkInForm() {
 
 function defaultPrintFilters() {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: getCurrentDateInputValue(),
     modalityId: ""
   };
 }
@@ -935,7 +941,7 @@ function defaultAppointmentEditForm() {
 
 function defaultModalityFilters() {
   return {
-    date: new Date().toISOString().slice(0, 10),
+    date: getCurrentDateInputValue(),
     modalityId: ""
   };
 }
@@ -1114,6 +1120,29 @@ function formatDisplayDateTime(value) {
   }).format(new Date(value));
 }
 
+function normalizeDateText(value) {
+  return String(value || "").slice(0, 10);
+}
+
+function getCurrentDateInputValue() {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Tripoli",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+
+  const parts = formatter.formatToParts(new Date()).reduce((accumulator, part) => {
+    if (part.type !== "literal") {
+      accumulator[part.type] = part.value;
+    }
+
+    return accumulator;
+  }, {});
+
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
 function formatSex(value) {
   if (value === "female") {
     return t().common.female;
@@ -1135,7 +1164,9 @@ function filteredExamTypes() {
 }
 
 function selectedAppointmentDay() {
-  return state.appointmentCalendar.find((day) => day.appointment_date === state.appointmentForm.appointmentDate);
+  return state.appointmentCalendar.find(
+    (day) => normalizeDateText(day.appointment_date) === normalizeDateText(state.appointmentForm.appointmentDate)
+  );
 }
 
 function queueExamTypes() {
@@ -1420,7 +1451,7 @@ async function loadAppointmentAvailability() {
     state.appointmentCalendar = result.availability || [];
 
     const selectedDateStillAvailable = state.appointmentCalendar.some(
-      (day) => day.appointment_date === state.appointmentForm.appointmentDate
+      (day) => normalizeDateText(day.appointment_date) === normalizeDateText(state.appointmentForm.appointmentDate)
     );
 
     if (!selectedDateStillAvailable) {
@@ -1870,7 +1901,7 @@ async function downloadBackup() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `rispro-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `rispro-backup-${getCurrentDateInputValue()}.json`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -1932,7 +1963,7 @@ async function downloadAuditExport() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `rispro-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = `rispro-audit-${getCurrentDateInputValue()}.csv`;
     document.body.append(link);
     link.click();
     link.remove();
@@ -2010,6 +2041,12 @@ async function createExamType() {
 async function saveAppointment() {
   if (!state.selectedAppointmentPatient) {
     state.appointmentError = t().appointments.noneSelected;
+    render();
+    return;
+  }
+
+  if (!normalizeDateText(state.appointmentForm.appointmentDate)) {
+    state.appointmentError = t().appointments.dateRequired;
     render();
     return;
   }
@@ -2930,7 +2967,8 @@ function renderAppointmentCalendar() {
     <div class="calendar">
       ${state.appointmentCalendar
         .map((day) => {
-          const isSelected = day.appointment_date === state.appointmentForm.appointmentDate;
+          const normalizedDate = normalizeDateText(day.appointment_date);
+          const isSelected = normalizedDate === normalizeDateText(state.appointmentForm.appointmentDate);
           const isFull = day.remaining_capacity <= 0;
           const canSelect = !isFull || isSupervisor();
 
@@ -2939,9 +2977,9 @@ function renderAppointmentCalendar() {
               type="button"
               class="day ${isSelected ? "active" : ""} ${isFull ? "day-full" : ""}"
               data-action="${canSelect ? "select-appointment-day" : "disabled-day"}"
-              data-date="${escapeHtml(day.appointment_date)}"
+              data-date="${escapeHtml(normalizedDate)}"
             >
-              <div class="day-date">${escapeHtml(formatDisplayDate(day.appointment_date))}</div>
+              <div class="day-date">${escapeHtml(formatDisplayDate(normalizedDate))}</div>
               <div class="day-value">${escapeHtml(String(day.remaining_capacity))}</div>
               <div class="day-note">
                 ${escapeHtml(isFull ? t().appointments.fullDay : t().appointments.availableDay)}
@@ -3029,6 +3067,7 @@ function renderAppointments() {
   const modality = currentAppointmentModality();
   const examTypes = filteredExamTypes();
   const selectedDay = selectedAppointmentDay();
+  const selectedDateValue = normalizeDateText(state.appointmentForm.appointmentDate);
 
   return `
     <div class="page">
@@ -3139,6 +3178,17 @@ function renderAppointments() {
                   </select>
                 </label>
 
+                <label class="field">
+                  <span class="label">${escapeHtml(t().appointments.fields.appointmentDate)}</span>
+                  <input
+                    class="input field-en"
+                    type="date"
+                    name="appointmentDate"
+                    value="${escapeHtml(selectedDateValue)}"
+                  />
+                  <div class="small">${escapeHtml(t().appointments.dateInputHint)}</div>
+                </label>
+
                 <label class="field checkbox-field">
                   <span class="label">${escapeHtml(t().appointments.walkIn)}</span>
                   <input type="checkbox" name="isWalkIn" ${state.appointmentForm.isWalkIn ? "checked" : ""} />
@@ -3173,9 +3223,15 @@ function renderAppointments() {
               <h2 class="section-title">${escapeHtml(t().appointments.dateSelect)}</h2>
               <span class="chip subtle">${escapeHtml(
                 selectedDay
-                  ? `${t().appointments.fields.appointmentDate}: ${selectedDay.appointment_date}`
-                  : t().appointments.calendarHint
+                  ? `${t().appointments.fields.appointmentDate}: ${normalizeDateText(selectedDay.appointment_date)}`
+                  : selectedDateValue || t().appointments.calendarHint
               )}</span>
+            </div>
+            <div class="date-selection-summary">
+              <div class="metric-tile tone-good">
+                <div class="metric-label">${escapeHtml(t().appointments.selectedDateLabel)}</div>
+                <div class="metric-value">${escapeHtml(selectedDateValue || t().common.noData)}</div>
+              </div>
             </div>
             ${selectedDay?.is_full ? `<div class="alert alert-error">${escapeHtml(t().appointments.overbookNotice)}</div>` : ""}
             ${renderAppointmentCalendar()}
@@ -4680,6 +4736,11 @@ function handleInput(event) {
 
   if (target.closest("#appointment-edit-form")) {
     state.appointmentEditForm[target.name] = target.value;
+
+    if (target.name === "modalityId") {
+      state.appointmentEditForm.examTypeId = "";
+    }
+
     return;
   }
 

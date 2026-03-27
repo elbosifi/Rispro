@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
@@ -21,7 +22,7 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
 }
 
 function normalizeDate(value) {
-  const raw = String(value || new Date().toISOString().slice(0, 10)).trim();
+  const raw = String(value || getTripoliToday()).trim();
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     throw new HttpError(400, "date must be in YYYY-MM-DD format.");

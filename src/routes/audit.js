@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { getTripoliToday } from "../utils/date.js";
 import { exportAuditEntriesCsv, listAuditEntries, listAuditFilterOptions, logAuditEntry } from "../services/audit-service.js";
 
 export const auditRouter = express.Router();
@@ -34,10 +35,7 @@ auditRouter.get("/export", async (req, res, next) => {
     });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="rispro-audit-${new Date().toISOString().slice(0, 10)}.csv"`
-    );
+    res.setHeader("Content-Disposition", `attachment; filename="rispro-audit-${getTripoliToday()}.csv"`);
     res.send(csv);
   } catch (error) {
     next(error);
