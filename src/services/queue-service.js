@@ -102,7 +102,7 @@ async function getQueueSummary(queueDate) {
       select
         count(*) as total_appointments,
         count(*) filter (where status = 'scheduled') as scheduled_count,
-        count(*) filter (where status = 'waiting') as waiting_count,
+        count(*) filter (where status in ('waiting', 'arrived')) as waiting_count,
         count(*) filter (where status = 'no-show') as no_show_count,
         count(*) filter (where arrived_at is not null) as arrived_count
       from appointments
@@ -231,7 +231,7 @@ async function updateAppointmentStatus(client, appointmentId, oldStatus, newStat
       update appointments
       set
         status = $2,
-        arrived_at = case when $2 = 'waiting' then coalesce(arrived_at, now()) else arrived_at end,
+        arrived_at = case when $2 in ('arrived', 'waiting') then coalesce(arrived_at, now()) else arrived_at end,
         updated_by_user_id = $3,
         updated_at = now()
       where id = $1
@@ -292,8 +292,8 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
 
     const queueEntry = await enqueueAppointmentRecord(client, appointment, currentUser.sub, queueDate);
 
-    if (appointment.status !== "waiting") {
-      await updateAppointmentStatus(client, appointment.id, appointment.status, "waiting", currentUser.sub);
+    if (appointment.status !== "arrived") {
+      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", currentUser.sub);
     }
 
     await logAuditEntry(
@@ -302,7 +302,7 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
         entityId: appointment.id,
         actionType: "scan_into_queue",
         oldValues: { status: appointment.status },
-        newValues: { status: "waiting", accession_number: appointment.accession_number },
+        newValues: { status: "arrived", accession_number: appointment.accession_number },
         changedByUserId: currentUser.sub
       },
       client
@@ -317,7 +317,7 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
         accession_number: appointment.accession_number,
         is_walk_in: appointment.is_walk_in,
         notes: appointment.notes,
-        status: "waiting"
+        status: "arrived"
       },
       patient: {
         arabic_full_name: appointment.arabic_full_name,

@@ -396,8 +396,8 @@ const copy = {
       completed: "Appointment marked completed successfully."
     },
     print: {
-      title: "Appointment slip printing",
-      body: "Load appointments, choose one record, and print a simple A5 appointment slip.",
+      title: "Daily modality printing",
+      body: "Load today's appointments and print daily lists by modality (CT, ultrasound, mammography, MRI, and more).",
       filtersTitle: "Daily list filters",
       date: "Date",
       dateFrom: "From",
@@ -549,7 +549,8 @@ const copy = {
       readOnly: "Read-only",
       environment: "Environment",
       patientCount: "Patients shown",
-      usersShown: "Users shown"
+      usersShown: "Users shown",
+      status: "Status"
     }
   },
   ar: {
@@ -728,8 +729,8 @@ const copy = {
       completed: "تم تحديد الموعد كمكتمل بنجاح."
     },
     print: {
-      title: "طباعة وصل الموعد",
-      body: "حمّل المواعيد واختر سجلاً واحداً ثم اطبع وصل موعد بسيط على ورق A5.",
+      title: "طباعة القوائم اليومية حسب الأجهزة",
+      body: "حمّل مواعيد اليوم واطبع القوائم اليومية حسب كل جهاز مثل CT وUltrasound وMammography وMRI وغيرها.",
       filtersTitle: "فلاتر القائمة اليومية",
       date: "التاريخ",
       dateFrom: "من",
@@ -881,7 +882,8 @@ const copy = {
       readOnly: "للعرض فقط",
       environment: "البيئة",
       patientCount: "عدد السجلات المعروضة",
-      usersShown: "عدد المستخدمين المعروضين"
+      usersShown: "عدد المستخدمين المعروضين",
+      status: "الحالة"
     }
   }
 };
@@ -1426,6 +1428,80 @@ function formatPriorityName(entry) {
   );
 }
 
+const CODE39_PATTERNS = {
+  "0": "nnnwwnwnn",
+  "1": "wnnwnnnnw",
+  "2": "nnwwnnnnw",
+  "3": "wnwwnnnnn",
+  "4": "nnnwwnnnw",
+  "5": "wnnwwnnnn",
+  "6": "nnwwwnnnn",
+  "7": "nnnwnnwnw",
+  "8": "wnnwnnwnn",
+  "9": "nnwwnnwnn",
+  A: "wnnnnwnnw",
+  B: "nnwnnwnnw",
+  C: "wnwnnwnnn",
+  D: "nnnnwwnnw",
+  E: "wnnnwwnnn",
+  F: "nnwnwwnnn",
+  G: "nnnnnwwnw",
+  H: "wnnnnwwnn",
+  I: "nnwnnwwnn",
+  J: "nnnnwwwnn",
+  K: "wnnnnnnww",
+  L: "nnwnnnnww",
+  M: "wnwnnnnwn",
+  N: "nnnnwnnww",
+  O: "wnnnwnnwn",
+  P: "nnwnwnnwn",
+  Q: "nnnnnnwww",
+  R: "wnnnnnwwn",
+  S: "nnwnnnwwn",
+  T: "nnnnwnwwn",
+  U: "wwnnnnnnw",
+  V: "nwwnnnnnw",
+  W: "wwwnnnnnn",
+  X: "nwnnwnnnw",
+  Y: "wwnnwnnnn",
+  Z: "nwwnwnnnn",
+  "-": "nwnnnnwnw",
+  ".": "wwnnnnwnn",
+  " ": "nwwnnnwnn",
+  $: "nwnwnwnnn",
+  "/": "nwnwnnnwn",
+  "+": "nwnnnwnwn",
+  "%": "nnnwnwnwn",
+  "*": "nwnnwnwnn"
+};
+
+function buildCode39Markup(value) {
+  const cleanValue = String(value || "")
+    .toUpperCase()
+    .split("")
+    .map((char) => (CODE39_PATTERNS[char] ? char : "-"))
+    .join("");
+  const encoded = `*${cleanValue}*`;
+  let bars = "";
+
+  for (const character of encoded) {
+    const pattern = CODE39_PATTERNS[character];
+    if (!pattern) {
+      continue;
+    }
+
+    for (let index = 0; index < pattern.length; index += 1) {
+      const isBar = index % 2 === 0;
+      const width = pattern[index] === "w" ? 6 : 2;
+      bars += `<span class="${isBar ? "bar" : "space"}" style="width:${width}px"></span>`;
+    }
+
+    bars += '<span class="space" style="width:2px"></span>';
+  }
+
+  return bars;
+}
+
 function buildAppointmentSlipData(source) {
   if (!source) {
     return null;
@@ -1450,14 +1526,14 @@ function buildAppointmentSlipData(source) {
   return {
     accessionNumber: source.barcodeValue || appointment.accession_number || "",
     appointmentDate: normalizeDateText(appointment.appointment_date),
+    registrationDate: appointment.created_at || null,
     patientArabicName: patient?.arabic_full_name || appointment?.arabic_full_name || "",
     patientEnglishName: patient?.english_full_name || appointment?.english_full_name || "",
     modalityName: formatModalityName(modality),
     examName: formatExamName(examType),
     notes: appointment.notes || "",
     modalityInstruction,
-    examInstruction,
-    printDate: formatDisplayDate(new Date())
+    examInstruction
   };
 }
 
@@ -1478,6 +1554,12 @@ function openAppointmentSlipPrint(source) {
   const patientEnglish = slip.patientEnglishName || "—";
   const modalityInstruction = slip.modalityInstruction || "—";
   const examInstruction = slip.examInstruction || "—";
+  const registrationDate = slip.registrationDate ? formatDisplayDate(slip.registrationDate) : "—";
+  const registrationDateLabel =
+    state.language === "ar"
+      ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
+      : "Registration date (date the appointment was booked, not exam date)";
+  const barcodeMarkup = buildCode39Markup(slip.accessionNumber);
 
   printWindow.document.write(`
     <!doctype html>
@@ -1493,7 +1575,6 @@ function openAppointmentSlipPrint(source) {
           .eyebrow { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; }
           .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
           .subtitle { color: #4b5563; font-size: 15px; }
-          .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 8px 12px; font-size: 13px; }
           .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
           .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
           .card.full { grid-column: 1 / -1; }
@@ -1501,8 +1582,11 @@ function openAppointmentSlipPrint(source) {
           .value { font-size: 16px; font-weight: 600; }
           .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
           .barcode { margin-top: 24px; border: 1px dashed #9ca3af; border-radius: 10px; padding: 16px; text-align: center; }
-          .barcode-lines { height: 54px; background: repeating-linear-gradient(90deg, #111827, #111827 2px, transparent 2px, transparent 4px); margin-bottom: 10px; }
+          .barcode-lines { display: inline-flex; align-items: stretch; height: 72px; margin-bottom: 10px; background: #fff; padding: 6px; }
+          .barcode-lines .bar { display: inline-block; height: 100%; background: #111827; }
+          .barcode-lines .space { display: inline-block; height: 100%; background: transparent; }
           .barcode-text { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
+          .footnote { margin-top: 10px; font-size: 11px; color: #6b7280; text-align: left; line-height: 1.45; }
         </style>
       </head>
       <body>
@@ -1513,16 +1597,11 @@ function openAppointmentSlipPrint(source) {
               <div class="title">${escapeHtml(slip.accessionNumber)}</div>
               <div class="subtitle">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
             </div>
-            <div class="badge">${escapeHtml(`${t().print.fields.slipDate}: ${slip.printDate}`)}</div>
           </div>
           <div class="grid">
             <div class="card">
               <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
               <div class="value">${escapeHtml(patientArabic)}</div>
-            </div>
-            <div class="card">
-              <div class="label">${escapeHtml(t().print.fields.slipDate)}</div>
-              <div class="value">${escapeHtml(slip.printDate)}</div>
             </div>
             <div class="card">
               <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
@@ -1564,13 +1643,87 @@ function openAppointmentSlipPrint(source) {
           }
           <div class="barcode">
             <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
-            <div class="barcode-lines"></div>
+            <div class="barcode-lines">${barcodeMarkup}</div>
             <div class="barcode-text">${escapeHtml(slip.accessionNumber)}</div>
+            <div class="footnote">${escapeHtml(`${registrationDateLabel}: ${registrationDate}`)}</div>
           </div>
         </div>
       </body>
     </html>
   `);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
+}
+
+function openDailyListPrint(appointments, title) {
+  if (!appointments.length) {
+    throw new Error(state.language === "ar" ? "لا توجد مواعيد للطباعة." : "No appointments available to print.");
+  }
+
+  const printWindow = window.open("", "_blank", "width=1100,height=800");
+
+  if (!printWindow) {
+    throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
+  }
+
+  const tableRows = appointments
+    .map(
+      (appointment) => `
+        <tr>
+          <td>${escapeHtml(appointment.accession_number || "")}</td>
+          <td>${escapeHtml(appointment.arabic_full_name || "")}</td>
+          <td>${escapeHtml(appointment.english_full_name || "")}</td>
+          <td>${escapeHtml(formatExamName(appointment))}</td>
+          <td>${escapeHtml(formatDisplayDate(appointment.appointment_date))}</td>
+          <td>${escapeHtml(appointment.status || "")}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .wrap { padding: 4mm 0; }
+          .head { margin-bottom: 12px; }
+          .title { font-size: 22px; font-weight: 700; }
+          .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+          th { background: #f3f4f6; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="head">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="meta">${escapeHtml(formatDisplayDate(new Date()))}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().appointments.fields.accessionNumber)}</th>
+                <th>${escapeHtml(t().patients.fields.arabicFullName)}</th>
+                <th>${escapeHtml(t().patients.fields.englishFullName)}</th>
+                <th>${escapeHtml(appointmentFieldLabel("examType"))}</th>
+                <th>${escapeHtml(t().appointments.fields.appointmentDate)}</th>
+                <th>${escapeHtml(t().common.status)}</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+          </table>
+        </div>
+      </body>
+    </html>
+  `);
+
   printWindow.document.close();
   printWindow.focus();
   printWindow.print();
@@ -4694,6 +4847,69 @@ function renderPrintList() {
   `;
 }
 
+function renderPrintGroupedByModality() {
+  if (state.printLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.printResults.length) {
+    return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
+  }
+
+  const grouped = state.printResults.reduce((accumulator, appointment) => {
+    const key = String(appointment.modality_id || "unknown");
+    const modalityName = formatModalityName(appointment) || (state.language === "ar" ? "جهاز غير محدد" : "Unknown modality");
+
+    if (!accumulator[key]) {
+      accumulator[key] = { modalityId: key, modalityName, appointments: [] };
+    }
+
+    accumulator[key].appointments.push(appointment);
+    return accumulator;
+  }, {});
+
+  return `
+    <div class="stack">
+      ${Object.values(grouped)
+        .map(
+          (group) => `
+            <article class="surface surface-compact">
+              <div class="section-head">
+                <h3 class="section-title">${escapeHtml(group.modalityName)}</h3>
+                <div class="hero-actions">
+                  <span class="chip subtle">${escapeHtml(String(group.appointments.length))}</span>
+                  <button class="button-secondary" type="button" data-action="print-modality-list" data-modality-id="${escapeHtml(group.modalityId)}">
+                    ${escapeHtml(t().modality.printList)}
+                  </button>
+                </div>
+              </div>
+              <div class="list">
+                ${group.appointments
+                  .map(
+                    (appointment) => `
+                      <div class="item patient-result">
+                        <div class="item-copy">
+                          <div class="item-title">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
+                            state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
+                          )}</div>
+                          <div class="item-subtitle">${escapeHtml(formatExamName(appointment))} • ${escapeHtml(
+                            formatDisplayDate(appointment.appointment_date)
+                          )}</div>
+                        </div>
+                        <span class="chip accent">${escapeHtml(appointment.status || "")}</span>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderPrintSlipPreview() {
   const appointment = state.selectedPrintAppointment;
 
@@ -4702,7 +4918,6 @@ function renderPrintSlipPreview() {
   }
 
   const language = state.language;
-  const slipDate = formatDisplayDate(new Date());
   const modalityInstruction =
     language === "ar" ? appointment.general_instruction_ar || "" : appointment.general_instruction_en || "";
   const examInstruction =
@@ -4710,6 +4925,11 @@ function renderPrintSlipPreview() {
       ? appointment.specific_instruction_ar || ""
       : appointment.specific_instruction_en || "";
   const noteContent = String(appointment.notes || "").trim();
+  const registrationDate = appointment.created_at ? formatDisplayDate(appointment.created_at) : "—";
+  const registrationDateLabel =
+    state.language === "ar"
+      ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
+      : "Registration date (date the appointment was booked, not exam date)";
 
   return `
     <div class="slip-card">
@@ -4726,10 +4946,6 @@ function renderPrintSlipPreview() {
         <div class="slip-info">
           <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
           <div>${escapeHtml(appointment.arabic_full_name || "—")}</div>
-        </div>
-        <div class="slip-info">
-          <div class="label">${escapeHtml(t().print.fields.slipDate)}</div>
-          <div>${escapeHtml(slipDate)}</div>
         </div>
         <div class="slip-info">
           <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
@@ -4770,6 +4986,7 @@ function renderPrintSlipPreview() {
         <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
         <div class="barcode-visual"></div>
         <div class="barcode-text">${escapeHtml(appointment.accession_number)}</div>
+        <div class="small">${escapeHtml(`${registrationDateLabel}: ${registrationDate}`)}</div>
       </div>
     </div>
   `;
@@ -5245,111 +5462,73 @@ function renderPrint() {
       ${pageHero(
         t().print.title,
         t().print.body,
-        "",
-        t().print.selectedAppointment
+        `<button class="button-secondary" type="button" data-action="print-daily-list">${escapeHtml(t().print.printDaily)}</button>`,
+        t().print.dailyList
       )}
       ${alertMarkup("error", state.printError)}
       ${alertMarkup("success", state.printSuccess || state.integrationSuccess)}
 
-      <section class="split-grid">
-        <div class="stack">
-          <article class="surface">
-            <form id="print-filter-form" class="stack">
-              <div class="section-head">
-                <h2 class="section-title">${escapeHtml(t().print.filtersTitle)}</h2>
-                <span class="chip accent">${escapeHtml(t().print.load)}</span>
-              </div>
-              <div class="form-grid">
-                <label class="field full">
-                  <span class="label">${escapeHtml(t().search.placeholder)}</span>
-                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.printFilters.query)}" placeholder="${escapeHtml(
-                    t().appointments.patientPlaceholder
-                  )}" />
-                </label>
-                <label class="field">
-                  <span class="label">${escapeHtml(t().print.date)}</span>
-                  <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
-                </label>
-                <label class="field">
-                  <span class="label">${escapeHtml(t().print.dateFrom)}</span>
-                  <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.printFilters.dateFrom)}" />
-                </label>
-                <label class="field">
-                  <span class="label">${escapeHtml(t().print.dateTo)}</span>
-                  <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.printFilters.dateTo)}" />
-                </label>
-                <label class="field">
-                  <span class="label">${escapeHtml(t().print.modality)}</span>
-                  <select class="select" name="modalityId">
-                    <option value="">${escapeHtml(t().common.optional)}</option>
-                    ${state.appointmentLookups.modalities
-                      .map(
-                        (entry) => `
-                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.printFilters.modalityId) ? "selected" : ""}>
-                            ${escapeHtml(formatModalityName(entry))}
-                          </option>
-                        `
-                      )
-                      .join("")}
-                  </select>
-                </label>
-              </div>
-              <div class="form-actions">
-                <div class="quick-actions">
-                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="today">${escapeHtml(t().print.quickToday)}</button>
-                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="tomorrow">${escapeHtml(t().print.quickTomorrow)}</button>
-                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="next_week">${escapeHtml(t().print.quickNextWeek)}</button>
-                  <button class="button-ghost" type="button" data-action="set-print-range" data-range="clear">${escapeHtml(t().print.quickClear)}</button>
-                </div>
-                <button class="button-primary" type="submit">${escapeHtml(state.printLoading ? t().common.loading : t().print.load)}</button>
-              </div>
-            </form>
-          </article>
-
-          <article class="surface">
+      <section class="stack">
+        <article class="surface">
+          <form id="print-filter-form" class="stack">
             <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.dailyList)}</h2>
-              <span class="chip subtle">${escapeHtml(String(state.printResults.length))}</span>
+              <h2 class="section-title">${escapeHtml(t().print.filtersTitle)}</h2>
+              <span class="chip accent">${escapeHtml(t().print.load)}</span>
             </div>
-            ${renderPrintList()}
-          </article>
-        </div>
+            <div class="form-grid">
+              <label class="field full">
+                <span class="label">${escapeHtml(t().search.placeholder)}</span>
+                <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.printFilters.query)}" placeholder="${escapeHtml(
+                  t().appointments.patientPlaceholder
+                )}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().print.date)}</span>
+                <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().print.dateFrom)}</span>
+                <input class="input field-en" type="date" name="dateFrom" value="${escapeHtml(state.printFilters.dateFrom)}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().print.dateTo)}</span>
+                <input class="input field-en" type="date" name="dateTo" value="${escapeHtml(state.printFilters.dateTo)}" />
+              </label>
+              <label class="field">
+                <span class="label">${escapeHtml(t().print.modality)}</span>
+                <select class="select" name="modalityId">
+                  <option value="">${escapeHtml(t().common.optional)}</option>
+                  ${state.appointmentLookups.modalities
+                    .map(
+                      (entry) => `
+                        <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.printFilters.modalityId) ? "selected" : ""}>
+                          ${escapeHtml(formatModalityName(entry))}
+                        </option>
+                      `
+                    )
+                    .join("")}
+                </select>
+              </label>
+            </div>
+            <div class="form-actions">
+              <div class="quick-actions">
+                <button class="button-ghost" type="button" data-action="set-print-range" data-range="today">${escapeHtml(t().print.quickToday)}</button>
+                <button class="button-ghost" type="button" data-action="set-print-range" data-range="tomorrow">${escapeHtml(t().print.quickTomorrow)}</button>
+                <button class="button-ghost" type="button" data-action="set-print-range" data-range="next_week">${escapeHtml(t().print.quickNextWeek)}</button>
+                <button class="button-ghost" type="button" data-action="set-print-range" data-range="clear">${escapeHtml(t().print.quickClear)}</button>
+              </div>
+              <button class="button-primary" type="submit">${escapeHtml(state.printLoading ? t().common.loading : t().print.load)}</button>
+            </div>
+          </form>
+        </article>
 
-        <div class="stack">
-          <article class="surface slip-surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.slipPreview)}</h2>
-              <button class="button-primary" type="button" data-action="browser-print">${escapeHtml(t().appointments.printNow)}</button>
-            </div>
-            ${renderPrintSlipPreview()}
-          </article>
-
-          <article class="surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().print.selectedAppointment)}</h2>
-              <span class="chip subtle">${escapeHtml(state.selectedPrintAppointment?.accession_number || t().common.noData)}</span>
-            </div>
-            <div class="settings-summary">${escapeHtml(
-              state.language === "ar"
-                ? "تم تبسيط هذه الصفحة لطباعة وصل الموعد على ورق A5 مباشرة."
-                : "This page is simplified to print the appointment slip directly on A5 paper."
-            )}</div>
-            ${
-              state.selectedPrintAppointment
-                ? `
-                  <div class="info-grid">
-                    ${infoTile(t().patients.fields.arabicFullName, state.selectedPrintAppointment.arabic_full_name, "tone-good")}
-                    ${infoTile(t().patients.fields.englishFullName, state.selectedPrintAppointment.english_full_name || "—", "")}
-                    ${infoTile(appointmentFieldLabel("modality"), formatModalityName(state.selectedPrintAppointment), "")}
-                    ${infoTile(appointmentFieldLabel("examType"), formatExamName(state.selectedPrintAppointment), "")}
-                    ${infoTile(t().patients.fields.phone1, state.selectedPrintAppointment.phone_1 || "—", "tone-warm")}
-                    ${infoTile(t().patients.fields.nationalId, state.selectedPrintAppointment.national_id || "—", "")}
-                  </div>
-                `
-                : `<div class="empty">${escapeHtml(t().print.noAppointment)}</div>`
-            }
-          </article>
-        </div>
+        <article class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().print.dailyList)}</h2>
+            <span class="chip subtle">${escapeHtml(String(state.printResults.length))}</span>
+          </div>
+          ${renderPrintGroupedByModality()}
+        </article>
       </section>
     </div>
   `;
@@ -5532,6 +5711,7 @@ function renderRegistrations() {
                     </div>
                     <div class="form-actions">
                       <button class="button-primary" type="submit">${escapeHtml(state.appointmentEditSaving ? t().common.loading : t().print.saveAppointment)}</button>
+                      <button class="button-secondary" type="button" data-action="browser-print">${escapeHtml(t().appointments.printNow)}</button>
                     </div>
                   </form>
                   <form id="appointment-cancel-form" class="stack">
@@ -7069,13 +7249,33 @@ function handleClick(event) {
 
   if (target.dataset.action === "print-daily-list") {
     event.preventDefault();
-    window.print();
+    try {
+      state.printError = "";
+      const title =
+        state.language === "ar" ? "القائمة اليومية حسب الأجهزة" : "Daily modality appointment list";
+      openDailyListPrint(state.printResults, title);
+    } catch (error) {
+      state.printError = error.message;
+    }
+    render();
     return;
   }
 
   if (target.dataset.action === "print-modality-list") {
     event.preventDefault();
-    window.print();
+    try {
+      state.printError = "";
+      const modalityId = target.dataset.modalityId;
+      const modalityAppointments = state.printResults.filter(
+        (appointment) => String(appointment.modality_id || "") === String(modalityId || "")
+      );
+      const modalityName = modalityAppointments[0] ? formatModalityName(modalityAppointments[0]) : "";
+      const fallback = state.language === "ar" ? "قائمة جهاز" : "Modality list";
+      openDailyListPrint(modalityAppointments, modalityName || fallback);
+    } catch (error) {
+      state.printError = error.message;
+    }
+    render();
     return;
   }
 
