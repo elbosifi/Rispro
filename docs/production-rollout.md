@@ -16,6 +16,94 @@ Do these first:
 - Run `npm run migrate` on every update.
 - The new rollout includes a new migration: `007_integration_settings_defaults.sql`.
 
+## Recommended deployment method
+
+The best long-term setup for this project is:
+
+1. push changes to GitHub
+2. let GitHub Actions run validation
+3. let the server run the shared deployment script
+
+This repository now includes:
+
+- a server deployment script at `/Users/seraj/Nextcloud/RISpro/scripts/deploy.sh`
+- a GitHub Actions workflow at `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml`
+
+The script is the real deployment logic.
+The GitHub workflow simply checks the code first and then tells the server to run that script.
+
+## First-time server setup for the script
+
+On the production server:
+
+1. clone the repository into the final app folder
+2. place the real `.env` file in that folder
+3. make sure Node.js 22 is installed
+4. make sure the service already exists in `systemd` or `pm2`
+5. make the script executable once:
+
+```bash
+chmod +x scripts/deploy.sh
+```
+
+### Example manual run with systemd
+
+```bash
+APP_DIR=/srv/rispro \
+DEPLOY_BRANCH=main \
+RESTART_MODE=systemd \
+SERVICE_NAME=rispro \
+HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
+./scripts/deploy.sh
+```
+
+### Example manual run with PM2
+
+```bash
+APP_DIR=/srv/rispro \
+DEPLOY_BRANCH=main \
+RESTART_MODE=pm2 \
+PM2_NAME=rispro \
+HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
+./scripts/deploy.sh
+```
+
+## GitHub Actions setup
+
+In the GitHub repository, add these secrets:
+
+- `DEPLOY_HOST`: your server IP or hostname
+- `DEPLOY_USER`: the SSH username used for deployment
+- `DEPLOY_SSH_KEY`: the private SSH key for that user
+
+Add these GitHub Actions variables:
+
+- `DEPLOY_APP_DIR`: full path of the app on the server, for example `/srv/rispro`
+- `DEPLOY_BRANCH`: usually `main`
+- `DEPLOY_PORT`: usually `22`
+- `RESTART_MODE`: `systemd`, `pm2`, or `none`
+- `DEPLOY_SERVICE_NAME`: the service name when using `systemd`
+- `DEPLOY_PM2_NAME`: the process name when using `pm2`
+- `DEPLOY_HEALTHCHECK_URL`: for example `http://127.0.0.1:3000/api/ready`
+
+Optional variables:
+
+- `DEPLOY_BACKUP_CMD`: command to run before install, for example a database backup command
+- `DEPLOY_INSTALL_CMD`: defaults to `npm ci --omit=dev`
+- `DEPLOY_MIGRATE_CMD`: defaults to `npm run migrate`
+- `DEPLOY_POST_MIGRATE_CMD`: anything extra you want after migration
+
+## Recommended permissions for the server user
+
+The deployment user should:
+
+- have access to the app folder
+- have permission to run `git`
+- have permission to run Node.js and npm
+- have permission to restart the service
+
+If you use `systemd`, add a `sudoers` rule that allows restarting only the app service instead of giving wide `sudo` access.
+
 ## Option 1: Docker deployment
 
 Use this if the production server runs the app as a Docker container.

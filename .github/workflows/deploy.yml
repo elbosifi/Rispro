@@ -1,0 +1,77 @@
+name: Deploy RISpro
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: rispro-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run syntax checks
+        run: npm run check
+
+  deploy:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Deploy on server over SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ vars.DEPLOY_PORT }}
+          script_stop: true
+          script: |
+            set -eu
+
+            APP_DIR="${{ vars.DEPLOY_APP_DIR }}"
+            BRANCH="${{ vars.DEPLOY_BRANCH }}"
+
+            if [ -z "$APP_DIR" ]; then
+              echo "DEPLOY_APP_DIR is not set in GitHub Actions variables."
+              exit 1
+            fi
+
+            BRANCH="${BRANCH:-main}"
+
+            cd "$APP_DIR"
+            git fetch origin "$BRANCH"
+            git checkout "$BRANCH"
+            git pull --rebase origin "$BRANCH"
+            chmod +x scripts/deploy.sh
+
+            SKIP_GIT_PULL=1 \
+            APP_DIR="$APP_DIR" \
+            DEPLOY_BRANCH="$BRANCH" \
+            RESTART_MODE="${{ vars.RESTART_MODE }}" \
+            SERVICE_NAME="${{ vars.DEPLOY_SERVICE_NAME }}" \
+            PM2_NAME="${{ vars.DEPLOY_PM2_NAME }}" \
+            HEALTHCHECK_URL="${{ vars.DEPLOY_HEALTHCHECK_URL }}" \
+            BACKUP_CMD="${{ vars.DEPLOY_BACKUP_CMD }}" \
+            INSTALL_CMD="${{ vars.DEPLOY_INSTALL_CMD }}" \
+            MIGRATE_CMD="${{ vars.DEPLOY_MIGRATE_CMD }}" \
+            POST_MIGRATE_CMD="${{ vars.DEPLOY_POST_MIGRATE_CMD }}" \
+            ./scripts/deploy.sh
