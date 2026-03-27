@@ -22,7 +22,7 @@ values
 
   ('patient_registration', 'phone1_required', '{"value":"required"}'::jsonb),
   ('patient_registration', 'dob_or_age_rule', '{"value":"age_or_dob_required"}'::jsonb),
-  ('patient_registration', 'national_id_required', '{"value":"required_with_confirmation"}'::jsonb),
+  ('patient_registration', 'national_id_required', '{"value":"optional"}'::jsonb),
   ('patient_registration', 'custom_fields_scope', '{"value":"all_patients"}'::jsonb),
 
   ('transliteration_and_dictionary', 'live_transliteration', '{"value":"enabled"}'::jsonb),

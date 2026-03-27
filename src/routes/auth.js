@@ -1,5 +1,6 @@
 import express from "express";
 import { createRateLimiter } from "../middleware/rate-limit.js";
+import { asyncRoute } from "../utils/async-route.js";
 import {
   authenticateUser,
   buildSessionToken,
@@ -19,8 +20,10 @@ const loginRateLimiter = createRateLimiter({
   message: "Too many login attempts. Please wait a few minutes and try again."
 });
 
-authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
-  try {
+authRouter.post(
+  "/login",
+  loginRateLimiter,
+  asyncRoute(async (req, res) => {
     const { username = "", password = "" } = req.body || {};
     const user = await authenticateUser(username, password);
     const token = buildSessionToken(user);
@@ -44,10 +47,8 @@ authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
         role: user.role
       }
     });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
 authRouter.post("/logout", (_req, res) => {
   clearSupervisorReauthCookie(res);
@@ -64,8 +65,10 @@ authRouter.get("/me", requireAuth, (req, res) => {
   });
 });
 
-authRouter.post("/re-auth", requireAuth, async (req, res, next) => {
-  try {
+authRouter.post(
+  "/re-auth",
+  requireAuth,
+  asyncRoute(async (req, res) => {
     const { password = "" } = req.body || {};
     const user = await authenticateUser(req.user.username, password);
     const reauthToken = buildSupervisorReauthToken(user);
@@ -90,7 +93,5 @@ authRouter.post("/re-auth", requireAuth, async (req, res, next) => {
         recentSupervisorReauth: true
       }
     });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);

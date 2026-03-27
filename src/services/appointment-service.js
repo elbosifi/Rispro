@@ -265,9 +265,11 @@ export async function listAppointmentsForPrint(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
   const appointmentDate = !dateFrom && !dateTo ? normalizeDateOrToday(filters.date) : null;
+  const query = String(filters.query || "").trim();
   const params = [];
   let dateClause = "";
   let modalityFilterSql = "";
+  let queryFilterSql = "";
 
   if (dateFrom || dateTo) {
     const start = dateFrom || dateTo;
@@ -288,6 +290,21 @@ export async function listAppointmentsForPrint(filters = {}) {
     const modalityId = normalizePositiveInteger(filters.modalityId, "modalityId");
     params.push(modalityId);
     modalityFilterSql = ` and appointments.modality_id = $${params.length}`;
+  }
+
+  if (query) {
+    params.push(`%${query}%`);
+    const patternIdx = params.length;
+    queryFilterSql = `
+      and (
+        appointments.accession_number ilike $${patternIdx}
+        or patients.arabic_full_name ilike $${patternIdx}
+        or patients.english_full_name ilike $${patternIdx}
+        or patients.phone_1 ilike $${patternIdx}
+        or patients.national_id ilike $${patternIdx}
+        or coalesce(patients.mrn, '') ilike $${patternIdx}
+      )
+    `;
   }
 
   const orderClause = dateFrom || dateTo ? "appointments.appointment_date asc, appointments.daily_sequence asc" : "appointments.daily_sequence asc";
@@ -332,6 +349,7 @@ export async function listAppointmentsForPrint(filters = {}) {
       left join reporting_priorities on reporting_priorities.id = appointments.reporting_priority_id
       where ${dateClause}
       ${modalityFilterSql}
+      ${queryFilterSql}
       order by ${orderClause}
     `,
     params

@@ -109,7 +109,6 @@ function validatePatientPayload(payload, rules) {
   const {
     nationalId,
     nationalIdConfirmation,
-    mrn = "",
     arabicFullName,
     englishFullName,
     ageYears,
@@ -133,7 +132,6 @@ function validatePatientPayload(payload, rules) {
   }
 
   return {
-    mrn,
     cleanNationalId,
     arabicFullName: arabicFullName.trim(),
     englishFullName: String(englishFullName || "").trim(),
@@ -197,7 +195,6 @@ export async function createPatient(payload, createdByUserId) {
     const { rows } = await pool.query(
       `
         insert into patients (
-          mrn,
           national_id,
           arabic_full_name,
           english_full_name,
@@ -213,23 +210,21 @@ export async function createPatient(payload, createdByUserId) {
         )
         values (
           nullif($1, ''),
-          nullif($2, ''),
-          $3,
-          nullif($4, ''),
+          $2,
+          nullif($3, ''),
+          $4,
           $5,
           $6,
           $7,
-          $8,
+          nullif($8, ''),
           nullif($9, ''),
           nullif($10, ''),
-          nullif($11, ''),
-          $12,
-          $12
+          $11,
+          $11
         )
         returning *
       `,
       [
-        validated.mrn,
         validated.cleanNationalId,
         validated.arabicFullName,
         validated.englishFullName,
@@ -276,25 +271,23 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
       `
         update patients
         set
-          mrn = nullif($2, ''),
-          national_id = nullif($3, ''),
-          arabic_full_name = $4,
-          english_full_name = nullif($5, ''),
-          normalized_arabic_name = $6,
-          age_years = $7,
-          estimated_date_of_birth = $8,
-          sex = $9,
-          phone_1 = nullif($10, ''),
-          phone_2 = nullif($11, ''),
-          address = nullif($12, ''),
-          updated_by_user_id = $13,
+          national_id = nullif($2, ''),
+          arabic_full_name = $3,
+          english_full_name = nullif($4, ''),
+          normalized_arabic_name = $5,
+          age_years = $6,
+          estimated_date_of_birth = $7,
+          sex = $8,
+          phone_1 = nullif($9, ''),
+          phone_2 = nullif($10, ''),
+          address = nullif($11, ''),
+          updated_by_user_id = $12,
           updated_at = now()
         where id = $1
         returning *
       `,
       [
         cleanPatientId,
-        validated.mrn,
         validated.cleanNationalId,
         validated.arabicFullName,
         validated.englishFullName,

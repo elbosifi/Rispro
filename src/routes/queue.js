@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { asyncRoute } from "../utils/async-route.js";
 import {
   confirmNoShow,
   createWalkInQueueEntry,
@@ -11,38 +12,34 @@ export const queueRouter = express.Router();
 
 queueRouter.use(requireAuth);
 
-queueRouter.get("/", async (_req, res, next) => {
-  try {
+queueRouter.get(
+  "/",
+  asyncRoute(async (_req, res) => {
     const queue = await getQueueSnapshot();
     res.json(queue);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-queueRouter.post("/scan", async (req, res, next) => {
-  try {
+queueRouter.post(
+  "/scan",
+  asyncRoute(async (req, res) => {
     const result = await scanAppointmentIntoQueue(req.body?.accessionNumber, req.user);
     res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-queueRouter.post("/walk-in", async (req, res, next) => {
-  try {
+queueRouter.post(
+  "/walk-in",
+  asyncRoute(async (req, res) => {
     const result = await createWalkInQueueEntry(req.body || {}, req.user);
     res.status(201).json(result);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-queueRouter.post("/confirm-no-show", async (req, res, next) => {
-  try {
+queueRouter.post(
+  "/confirm-no-show",
+  asyncRoute(async (req, res) => {
     const result = await confirmNoShow(req.body?.appointmentId, req.body?.reason, req.user);
     res.json(result);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);

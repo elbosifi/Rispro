@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
+import { asyncRoute } from "../utils/async-route.js";
 import { getTripoliToday } from "../utils/date.js";
 import { exportAuditEntriesCsv, listAuditEntries, listAuditFilterOptions, logAuditEntry } from "../services/audit-service.js";
 
@@ -7,8 +8,9 @@ export const auditRouter = express.Router();
 
 auditRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 
-auditRouter.get("/export", async (req, res, next) => {
-  try {
+auditRouter.get(
+  "/export",
+  asyncRoute(async (req, res) => {
     const csv = await exportAuditEntriesCsv({
       limit: req.query.limit,
       entityType: req.query.entityType,
@@ -37,13 +39,12 @@ auditRouter.get("/export", async (req, res, next) => {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="rispro-audit-${getTripoliToday()}.csv"`);
     res.send(csv);
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-auditRouter.get("/", async (req, res, next) => {
-  try {
+auditRouter.get(
+  "/",
+  asyncRoute(async (req, res) => {
     const [entries, meta] = await Promise.all([
       listAuditEntries({
         limit: req.query.limit,
@@ -56,7 +57,5 @@ auditRouter.get("/", async (req, res, next) => {
       listAuditFilterOptions()
     ]);
     res.json({ entries, meta });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);

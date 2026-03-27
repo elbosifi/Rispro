@@ -1,5 +1,6 @@
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { asyncRoute } from "../utils/async-route.js";
 import {
   createPatient,
   getPatientById,
@@ -12,47 +13,42 @@ export const patientsRouter = express.Router();
 
 patientsRouter.use(requireAuth);
 
-patientsRouter.get("/", async (req, res, next) => {
-  try {
+patientsRouter.get(
+  "/",
+  asyncRoute(async (req, res) => {
     const patients = await searchPatients(req.query.q || "");
     res.json({ patients });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-patientsRouter.post("/merge", async (req, res, next) => {
-  try {
+patientsRouter.post(
+  "/merge",
+  asyncRoute(async (req, res) => {
     const patient = await mergePatients(req.body || {}, req.user.sub);
     res.json({ patient });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-patientsRouter.post("/", async (req, res, next) => {
-  try {
+patientsRouter.post(
+  "/",
+  asyncRoute(async (req, res) => {
     const patient = await createPatient(req.body || {}, req.user.sub);
     res.status(201).json({ patient });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-patientsRouter.get("/:patientId", async (req, res, next) => {
-  try {
+patientsRouter.get(
+  "/:patientId",
+  asyncRoute(async (req, res) => {
     const patient = await getPatientById(req.params.patientId);
     res.json({ patient });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);
 
-patientsRouter.put("/:patientId", async (req, res, next) => {
-  try {
+patientsRouter.put(
+  "/:patientId",
+  asyncRoute(async (req, res) => {
     const patient = await updatePatient(req.params.patientId, req.body || {}, req.user.sub);
     res.json({ patient });
-  } catch (error) {
-    next(error);
-  }
-});
+  })
+);

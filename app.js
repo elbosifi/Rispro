@@ -291,7 +291,8 @@ const copy = {
       },
       savedRecord: "Latest saved patient",
       possibleMatches: "Possible existing matches",
-      supportNote: "Use duplicate checks before saving to keep records clean."
+      supportNote: "Use duplicate checks before saving to keep records clean.",
+      mrnAutoHint: "An MRN (six-digit patient number) is generated automatically and cannot be edited."
     },
     patientActions: {
       edit: "Edit patient",
@@ -437,7 +438,10 @@ const copy = {
       fields: {
         documentType: "Document type",
         fileName: "File",
-        notes: "Notes"
+        notes: "Notes",
+        slipDate: "Slip date",
+        modalityInstructions: "Modality instructions",
+        examInstructions: "Exam instructions"
       }
     },
     doctor: {
@@ -619,7 +623,8 @@ const copy = {
       },
       savedRecord: "آخر مريض تم حفظه",
       possibleMatches: "سجلات محتملة موجودة",
-      supportNote: "تحقق من التكرار قبل الحفظ للحفاظ على نظافة البيانات."
+      supportNote: "تحقق من التكرار قبل الحفظ للحفاظ على نظافة البيانات.",
+      mrnAutoHint: "يتم إنشاء رقم MRN المكوّن من ستة أرقام تلقائياً ولا يمكن تغييره."
     },
     patientActions: {
       edit: "تعديل المريض",
@@ -765,7 +770,10 @@ const copy = {
       fields: {
         documentType: "نوع الوثيقة",
         fileName: "الملف",
-        notes: "Notes"
+        notes: "ملاحظات",
+        slipDate: "تاريخ الوصل",
+        modalityInstructions: "تعليمات الجهاز",
+        examInstructions: "تعليمات الفحص"
       }
     },
     doctor: {
@@ -1058,7 +1066,6 @@ const SETTINGS_META = {
 
 function defaultPatientForm() {
   return {
-    mrn: "",
     arabicFullName: "",
     englishFullName: "",
     ageYears: "",
@@ -1108,7 +1115,8 @@ function defaultPrintFilters() {
     date: getCurrentDateInputValue(),
     dateFrom: "",
     dateTo: "",
-    modalityId: ""
+    modalityId: "",
+    query: ""
   };
 }
 
@@ -1412,32 +1420,33 @@ function buildAppointmentSlipData(source) {
     return null;
   }
 
-  if (source.appointment) {
-    return {
-      accessionNumber: source.barcodeValue || source.appointment.accession_number || "",
-      appointmentDate: normalizeDateText(source.appointment.appointment_date),
-      patientArabicName: source.patient?.arabic_full_name || "",
-      patientEnglishName: source.patient?.english_full_name || "",
-      modalityName: formatModalityName(source.modality),
-      examName: formatExamName(source.examType),
-      notes: source.appointment?.notes || selectedPrintInstruction(source.examType || source.modality) || "",
-      slotNumber: source.appointment?.modality_slot_number || "",
-      patientPhone: source.patient?.phone_1 || "",
-      patientNationalId: source.patient?.national_id || ""
-    };
-  }
+  const appointment = source.appointment || source;
+  const patient = source.patient || source;
+  const modality = source.modality || appointment;
+  const examType = source.examType || appointment;
+  const language = state.language;
+
+  const modalityInstruction =
+    language === "ar"
+      ? modality?.general_instruction_ar || appointment?.general_instruction_ar || ""
+      : modality?.general_instruction_en || appointment?.general_instruction_en || "";
+
+  const examInstruction =
+    language === "ar"
+      ? examType?.specific_instruction_ar || appointment?.specific_instruction_ar || ""
+      : examType?.specific_instruction_en || appointment?.specific_instruction_en || "";
 
   return {
-    accessionNumber: source.accession_number || "",
-    appointmentDate: normalizeDateText(source.appointment_date),
-    patientArabicName: source.arabic_full_name || "",
-    patientEnglishName: source.english_full_name || "",
-    modalityName: formatModalityName(source),
-    examName: formatExamName(source),
-    notes: source.notes || selectedPrintInstruction(source) || "",
-    slotNumber: source.modality_slot_number || "",
-    patientPhone: source.phone_1 || "",
-    patientNationalId: source.national_id || ""
+    accessionNumber: source.barcodeValue || appointment.accession_number || "",
+    appointmentDate: normalizeDateText(appointment.appointment_date),
+    patientArabicName: patient?.arabic_full_name || appointment?.arabic_full_name || "",
+    patientEnglishName: patient?.english_full_name || appointment?.english_full_name || "",
+    modalityName: formatModalityName(modality),
+    examName: formatExamName(examType),
+    notes: appointment.notes || "",
+    modalityInstruction,
+    examInstruction,
+    printDate: formatDisplayDate(new Date())
   };
 }
 
@@ -1454,10 +1463,10 @@ function openAppointmentSlipPrint(source) {
     throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
   }
 
-  const noteText = slip.notes || "—";
+  const patientArabic = slip.patientArabicName || "—";
   const patientEnglish = slip.patientEnglishName || "—";
-  const patientPhone = slip.patientPhone || "—";
-  const patientNationalId = slip.patientNationalId || "—";
+  const modalityInstruction = slip.modalityInstruction || "—";
+  const examInstruction = slip.examInstruction || "—";
 
   printWindow.document.write(`
     <!doctype html>
@@ -1469,14 +1478,14 @@ function openAppointmentSlipPrint(source) {
           @page { size: A5 portrait; margin: 10mm; }
           body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
           .sheet { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 18px; box-sizing: border-box; }
-          .top { display: flex; justify-content: space-between; gap: 16px; align-items: start; margin-bottom: 18px; }
+          .top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
           .eyebrow { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; }
           .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
           .subtitle { color: #4b5563; font-size: 15px; }
           .badge { border: 1px solid #bfdbfe; background: #eff6ff; color: #1d4ed8; border-radius: 999px; padding: 8px 12px; font-size: 13px; }
-          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 18px; }
+          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
           .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
-          .full { grid-column: 1 / -1; }
+          .card.full { grid-column: 1 / -1; }
           .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
           .value { font-size: 16px; font-weight: 600; }
           .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
@@ -1493,16 +1502,24 @@ function openAppointmentSlipPrint(source) {
               <div class="title">${escapeHtml(slip.accessionNumber)}</div>
               <div class="subtitle">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
             </div>
-            <div class="badge">${escapeHtml(`${t().appointments.fields.slotNumber}: ${slip.slotNumber || "—"}`)}</div>
+            <div class="badge">${escapeHtml(`${t().print.fields.slipDate}: ${slip.printDate}`)}</div>
           </div>
           <div class="grid">
             <div class="card">
               <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
-              <div class="value">${escapeHtml(slip.patientArabicName)}</div>
+              <div class="value">${escapeHtml(patientArabic)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().print.fields.slipDate)}</div>
+              <div class="value">${escapeHtml(slip.printDate)}</div>
             </div>
             <div class="card">
               <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
               <div class="value">${escapeHtml(patientEnglish)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().appointments.fields.appointmentDate)}</div>
+              <div class="value">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
             </div>
             <div class="card">
               <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
@@ -1512,19 +1529,28 @@ function openAppointmentSlipPrint(source) {
               <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
               <div class="value">${escapeHtml(slip.examName)}</div>
             </div>
-            <div class="card">
-              <div class="label">${escapeHtml(t().patients.fields.phone1)}</div>
-              <div class="value">${escapeHtml(patientPhone)}</div>
-            </div>
-            <div class="card">
-              <div class="label">${escapeHtml(t().patients.fields.nationalId)}</div>
-              <div class="value">${escapeHtml(patientNationalId)}</div>
+          </div>
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(t().print.fields.modalityInstructions)}</div>
+              <div class="value small">${escapeHtml(modalityInstruction)}</div>
             </div>
             <div class="card full">
-              <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
-              <div class="value small">${escapeHtml(noteText)}</div>
+              <div class="label">${escapeHtml(t().print.fields.examInstructions)}</div>
+              <div class="value small">${escapeHtml(examInstruction)}</div>
             </div>
           </div>
+          ${
+            slip.notes
+              ? `
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
+              <div class="value small">${escapeHtml(slip.notes)}</div>
+            </div>
+          </div>`
+              : ""
+          }
           <div class="barcode">
             <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
             <div class="barcode-lines"></div>
@@ -1648,18 +1674,6 @@ function queueExamTypes() {
   return state.appointmentLookups.examTypes.filter(
     (examType) => String(examType.modality_id) === String(state.queueWalkInForm.modalityId)
   );
-}
-
-function selectedPrintInstruction(appointment) {
-  if (!appointment) {
-    return "";
-  }
-
-  if (state.language === "ar") {
-    return appointment.specific_instruction_ar || appointment.general_instruction_ar || "";
-  }
-
-  return appointment.specific_instruction_en || appointment.general_instruction_en || "";
 }
 
 function setLanguage(language) {
@@ -1873,6 +1887,10 @@ async function loadPrintAppointments() {
 
     if (state.printFilters.modalityId) {
       params.set("modalityId", state.printFilters.modalityId);
+    }
+
+    if (state.printFilters.query.trim()) {
+      params.set("q", state.printFilters.query.trim());
     }
 
     const result = await api(`/api/appointments?${params.toString()}`, { method: "GET" });
@@ -2398,7 +2416,6 @@ async function savePatient() {
 
   try {
     const payload = {
-      mrn: state.patientForm.mrn,
       arabicFullName: state.patientForm.arabicFullName,
       englishFullName: state.patientForm.englishFullName,
       ageYears: state.patientForm.ageYears,
@@ -2765,7 +2782,6 @@ async function saveAppointment() {
       patientId: state.selectedAppointmentPatient.id,
       modalityId: state.appointmentForm.modalityId,
       examTypeId: state.appointmentForm.examTypeId,
-      reportingPriorityId: state.appointmentForm.reportingPriorityId,
       appointmentDate: state.appointmentForm.appointmentDate,
       notes: state.appointmentForm.notes,
       overbookingReason: state.appointmentForm.overbookingReason,
@@ -2782,8 +2798,7 @@ async function saveAppointment() {
     state.appointmentCreatedDialogOpen = true;
     state.appointmentForm = {
       ...defaultAppointmentForm(),
-      modalityId: state.appointmentForm.modalityId,
-      reportingPriorityId: state.appointmentForm.reportingPriorityId
+      modalityId: state.appointmentForm.modalityId
     };
     await loadAppointmentAvailability();
   } catch (error) {
@@ -3064,7 +3079,6 @@ async function prepareScanSession() {
 
 function fillPatientEditForm(patient) {
   state.patientEditForm = {
-    mrn: patient.mrn || "",
     arabicFullName: patient.arabic_full_name || "",
     englishFullName: patient.english_full_name || "",
     ageYears: String(patient.age_years || ""),
@@ -3869,6 +3883,7 @@ function renderPatients() {
                 <span class="chip success">${escapeHtml(t().common.required)}</span>
                 <span class="chip subtle">${escapeHtml(t().common.optional)}</span>
               </div>
+              <p class="small">${escapeHtml(t().patients.mrnAutoHint)}</p>
             </div>
 
             <div class="form-grid">
@@ -3885,11 +3900,6 @@ function renderPatients() {
               <label class="field full">
                 <span class="label">${escapeHtml(t().patients.fields.englishFullName)}</span>
                 <input class="input field-en" lang="en" dir="ltr" name="englishFullName" value="${escapeHtml(state.patientForm.englishFullName)}" />
-              </label>
-
-              <label class="field">
-                <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
-                <input class="input field-en" name="mrn" value="${escapeHtml(state.patientForm.mrn)}" />
               </label>
 
               <label class="field">
@@ -4239,22 +4249,6 @@ function renderAppointments() {
                         (entry) => `
                           <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentForm.examTypeId) ? "selected" : ""}>
                             ${escapeHtml(formatExamName(entry))}
-                          </option>
-                        `
-                      )
-                      .join("")}
-                  </select>
-                </label>
-
-                <label class="field">
-                  <span class="label">${escapeHtml(appointmentFieldLabel("priority"))}</span>
-                  <select class="select" name="reportingPriorityId">
-                    <option value="">${escapeHtml(t().common.optional)}</option>
-                    ${state.appointmentLookups.priorities
-                      .map(
-                        (entry) => `
-                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentForm.reportingPriorityId) ? "selected" : ""}>
-                            ${escapeHtml(formatPriorityName(entry))}
                           </option>
                         `
                       )
@@ -4646,6 +4640,16 @@ function renderPrintSlipPreview() {
     return `<div class="empty">${escapeHtml(t().print.noAppointment)}</div>`;
   }
 
+  const language = state.language;
+  const slipDate = formatDisplayDate(new Date());
+  const modalityInstruction =
+    language === "ar" ? appointment.general_instruction_ar || "" : appointment.general_instruction_en || "";
+  const examInstruction =
+    language === "ar"
+      ? appointment.specific_instruction_ar || ""
+      : appointment.specific_instruction_en || "";
+  const noteContent = String(appointment.notes || "").trim();
+
   return `
     <div class="slip-card">
       <div class="slip-top">
@@ -4660,24 +4664,45 @@ function renderPrintSlipPreview() {
       <div class="slip-grid">
         <div class="slip-info">
           <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
-          <div>${escapeHtml(appointment.arabic_full_name)}</div>
+          <div>${escapeHtml(appointment.arabic_full_name || "—")}</div>
+        </div>
+        <div class="slip-info">
+          <div class="label">${escapeHtml(t().print.fields.slipDate)}</div>
+          <div>${escapeHtml(slipDate)}</div>
         </div>
         <div class="slip-info">
           <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
-          <div>${escapeHtml(appointment.english_full_name)}</div>
+          <div>${escapeHtml(appointment.english_full_name || "—")}</div>
+        </div>
+        <div class="slip-info">
+          <div class="label">${escapeHtml(t().appointments.fields.appointmentDate)}</div>
+          <div>${escapeHtml(formatDisplayDate(appointment.appointment_date))}</div>
         </div>
         <div class="slip-info">
           <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
-          <div>${escapeHtml(formatModalityName(appointment))}</div>
+          <div>${escapeHtml(formatModalityName(appointment)) || "—"}</div>
         </div>
         <div class="slip-info">
           <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
           <div>${escapeHtml(formatExamName(appointment))}</div>
         </div>
         <div class="slip-info full-span">
-          <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
-          <div>${escapeHtml(appointment.notes || selectedPrintInstruction(appointment) || "—")}</div>
+          <div class="label">${escapeHtml(t().print.fields.modalityInstructions)}</div>
+          <div>${escapeHtml(modalityInstruction || "—")}</div>
         </div>
+        <div class="slip-info full-span">
+          <div class="label">${escapeHtml(t().print.fields.examInstructions)}</div>
+          <div>${escapeHtml(examInstruction || "—")}</div>
+        </div>
+        ${
+          noteContent
+            ? `
+        <div class="slip-info full-span">
+          <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
+          <div>${escapeHtml(noteContent)}</div>
+        </div>`
+            : ""
+        }
       </div>
 
       <div class="barcode-block">
@@ -5174,6 +5199,12 @@ function renderPrint() {
                 <span class="chip accent">${escapeHtml(t().print.load)}</span>
               </div>
               <div class="form-grid">
+                <label class="field full">
+                  <span class="label">${escapeHtml(t().search.placeholder)}</span>
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.printFilters.query)}" placeholder="${escapeHtml(
+                    t().appointments.patientPlaceholder
+                  )}" />
+                </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.date)}</span>
                   <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
@@ -5313,6 +5344,12 @@ function renderRegistrations() {
                 <span class="chip accent">${escapeHtml(t().registrations.load)}</span>
               </div>
               <div class="form-grid">
+                <label class="field full">
+                  <span class="label">${escapeHtml(t().search.placeholder)}</span>
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.printFilters.query)}" placeholder="${escapeHtml(
+                    t().appointments.patientPlaceholder
+                  )}" />
+                </label>
                 <label class="field">
                   <span class="label">${escapeHtml(t().print.date)}</span>
                   <input class="input field-en" type="date" name="date" value="${escapeHtml(state.printFilters.date)}" />
@@ -5528,10 +5565,6 @@ function renderSearch() {
                       <label class="field full">
                         <span class="label">${escapeHtml(t().patients.fields.englishFullName)}</span>
                         <input class="input field-en" name="englishFullName" value="${escapeHtml(state.patientEditForm.englishFullName)}" />
-                      </label>
-                      <label class="field">
-                        <span class="label">${escapeHtml(t().patients.fields.mrn)}</span>
-                        <input class="input field-en" name="mrn" value="${escapeHtml(state.patientEditForm.mrn)}" />
                       </label>
                       <label class="field">
                         <span class="label">${escapeHtml(t().patients.fields.sex)}</span>
