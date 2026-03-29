@@ -894,6 +894,58 @@ html[dir="rtl"] .settings-row {
   font-weight: 800;
 }
 
+.calendar-day-modality {
+  display: flex;
+  justify-content: center;
+}
+
+.calendar-day-modality-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+
+.calendar-day-modality-item {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.calendar-day-modality-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--calendar-day-chip, rgba(15, 118, 110, 0.9));
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.calendar-day-modality-name {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-day-modality-more {
+  font-size: 0.75rem;
+  color: var(--muted);
+  align-self: center;
+  padding-left: 6px;
+}
+
+.calendar-day-modality-empty {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
 .calendar-day-note {
   font-size: 0.78rem;
   color: var(--muted);

@@ -34,6 +34,19 @@ const NAME_DICTIONARY_CSV_EXAMPLE = `arabic_text,english_text
 نور,Noor
 `;
 
+const CALENDAR_MODALITY_COLOR_PALETTE = [
+  "#0ea5e9",
+  "#22c55e",
+  "#f97316",
+  "#a855f7",
+  "#ef4444",
+  "#eab308",
+  "#14b8a6",
+  "#2563eb"
+];
+
+const MAX_CALENDAR_MODALITY_CHIPS = 3;
+
 function loadCityOptions() {
   try {
     const stored = JSON.parse(localStorage.getItem("rispro-city-options") || "[]");
@@ -377,10 +390,10 @@ const copy = {
         specificInstructionEn: "English instruction"
       }
     },
-    calendar: {
-      title: "Appointment calendar",
-      body: "Browse a full month, filter by modality, and print each day’s list.",
-      summary: "Click a day to surface that day’s appointments and print them.",
+  calendar: {
+    title: "Appointment calendar",
+    body: "Browse a full month, filter by modality, and print each day’s list.",
+    summary: "Click a day to surface that day’s appointments and print them.",
       filtersTitle: "Calendar filters",
       clearFilters: "Clear filters",
       fields: {
@@ -395,8 +408,9 @@ const copy = {
       today: "Today",
       printTitlePrefix: "Daily appointments",
       monthLabelHint: "Monthly view",
-      loading: "Loading calendar..."
-    },
+      loading: "Loading calendar...",
+      moreModalities: "More modalities"
+  },
     registrations: {
       title: "Daily registrations",
       body: "View registrations by day, open one record, edit it, print its slip, or delete it.",
@@ -809,7 +823,8 @@ const copy = {
       today: "اليوم",
       printTitlePrefix: "مواعيد يومية",
       monthLabelHint: "عرض شهري",
-      loading: "جارٍ تحميل التقويم..."
+      loading: "جارٍ تحميل التقويم...",
+      moreModalities: "أجهزة إضافية"
     },
     registrations: {
       title: "تسجيلات اليوم",
@@ -1704,6 +1719,97 @@ function formatModalityName(entry) {
     entry?.modality_name_ar ||
     ""
   );
+}
+
+function hashString(value) {
+  let hash = 0;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash << 5) - hash + value.charCodeAt(index);
+    hash |= 0;
+  }
+
+  return hash;
+}
+
+function getModalityColor(modalityId) {
+  if (!modalityId) {
+    return CALENDAR_MODALITY_COLOR_PALETTE[0];
+  }
+
+  const modalities = state.appointmentLookups.modalities || [];
+  const index = modalities.findIndex((item) => String(item.id) === String(modalityId));
+
+  if (index >= 0) {
+    return CALENDAR_MODALITY_COLOR_PALETTE[index % CALENDAR_MODALITY_COLOR_PALETTE.length];
+  }
+
+  const hashed = Math.abs(hashString(String(modalityId))) % CALENDAR_MODALITY_COLOR_PALETTE.length;
+  return CALENDAR_MODALITY_COLOR_PALETTE[hashed];
+}
+
+function formatCalendarModalityLabel(entry) {
+  if (!entry) {
+    return "";
+  }
+
+  if (state.language === "ar") {
+    return entry.modalityNameAr || entry.modalityNameEn || entry.nameAr || entry.nameEn || "";
+  }
+
+  return entry.modalityNameEn || entry.modalityNameAr || entry.nameEn || entry.nameAr || "";
+}
+
+function formatCalendarModalityShortLabel(entry) {
+  const fullLabel = formatCalendarModalityLabel(entry);
+  if (!fullLabel) {
+    return "";
+  }
+
+  if (fullLabel.length <= 8) {
+    return fullLabel;
+  }
+
+  return `${fullLabel.slice(0, 7)}…`;
+}
+
+function getCalendarModalityBreakdown() {
+  const breakdown = {};
+
+  for (const appointment of state.calendarAppointments) {
+    const dayKey = normalizeDateText(appointment.appointment_date);
+
+    if (!dayKey) {
+      continue;
+    }
+
+    const modalityId = appointment.modality_id ? String(appointment.modality_id) : "unknown";
+
+    if (!breakdown[dayKey]) {
+      breakdown[dayKey] = {};
+    }
+
+    if (!breakdown[dayKey][modalityId]) {
+      breakdown[dayKey][modalityId] = {
+        modalityId: appointment.modality_id,
+        modalityNameEn: appointment.modality_name_en,
+        modalityNameAr: appointment.modality_name_ar,
+        nameEn: appointment.name_en,
+        nameAr: appointment.name_ar,
+        count: 0
+      };
+    }
+
+    breakdown[dayKey][modalityId].count += 1;
+  }
+
+  const finalBreakdown = {};
+
+  for (const dayKey of Object.keys(breakdown)) {
+    finalBreakdown[dayKey] = Object.values(breakdown[dayKey]).sort((left, right) => right.count - left.count);
+  }
+
+  return finalBreakdown;
 }
 
 function formatExamName(entry) {
@@ -5316,6 +5422,7 @@ function renderCalendar() {
   const monthLabel = formatCalendarMonthLabel(state.calendarDisplayDate);
   const weekdayLabels = getCalendarWeekdayLabels();
   const groupedAppointments = groupCalendarAppointments();
+  const modalityBreakdown = getCalendarModalityBreakdown();
   const selectedDate = state.calendarSelectedDate || formatIsoDate(state.calendarDisplayDate);
   const selectedAppointments = groupedAppointments[selectedDate] || [];
   const monthStart = getCalendarGridStart(state.calendarDisplayDate);
@@ -5329,7 +5436,8 @@ function renderCalendar() {
       dayNumber: date.getUTCDate(),
       isCurrentMonth: date.getUTCMonth() === state.calendarDisplayDate.getUTCMonth(),
       count: groupedAppointments[iso]?.length || 0,
-      isSelected: iso === selectedDate
+      isSelected: iso === selectedDate,
+      modalitySummary: modalityBreakdown[iso] || []
     });
   }
 
@@ -5350,8 +5458,33 @@ function renderCalendar() {
       </div>
       <div class="calendar-month-grid">
         ${gridDays
-          .map(
-            (day) => `
+          .map((day) => {
+            const visibleEntries = (day.modalitySummary || []).slice(0, MAX_CALENDAR_MODALITY_CHIPS);
+            const hiddenCount = Math.max(0, (day.modalitySummary || []).length - visibleEntries.length);
+            const modalityMarkup = (day.modalitySummary || []).length
+              ? `
+                <div class="calendar-day-modality-grid">
+                  ${visibleEntries
+                    .map((entry) => {
+                      const color = getModalityColor(entry.modalityId);
+                      const fullLabel = formatCalendarModalityLabel(entry) || t().calendar.fields.modality;
+                      const shortLabel = formatCalendarModalityShortLabel(entry) || fullLabel;
+                      return `
+                        <span class="calendar-day-modality-item" title="${escapeHtml(fullLabel)}">
+                          <span class="calendar-day-modality-pill" style="--calendar-day-chip:${escapeHtml(color)}">
+                            ${escapeHtml(String(entry.count))}
+                          </span>
+                          <span class="calendar-day-modality-name">${escapeHtml(shortLabel)}</span>
+                        </span>
+                      `;
+                    })
+                    .join("")}
+                  ${hiddenCount > 0 ? `<span class="calendar-day-modality-more" title="${escapeHtml(t().calendar.moreModalities)}">+${hiddenCount}</span>` : ""}
+                </div>
+              `
+              : `<div class="calendar-day-modality-empty">${escapeHtml(t().calendar.noAppointmentsShort)}</div>`;
+
+            return `
               <button
                 type="button"
                 class="calendar-day ${day.isCurrentMonth ? "" : "calendar-day--ghost"} ${
@@ -5361,13 +5494,14 @@ function renderCalendar() {
                 data-date="${escapeHtml(day.iso)}"
               >
                 <div class="calendar-day-number">${escapeHtml(String(day.dayNumber))}</div>
+                <div class="calendar-day-modality">${modalityMarkup}</div>
                 <div class="calendar-day-count">${escapeHtml(String(day.count))}</div>
                 <div class="calendar-day-note">${escapeHtml(
                   day.count ? t().calendar.dayAppointmentsLabel : t().calendar.noAppointmentsShort
                 )}</div>
               </button>
-            `
-          )
+            `;
+          })
           .join("")}
       </div>
     `;
