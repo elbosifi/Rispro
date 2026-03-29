@@ -238,7 +238,8 @@ const state = {
   userSaving: false,
   userError: "",
   userSuccess: "",
-  userDeletingId: null
+  userDeletingId: null,
+  menuOpen: false
 };
 
 const copy = {
@@ -2325,8 +2326,14 @@ function setLanguage(language) {
   render();
 }
 
+function toggleMenu(force) {
+  state.menuOpen = typeof force === "boolean" ? force : !state.menuOpen;
+  render();
+}
+
 function setRoute(route) {
   state.route = allowedRoutes.includes(route) ? route : DEFAULT_ROUTE;
+  state.menuOpen = false;
   if (state.route === "settings") {
     state.settingsSection = "menu";
   }
@@ -7908,38 +7915,11 @@ function renderAppFrame(content) {
 
   return `
     <div class="shell">
+      ${renderMenuOverlay()}
       <div class="layout">
-        <aside class="sidebar">
-          <div class="brand">
-            <div class="brand-mark">R</div>
-            <div>
-              <div class="brand-title">${escapeHtml(t().appName)}</div>
-              <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
-            </div>
-          </div>
-
-          <nav class="nav">
-            ${allowedRoutes
-              .map(
-                (route, index) => `
-                  <a href="#" class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
-                    <span>${escapeHtml(t().nav[route])}</span>
-                    <span>${String(index + 1).padStart(2, "0")}</span>
-                  </a>
-                `
-              )
-              .join("")}
-          </nav>
-
-          <div class="sidebar-note">
-            <div class="sidebar-note-title">${escapeHtml(t().common.environment)}</div>
-            <div>${escapeHtml(localizedDate())}</div>
-            <div class="sidebar-note-copy">${escapeHtml(t().note)}</div>
-          </div>
-        </aside>
-
         <div class="content">
           <header class="topbar">
+            <button class="menu-toggle" type="button" data-action="toggle-menu" aria-label="Open navigation menu">☰</button>
             <div>
               <div class="topbar-path">${escapeHtml(t().nav.dashboard)} / ${escapeHtml(routeLabel)}</div>
               <div class="topbar-title">${escapeHtml(t().topTitle)}</div>
@@ -7969,6 +7949,52 @@ function renderAppFrame(content) {
       </div>
     </div>
     ${renderToasts()}
+  `;
+}
+
+function renderMenuLinks() {
+  return allowedRoutes
+    .map(
+      (route, index) => `
+        <a href="#" class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
+          <span>${escapeHtml(t().nav[route])}</span>
+          <span>${String(index + 1).padStart(2, "0")}</span>
+        </a>
+      `
+    )
+    .join("");
+}
+
+function renderMenuOverlay() {
+  const routeLabel = t().nav[state.route];
+
+  return `
+    <div class="menu-overlay ${state.menuOpen ? "visible" : ""}">
+      <div class="menu-panel surface">
+        <div class="menu-header">
+          <div class="brand">
+            <div class="brand-mark">R</div>
+            <div>
+              <div class="brand-title">${escapeHtml(t().appName)}</div>
+              <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
+            </div>
+          </div>
+          <button class="menu-close" type="button" data-action="toggle-menu">${escapeHtml(t().common.close)}</button>
+        </div>
+        <nav class="menu-nav">
+          ${renderMenuLinks()}
+        </nav>
+        <div class="menu-note">
+          <div class="menu-note-title">${escapeHtml(t().common.environment)}</div>
+          <div>${escapeHtml(localizedDate())}</div>
+          <div class="menu-note-copy">${escapeHtml(t().note)}</div>
+        </div>
+        <div class="menu-route">
+          <div class="topbar-path">${escapeHtml(t().nav.dashboard)} / ${escapeHtml(routeLabel)}</div>
+          <div class="chip accent">${escapeHtml(routeLabel)}</div>
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -8303,9 +8329,24 @@ function handleInput(event) {
 }
 
 function handleClick(event) {
+  if (state.menuOpen) {
+    const overlayClick = event.target.closest(".menu-overlay");
+    if (overlayClick && !event.target.closest(".menu-panel")) {
+      event.preventDefault();
+      toggleMenu(false);
+      return;
+    }
+  }
+
   const target = event.target.closest("[data-language], [data-route], [data-action], #logout-button");
 
   if (!target) {
+    return;
+  }
+
+  if (target.dataset.action === "toggle-menu") {
+    event.preventDefault();
+    toggleMenu();
     return;
   }
 
