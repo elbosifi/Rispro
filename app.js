@@ -34,19 +34,6 @@ const NAME_DICTIONARY_CSV_EXAMPLE = `arabic_text,english_text
 نور,Noor
 `;
 
-const CALENDAR_MODALITY_COLOR_PALETTE = [
-  "#0ea5e9",
-  "#22c55e",
-  "#f97316",
-  "#a855f7",
-  "#ef4444",
-  "#eab308",
-  "#14b8a6",
-  "#2563eb"
-];
-
-const MAX_CALENDAR_MODALITY_CHIPS = 3;
-
 function loadCityOptions() {
   try {
     const stored = JSON.parse(localStorage.getItem("rispro-city-options") || "[]");
@@ -103,6 +90,13 @@ const state = {
   integrationError: "",
   integrationSuccess: "",
   integrationStatus: null,
+  pacsFindLoading: false,
+  pacsFindError: "",
+  pacsFindResults: [],
+  pacsFindHasRun: false,
+  pacsTestLoading: false,
+  pacsTestError: "",
+  pacsTestSuccess: "",
   scanPreparationLoading: false,
   printPreparationLoading: false,
   printResults: [],
@@ -351,6 +345,12 @@ const copy = {
       patientPlaceholder: "Search by name, phone, MRN, or national ID",
       patientSelect: "Use this patient",
       selectedPatient: "Selected patient",
+      pacsSearch: "Search PACS",
+      pacsSearchHint: "Uses National ID to find prior studies.",
+      pacsResultsTitle: "Previous studies",
+      pacsNoResults: "No prior studies were found.",
+      pacsLoading: "Searching PACS...",
+      pacsMissingNationalId: "National ID is required to search PACS.",
       noneSelected: "Select a patient before saving an appointment.",
       lookupsLoading: "Loading modalities and priorities...",
       calendarHint: "Select a modality to load the next 14 days.",
@@ -384,16 +384,32 @@ const copy = {
         booked: "Booked",
         slotNumber: "Modality slot",
         accessionNumber: "Accession number",
+        pacsPatientId: "Patient ID",
+        pacsModality: "Modality",
+        pacsStudyDescription: "Study description",
+        pacsStudyDate: "Study date",
         examNameAr: "Exam name Arabic",
         examNameEn: "Exam name English",
         specificInstructionAr: "Arabic instruction",
         specificInstructionEn: "English instruction"
       }
     },
-  calendar: {
-    title: "Appointment calendar",
-    body: "Browse a full month, filter by modality, and print each day’s list.",
-    summary: "Click a day to surface that day’s appointments and print them.",
+    pacs: {
+      testButton: "اختبار اتصال PACS",
+      testSuccess: "تم نجاح الاتصال بـ PACS.",
+      testFail: "فشل الاتصال بـ PACS.",
+      testHint: "يرسل فحص C-ECHO إلى PACS المعرّف."
+    },
+    pacs: {
+      testButton: "Test PACS connection",
+      testSuccess: "PACS connection succeeded.",
+      testFail: "PACS connection failed.",
+      testHint: "Sends a basic C-ECHO to the configured PACS."
+    },
+    calendar: {
+      title: "Appointment calendar",
+      body: "Browse a full month, filter by modality, and print each day’s list.",
+      summary: "Click a day to surface that day’s appointments and print them.",
       filtersTitle: "Calendar filters",
       clearFilters: "Clear filters",
       fields: {
@@ -408,9 +424,8 @@ const copy = {
       today: "Today",
       printTitlePrefix: "Daily appointments",
       monthLabelHint: "Monthly view",
-      loading: "Loading calendar...",
-      moreModalities: "More modalities"
-  },
+      loading: "Loading calendar..."
+    },
     registrations: {
       title: "Daily registrations",
       body: "View registrations by day, open one record, edit it, print its slip, or delete it.",
@@ -766,6 +781,12 @@ const copy = {
       patientPlaceholder: "ابحث بالاسم أو الهاتف أو رقم الملف أو الرقم الوطني",
       patientSelect: "اختيار هذا المريض",
       selectedPatient: "المريض المختار",
+      pacsSearch: "بحث PACS",
+      pacsSearchHint: "يستخدم الرقم الوطني للبحث عن الدراسات السابقة.",
+      pacsResultsTitle: "الدراسات السابقة",
+      pacsNoResults: "لا توجد دراسات سابقة.",
+      pacsLoading: "جارٍ البحث في PACS...",
+      pacsMissingNationalId: "الرقم الوطني مطلوب لبحث PACS.",
       noneSelected: "اختر مريضاً قبل حفظ الموعد.",
       lookupsLoading: "جارٍ تحميل الأجهزة والأولويات...",
       calendarHint: "اختر الجهاز لتحميل الأيام الأربعة عشر القادمة.",
@@ -799,6 +820,10 @@ const copy = {
         booked: "المحجوز",
         slotNumber: "رقم دور الجهاز",
         accessionNumber: "رقم الدخول",
+        pacsPatientId: "رقم المريض",
+        pacsModality: "الجهاز",
+        pacsStudyDescription: "وصف الدراسة",
+        pacsStudyDate: "تاريخ الدراسة",
         examNameAr: "اسم الفحص بالعربية",
         examNameEn: "اسم الفحص بالإنجليزية",
         specificInstructionAr: "تعليمات بالعربية",
@@ -823,8 +848,7 @@ const copy = {
       today: "اليوم",
       printTitlePrefix: "مواعيد يومية",
       monthLabelHint: "عرض شهري",
-      loading: "جارٍ تحميل التقويم...",
-      moreModalities: "أجهزة إضافية"
+      loading: "جارٍ تحميل التقويم..."
     },
     registrations: {
       title: "تسجيلات اليوم",
@@ -1134,6 +1158,20 @@ const SETTINGS_META = {
       language_switcher: { en: "Language switcher", ar: "التبديل بين اللغات" },
       arabic_direction: { en: "Arabic direction", ar: "اتجاه العربية" },
       english_direction: { en: "English direction", ar: "اتجاه الإنجليزية" }
+    }
+  },
+  pacs_connection: {
+    titleEn: "PACS connection",
+    titleAr: "إعدادات ربط PACS",
+    summaryEn: "Connect to PACS for C-FIND study lookups.",
+    summaryAr: "ربط نظام PACS للبحث عن الدراسات السابقة.",
+    fields: {
+      enabled: { en: "PACS enabled", ar: "تفعيل PACS" },
+      host: { en: "PACS host", ar: "عنوان PACS" },
+      port: { en: "PACS port", ar: "منفذ PACS" },
+      called_ae_title: { en: "Called AE Title", ar: "AE Title المستهدف" },
+      calling_ae_title: { en: "Calling AE Title", ar: "AE Title المرسل" },
+      timeout_seconds: { en: "Timeout seconds", ar: "مهلة الاتصال بالثواني" }
     }
   },
   patient_registration: {
@@ -1488,7 +1526,9 @@ function formatAuditActionType(value) {
     scan_into_queue: { en: "Scan into queue", ar: "إدخال للطابور" },
     export: { en: "Export", ar: "تصدير" },
     prepare_print: { en: "Prepare print", ar: "تجهيز طباعة" },
-    prepare_scan: { en: "Prepare scan", ar: "تجهيز مسح" }
+    prepare_scan: { en: "Prepare scan", ar: "تجهيز مسح" },
+    pacs_cfind: { en: "PACS C-FIND", ar: "بحث PACS" },
+    pacs_echo: { en: "PACS C-ECHO", ar: "اختبار PACS" }
   };
 
   return labels[value]?.[state.language] || humanizeAuditValue(value);
@@ -1592,6 +1632,24 @@ function formatDisplayDate(value) {
     month: "short",
     year: "numeric"
   }).format(new Date(value));
+}
+
+function formatDicomDate(value) {
+  const clean = String(value || "").trim();
+  if (!clean) {
+    return "";
+  }
+
+  const iso = /^\d{8}$/.test(clean)
+    ? `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}`
+    : clean;
+  const parsed = new Date(iso);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return clean;
+  }
+
+  return formatDisplayDate(parsed.toISOString());
 }
 
 function formatDisplayDateTime(value) {
@@ -1719,97 +1777,6 @@ function formatModalityName(entry) {
     entry?.modality_name_ar ||
     ""
   );
-}
-
-function hashString(value) {
-  let hash = 0;
-
-  for (let index = 0; index < value.length; index += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(index);
-    hash |= 0;
-  }
-
-  return hash;
-}
-
-function getModalityColor(modalityId) {
-  if (!modalityId) {
-    return CALENDAR_MODALITY_COLOR_PALETTE[0];
-  }
-
-  const modalities = state.appointmentLookups.modalities || [];
-  const index = modalities.findIndex((item) => String(item.id) === String(modalityId));
-
-  if (index >= 0) {
-    return CALENDAR_MODALITY_COLOR_PALETTE[index % CALENDAR_MODALITY_COLOR_PALETTE.length];
-  }
-
-  const hashed = Math.abs(hashString(String(modalityId))) % CALENDAR_MODALITY_COLOR_PALETTE.length;
-  return CALENDAR_MODALITY_COLOR_PALETTE[hashed];
-}
-
-function formatCalendarModalityLabel(entry) {
-  if (!entry) {
-    return "";
-  }
-
-  if (state.language === "ar") {
-    return entry.modalityNameAr || entry.modalityNameEn || entry.nameAr || entry.nameEn || "";
-  }
-
-  return entry.modalityNameEn || entry.modalityNameAr || entry.nameEn || entry.nameAr || "";
-}
-
-function formatCalendarModalityShortLabel(entry) {
-  const fullLabel = formatCalendarModalityLabel(entry);
-  if (!fullLabel) {
-    return "";
-  }
-
-  if (fullLabel.length <= 8) {
-    return fullLabel;
-  }
-
-  return `${fullLabel.slice(0, 7)}…`;
-}
-
-function getCalendarModalityBreakdown() {
-  const breakdown = {};
-
-  for (const appointment of state.calendarAppointments) {
-    const dayKey = normalizeDateText(appointment.appointment_date);
-
-    if (!dayKey) {
-      continue;
-    }
-
-    const modalityId = appointment.modality_id ? String(appointment.modality_id) : "unknown";
-
-    if (!breakdown[dayKey]) {
-      breakdown[dayKey] = {};
-    }
-
-    if (!breakdown[dayKey][modalityId]) {
-      breakdown[dayKey][modalityId] = {
-        modalityId: appointment.modality_id,
-        modalityNameEn: appointment.modality_name_en,
-        modalityNameAr: appointment.modality_name_ar,
-        nameEn: appointment.name_en,
-        nameAr: appointment.name_ar,
-        count: 0
-      };
-    }
-
-    breakdown[dayKey][modalityId].count += 1;
-  }
-
-  const finalBreakdown = {};
-
-  for (const dayKey of Object.keys(breakdown)) {
-    finalBreakdown[dayKey] = Object.values(breakdown[dayKey]).sort((left, right) => right.count - left.count);
-  }
-
-  return finalBreakdown;
 }
 
 function formatExamName(entry) {
@@ -4045,6 +4012,58 @@ async function prepareScanSession() {
   }
 }
 
+async function searchPacsStudies() {
+  if (!state.selectedAppointmentPatient) {
+    state.pacsFindError = t().appointments.noneSelected;
+    render();
+    return;
+  }
+
+  const patientNationalId = String(state.selectedAppointmentPatient.national_id || "").trim();
+
+  if (!patientNationalId) {
+    state.pacsFindError = t().appointments.pacsMissingNationalId;
+    render();
+    return;
+  }
+
+  state.pacsFindLoading = true;
+  state.pacsFindError = "";
+  state.pacsFindResults = [];
+  render();
+
+  try {
+    const result = await api("/api/integrations/pacs-cfind", {
+      method: "POST",
+      body: JSON.stringify({ patientNationalId })
+    });
+    state.pacsFindResults = result.studies || [];
+  } catch (error) {
+    state.pacsFindError = error.message;
+  } finally {
+    state.pacsFindLoading = false;
+    state.pacsFindHasRun = true;
+    render();
+  }
+}
+
+async function testPacsConnection() {
+  state.pacsTestLoading = true;
+  state.pacsTestError = "";
+  state.pacsTestSuccess = "";
+  render();
+
+  try {
+    await api("/api/integrations/pacs-test", { method: "POST" });
+    state.pacsTestSuccess = t().pacs.testSuccess;
+  } catch (error) {
+    state.pacsTestError = error.message || t().pacs.testFail;
+  } finally {
+    state.pacsTestLoading = false;
+    render();
+  }
+}
+
 function fillPatientEditForm(patient) {
   state.patientEditForm = {
     arabicFullName: patient.arabic_full_name || "",
@@ -5059,6 +5078,71 @@ function renderAppointmentPatientResults() {
   `;
 }
 
+function renderPacsFindResults() {
+  if (state.pacsFindLoading) {
+    return `<div class="empty">${escapeHtml(t().appointments.pacsLoading)}</div>`;
+  }
+
+  if (!state.pacsFindHasRun) {
+    return "";
+  }
+
+  if (!state.pacsFindResults.length) {
+    return `<div class="empty">${escapeHtml(t().appointments.pacsNoResults)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.pacsFindResults
+        .map((study) => {
+          const patientId = study.patientId || "—";
+          const modality = study.modality || "—";
+          const description = study.studyDescription || "—";
+          const studyDate = study.studyDate ? formatDicomDate(study.studyDate) : "—";
+
+          return `
+            <div class="item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(description)}</div>
+                <div class="item-subtitle">${escapeHtml(
+                  `${t().appointments.fields.pacsPatientId}: ${patientId} • ${t().appointments.fields.pacsModality}: ${modality} • ${t().appointments.fields.pacsStudyDate}: ${studyDate}`
+                )}</div>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPacsFindPanel(patient) {
+  if (!patient) {
+    return "";
+  }
+
+  const hasNationalId = Boolean(patient.national_id);
+  const buttonLabel = state.pacsFindLoading ? t().appointments.pacsLoading : t().appointments.pacsSearch;
+
+  return `
+    <div class="stack">
+      <div class="section-head">
+        <h3 class="section-title">${escapeHtml(t().appointments.pacsResultsTitle)}</h3>
+        <span class="chip subtle">${escapeHtml(String(state.pacsFindResults.length))}</span>
+      </div>
+      <div class="small">${escapeHtml(t().appointments.pacsSearchHint)}</div>
+      ${!hasNationalId ? `<div class="small">${escapeHtml(t().appointments.pacsMissingNationalId)}</div>` : ""}
+      ${alertMarkup("error", state.pacsFindError)}
+      <div class="form-actions">
+        <button class="button-secondary" type="button" data-action="pacs-cfind" ${!hasNationalId || state.pacsFindLoading ? "disabled" : ""}>
+          ${escapeHtml(buttonLabel)}
+        </button>
+      </div>
+      ${renderPacsFindResults()}
+    </div>
+  `;
+}
+
 function renderSelectedAppointmentPatient() {
   if (!state.selectedAppointmentPatient) {
     return `<div class="empty">${escapeHtml(t().appointments.noneSelected)}</div>`;
@@ -5067,15 +5151,18 @@ function renderSelectedAppointmentPatient() {
   const patient = state.selectedAppointmentPatient;
 
   return `
-    <div class="info-grid">
-      ${infoTile(t().patients.fields.arabicFullName, patient.arabic_full_name, "tone-good")}
-      ${infoTile(t().patients.fields.englishFullName, patient.english_full_name, "")}
-      ${infoTile(t().patients.fields.ageYears, String(patient.age_years || ""), "")}
-      ${infoTile(t().patients.fields.sex, formatSex(patient.sex), "")}
-      ${infoTile(t().patients.fields.phone1, patient.phone_1 || "N/A", "tone-warm")}
-      ${infoTile(t().patients.fields.nationalId, patient.national_id || "N/A", "")}
-      ${infoTile(t().patients.fields.address, patient.address || "—", "")}
-      ${infoTile(t().patients.fields.mrn, patient.mrn || `#${patient.id}`, "")}
+    <div class="stack">
+      <div class="info-grid">
+        ${infoTile(t().patients.fields.arabicFullName, patient.arabic_full_name, "tone-good")}
+        ${infoTile(t().patients.fields.englishFullName, patient.english_full_name, "")}
+        ${infoTile(t().patients.fields.ageYears, String(patient.age_years || ""), "")}
+        ${infoTile(t().patients.fields.sex, formatSex(patient.sex), "")}
+        ${infoTile(t().patients.fields.phone1, patient.phone_1 || "N/A", "tone-warm")}
+        ${infoTile(t().patients.fields.nationalId, patient.national_id || "N/A", "")}
+        ${infoTile(t().patients.fields.address, patient.address || "—", "")}
+        ${infoTile(t().patients.fields.mrn, patient.mrn || `#${patient.id}`, "")}
+      </div>
+      ${renderPacsFindPanel(patient)}
     </div>
   `;
 }
@@ -5422,7 +5509,6 @@ function renderCalendar() {
   const monthLabel = formatCalendarMonthLabel(state.calendarDisplayDate);
   const weekdayLabels = getCalendarWeekdayLabels();
   const groupedAppointments = groupCalendarAppointments();
-  const modalityBreakdown = getCalendarModalityBreakdown();
   const selectedDate = state.calendarSelectedDate || formatIsoDate(state.calendarDisplayDate);
   const selectedAppointments = groupedAppointments[selectedDate] || [];
   const monthStart = getCalendarGridStart(state.calendarDisplayDate);
@@ -5436,8 +5522,7 @@ function renderCalendar() {
       dayNumber: date.getUTCDate(),
       isCurrentMonth: date.getUTCMonth() === state.calendarDisplayDate.getUTCMonth(),
       count: groupedAppointments[iso]?.length || 0,
-      isSelected: iso === selectedDate,
-      modalitySummary: modalityBreakdown[iso] || []
+      isSelected: iso === selectedDate
     });
   }
 
@@ -5458,33 +5543,8 @@ function renderCalendar() {
       </div>
       <div class="calendar-month-grid">
         ${gridDays
-          .map((day) => {
-            const visibleEntries = (day.modalitySummary || []).slice(0, MAX_CALENDAR_MODALITY_CHIPS);
-            const hiddenCount = Math.max(0, (day.modalitySummary || []).length - visibleEntries.length);
-            const modalityMarkup = (day.modalitySummary || []).length
-              ? `
-                <div class="calendar-day-modality-grid">
-                  ${visibleEntries
-                    .map((entry) => {
-                      const color = getModalityColor(entry.modalityId);
-                      const fullLabel = formatCalendarModalityLabel(entry) || t().calendar.fields.modality;
-                      const shortLabel = formatCalendarModalityShortLabel(entry) || fullLabel;
-                      return `
-                        <span class="calendar-day-modality-item" title="${escapeHtml(fullLabel)}">
-                          <span class="calendar-day-modality-pill" style="--calendar-day-chip:${escapeHtml(color)}">
-                            ${escapeHtml(String(entry.count))}
-                          </span>
-                          <span class="calendar-day-modality-name">${escapeHtml(shortLabel)}</span>
-                        </span>
-                      `;
-                    })
-                    .join("")}
-                  ${hiddenCount > 0 ? `<span class="calendar-day-modality-more" title="${escapeHtml(t().calendar.moreModalities)}">+${hiddenCount}</span>` : ""}
-                </div>
-              `
-              : `<div class="calendar-day-modality-empty">${escapeHtml(t().calendar.noAppointmentsShort)}</div>`;
-
-            return `
+          .map(
+            (day) => `
               <button
                 type="button"
                 class="calendar-day ${day.isCurrentMonth ? "" : "calendar-day--ghost"} ${
@@ -5494,14 +5554,13 @@ function renderCalendar() {
                 data-date="${escapeHtml(day.iso)}"
               >
                 <div class="calendar-day-number">${escapeHtml(String(day.dayNumber))}</div>
-                <div class="calendar-day-modality">${modalityMarkup}</div>
                 <div class="calendar-day-count">${escapeHtml(String(day.count))}</div>
                 <div class="calendar-day-note">${escapeHtml(
                   day.count ? t().calendar.dayAppointmentsLabel : t().calendar.noAppointmentsShort
                 )}</div>
               </button>
-            `;
-          })
+            `
+          )
           .join("")}
       </div>
     `;
@@ -7173,6 +7232,8 @@ function renderSettingsCatalog() {
           const summary = getSettingsCategorySummary(category);
           const isSaving = state.settingsSavingCategory === category;
 
+          const showPacsTest = category === "pacs_connection";
+
           return `
             <article class="surface settings-category">
               <form class="stack" data-settings-form="${escapeHtml(category)}">
@@ -7205,6 +7266,18 @@ function renderSettingsCatalog() {
                 </div>
 
                 <div class="form-actions">
+                  ${showPacsTest ? `
+                    <div class="stack" style="width:100%;">
+                      <div class="small">${escapeHtml(t().pacs.testHint)}</div>
+                      ${alertMarkup("error", state.pacsTestError)}
+                      ${alertMarkup("success", state.pacsTestSuccess)}
+                    </div>
+                  ` : ""}
+                  ${showPacsTest ? `
+                    <button class="button-secondary" type="button" data-action="pacs-test-connection">
+                      ${escapeHtml(state.pacsTestLoading ? t().common.loading : t().pacs.testButton)}
+                    </button>
+                  ` : ""}
                   <button class="button-primary" type="submit">
                     ${escapeHtml(isSaving ? t().common.loading : t().settings.saveCategory)}
                   </button>
@@ -8495,7 +8568,16 @@ function handleClick(event) {
       (patient) => String(patient.id) === String(patientId)
     ) || null;
     state.appointmentError = "";
+    state.pacsFindResults = [];
+    state.pacsFindError = "";
+    state.pacsFindHasRun = false;
     render();
+    return;
+  }
+
+  if (target.dataset.action === "pacs-cfind") {
+    event.preventDefault();
+    void searchPacsStudies();
     return;
   }
 
@@ -8708,6 +8790,12 @@ function handleClick(event) {
     event.preventDefault();
     state.settingsSection = "menu";
     render();
+    return;
+  }
+
+  if (target.dataset.action === "pacs-test-connection") {
+    event.preventDefault();
+    void testPacsConnection();
     return;
   }
 
