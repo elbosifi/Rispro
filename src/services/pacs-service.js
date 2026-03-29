@@ -291,7 +291,7 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
 
   await logAuditEntry({
     entityType: "integration",
-    entityId: patientId,
+    entityId: null,
     actionType: "pacs_cfind",
     oldValues: null,
     newValues: {
@@ -329,7 +329,7 @@ export async function testPacsConnection({ currentUserId, overrides = null }) {
 
   await logAuditEntry({
     entityType: "integration",
-    entityId: settings.host,
+    entityId: null,
     actionType: "pacs_echo",
     oldValues: null,
     newValues: {

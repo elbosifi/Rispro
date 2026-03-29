@@ -2548,9 +2548,14 @@ async function api(path, options = {}) {
   }
 
   if (!response.ok) {
+    const isHtmlPayload = typeof payload === "string" && /<html|<!doctype html/i.test(payload);
     const message =
       typeof payload === "string"
-        ? payload
+        ? isHtmlPayload
+          ? response.status === 502
+            ? "PACS test failed because the server returned a gateway error."
+            : `Request failed with status ${response.status}.`
+          : payload
         : payload?.error?.message || `Request failed with status ${response.status}.`;
     throw new Error(message);
   }
