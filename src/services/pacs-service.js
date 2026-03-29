@@ -1,7 +1,10 @@
 import dimse from "dicom-dimse-native";
+import os from "os";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+
+const DEFAULT_DIMSE_SOURCE_PORT = "11112";
 
 function parseEnabled(value) {
   return String(value || "").trim() === "enabled";
@@ -13,6 +16,20 @@ function parsePositiveInteger(value, fallback) {
     return fallback;
   }
   return parsed;
+}
+
+function getDimseSourceIp() {
+  const interfaces = os.networkInterfaces();
+
+  for (const addresses of Object.values(interfaces)) {
+    for (const address of addresses || []) {
+      if (address && address.family === "IPv4" && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+
+  return "0.0.0.0";
 }
 
 async function loadSettingsMap(categories) {
@@ -183,16 +200,21 @@ function normalizePacsSettingsInput(input = {}) {
 async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
+      const sourceIp = getDimseSourceIp();
+      const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
+      const timer = setTimeout(() => {
+        reject(new Error("Timed out waiting for PACS response."));
+      }, timeoutMs + 2000);
       const options = {
         source: {
           aet: callingAeTitle || "RISPRO",
-          ip: "0.0.0.0",
-          port: 0
+          ip: sourceIp,
+          port: DEFAULT_DIMSE_SOURCE_PORT
         },
         target: {
           aet: calledAeTitle,
           ip: host,
-          port
+          port: String(port)
         },
         tags: [
           { key: "00080052", value: "STUDY" },
@@ -201,10 +223,12 @@ async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAe
           { key: "00080060" },
           { key: "00081030" }
         ],
-        timeout: timeoutSeconds
+        timeout: Number(timeoutSeconds),
+        verbose: true
       };
 
       dimse.findScu(options, (result) => {
+        clearTimeout(timer);
         if (!result) {
           resolve([]);
           return;
@@ -227,21 +251,28 @@ async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAe
 async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
+      const sourceIp = getDimseSourceIp();
+      const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
+      const timer = setTimeout(() => {
+        reject(new Error("Timed out waiting for PACS response."));
+      }, timeoutMs + 2000);
       const options = {
         source: {
           aet: callingAeTitle || "RISPRO",
-          ip: "0.0.0.0",
-          port: 0
+          ip: sourceIp,
+          port: DEFAULT_DIMSE_SOURCE_PORT
         },
         target: {
           aet: calledAeTitle,
           ip: host,
-          port
+          port: String(port)
         },
-        timeout: timeoutSeconds
+        timeout: Number(timeoutSeconds),
+        verbose: true
       };
 
       dimse.echoScu(options, (result) => {
+        clearTimeout(timer);
         if (!result) {
           resolve([]);
           return;
