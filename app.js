@@ -571,7 +571,7 @@ const copy = {
       submit: "Search",
       empty: "No matching patients were found yet."
     },
-    settings: {
+  settings: {
       title: "Supervisor settings",
       body: "Create staff accounts, review access, and control the saved system behavior category by category.",
       menuTitle: "Settings sections",
@@ -583,6 +583,8 @@ const copy = {
       sectionDictionary: "Custom dictionary",
       sectionExamTypes: "Exam types",
       sectionCapacity: "Scheduling capacity",
+      sectionPacs: "إعدادات PACS",
+      sectionPacs: "PACS connection",
       sectionCategories: "System behavior",
       sectionAudit: "Audit log",
       sectionBackup: "Backup and restore",
@@ -1575,25 +1577,38 @@ function getSettingsFieldValue(entry) {
 
 function ensureRequiredSettingsDefaults(catalog) {
   const nextCatalog = { ...(catalog || {}) };
-  const category = "scheduling_and_capacity";
-  const requiredEntries = [{ key: "max_cases_per_modality", value: "" }];
-  const existingEntries = Array.isArray(nextCatalog[category]) ? [...nextCatalog[category]] : [];
+  const requiredByCategory = {
+    scheduling_and_capacity: [{ key: "max_cases_per_modality", value: "" }],
+    pacs_connection: [
+      { key: "enabled", value: "enabled" },
+      { key: "host", value: "" },
+      { key: "port", value: "104" },
+      { key: "called_ae_title", value: "" },
+      { key: "calling_ae_title", value: "RISPRO" },
+      { key: "timeout_seconds", value: "10" }
+    ]
+  };
 
-  for (const required of requiredEntries) {
-    const hasEntry = existingEntries.some((entry) => entry.setting_key === required.key);
+  Object.entries(requiredByCategory).forEach(([category, requiredEntries]) => {
+    const existingEntries = Array.isArray(nextCatalog[category]) ? [...nextCatalog[category]] : [];
 
-    if (!hasEntry) {
-      existingEntries.push({
-        category,
-        setting_key: required.key,
-        setting_value: { value: required.value },
-        updated_at: null
-      });
+    for (const required of requiredEntries) {
+      const hasEntry = existingEntries.some((entry) => entry.setting_key === required.key);
+
+      if (!hasEntry) {
+        existingEntries.push({
+          category,
+          setting_key: required.key,
+          setting_value: { value: required.value },
+          updated_at: null
+        });
+      }
     }
-  }
 
-  existingEntries.sort((left, right) => String(left.setting_key).localeCompare(String(right.setting_key)));
-  nextCatalog[category] = existingEntries;
+    existingEntries.sort((left, right) => String(left.setting_key).localeCompare(String(right.setting_key)));
+    nextCatalog[category] = existingEntries;
+  });
+
   return nextCatalog;
 }
 
@@ -7217,7 +7232,7 @@ function renderSettingsCatalog() {
     return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
   }
 
-  const categories = Object.keys(state.settingsCatalog);
+  const categories = Object.keys(state.settingsCatalog).filter((category) => category !== "pacs_connection");
 
   if (!categories.length) {
     return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
@@ -7231,8 +7246,6 @@ function renderSettingsCatalog() {
           const title = getSettingsCategoryTitle(category);
           const summary = getSettingsCategorySummary(category);
           const isSaving = state.settingsSavingCategory === category;
-
-          const showPacsTest = category === "pacs_connection";
 
           return `
             <article class="surface settings-category">
@@ -7266,18 +7279,6 @@ function renderSettingsCatalog() {
                 </div>
 
                 <div class="form-actions">
-                  ${showPacsTest ? `
-                    <div class="stack" style="width:100%;">
-                      <div class="small">${escapeHtml(t().pacs.testHint)}</div>
-                      ${alertMarkup("error", state.pacsTestError)}
-                      ${alertMarkup("success", state.pacsTestSuccess)}
-                    </div>
-                  ` : ""}
-                  ${showPacsTest ? `
-                    <button class="button-secondary" type="button" data-action="pacs-test-connection">
-                      ${escapeHtml(state.pacsTestLoading ? t().common.loading : t().pacs.testButton)}
-                    </button>
-                  ` : ""}
                   <button class="button-primary" type="submit">
                     ${escapeHtml(isSaving ? t().common.loading : t().settings.saveCategory)}
                   </button>
@@ -7786,6 +7787,12 @@ function renderSettingsMenu() {
       count: getSettingsEntryValue("scheduling_and_capacity", "max_cases_per_modality", "—") || "—"
     },
     {
+      id: "pacs",
+      title: t().settings.sectionPacs,
+      body: t().pacs.testHint,
+      count: getSettingsEntryValue("pacs_connection", "enabled", t().common.inactive) === "enabled" ? t().common.active : t().common.inactive
+    },
+    {
       id: "categories",
       title: t().settings.sectionCategories,
       body: t().settings.body,
@@ -7923,6 +7930,114 @@ function renderSettingsCapacitySection() {
   `;
 }
 
+function renderSettingsPacsSection() {
+  const enabledValue = getSettingsEntryValue("pacs_connection", "enabled", "enabled");
+  const hostValue = getSettingsEntryValue("pacs_connection", "host", "");
+  const portValue = getSettingsEntryValue("pacs_connection", "port", "104");
+  const calledAeValue = getSettingsEntryValue("pacs_connection", "called_ae_title", "");
+  const callingAeValue = getSettingsEntryValue("pacs_connection", "calling_ae_title", "RISPRO");
+  const timeoutValue = getSettingsEntryValue("pacs_connection", "timeout_seconds", "10");
+
+  return `
+    <section class="surface">
+      <div class="section-head">
+        <h2 class="section-title">${escapeHtml(t().settings.sectionPacs)}</h2>
+        <span class="chip accent">${escapeHtml(t().common.required)}</span>
+      </div>
+      <div class="settings-summary">${escapeHtml(t().pacs.testHint)}</div>
+      ${alertMarkup("error", state.pacsTestError)}
+      ${alertMarkup("success", state.pacsTestSuccess)}
+      <form class="stack" data-settings-form="pacs_connection">
+        <div class="form-grid">
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "enabled"))}</span>
+            <select
+              class="select"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="enabled"
+            >
+              <option value="enabled" ${enabledValue === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+              <option value="disabled" ${enabledValue === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "host"))}</span>
+            <input
+              class="input field-en"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="host"
+              value="${escapeHtml(hostValue)}"
+              autocomplete="off"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "port"))}</span>
+            <input
+              class="input field-en"
+              inputmode="numeric"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="port"
+              value="${escapeHtml(portValue)}"
+              autocomplete="off"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "called_ae_title"))}</span>
+            <input
+              class="input field-en"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="called_ae_title"
+              value="${escapeHtml(calledAeValue)}"
+              autocomplete="off"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "calling_ae_title"))}</span>
+            <input
+              class="input field-en"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="calling_ae_title"
+              value="${escapeHtml(callingAeValue)}"
+              autocomplete="off"
+            />
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "timeout_seconds"))}</span>
+            <input
+              class="input field-en"
+              inputmode="numeric"
+              data-setting-field="true"
+              data-setting-category="pacs_connection"
+              data-setting-key="timeout_seconds"
+              value="${escapeHtml(timeoutValue)}"
+              autocomplete="off"
+            />
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button class="button-secondary" type="button" data-action="pacs-test-connection">
+            ${escapeHtml(state.pacsTestLoading ? t().common.loading : t().pacs.testButton)}
+          </button>
+          <button class="button-primary" type="submit">
+            ${escapeHtml(state.settingsSavingCategory === "pacs_connection" ? t().common.loading : t().settings.saveCategory)}
+          </button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
 function renderSettingsSectionContent() {
   switch (state.settingsSection) {
     case "users":
@@ -7966,6 +8081,8 @@ function renderSettingsSectionContent() {
       `;
     case "capacity":
       return renderSettingsCapacitySection();
+    case "pacs":
+      return renderSettingsPacsSection();
     case "categories":
       return `
         <section class="surface">

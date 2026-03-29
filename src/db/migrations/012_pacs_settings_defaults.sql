@@ -1,6 +1,6 @@
 insert into system_settings (category, setting_key, setting_value)
 values
-  ('pacs_connection', 'enabled', '{"value":"disabled"}'::jsonb),
+  ('pacs_connection', 'enabled', '{"value":"enabled"}'::jsonb),
   ('pacs_connection', 'host', '{"value":""}'::jsonb),
   ('pacs_connection', 'port', '{"value":"104"}'::jsonb),
   ('pacs_connection', 'called_ae_title', '{"value":""}'::jsonb),
