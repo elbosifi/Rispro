@@ -52,12 +52,39 @@ async function loadSettingsMap(categories) {
   }, {});
 }
 
-function normalizePatientId(value) {
+function normalizeDateForDicom(value) {
   const clean = String(value || "").trim();
   if (!clean) {
-    throw new HttpError(400, "patientNationalId is required.");
+    return "";
   }
-  return clean;
+
+  if (/^\d{8}$/.test(clean)) {
+    return clean;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return clean.replaceAll("-", "");
+  }
+
+  throw new HttpError(400, "studyDate must be in YYYY-MM-DD format.");
+}
+
+function normalizeStudySearchCriteria(payload = {}) {
+  const patientId = String(payload.patientId || payload.patientNationalId || "").trim();
+  const patientName = String(payload.patientName || "").trim();
+  const accessionNumber = String(payload.accessionNumber || "").trim();
+  const studyDate = normalizeDateForDicom(payload.studyDate || "");
+
+  if (!patientId && !patientName && !accessionNumber && !studyDate) {
+    throw new HttpError(400, "At least one PACS search field is required.");
+  }
+
+  return {
+    patientId,
+    patientName,
+    accessionNumber,
+    studyDate
+  };
 }
 
 function extractTagValue(dataset, tag) {
@@ -74,11 +101,29 @@ function extractTagValue(dataset, tag) {
       return String(candidate);
     }
     if (Array.isArray(candidate)) {
-      return candidate.length ? String(candidate[0] ?? "") : "";
+      if (!candidate.length) {
+        return "";
+      }
+
+      const firstValue = candidate[0];
+      if (firstValue && typeof firstValue === "object") {
+        return String(firstValue.Alphabetic || firstValue.Ideographic || firstValue.Phonetic || "");
+      }
+
+      return String(firstValue ?? "");
     }
     if (typeof candidate === "object") {
       if (Array.isArray(candidate.Value)) {
-        return candidate.Value.length ? String(candidate.Value[0] ?? "") : "";
+        if (!candidate.Value.length) {
+          return "";
+        }
+
+        const firstValue = candidate.Value[0];
+        if (firstValue && typeof firstValue === "object") {
+          return String(firstValue.Alphabetic || firstValue.Ideographic || firstValue.Phonetic || "");
+        }
+
+        return String(firstValue ?? "");
       }
       if (candidate.Value !== undefined) {
         return String(candidate.Value ?? "");
@@ -96,6 +141,12 @@ function extractStudySummary(dataset) {
   const patientId =
     extractTagValue(dataset, "00100020") ||
     extractTagValue(dataset, "PatientID");
+  const patientName =
+    extractTagValue(dataset, "00100010") ||
+    extractTagValue(dataset, "PatientName");
+  const accessionNumber =
+    extractTagValue(dataset, "00080050") ||
+    extractTagValue(dataset, "AccessionNumber");
   const modality =
     extractTagValue(dataset, "00080060") ||
     extractTagValue(dataset, "Modality");
@@ -108,6 +159,8 @@ function extractStudySummary(dataset) {
 
   return {
     patientId,
+    patientName,
+    accessionNumber,
     modality,
     studyDescription: description,
     studyDate
@@ -197,7 +250,21 @@ function normalizePacsSettingsInput(input = {}) {
   };
 }
 
-async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
+function buildStudySearchTags(criteria) {
+  const tags = [
+    { key: "00080052", value: "STUDY" },
+    { key: "00100010", value: criteria.patientName ? `*${criteria.patientName}*` : "" },
+    { key: "00100020", value: criteria.patientId || "" },
+    { key: "00080050", value: criteria.accessionNumber || "" },
+    { key: "00080020", value: criteria.studyDate || "" },
+    { key: "00080060", value: "" },
+    { key: "00081030", value: "" }
+  ];
+
+  return tags;
+}
+
+async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
       const sourceIp = getDimseSourceIp();
@@ -216,13 +283,7 @@ async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAe
           ip: host,
           port: String(port)
         },
-        tags: [
-          { key: "00080052", value: "STUDY" },
-          { key: "00100020", value: patientId },
-          { key: "00080020" },
-          { key: "00080060" },
-          { key: "00081030" }
-        ],
+        tags: buildStudySearchTags(criteria),
         timeout: Number(timeoutSeconds),
         verbose: true
       };
@@ -292,8 +353,8 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
   });
 }
 
-export async function runPacsCFind({ patientNationalId, currentUserId }) {
-  const patientId = normalizePatientId(patientNationalId);
+export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }) {
+  const criteria = normalizeStudySearchCriteria(rawCriteria);
   const settings = await loadPacsSettings();
 
   if (!settings.enabled) {
@@ -307,7 +368,7 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
   let rawResult;
   try {
     rawResult = await runDimseFindScu({
-      patientId,
+      criteria,
       host: settings.host,
       port: settings.port,
       calledAeTitle: settings.calledAeTitle,
@@ -326,13 +387,20 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
     actionType: "pacs_cfind",
     oldValues: null,
     newValues: {
-      patientId,
+      criteria,
       resultCount: studies.length
     },
     changedByUserId: currentUserId
   });
 
   return studies;
+}
+
+export async function runPacsCFind({ patientNationalId, currentUserId }) {
+  return searchPacsStudies({
+    criteria: { patientId: patientNationalId },
+    currentUserId
+  });
 }
 
 export async function testPacsConnection({ currentUserId, overrides = null }) {

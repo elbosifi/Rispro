@@ -2,7 +2,7 @@ import express from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
-import { runPacsCFind, testPacsConnection } from "../services/pacs-service.js";
+import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
 
 export const integrationsRouter = express.Router();
 
@@ -37,6 +37,17 @@ integrationsRouter.post(
   asyncRoute(async (req, res) => {
     const studies = await runPacsCFind({
       patientNationalId: req.body?.patientNationalId,
+      currentUserId: req.user.sub
+    });
+    res.json({ studies });
+  })
+);
+
+integrationsRouter.post(
+  "/pacs-search",
+  asyncRoute(async (req, res) => {
+    const studies = await searchPacsStudies({
+      criteria: req.body || {},
       currentUserId: req.user.sub
     });
     res.json({ studies });

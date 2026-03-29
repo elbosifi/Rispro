@@ -48,7 +48,7 @@ function saveCityOptions(list) {
   localStorage.setItem("rispro-city-options", JSON.stringify(list));
 }
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "calendar", "registrations", "queue", "modality", "doctor", "print", "statistics", "search", "settings"];
+const allowedRoutes = ["dashboard", "patients", "appointments", "calendar", "registrations", "queue", "modality", "doctor", "print", "statistics", "search", "pacs", "settings"];
 const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
@@ -94,6 +94,11 @@ const state = {
   pacsFindError: "",
   pacsFindResults: [],
   pacsFindHasRun: false,
+  pacsSearchForm: defaultPacsSearchForm(),
+  pacsSearchLoading: false,
+  pacsSearchError: "",
+  pacsSearchResults: [],
+  pacsSearchHasRun: false,
   pacsTestLoading: false,
   pacsTestError: "",
   pacsTestSuccess: "",
@@ -269,6 +274,7 @@ const copy = {
       print: "Printing",
       statistics: "Statistics",
       search: "Search patients",
+      pacs: "PACS",
       settings: "Settings"
     },
     login: {
@@ -393,6 +399,21 @@ const copy = {
         examNameEn: "Exam name English",
         specificInstructionAr: "Arabic instruction",
         specificInstructionEn: "English instruction"
+      }
+    },
+    pacs: {
+      title: "PACS search",
+      body: "Search PACS studies by patient name, patient ID, accession number, or date.",
+      searchButton: "Search PACS",
+      resetButton: "Clear search",
+      resultsTitle: "PACS studies",
+      noResults: "No PACS studies were found.",
+      loading: "Searching PACS...",
+      fields: {
+        patientName: "Patient name",
+        patientId: "Patient ID",
+        accessionNumber: "Accession number",
+        studyDate: "Study date"
       }
     },
     pacs: {
@@ -707,6 +728,7 @@ const copy = {
       print: "الطباعة",
       statistics: "الإحصائيات",
       search: "البحث عن مريض",
+      pacs: "PACS",
       settings: "الإعدادات"
     },
     login: {
@@ -831,6 +853,21 @@ const copy = {
         examNameEn: "اسم الفحص بالإنجليزية",
         specificInstructionAr: "تعليمات بالعربية",
         specificInstructionEn: "تعليمات بالإنجليزية"
+      }
+    },
+    pacs: {
+      title: "بحث PACS",
+      body: "ابحث في دراسات PACS باسم المريض أو رقم المريض أو رقم الدخول أو التاريخ.",
+      searchButton: "بحث PACS",
+      resetButton: "مسح البحث",
+      resultsTitle: "دراسات PACS",
+      noResults: "لم يتم العثور على دراسات في PACS.",
+      loading: "جارٍ البحث في PACS...",
+      fields: {
+        patientName: "اسم المريض",
+        patientId: "رقم المريض",
+        accessionNumber: "رقم الدخول",
+        studyDate: "تاريخ الدراسة"
       }
     },
     calendar: {
@@ -1425,6 +1462,15 @@ function defaultPacsSettingsForm() {
     calledAeTitle: "osirixr",
     callingAeTitle: "RISPRO",
     timeoutSeconds: "10"
+  };
+}
+
+function defaultPacsSearchForm() {
+  return {
+    patientName: "",
+    patientId: "",
+    accessionNumber: "",
+    studyDate: ""
   };
 }
 
@@ -4091,9 +4137,9 @@ async function searchPacsStudies() {
   render();
 
   try {
-    const result = await api("/api/integrations/pacs-cfind", {
+    const result = await api("/api/integrations/pacs-search", {
       method: "POST",
-      body: JSON.stringify({ patientNationalId })
+      body: JSON.stringify({ patientId: patientNationalId })
     });
     state.pacsFindResults = result.studies || [];
   } catch (error) {
@@ -4103,6 +4149,49 @@ async function searchPacsStudies() {
     state.pacsFindHasRun = true;
     render();
   }
+}
+
+async function searchPacsDirectory() {
+  const hasCriteria = Object.values(state.pacsSearchForm).some((value) => String(value || "").trim());
+
+  if (!hasCriteria) {
+    state.pacsSearchError =
+      state.language === "ar"
+        ? "أدخل اسماً أو رقم مريض أو رقم دخول أو تاريخاً للبحث في PACS."
+        : "Enter a patient name, patient ID, accession number, or date to search PACS.";
+    state.pacsSearchResults = [];
+    state.pacsSearchHasRun = false;
+    render();
+    return;
+  }
+
+  state.pacsSearchLoading = true;
+  state.pacsSearchError = "";
+  state.pacsSearchResults = [];
+  render();
+
+  try {
+    const result = await api("/api/integrations/pacs-search", {
+      method: "POST",
+      body: JSON.stringify(state.pacsSearchForm)
+    });
+    state.pacsSearchResults = result.studies || [];
+    state.pacsSearchHasRun = true;
+  } catch (error) {
+    state.pacsSearchError = error.message;
+    state.pacsSearchHasRun = true;
+  } finally {
+    state.pacsSearchLoading = false;
+    render();
+  }
+}
+
+function resetPacsSearch() {
+  state.pacsSearchForm = defaultPacsSearchForm();
+  state.pacsSearchError = "";
+  state.pacsSearchResults = [];
+  state.pacsSearchHasRun = false;
+  render();
 }
 
 async function testPacsConnection() {
@@ -5206,6 +5295,8 @@ function renderPacsFindResults() {
       ${state.pacsFindResults
         .map((study) => {
           const patientId = study.patientId || "—";
+          const patientName = study.patientName || "—";
+          const accessionNumber = study.accessionNumber || "—";
           const modality = study.modality || "—";
           const description = study.studyDescription || "—";
           const studyDate = study.studyDate ? formatDicomDate(study.studyDate) : "—";
@@ -5213,9 +5304,49 @@ function renderPacsFindResults() {
           return `
             <div class="item">
               <div class="item-copy">
-                <div class="item-title">${escapeHtml(description)}</div>
+                <div class="item-title">${escapeHtml(description || patientName)}</div>
                 <div class="item-subtitle">${escapeHtml(
-                  `${t().appointments.fields.pacsPatientId}: ${patientId} • ${t().appointments.fields.pacsModality}: ${modality} • ${t().appointments.fields.pacsStudyDate}: ${studyDate}`
+                  `${patientName} • ${t().appointments.fields.pacsPatientId}: ${patientId} • ${accessionNumber} • ${t().appointments.fields.pacsModality}: ${modality} • ${t().appointments.fields.pacsStudyDate}: ${studyDate}`
+                )}</div>
+              </div>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function renderPacsSearchResults() {
+  if (state.pacsSearchLoading) {
+    return `<div class="empty">${escapeHtml(t().pacs.loading)}</div>`;
+  }
+
+  if (!state.pacsSearchHasRun) {
+    return "";
+  }
+
+  if (!state.pacsSearchResults.length) {
+    return `<div class="empty">${escapeHtml(t().pacs.noResults)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.pacsSearchResults
+        .map((study) => {
+          const patientName = study.patientName || "—";
+          const patientId = study.patientId || "—";
+          const accessionNumber = study.accessionNumber || "—";
+          const modality = study.modality || "—";
+          const description = study.studyDescription || "—";
+          const studyDate = study.studyDate ? formatDicomDate(study.studyDate) : "—";
+
+          return `
+            <div class="item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(patientName)}</div>
+                <div class="item-subtitle">${escapeHtml(
+                  `${t().appointments.fields.pacsPatientId}: ${patientId} • ${accessionNumber} • ${modality} • ${description} • ${studyDate}`
                 )}</div>
               </div>
             </div>
@@ -5579,6 +5710,62 @@ function renderAppointments() {
 
       ${renderExamTypeModal()}
       ${renderAppointmentCreatedDialog()}
+    </div>
+  `;
+}
+
+function renderPacsPage() {
+  return `
+    <div class="page">
+      ${pageHero(t().pacs.title, t().pacs.body, "", t().common.required)}
+      ${alertMarkup("error", state.pacsSearchError)}
+      <section class="split-grid">
+        <article class="surface">
+          <form id="pacs-search-form" class="stack">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().pacs.title)}</h2>
+              <span class="chip accent">${escapeHtml(t().common.required)}</span>
+            </div>
+
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">${escapeHtml(t().pacs.fields.patientName)}</span>
+                <input class="input ${state.language === "ar" ? "field-ar" : "field-en"}" name="patientName" value="${escapeHtml(state.pacsSearchForm.patientName)}" />
+              </label>
+
+              <label class="field">
+                <span class="label">${escapeHtml(t().pacs.fields.patientId)}</span>
+                <input class="input field-en" name="patientId" value="${escapeHtml(state.pacsSearchForm.patientId)}" />
+              </label>
+
+              <label class="field">
+                <span class="label">${escapeHtml(t().pacs.fields.accessionNumber)}</span>
+                <input class="input field-en" name="accessionNumber" value="${escapeHtml(state.pacsSearchForm.accessionNumber)}" />
+              </label>
+
+              <label class="field">
+                <span class="label">${escapeHtml(t().pacs.fields.studyDate)}</span>
+                <input class="input field-en" type="date" name="studyDate" value="${escapeHtml(state.pacsSearchForm.studyDate)}" />
+              </label>
+            </div>
+
+            <div class="form-actions">
+              <button class="button-secondary" type="button" data-action="reset-pacs-search">${escapeHtml(t().pacs.resetButton)}</button>
+              <button class="button-primary" type="submit">${escapeHtml(
+                state.pacsSearchLoading ? t().pacs.loading : t().pacs.searchButton
+              )}</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().pacs.resultsTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String(state.pacsSearchResults.length))}</span>
+          </div>
+          ${renderPacsSearchResults()}
+        </article>
+      </section>
     </div>
   `;
 }
@@ -8304,6 +8491,8 @@ function renderPage() {
       return renderStatistics();
     case "search":
       return renderSearch();
+    case "pacs":
+      return renderPacsPage();
     case "settings":
       return renderSettings();
     default:
@@ -8535,6 +8724,12 @@ function handleInput(event) {
 
   if (target.closest("#doctor-filter-form")) {
     state.doctorFilters[target.name] = target.value;
+    return;
+  }
+
+  if (target.closest("#pacs-search-form")) {
+    state.pacsSearchForm[target.name] = target.value;
+    state.pacsSearchError = "";
     return;
   }
 
@@ -9009,6 +9204,12 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "reset-pacs-search") {
+    event.preventDefault();
+    resetPacsSearch();
+    return;
+  }
+
   if (target.dataset.action === "save-exam-type-entry") {
     event.preventDefault();
     void updateSettingsExamType(target.dataset.examTypeId);
@@ -9399,6 +9600,12 @@ function handleSubmit(event) {
   if (event.target.id === "doctor-filter-form") {
     event.preventDefault();
     void loadDoctorRequests();
+    return;
+  }
+
+  if (event.target.id === "pacs-search-form") {
+    event.preventDefault();
+    void searchPacsDirectory();
     return;
   }
 
