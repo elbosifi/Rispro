@@ -250,29 +250,39 @@ button {
 
 .topbar {
   display: flex;
-  justify-content: center;
+  justify-content: space-between;
   align-items: center;
-  gap: 18px;
-  margin-bottom: 22px;
-  padding: 18px 22px;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 18px;
   background: rgba(255, 251, 244, 0.84);
   backdrop-filter: blur(18px);
   box-shadow: var(--shadow);
 }
 
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topbar-route {
+  display: grid;
+  gap: 4px;
+}
+
 .topbar-path {
   color: var(--muted);
-  font-size: 0.88rem;
-  margin-bottom: 6px;
-  text-align: center;
+  font-size: 0.86rem;
+  text-align: left;
 }
 
 .topbar-title {
-  font-size: 1.42rem;
+  font-size: 1.05rem;
   font-weight: 800;
-  text-align: center;
+  text-align: left;
 }
 
 .topbar-subtitle {
@@ -287,7 +297,7 @@ button {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 .toggle {

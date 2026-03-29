@@ -7919,11 +7919,12 @@ function renderAppFrame(content) {
       <div class="layout">
         <div class="content">
           <header class="topbar">
-            <button class="menu-toggle" type="button" data-action="toggle-menu" aria-label="Open navigation menu">☰</button>
-            <div>
-              <div class="topbar-path">${escapeHtml(t().nav.dashboard)} / ${escapeHtml(routeLabel)}</div>
-              <div class="topbar-title">${escapeHtml(t().topTitle)}</div>
-              <div class="topbar-subtitle">${escapeHtml(t().topSubtitle)}</div>
+            <div class="topbar-left">
+              <button class="menu-toggle" type="button" data-action="toggle-menu" aria-label="Open navigation menu">☰</button>
+              <div class="topbar-route">
+                <div class="topbar-title">${escapeHtml(t().appName)}</div>
+                <div class="topbar-path">${escapeHtml(t().nav.dashboard)} / ${escapeHtml(routeLabel)}</div>
+              </div>
             </div>
 
             <div class="topbar-actions">
