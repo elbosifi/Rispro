@@ -151,3 +151,23 @@ export async function deleteNameDictionaryEntry(entryId, currentUserId) {
 
   return removed;
 }
+
+export async function importNameDictionaryEntries(entries, currentUserId) {
+  if (!Array.isArray(entries) || !entries.length) {
+    throw new HttpError(400, "entries must be a non-empty array.");
+  }
+
+  const imported = [];
+
+  for (const entry of entries) {
+    const normalizedEntry = {
+      arabicText: entry?.arabicText,
+      englishText: entry?.englishText,
+      isActive: entry?.isActive
+    };
+    const result = await upsertNameDictionary(normalizedEntry, currentUserId);
+    imported.push(result);
+  }
+
+  return imported;
+}

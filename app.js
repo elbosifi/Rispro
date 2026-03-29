@@ -26,6 +26,14 @@ const DEFAULT_CITY_OPTIONS = [
   "Derna"
 ];
 
+const NAME_DICTIONARY_CSV_EXAMPLE = `arabic_text,english_text
+محمد,Mohammad
+أحمد,Ahmed
+عائشة,Aisha
+سالم,Salem
+نور,Noor
+`;
+
 function loadCityOptions() {
   try {
     const stored = JSON.parse(localStorage.getItem("rispro-city-options") || "[]");
@@ -40,7 +48,7 @@ function saveCityOptions(list) {
   localStorage.setItem("rispro-city-options", JSON.stringify(list));
 }
 
-const allowedRoutes = ["dashboard", "patients", "appointments", "registrations", "queue", "modality", "doctor", "print", "statistics", "search", "settings"];
+const allowedRoutes = ["dashboard", "patients", "appointments", "calendar", "registrations", "queue", "modality", "doctor", "print", "statistics", "search", "settings"];
 const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
@@ -86,6 +94,12 @@ const state = {
   printPreparationLoading: false,
   printResults: [],
   printFilters: defaultPrintFilters(),
+  calendarLoading: false,
+  calendarError: "",
+  calendarAppointments: [],
+  calendarFilters: defaultCalendarFilters(),
+  calendarDisplayDate: getCalendarMonthStartDate(),
+  calendarSelectedDate: getCurrentDateInputValue(),
   statisticsFilters: defaultStatisticsFilters(),
   statisticsLoading: false,
   statisticsError: "",
@@ -158,6 +172,8 @@ const state = {
     englishText: "",
     isActive: true
   },
+  nameDictionaryImportFile: null,
+  nameDictionaryImportLoading: false,
   appointmentLookupsLoading: false,
   appointmentCalendarLoading: false,
   appointmentSaving: false,
@@ -221,7 +237,8 @@ const state = {
   },
   userSaving: false,
   userError: "",
-  userSuccess: ""
+  userSuccess: "",
+  userDeletingId: null
 };
 
 const copy = {
@@ -236,6 +253,7 @@ const copy = {
       dashboard: "Dashboard",
       patients: "Register patient",
       appointments: "Create appointment",
+      calendar: "Calendar",
       registrations: "Registrations",
       queue: "Queue",
       modality: "Modality board",
@@ -299,7 +317,9 @@ const copy = {
       savedRecord: "Latest saved patient",
       possibleMatches: "Possible existing matches",
       supportNote: "Use duplicate checks before saving to keep records clean.",
-      mrnAutoHint: "An MRN (six-digit patient number) is generated automatically and cannot be edited."
+      mrnAutoHint: "An MRN (six-digit patient number) is generated automatically and cannot be edited.",
+      phone1Hint: "Phone 1 is required.",
+      nationalIdHint: "National ID is optional."
     },
     patientActions: {
       edit: "Edit patient",
@@ -356,6 +376,26 @@ const copy = {
         specificInstructionAr: "Arabic instruction",
         specificInstructionEn: "English instruction"
       }
+    },
+    calendar: {
+      title: "Appointment calendar",
+      body: "Browse a full month, filter by modality, and print each day’s list.",
+      summary: "Click a day to surface that day’s appointments and print them.",
+      filtersTitle: "Calendar filters",
+      clearFilters: "Clear filters",
+      fields: {
+        modality: "Modality"
+      },
+      selectedDayTitle: "Selected day",
+      noSelection: "Pick a day on the calendar to view its appointments.",
+      noAppointments: "No appointments for this day.",
+      noAppointmentsShort: "No appointments",
+      dayAppointmentsLabel: "appointments",
+      printButton: "Print day list",
+      today: "Today",
+      printTitlePrefix: "Daily appointments",
+      monthLabelHint: "Monthly view",
+      loading: "Loading calendar..."
     },
     registrations: {
       title: "Daily registrations",
@@ -537,6 +577,13 @@ const copy = {
       dictionaryEnglish: "English name",
       dictionaryActive: "Active",
       dictionarySave: "Save entry",
+      dictionaryImportTitle: "Import dictionary",
+      dictionaryImportBody: "Upload an Arabic/English CSV file to batch-add dictionary entries.",
+      dictionaryImportFile: "CSV file",
+      dictionaryImportHint: "Each row should contain Arabic text followed by English text separated by a comma.",
+      dictionaryImportExample: "Download example CSV",
+      dictionaryImportSubmit: "Import CSV",
+      dictionaryImportSuccess: "Dictionary imported successfully.",
       dictionaryDelete: "Remove",
       examTypesTitle: "Exam types",
       examTypesBody: "Add, edit, or remove exam types and link each one to a modality.",
@@ -547,6 +594,8 @@ const copy = {
       examTypesEmpty: "No exam types have been added yet.",
       users: "Users",
       addUser: "Create user",
+      deleteUser: "Delete user",
+      userDeleted: "User deleted successfully.",
       refresh: "Refresh list",
       refreshAll: "Refresh settings",
       blocked: "Supervisor access is required for this area.",
@@ -618,6 +667,7 @@ const copy = {
       dashboard: "الرئيسية",
       patients: "تسجيل مريض",
       appointments: "إنشاء موعد",
+      calendar: "التقويم",
       registrations: "التسجيلات",
       queue: "الطابور",
       modality: "لوحة الجهاز",
@@ -681,7 +731,9 @@ const copy = {
       savedRecord: "آخر مريض تم حفظه",
       possibleMatches: "سجلات محتملة موجودة",
       supportNote: "تحقق من التكرار قبل الحفظ للحفاظ على نظافة البيانات.",
-      mrnAutoHint: "يتم إنشاء رقم MRN المكوّن من ستة أرقام تلقائياً ولا يمكن تغييره."
+      mrnAutoHint: "يتم إنشاء رقم MRN المكوّن من ستة أرقام تلقائياً ولا يمكن تغييره.",
+      phone1Hint: "الهاتف 1 مطلوب.",
+      nationalIdHint: "الرقم الوطني اختياري."
     },
     patientActions: {
       edit: "تعديل المريض",
@@ -738,6 +790,26 @@ const copy = {
         specificInstructionAr: "تعليمات بالعربية",
         specificInstructionEn: "تعليمات بالإنجليزية"
       }
+    },
+    calendar: {
+      title: "تقويم المواعيد",
+      body: "استعرض الجدول الشهري، صفّ المواعيد حسب الجهاز، واطبع قوائم اليوم.",
+      summary: "اضغط على يوم لعرض مواعيد ذلك اليوم وطباعتها.",
+      filtersTitle: "فلاتر التقويم",
+      clearFilters: "مسح الفلاتر",
+      fields: {
+        modality: "الجهاز"
+      },
+      selectedDayTitle: "اليوم المختار",
+      noSelection: "اختر يوماً من التقويم لعرض المواعيد الخاصة به.",
+      noAppointments: "لا توجد مواعيد في هذا اليوم.",
+      noAppointmentsShort: "لا توجد مواعيد",
+      dayAppointmentsLabel: "مواعيد",
+      printButton: "طباعة قائمة اليوم",
+      today: "اليوم",
+      printTitlePrefix: "مواعيد يومية",
+      monthLabelHint: "عرض شهري",
+      loading: "جارٍ تحميل التقويم..."
     },
     registrations: {
       title: "تسجيلات اليوم",
@@ -919,6 +991,13 @@ const copy = {
       dictionaryEnglish: "الاسم بالإنجليزية",
       dictionaryActive: "مفعّل",
       dictionarySave: "حفظ المدخل",
+      dictionaryImportTitle: "استيراد القاموس",
+      dictionaryImportBody: "ارفع ملف CSV عربي/إنجليزي لإضافة مدخلات القاموس دفعة واحدة.",
+      dictionaryImportFile: "ملف CSV",
+      dictionaryImportHint: "يجب أن تحتوي كل سطر على الاسم العربي ثم الاسم الإنجليزي مفصولاً بفاصلة.",
+      dictionaryImportExample: "تنزيل مثال CSV",
+      dictionaryImportSubmit: "استيراد CSV",
+      dictionaryImportSuccess: "تم استيراد القاموس بنجاح.",
       dictionaryDelete: "حذف",
       examTypesTitle: "أنواع الفحوصات",
       examTypesBody: "أضف أو عدّل أو احذف أنواع الفحوصات واربط كل نوع بالجهاز المناسب.",
@@ -929,6 +1008,8 @@ const copy = {
       examTypesEmpty: "لا توجد أنواع فحوصات مضافة بعد.",
       users: "المستخدمون",
       addUser: "إنشاء مستخدم",
+      deleteUser: "حذف المستخدم",
+      userDeleted: "تم حذف المستخدم بنجاح.",
       refresh: "تحديث القائمة",
       refreshAll: "تحديث الإعدادات",
       blocked: "هذه المنطقة تحتاج صلاحية مشرف.",
@@ -1253,6 +1334,12 @@ function defaultDoctorFilters() {
   };
 }
 
+function defaultCalendarFilters() {
+  return {
+    modalityId: ""
+  };
+}
+
 function defaultUploadForm() {
   return {
     documentType: "referral_request",
@@ -1513,6 +1600,80 @@ function normalizeDateText(value) {
 
 function getCurrentDateInputValue() {
   return formatDateInput(new Date());
+}
+
+function getCalendarMonthStartDate() {
+  const today = new Date();
+  return new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+}
+
+function formatIsoDate(date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    date.getUTCDate()
+  ).padStart(2, "0")}`;
+}
+
+function addUtcMonths(date, offset) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1));
+}
+
+function getCalendarMonthRange(date) {
+  const start = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0));
+  return { start, end };
+}
+
+function getCalendarGridStart(date) {
+  const firstDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
+  const dayOfWeek = firstDay.getUTCDay();
+  return new Date(Date.UTC(firstDay.getUTCFullYear(), firstDay.getUTCMonth(), 1 - dayOfWeek));
+}
+
+function getCalendarWeekdayLabels() {
+  const formatter = new Intl.DateTimeFormat(state.language === "ar" ? "ar-LY" : "en-GB", {
+    weekday: "short"
+  });
+  const labels = [];
+  for (let index = 0; index < 7; index += 1) {
+    const current = new Date(Date.UTC(2023, 0, 1 + index));
+    labels.push(formatter.format(current));
+  }
+  return labels;
+}
+
+function formatCalendarMonthLabel(date) {
+  return new Intl.DateTimeFormat(state.language === "ar" ? "ar-LY" : "en-GB", {
+    month: "long",
+    year: "numeric"
+  }).format(date);
+}
+
+function groupCalendarAppointments() {
+  const result = {};
+  const filterModality = state.calendarFilters.modalityId ? String(state.calendarFilters.modalityId) : "";
+
+  for (const appointment of state.calendarAppointments) {
+    if (filterModality && String(appointment.modality_id) !== filterModality) {
+      continue;
+    }
+
+    const dayKey = normalizeDateText(appointment.appointment_date);
+    if (!result[dayKey]) {
+      result[dayKey] = [];
+    }
+    result[dayKey].push(appointment);
+  }
+
+  return result;
+}
+
+function getCalendarAppointmentsForDate(date) {
+  if (!date) {
+    return [];
+  }
+
+  const grouped = groupCalendarAppointments();
+  return grouped[date] || [];
 }
 
 function formatSex(value) {
@@ -2402,6 +2563,39 @@ async function loadPrintAppointments() {
   }
 }
 
+async function loadCalendarAppointments() {
+  state.calendarLoading = true;
+  state.calendarError = "";
+  render();
+
+  try {
+    const { start, end } = getCalendarMonthRange(state.calendarDisplayDate);
+    const params = new URLSearchParams();
+    params.set("dateFrom", formatIsoDate(start));
+    params.set("dateTo", formatIsoDate(end));
+
+    if (state.calendarFilters.modalityId) {
+      params.set("modalityId", state.calendarFilters.modalityId);
+    }
+
+    const result = await api(`/api/appointments?${params.toString()}`, { method: "GET" });
+    state.calendarAppointments = result.appointments || [];
+
+    const startKey = formatIsoDate(start);
+    const endKey = formatIsoDate(end);
+    const selected = state.calendarSelectedDate || startKey;
+
+    if (selected < startKey || selected > endKey) {
+      state.calendarSelectedDate = startKey;
+    }
+  } catch (error) {
+    state.calendarError = error.message;
+  } finally {
+    state.calendarLoading = false;
+    render();
+  }
+}
+
 async function loadStatistics() {
   state.statisticsLoading = true;
   state.statisticsError = "";
@@ -2571,6 +2765,7 @@ async function loadNameDictionary() {
     const result = await api(endpoint, { method: "GET" });
     state.nameDictionaryEntries = result.entries || [];
     rebuildNameDictionary(state.nameDictionaryEntries);
+    state.nameDictionaryImportFile = null;
   } catch (error) {
     state.nameDictionaryError = error.message;
   } finally {
@@ -2796,6 +2991,11 @@ async function hydrateRoute() {
     return;
   }
 
+  if (state.route === "calendar") {
+    await Promise.all([loadAppointmentLookups(), loadCalendarAppointments()]);
+    return;
+  }
+
   if (state.route === "queue") {
     await Promise.all([loadQueueSnapshot(), loadAppointmentLookups()]);
     return;
@@ -2862,6 +3062,7 @@ async function signOut() {
   } finally {
     state.session = null;
     state.users = [];
+    state.userDeletingId = null;
     state.settingsCatalog = {};
     state.settingsSection = "menu";
     state.settingsSuccess = "";
@@ -2871,6 +3072,8 @@ async function signOut() {
     state.nameDictionarySuccess = "";
     state.nameDictionarySavingId = "";
     state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
+    state.nameDictionaryImportFile = null;
+    state.nameDictionaryImportLoading = false;
     state.examTypeSettingsEntries = [];
     state.examTypeSettingsModalities = [];
     state.examTypeSettingsError = "";
@@ -2918,6 +3121,12 @@ async function signOut() {
     state.integrationLoading = false;
     state.scanPreparationLoading = false;
     state.printPreparationLoading = false;
+    state.calendarLoading = false;
+    state.calendarError = "";
+    state.calendarAppointments = [];
+    state.calendarFilters = defaultCalendarFilters();
+    state.calendarDisplayDate = getCalendarMonthStartDate();
+    state.calendarSelectedDate = getCurrentDateInputValue();
     state.printFilters = defaultPrintFilters();
     state.statisticsFilters = defaultStatisticsFilters();
     state.statisticsError = "";
@@ -3145,6 +3354,28 @@ async function createUser() {
     state.userError = error.message;
   } finally {
     state.userSaving = false;
+    render();
+  }
+}
+
+async function deleteUser(userId) {
+  if (!userId) {
+    return;
+  }
+
+  state.userDeletingId = Number(userId);
+  state.userError = "";
+  state.userSuccess = "";
+  render();
+
+  try {
+    await api(`/api/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
+    state.userSuccess = t().settings.userDeleted;
+    await loadUsers();
+  } catch (error) {
+    state.userError = error.message;
+  } finally {
+    state.userDeletingId = null;
     render();
   }
 }
@@ -3988,6 +4219,87 @@ async function createNameDictionaryEntry() {
   }
 }
 
+function parseDictionaryCsv(text) {
+  const rows = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const entries = [];
+
+  for (const row of rows) {
+    const cleaned = row.replace(/^\uFEFF/, "");
+    const lowercase = cleaned.toLowerCase();
+
+    if (lowercase.includes("arabic") && lowercase.includes("english")) {
+      continue;
+    }
+
+    const [arabic, ...rest] = cleaned.split(",");
+    const arabicText = String(arabic || "").trim();
+    const englishText = String(rest.join(",") || "").trim();
+
+    if (!arabicText || !englishText) {
+      continue;
+    }
+
+    entries.push({
+      arabicText,
+      englishText,
+      isActive: true
+    });
+  }
+
+  return entries;
+}
+
+function downloadDictionaryExample() {
+  const blob = new Blob([NAME_DICTIONARY_CSV_EXAMPLE], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "rispro-name-dictionary-example.csv";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function importNameDictionaryCsv() {
+  if (!state.nameDictionaryImportFile) {
+    state.nameDictionaryError = state.language === "ar" ? "اختر ملف CSV للاستيراد." : "Select a CSV file to import.";
+    render();
+    return;
+  }
+
+  state.nameDictionaryImportLoading = true;
+  state.nameDictionaryError = "";
+  state.nameDictionarySuccess = "";
+  render();
+
+  try {
+    const csv = await state.nameDictionaryImportFile.text();
+    const entries = parseDictionaryCsv(csv);
+
+    if (!entries.length) {
+      throw new Error(state.language === "ar" ? "لم يتم العثور على أي مدخلات في ملف CSV." : "No entries were detected in the CSV file.");
+    }
+
+    await api("/api/name-dictionary/import", {
+      method: "POST",
+      body: JSON.stringify({ entries })
+    });
+
+    state.nameDictionaryImportFile = null;
+    state.nameDictionarySuccess = t().settings.dictionaryImportSuccess;
+    await loadNameDictionary();
+  } catch (error) {
+    state.nameDictionaryError = error.message;
+  } finally {
+    state.nameDictionaryImportLoading = false;
+    render();
+  }
+}
+
 async function updateNameDictionaryEntry(entryId) {
   const entry = state.nameDictionaryEntries.find((item) => String(item.id) === String(entryId));
 
@@ -4556,6 +4868,7 @@ function renderPatients() {
               <label class="field">
                 <span class="label">${escapeHtml(t().patients.fields.phone1)}</span>
                 <input class="input field-en" name="phone1" value="${escapeHtml(state.patientForm.phone1)}" inputmode="numeric" maxlength="10" autocomplete="off" />
+                <div class="small">${escapeHtml(t().patients.phone1Hint)}</div>
               </label>
 
               <label class="field">
@@ -4566,6 +4879,7 @@ function renderPatients() {
               <label class="field">
                 <span class="label">${escapeHtml(t().patients.fields.nationalId)}</span>
                 <input class="input field-en" name="nationalId" value="${escapeHtml(state.patientForm.nationalId)}" inputmode="numeric" maxlength="11" autocomplete="off" />
+                <div class="small">${escapeHtml(t().patients.nationalIdHint)}</div>
               </label>
 
               <label class="field">
@@ -4962,6 +5276,185 @@ function renderAppointments() {
 
       ${renderExamTypeModal()}
       ${renderAppointmentCreatedDialog()}
+    </div>
+  `;
+}
+
+function renderCalendarDayList(appointments) {
+  if (!appointments.length) {
+    return `<div class="empty">${escapeHtml(t().calendar.noAppointments)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${appointments
+        .map(
+          (appointment) => `
+            <div class="item patient-result">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(appointment.accession_number)} • ${escapeHtml(
+                  state.language === "ar" ? appointment.arabic_full_name : appointment.english_full_name
+                )}</div>
+                <div class="item-subtitle">
+                  ${escapeHtml(formatModalityName(appointment))} • ${escapeHtml(formatExamName(appointment))} • ${escapeHtml(
+                    formatDisplayDate(appointment.appointment_date)
+                  )}
+                </div>
+              </div>
+              <span class="chip ${appointment.status === "completed" ? "success" : "subtle"}">${escapeHtml(
+                formatAppointmentStatus(appointment.status)
+              )}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function renderCalendar() {
+  const monthLabel = formatCalendarMonthLabel(state.calendarDisplayDate);
+  const weekdayLabels = getCalendarWeekdayLabels();
+  const groupedAppointments = groupCalendarAppointments();
+  const selectedDate = state.calendarSelectedDate || formatIsoDate(state.calendarDisplayDate);
+  const selectedAppointments = groupedAppointments[selectedDate] || [];
+  const monthStart = getCalendarGridStart(state.calendarDisplayDate);
+  const gridDays = [];
+
+  for (let index = 0; index < 42; index += 1) {
+    const date = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), monthStart.getUTCDate() + index));
+    const iso = formatIsoDate(date);
+    gridDays.push({
+      iso,
+      dayNumber: date.getUTCDate(),
+      isCurrentMonth: date.getUTCMonth() === state.calendarDisplayDate.getUTCMonth(),
+      count: groupedAppointments[iso]?.length || 0,
+      isSelected: iso === selectedDate
+    });
+  }
+
+  const filterModality = state.calendarFilters.modalityId
+    ? state.appointmentLookups.modalities.find((entry) => String(entry.id) === String(state.calendarFilters.modalityId))
+    : null;
+
+  const filterChip = filterModality ? `<span class="chip subtle">${escapeHtml(formatModalityName(filterModality))}</span>` : "";
+  const heroActions = `<button class="button-secondary" type="button" data-action="calendar-today">${
+    escapeHtml(t().calendar.today)
+  }</button>`;
+
+  const calendarContent = state.calendarLoading
+    ? `<div class="empty">${escapeHtml(t().calendar.loading)}</div>`
+    : `
+      <div class="calendar-weekdays">
+        ${weekdayLabels.map((label) => `<div class="calendar-weekday">${escapeHtml(label)}</div>`).join("")}
+      </div>
+      <div class="calendar-month-grid">
+        ${gridDays
+          .map(
+            (day) => `
+              <button
+                type="button"
+                class="calendar-day ${day.isCurrentMonth ? "" : "calendar-day--ghost"} ${
+              day.count ? "" : "calendar-day--empty"
+            } ${day.isSelected ? "calendar-day--active" : ""}"
+                data-action="select-calendar-day"
+                data-date="${escapeHtml(day.iso)}"
+              >
+                <div class="calendar-day-number">${escapeHtml(String(day.dayNumber))}</div>
+                <div class="calendar-day-count">${escapeHtml(String(day.count))}</div>
+                <div class="calendar-day-note">${escapeHtml(
+                  day.count ? t().calendar.dayAppointmentsLabel : t().calendar.noAppointmentsShort
+                )}</div>
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+
+  const dayListContent = state.calendarLoading
+    ? `<div class="empty">${escapeHtml(t().common.loading)}</div>`
+    : renderCalendarDayList(selectedAppointments);
+
+  return `
+    <div class="page">
+      ${pageHero(t().calendar.title, t().calendar.body, heroActions, t().calendar.summary)}
+      ${alertMarkup("error", state.calendarError)}
+
+      <section class="split-grid">
+        <div class="stack">
+          <article class="surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().calendar.filtersTitle)}</h2>
+            </div>
+            <form id="calendar-filter-form" class="stack">
+              <div class="form-grid">
+                <label class="field">
+                  <span class="label">${escapeHtml(t().calendar.fields.modality)}</span>
+                  <select class="select" name="modalityId">
+                    <option value="">${escapeHtml(t().common.optional)}</option>
+                    ${state.appointmentLookups.modalities
+                      .map(
+                        (entry) => `
+                          <option value="${escapeHtml(String(entry.id))}" ${
+                          String(entry.id) === String(state.calendarFilters.modalityId) ? "selected" : ""
+                        }>
+                            ${escapeHtml(formatModalityName(entry))}
+                          </option>
+                        `
+                      )
+                      .join("")}
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="button-secondary" type="button" data-action="calendar-clear-filter">${escapeHtml(
+                  t().calendar.clearFilters
+                )}</button>
+                <button class="button-primary" type="submit">${escapeHtml(t().common.refresh)}</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="surface">
+            <div class="calendar-panel">
+              <div class="calendar-panel-header">
+                <button class="button-ghost" type="button" data-action="calendar-prev-month">‹</button>
+                <div>
+                  <div class="calendar-month-label">${escapeHtml(monthLabel)}</div>
+                  <div class="small">${escapeHtml(t().calendar.monthLabelHint)}</div>
+                </div>
+                <button class="button-ghost" type="button" data-action="calendar-next-month">›</button>
+              </div>
+              ${calendarContent}
+            </div>
+          </article>
+        </div>
+
+        <div class="stack">
+          <article class="surface">
+            <div class="section-head">
+              <h2 class="section-title">${escapeHtml(t().calendar.selectedDayTitle)}</h2>
+              <div class="hero-actions">
+                ${filterChip}
+                <span class="chip accent">${escapeHtml(selectedDate ? formatDisplayDate(selectedDate) : t().common.noData)}</span>
+              </div>
+            </div>
+            ${dayListContent}
+            <div class="form-actions">
+              <button
+                class="button-primary"
+                type="button"
+                data-action="calendar-print-day"
+                data-date="${escapeHtml(selectedDate)}"
+                ${selectedAppointments.length ? "" : "disabled"}
+              >
+                ${escapeHtml(t().calendar.printButton)}
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
     </div>
   `;
 }
@@ -6502,7 +6995,22 @@ function renderUsersList() {
                 <div class="item-title">${escapeHtml(user.full_name)}</div>
                 <div class="item-subtitle">${escapeHtml(user.username)} • ${escapeHtml(formatRole(user.role))}</div>
               </div>
-              <span class="chip ${user.is_active ? "success" : "subtle"}">${escapeHtml(user.is_active ? t().common.active : t().common.inactive)}</span>
+              <div class="badge-row">
+                <span class="chip ${user.is_active ? "success" : "subtle"}">${escapeHtml(
+                  user.is_active ? t().common.active : t().common.inactive
+                )}</span>
+                <button
+                  class="button-ghost"
+                  type="button"
+                  data-action="delete-user"
+                  data-user-id="${escapeHtml(String(user.id))}"
+                  ${(state.userDeletingId === user.id || (state.session?.id && Number(state.session.id) === Number(user.id)))
+                    ? "disabled"
+                    : ""}
+                >
+                  ${escapeHtml(state.userDeletingId === user.id ? t().common.loading : t().settings.deleteUser)}
+                </button>
+              </div>
             </div>
           `
         )
@@ -6742,6 +7250,59 @@ function renderPatientRegistrationRules() {
       <div class="form-actions">
         <button class="button-primary" type="submit">${escapeHtml(
           state.settingsSavingCategory === "patient_registration" ? t().common.loading : t().settings.patientRulesSave
+        )}</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderNameDictionaryAddForm() {
+  return `
+    <form id="name-dictionary-form" class="stack">
+      <div class="form-grid">
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.dictionaryArabic)}</span>
+          <input class="input field-ar" name="arabicText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.arabicText)}" />
+        </label>
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.dictionaryEnglish)}</span>
+          <input class="input field-en" name="englishText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.englishText)}" />
+        </label>
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
+          <input type="checkbox" name="isActive" data-name-dictionary-new-field="true" ${state.nameDictionaryForm.isActive ? "checked" : ""} />
+        </label>
+      </div>
+      <div class="form-actions">
+        <button class="button-primary" type="submit">${escapeHtml(
+          state.nameDictionarySavingId === "new" ? t().common.loading : t().settings.dictionaryAdd
+        )}</button>
+      </div>
+    </form>
+  `;
+}
+
+function renderNameDictionaryImportForm() {
+  const fileName = state.nameDictionaryImportFile ? state.nameDictionaryImportFile.name : t().print.fileNone;
+
+  return `
+    <form id="name-dictionary-import-form" class="stack">
+      <div class="section-head">
+        <h3 class="section-title">${escapeHtml(t().settings.dictionaryImportTitle)}</h3>
+        <span class="chip subtle">${escapeHtml(t().settings.dictionaryImportBody)}</span>
+      </div>
+      <label class="field">
+        <span class="label">${escapeHtml(t().settings.dictionaryImportFile)}</span>
+        <input class="input" type="file" accept=".csv,text/csv" />
+      </label>
+      <div class="small">${escapeHtml(t().settings.dictionaryImportHint)}</div>
+      <div class="small">${escapeHtml(fileName)}</div>
+      <div class="form-actions">
+        <button class="button-primary" type="submit">${escapeHtml(
+          state.nameDictionaryImportLoading ? t().common.loading : t().settings.dictionaryImportSubmit
+        )}</button>
+        <button class="button-ghost" type="button" data-action="download-dictionary-example">${escapeHtml(
+          t().settings.dictionaryImportExample
         )}</button>
       </div>
     </form>
@@ -7180,27 +7741,8 @@ function renderSettingsSectionContent() {
           <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
           ${alertMarkup("error", state.nameDictionaryError)}
           ${alertMarkup("success", state.nameDictionarySuccess)}
-          <form id="name-dictionary-form" class="stack">
-            <div class="form-grid">
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.dictionaryArabic)}</span>
-                <input class="input field-ar" name="arabicText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.arabicText)}" />
-              </label>
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.dictionaryEnglish)}</span>
-                <input class="input field-en" name="englishText" data-name-dictionary-new-field="true" value="${escapeHtml(state.nameDictionaryForm.englishText)}" />
-              </label>
-              <label class="field">
-                <span class="label">${escapeHtml(t().settings.dictionaryActive)}</span>
-                <input type="checkbox" name="isActive" data-name-dictionary-new-field="true" ${state.nameDictionaryForm.isActive ? "checked" : ""} />
-              </label>
-            </div>
-            <div class="form-actions">
-              <button class="button-primary" type="submit">${escapeHtml(
-                state.nameDictionarySavingId === "new" ? t().common.loading : t().settings.dictionaryAdd
-              )}</button>
-            </div>
-          </form>
+          ${renderNameDictionaryAddForm()}
+          ${renderNameDictionaryImportForm()}
           ${renderNameDictionaryList()}
         </section>
       `;
@@ -7338,6 +7880,8 @@ function renderPage() {
       return renderPatients();
     case "appointments":
       return renderAppointments();
+    case "calendar":
+      return renderCalendar();
     case "registrations":
       return renderRegistrations();
     case "queue":
@@ -7558,6 +8102,11 @@ function handleInput(event) {
     return;
   }
 
+  if (target.closest("#calendar-filter-form")) {
+    state.calendarFilters[target.name] = target.value;
+    return;
+  }
+
   if (target.closest("#statistics-filter-form")) {
     state.statisticsFilters[target.name] = target.value;
     if (target.name === "date") {
@@ -7690,6 +8239,13 @@ function handleInput(event) {
           }
         : entry
     );
+    return;
+  }
+
+  if (target.closest("#name-dictionary-import-form")) {
+    if (target instanceof HTMLInputElement && target.type === "file") {
+      state.nameDictionaryImportFile = target.files?.[0] || null;
+    }
     return;
   }
 
@@ -7852,6 +8408,49 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "calendar-prev-month") {
+    event.preventDefault();
+    state.calendarDisplayDate = addUtcMonths(state.calendarDisplayDate, -1);
+    state.calendarSelectedDate = formatIsoDate(state.calendarDisplayDate);
+    state.calendarError = "";
+    void loadCalendarAppointments();
+    return;
+  }
+
+  if (target.dataset.action === "calendar-next-month") {
+    event.preventDefault();
+    state.calendarDisplayDate = addUtcMonths(state.calendarDisplayDate, 1);
+    state.calendarSelectedDate = formatIsoDate(state.calendarDisplayDate);
+    state.calendarError = "";
+    void loadCalendarAppointments();
+    return;
+  }
+
+  if (target.dataset.action === "calendar-today") {
+    event.preventDefault();
+    state.calendarDisplayDate = getCalendarMonthStartDate();
+    state.calendarSelectedDate = getCurrentDateInputValue();
+    state.calendarError = "";
+    void loadCalendarAppointments();
+    return;
+  }
+
+  if (target.dataset.action === "select-calendar-day") {
+    event.preventDefault();
+    state.calendarSelectedDate = target.dataset.date || "";
+    state.calendarError = "";
+    render();
+    return;
+  }
+
+  if (target.dataset.action === "calendar-clear-filter") {
+    event.preventDefault();
+    state.calendarFilters = defaultCalendarFilters();
+    state.calendarError = "";
+    void loadCalendarAppointments();
+    return;
+  }
+
   if (target.dataset.action === "open-exam-type-modal") {
     event.preventDefault();
     state.examTypeModalOpen = true;
@@ -7949,6 +8548,12 @@ function handleClick(event) {
   if (target.dataset.action === "refresh-users") {
     event.preventDefault();
     void loadUsers();
+    return;
+  }
+
+  if (target.dataset.action === "delete-user") {
+    event.preventDefault();
+    void deleteUser(target.dataset.userId);
     return;
   }
 
@@ -8088,6 +8693,31 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "calendar-print-day") {
+    event.preventDefault();
+    state.calendarError = "";
+    const date = target.dataset.date;
+    const appointments = getCalendarAppointmentsForDate(date);
+
+    if (!appointments.length) {
+      state.calendarError = t().calendar.noAppointments;
+      render();
+      return;
+    }
+
+    try {
+      const title =
+        state.language === "ar"
+          ? `${t().calendar.printTitlePrefix} • ${formatDisplayDate(date)}`
+          : `${formatDisplayDate(date)} • ${t().calendar.printTitlePrefix}`;
+      openDailyListPrint(appointments, title);
+    } catch (error) {
+      state.calendarError = error.message;
+    }
+    render();
+    return;
+  }
+
   if (target.dataset.action === "prepare-slip-print") {
     event.preventDefault();
     void preparePrintOutput("slip");
@@ -8154,6 +8784,12 @@ function handleClick(event) {
   if (target.dataset.action === "delete-dictionary-entry") {
     event.preventDefault();
     void deleteNameDictionaryEntry(target.dataset.dictionaryId);
+    return;
+  }
+
+  if (target.dataset.action === "download-dictionary-example") {
+    event.preventDefault();
+    downloadDictionaryExample();
     return;
   }
 
@@ -8310,6 +8946,12 @@ function handleSubmit(event) {
     return;
   }
 
+  if (event.target.id === "calendar-filter-form") {
+    event.preventDefault();
+    void loadCalendarAppointments();
+    return;
+  }
+
   if (event.target.id === "statistics-filter-form") {
     event.preventDefault();
     void loadStatistics();
@@ -8373,6 +9015,12 @@ function handleSubmit(event) {
   if (event.target.id === "name-dictionary-form") {
     event.preventDefault();
     void createNameDictionaryEntry();
+    return;
+  }
+
+  if (event.target.id === "name-dictionary-import-form") {
+    event.preventDefault();
+    void importNameDictionaryCsv();
     return;
   }
 

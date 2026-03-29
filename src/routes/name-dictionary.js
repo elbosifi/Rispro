@@ -3,6 +3,7 @@ import { hasRecentSupervisorReauth, requireAuth, requireRecentSupervisorReauth, 
 import { asyncRoute } from "../utils/async-route.js";
 import {
   deleteNameDictionaryEntry,
+  importNameDictionaryEntries,
   listNameDictionary,
   updateNameDictionaryEntry,
   upsertNameDictionary
@@ -29,6 +30,16 @@ nameDictionaryRouter.post(
   asyncRoute(async (req, res) => {
     const entry = await upsertNameDictionary(req.body || {}, req.user.sub);
     res.status(201).json({ entry });
+  })
+);
+
+nameDictionaryRouter.post(
+  "/import",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req, res) => {
+    const entries = await importNameDictionaryEntries(req.body?.entries || [], req.user.sub);
+    res.status(201).json({ entries });
   })
 );
 

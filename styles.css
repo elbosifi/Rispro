@@ -805,6 +805,100 @@ html[dir="rtl"] .settings-row {
   font-size: 0.9rem;
 }
 
+.calendar-panel {
+  border-radius: 22px;
+  border: 1px solid rgba(86, 60, 38, 0.15);
+  background: rgba(255, 255, 255, 0.94);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.calendar-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.calendar-month-label {
+  font-size: 1.25rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.calendar-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.calendar-weekday {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.calendar-month-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.calendar-day {
+  border: 1px solid rgba(86, 60, 38, 0.15);
+  border-radius: 16px;
+  min-height: 120px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+  background: var(--surface-strong);
+  color: var(--text);
+  text-align: center;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.calendar-day:hover:not(.calendar-day--active) {
+  transform: translateY(-2px);
+  border-color: rgba(15, 118, 110, 0.3);
+}
+
+.calendar-day--ghost {
+  opacity: 0.4;
+}
+
+.calendar-day--active {
+  border-color: rgba(15, 118, 110, 0.4);
+  box-shadow: 0 16px 32px rgba(15, 118, 110, 0.15);
+  transform: translateY(0);
+}
+
+.calendar-day--empty .calendar-day-count {
+  color: var(--muted);
+}
+
+.calendar-day-number {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.calendar-day-count {
+  font-size: 1.8rem;
+  font-weight: 800;
+}
+
+.calendar-day-note {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .slip-surface {
   background: linear-gradient(180deg, rgba(255, 252, 247, 0.94), rgba(249, 243, 233, 0.9));
 }

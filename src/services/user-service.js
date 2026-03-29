@@ -54,3 +54,41 @@ export async function createUser({ username, fullName, password, role, isActive 
     throw error;
   }
 }
+
+export async function deleteUser(userId, deletedByUserId = null) {
+  const cleanUserId = Number(userId);
+
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+
+  if (deletedByUserId && Number(deletedByUserId) === cleanUserId) {
+    throw new HttpError(400, "You cannot delete your own account.");
+  }
+
+  const { rows } = await pool.query(
+    `
+      delete from users
+      where id = $1
+      returning id, username, full_name, role, is_active, created_at, updated_at
+    `,
+    [cleanUserId]
+  );
+
+  const removed = rows[0];
+
+  if (!removed) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: removed.id,
+    actionType: "delete",
+    oldValues: removed,
+    newValues: null,
+    changedByUserId: deletedByUserId
+  });
+
+  return removed;
+}
