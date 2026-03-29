@@ -169,6 +169,17 @@ async function loadPacsSettings() {
   };
 }
 
+function normalizePacsSettingsInput(input = {}) {
+  return {
+    enabled: parseEnabled(input.enabled || "enabled"),
+    host: String(input.host || "").trim(),
+    port: parsePositiveInteger(input.port, 104),
+    calledAeTitle: String(input.calledAeTitle || input.called_ae_title || "").trim(),
+    callingAeTitle: String(input.callingAeTitle || input.calling_ae_title || "").trim(),
+    timeoutSeconds: parsePositiveInteger(input.timeoutSeconds || input.timeout_seconds, 10)
+  };
+}
+
 async function runDimseFindScu({ patientId, host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
@@ -293,8 +304,8 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
   return studies;
 }
 
-export async function testPacsConnection({ currentUserId }) {
-  const settings = await loadPacsSettings();
+export async function testPacsConnection({ currentUserId, overrides = null }) {
+  const settings = overrides ? normalizePacsSettingsInput(overrides) : await loadPacsSettings();
 
   if (!settings.enabled) {
     throw new HttpError(400, "PACS is disabled in settings.");

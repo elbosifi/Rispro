@@ -46,7 +46,7 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-test",
   asyncRoute(async (req, res) => {
-    await testPacsConnection({ currentUserId: req.user.sub });
+    await testPacsConnection({ currentUserId: req.user.sub, overrides: req.body || null });
     res.json({ ok: true });
   })
 );

@@ -97,6 +97,7 @@ const state = {
   pacsTestLoading: false,
   pacsTestError: "",
   pacsTestSuccess: "",
+  pacsSettingsForm: defaultPacsSettingsForm(),
   scanPreparationLoading: false,
   printPreparationLoading: false,
   printResults: [],
@@ -1416,6 +1417,17 @@ function defaultAppointmentEditForm() {
   };
 }
 
+function defaultPacsSettingsForm() {
+  return {
+    enabled: "enabled",
+    host: "",
+    port: "104",
+    calledAeTitle: "",
+    callingAeTitle: "RISPRO",
+    timeoutSeconds: "10"
+  };
+}
+
 function defaultModalityFilters() {
   return {
     date: getCurrentDateInputValue(),
@@ -1610,6 +1622,31 @@ function ensureRequiredSettingsDefaults(catalog) {
   });
 
   return nextCatalog;
+}
+
+function hydratePacsSettingsForm(catalog) {
+  const nextCatalog = catalog || state.settingsCatalog;
+
+  state.pacsSettingsForm = {
+    enabled: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "enabled") || { setting_value: { value: "enabled" } }
+    ),
+    host: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "host") || { setting_value: { value: "" } }
+    ),
+    port: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "port") || { setting_value: { value: "104" } }
+    ),
+    calledAeTitle: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "called_ae_title") || { setting_value: { value: "" } }
+    ),
+    callingAeTitle: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "calling_ae_title") || { setting_value: { value: "RISPRO" } }
+    ),
+    timeoutSeconds: getSettingsFieldValue(
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "timeout_seconds") || { setting_value: { value: "10" } }
+    )
+  };
 }
 
 function initials(name) {
@@ -3006,6 +3043,7 @@ async function loadSettings() {
   try {
     const result = await api("/api/settings", { method: "GET" });
     state.settingsCatalog = ensureRequiredSettingsDefaults(result.settings || {});
+    hydratePacsSettingsForm(state.settingsCatalog);
   } catch (error) {
     state.settingsError = error.message;
   } finally {
@@ -4063,13 +4101,25 @@ async function searchPacsStudies() {
 }
 
 async function testPacsConnection() {
+  const pacs = state.pacsSettingsForm;
+
   state.pacsTestLoading = true;
   state.pacsTestError = "";
   state.pacsTestSuccess = "";
   render();
 
   try {
-    await api("/api/integrations/pacs-test", { method: "POST" });
+    await api("/api/integrations/pacs-test", {
+      method: "POST",
+      body: JSON.stringify({
+        enabled: pacs.enabled || "enabled",
+        host: String(pacs.host || "").trim(),
+        port: String(pacs.port || "").trim() || "104",
+        calledAeTitle: String(pacs.calledAeTitle || "").trim(),
+        callingAeTitle: String(pacs.callingAeTitle || "").trim() || "RISPRO",
+        timeoutSeconds: String(pacs.timeoutSeconds || "").trim() || "10"
+      })
+    });
     state.pacsTestSuccess = t().pacs.testSuccess;
   } catch (error) {
     state.pacsTestError = error.message || t().pacs.testFail;
@@ -4310,6 +4360,46 @@ async function saveSettingsCategory(category) {
       state.language === "ar"
         ? `تم حفظ فئة ${getSettingsCategoryTitle(category)} بنجاح.`
         : `${getSettingsCategoryTitle(category)} was saved successfully.`;
+    pushToast("success", state.settingsSuccess);
+    await loadSettings();
+  } catch (error) {
+    state.settingsError = error.message;
+    pushToast("error", state.settingsError);
+  } finally {
+    state.settingsSavingCategory = "";
+    render();
+  }
+}
+
+async function savePacsSettings() {
+  const pacs = state.pacsSettingsForm;
+
+  state.settingsSavingCategory = "pacs_connection";
+  state.settingsError = "";
+  state.settingsSuccess = "";
+  state.pacsTestError = "";
+  state.pacsTestSuccess = "";
+  render();
+
+  try {
+    await api("/api/settings/pacs_connection", {
+      method: "PUT",
+      body: JSON.stringify({
+        entries: [
+          { key: "enabled", value: { value: pacs.enabled || "enabled" } },
+          { key: "host", value: { value: String(pacs.host || "").trim() } },
+          { key: "port", value: { value: String(pacs.port || "").trim() || "104" } },
+          { key: "called_ae_title", value: { value: String(pacs.calledAeTitle || "").trim() } },
+          { key: "calling_ae_title", value: { value: String(pacs.callingAeTitle || "").trim() || "RISPRO" } },
+          { key: "timeout_seconds", value: { value: String(pacs.timeoutSeconds || "").trim() || "10" } }
+        ]
+      })
+    });
+
+    state.settingsSuccess =
+      state.language === "ar"
+        ? `تم حفظ فئة ${getSettingsCategoryTitle("pacs_connection")} بنجاح.`
+        : `${getSettingsCategoryTitle("pacs_connection")} was saved successfully.`;
     pushToast("success", state.settingsSuccess);
     await loadSettings();
   } catch (error) {
@@ -7790,7 +7880,7 @@ function renderSettingsMenu() {
       id: "pacs",
       title: t().settings.sectionPacs,
       body: t().pacs.testHint,
-      count: getSettingsEntryValue("pacs_connection", "enabled", t().common.inactive) === "enabled" ? t().common.active : t().common.inactive
+      count: state.pacsSettingsForm.enabled === "enabled" ? t().common.active : t().common.inactive
     },
     {
       id: "categories",
@@ -7931,12 +8021,7 @@ function renderSettingsCapacitySection() {
 }
 
 function renderSettingsPacsSection() {
-  const enabledValue = getSettingsEntryValue("pacs_connection", "enabled", "enabled");
-  const hostValue = getSettingsEntryValue("pacs_connection", "host", "");
-  const portValue = getSettingsEntryValue("pacs_connection", "port", "104");
-  const calledAeValue = getSettingsEntryValue("pacs_connection", "called_ae_title", "");
-  const callingAeValue = getSettingsEntryValue("pacs_connection", "calling_ae_title", "RISPRO");
-  const timeoutValue = getSettingsEntryValue("pacs_connection", "timeout_seconds", "10");
+  const pacs = state.pacsSettingsForm;
 
   return `
     <section class="surface">
@@ -7947,18 +8032,17 @@ function renderSettingsPacsSection() {
       <div class="settings-summary">${escapeHtml(t().pacs.testHint)}</div>
       ${alertMarkup("error", state.pacsTestError)}
       ${alertMarkup("success", state.pacsTestSuccess)}
-      <form class="stack" data-settings-form="pacs_connection">
+      <form id="pacs-settings-form" class="stack">
         <div class="form-grid">
           <label class="field">
             <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "enabled"))}</span>
             <select
               class="select"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="enabled"
+              name="enabled"
+              data-pacs-setting-field="true"
             >
-              <option value="enabled" ${enabledValue === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
-              <option value="disabled" ${enabledValue === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+              <option value="enabled" ${pacs.enabled === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+              <option value="disabled" ${pacs.enabled === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
             </select>
           </label>
 
@@ -7966,10 +8050,9 @@ function renderSettingsPacsSection() {
             <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "host"))}</span>
             <input
               class="input field-en"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="host"
-              value="${escapeHtml(hostValue)}"
+              name="host"
+              data-pacs-setting-field="true"
+              value="${escapeHtml(pacs.host)}"
               autocomplete="off"
             />
           </label>
@@ -7979,10 +8062,9 @@ function renderSettingsPacsSection() {
             <input
               class="input field-en"
               inputmode="numeric"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="port"
-              value="${escapeHtml(portValue)}"
+              name="port"
+              data-pacs-setting-field="true"
+              value="${escapeHtml(pacs.port)}"
               autocomplete="off"
             />
           </label>
@@ -7991,10 +8073,9 @@ function renderSettingsPacsSection() {
             <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "called_ae_title"))}</span>
             <input
               class="input field-en"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="called_ae_title"
-              value="${escapeHtml(calledAeValue)}"
+              name="calledAeTitle"
+              data-pacs-setting-field="true"
+              value="${escapeHtml(pacs.calledAeTitle)}"
               autocomplete="off"
             />
           </label>
@@ -8003,10 +8084,9 @@ function renderSettingsPacsSection() {
             <span class="label">${escapeHtml(getSettingsFieldLabel("pacs_connection", "calling_ae_title"))}</span>
             <input
               class="input field-en"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="calling_ae_title"
-              value="${escapeHtml(callingAeValue)}"
+              name="callingAeTitle"
+              data-pacs-setting-field="true"
+              value="${escapeHtml(pacs.callingAeTitle)}"
               autocomplete="off"
             />
           </label>
@@ -8016,10 +8096,9 @@ function renderSettingsPacsSection() {
             <input
               class="input field-en"
               inputmode="numeric"
-              data-setting-field="true"
-              data-setting-category="pacs_connection"
-              data-setting-key="timeout_seconds"
-              value="${escapeHtml(timeoutValue)}"
+              name="timeoutSeconds"
+              data-pacs-setting-field="true"
+              value="${escapeHtml(pacs.timeoutSeconds)}"
               autocomplete="off"
             />
           </label>
@@ -8539,6 +8618,15 @@ function handleInput(event) {
 
   if (target.hasAttribute("data-exam-type-field")) {
     state.examTypeForm[target.name] = target.value;
+    return;
+  }
+
+  if (target.hasAttribute("data-pacs-setting-field")) {
+    state.pacsSettingsForm[target.name] = target.value;
+    state.settingsSuccess = "";
+    state.settingsError = "";
+    state.pacsTestError = "";
+    state.pacsTestSuccess = "";
     return;
   }
 
@@ -9372,6 +9460,12 @@ function handleSubmit(event) {
   if (event.target.id === "user-form") {
     event.preventDefault();
     void createUser();
+    return;
+  }
+
+  if (event.target.id === "pacs-settings-form") {
+    event.preventDefault();
+    void savePacsSettings();
     return;
   }
 
