@@ -5,7 +5,7 @@ import { logAuditEntry } from "./audit-service.js";
 export async function listSettingsCatalog() {
   const { rows } = await pool.query(
     `
-      select category, setting_key, setting_value, updated_at
+      select id, category, setting_key, setting_value, updated_at
       from system_settings
       order by category asc, setting_key asc
     `
@@ -26,7 +26,7 @@ export async function listSettingsCatalog() {
 export async function getSettingsByCategory(category) {
   const { rows } = await pool.query(
     `
-      select category, setting_key, setting_value, updated_at
+      select id, category, setting_key, setting_value, updated_at
       from system_settings
       where category = $1
       order by setting_key asc
@@ -56,7 +56,7 @@ export async function upsertSettings(category, entries, updatedByUserId) {
 
       const previousResult = await client.query(
         `
-          select category, setting_key, setting_value, updated_at
+          select id, category, setting_key, setting_value, updated_at
           from system_settings
           where category = $1 and setting_key = $2
           limit 1
@@ -75,7 +75,7 @@ export async function upsertSettings(category, entries, updatedByUserId) {
             setting_value = excluded.setting_value,
             updated_by_user_id = excluded.updated_by_user_id,
             updated_at = now()
-          returning category, setting_key, setting_value, updated_at
+          returning id, category, setting_key, setting_value, updated_at
         `,
         [category, entry.key, JSON.stringify(entry.value ?? {}), updatedByUserId]
       );
@@ -83,7 +83,7 @@ export async function upsertSettings(category, entries, updatedByUserId) {
       await logAuditEntry(
         {
           entityType: "system_setting",
-          entityId: rows[0].setting_key,
+          entityId: rows[0].id,
           actionType: "upsert",
           oldValues: previousSetting,
           newValues: rows[0],

@@ -1420,9 +1420,9 @@ function defaultAppointmentEditForm() {
 function defaultPacsSettingsForm() {
   return {
     enabled: "enabled",
-    host: "",
-    port: "104",
-    calledAeTitle: "",
+    host: "192.9.101.164",
+    port: "103",
+    calledAeTitle: "osirixr",
     callingAeTitle: "RISPRO",
     timeoutSeconds: "10"
   };
@@ -1593,9 +1593,9 @@ function ensureRequiredSettingsDefaults(catalog) {
     scheduling_and_capacity: [{ key: "max_cases_per_modality", value: "" }],
     pacs_connection: [
       { key: "enabled", value: "enabled" },
-      { key: "host", value: "" },
-      { key: "port", value: "104" },
-      { key: "called_ae_title", value: "" },
+      { key: "host", value: "192.9.101.164" },
+      { key: "port", value: "103" },
+      { key: "called_ae_title", value: "osirixr" },
       { key: "calling_ae_title", value: "RISPRO" },
       { key: "timeout_seconds", value: "10" }
     ]
@@ -1632,13 +1632,13 @@ function hydratePacsSettingsForm(catalog) {
       (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "enabled") || { setting_value: { value: "enabled" } }
     ),
     host: getSettingsFieldValue(
-      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "host") || { setting_value: { value: "" } }
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "host") || { setting_value: { value: "192.9.101.164" } }
     ),
     port: getSettingsFieldValue(
-      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "port") || { setting_value: { value: "104" } }
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "port") || { setting_value: { value: "103" } }
     ),
     calledAeTitle: getSettingsFieldValue(
-      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "called_ae_title") || { setting_value: { value: "" } }
+      (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "called_ae_title") || { setting_value: { value: "osirixr" } }
     ),
     callingAeTitle: getSettingsFieldValue(
       (nextCatalog.pacs_connection || []).find((entry) => entry.setting_key === "calling_ae_title") || { setting_value: { value: "RISPRO" } }
@@ -4387,9 +4387,9 @@ async function savePacsSettings() {
       body: JSON.stringify({
         entries: [
           { key: "enabled", value: { value: pacs.enabled || "enabled" } },
-          { key: "host", value: { value: String(pacs.host || "").trim() } },
-          { key: "port", value: { value: String(pacs.port || "").trim() || "104" } },
-          { key: "called_ae_title", value: { value: String(pacs.calledAeTitle || "").trim() } },
+          { key: "host", value: { value: String(pacs.host || "").trim() || "192.9.101.164" } },
+          { key: "port", value: { value: String(pacs.port || "").trim() || "103" } },
+          { key: "called_ae_title", value: { value: String(pacs.calledAeTitle || "").trim() || "osirixr" } },
           { key: "calling_ae_title", value: { value: String(pacs.callingAeTitle || "").trim() || "RISPRO" } },
           { key: "timeout_seconds", value: { value: String(pacs.timeoutSeconds || "").trim() || "10" } }
         ]
