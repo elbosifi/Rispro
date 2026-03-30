@@ -80,72 +80,27 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
-.nav-menu {
-  position: relative;
+.top-nav-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 16px;
 }
 
-.nav-menu-toggle {
-  list-style: none;
-  cursor: pointer;
-  user-select: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.9);
+.top-nav-button {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--line-strong);
   color: var(--text);
-  font-weight: 700;
-}
-
-.nav-menu-toggle::-webkit-details-marker {
-  display: none;
-}
-
-.nav-menu[open] .nav-menu-toggle {
-  background: var(--teal);
-  color: #ffffff;
-  border-color: transparent;
-}
-
-.nav-menu-list {
-  position: absolute;
-  top: calc(100% + 10px);
-  inset-inline-end: 0;
-  min-width: 280px;
-  width: min(520px, 92vw);
-  padding: 12px;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: rgba(34, 26, 19, 0.98);
-  box-shadow: var(--shadow);
-  z-index: 10;
-  display: grid;
-  gap: 8px;
-  writing-mode: horizontal-tb;
-}
-
-.nav-menu-list .nav-link {
-  width: 100%;
-  justify-content: space-between;
-  color: rgba(255, 248, 239, 0.92);
-  min-width: 0;
-  padding: 10px 12px;
-  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 0.8rem;
   white-space: nowrap;
 }
 
-.nav-menu-list .nav-link span:first-child {
-  flex: 1;
-  text-align: start;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.nav-menu-list .nav-link span:last-child {
-  flex: 0 0 auto;
+.top-nav-button.active {
+  background: rgba(15, 118, 110, 0.18);
+  border-color: rgba(15, 118, 110, 0.4);
 }
 
 .sidebar {

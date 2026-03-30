@@ -4,6 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import {
   createPatient,
   getPatientById,
+  getPatientNoShowSummary,
   mergePatients,
   searchPatients,
   updatePatient
@@ -42,6 +43,14 @@ patientsRouter.get(
   asyncRoute(async (req, res) => {
     const patient = await getPatientById(req.params.patientId);
     res.json({ patient });
+  })
+);
+
+patientsRouter.get(
+  "/:patientId/no-show",
+  asyncRoute(async (req, res) => {
+    const summary = await getPatientNoShowSummary(req.params.patientId);
+    res.json(summary);
   })
 );
 

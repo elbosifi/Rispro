@@ -231,6 +231,25 @@ export async function getPatientById(patientId) {
   return rows[0];
 }
 
+export async function getPatientNoShowSummary(patientId) {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const { rows } = await pool.query(
+    `
+      select
+        count(*) filter (where status = 'no-show') as no_show_count,
+        max(appointment_date) filter (where status = 'no-show') as last_no_show_date
+      from appointments
+      where patient_id = $1
+    `,
+    [cleanPatientId]
+  );
+
+  return {
+    noShowCount: Number(rows[0]?.no_show_count || 0),
+    lastNoShowDate: rows[0]?.last_no_show_date || null
+  };
+}
+
 export async function searchPatients(searchTerm = "") {
   const term = searchTerm.trim();
   const pattern = `%${term}%`;

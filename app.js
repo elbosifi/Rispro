@@ -207,6 +207,9 @@ const state = {
   appointmentCalendarLoading: false,
   appointmentDaySettings: { fridayEnabled: true, saturdayEnabled: true },
   appointmentDaySettingsError: "",
+  appointmentNoShowSummary: { count: 0, lastDate: "" },
+  appointmentNoShowLoading: false,
+  appointmentNoShowError: "",
   appointmentSaving: false,
   appointmentError: "",
   appointmentSuccess: "",
@@ -410,6 +413,7 @@ const copy = {
       overbookNotice: "This day is full. Supervisor overbooking is required.",
       dayDisabledFriday: "Friday appointments are disabled in settings.",
       dayDisabledSaturday: "Saturday appointments are disabled in settings.",
+      previousNoShow: "Previous no-shows",
       savedCard: "Latest saved appointment",
       fields: {
         modality: "Modality",
@@ -906,6 +910,7 @@ const copy = {
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
       dayDisabledFriday: "مواعيد يوم الجمعة غير مفعّلة في الإعدادات.",
       dayDisabledSaturday: "مواعيد يوم السبت غير مفعّلة في الإعدادات.",
+      previousNoShow: "حالات عدم الحضور السابقة",
       savedCard: "آخر موعد تم حفظه",
       fields: {
         modality: "Modality",
@@ -3516,6 +3521,31 @@ async function loadAppointmentDaySettings() {
   }
 }
 
+async function loadAppointmentNoShowSummary(patientId) {
+  if (!patientId) {
+    state.appointmentNoShowSummary = { count: 0, lastDate: "" };
+    return;
+  }
+
+  state.appointmentNoShowLoading = true;
+  state.appointmentNoShowError = "";
+  render();
+
+  try {
+    const result = await api(`/api/patients/${encodeURIComponent(patientId)}/no-show`, { method: "GET" });
+    state.appointmentNoShowSummary = {
+      count: Number(result.noShowCount || 0),
+      lastDate: result.lastNoShowDate ? String(result.lastNoShowDate).slice(0, 10) : ""
+    };
+  } catch (error) {
+    state.appointmentNoShowError = error.message;
+    state.appointmentNoShowSummary = { count: 0, lastDate: "" };
+  } finally {
+    state.appointmentNoShowLoading = false;
+    render();
+  }
+}
+
 async function loadUsers() {
   if (!isSupervisor() || !hasRecentSupervisorReauth()) {
     return;
@@ -3731,6 +3761,9 @@ async function signOut() {
     state.appointmentCalendar = [];
     state.appointmentDaySettings = { fridayEnabled: true, saturdayEnabled: true };
     state.appointmentDaySettingsError = "";
+    state.appointmentNoShowSummary = { count: 0, lastDate: "" };
+    state.appointmentNoShowLoading = false;
+    state.appointmentNoShowError = "";
     state.selectedAppointmentPatient = null;
     state.appointmentPatientResults = [];
     state.appointmentPatientQuery = "";
@@ -3896,6 +3929,8 @@ async function startAppointmentForPatient(patient) {
   state.appointmentPatientResults = [];
   state.appointmentError = "";
   state.appointmentSuccess = "";
+  state.appointmentNoShowSummary = { count: 0, lastDate: "" };
+  state.appointmentNoShowError = "";
   state.route = "appointments";
   localStorage.setItem("rispro-route", state.route);
 
@@ -3904,6 +3939,7 @@ async function startAppointmentForPatient(patient) {
   }
 
   render();
+  void loadAppointmentNoShowSummary(patient.id);
   if (getAppointmentPacsPatientId(patient)) {
     void searchPacsStudies();
   }
@@ -6199,6 +6235,13 @@ function renderSelectedAppointmentPatient() {
   }
 
   const patient = state.selectedAppointmentPatient;
+  const noShowCount = state.appointmentNoShowSummary.count || 0;
+  const lastNoShow = state.appointmentNoShowSummary.lastDate
+    ? formatDisplayDate(state.appointmentNoShowSummary.lastDate)
+    : "";
+  const noShowMessage = noShowCount
+    ? `${t().appointments.previousNoShow}: ${noShowCount}${lastNoShow ? ` • ${lastNoShow}` : ""}`
+    : "";
 
   return `
     <div class="stack">
@@ -6212,6 +6255,8 @@ function renderSelectedAppointmentPatient() {
         ${infoTile(t().patients.fields.address, patient.address || "—", "")}
         ${infoTile(t().patients.fields.mrn, patient.mrn || `#${patient.id}`, "")}
       </div>
+      ${state.appointmentNoShowLoading ? `<div class="small">${escapeHtml(t().common.loading)}</div>` : ""}
+      ${noShowMessage ? `<div class="alert alert-error">${escapeHtml(noShowMessage)}</div>` : ""}
       ${renderPacsFindPanel(patient)}
     </div>
   `;
@@ -9883,23 +9928,29 @@ function renderAppFrame(content) {
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
           </div>
-
-          <details class="nav-menu">
-            <summary class="nav-menu-toggle">${escapeHtml(t().common.menu)}</summary>
-            <nav class="nav nav-menu-list">
-              ${allowedRoutes
-                .map(
-                  (route, index) => `
-                    <a href="#" class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
-                      <span>${escapeHtml(t().nav[route])}</span>
-                      <span>${String(index + 1).padStart(2, "0")}</span>
-                    </a>
-                  `
-                )
-                .join("")}
-            </nav>
-          </details>
+          <div class="appbar-shortcuts">
+            <button class="button-ghost appbar-shortcut" type="button" data-route="registrations">${escapeHtml(
+              t().nav.registrations
+            )}</button>
+            <button class="button-ghost appbar-shortcut" type="button" data-route="dashboard">${escapeHtml(
+              t().nav.dashboard
+            )}</button>
+            <button class="button-ghost appbar-shortcut" type="button" data-route="appointments">${escapeHtml(
+              t().nav.appointments
+            )}</button>
+          </div>
         </header>
+        <nav class="top-nav-row">
+          ${allowedRoutes
+            .map(
+              (route) => `
+                <button class="top-nav-button ${state.route === route ? "active" : ""}" type="button" data-route="${route}">
+                  ${escapeHtml(t().nav[route])}
+                </button>
+              `
+            )
+            .join("")}
+        </nav>
 
         <div class="content">
           <header class="topbar">
@@ -10392,6 +10443,11 @@ function handleClick(event) {
     state.pacsFindError = "";
     state.pacsFindHasRun = false;
     render();
+    if (state.selectedAppointmentPatient) {
+      void loadAppointmentNoShowSummary(state.selectedAppointmentPatient.id);
+    } else {
+      state.appointmentNoShowSummary = { count: 0, lastDate: "" };
+    }
     if (getAppointmentPacsPatientId(state.selectedAppointmentPatient)) {
       void searchPacsStudies();
     }
