@@ -205,6 +205,8 @@ const state = {
   nameDictionaryImportLoading: false,
   appointmentLookupsLoading: false,
   appointmentCalendarLoading: false,
+  appointmentDaySettings: { fridayEnabled: true, saturdayEnabled: true },
+  appointmentDaySettingsError: "",
   appointmentSaving: false,
   appointmentError: "",
   appointmentSuccess: "",
@@ -380,11 +382,11 @@ const copy = {
       patientSelect: "Use this patient",
       selectedPatient: "Selected patient",
       pacsSearch: "Search PACS",
-      pacsSearchHint: "Uses Patient ID (MRN) to find prior studies.",
+      pacsSearchHint: "Uses National ID to find prior studies.",
       pacsResultsTitle: "Previous studies",
       pacsNoResults: "No prior studies were found.",
       pacsLoading: "Searching PACS...",
-      pacsMissingNationalId: "Patient ID (MRN) is required to search PACS.",
+      pacsMissingNationalId: "National ID is required to search PACS.",
       noneSelected: "Select a patient before saving an appointment.",
       lookupsLoading: "Loading modalities and priorities...",
       calendarHint: "Select a modality to load the next 14 days.",
@@ -405,6 +407,8 @@ const copy = {
       fullDay: "Full day",
       availableDay: "Available",
       overbookNotice: "This day is full. Supervisor overbooking is required.",
+      dayDisabledFriday: "Friday appointments are disabled in settings.",
+      dayDisabledSaturday: "Saturday appointments are disabled in settings.",
       savedCard: "Latest saved appointment",
       fields: {
         modality: "Modality",
@@ -873,11 +877,11 @@ const copy = {
       patientSelect: "اختيار هذا المريض",
       selectedPatient: "المريض المختار",
       pacsSearch: "بحث PACS",
-      pacsSearchHint: "يستخدم رقم المريض (MRN) للبحث عن الدراسات السابقة.",
+      pacsSearchHint: "يستخدم الرقم الوطني للبحث عن الدراسات السابقة.",
       pacsResultsTitle: "الدراسات السابقة",
       pacsNoResults: "لا توجد دراسات سابقة.",
       pacsLoading: "جارٍ البحث في PACS...",
-      pacsMissingNationalId: "رقم المريض (MRN) مطلوب لبحث PACS.",
+      pacsMissingNationalId: "الرقم الوطني مطلوب لبحث PACS.",
       noneSelected: "اختر مريضاً قبل حفظ الموعد.",
       lookupsLoading: "جارٍ تحميل الأجهزة والأولويات...",
       calendarHint: "اختر الجهاز لتحميل الأيام الأربعة عشر القادمة.",
@@ -898,6 +902,8 @@ const copy = {
       fullDay: "اليوم ممتلئ",
       availableDay: "متاح",
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
+      dayDisabledFriday: "مواعيد يوم الجمعة غير مفعّلة في الإعدادات.",
+      dayDisabledSaturday: "مواعيد يوم السبت غير مفعّلة في الإعدادات.",
       savedCard: "آخر موعد تم حفظه",
       fields: {
         modality: "Modality",
@@ -1953,6 +1959,35 @@ function formatDisplayDateTime(value) {
 
 function normalizeDateText(value) {
   return String(value || "").slice(0, 10);
+}
+
+function getTripoliWeekday(isoDate) {
+  if (!isoDate) {
+    return "";
+  }
+
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  return new Intl.DateTimeFormat("en-US", { timeZone: "Africa/Tripoli", weekday: "long" })
+    .format(date)
+    .toLowerCase();
+}
+
+function getDisabledAppointmentDayMessage(isoDate) {
+  if (!isoDate) {
+    return "";
+  }
+
+  const weekday = getTripoliWeekday(isoDate);
+
+  if (weekday === "friday" && !state.appointmentDaySettings.fridayEnabled) {
+    return t().appointments.dayDisabledFriday;
+  }
+
+  if (weekday === "saturday" && !state.appointmentDaySettings.saturdayEnabled) {
+    return t().appointments.dayDisabledSaturday;
+  }
+
+  return "";
 }
 
 function getCurrentDateInputValue() {
@@ -3360,6 +3395,7 @@ async function loadAppointmentLookups() {
       priorities: result.priorities || []
     };
     normalizeAppointmentFormSelections();
+    await loadAppointmentDaySettings();
 
     if (!state.dicomDeviceForm.modalityId && state.appointmentLookups.modalities[0]) {
       state.dicomDeviceForm.modalityId = String(state.appointmentLookups.modalities[0].id);
@@ -3406,6 +3442,22 @@ async function loadAppointmentAvailability() {
     state.appointmentError = error.message;
   } finally {
     state.appointmentCalendarLoading = false;
+    render();
+  }
+}
+
+async function loadAppointmentDaySettings() {
+  state.appointmentDaySettingsError = "";
+
+  try {
+    const result = await api("/api/appointments/day-settings", { method: "GET" });
+    state.appointmentDaySettings = {
+      fridayEnabled: Boolean(result.fridayEnabled),
+      saturdayEnabled: Boolean(result.saturdayEnabled)
+    };
+  } catch (error) {
+    state.appointmentDaySettingsError = error.message;
+  } finally {
     render();
   }
 }
@@ -3623,6 +3675,8 @@ async function signOut() {
     state.modalitySettingsForm = defaultModalityForm();
     state.appointmentLookups = { modalities: [], examTypes: [], priorities: [] };
     state.appointmentCalendar = [];
+    state.appointmentDaySettings = { fridayEnabled: true, saturdayEnabled: true };
+    state.appointmentDaySettingsError = "";
     state.selectedAppointmentPatient = null;
     state.appointmentPatientResults = [];
     state.appointmentPatientQuery = "";
@@ -4155,6 +4209,13 @@ async function saveAppointment() {
     return;
   }
 
+  const disabledDayMessage = getDisabledAppointmentDayMessage(state.appointmentForm.appointmentDate);
+  if (disabledDayMessage) {
+    state.appointmentError = disabledDayMessage;
+    render();
+    return;
+  }
+
   state.appointmentSaving = true;
   state.appointmentError = "";
   state.appointmentSuccess = "";
@@ -4492,7 +4553,7 @@ function getAppointmentPacsPatientId(patient) {
     return "";
   }
 
-  return String(patient.mrn || patient.patient_id || patient.id || patient.national_id || "").trim();
+  return String(patient.national_id || "").trim();
 }
 
 async function searchPacsStudies() {
@@ -4838,6 +4899,7 @@ async function saveSettingsCategory(category) {
         : `${getSettingsCategoryTitle(category)} was saved successfully.`;
     pushToast("success", state.settingsSuccess);
     await loadSettings();
+    await loadAppointmentDaySettings();
   } catch (error) {
     state.settingsError = error.message;
     pushToast("error", state.settingsError);
@@ -6234,6 +6296,7 @@ function renderAppointments() {
   const examTypes = filteredExamTypes();
   const selectedDay = selectedAppointmentDay();
   const selectedDateValue = normalizeDateText(state.appointmentForm.appointmentDate);
+  const disabledDayMessage = getDisabledAppointmentDayMessage(selectedDateValue);
 
   return `
     <div class="page">
@@ -6359,6 +6422,8 @@ function renderAppointments() {
                 ` : ""}
               </div>
 
+              ${disabledDayMessage ? `<div class="alert alert-error">${escapeHtml(disabledDayMessage)}</div>` : ""}
+
               <div class="form-actions">
                 <button class="button-secondary" type="button" data-action="open-exam-type-modal">${escapeHtml(t().appointments.createExam)}</button>
                 <button class="button-primary" type="submit">${escapeHtml(
@@ -6383,6 +6448,7 @@ function renderAppointments() {
                 <div class="metric-value">${escapeHtml(selectedDateValue || t().common.noData)}</div>
               </div>
             </div>
+            ${disabledDayMessage ? `<div class="alert alert-error">${escapeHtml(disabledDayMessage)}</div>` : ""}
             ${selectedDay?.is_full ? `<div class="alert alert-error">${escapeHtml(t().appointments.overbookNotice)}</div>` : ""}
             ${renderAppointmentCalendar()}
           </article>

@@ -5,6 +5,7 @@ import {
   cancelAppointment,
   createAppointment,
   createExamType,
+  getAppointmentDaySettings,
   getAppointmentPrintDetails,
   listAppointmentStatistics,
   listAppointmentLookups,
@@ -46,6 +47,14 @@ appointmentsRouter.get(
     const days = req.query.days ? Number(req.query.days) : 14;
     const availability = await listAvailability(req.query.modalityId, days);
     res.json({ availability });
+  })
+);
+
+appointmentsRouter.get(
+  "/day-settings",
+  asyncRoute(async (_req, res) => {
+    const settings = await getAppointmentDaySettings();
+    res.json(settings);
   })
 );
 

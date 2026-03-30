@@ -95,7 +95,7 @@ function getTripoliWeekday(isoDate) {
   return weekday.toLowerCase();
 }
 
-async function getAppointmentDaySettings(client) {
+export async function getAppointmentDaySettings(client = pool) {
   const { rows } = await client.query(
     `
       select setting_key, setting_value
