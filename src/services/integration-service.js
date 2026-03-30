@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { getDicomGatewayOverview } from "./dicom-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -84,6 +85,7 @@ export async function getIntegrationStatus() {
   const documentSettings = settings.documents_and_uploads || {};
   const rawScannerMode = documentSettings.scanner_bridge_mode || "";
   const scannerBridgeMode = rawScannerMode === "future_local_bridge" ? "manual_browser_upload" : rawScannerMode || "manual_browser_upload";
+  const dicomGateway = await getDicomGatewayOverview();
 
   return {
     printer: {
@@ -108,6 +110,16 @@ export async function getIntegrationStatus() {
       scanColorMode: documentSettings.scan_color_mode || "grayscale",
       scanFileFormat: documentSettings.scan_file_format || "pdf",
       bridgeReady: String(scannerBridgeMode || "") === "local_bridge_ready"
+    },
+    dicomGateway: {
+      enabled: dicomGateway.settings.enabled,
+      mwlAeTitle: dicomGateway.settings.mwlAeTitle,
+      mwlPort: dicomGateway.settings.mwlPort,
+      mppsAeTitle: dicomGateway.settings.mppsAeTitle,
+      mppsPort: dicomGateway.settings.mppsPort,
+      deviceCount: dicomGateway.devices.length,
+      processedMessageCount: Number(dicomGateway.logSummary.processed_count || 0),
+      failedMessageCount: Number(dicomGateway.logSummary.failed_count || 0)
     }
   };
 }

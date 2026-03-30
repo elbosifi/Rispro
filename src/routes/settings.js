@@ -9,6 +9,12 @@ import {
   updateExamType
 } from "../services/appointment-service.js";
 import {
+  createDicomDevice,
+  deleteDicomDevice,
+  listDicomDevices,
+  updateDicomDevice
+} from "../services/dicom-service.js";
+import {
   deleteNameDictionaryEntry,
   listNameDictionary,
   updateNameDictionaryEntry,
@@ -89,6 +95,39 @@ settingsRouter.delete(
   asyncRoute(async (req, res) => {
     const examType = await deleteExamType(req.params.examTypeId, req.user.sub);
     res.json({ examType });
+  })
+);
+
+settingsRouter.get(
+  "/dicom-devices",
+  asyncRoute(async (req, res) => {
+    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const devices = await listDicomDevices({ includeInactive });
+    res.json({ devices });
+  })
+);
+
+settingsRouter.post(
+  "/dicom-devices",
+  asyncRoute(async (req, res) => {
+    const device = await createDicomDevice(req.body || {}, req.user.sub);
+    res.status(201).json({ device });
+  })
+);
+
+settingsRouter.put(
+  "/dicom-devices/:deviceId",
+  asyncRoute(async (req, res) => {
+    const device = await updateDicomDevice(req.params.deviceId, req.body || {}, req.user.sub);
+    res.json({ device });
+  })
+);
+
+settingsRouter.delete(
+  "/dicom-devices/:deviceId",
+  asyncRoute(async (req, res) => {
+    const result = await deleteDicomDevice(req.params.deviceId, req.user.sub);
+    res.json(result);
   })
 );
 

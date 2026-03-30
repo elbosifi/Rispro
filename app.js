@@ -103,6 +103,12 @@ const state = {
   pacsTestError: "",
   pacsTestSuccess: "",
   pacsSettingsForm: defaultPacsSettingsForm(),
+  dicomDevicesLoading: false,
+  dicomDevicesError: "",
+  dicomDevicesSuccess: "",
+  dicomDevices: [],
+  dicomDeviceForm: defaultDicomDeviceForm(),
+  dicomDeviceSaving: false,
   scanPreparationLoading: false,
   printPreparationLoading: false,
   printResults: [],
@@ -558,7 +564,9 @@ const copy = {
         scheduled: "Scheduled",
         arrived: "Arrived",
         waiting: "Waiting",
+        "in-progress": "In progress",
         completed: "Completed",
+        discontinued: "Discontinued",
         "no-show": "No-show",
         cancelled: "Cancelled"
       }
@@ -599,9 +607,23 @@ const copy = {
       sectionCapacity: "Scheduling capacity",
       sectionPacs: "إعدادات PACS",
       sectionPacs: "PACS connection",
+      sectionDicom: "DICOM gateway",
       sectionCategories: "System behavior",
       sectionAudit: "Audit log",
       sectionBackup: "Backup and restore",
+      dicomTitle: "DICOM gateway and devices",
+      dicomBody: "Manage MWL and MPPS endpoint settings and map each modality device by AE Title.",
+      dicomDevicesTitle: "Mapped modality devices",
+      dicomDevicesEmpty: "No DICOM devices are mapped yet.",
+      dicomDeviceAdd: "Add device",
+      dicomDeviceSave: "Save device",
+      dicomDeviceReset: "Clear form",
+      dicomDeviceDelete: "Delete device",
+      dicomDeviceEdit: "Edit",
+      dicomDeviceSaved: "DICOM device saved successfully.",
+      dicomDeviceDeleted: "DICOM device removed successfully.",
+      dicomGatewaySave: "Save DICOM gateway settings",
+      dicomGatewayHint: "These settings must match the sidecar gateway and DCMTK listeners.",
       capacityTitle: "Maximum appointments per modality",
       capacityBody:
         "Set the maximum number of appointments allowed per modality per day. Leave blank to use each modality capacity only.",
@@ -1004,7 +1026,9 @@ const copy = {
         scheduled: "مجدول",
         arrived: "وصل",
         waiting: "منتظر",
+        "in-progress": "بدأ الفحص",
         completed: "مكتمل",
+        discontinued: "تم إيقافه",
         "no-show": "عدم حضور",
         cancelled: "ملغي"
       }
@@ -1043,9 +1067,23 @@ const copy = {
       sectionDictionary: "القاموس المخصص",
       sectionExamTypes: "أنواع الفحوصات",
       sectionCapacity: "سعة الجدولة",
+      sectionDicom: "بوابة DICOM",
       sectionCategories: "سلوك النظام",
       sectionAudit: "سجل التدقيق",
       sectionBackup: "النسخ الاحتياطي والاستعادة",
+      dicomTitle: "بوابة DICOM والأجهزة",
+      dicomBody: "إدارة إعدادات MWL وMPPS وربط كل جهاز حسب AE Title.",
+      dicomDevicesTitle: "أجهزة التصوير المرتبطة",
+      dicomDevicesEmpty: "لا توجد أجهزة DICOM مرتبطة بعد.",
+      dicomDeviceAdd: "إضافة جهاز",
+      dicomDeviceSave: "حفظ الجهاز",
+      dicomDeviceReset: "مسح النموذج",
+      dicomDeviceDelete: "حذف الجهاز",
+      dicomDeviceEdit: "تعديل",
+      dicomDeviceSaved: "تم حفظ جهاز DICOM بنجاح.",
+      dicomDeviceDeleted: "تم حذف جهاز DICOM بنجاح.",
+      dicomGatewaySave: "حفظ إعدادات بوابة DICOM",
+      dicomGatewayHint: "يجب أن تطابق هذه الإعدادات البوابة الجانبية ومستمعات DCMTK.",
       capacityTitle: "الحد الأقصى للمواعيد لكل جهاز",
       capacityBody:
         "حدد الحد الأقصى لعدد المواعيد المسموح بها لكل جهاز في اليوم. اتركه فارغاً لاستخدام سعة كل جهاز فقط.",
@@ -1208,6 +1246,29 @@ const SETTINGS_META = {
       called_ae_title: { en: "Called AE Title", ar: "AE Title المستهدف" },
       calling_ae_title: { en: "Calling AE Title", ar: "AE Title المرسل" },
       timeout_seconds: { en: "Timeout seconds", ar: "مهلة الاتصال بالثواني" }
+    }
+  },
+  dicom_gateway: {
+    titleEn: "DICOM gateway",
+    titleAr: "بوابة DICOM",
+    summaryEn: "MWL and MPPS sidecar paths, ports, and callback settings.",
+    summaryAr: "مسارات ومنافذ وإعدادات الاستدعاء الخاصة ببوابة MWL وMPPS.",
+    fields: {
+      enabled: { en: "Gateway enabled", ar: "تفعيل البوابة" },
+      bind_host: { en: "Bind host", ar: "عنوان الاستماع" },
+      mwl_ae_title: { en: "MWL AE Title", ar: "AE Title للـ MWL" },
+      mwl_port: { en: "MWL port", ar: "منفذ MWL" },
+      mpps_ae_title: { en: "MPPS AE Title", ar: "AE Title للـ MPPS" },
+      mpps_port: { en: "MPPS port", ar: "منفذ MPPS" },
+      worklist_output_dir: { en: "Worklist output dir", ar: "مجلد ملفات العمل النهائي" },
+      worklist_source_dir: { en: "Worklist source dir", ar: "مجلد ملفات العمل المصدرية" },
+      mpps_inbox_dir: { en: "MPPS inbox dir", ar: "مجلد وارد MPPS" },
+      mpps_processed_dir: { en: "MPPS processed dir", ar: "مجلد MPPS المعالج" },
+      mpps_failed_dir: { en: "MPPS failed dir", ar: "مجلد MPPS الفاشل" },
+      callback_secret: { en: "Callback secret", ar: "سر الاستدعاء" },
+      rebuild_behavior: { en: "Rebuild behavior", ar: "سلوك إعادة البناء" },
+      dump2dcm_command: { en: "dump2dcm command", ar: "أمر dump2dcm" },
+      dcmdump_command: { en: "dcmdump command", ar: "أمر dcmdump" }
     }
   },
   patient_registration: {
@@ -1461,6 +1522,22 @@ function defaultPacsSettingsForm() {
   };
 }
 
+function defaultDicomDeviceForm() {
+  return {
+    deviceId: "",
+    modalityId: "",
+    deviceName: "",
+    modalityAeTitle: "",
+    scheduledStationAeTitle: "",
+    stationName: "",
+    stationLocation: "",
+    sourceIp: "",
+    mwlEnabled: "enabled",
+    mppsEnabled: "enabled",
+    isActive: "enabled"
+  };
+}
+
 function defaultPacsSearchForm() {
   return {
     patientName: "",
@@ -1584,7 +1661,13 @@ function formatAuditActionType(value) {
     prepare_print: { en: "Prepare print", ar: "تجهيز طباعة" },
     prepare_scan: { en: "Prepare scan", ar: "تجهيز مسح" },
     pacs_cfind: { en: "PACS C-FIND", ar: "بحث PACS" },
-    pacs_echo: { en: "PACS C-ECHO", ar: "اختبار PACS" }
+    pacs_echo: { en: "PACS C-ECHO", ar: "اختبار PACS" },
+    mpps_start: { en: "MPPS start", ar: "بداية MPPS" },
+    mpps_complete: { en: "MPPS complete", ar: "اكتمال MPPS" },
+    mpps_discontinue: { en: "MPPS discontinue", ar: "إيقاف MPPS" },
+    create_dicom_device: { en: "Create DICOM device", ar: "إنشاء جهاز DICOM" },
+    update_dicom_device: { en: "Update DICOM device", ar: "تعديل جهاز DICOM" },
+    delete_dicom_device: { en: "Delete DICOM device", ar: "حذف جهاز DICOM" }
   };
 
   return labels[value]?.[state.language] || humanizeAuditValue(value);
@@ -1640,6 +1723,23 @@ function ensureRequiredSettingsDefaults(catalog) {
       { key: "called_ae_title", value: "osirixr" },
       { key: "calling_ae_title", value: "RISPRO" },
       { key: "timeout_seconds", value: "10" }
+    ],
+    dicom_gateway: [
+      { key: "enabled", value: "enabled" },
+      { key: "bind_host", value: "0.0.0.0" },
+      { key: "mwl_ae_title", value: "RISPRO_MWL" },
+      { key: "mwl_port", value: "11112" },
+      { key: "mpps_ae_title", value: "RISPRO_MPPS" },
+      { key: "mpps_port", value: "11113" },
+      { key: "worklist_output_dir", value: "storage/dicom/worklists" },
+      { key: "worklist_source_dir", value: "storage/dicom/worklist-source" },
+      { key: "mpps_inbox_dir", value: "storage/dicom/mpps/inbox" },
+      { key: "mpps_processed_dir", value: "storage/dicom/mpps/processed" },
+      { key: "mpps_failed_dir", value: "storage/dicom/mpps/failed" },
+      { key: "callback_secret", value: "change-me-dicom-callback" },
+      { key: "rebuild_behavior", value: "incremental_on_write" },
+      { key: "dump2dcm_command", value: "dump2dcm" },
+      { key: "dcmdump_command", value: "dcmdump" }
     ]
   };
 
@@ -2996,6 +3096,30 @@ async function loadExamTypeSettings() {
   }
 }
 
+async function loadDicomDevices() {
+  if (!isSupervisor() || !hasRecentSupervisorReauth()) {
+    return;
+  }
+
+  state.dicomDevicesLoading = true;
+  state.dicomDevicesError = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/dicom-devices?includeInactive=true", { method: "GET" });
+    state.dicomDevices = result.devices || [];
+
+    if (!state.dicomDeviceForm.modalityId && state.appointmentLookups.modalities[0]) {
+      state.dicomDeviceForm.modalityId = String(state.appointmentLookups.modalities[0].id);
+    }
+  } catch (error) {
+    state.dicomDevicesError = error.message;
+  } finally {
+    state.dicomDevicesLoading = false;
+    render();
+  }
+}
+
 async function loadAppointmentDocuments(appointmentId) {
   if (!appointmentId) {
     state.appointmentDocuments = [];
@@ -3031,6 +3155,10 @@ async function loadAppointmentLookups() {
       priorities: result.priorities || []
     };
     normalizeAppointmentFormSelections();
+
+    if (!state.dicomDeviceForm.modalityId && state.appointmentLookups.modalities[0]) {
+      state.dicomDeviceForm.modalityId = String(state.appointmentLookups.modalities[0].id);
+    }
 
     if (state.appointmentForm.modalityId) {
       await loadAppointmentAvailability();
@@ -3110,6 +3238,7 @@ async function loadSettings() {
     const result = await api("/api/settings", { method: "GET" });
     state.settingsCatalog = ensureRequiredSettingsDefaults(result.settings || {});
     hydratePacsSettingsForm(state.settingsCatalog);
+    await loadDicomDevices();
   } catch (error) {
     state.settingsError = error.message;
   } finally {
@@ -3173,7 +3302,15 @@ async function hydrateRoute() {
 
   if (state.route === "settings") {
     if (hasRecentSupervisorReauth()) {
-      await Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary(), loadExamTypeSettings()]);
+      await Promise.all([
+        loadUsers(),
+        loadSettings(),
+        loadAuditEntries(),
+        loadNameDictionary(),
+        loadExamTypeSettings(),
+        loadDicomDevices(),
+        loadAppointmentLookups()
+      ]);
     }
     return;
   }
@@ -3311,6 +3448,10 @@ async function signOut() {
     state.integrationError = "";
     state.integrationSuccess = "";
     state.integrationLoading = false;
+    state.dicomDevices = [];
+    state.dicomDevicesError = "";
+    state.dicomDevicesSuccess = "";
+    state.dicomDeviceForm = defaultDicomDeviceForm();
     state.scanPreparationLoading = false;
     state.printPreparationLoading = false;
     state.calendarLoading = false;
@@ -3851,9 +3992,9 @@ async function saveAppointment() {
 }
 
 async function scanQueueAccession() {
-  const accessionNumber = state.queueScanValue.trim();
+  const scanValue = state.queueScanValue.trim();
 
-  if (!accessionNumber) {
+  if (!scanValue) {
     state.queueError =
       state.language === "ar" ? "أدخل رقم الدخول أو امسح الباركود أولاً." : "Enter or scan an accession number first.";
     render();
@@ -3868,7 +4009,7 @@ async function scanQueueAccession() {
   try {
     await api("/api/queue/scan", {
       method: "POST",
-      body: JSON.stringify({ accessionNumber })
+      body: JSON.stringify({ scanValue })
     });
     state.queueSuccess = t().queue.scannedSuccess;
     state.queueScanValue = "";
@@ -4521,6 +4662,116 @@ async function savePacsSettings() {
     state.settingsSavingCategory = "";
     render();
   }
+}
+
+async function saveDicomDevice() {
+  const form = state.dicomDeviceForm;
+
+  if (!form.modalityId || !form.deviceName.trim() || !form.modalityAeTitle.trim() || !form.scheduledStationAeTitle.trim()) {
+    state.dicomDevicesError =
+      state.language === "ar"
+        ? "أدخل الجهاز وAE Title وScheduled Station AE Title."
+        : "Enter the modality, device name, AE Title, and Scheduled Station AE Title.";
+    render();
+    return;
+  }
+
+  state.dicomDeviceSaving = true;
+  state.dicomDevicesError = "";
+  state.dicomDevicesSuccess = "";
+  render();
+
+  try {
+    const payload = {
+      modalityId: form.modalityId,
+      deviceName: form.deviceName,
+      modalityAeTitle: form.modalityAeTitle,
+      scheduledStationAeTitle: form.scheduledStationAeTitle,
+      stationName: form.stationName,
+      stationLocation: form.stationLocation,
+      sourceIp: form.sourceIp,
+      mwlEnabled: form.mwlEnabled,
+      mppsEnabled: form.mppsEnabled,
+      isActive: form.isActive
+    };
+
+    if (form.deviceId) {
+      await api(`/api/settings/dicom-devices/${encodeURIComponent(form.deviceId)}`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      });
+    } else {
+      await api("/api/settings/dicom-devices", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+    }
+
+    state.dicomDevicesSuccess = t().settings.dicomDeviceSaved;
+    state.dicomDeviceForm = {
+      ...defaultDicomDeviceForm(),
+      modalityId: form.modalityId
+    };
+    await loadDicomDevices();
+    await loadSettings();
+  } catch (error) {
+    state.dicomDevicesError = error.message;
+  } finally {
+    state.dicomDeviceSaving = false;
+    render();
+  }
+}
+
+async function deleteDicomDevice(deviceId) {
+  if (!deviceId) {
+    return;
+  }
+
+  state.dicomDeviceSaving = true;
+  state.dicomDevicesError = "";
+  state.dicomDevicesSuccess = "";
+  render();
+
+  try {
+    await api(`/api/settings/dicom-devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" });
+    state.dicomDevicesSuccess = t().settings.dicomDeviceDeleted;
+    if (String(state.dicomDeviceForm.deviceId || "") === String(deviceId)) {
+      state.dicomDeviceForm = defaultDicomDeviceForm();
+    }
+    await loadDicomDevices();
+    await loadSettings();
+  } catch (error) {
+    state.dicomDevicesError = error.message;
+  } finally {
+    state.dicomDeviceSaving = false;
+    render();
+  }
+}
+
+function startEditingDicomDevice(deviceId) {
+  const device = state.dicomDevices.find((entry) => String(entry.id) === String(deviceId));
+
+  if (!device) {
+    return;
+  }
+
+  state.dicomDeviceForm = {
+    deviceId: String(device.id),
+    modalityId: String(device.modality_id || ""),
+    deviceName: device.device_name || "",
+    modalityAeTitle: device.modality_ae_title || "",
+    scheduledStationAeTitle: device.scheduled_station_ae_title || "",
+    stationName: device.station_name || "",
+    stationLocation: device.station_location || "",
+    sourceIp: device.source_ip || "",
+    mwlEnabled: device.mwl_enabled ? "enabled" : "disabled",
+    mppsEnabled: device.mpps_enabled ? "enabled" : "disabled",
+    isActive: device.is_active ? "enabled" : "disabled"
+  };
+
+  state.dicomDevicesError = "";
+  state.dicomDevicesSuccess = "";
+  render();
 }
 
 function getSettingsEntryValue(category, key, fallback = "") {
@@ -6455,6 +6706,7 @@ function renderIntegrationStatusPanel() {
 
   const printer = state.integrationStatus.printer;
   const scanner = state.integrationStatus.scanner;
+  const dicomGateway = state.integrationStatus.dicomGateway || null;
 
   return `
     <div class="dual-grid">
@@ -6505,6 +6757,32 @@ function renderIntegrationStatusPanel() {
           </div>
         </div>
       </article>
+
+      ${
+        dicomGateway
+          ? `
+            <article class="surface surface-compact">
+              <div class="section-head">
+                <h3 class="section-title">${escapeHtml(state.language === "ar" ? "بوابة DICOM" : "DICOM gateway")}</h3>
+                <span class="chip ${dicomGateway.enabled ? "success" : "subtle"}">${escapeHtml(
+                  dicomGateway.enabled ? t().common.active : t().common.inactive
+                )}</span>
+              </div>
+              <div class="stack">
+                <div class="info-grid">
+                  ${infoTile("MWL", `${dicomGateway.mwlAeTitle || "RISPRO_MWL"} • ${dicomGateway.mwlPort || "11112"}`, "tone-good")}
+                  ${infoTile("MPPS", `${dicomGateway.mppsAeTitle || "RISPRO_MPPS"} • ${dicomGateway.mppsPort || "11113"}`, "tone-warm")}
+                </div>
+                <div class="small">${escapeHtml(
+                  state.language === "ar"
+                    ? `الأجهزة المرتبطة: ${dicomGateway.deviceCount || 0} • الرسائل المعالجة: ${dicomGateway.processedMessageCount || 0}`
+                    : `Mapped devices: ${dicomGateway.deviceCount || 0} • Processed messages: ${dicomGateway.processedMessageCount || 0}`
+                )}</div>
+              </div>
+            </article>
+          `
+          : ""
+      }
     </div>
   `;
 }
@@ -6576,7 +6854,7 @@ function renderModalityWorklist() {
                 )}</div>
               </div>
               ${
-                ["waiting", "arrived"].includes(appointment.status)
+                ["waiting", "arrived", "in-progress"].includes(appointment.status)
                   ? `<button class="button-secondary" type="button" data-action="complete-appointment" data-appointment-id="${escapeHtml(String(appointment.id))}">${escapeHtml(t().modality.complete)}</button>`
                   : appointment.status === "completed"
                     ? `<span class="chip success">${escapeHtml(appointment.status)}</span>`
@@ -7532,7 +7810,9 @@ function renderSettingsCatalog() {
     return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
   }
 
-  const categories = Object.keys(state.settingsCatalog).filter((category) => category !== "pacs_connection");
+  const categories = Object.keys(state.settingsCatalog).filter(
+    (category) => !["pacs_connection", "dicom_gateway"].includes(category)
+  );
 
   if (!categories.length) {
     return `<div class="empty">${escapeHtml(t().common.noData)}</div>`;
@@ -8093,6 +8373,12 @@ function renderSettingsMenu() {
       count: state.pacsSettingsForm.enabled === "enabled" ? t().common.active : t().common.inactive
     },
     {
+      id: "dicom",
+      title: t().settings.sectionDicom,
+      body: t().settings.dicomBody,
+      count: String(state.dicomDevices.length)
+    },
+    {
       id: "categories",
       title: t().settings.sectionCategories,
       body: t().settings.body,
@@ -8327,6 +8613,175 @@ function renderSettingsPacsSection() {
   `;
 }
 
+function renderSettingsDicomSection() {
+  const gatewayEntries = state.settingsCatalog.dicom_gateway || [];
+  const modalities = state.appointmentLookups.modalities || [];
+  const form = state.dicomDeviceForm;
+
+  return `
+    <section class="stack">
+      <article class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.dicomTitle)}</h2>
+          <span class="chip accent">${escapeHtml(String(gatewayEntries.length || 0))}</span>
+        </div>
+        <div class="settings-summary">${escapeHtml(t().settings.dicomGatewayHint)}</div>
+        <form class="stack" data-settings-form="dicom_gateway">
+          <div class="settings-rows">
+            ${gatewayEntries
+              .map(
+                (entry) => `
+                  <label class="field">
+                    <span class="label">${escapeHtml(getSettingsFieldLabel("dicom_gateway", entry.setting_key))}</span>
+                    <input
+                      class="input field-en"
+                      data-setting-field="true"
+                      data-setting-category="dicom_gateway"
+                      data-setting-key="${escapeHtml(entry.setting_key)}"
+                      value="${escapeHtml(getSettingsFieldValue(entry))}"
+                      autocomplete="off"
+                    />
+                  </label>
+                `
+              )
+              .join("")}
+          </div>
+          <div class="form-actions">
+            <button class="button-primary" type="submit">
+              ${escapeHtml(state.settingsSavingCategory === "dicom_gateway" ? t().common.loading : t().settings.dicomGatewaySave)}
+            </button>
+          </div>
+        </form>
+      </article>
+
+      <article class="surface">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().settings.dicomDevicesTitle)}</h2>
+          <span class="chip subtle">${escapeHtml(String(state.dicomDevices.length))}</span>
+        </div>
+        ${alertMarkup("error", state.dicomDevicesError)}
+        ${alertMarkup("success", state.dicomDevicesSuccess)}
+        <div class="split-grid">
+          <div class="surface surface-compact">
+            ${renderDicomDevicesList()}
+          </div>
+          <div class="surface surface-compact">
+            <form id="dicom-device-form" class="stack">
+              <div class="section-head">
+                <h3 class="section-title">${escapeHtml(form.deviceId ? t().settings.dicomDeviceEdit : t().settings.dicomDeviceAdd)}</h3>
+                <span class="chip accent">${escapeHtml(form.deviceId ? `#${form.deviceId}` : t().common.required)}</span>
+              </div>
+              <div class="form-grid">
+                <label class="field">
+                  <span class="label">${escapeHtml(t().appointments.fields.modality)}</span>
+                  <select class="select" name="modalityId" data-dicom-device-field="true">
+                    ${modalities
+                      .map(
+                        (entry) => `
+                          <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(form.modalityId) ? "selected" : ""}>
+                            ${escapeHtml(formatModalityName(entry))}
+                          </option>
+                        `
+                      )
+                      .join("")}
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "اسم الجهاز" : "Device name")}</span>
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="deviceName" data-dicom-device-field="true" value="${escapeHtml(form.deviceName)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "Modality AE Title" : "Modality AE Title")}</span>
+                  <input class="input field-en" name="modalityAeTitle" data-dicom-device-field="true" value="${escapeHtml(form.modalityAeTitle)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "Scheduled Station AE Title" : "Scheduled Station AE Title")}</span>
+                  <input class="input field-en" name="scheduledStationAeTitle" data-dicom-device-field="true" value="${escapeHtml(form.scheduledStationAeTitle)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "Station name" : "Station name")}</span>
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="stationName" data-dicom-device-field="true" value="${escapeHtml(form.stationName)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "Station location" : "Station location")}</span>
+                  <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="stationLocation" data-dicom-device-field="true" value="${escapeHtml(form.stationLocation)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "Source IP" : "Source IP")}</span>
+                  <input class="input field-en" name="sourceIp" data-dicom-device-field="true" value="${escapeHtml(form.sourceIp)}" />
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml("MWL")}</span>
+                  <select class="select" name="mwlEnabled" data-dicom-device-field="true">
+                    <option value="enabled" ${form.mwlEnabled === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+                    <option value="disabled" ${form.mwlEnabled === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml("MPPS")}</span>
+                  <select class="select" name="mppsEnabled" data-dicom-device-field="true">
+                    <option value="enabled" ${form.mppsEnabled === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+                    <option value="disabled" ${form.mppsEnabled === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span class="label">${escapeHtml(state.language === "ar" ? "الحالة" : "Status")}</span>
+                  <select class="select" name="isActive" data-dicom-device-field="true">
+                    <option value="enabled" ${form.isActive === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+                    <option value="disabled" ${form.isActive === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+                  </select>
+                </label>
+              </div>
+              <div class="form-actions">
+                <button class="button-secondary" type="button" data-action="reset-dicom-device-form">${escapeHtml(t().settings.dicomDeviceReset)}</button>
+                <button class="button-primary" type="submit">${escapeHtml(state.dicomDeviceSaving ? t().common.loading : t().settings.dicomDeviceSave)}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderDicomDevicesList() {
+  if (state.dicomDevicesLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  if (!state.dicomDevices.length) {
+    return `<div class="empty">${escapeHtml(t().settings.dicomDevicesEmpty)}</div>`;
+  }
+
+  return `
+    <div class="list">
+      ${state.dicomDevices
+        .map(
+          (device) => `
+            <div class="item">
+              <div class="item-copy">
+                <div class="item-title">${escapeHtml(device.device_name || `#${device.id}`)}</div>
+                <div class="item-subtitle">
+                  ${escapeHtml(`${formatModalityName(device)} • ${device.modality_ae_title} • ${device.scheduled_station_ae_title}`)}
+                </div>
+                <div class="small">${escapeHtml(device.source_ip || "—")}</div>
+              </div>
+              <div class="form-actions">
+                <button class="button-ghost" type="button" data-action="edit-dicom-device" data-device-id="${escapeHtml(String(device.id))}">
+                  ${escapeHtml(t().settings.dicomDeviceEdit)}
+                </button>
+                <button class="button-secondary" type="button" data-action="delete-dicom-device" data-device-id="${escapeHtml(String(device.id))}">
+                  ${escapeHtml(t().settings.dicomDeviceDelete)}
+                </button>
+              </div>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderSettingsSectionContent() {
   switch (state.settingsSection) {
     case "users":
@@ -8372,6 +8827,8 @@ function renderSettingsSectionContent() {
       return renderSettingsCapacitySection();
     case "pacs":
       return renderSettingsPacsSection();
+    case "dicom":
+      return renderSettingsDicomSection();
     case "categories":
       return `
         <section class="surface">
@@ -8854,6 +9311,13 @@ function handleInput(event) {
     return;
   }
 
+  if (target.hasAttribute("data-dicom-device-field")) {
+    state.dicomDeviceForm[target.name] = target.value;
+    state.dicomDevicesError = "";
+    state.dicomDevicesSuccess = "";
+    return;
+  }
+
   if (target.hasAttribute("data-setting-field")) {
     const category = target.dataset.settingCategory;
     const key = target.dataset.settingKey;
@@ -9204,7 +9668,15 @@ function handleClick(event) {
 
   if (target.dataset.action === "refresh-settings") {
     event.preventDefault();
-    void Promise.all([loadUsers(), loadSettings(), loadAuditEntries(), loadNameDictionary(), loadExamTypeSettings()]);
+    void Promise.all([
+      loadUsers(),
+      loadSettings(),
+      loadAuditEntries(),
+      loadNameDictionary(),
+      loadExamTypeSettings(),
+      loadDicomDevices(),
+      loadAppointmentLookups()
+    ]);
     return;
   }
 
@@ -9225,6 +9697,27 @@ function handleClick(event) {
   if (target.dataset.action === "pacs-test-connection") {
     event.preventDefault();
     void testPacsConnection();
+    return;
+  }
+
+  if (target.dataset.action === "edit-dicom-device") {
+    event.preventDefault();
+    startEditingDicomDevice(target.dataset.deviceId);
+    return;
+  }
+
+  if (target.dataset.action === "delete-dicom-device") {
+    event.preventDefault();
+    void deleteDicomDevice(target.dataset.deviceId);
+    return;
+  }
+
+  if (target.dataset.action === "reset-dicom-device-form") {
+    event.preventDefault();
+    state.dicomDeviceForm = defaultDicomDeviceForm();
+    state.dicomDevicesError = "";
+    state.dicomDevicesSuccess = "";
+    render();
     return;
   }
 
@@ -9702,6 +10195,12 @@ function handleSubmit(event) {
   if (event.target.id === "pacs-settings-form") {
     event.preventDefault();
     void savePacsSettings();
+    return;
+  }
+
+  if (event.target.id === "dicom-device-form") {
+    event.preventDefault();
+    void saveDicomDevice();
     return;
   }
 

@@ -17,6 +17,7 @@ RISpro Reception is now a real Node.js + PostgreSQL web app for the currently im
 - supervisor user management
 - supervisor audit log viewer with filters and CSV export inside settings
 - printer and scanner groundwork with browser-print profiles and scan preparation
+- DICOM gateway groundwork for Modality Worklist and MPPS sidecar integration
 
 The old prototype-only browser login and fake local data have been removed from the main production flow.
 
@@ -39,6 +40,7 @@ Not enabled yet:
 
 - direct printer bridge execution
 - local scanner bridge execution
+- full DCMTK gateway runtime until the sidecar is deployed
 
 ## Local run
 
@@ -123,3 +125,31 @@ This repository includes:
 - `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml` for GitHub-based deployment automation
 
 Setup details are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
+
+## DICOM gateway sidecar
+
+This repository now includes first-phase support for:
+
+- MWL source file generation inside `storage/dicom/worklist-source`
+- MPPS callback handling at `POST /api/integrations/dicom/mpps-event`
+- DICOM device mapping in supervisor settings
+- DCMTK sidecar runtime files in `/Users/seraj/Nextcloud/RISpro/scripts/dicom-gateway`
+
+The included sidecar stack uses:
+
+- `wlmscpfs` for Modality Worklist
+- `ppsscpfs` for MPPS
+- a small Node worker to convert `.dump` worklist source files into `.wl` files
+- a small Node worker to parse incoming MPPS files and post them back to RISpro
+
+Local sidecar compose file:
+
+```bash
+docker compose -f docker-compose.dicom-gateway.yml up --build
+```
+
+Important:
+
+- keep the DICOM callback secret aligned between RISpro settings and the sidecar environment
+- run `npm run migrate` before starting the updated app
+- map each real modality device in Settings -> DICOM gateway before testing MWL or MPPS
