@@ -1,10 +1,32 @@
 import express from "express";
+import { HttpError } from "../utils/http-error.js";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
 import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
+import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from "../services/dicom-service.js";
 
 export const integrationsRouter = express.Router();
+
+function isLoopbackAddress(value) {
+  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(value || "").trim());
+}
+
+integrationsRouter.post(
+  "/dicom/mpps-event",
+  asyncRoute(async (req, res) => {
+    const settings = await getDicomGatewaySettings();
+    const headerSecret = String(req.headers["x-rispro-dicom-secret"] || "").trim();
+    const remoteAddress = req.ip || req.socket?.remoteAddress || "";
+
+    if (headerSecret !== settings.callbackSecret && !isLoopbackAddress(remoteAddress)) {
+      throw new HttpError(403, "DICOM callback authentication failed.");
+    }
+
+    const result = await ingestMppsEvent(buildMppsEventPayload(req.body || {}));
+    res.status(result.ok ? 200 : 202).json(result);
+  })
+);
 
 integrationsRouter.use(requireAuth);
 

@@ -2,6 +2,7 @@ import http from "http";
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
 import { pingDatabase, pool } from "./db/pool.js";
+import { ensureDicomGatewayLayout, rebuildAllDicomWorklistSources } from "./services/dicom-service.js";
 
 const app = createApp();
 const server = http.createServer(app);
@@ -46,6 +47,12 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function start() {
   await pingDatabase();
+  try {
+    await ensureDicomGatewayLayout();
+    await rebuildAllDicomWorklistSources();
+  } catch (error) {
+    console.error("DICOM gateway initialization failed. Continuing without blocking startup.", error);
+  }
 
   server.listen(env.port, () => {
     console.log(`RISpro backend listening on http://localhost:${env.port}`);

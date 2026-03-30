@@ -3,6 +3,7 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { createAppointment } from "./appointment-service.js";
 import { logAuditEntry } from "./audit-service.js";
+import { resolveScanValueToAccession, scheduleWorklistSync } from "./dicom-service.js";
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 
@@ -102,7 +103,7 @@ async function getQueueSummary(queueDate) {
       select
         count(*) as total_appointments,
         count(*) filter (where status = 'scheduled') as scheduled_count,
-        count(*) filter (where status in ('waiting', 'arrived')) as waiting_count,
+        count(*) filter (where status in ('waiting', 'arrived', 'in-progress')) as waiting_count,
         count(*) filter (where status = 'no-show') as no_show_count,
         count(*) filter (where arrived_at is not null) as arrived_count
       from appointments
@@ -269,11 +270,7 @@ export async function getQueueSnapshot() {
 }
 
 export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
-  const cleanAccession = String(accessionNumber || "").trim();
-
-  if (!cleanAccession) {
-    throw new HttpError(400, "accessionNumber is required.");
-  }
+  const cleanAccession = await resolveScanValueToAccession(accessionNumber?.scanValue, accessionNumber?.accessionNumber || accessionNumber);
 
   const queueDate = getTripoliToday();
   const client = await pool.connect();
@@ -309,6 +306,7 @@ export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
     );
 
     await client.query("commit");
+    scheduleWorklistSync(appointment.id);
 
     return {
       queueEntry,
@@ -446,6 +444,7 @@ export async function confirmNoShow(appointmentId, reason, currentUser) {
     );
 
     await client.query("commit");
+    scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

@@ -23,6 +23,8 @@ const backupTables = [
   "patient_custom_values",
   "name_dictionary",
   "documents",
+  "dicom_devices",
+  "dicom_message_log",
   "system_settings",
   "backup_runs",
   "audit_log"
@@ -173,6 +175,8 @@ export async function restoreBackupSnapshot(payload, currentUserId) {
           patient_custom_values,
           patient_custom_fields,
           documents,
+          dicom_message_log,
+          dicom_devices,
           patients,
           exam_types,
           modalities,

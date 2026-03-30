@@ -23,7 +23,7 @@ queueRouter.get(
 queueRouter.post(
   "/scan",
   asyncRoute(async (req, res) => {
-    const result = await scanAppointmentIntoQueue(req.body?.accessionNumber, req.user);
+    const result = await scanAppointmentIntoQueue(req.body || {}, req.user);
     res.json(result);
   })
 );

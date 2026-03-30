@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
+import { scheduleWorklistSync } from "./dicom-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -431,7 +432,7 @@ export async function listAppointmentStatistics(filters = {}) {
           count(distinct patient_id) as unique_patients,
           count(distinct modality_id) as unique_modalities,
           count(*) filter (where status = 'scheduled') as scheduled_count,
-          count(*) filter (where status in ('arrived', 'waiting')) as in_queue_count,
+          count(*) filter (where status in ('arrived', 'waiting', 'in-progress')) as in_queue_count,
           count(*) filter (where status = 'completed') as completed_count,
           count(*) filter (where status = 'no-show') as no_show_count,
           count(*) filter (where status = 'cancelled') as cancelled_count,
@@ -450,7 +451,7 @@ export async function listAppointmentStatistics(filters = {}) {
           modalities.name_en as modality_name_en,
           count(*) as total_count,
           count(*) filter (where appointments.status = 'scheduled') as scheduled_count,
-          count(*) filter (where appointments.status in ('arrived', 'waiting')) as in_queue_count,
+          count(*) filter (where appointments.status in ('arrived', 'waiting', 'in-progress')) as in_queue_count,
           count(*) filter (where appointments.status = 'completed') as completed_count,
           count(*) filter (where appointments.status = 'no-show') as no_show_count,
           count(*) filter (where appointments.status = 'cancelled') as cancelled_count
@@ -977,6 +978,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
     );
 
     await client.query("commit");
+    scheduleWorklistSync(rows[0].id);
 
     return {
       appointment: rows[0],
@@ -1102,6 +1104,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     );
 
     await client.query("commit");
+    scheduleWorklistSync(cleanAppointmentId);
     return rows[0];
   } catch (error) {
     await client.query("rollback");
@@ -1160,6 +1163,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
     );
 
     await client.query("commit");
+    scheduleWorklistSync(cleanAppointmentId);
     return rows[0];
   } catch (error) {
     await client.query("rollback");
@@ -1183,7 +1187,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
     await client.query("begin");
     const appointment = await getAppointmentById(client, cleanAppointmentId);
 
-    if (["cancelled", "completed", "no-show"].includes(appointment.status)) {
+    if (["cancelled", "completed", "discontinued", "no-show", "in-progress"].includes(appointment.status)) {
       throw new HttpError(409, "This appointment can no longer be cancelled.");
     }
 
@@ -1230,6 +1234,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
     );
 
     await client.query("commit");
+    scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
+import { scheduleWorklistSync } from "./dicom-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -123,8 +124,8 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
       throw new HttpError(409, "This appointment is already completed.");
     }
 
-    if (!["waiting", "arrived"].includes(appointment.status)) {
-      throw new HttpError(409, "Only arrived or waiting appointments can be completed.");
+    if (!["waiting", "arrived", "in-progress"].includes(appointment.status)) {
+      throw new HttpError(409, "Only arrived, waiting, or in-progress appointments can be completed.");
     }
 
     await client.query(
@@ -132,6 +133,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         update appointments
         set
           status = 'completed',
+          scan_finished_at = coalesce(scan_finished_at, now()),
           completed_at = now(),
           updated_by_user_id = $2,
           updated_at = now()
@@ -170,6 +172,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
     );
 
     await client.query("commit");
+    scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");
