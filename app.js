@@ -9928,17 +9928,6 @@ function renderAppFrame(content) {
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
           </div>
-          <div class="appbar-shortcuts">
-            <button class="button-ghost appbar-shortcut" type="button" data-route="registrations">${escapeHtml(
-              t().nav.registrations
-            )}</button>
-            <button class="button-ghost appbar-shortcut" type="button" data-route="dashboard">${escapeHtml(
-              t().nav.dashboard
-            )}</button>
-            <button class="button-ghost appbar-shortcut" type="button" data-route="appointments">${escapeHtml(
-              t().nav.appointments
-            )}</button>
-          </div>
         </header>
         <nav class="top-nav-row">
           ${allowedRoutes
