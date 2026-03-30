@@ -113,7 +113,8 @@ button {
   position: absolute;
   top: calc(100% + 10px);
   inset-inline-end: 0;
-  width: min(320px, 80vw);
+  min-width: 280px;
+  width: min(520px, 92vw);
   padding: 12px;
   border-radius: 16px;
   border: 1px solid var(--line);
@@ -122,6 +123,7 @@ button {
   z-index: 10;
   display: grid;
   gap: 8px;
+  writing-mode: horizontal-tb;
 }
 
 .nav-menu-list .nav-link {
@@ -131,13 +133,15 @@ button {
   min-width: 0;
   padding: 10px 12px;
   gap: 8px;
+  white-space: nowrap;
 }
 
 .nav-menu-list .nav-link span:first-child {
   flex: 1;
   text-align: start;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .nav-menu-list .nav-link span:last-child {

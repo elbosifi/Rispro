@@ -350,6 +350,7 @@ const copy = {
         arabicFullName: "Arabic full name",
         englishFullName: "English full name",
         ageYears: "Age",
+        dateOfBirth: "Date of birth",
         sex: "Sex",
         nationalId: "National ID",
         nationalIdConfirmation: "Confirm National ID",
@@ -378,7 +379,7 @@ const copy = {
       title: "Appointment creation",
       body: "Search for a patient, then choose the modality, exam, and day with availability.",
       patientSearch: "Find patient",
-      patientPlaceholder: "Search by name, phone, MRN, or national ID",
+      patientPlaceholder: "Search by name, phone, or patient ID (national ID)",
       patientSelect: "Use this patient",
       selectedPatient: "Selected patient",
       pacsSearch: "Search PACS",
@@ -845,6 +846,7 @@ const copy = {
         arabicFullName: "الاسم الكامل بالعربية",
         englishFullName: "الاسم الكامل بالإنجليزية",
         ageYears: "العمر",
+        dateOfBirth: "تاريخ الميلاد",
         sex: "الجنس",
         nationalId: "الرقم الوطني",
         nationalIdConfirmation: "تأكيد الرقم الوطني",
@@ -873,7 +875,7 @@ const copy = {
       title: "إنشاء موعد",
       body: "ابحث عن المريض ثم اختر الجهاز ونوع الفحص واليوم حسب التوفر.",
       patientSearch: "البحث عن مريض",
-      patientPlaceholder: "ابحث بالاسم أو الهاتف أو رقم الملف أو الرقم الوطني",
+      patientPlaceholder: "ابحث بالاسم أو الهاتف أو رقم المريض (الرقم الوطني)",
       patientSelect: "اختيار هذا المريض",
       selectedPatient: "المريض المختار",
       pacsSearch: "بحث PACS",
@@ -1487,6 +1489,7 @@ function defaultPatientForm() {
     arabicFullName: "",
     englishFullName: "",
     ageYears: "",
+    estimatedDateOfBirth: "",
     sex: "male",
     nationalId: "",
     nationalIdConfirmation: "",
@@ -1988,6 +1991,23 @@ function getDisabledAppointmentDayMessage(isoDate) {
   }
 
   return "";
+}
+
+function deriveDobFromNationalId(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+
+  if (digits.length < 6) {
+    return "";
+  }
+
+  const extracted = digits.slice(1, 6);
+  const year = extracted.length === 5 ? extracted.slice(1) : extracted;
+
+  if (!/^\d{4}$/.test(year)) {
+    return "";
+  }
+
+  return `${year}-01-01`;
 }
 
 function getCurrentDateInputValue() {
@@ -3837,6 +3857,7 @@ async function savePatient() {
       arabicFullName: state.patientForm.arabicFullName,
       englishFullName: state.patientForm.englishFullName,
       ageYears: state.patientForm.ageYears,
+      estimatedDateOfBirth: state.patientForm.estimatedDateOfBirth,
       sex: state.patientForm.sex,
       nationalId: state.patientForm.nationalId,
       nationalIdConfirmation: state.patientForm.nationalIdConfirmation,
@@ -3913,8 +3934,8 @@ async function searchAppointmentPatients() {
     state.appointmentPatientResults = [];
     state.appointmentError =
       state.language === "ar"
-        ? "أدخل اسماً أو هاتفاً أو رقماً وطنياً للبحث عن المريض."
-        : "Enter a name, phone number, or national ID to search for a patient.";
+        ? "أدخل اسماً أو هاتفاً أو رقم المريض (الرقم الوطني) للبحث عن المريض."
+        : "Enter a name, phone number, or patient ID (national ID) to search for a patient.";
     render();
     return;
   }
@@ -4705,6 +4726,7 @@ function fillPatientEditForm(patient) {
     arabicFullName: patient.arabic_full_name || "",
     englishFullName: patient.english_full_name || "",
     ageYears: String(patient.age_years || ""),
+    estimatedDateOfBirth: String(patient.estimated_date_of_birth || "").slice(0, 10),
     sex: patient.sex || "male",
     nationalId: patient.national_id || "",
     nationalIdConfirmation: patient.national_id || "",
@@ -5950,6 +5972,16 @@ function renderPatients() {
               <label class="field">
                 <span class="label">${escapeHtml(t().patients.fields.ageYears)}</span>
                 <input class="input field-en" name="ageYears" value="${escapeHtml(state.patientForm.ageYears)}" inputmode="numeric" />
+              </label>
+
+              <label class="field">
+                <span class="label">${escapeHtml(t().patients.fields.dateOfBirth)}</span>
+                <input
+                  class="input field-en"
+                  type="date"
+                  name="estimatedDateOfBirth"
+                  value="${escapeHtml(state.patientForm.estimatedDateOfBirth)}"
+                />
               </label>
 
               <label class="field full">
@@ -8258,6 +8290,15 @@ function renderSearch() {
                         <span class="label">${escapeHtml(t().patients.fields.ageYears)}</span>
                         <input class="input field-en" name="ageYears" value="${escapeHtml(state.patientEditForm.ageYears)}" inputmode="numeric" />
                       </label>
+                      <label class="field">
+                        <span class="label">${escapeHtml(t().patients.fields.dateOfBirth)}</span>
+                        <input
+                          class="input field-en"
+                          type="date"
+                          name="estimatedDateOfBirth"
+                          value="${escapeHtml(state.patientEditForm.estimatedDateOfBirth)}"
+                        />
+                      </label>
                       <label class="field full">
                         <span class="label">${escapeHtml(t().patients.fields.englishFullName)}</span>
                         <input class="input field-en" name="englishFullName" value="${escapeHtml(state.patientEditForm.englishFullName)}" />
@@ -9964,6 +10005,17 @@ function handleInput(event) {
     }
 
     state.patientForm[target.name] = target.value;
+
+    if (target.name === "nationalId") {
+      const derivedDob = deriveDobFromNationalId(target.value);
+      if (derivedDob) {
+        state.patientForm.estimatedDateOfBirth = derivedDob;
+        const dobInput = document.querySelector('#patient-form [name="estimatedDateOfBirth"]');
+        if (dobInput) {
+          dobInput.value = derivedDob;
+        }
+      }
+    }
 
     if (target.name === "arabicFullName" && !state.manualEnglishName) {
       state.patientForm.englishFullName = transliterateName(target.value);
