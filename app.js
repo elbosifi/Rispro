@@ -441,6 +441,8 @@ const copy = {
       noAppointments: "No appointments for this day.",
       noAppointmentsShort: "No appointments",
       dayAppointmentsLabel: "appointments",
+      dayCasesLabel: "cases",
+      dayMoreLabel: "more",
       printButton: "Print day list",
       today: "Today",
       printTitlePrefix: "Daily appointments",
@@ -703,6 +705,7 @@ const copy = {
       optional: "Optional",
       required: "Required",
       close: "Close",
+      menu: "Menu",
       open: "Open",
       refresh: "Refresh",
       arabic: "Arabic",
@@ -904,6 +907,8 @@ const copy = {
       noAppointments: "لا توجد مواعيد في هذا اليوم.",
       noAppointmentsShort: "لا توجد مواعيد",
       dayAppointmentsLabel: "مواعيد",
+      dayCasesLabel: "حالات",
+      dayMoreLabel: "أخرى",
       printButton: "طباعة قائمة اليوم",
       today: "اليوم",
       printTitlePrefix: "مواعيد يومية",
@@ -1164,6 +1169,7 @@ const copy = {
       optional: "اختياري",
       required: "إلزامي",
       close: "إغلاق",
+      menu: "القائمة",
       open: "فتح",
       refresh: "تحديث",
       arabic: "العربية",
@@ -6074,6 +6080,28 @@ function renderCalendarDayList(appointments) {
   `;
 }
 
+function summarizeCalendarDay(appointments) {
+  const counts = new Map();
+
+  for (const appointment of appointments) {
+    const label = formatModalityName(appointment) || t().common.noData;
+    counts.set(label, (counts.get(label) || 0) + 1);
+  }
+
+  return Array.from(counts.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+function scrollCalendarDayListIntoView() {
+  requestAnimationFrame(() => {
+    const target = document.getElementById("calendar-day-list");
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+}
+
 function renderCalendar() {
   const monthLabel = formatCalendarMonthLabel(state.calendarDisplayDate);
   const weekdayLabels = getCalendarWeekdayLabels();
@@ -6086,12 +6114,14 @@ function renderCalendar() {
   for (let index = 0; index < 42; index += 1) {
     const date = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), monthStart.getUTCDate() + index));
     const iso = formatIsoDate(date);
+    const dayAppointments = groupedAppointments[iso] || [];
     gridDays.push({
       iso,
       dayNumber: date.getUTCDate(),
       isCurrentMonth: date.getUTCMonth() === state.calendarDisplayDate.getUTCMonth(),
-      count: groupedAppointments[iso]?.length || 0,
-      isSelected: iso === selectedDate
+      count: dayAppointments.length,
+      isSelected: iso === selectedDate,
+      summary: summarizeCalendarDay(dayAppointments)
     });
   }
 
@@ -6127,6 +6157,33 @@ function renderCalendar() {
                 <div class="calendar-day-note">${escapeHtml(
                   day.count ? t().calendar.dayAppointmentsLabel : t().calendar.noAppointmentsShort
                 )}</div>
+                ${day.count ? `<div class="calendar-day-meta">${escapeHtml(t().calendar.dayCasesLabel)}</div>` : ""}
+                ${
+                  day.count
+                    ? `
+                      <div class="calendar-day-summary">
+                        ${day.summary
+                          .slice(0, 3)
+                          .map(
+                            (item) => `
+                              <div class="calendar-day-item">
+                                <span>${escapeHtml(item.label)}</span>
+                                <span>${escapeHtml(String(item.count))}</span>
+                              </div>
+                            `
+                          )
+                          .join("")}
+                        ${
+                          day.summary.length > 3
+                            ? `<div class="calendar-day-more">+${escapeHtml(String(day.summary.length - 3))} ${escapeHtml(
+                                t().calendar.dayMoreLabel
+                              )}</div>`
+                            : ""
+                        }
+                      </div>
+                    `
+                    : ""
+                }
               </button>
             `
           )
@@ -8980,7 +9037,7 @@ function renderAppFrame(content) {
   return `
     <div class="shell">
       <div class="layout">
-        <aside class="sidebar">
+        <header class="appbar">
           <div class="brand">
             <img class="brand-logo" src="/assets/nccb-logo.png" alt="National Cancer Center Benghazi logo" />
             <div class="brand-text">
@@ -8990,25 +9047,22 @@ function renderAppFrame(content) {
             </div>
           </div>
 
-          <nav class="nav">
-            ${allowedRoutes
-              .map(
-                (route, index) => `
-                  <a href="#" class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
-                    <span>${escapeHtml(t().nav[route])}</span>
-                    <span>${String(index + 1).padStart(2, "0")}</span>
-                  </a>
-                `
-              )
-              .join("")}
-          </nav>
-
-          <div class="sidebar-note">
-            <div class="sidebar-note-title">${escapeHtml(t().common.environment)}</div>
-            <div>${escapeHtml(localizedDate())}</div>
-            <div class="sidebar-note-copy">${escapeHtml(t().note)}</div>
-          </div>
-        </aside>
+          <details class="nav-menu">
+            <summary class="nav-menu-toggle">${escapeHtml(t().common.menu)}</summary>
+            <nav class="nav nav-menu-list">
+              ${allowedRoutes
+                .map(
+                  (route, index) => `
+                    <a href="#" class="nav-link ${state.route === route ? "active" : ""}" data-route="${route}">
+                      <span>${escapeHtml(t().nav[route])}</span>
+                      <span>${String(index + 1).padStart(2, "0")}</span>
+                    </a>
+                  `
+                )
+                .join("")}
+            </nav>
+          </details>
+        </header>
 
         <div class="content">
           <header class="topbar">
