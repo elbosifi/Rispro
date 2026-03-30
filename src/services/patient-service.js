@@ -168,11 +168,11 @@ function validatePatientPayload(payload, rules) {
   const hasAgeValue = String(ageYears ?? "").trim() !== "";
   const parsedAge = hasAgeValue ? Number(ageYears) : null;
 
-  if (hasAgeValue && (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
+  if (!hasDob && hasAgeValue && (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
     throw new HttpError(400, "ageYears must be a whole number between 0 and 130.");
   }
 
-  if (rules.dobRule === "age_required" && !hasAgeValue) {
+  if (rules.dobRule === "age_required" && !hasDob && !hasAgeValue) {
     throw new HttpError(400, "ageYears is required.");
   }
 
@@ -184,14 +184,14 @@ function validatePatientPayload(payload, rules) {
     throw new HttpError(400, "ageYears or estimatedDateOfBirth is required.");
   }
 
-  let resolvedAge = parsedAge;
+  let resolvedAge = null;
   let estimatedDob = "";
 
   if (hasDob) {
     estimatedDob = dobValue;
-    if (!hasAgeValue) {
-      resolvedAge = calculateAgeYearsFromDob(dobValue);
-    }
+    resolvedAge = calculateAgeYearsFromDob(dobValue);
+  } else if (hasAgeValue) {
+    resolvedAge = parsedAge;
   }
 
   if (resolvedAge === null || resolvedAge === undefined) {
