@@ -2110,6 +2110,38 @@ function formatModalityName(entry) {
   );
 }
 
+function normalizeModalityKey(entry) {
+  const code = String(entry?.code || entry?.modality_code || "").trim().toLowerCase();
+  const name = formatModalityName(entry).trim().toLowerCase().replace(/\s+/g, " ");
+  return `${code}|${name}`;
+}
+
+function normalizeModalities(modalities, { activeOnly = false } = {}) {
+  const list = Array.isArray(modalities) ? modalities : [];
+  const seen = new Set();
+  const result = [];
+
+  for (const entry of list) {
+    if (!entry) {
+      continue;
+    }
+
+    if (activeOnly && entry.is_active === false) {
+      continue;
+    }
+
+    const key = normalizeModalityKey(entry);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    result.push(entry);
+  }
+
+  return result;
+}
+
 function formatExamName(entry) {
   return (
     entry?.name_en ||
@@ -3281,12 +3313,13 @@ async function loadExamTypeSettings() {
 
   try {
     const result = await api("/api/settings/exam-types", { method: "GET" });
+    const normalizedModalities = normalizeModalities(result.modalities);
     state.examTypeSettingsEntries = result.examTypes || [];
-    state.examTypeSettingsModalities = result.modalities || [];
+    state.examTypeSettingsModalities = normalizedModalities;
 
     state.appointmentLookups = {
       ...state.appointmentLookups,
-      modalities: result.modalities || state.appointmentLookups.modalities,
+      modalities: normalizedModalities.length ? normalizedModalities : state.appointmentLookups.modalities,
       examTypes: result.examTypes || state.appointmentLookups.examTypes
     };
 
@@ -3314,7 +3347,7 @@ async function loadModalitySettings() {
     const result = await api("/api/settings/modalities?includeInactive=true", { method: "GET" });
     state.modalitySettingsEntries = result.modalities || [];
 
-    const activeModalities = state.modalitySettingsEntries.filter((entry) => entry.is_active);
+    const activeModalities = normalizeModalities(state.modalitySettingsEntries, { activeOnly: true });
     state.appointmentLookups = {
       ...state.appointmentLookups,
       modalities: activeModalities
@@ -3389,8 +3422,9 @@ async function loadAppointmentLookups() {
 
   try {
     const result = await api("/api/appointments/lookups", { method: "GET" });
+    const normalizedModalities = normalizeModalities(result.modalities);
     state.appointmentLookups = {
-      modalities: result.modalities || [],
+      modalities: normalizedModalities,
       examTypes: result.examTypes || [],
       priorities: result.priorities || []
     };
@@ -5341,7 +5375,7 @@ async function deleteSettingsExamType(entryId) {
 }
 
 function syncModalitySettingsLookups(modalities) {
-  const activeModalities = (modalities || []).filter((entry) => entry.is_active);
+  const activeModalities = normalizeModalities(modalities, { activeOnly: true });
   state.appointmentLookups = {
     ...state.appointmentLookups,
     modalities: activeModalities
@@ -5612,6 +5646,24 @@ function renderLogin() {
   `;
 }
 
+function renderDashboardHero() {
+  const readyLabel =
+    state.dashboardReady == null
+      ? t().common.loading
+      : state.dashboardReady
+        ? t().dashboard.ready
+        : t().dashboard.notReady;
+
+  return `
+    <section class="dashboard-hero">
+      <span class="chip success">${escapeHtml(readyLabel)}</span>
+      <div class="dashboard-hero-title">${escapeHtml(t().dashboard.title)}</div>
+      <div class="dashboard-hero-body">${escapeHtml(t().dashboard.body)}</div>
+      <button type="button" class="button-primary" data-route="patients">${escapeHtml(t().dashboard.primary)}</button>
+    </section>
+  `;
+}
+
 function renderDashboard() {
   const readinessLabel =
     state.dashboardReady == null
@@ -5630,13 +5682,7 @@ function renderDashboard() {
 
   return `
     <div class="page">
-      ${pageHero(
-        t().dashboard.title,
-        t().dashboard.body,
-        `<button type="button" class="button-primary" data-route="patients">${escapeHtml(t().dashboard.primary)}</button>
-         <button type="button" class="button-secondary" data-route="queue">${escapeHtml(t().dashboard.scanShortcut)}</button>`,
-        t().dashboard.ready
-      )}
+      ${renderDashboardHero()}
 
       ${alertMarkup("error", state.dashboardError || state.queueError)}
       ${alertMarkup("error", state.dashboardScheduleError)}
@@ -8336,7 +8382,7 @@ function renderSettingsCatalog() {
   }
 
   const categories = Object.keys(state.settingsCatalog).filter(
-    (category) => !["pacs_connection", "dicom_gateway"].includes(category)
+    (category) => !["pacs_connection", "dicom_gateway", "modalities_and_exams"].includes(category)
   );
 
   if (!categories.length) {
@@ -9807,6 +9853,12 @@ function renderAppFrame(content) {
               <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
+          </div>
+
+          <div class="appbar-shortcuts">
+            <button class="button-ghost appbar-shortcut" type="button" data-route="registrations">${escapeHtml(t().nav.registrations)}</button>
+            <button class="button-ghost appbar-shortcut" type="button" data-route="dashboard">${escapeHtml(t().nav.dashboard)}</button>
+            <button class="button-ghost appbar-shortcut" type="button" data-route="appointments">${escapeHtml(t().nav.appointments)}</button>
           </div>
 
           <details class="nav-menu">

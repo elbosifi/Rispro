@@ -80,6 +80,18 @@ button {
   box-shadow: var(--shadow-soft);
 }
 
+.appbar-shortcuts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.appbar-shortcut {
+  padding: 6px 12px;
+  font-size: 0.85rem;
+}
+
 .nav-menu {
   position: relative;
 }
@@ -113,7 +125,7 @@ button {
   position: absolute;
   top: calc(100% + 10px);
   inset-inline-end: 0;
-  width: min(320px, 80vw);
+  width: min(420px, 90vw);
   padding: 12px;
   border-radius: 16px;
   border: 1px solid var(--line);
@@ -136,8 +148,8 @@ button {
 .nav-menu-list .nav-link span:first-child {
   flex: 1;
   text-align: start;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .nav-menu-list .nav-link span:last-child {
@@ -376,6 +388,38 @@ button {
 .page {
   display: grid;
   gap: 20px;
+}
+
+.dashboard-hero {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: var(--shadow-soft);
+}
+
+.dashboard-hero-title {
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.dashboard-hero-body {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 520px;
+}
+
+@media (max-width: 900px) {
+  .dashboard-hero-body {
+    white-space: normal;
+  }
 }
 
 .hero {
