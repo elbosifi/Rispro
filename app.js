@@ -262,10 +262,11 @@ const state = {
 
 const copy = {
   en: {
-    appName: "RISpro Reception",
+    appName: "National Cancer Center Benghazi",
+    appNameAlternate: "المركز الوطني للأورام بنغازي",
     appSubtitle: "Reception workspace",
-    topTitle: "Reception operations",
-    topSubtitle: "Patient intake, scheduling, and supervision tools.",
+    topTitle: "National Cancer Center Benghazi Reception",
+    topSubtitle: "Patient intake, scheduling, and supervision tools at NCCB.",
     userRoleLabel: "Signed in as",
     note: "Operations status for today’s reception shift.",
     nav: {
@@ -724,10 +725,11 @@ const copy = {
     }
   },
   ar: {
-    appName: "نظام الاستقبال RISpro",
+    appName: "المركز الوطني للأورام بنغازي",
+    appNameAlternate: "National Cancer Center Benghazi",
     appSubtitle: "واجهة عمل الاستقبال",
-    topTitle: "تشغيل الاستقبال",
-    topSubtitle: "تسجيل المرضى والجدولة وأدوات الإشراف.",
+    topTitle: "المركز الوطني للأورام بنغازي",
+    topSubtitle: "تسجيل المرضى والتنسيق والإشراف في المركز.",
     userRoleLabel: "تم تسجيل الدخول كـ",
     note: "حالة التشغيل لدوام الاستقبال اليوم.",
     nav: {
@@ -5155,9 +5157,10 @@ function renderLogin() {
       <div class="login-card">
         <section class="login-showcase">
           <div class="brand">
-            <div class="brand-mark">R</div>
-            <div>
+            <img class="brand-logo" src="/assets/nccb-logo.png" alt="National Cancer Center Benghazi logo" />
+            <div class="brand-text">
               <div class="brand-title">${escapeHtml(t().appName)}</div>
+              <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
           </div>
@@ -6136,84 +6139,80 @@ function renderCalendar() {
     : renderCalendarDayList(selectedAppointments);
 
   return `
-    <div class="page">
+    <div class="page calendar-page">
       ${pageHero(t().calendar.title, t().calendar.body, heroActions, t().calendar.summary)}
       ${alertMarkup("error", state.calendarError)}
 
-      <section class="split-grid">
-        <div class="stack">
-          <article class="surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().calendar.filtersTitle)}</h2>
+      <section class="calendar-top-grid">
+        <article class="surface calendar-filter-card">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().calendar.filtersTitle)}</h2>
+          </div>
+          <form id="calendar-filter-form" class="stack">
+            <div class="form-grid">
+              <label class="field">
+                <span class="label">${escapeHtml(t().calendar.fields.modality)}</span>
+                <select class="select" name="modalityId">
+                  <option value="">${escapeHtml(t().common.optional)}</option>
+                  ${state.appointmentLookups.modalities
+                    .map(
+                      (entry) => `
+                        <option value="${escapeHtml(String(entry.id))}" ${
+                        String(entry.id) === String(state.calendarFilters.modalityId) ? "selected" : ""
+                      }>
+                          ${escapeHtml(formatModalityName(entry))}
+                        </option>
+                      `
+                    )
+                    .join("")}
+                </select>
+              </label>
             </div>
-            <form id="calendar-filter-form" class="stack">
-              <div class="form-grid">
-                <label class="field">
-                  <span class="label">${escapeHtml(t().calendar.fields.modality)}</span>
-                  <select class="select" name="modalityId">
-                    <option value="">${escapeHtml(t().common.optional)}</option>
-                    ${state.appointmentLookups.modalities
-                      .map(
-                        (entry) => `
-                          <option value="${escapeHtml(String(entry.id))}" ${
-                          String(entry.id) === String(state.calendarFilters.modalityId) ? "selected" : ""
-                        }>
-                            ${escapeHtml(formatModalityName(entry))}
-                          </option>
-                        `
-                      )
-                      .join("")}
-                  </select>
-                </label>
-              </div>
-              <div class="form-actions">
-                <button class="button-secondary" type="button" data-action="calendar-clear-filter">${escapeHtml(
-                  t().calendar.clearFilters
-                )}</button>
-                <button class="button-primary" type="submit">${escapeHtml(t().common.refresh)}</button>
-              </div>
-            </form>
-          </article>
-
-          <article class="surface">
-            <div class="calendar-panel">
-              <div class="calendar-panel-header">
-                <button class="button-ghost" type="button" data-action="calendar-prev-month">‹</button>
-                <div>
-                  <div class="calendar-month-label">${escapeHtml(monthLabel)}</div>
-                  <div class="small">${escapeHtml(t().calendar.monthLabelHint)}</div>
-                </div>
-                <button class="button-ghost" type="button" data-action="calendar-next-month">›</button>
-              </div>
-              ${calendarContent}
-            </div>
-          </article>
-        </div>
-
-        <div class="stack">
-          <article class="surface">
-            <div class="section-head">
-              <h2 class="section-title">${escapeHtml(t().calendar.selectedDayTitle)}</h2>
-              <div class="hero-actions">
-                ${filterChip}
-                <span class="chip accent">${escapeHtml(selectedDate ? formatDisplayDate(selectedDate) : t().common.noData)}</span>
-              </div>
-            </div>
-            ${dayListContent}
             <div class="form-actions">
-              <button
-                class="button-primary"
-                type="button"
-                data-action="calendar-print-day"
-                data-date="${escapeHtml(selectedDate)}"
-                ${selectedAppointments.length ? "" : "disabled"}
-              >
-                ${escapeHtml(t().calendar.printButton)}
-              </button>
+              <button class="button-secondary" type="button" data-action="calendar-clear-filter">${escapeHtml(
+                t().calendar.clearFilters
+              )}</button>
+              <button class="button-primary" type="submit">${escapeHtml(t().common.refresh)}</button>
             </div>
-          </article>
-        </div>
+          </form>
+        </article>
+
+        <article class="surface calendar-panel-wrapper">
+          <div class="calendar-panel">
+            <div class="calendar-panel-header">
+              <button class="button-ghost" type="button" data-action="calendar-prev-month">‹</button>
+              <div>
+                <div class="calendar-month-label">${escapeHtml(monthLabel)}</div>
+                <div class="small">${escapeHtml(t().calendar.monthLabelHint)}</div>
+              </div>
+              <button class="button-ghost" type="button" data-action="calendar-next-month">›</button>
+            </div>
+            ${calendarContent}
+          </div>
+        </article>
       </section>
+
+      <article class="surface calendar-day-panel" id="calendar-day-list">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(t().calendar.selectedDayTitle)}</h2>
+          <div class="hero-actions">
+            ${filterChip}
+            <span class="chip accent">${escapeHtml(selectedDate ? formatDisplayDate(selectedDate) : t().common.noData)}</span>
+          </div>
+        </div>
+        ${dayListContent}
+        <div class="form-actions">
+          <button
+            class="button-primary"
+            type="button"
+            data-action="calendar-print-day"
+            data-date="${escapeHtml(selectedDate)}"
+            ${selectedAppointments.length ? "" : "disabled"}
+          >
+            ${escapeHtml(t().calendar.printButton)}
+          </button>
+        </div>
+      </article>
     </div>
   `;
 }
@@ -8983,9 +8982,10 @@ function renderAppFrame(content) {
       <div class="layout">
         <aside class="sidebar">
           <div class="brand">
-            <div class="brand-mark">R</div>
-            <div>
+            <img class="brand-logo" src="/assets/nccb-logo.png" alt="National Cancer Center Benghazi logo" />
+            <div class="brand-text">
               <div class="brand-title">${escapeHtml(t().appName)}</div>
+              <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
           </div>
@@ -9042,6 +9042,15 @@ function renderAppFrame(content) {
     </div>
     ${renderToasts()}
   `;
+}
+
+function scrollCalendarDayListIntoView() {
+  requestAnimationFrame(() => {
+    const target = document.getElementById("calendar-day-list");
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
 }
 
 function renderLoading() {
@@ -9549,6 +9558,7 @@ function handleClick(event) {
     state.calendarSelectedDate = target.dataset.date || "";
     state.calendarError = "";
     render();
+    scrollCalendarDayListIntoView();
     return;
   }
 

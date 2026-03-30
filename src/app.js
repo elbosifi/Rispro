@@ -44,6 +44,7 @@ export function createApp() {
   app.use(securityHeaders);
   app.use(express.json({ limit: env.requestBodyLimit }));
   app.use(cookieParser());
+  app.use("/assets", express.static(path.join(rootDir, "assets")));
 
   app.get("/api/health", (_req, res) => {
     res.json({

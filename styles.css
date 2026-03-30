@@ -85,30 +85,46 @@ button {
 .brand {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
   justify-content: center;
   width: 100%;
 }
 
-.brand-mark {
-  width: 52px;
-  height: 52px;
+.brand-logo {
+  width: 56px;
+  height: 56px;
   border-radius: 18px;
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  background: linear-gradient(135deg, #14b8a6, #f59e0b);
+  object-fit: contain;
+  background: var(--surface-strong);
+  padding: 4px;
+  box-shadow: var(--shadow-soft);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
 }
 
 .brand-title {
   font-weight: 800;
   font-size: 1.08rem;
+  margin: 0;
+}
+
+.brand-title-alt {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(255, 248, 239, 0.7);
+  margin: 0;
 }
 
 .brand-subtitle {
   font-size: 0.9rem;
   color: rgba(255, 248, 239, 0.7);
-  margin-top: 4px;
+  margin: 0;
 }
 
 .nav {
@@ -174,44 +190,57 @@ button {
 
 .topbar {
   display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 18px;
-  margin-bottom: 22px;
-  padding: 18px 22px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 18px;
   border: 1px solid var(--line);
-  border-radius: 24px;
-  background: rgba(255, 251, 244, 0.84);
-  backdrop-filter: blur(18px);
+  border-radius: 20px;
+  background: rgba(255, 251, 244, 0.94);
+  backdrop-filter: blur(16px);
   box-shadow: var(--shadow);
 }
 
 .topbar-path {
   color: var(--muted);
-  font-size: 0.88rem;
-  margin-bottom: 6px;
-  text-align: center;
+  font-size: 0.82rem;
+  margin-bottom: 2px;
+  text-align: left;
 }
 
 .topbar-title {
-  font-size: 1.42rem;
+  font-size: 1.2rem;
   font-weight: 800;
-  text-align: center;
+  text-align: left;
 }
 
 .topbar-subtitle {
   color: var(--muted);
-  margin-top: 4px;
-  text-align: center;
+  margin-top: 2px;
+  text-align: left;
 }
 
-.topbar-actions,
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .topbar-meta {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   flex-wrap: wrap;
   justify-content: center;
+}
+
+.topbar .chip {
+  padding: 4px 10px;
+  font-size: 0.72rem;
 }
 
 .toggle {
@@ -897,6 +926,50 @@ html[dir="rtl"] .settings-row {
 .calendar-day-note {
   font-size: 0.78rem;
   color: var(--muted);
+}
+
+.calendar-page {
+  display: grid;
+  gap: 16px;
+}
+
+.calendar-top-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.calendar-filter-card {
+  width: 100%;
+  max-width: 420px;
+}
+
+.calendar-panel-wrapper {
+  width: 100%;
+  flex: 1;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+.calendar-day-panel {
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+.calendar-day-panel .form-actions {
+  justify-content: flex-end;
+}
+
+@media (min-width: 960px) {
+  .calendar-top-grid {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: center;
+  }
+
+  .calendar-day-panel {
+    padding: 26px 28px;
+  }
 }
 
 .slip-surface {
