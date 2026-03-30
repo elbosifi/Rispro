@@ -4,9 +4,13 @@ import { asyncRoute } from "../utils/async-route.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
 import {
   createExamType,
+  createModality,
   deleteExamType,
+  deleteModality,
   listExamTypesForSettings,
-  updateExamType
+  listModalitiesForSettings,
+  updateExamType,
+  updateModality
 } from "../services/appointment-service.js";
 import {
   createDicomDevice,
@@ -63,6 +67,39 @@ settingsRouter.delete(
   asyncRoute(async (req, res) => {
     const entry = await deleteNameDictionaryEntry(req.params.entryId, req.user.sub);
     res.json({ entry });
+  })
+);
+
+settingsRouter.get(
+  "/modalities",
+  asyncRoute(async (req, res) => {
+    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const result = await listModalitiesForSettings({ includeInactive });
+    res.json(result);
+  })
+);
+
+settingsRouter.post(
+  "/modalities",
+  asyncRoute(async (req, res) => {
+    const modality = await createModality(req.body || {}, req.user.sub);
+    res.status(201).json({ modality });
+  })
+);
+
+settingsRouter.put(
+  "/modalities/:modalityId",
+  asyncRoute(async (req, res) => {
+    const modality = await updateModality(req.params.modalityId, req.body || {}, req.user.sub);
+    res.json({ modality });
+  })
+);
+
+settingsRouter.delete(
+  "/modalities/:modalityId",
+  asyncRoute(async (req, res) => {
+    const modality = await deleteModality(req.params.modalityId, req.user.sub);
+    res.json({ modality });
   })
 );
 

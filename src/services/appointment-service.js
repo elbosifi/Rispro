@@ -1,6 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { getTripoliToday } from "../utils/date.js";
+import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 
@@ -47,6 +47,86 @@ function normalizeCapacityLimit(value) {
     return null;
   }
   return parsed;
+}
+
+function normalizeDailyCapacity(value) {
+  if (value === undefined || value === null || value === "") {
+    return 0;
+  }
+
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new HttpError(400, "dailyCapacity must be 0 or a positive whole number.");
+  }
+
+  return parsed;
+}
+
+function normalizeSettingToggle(value, defaultValue = true) {
+  const raw = String(value || "").trim().toLowerCase();
+
+  if (!raw) {
+    return defaultValue;
+  }
+
+  if (["enabled", "on", "true", "yes", "1"].includes(raw)) {
+    return true;
+  }
+
+  if (["disabled", "off", "false", "no", "0"].includes(raw)) {
+    return false;
+  }
+
+  return defaultValue;
+}
+
+function normalizeIsoDate(value) {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  return String(value || "").slice(0, 10);
+}
+
+function getTripoliWeekday(isoDate) {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: TRIPOLI_TIME_ZONE, weekday: "long" }).format(date);
+  return weekday.toLowerCase();
+}
+
+async function getAppointmentDaySettings(client) {
+  const { rows } = await client.query(
+    `
+      select setting_key, setting_value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key in ('allow_friday_appointments', 'allow_saturday_appointments')
+    `
+  );
+
+  const values = rows.reduce((accumulator, row) => {
+    accumulator[row.setting_key] = row.setting_value?.value;
+    return accumulator;
+  }, {});
+
+  return {
+    fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
+    saturdayEnabled: normalizeSettingToggle(values.allow_saturday_appointments, true)
+  };
+}
+
+async function requireAppointmentDayEnabled(client, appointmentDate) {
+  const settings = await getAppointmentDaySettings(client);
+  const weekday = getTripoliWeekday(appointmentDate);
+
+  if (weekday === "friday" && !settings.fridayEnabled) {
+    throw new HttpError(409, "Appointments are disabled on Friday in settings.");
+  }
+
+  if (weekday === "saturday" && !settings.saturdayEnabled) {
+    throw new HttpError(409, "Appointments are disabled on Saturday in settings.");
+  }
 }
 
 async function getMaxCasesPerModality(client) {
@@ -604,6 +684,7 @@ export async function listAvailability(modalityId, days = 14) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
   const modality = await getModalityById(pool, cleanModalityId);
+  const daySettings = await getAppointmentDaySettings(pool);
 
   const { rows } = await pool.query(
     `
@@ -632,19 +713,238 @@ export async function listAvailability(modalityId, days = 14) {
     [cleanModalityId, windowDays]
   );
 
-  return rows.map((row) => {
-    const capacity = Number(modality.daily_capacity || 0);
-    const bookedCount = Number(row.booked_count || 0);
-    const remaining = Math.max(capacity - bookedCount, 0);
+  return rows
+    .filter((row) => {
+      const isoDate = normalizeIsoDate(row.appointment_date);
+      const weekday = getTripoliWeekday(isoDate);
 
-    return {
-      appointment_date: row.appointment_date,
-      booked_count: bookedCount,
-      remaining_capacity: remaining,
-      daily_capacity: capacity,
-      is_full: remaining <= 0
-    };
-  });
+      if (weekday === "friday" && !daySettings.fridayEnabled) {
+        return false;
+      }
+
+      if (weekday === "saturday" && !daySettings.saturdayEnabled) {
+        return false;
+      }
+
+      return true;
+    })
+    .map((row) => {
+      const capacity = Number(modality.daily_capacity || 0);
+      const bookedCount = Number(row.booked_count || 0);
+      const remaining = Math.max(capacity - bookedCount, 0);
+
+      return {
+        appointment_date: row.appointment_date,
+        booked_count: bookedCount,
+        remaining_capacity: remaining,
+        daily_capacity: capacity,
+        is_full: remaining <= 0
+      };
+    });
+}
+
+export async function listModalitiesForSettings({ includeInactive = false } = {}) {
+  const whereClause = includeInactive ? "" : "where is_active = true";
+  const { rows } = await pool.query(
+    `
+      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      from modalities
+      ${whereClause}
+      order by name_en asc
+    `
+  );
+
+  return { modalities: rows };
+}
+
+export async function createModality(payload, currentUserId = null) {
+  const code = String(payload.code || "").trim();
+  const nameAr = String(payload.nameAr || "").trim();
+  const nameEn = String(payload.nameEn || "").trim();
+  const dailyCapacity = normalizeDailyCapacity(payload.dailyCapacity);
+  const generalInstructionAr = String(payload.generalInstructionAr || "").trim();
+  const generalInstructionEn = String(payload.generalInstructionEn || "").trim();
+  const isActive = String(payload.isActive || "enabled") === "enabled";
+
+  if (!code || !nameAr || !nameEn) {
+    throw new HttpError(400, "code, nameAr, and nameEn are required.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    const { rows } = await client.query(
+      `
+        insert into modalities (
+          code,
+          name_ar,
+          name_en,
+          daily_capacity,
+          general_instruction_ar,
+          general_instruction_en,
+          is_active
+        )
+        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7)
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      `,
+      [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
+    );
+
+    if (currentUserId) {
+      await logAuditEntry(
+        {
+          entityType: "modality",
+          entityId: rows[0].id,
+          actionType: "create",
+          oldValues: null,
+          newValues: rows[0],
+          changedByUserId: currentUserId
+        },
+        client
+      );
+    }
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateModality(modalityId, payload, currentUserId) {
+  const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
+  const code = String(payload.code || "").trim();
+  const nameAr = String(payload.nameAr || "").trim();
+  const nameEn = String(payload.nameEn || "").trim();
+  const dailyCapacity = normalizeDailyCapacity(payload.dailyCapacity);
+  const generalInstructionAr = String(payload.generalInstructionAr || "").trim();
+  const generalInstructionEn = String(payload.generalInstructionEn || "").trim();
+  const isActive = String(payload.isActive || "enabled") === "enabled";
+
+  if (!code || !nameAr || !nameEn) {
+    throw new HttpError(400, "code, nameAr, and nameEn are required.");
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        from modalities
+        where id = $1
+        limit 1
+      `,
+      [cleanModalityId]
+    );
+
+    const existing = existingResult.rows[0];
+
+    if (!existing) {
+      throw new HttpError(404, "Modality not found.");
+    }
+
+    const { rows } = await client.query(
+      `
+        update modalities
+        set
+          code = $2,
+          name_ar = $3,
+          name_en = $4,
+          daily_capacity = $5,
+          general_instruction_ar = nullif($6, ''),
+          general_instruction_en = nullif($7, ''),
+          is_active = $8,
+          updated_at = now()
+        where id = $1
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      `,
+      [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "modality",
+        entityId: cleanModalityId,
+        actionType: "update",
+        oldValues: existing,
+        newValues: rows[0],
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteModality(modalityId, currentUserId) {
+  const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        from modalities
+        where id = $1
+        limit 1
+      `,
+      [cleanModalityId]
+    );
+
+    const existing = existingResult.rows[0];
+
+    if (!existing || !existing.is_active) {
+      throw new HttpError(404, "Modality not found.");
+    }
+
+    const { rows } = await client.query(
+      `
+        update modalities
+        set
+          is_active = false,
+          updated_at = now()
+        where id = $1
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      `,
+      [cleanModalityId]
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "modality",
+        entityId: cleanModalityId,
+        actionType: "delete",
+        oldValues: existing,
+        newValues: rows[0],
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return rows[0];
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createExamType(payload, currentUserId = null) {
@@ -849,6 +1149,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
 
   try {
     await client.query("begin");
+    await requireAppointmentDayEnabled(client, appointmentDate);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
@@ -1015,6 +1316,11 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 
     if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");
+    }
+
+    const existingDate = normalizeIsoDate(existingAppointment.appointment_date);
+    if (existingDate !== appointmentDate) {
+      await requireAppointmentDayEnabled(client, appointmentDate);
     }
 
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);

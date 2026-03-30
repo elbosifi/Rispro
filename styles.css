@@ -128,6 +128,20 @@ button {
   width: 100%;
   justify-content: space-between;
   color: rgba(255, 248, 239, 0.92);
+  min-width: 0;
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.nav-menu-list .nav-link span:first-child {
+  flex: 1;
+  text-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.nav-menu-list .nav-link span:last-child {
+  flex: 0 0 auto;
 }
 
 .sidebar {
@@ -582,14 +596,29 @@ button {
   font-size: 2.35rem;
 }
 
-.banner-grid {
+.banner-strip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  align-items: center;
 }
 
-.banner-card {
-  text-align: center;
+.banner-metric {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: start;
+}
+
+.banner-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--teal);
+  font-weight: 800;
 }
 
 .banner-label {
@@ -598,14 +627,31 @@ button {
 }
 
 .banner-value {
-  margin-top: 12px;
-  font-size: 2.8rem;
+  font-size: 2.2rem;
   font-weight: 800;
 }
 
 .banner-note {
-  margin-top: 8px;
+  margin-top: 4px;
   color: var(--muted);
+}
+
+.banner-divider {
+  width: 1px;
+  height: 100%;
+  background: var(--line);
+  justify-self: center;
+  display: none;
+}
+
+@media (min-width: 900px) {
+  .banner-strip {
+    grid-template-columns: auto 1px auto 1px auto;
+  }
+
+  .banner-divider {
+    display: block;
+  }
 }
 
 .availability-grid {
@@ -619,8 +665,25 @@ button {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.7);
   border: 1px solid rgba(86, 60, 38, 0.12);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.availability-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  background: rgba(15, 118, 110, 0.12);
+  color: var(--teal);
+  font-weight: 800;
   display: grid;
-  gap: 6px;
+  place-items: center;
+}
+
+.availability-copy {
+  display: grid;
+  gap: 4px;
 }
 
 .availability-label {

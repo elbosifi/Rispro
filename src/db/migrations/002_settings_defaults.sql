@@ -39,6 +39,8 @@ values
   ('scheduling_and_capacity', 'calendar_window_days', '{"value":"14"}'::jsonb),
   ('scheduling_and_capacity', 'double_booking_prevention', '{"value":"enabled"}'::jsonb),
   ('scheduling_and_capacity', 'overbooking_reason_required', '{"value":"enabled"}'::jsonb),
+  ('scheduling_and_capacity', 'allow_friday_appointments', '{"value":"enabled"}'::jsonb),
+  ('scheduling_and_capacity', 'allow_saturday_appointments', '{"value":"enabled"}'::jsonb),
 
   ('queue_and_arrival', 'barcode_check_in', '{"value":"enabled"}'::jsonb),
   ('queue_and_arrival', 'walk_in_queue', '{"value":"enabled"}'::jsonb),

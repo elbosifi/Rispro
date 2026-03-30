@@ -190,6 +190,12 @@ const state = {
   examTypeSettingsSuccess: "",
   examTypeSettingsSavingId: "",
   examTypeSettingsForm: defaultExamTypeForm(),
+  modalitySettingsEntries: [],
+  modalitySettingsLoading: false,
+  modalitySettingsError: "",
+  modalitySettingsSuccess: "",
+  modalitySettingsSavingId: "",
+  modalitySettingsForm: defaultModalityForm(),
   nameDictionaryForm: {
     arabicText: "",
     englishText: "",
@@ -305,6 +311,7 @@ const copy = {
       next7Note: "Scheduled appointments in the coming week.",
       next30Title: "Cases in next 30 days",
       next30Note: "Scheduled appointments in the coming month.",
+      avgNextSlotTitle: "Avg next slot",
       nextSlotTitle: "Next available slot by modality",
       nextSlotNote: "Days until the next open slot appears.",
       nextSlotUnavailable: "No open slots in the next 30 days",
@@ -373,11 +380,11 @@ const copy = {
       patientSelect: "Use this patient",
       selectedPatient: "Selected patient",
       pacsSearch: "Search PACS",
-      pacsSearchHint: "Uses National ID to find prior studies.",
+      pacsSearchHint: "Uses Patient ID (MRN) to find prior studies.",
       pacsResultsTitle: "Previous studies",
       pacsNoResults: "No prior studies were found.",
       pacsLoading: "Searching PACS...",
-      pacsMissingNationalId: "National ID is required to search PACS.",
+      pacsMissingNationalId: "Patient ID (MRN) is required to search PACS.",
       noneSelected: "Select a patient before saving an appointment.",
       lookupsLoading: "Loading modalities and priorities...",
       calendarHint: "Select a modality to load the next 14 days.",
@@ -620,6 +627,7 @@ const copy = {
       sectionPatientRules: "Registration rules",
       sectionDictionary: "Custom dictionary",
       sectionExamTypes: "Exam types",
+      sectionModalities: "Modalities",
       sectionCapacity: "Scheduling capacity",
       sectionPacs: "إعدادات PACS",
       sectionPacs: "PACS connection",
@@ -678,6 +686,19 @@ const copy = {
       examTypesDelete: "Delete exam type",
       examTypesModality: "Modality",
       examTypesEmpty: "No exam types have been added yet.",
+      modalitiesTitle: "Modalities",
+      modalitiesBody: "Add, edit, or remove modalities and set each daily capacity.",
+      modalitiesAdd: "Add modality",
+      modalitiesSave: "Save modality",
+      modalitiesDelete: "Delete modality",
+      modalitiesEmpty: "No modalities have been added yet.",
+      modalitiesCode: "Modality code",
+      modalitiesNameAr: "Modality name Arabic",
+      modalitiesNameEn: "Modality name English",
+      modalitiesDailyCapacity: "Daily capacity",
+      modalitiesInstructionAr: "Arabic instruction",
+      modalitiesInstructionEn: "English instruction",
+      modalitiesStatus: "Status",
       users: "Users",
       addUser: "Create user",
       deleteUser: "Delete user",
@@ -783,6 +804,7 @@ const copy = {
       next7Note: "المواعيد المجدولة خلال الأسبوع القادم.",
       next30Title: "الحالات خلال 30 يوماً",
       next30Note: "المواعيد المجدولة خلال الشهر القادم.",
+      avgNextSlotTitle: "متوسط أقرب موعد",
       nextSlotTitle: "أقرب موعد متاح لكل جهاز",
       nextSlotNote: "عدد الأيام حتى أول فتحة متاحة.",
       nextSlotUnavailable: "لا توجد فتحات خلال 30 يوماً",
@@ -851,11 +873,11 @@ const copy = {
       patientSelect: "اختيار هذا المريض",
       selectedPatient: "المريض المختار",
       pacsSearch: "بحث PACS",
-      pacsSearchHint: "يستخدم الرقم الوطني للبحث عن الدراسات السابقة.",
+      pacsSearchHint: "يستخدم رقم المريض (MRN) للبحث عن الدراسات السابقة.",
       pacsResultsTitle: "الدراسات السابقة",
       pacsNoResults: "لا توجد دراسات سابقة.",
       pacsLoading: "جارٍ البحث في PACS...",
-      pacsMissingNationalId: "الرقم الوطني مطلوب لبحث PACS.",
+      pacsMissingNationalId: "رقم المريض (MRN) مطلوب لبحث PACS.",
       noneSelected: "اختر مريضاً قبل حفظ الموعد.",
       lookupsLoading: "جارٍ تحميل الأجهزة والأولويات...",
       calendarHint: "اختر الجهاز لتحميل الأيام الأربعة عشر القادمة.",
@@ -1098,6 +1120,7 @@ const copy = {
       sectionPatientRules: "قواعد التسجيل",
       sectionDictionary: "القاموس المخصص",
       sectionExamTypes: "أنواع الفحوصات",
+      sectionModalities: "الأجهزة",
       sectionCapacity: "سعة الجدولة",
       sectionDicom: "بوابة DICOM",
       sectionModules: "الوحدات المدعومة",
@@ -1154,6 +1177,19 @@ const copy = {
       examTypesDelete: "حذف نوع الفحص",
       examTypesModality: "الجهاز",
       examTypesEmpty: "لا توجد أنواع فحوصات مضافة بعد.",
+      modalitiesTitle: "الأجهزة",
+      modalitiesBody: "أضف أو عدّل أو احذف الأجهزة واضبط سعة كل جهاز يومياً.",
+      modalitiesAdd: "إضافة جهاز",
+      modalitiesSave: "حفظ الجهاز",
+      modalitiesDelete: "حذف الجهاز",
+      modalitiesEmpty: "لا توجد أجهزة مضافة بعد.",
+      modalitiesCode: "رمز الجهاز",
+      modalitiesNameAr: "اسم الجهاز بالعربية",
+      modalitiesNameEn: "اسم الجهاز بالإنجليزية",
+      modalitiesDailyCapacity: "السعة اليومية",
+      modalitiesInstructionAr: "تعليمات بالعربية",
+      modalitiesInstructionEn: "تعليمات بالإنجليزية",
+      modalitiesStatus: "الحالة",
       users: "المستخدمون",
       addUser: "إنشاء مستخدم",
       deleteUser: "حذف المستخدم",
@@ -1353,7 +1389,9 @@ const SETTINGS_META = {
       calendar_window_days: { en: "Calendar window in days", ar: "عدد أيام التقويم" },
       double_booking_prevention: { en: "Prevent double booking", ar: "منع التكرار" },
       overbooking_reason_required: { en: "Require overbooking reason", ar: "إلزام سبب تجاوز السعة" },
-      max_cases_per_modality: { en: "Max cases per modality/day", ar: "الحد الأقصى لكل جهاز/يوم" }
+      max_cases_per_modality: { en: "Max cases per modality/day", ar: "الحد الأقصى لكل جهاز/يوم" },
+      allow_friday_appointments: { en: "Allow Friday appointments", ar: "السماح بمواعيد يوم الجمعة" },
+      allow_saturday_appointments: { en: "Allow Saturday appointments", ar: "السماح بمواعيد يوم السبت" }
     }
   },
   queue_and_arrival: {
@@ -1471,6 +1509,18 @@ function defaultExamTypeForm() {
     nameEn: "",
     specificInstructionAr: "",
     specificInstructionEn: ""
+  };
+}
+
+function defaultModalityForm() {
+  return {
+    code: "",
+    nameAr: "",
+    nameEn: "",
+    dailyCapacity: "",
+    generalInstructionAr: "",
+    generalInstructionEn: "",
+    isActive: "enabled"
   };
 }
 
@@ -1751,7 +1801,11 @@ function getSettingsFieldValue(entry) {
 function ensureRequiredSettingsDefaults(catalog) {
   const nextCatalog = { ...(catalog || {}) };
   const requiredByCategory = {
-    scheduling_and_capacity: [{ key: "max_cases_per_modality", value: "" }],
+    scheduling_and_capacity: [
+      { key: "max_cases_per_modality", value: "" },
+      { key: "allow_friday_appointments", value: "enabled" },
+      { key: "allow_saturday_appointments", value: "enabled" }
+    ],
     pacs_connection: [
       { key: "enabled", value: "enabled" },
       { key: "host", value: "192.9.101.164" },
@@ -2822,8 +2876,6 @@ async function loadDashboardSchedule() {
       return appointmentDate >= dateFrom && appointmentDate <= dateTo7;
     }).length;
 
-    state.dashboardScheduleCounts = { next7: next7Count, next30: appointments.length };
-
     const modalityList = state.appointmentLookups.modalities || [];
     const availabilityResults = await Promise.all(
       modalityList.map(async (modality) => {
@@ -2860,6 +2912,11 @@ async function loadDashboardSchedule() {
       })
     );
 
+    const availableDays = availabilityResults.map((slot) => slot.daysUntil).filter((value) => value != null);
+    const averageNextSlot =
+      availableDays.length ? Math.round(availableDays.reduce((sum, value) => sum + value, 0) / availableDays.length) : null;
+
+    state.dashboardScheduleCounts = { next7: next7Count, next30: appointments.length, averageNextSlot };
     state.dashboardNextSlots = availabilityResults;
   } catch (error) {
     state.dashboardScheduleError = error.message;
@@ -3209,6 +3266,41 @@ async function loadExamTypeSettings() {
   }
 }
 
+async function loadModalitySettings() {
+  if (!isSupervisor() || !hasRecentSupervisorReauth()) {
+    return;
+  }
+
+  state.modalitySettingsLoading = true;
+  state.modalitySettingsError = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/modalities?includeInactive=true", { method: "GET" });
+    state.modalitySettingsEntries = result.modalities || [];
+
+    const activeModalities = state.modalitySettingsEntries.filter((entry) => entry.is_active);
+    state.appointmentLookups = {
+      ...state.appointmentLookups,
+      modalities: activeModalities
+    };
+    state.examTypeSettingsModalities = activeModalities;
+    normalizeAppointmentFormSelections();
+
+    if (!state.modalitySettingsForm.code && state.modalitySettingsEntries[0]) {
+      state.modalitySettingsForm = {
+        ...defaultModalityForm(),
+        isActive: "enabled"
+      };
+    }
+  } catch (error) {
+    state.modalitySettingsError = error.message;
+  } finally {
+    state.modalitySettingsLoading = false;
+    render();
+  }
+}
+
 async function loadDicomDevices() {
   if (!isSupervisor() || !hasRecentSupervisorReauth()) {
     return;
@@ -3421,6 +3513,7 @@ async function hydrateRoute() {
         loadSettings(),
         loadAuditEntries(),
         loadNameDictionary(),
+        loadModalitySettings(),
         loadExamTypeSettings(),
         loadDicomDevices(),
         loadAppointmentLookups()
@@ -3523,6 +3616,11 @@ async function signOut() {
     state.examTypeSettingsSuccess = "";
     state.examTypeSettingsSavingId = "";
     state.examTypeSettingsForm = defaultExamTypeForm();
+    state.modalitySettingsEntries = [];
+    state.modalitySettingsError = "";
+    state.modalitySettingsSuccess = "";
+    state.modalitySettingsSavingId = "";
+    state.modalitySettingsForm = defaultModalityForm();
     state.appointmentLookups = { modalities: [], examTypes: [], priorities: [] };
     state.appointmentCalendar = [];
     state.selectedAppointmentPatient = null;
@@ -3697,6 +3795,9 @@ async function startAppointmentForPatient(patient) {
   }
 
   render();
+  if (getAppointmentPacsPatientId(patient)) {
+    void searchPacsStudies();
+  }
 }
 
 async function searchPatients() {
@@ -4386,6 +4487,14 @@ async function prepareScanSession() {
   }
 }
 
+function getAppointmentPacsPatientId(patient) {
+  if (!patient) {
+    return "";
+  }
+
+  return String(patient.mrn || patient.patient_id || patient.id || patient.national_id || "").trim();
+}
+
 async function searchPacsStudies() {
   if (!state.selectedAppointmentPatient) {
     state.pacsFindError = t().appointments.noneSelected;
@@ -4393,9 +4502,9 @@ async function searchPacsStudies() {
     return;
   }
 
-  const patientNationalId = String(state.selectedAppointmentPatient.national_id || "").trim();
+  const patientId = getAppointmentPacsPatientId(state.selectedAppointmentPatient);
 
-  if (!patientNationalId) {
+  if (!patientId) {
     state.pacsFindError = t().appointments.pacsMissingNationalId;
     render();
     return;
@@ -4409,7 +4518,7 @@ async function searchPacsStudies() {
   try {
     const result = await api("/api/integrations/pacs-search", {
       method: "POST",
-      body: JSON.stringify({ patientId: patientNationalId }),
+      body: JSON.stringify({ patientId }),
       timeoutMs: 20000
     });
     state.pacsFindResults = result.studies || [];
@@ -5169,6 +5278,120 @@ async function deleteSettingsExamType(entryId) {
   }
 }
 
+function syncModalitySettingsLookups(modalities) {
+  const activeModalities = (modalities || []).filter((entry) => entry.is_active);
+  state.appointmentLookups = {
+    ...state.appointmentLookups,
+    modalities: activeModalities
+  };
+  state.examTypeSettingsModalities = activeModalities;
+  normalizeAppointmentFormSelections();
+}
+
+async function createSettingsModality() {
+  const payload = {
+    code: state.modalitySettingsForm.code,
+    nameAr: state.modalitySettingsForm.nameAr,
+    nameEn: state.modalitySettingsForm.nameEn,
+    dailyCapacity: state.modalitySettingsForm.dailyCapacity,
+    generalInstructionAr: state.modalitySettingsForm.generalInstructionAr,
+    generalInstructionEn: state.modalitySettingsForm.generalInstructionEn,
+    isActive: state.modalitySettingsForm.isActive
+  };
+
+  state.modalitySettingsSavingId = "new";
+  state.modalitySettingsError = "";
+  state.modalitySettingsSuccess = "";
+  render();
+
+  try {
+    const result = await api("/api/settings/modalities", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+
+    state.modalitySettingsEntries = [result.modality, ...state.modalitySettingsEntries];
+    syncModalitySettingsLookups(state.modalitySettingsEntries);
+    state.modalitySettingsForm = defaultModalityForm();
+    state.modalitySettingsSuccess =
+      state.language === "ar" ? "تمت إضافة الجهاز بنجاح." : "Modality added successfully.";
+    pushToast("success", state.modalitySettingsSuccess);
+  } catch (error) {
+    state.modalitySettingsError = error.message;
+    pushToast("error", state.modalitySettingsError);
+  } finally {
+    state.modalitySettingsSavingId = "";
+    render();
+  }
+}
+
+async function updateSettingsModality(entryId) {
+  const entry = state.modalitySettingsEntries.find((item) => String(item.id) === String(entryId));
+
+  if (!entry) {
+    return;
+  }
+
+  state.modalitySettingsSavingId = String(entryId);
+  state.modalitySettingsError = "";
+  state.modalitySettingsSuccess = "";
+  render();
+
+  try {
+    const result = await api(`/api/settings/modalities/${encodeURIComponent(entryId)}`, {
+      method: "PUT",
+      body: JSON.stringify({
+        code: entry.code,
+        nameAr: entry.name_ar,
+        nameEn: entry.name_en,
+        dailyCapacity: entry.daily_capacity,
+        generalInstructionAr: entry.general_instruction_ar,
+        generalInstructionEn: entry.general_instruction_en,
+        isActive: entry.is_active ? "enabled" : "disabled"
+      })
+    });
+
+    state.modalitySettingsEntries = state.modalitySettingsEntries.map((item) =>
+      String(item.id) === String(entryId) ? result.modality : item
+    );
+    syncModalitySettingsLookups(state.modalitySettingsEntries);
+    state.modalitySettingsSuccess =
+      state.language === "ar" ? "تم تحديث الجهاز بنجاح." : "Modality updated successfully.";
+    pushToast("success", state.modalitySettingsSuccess);
+  } catch (error) {
+    state.modalitySettingsError = error.message;
+    pushToast("error", state.modalitySettingsError);
+  } finally {
+    state.modalitySettingsSavingId = "";
+    render();
+  }
+}
+
+async function deleteSettingsModality(entryId) {
+  state.modalitySettingsSavingId = `delete-${entryId}`;
+  state.modalitySettingsError = "";
+  state.modalitySettingsSuccess = "";
+  render();
+
+  try {
+    await api(`/api/settings/modalities/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+    state.modalitySettingsEntries = state.modalitySettingsEntries.filter((item) => String(item.id) !== String(entryId));
+    syncModalitySettingsLookups(state.modalitySettingsEntries);
+    if (String(state.appointmentForm.modalityId) === String(entryId)) {
+      state.appointmentForm.modalityId = "";
+    }
+    state.modalitySettingsSuccess =
+      state.language === "ar" ? "تم حذف الجهاز." : "Modality deleted.";
+    pushToast("success", state.modalitySettingsSuccess);
+  } catch (error) {
+    state.modalitySettingsError = error.message;
+    pushToast("error", state.modalitySettingsError);
+  } finally {
+    state.modalitySettingsSavingId = "";
+    render();
+  }
+}
+
 function pageHero(title, body, actions = "", eyebrow = "") {
   return `
     <section class="hero">
@@ -5357,19 +5580,35 @@ function renderDashboard() {
       ${alertMarkup("error", state.dashboardScheduleError)}
       ${alertMarkup("success", state.queueSuccess)}
 
-      <section class="banner-grid">
-        ${bannerCard(
-          t().dashboard.next7Title,
-          scheduleLoading ? t().common.loading : String(scheduleCounts.next7),
-          t().dashboard.next7Note,
-          "var(--teal)"
-        )}
-        ${bannerCard(
-          t().dashboard.next30Title,
-          scheduleLoading ? t().common.loading : String(scheduleCounts.next30),
-          t().dashboard.next30Note,
-          "var(--amber)"
-        )}
+      <section class="banner-strip surface">
+        <div class="banner-metric">
+          <div class="banner-icon">7</div>
+          <div>
+            <div class="banner-label">${escapeHtml(t().dashboard.next7Title)}</div>
+            <div class="banner-value">${escapeHtml(scheduleLoading ? t().common.loading : String(scheduleCounts.next7))}</div>
+            <div class="banner-note">${escapeHtml(t().dashboard.next7Note)}</div>
+          </div>
+        </div>
+        <div class="banner-divider"></div>
+        <div class="banner-metric">
+          <div class="banner-icon">30</div>
+          <div>
+            <div class="banner-label">${escapeHtml(t().dashboard.next30Title)}</div>
+            <div class="banner-value">${escapeHtml(scheduleLoading ? t().common.loading : String(scheduleCounts.next30))}</div>
+            <div class="banner-note">${escapeHtml(t().dashboard.next30Note)}</div>
+          </div>
+        </div>
+        <div class="banner-divider"></div>
+        <div class="banner-metric">
+          <div class="banner-icon">AVG</div>
+          <div>
+            <div class="banner-label">${escapeHtml(t().dashboard.avgNextSlotTitle)}</div>
+            <div class="banner-value">${escapeHtml(
+              scheduleLoading ? t().common.loading : formatDaysUntilLabel(scheduleCounts.averageNextSlot)
+            )}</div>
+            <div class="banner-note">${escapeHtml(t().dashboard.nextSlotNote)}</div>
+          </div>
+        </div>
       </section>
 
       <section class="card-grid dashboard-cards">
@@ -5398,11 +5637,14 @@ function renderDashboard() {
                       .map(
                         (slot) => `
                           <div class="availability-card">
-                            <div class="availability-label">${escapeHtml(formatModalityName(slot.modality))}</div>
-                            <div class="availability-value">${escapeHtml(formatDaysUntilLabel(slot.daysUntil))}</div>
-                            <div class="availability-note">${escapeHtml(
-                              slot.nextDate ? formatDisplayDate(slot.nextDate) : t().dashboard.nextSlotUnavailable
-                            )}</div>
+                            <div class="availability-icon">${escapeHtml(initials(formatModalityName(slot.modality)))}</div>
+                            <div class="availability-copy">
+                              <div class="availability-label">${escapeHtml(formatModalityName(slot.modality))}</div>
+                              <div class="availability-value">${escapeHtml(formatDaysUntilLabel(slot.daysUntil))}</div>
+                              <div class="availability-note">${escapeHtml(
+                                slot.nextDate ? formatDisplayDate(slot.nextDate) : t().dashboard.nextSlotUnavailable
+                              )}</div>
+                            </div>
                           </div>
                         `
                       )
@@ -5800,7 +6042,8 @@ function renderPacsFindPanel(patient) {
     return "";
   }
 
-  const hasNationalId = Boolean(patient.national_id);
+  const patientId = getAppointmentPacsPatientId(patient);
+  const hasPatientId = Boolean(patientId);
   const buttonLabel = state.pacsFindLoading ? t().appointments.pacsLoading : t().appointments.pacsSearch;
 
   return `
@@ -5810,10 +6053,10 @@ function renderPacsFindPanel(patient) {
         <span class="chip subtle">${escapeHtml(String(state.pacsFindResults.length))}</span>
       </div>
       <div class="small">${escapeHtml(t().appointments.pacsSearchHint)}</div>
-      ${!hasNationalId ? `<div class="small">${escapeHtml(t().appointments.pacsMissingNationalId)}</div>` : ""}
+      ${!hasPatientId ? `<div class="small">${escapeHtml(t().appointments.pacsMissingNationalId)}</div>` : ""}
       ${alertMarkup("error", state.pacsFindError)}
       <div class="form-actions">
-        <button class="button-secondary" type="button" data-action="pacs-cfind" ${!hasNationalId || state.pacsFindLoading ? "disabled" : ""}>
+        <button class="button-secondary" type="button" data-action="pacs-cfind" ${!hasPatientId || state.pacsFindLoading ? "disabled" : ""}>
           ${escapeHtml(buttonLabel)}
         </button>
       </div>
@@ -8550,6 +8793,224 @@ function renderExamTypeSettings() {
   `;
 }
 
+function renderModalitySettings() {
+  if (state.modalitySettingsLoading) {
+    return `<div class="empty">${escapeHtml(t().common.loading)}</div>`;
+  }
+
+  return `
+    ${alertMarkup("error", state.modalitySettingsError)}
+    ${alertMarkup("success", state.modalitySettingsSuccess)}
+    <form id="modality-settings-form" class="stack">
+      <div class="form-grid">
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.modalitiesCode)}</span>
+          <input
+            class="input field-en"
+            name="code"
+            data-modality-settings-new-field="true"
+            value="${escapeHtml(state.modalitySettingsForm.code)}"
+          />
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.modalitiesNameAr)}</span>
+          <input
+            class="input field-ar"
+            name="nameAr"
+            data-modality-settings-new-field="true"
+            value="${escapeHtml(state.modalitySettingsForm.nameAr)}"
+          />
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.modalitiesNameEn)}</span>
+          <input
+            class="input field-en"
+            name="nameEn"
+            data-modality-settings-new-field="true"
+            value="${escapeHtml(state.modalitySettingsForm.nameEn)}"
+          />
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.modalitiesDailyCapacity)}</span>
+          <input
+            class="input field-en"
+            inputmode="numeric"
+            min="0"
+            step="1"
+            name="dailyCapacity"
+            data-modality-settings-new-field="true"
+            value="${escapeHtml(state.modalitySettingsForm.dailyCapacity)}"
+            placeholder="12"
+          />
+        </label>
+
+        <label class="field full">
+          <span class="label">${escapeHtml(t().settings.modalitiesInstructionAr)}</span>
+          <textarea
+            class="textarea field-ar"
+            name="generalInstructionAr"
+            data-modality-settings-new-field="true"
+          >${escapeHtml(state.modalitySettingsForm.generalInstructionAr)}</textarea>
+        </label>
+
+        <label class="field full">
+          <span class="label">${escapeHtml(t().settings.modalitiesInstructionEn)}</span>
+          <textarea
+            class="textarea field-en"
+            name="generalInstructionEn"
+            data-modality-settings-new-field="true"
+          >${escapeHtml(state.modalitySettingsForm.generalInstructionEn)}</textarea>
+        </label>
+
+        <label class="field">
+          <span class="label">${escapeHtml(t().settings.modalitiesStatus)}</span>
+          <select class="select" name="isActive" data-modality-settings-new-field="true">
+            <option value="enabled" ${state.modalitySettingsForm.isActive === "enabled" ? "selected" : ""}>${escapeHtml(
+              t().common.active
+            )}</option>
+            <option value="disabled" ${state.modalitySettingsForm.isActive === "disabled" ? "selected" : ""}>${escapeHtml(
+              t().common.inactive
+            )}</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button class="button-primary" type="submit">${escapeHtml(
+          state.modalitySettingsSavingId === "new" ? t().common.loading : t().settings.modalitiesAdd
+        )}</button>
+      </div>
+    </form>
+
+    ${
+      state.modalitySettingsEntries.length
+        ? `
+          <div class="list">
+            ${state.modalitySettingsEntries
+              .map(
+                (entry) => `
+                  <div class="item dictionary-item">
+                    <div class="item-copy" style="width:100%;">
+                      <div class="form-grid">
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.modalitiesCode)}</span>
+                          <input
+                            class="input field-en"
+                            name="code"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(entry.code)}"
+                          />
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.modalitiesNameAr)}</span>
+                          <input
+                            class="input field-ar"
+                            name="name_ar"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(entry.name_ar)}"
+                          />
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.modalitiesNameEn)}</span>
+                          <input
+                            class="input field-en"
+                            name="name_en"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(entry.name_en)}"
+                          />
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.modalitiesDailyCapacity)}</span>
+                          <input
+                            class="input field-en"
+                            inputmode="numeric"
+                            min="0"
+                            step="1"
+                            name="daily_capacity"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                            value="${escapeHtml(String(entry.daily_capacity ?? ""))}"
+                          />
+                        </label>
+
+                        <label class="field full">
+                          <span class="label">${escapeHtml(t().settings.modalitiesInstructionAr)}</span>
+                          <textarea
+                            class="textarea field-ar"
+                            name="general_instruction_ar"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                          >${escapeHtml(entry.general_instruction_ar || "")}</textarea>
+                        </label>
+
+                        <label class="field full">
+                          <span class="label">${escapeHtml(t().settings.modalitiesInstructionEn)}</span>
+                          <textarea
+                            class="textarea field-en"
+                            name="general_instruction_en"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                          >${escapeHtml(entry.general_instruction_en || "")}</textarea>
+                        </label>
+
+                        <label class="field">
+                          <span class="label">${escapeHtml(t().settings.modalitiesStatus)}</span>
+                          <select
+                            class="select"
+                            name="is_active"
+                            data-modality-settings-field="true"
+                            data-modality-id="${escapeHtml(String(entry.id))}"
+                          >
+                            <option value="enabled" ${entry.is_active ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+                            <option value="disabled" ${!entry.is_active ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                    <div class="dictionary-actions">
+                      <button
+                        class="button-secondary"
+                        type="button"
+                        data-action="save-modality-entry"
+                        data-modality-id="${escapeHtml(String(entry.id))}"
+                      >
+                        ${escapeHtml(
+                          state.modalitySettingsSavingId === String(entry.id) ? t().common.loading : t().settings.modalitiesSave
+                        )}
+                      </button>
+                      <button
+                        class="button-ghost"
+                        type="button"
+                        data-action="delete-modality-entry"
+                        data-modality-id="${escapeHtml(String(entry.id))}"
+                      >
+                        ${escapeHtml(
+                          state.modalitySettingsSavingId === `delete-${entry.id}`
+                            ? t().common.loading
+                            : t().settings.modalitiesDelete
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        `
+        : `<div class="empty">${escapeHtml(t().settings.modalitiesEmpty)}</div>`
+    }
+  `;
+}
+
 function renderSettingsMenu() {
   const sections = [
     {
@@ -8575,6 +9036,12 @@ function renderSettingsMenu() {
       title: t().settings.sectionExamTypes,
       body: t().settings.examTypesBody,
       count: String(state.examTypeSettingsEntries.length)
+    },
+    {
+      id: "modalities",
+      title: t().settings.sectionModalities,
+      body: t().settings.modalitiesBody,
+      count: String(state.modalitySettingsEntries.length)
     },
     {
       id: "capacity",
@@ -8701,6 +9168,8 @@ function renderSettingsUsersSection() {
 
 function renderSettingsCapacitySection() {
   const currentLimit = getSettingsEntryValue("scheduling_and_capacity", "max_cases_per_modality", "");
+  const fridaySetting = getSettingsEntryValue("scheduling_and_capacity", "allow_friday_appointments", "enabled");
+  const saturdaySetting = getSettingsEntryValue("scheduling_and_capacity", "allow_saturday_appointments", "enabled");
 
   return `
     <section class="surface">
@@ -8726,6 +9195,32 @@ function renderSettingsCapacitySection() {
               autocomplete="off"
             />
             <span class="small">${escapeHtml(t().settings.maxCasesPerModalityHint)}</span>
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("scheduling_and_capacity", "allow_friday_appointments"))}</span>
+            <select
+              class="select"
+              data-setting-field="true"
+              data-setting-category="scheduling_and_capacity"
+              data-setting-key="allow_friday_appointments"
+            >
+              <option value="enabled" ${fridaySetting === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+              <option value="disabled" ${fridaySetting === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span class="label">${escapeHtml(getSettingsFieldLabel("scheduling_and_capacity", "allow_saturday_appointments"))}</span>
+            <select
+              class="select"
+              data-setting-field="true"
+              data-setting-category="scheduling_and_capacity"
+              data-setting-key="allow_saturday_appointments"
+            >
+              <option value="enabled" ${saturdaySetting === "enabled" ? "selected" : ""}>${escapeHtml(t().common.active)}</option>
+              <option value="disabled" ${saturdaySetting === "disabled" ? "selected" : ""}>${escapeHtml(t().common.inactive)}</option>
+            </select>
           </label>
         </div>
         <div class="form-actions">
@@ -9065,6 +9560,17 @@ function renderSettingsSectionContent() {
           </div>
           <div class="settings-summary">${escapeHtml(t().settings.examTypesBody)}</div>
           ${renderExamTypeSettings()}
+        </section>
+      `;
+    case "modalities":
+      return `
+        <section class="surface">
+          <div class="section-head">
+            <h2 class="section-title">${escapeHtml(t().settings.modalitiesTitle)}</h2>
+            <span class="chip subtle">${escapeHtml(String(state.modalitySettingsEntries.length))}</span>
+          </div>
+          <div class="settings-summary">${escapeHtml(t().settings.modalitiesBody)}</div>
+          ${renderModalitySettings()}
         </section>
       `;
     case "capacity":
@@ -9603,6 +10109,11 @@ function handleInput(event) {
     return;
   }
 
+  if (target.hasAttribute("data-modality-settings-new-field")) {
+    state.modalitySettingsForm[target.name] = target.value;
+    return;
+  }
+
   if (target.hasAttribute("data-name-dictionary-field")) {
     const entryId = target.dataset.dictionaryId;
     if (!entryId) {
@@ -9631,6 +10142,26 @@ function handleInput(event) {
         ? {
             ...entry,
             [target.name]: target.value
+          }
+        : entry
+    );
+    return;
+  }
+
+  if (target.hasAttribute("data-modality-settings-field")) {
+    const entryId = target.dataset.modalityId;
+    if (!entryId) {
+      return;
+    }
+
+    state.modalitySettingsEntries = state.modalitySettingsEntries.map((entry) =>
+      String(entry.id) === String(entryId)
+        ? {
+            ...entry,
+            [target.name]:
+              target.name === "is_active"
+                ? target.value === "enabled"
+                : target.value
           }
         : entry
     );
@@ -9709,6 +10240,9 @@ function handleClick(event) {
     state.pacsFindError = "";
     state.pacsFindHasRun = false;
     render();
+    if (getAppointmentPacsPatientId(state.selectedAppointmentPatient)) {
+      void searchPacsStudies();
+    }
     return;
   }
 
@@ -9918,6 +10452,7 @@ function handleClick(event) {
       loadSettings(),
       loadAuditEntries(),
       loadNameDictionary(),
+      loadModalitySettings(),
       loadExamTypeSettings(),
       loadDicomDevices(),
       loadAppointmentLookups()
@@ -9981,6 +10516,18 @@ function handleClick(event) {
   if (target.dataset.action === "delete-exam-type-entry") {
     event.preventDefault();
     void deleteSettingsExamType(target.dataset.examTypeId);
+    return;
+  }
+
+  if (target.dataset.action === "save-modality-entry") {
+    event.preventDefault();
+    void updateSettingsModality(target.dataset.modalityId);
+    return;
+  }
+
+  if (target.dataset.action === "delete-modality-entry") {
+    event.preventDefault();
+    void deleteSettingsModality(target.dataset.modalityId);
     return;
   }
 
@@ -10428,6 +10975,12 @@ function handleSubmit(event) {
   if (event.target.id === "exam-type-settings-form") {
     event.preventDefault();
     void createSettingsExamType();
+    return;
+  }
+
+  if (event.target.id === "modality-settings-form") {
+    event.preventDefault();
+    void createSettingsModality();
     return;
   }
 
