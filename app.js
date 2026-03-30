@@ -2001,12 +2001,12 @@ function getDisabledAppointmentDayMessage(isoDate) {
 function deriveDobFromNationalId(value) {
   const digits = String(value || "").replace(/\D/g, "");
 
-  if (digits.length < 6) {
+  if (digits.length < 5) {
     return "";
   }
 
-  const extracted = digits.slice(1, 6);
-  const year = extracted.length === 5 ? extracted.slice(1) : extracted;
+  const extracted = digits.slice(0, 5);
+  const year = extracted.length === 5 ? extracted.slice(-4) : extracted;
 
   if (!/^\d{4}$/.test(year)) {
     return "";
