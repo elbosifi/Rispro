@@ -88,6 +88,9 @@ button {
   list-style: none;
   cursor: pointer;
   user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 14px;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -98,6 +101,12 @@ button {
 
 .nav-menu-toggle::-webkit-details-marker {
   display: none;
+}
+
+.nav-menu[open] .nav-menu-toggle {
+  background: var(--teal);
+  color: #ffffff;
+  border-color: transparent;
 }
 
 .nav-menu-list {
@@ -567,6 +576,66 @@ button {
 .card-note {
   margin-top: 10px;
   color: var(--muted);
+}
+
+.dashboard-cards .card-value {
+  font-size: 2.35rem;
+}
+
+.banner-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.banner-card {
+  text-align: center;
+}
+
+.banner-label {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.banner-value {
+  margin-top: 12px;
+  font-size: 2.8rem;
+  font-weight: 800;
+}
+
+.banner-note {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.availability-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.availability-card {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(86, 60, 38, 0.12);
+  display: grid;
+  gap: 6px;
+}
+
+.availability-label {
+  font-weight: 700;
+}
+
+.availability-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--teal);
+}
+
+.availability-note {
+  color: var(--muted);
+  font-size: 0.86rem;
 }
 
 .legend-row {

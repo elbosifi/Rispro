@@ -66,6 +66,10 @@ const state = {
   dashboardLoading: false,
   dashboardReady: null,
   dashboardError: "",
+  dashboardScheduleLoading: false,
+  dashboardScheduleError: "",
+  dashboardScheduleCounts: { next7: 0, next30: 0 },
+  dashboardNextSlots: [],
   modalityLoading: false,
   modalityError: "",
   modalitySuccess: "",
@@ -297,6 +301,15 @@ const copy = {
       body: "A quick health check plus today's queue and no-show review status.",
       primary: "Register patient",
       secondary: "Search patients",
+      next7Title: "Cases in next 7 days",
+      next7Note: "Scheduled appointments in the coming week.",
+      next30Title: "Cases in next 30 days",
+      next30Note: "Scheduled appointments in the coming month.",
+      nextSlotTitle: "Next available slot by modality",
+      nextSlotNote: "Days until the next open slot appears.",
+      nextSlotUnavailable: "No open slots in the next 30 days",
+      daysLabel: "days",
+      todayLabel: "Today",
       db: "Database status",
       session: "Current session",
       modules: "Supported modules",
@@ -611,9 +624,12 @@ const copy = {
       sectionPacs: "إعدادات PACS",
       sectionPacs: "PACS connection",
       sectionDicom: "DICOM gateway",
+      sectionModules: "Supported modules",
       sectionCategories: "System behavior",
       sectionAudit: "Audit log",
       sectionBackup: "Backup and restore",
+      modulesTitle: "Supported modules",
+      modulesBody: "Active pages and the main API endpoints that power them.",
       dicomTitle: "DICOM gateway and devices",
       dicomBody: "Manage MWL and MPPS endpoint settings and map each modality device by AE Title.",
       dicomDevicesTitle: "Mapped modality devices",
@@ -763,6 +779,15 @@ const copy = {
       body: "فحص سريع للحالة مع متابعة طابور اليوم ومراجعة عدم الحضور.",
       primary: "تسجيل مريض",
       secondary: "البحث عن مريض",
+      next7Title: "الحالات خلال 7 أيام",
+      next7Note: "المواعيد المجدولة خلال الأسبوع القادم.",
+      next30Title: "الحالات خلال 30 يوماً",
+      next30Note: "المواعيد المجدولة خلال الشهر القادم.",
+      nextSlotTitle: "أقرب موعد متاح لكل جهاز",
+      nextSlotNote: "عدد الأيام حتى أول فتحة متاحة.",
+      nextSlotUnavailable: "لا توجد فتحات خلال 30 يوماً",
+      daysLabel: "أيام",
+      todayLabel: "اليوم",
       db: "حالة قاعدة البيانات",
       session: "الجلسة الحالية",
       modules: "الوظائف المتاحة",
@@ -1075,9 +1100,12 @@ const copy = {
       sectionExamTypes: "أنواع الفحوصات",
       sectionCapacity: "سعة الجدولة",
       sectionDicom: "بوابة DICOM",
+      sectionModules: "الوحدات المدعومة",
       sectionCategories: "سلوك النظام",
       sectionAudit: "سجل التدقيق",
       sectionBackup: "النسخ الاحتياطي والاستعادة",
+      modulesTitle: "الوحدات المدعومة",
+      modulesBody: "الصفحات النشطة ونقاط الـ API الأساسية التي تعتمد عليها.",
       dicomTitle: "بوابة DICOM والأجهزة",
       dicomBody: "إدارة إعدادات MWL وMPPS وربط كل جهاز حسب AE Title.",
       dicomDevicesTitle: "أجهزة التصوير المرتبطة",
@@ -1886,6 +1914,18 @@ function formatIsoDate(date) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(
     date.getUTCDate()
   ).padStart(2, "0")}`;
+}
+
+function parseIsoDate(value) {
+  const [year, month, day] = String(value || "").split("-").map((part) => Number(part));
+  if (!year || !month || !day) {
+    return new Date(NaN);
+  }
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function addUtcDays(date, offset) {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + offset));
 }
 
 function addUtcMonths(date, offset) {
@@ -2764,6 +2804,71 @@ async function loadDashboardStatus() {
   }
 }
 
+async function loadDashboardSchedule() {
+  state.dashboardScheduleLoading = true;
+  state.dashboardScheduleError = "";
+  render();
+
+  try {
+    const today = new Date();
+    const dateFrom = formatIsoDate(today);
+    const dateTo7 = formatIsoDate(addUtcDays(today, 7));
+    const dateTo30 = formatIsoDate(addUtcDays(today, 30));
+
+    const result = await api(`/api/appointments?dateFrom=${dateFrom}&dateTo=${dateTo30}`, { method: "GET" });
+    const appointments = result.appointments || [];
+    const next7Count = appointments.filter((appointment) => {
+      const appointmentDate = normalizeDateText(appointment.appointment_date);
+      return appointmentDate >= dateFrom && appointmentDate <= dateTo7;
+    }).length;
+
+    state.dashboardScheduleCounts = { next7: next7Count, next30: appointments.length };
+
+    const modalityList = state.appointmentLookups.modalities || [];
+    const availabilityResults = await Promise.all(
+      modalityList.map(async (modality) => {
+        try {
+          const availability = await api(
+            `/api/appointments/availability?modalityId=${encodeURIComponent(modality.id)}&days=30`,
+            { method: "GET" }
+          );
+          const openDay = (availability.availability || []).find((day) => day.remaining_capacity > 0);
+          if (!openDay) {
+            return {
+              modality,
+              nextDate: null,
+              daysUntil: null
+            };
+          }
+          const dateText = normalizeDateText(openDay.appointment_date);
+          const daysUntil = Math.max(
+            0,
+            Math.round((parseIsoDate(dateText).getTime() - parseIsoDate(dateFrom).getTime()) / 86400000)
+          );
+          return {
+            modality,
+            nextDate: dateText,
+            daysUntil
+          };
+        } catch (error) {
+          return {
+            modality,
+            nextDate: null,
+            daysUntil: null
+          };
+        }
+      })
+    );
+
+    state.dashboardNextSlots = availabilityResults;
+  } catch (error) {
+    state.dashboardScheduleError = error.message;
+  } finally {
+    state.dashboardScheduleLoading = false;
+    render();
+  }
+}
+
 async function loadQueueSnapshot() {
   state.queueLoading = true;
   state.queueError = "";
@@ -3304,7 +3409,8 @@ async function hydrateRoute() {
   }
 
   if (state.route === "dashboard") {
-    await Promise.all([loadDashboardStatus(), loadQueueSnapshot()]);
+    await loadAppointmentLookups();
+    await Promise.all([loadDashboardStatus(), loadQueueSnapshot(), loadDashboardSchedule()]);
     return;
   }
 
@@ -5086,6 +5192,28 @@ function statCard(label, value, note, color) {
   `;
 }
 
+function bannerCard(label, value, note, color) {
+  return `
+    <article class="surface banner-card">
+      <div class="banner-label">${escapeHtml(label)}</div>
+      <div class="banner-value" style="color:${escapeHtml(color)}">${escapeHtml(value)}</div>
+      <div class="banner-note">${escapeHtml(note)}</div>
+    </article>
+  `;
+}
+
+function formatDaysUntilLabel(daysUntil) {
+  if (daysUntil == null) {
+    return t().dashboard.nextSlotUnavailable;
+  }
+
+  if (daysUntil === 0) {
+    return t().dashboard.todayLabel;
+  }
+
+  return `${daysUntil} ${t().dashboard.daysLabel}`;
+}
+
 function infoTile(label, value, tone = "") {
   return `
     <div class="metric-tile ${tone}">
@@ -5211,6 +5339,9 @@ function renderDashboard() {
   const noShowCandidates = state.queueSnapshot?.noShowCandidates || [];
   const reviewActive = Boolean(state.queueSnapshot?.reviewActive);
   const reviewTime = state.queueSnapshot?.reviewTime || "17:00";
+  const scheduleCounts = state.dashboardScheduleCounts || { next7: 0, next30: 0 };
+  const scheduleLoading = state.dashboardScheduleLoading;
+  const scheduleSlots = state.dashboardNextSlots || [];
 
   return `
     <div class="page">
@@ -5223,33 +5354,62 @@ function renderDashboard() {
       )}
 
       ${alertMarkup("error", state.dashboardError || state.queueError)}
+      ${alertMarkup("error", state.dashboardScheduleError)}
       ${alertMarkup("success", state.queueSuccess)}
 
-      <section class="card-grid">
+      <section class="banner-grid">
+        ${bannerCard(
+          t().dashboard.next7Title,
+          scheduleLoading ? t().common.loading : String(scheduleCounts.next7),
+          t().dashboard.next7Note,
+          "var(--teal)"
+        )}
+        ${bannerCard(
+          t().dashboard.next30Title,
+          scheduleLoading ? t().common.loading : String(scheduleCounts.next30),
+          t().dashboard.next30Note,
+          "var(--amber)"
+        )}
+      </section>
+
+      <section class="card-grid dashboard-cards">
         ${statCard(t().dashboard.db, readinessLabel, state.dashboardReady ? t().dashboard.ready : t().dashboard.notReady, "var(--teal)")}
         ${statCard(t().dashboard.session, formatRole(state.session.role), state.session.fullName, "var(--amber)")}
         ${statCard(t().dashboard.waiting, String(summary.waiting_count || 0), `${queueEntries.length} ${t().queue.waitingList}`, "var(--blue)")}
         ${statCard(t().dashboard.noShowReview, String(noShowCandidates.length), `${t().dashboard.reviewStarts} ${reviewTime}`, "var(--red)")}
-        ${statCard(t().dashboard.modules, "8", state.language === "ar" ? "الرئيسية + المرضى + المواعيد + الطابور + لوحة الجهاز + الطباعة + البحث + الإعدادات" : "Dashboard + Patients + Appointments + Queue + Modality + Print + Search + Settings", "var(--blue)")}
         ${statCard(t().dashboard.date, localizedDate(), t().common.environment + `: ${state.dashboardLoading || state.queueLoading ? t().common.loading : "API"}`, "var(--green)")}
       </section>
 
       <section class="dual-grid">
         <article class="surface">
           <div class="section-head">
-            <h2 class="section-title">${escapeHtml(t().dashboard.moduleListTitle)}</h2>
-            <span class="chip success">${escapeHtml(t().dashboard.ready)}</span>
+            <h2 class="section-title">${escapeHtml(t().dashboard.nextSlotTitle)}</h2>
+            <span class="chip ${scheduleLoading ? "subtle" : "accent"}">${escapeHtml(
+              scheduleLoading ? t().common.loading : t().common.active
+            )}</span>
           </div>
-          <div class="list">
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.dashboard)}</div><div class="item-subtitle">/api/ready, /api/auth/me</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.patients)}</div><div class="item-subtitle">/api/patients POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.appointments)}</div><div class="item-subtitle">/api/appointments POST, /api/appointments/lookups</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.queue)}</div><div class="item-subtitle">/api/queue GET, /api/queue/scan, /api/queue/walk-in</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.modality)}</div><div class="item-subtitle">/api/modality/worklist, /api/modality/:id/complete</div></div><span class="chip accent">${escapeHtml(canAccessModalityBoard() ? t().common.active : t().common.readOnly)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.print)}</div><div class="item-subtitle">/api/appointments GET, /api/documents POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.search)}</div><div class="item-subtitle">/api/patients GET</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
-            <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.settings)}</div><div class="item-subtitle">/api/users GET/POST</div></div><span class="chip accent">${escapeHtml(isSupervisor() ? t().common.active : t().common.readOnly)}</span></div>
-          </div>
+          <div class="settings-summary">${escapeHtml(t().dashboard.nextSlotNote)}</div>
+          ${
+            scheduleLoading
+              ? `<div class="empty">${escapeHtml(t().common.loading)}</div>`
+              : scheduleSlots.length
+                ? `<div class="availability-grid">
+                    ${scheduleSlots
+                      .map(
+                        (slot) => `
+                          <div class="availability-card">
+                            <div class="availability-label">${escapeHtml(formatModalityName(slot.modality))}</div>
+                            <div class="availability-value">${escapeHtml(formatDaysUntilLabel(slot.daysUntil))}</div>
+                            <div class="availability-note">${escapeHtml(
+                              slot.nextDate ? formatDisplayDate(slot.nextDate) : t().dashboard.nextSlotUnavailable
+                            )}</div>
+                          </div>
+                        `
+                      )
+                      .join("")}
+                  </div>`
+                : `<div class="empty">${escapeHtml(t().common.noData)}</div>`
+          }
         </article>
 
         <article class="surface">
@@ -8435,6 +8595,12 @@ function renderSettingsMenu() {
       count: String(state.dicomDevices.length)
     },
     {
+      id: "modules",
+      title: t().settings.sectionModules,
+      body: t().settings.modulesBody,
+      count: String(allowedRoutes.length)
+    },
+    {
       id: "categories",
       title: t().settings.sectionCategories,
       body: t().settings.body,
@@ -8838,6 +9004,28 @@ function renderDicomDevicesList() {
   `;
 }
 
+function renderSettingsModulesSection() {
+  return `
+    <section class="surface">
+      <div class="section-head">
+        <h2 class="section-title">${escapeHtml(t().settings.modulesTitle)}</h2>
+        <span class="chip accent">${escapeHtml(String(allowedRoutes.length))}</span>
+      </div>
+      <div class="settings-summary">${escapeHtml(t().settings.modulesBody)}</div>
+      <div class="list">
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.dashboard)}</div><div class="item-subtitle">/api/ready, /api/auth/me</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.patients)}</div><div class="item-subtitle">/api/patients POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.appointments)}</div><div class="item-subtitle">/api/appointments POST, /api/appointments/lookups</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.queue)}</div><div class="item-subtitle">/api/queue GET, /api/queue/scan, /api/queue/walk-in</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.modality)}</div><div class="item-subtitle">/api/modality/worklist, /api/modality/:id/complete</div></div><span class="chip accent">${escapeHtml(canAccessModalityBoard() ? t().common.active : t().common.readOnly)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.print)}</div><div class="item-subtitle">/api/appointments GET, /api/documents POST</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.search)}</div><div class="item-subtitle">/api/patients GET</div></div><span class="chip accent">${escapeHtml(t().common.active)}</span></div>
+        <div class="item"><div class="item-copy"><div class="item-title">${escapeHtml(t().nav.settings)}</div><div class="item-subtitle">/api/users GET/POST</div></div><span class="chip accent">${escapeHtml(isSupervisor() ? t().common.active : t().common.readOnly)}</span></div>
+      </div>
+    </section>
+  `;
+}
+
 function renderSettingsSectionContent() {
   switch (state.settingsSection) {
     case "users":
@@ -8885,6 +9073,8 @@ function renderSettingsSectionContent() {
       return renderSettingsPacsSection();
     case "dicom":
       return renderSettingsDicomSection();
+    case "modules":
+      return renderSettingsModulesSection();
     case "categories":
       return `
         <section class="surface">
@@ -9096,15 +9286,6 @@ function renderAppFrame(content) {
     </div>
     ${renderToasts()}
   `;
-}
-
-function scrollCalendarDayListIntoView() {
-  requestAnimationFrame(() => {
-    const target = document.getElementById("calendar-day-list");
-    if (target) {
-      target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }
-  });
 }
 
 function renderLoading() {
