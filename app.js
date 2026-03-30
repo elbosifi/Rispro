@@ -2015,6 +2015,29 @@ function deriveDobFromNationalId(value) {
   return `${year}-01-01`;
 }
 
+function calculateAgeYearsFromDob(dobValue) {
+  const parsed = parseIsoDate(dobValue);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+  let age = today.getUTCFullYear() - parsed.getUTCFullYear();
+  const hasHadBirthday =
+    today.getUTCMonth() > parsed.getUTCMonth() ||
+    (today.getUTCMonth() === parsed.getUTCMonth() && today.getUTCDate() >= parsed.getUTCDate());
+
+  if (!hasHadBirthday) {
+    age -= 1;
+  }
+
+  if (!Number.isInteger(age) || age < 0 || age > 130) {
+    return null;
+  }
+
+  return age;
+}
+
 function getCurrentDateInputValue() {
   return formatDateInput(new Date());
 }
@@ -10054,6 +10077,33 @@ function handleInput(event) {
         if (dobInput) {
           dobInput.value = derivedDob;
         }
+        const derivedAge = calculateAgeYearsFromDob(derivedDob);
+        if (derivedAge !== null) {
+          state.patientForm.ageYears = String(derivedAge);
+          const ageInput = document.querySelector('#patient-form [name="ageYears"]');
+          if (ageInput) {
+            ageInput.value = state.patientForm.ageYears;
+          }
+        }
+      }
+    }
+
+    if (target.name === "estimatedDateOfBirth") {
+      if (!target.value.trim()) {
+        state.patientForm.ageYears = "";
+        const ageInput = document.querySelector('#patient-form [name="ageYears"]');
+        if (ageInput) {
+          ageInput.value = "";
+        }
+      } else {
+        const derivedAge = calculateAgeYearsFromDob(target.value);
+        if (derivedAge !== null) {
+          state.patientForm.ageYears = String(derivedAge);
+          const ageInput = document.querySelector('#patient-form [name="ageYears"]');
+          if (ageInput) {
+            ageInput.value = state.patientForm.ageYears;
+          }
+        }
       }
     }
 
@@ -10095,6 +10145,26 @@ function handleInput(event) {
     }
 
     state.patientEditForm[target.name] = target.value;
+
+    if (target.name === "estimatedDateOfBirth") {
+      if (!target.value.trim()) {
+        state.patientEditForm.ageYears = "";
+        const ageInput = document.querySelector('#patient-edit-form [name="ageYears"]');
+        if (ageInput) {
+          ageInput.value = "";
+        }
+      } else {
+        const derivedAge = calculateAgeYearsFromDob(target.value);
+        if (derivedAge !== null) {
+          state.patientEditForm.ageYears = String(derivedAge);
+          const ageInput = document.querySelector('#patient-edit-form [name="ageYears"]');
+          if (ageInput) {
+            ageInput.value = state.patientEditForm.ageYears;
+          }
+        }
+      }
+    }
+
     return;
   }
 
