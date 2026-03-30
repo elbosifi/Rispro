@@ -409,24 +409,16 @@ const copy = {
       resultsTitle: "PACS studies",
       noResults: "No PACS studies were found.",
       loading: "Searching PACS...",
+      testButton: "Test PACS connection",
+      testSuccess: "PACS connection succeeded.",
+      testFail: "PACS connection failed.",
+      testHint: "Sends a basic C-ECHO to the configured PACS.",
       fields: {
         patientName: "Patient name",
         patientId: "Patient ID",
         accessionNumber: "Accession number",
         studyDate: "Study date"
       }
-    },
-    pacs: {
-      testButton: "اختبار اتصال PACS",
-      testSuccess: "تم نجاح الاتصال بـ PACS.",
-      testFail: "فشل الاتصال بـ PACS.",
-      testHint: "يرسل فحص C-ECHO إلى PACS المعرّف."
-    },
-    pacs: {
-      testButton: "Test PACS connection",
-      testSuccess: "PACS connection succeeded.",
-      testFail: "PACS connection failed.",
-      testHint: "Sends a basic C-ECHO to the configured PACS."
     },
     calendar: {
       title: "Appointment calendar",
@@ -863,6 +855,10 @@ const copy = {
       resultsTitle: "دراسات PACS",
       noResults: "لم يتم العثور على دراسات في PACS.",
       loading: "جارٍ البحث في PACS...",
+      testButton: "اختبار اتصال PACS",
+      testSuccess: "تم نجاح الاتصال بـ PACS.",
+      testFail: "فشل الاتصال بـ PACS.",
+      testHint: "يرسل فحص C-ECHO إلى PACS المعرّف.",
       fields: {
         patientName: "اسم المريض",
         patientId: "رقم المريض",
@@ -2578,14 +2574,33 @@ function canAccessModalityBoard() {
 }
 
 async function api(path, options = {}) {
-  const response = await fetch(path, {
-    credentials: "same-origin",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {})
-    },
-    ...options
-  });
+  const { timeoutMs = 15000, headers: optionHeaders, ...fetchOptions } = options;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let response;
+
+  try {
+    response = await fetch(path, {
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": "application/json",
+        ...(optionHeaders || {})
+      },
+      signal: controller.signal,
+      ...fetchOptions
+    });
+  } catch (error) {
+    clearTimeout(timer);
+
+    if (error.name === "AbortError") {
+      throw new Error("The server took too long to respond.");
+    }
+
+    throw error;
+  }
+
+  clearTimeout(timer);
   const contentType = response.headers.get("content-type") || "";
   let payload = null;
 
@@ -4139,7 +4154,8 @@ async function searchPacsStudies() {
   try {
     const result = await api("/api/integrations/pacs-search", {
       method: "POST",
-      body: JSON.stringify({ patientId: patientNationalId })
+      body: JSON.stringify({ patientId: patientNationalId }),
+      timeoutMs: 20000
     });
     state.pacsFindResults = result.studies || [];
   } catch (error) {
@@ -4173,7 +4189,8 @@ async function searchPacsDirectory() {
   try {
     const result = await api("/api/integrations/pacs-search", {
       method: "POST",
-      body: JSON.stringify(state.pacsSearchForm)
+      body: JSON.stringify(state.pacsSearchForm),
+      timeoutMs: 20000
     });
     state.pacsSearchResults = result.studies || [];
     state.pacsSearchHasRun = true;
@@ -4212,7 +4229,8 @@ async function testPacsConnection() {
         calledAeTitle: String(pacs.calledAeTitle || "").trim(),
         callingAeTitle: String(pacs.callingAeTitle || "").trim() || "RISPRO",
         timeoutSeconds: String(pacs.timeoutSeconds || "").trim() || "10"
-      })
+      }),
+      timeoutMs: 20000
     });
     state.pacsTestSuccess = t().pacs.testSuccess;
   } catch (error) {
@@ -8593,7 +8611,13 @@ function render() {
     return;
   }
 
-  app.innerHTML = state.session ? renderAppFrame(renderPage()) : renderLogin();
+  try {
+    app.innerHTML = state.session ? renderAppFrame(renderPage()) : renderLogin();
+  } catch (error) {
+    state.authChecked = true;
+    state.appError = error?.message || "The page failed to render.";
+    app.innerHTML = state.session ? renderAppFrame("") : renderLogin();
+  }
 }
 
 function handleInput(event) {
@@ -9700,11 +9724,16 @@ document.addEventListener("paste", handlePaste);
 document.addEventListener("submit", handleSubmit);
 
 async function bootstrap() {
-  await refreshSession();
+  try {
+    await refreshSession();
 
-  if (state.session) {
-    await loadNameDictionary();
-    await hydrateRoute();
+    if (state.session) {
+      await loadNameDictionary();
+      await hydrateRoute();
+    }
+  } catch (error) {
+    state.authChecked = true;
+    state.appError = error?.message || "The application failed to load.";
   }
 
   render();
