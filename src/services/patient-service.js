@@ -84,6 +84,43 @@ function validatePhone(phone, fieldName, { required }) {
   return normalized;
 }
 
+function normalizeDateString(value, fieldName) {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return "";
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    throw new HttpError(400, `${fieldName} must be in YYYY-MM-DD format.`);
+  }
+
+  return raw;
+}
+
+function calculateAgeYearsFromDob(dob) {
+  const parsed = new Date(`${dob}T00:00:00Z`);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+  let age = today.getUTCFullYear() - parsed.getUTCFullYear();
+  const monthDiff = today.getUTCMonth() - parsed.getUTCMonth();
+  const dayDiff = today.getUTCDate() - parsed.getUTCDate();
+
+  if (monthDiff < 0 || (monthDiff === 0 && dayDiff < 0)) {
+    age -= 1;
+  }
+
+  if (!Number.isInteger(age) || age < 0 || age > 130) {
+    return null;
+  }
+
+  return age;
+}
+
 async function loadPatientRegistrationSettings() {
   const { rows } = await pool.query(
     `
@@ -112,6 +149,7 @@ function validatePatientPayload(payload, rules) {
     arabicFullName,
     englishFullName,
     ageYears,
+    estimatedDateOfBirth,
     sex,
     phone1,
     phone2 = "",
@@ -125,10 +163,39 @@ function validatePatientPayload(payload, rules) {
   const cleanNationalId = validateNationalId(nationalId, nationalIdConfirmation, rules.nationalIdRule);
   const cleanPhone1 = validatePhone(phone1, "phone1", { required: rules.phoneRule !== "optional" });
   const cleanPhone2 = validatePhone(phone2, "phone2", { required: false });
-  const parsedAge = Number(ageYears);
+  const dobValue = normalizeDateString(estimatedDateOfBirth, "estimatedDateOfBirth");
+  const hasDob = Boolean(dobValue);
+  const hasAgeValue = String(ageYears ?? "").trim() !== "";
+  const parsedAge = hasAgeValue ? Number(ageYears) : null;
 
-  if (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130) {
+  if (hasAgeValue && (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
     throw new HttpError(400, "ageYears must be a whole number between 0 and 130.");
+  }
+
+  if (rules.dobRule === "age_required" && !hasAgeValue) {
+    throw new HttpError(400, "ageYears is required.");
+  }
+
+  if (rules.dobRule === "dob_required" && !hasDob) {
+    throw new HttpError(400, "estimatedDateOfBirth is required.");
+  }
+
+  if (rules.dobRule === "age_or_dob_required" && !hasDob && !hasAgeValue) {
+    throw new HttpError(400, "ageYears or estimatedDateOfBirth is required.");
+  }
+
+  let resolvedAge = parsedAge;
+  let estimatedDob = "";
+
+  if (hasDob) {
+    estimatedDob = dobValue;
+    if (!hasAgeValue) {
+      resolvedAge = calculateAgeYearsFromDob(dobValue);
+    }
+  }
+
+  if (resolvedAge === null || resolvedAge === undefined) {
+    throw new HttpError(400, "ageYears is required when DOB cannot be calculated.");
   }
 
   return {
@@ -136,8 +203,8 @@ function validatePatientPayload(payload, rules) {
     arabicFullName: arabicFullName.trim(),
     englishFullName: String(englishFullName || "").trim(),
     normalizedArabicName: normalizeArabicName(arabicFullName),
-    parsedAge,
-    estimatedDob: formatDateForSql(buildEstimatedDobFromAge(parsedAge)),
+    parsedAge: resolvedAge,
+    estimatedDob: estimatedDob || formatDateForSql(buildEstimatedDobFromAge(resolvedAge)),
     sex,
     cleanPhone1,
     cleanPhone2,

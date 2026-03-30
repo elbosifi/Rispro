@@ -5646,24 +5646,6 @@ function renderLogin() {
   `;
 }
 
-function renderDashboardHero() {
-  const readyLabel =
-    state.dashboardReady == null
-      ? t().common.loading
-      : state.dashboardReady
-        ? t().dashboard.ready
-        : t().dashboard.notReady;
-
-  return `
-    <section class="dashboard-hero">
-      <span class="chip success">${escapeHtml(readyLabel)}</span>
-      <div class="dashboard-hero-title">${escapeHtml(t().dashboard.title)}</div>
-      <div class="dashboard-hero-body">${escapeHtml(t().dashboard.body)}</div>
-      <button type="button" class="button-primary" data-route="patients">${escapeHtml(t().dashboard.primary)}</button>
-    </section>
-  `;
-}
-
 function renderDashboard() {
   const readinessLabel =
     state.dashboardReady == null
@@ -5682,7 +5664,13 @@ function renderDashboard() {
 
   return `
     <div class="page">
-      ${renderDashboardHero()}
+      ${pageHero(
+        t().dashboard.title,
+        t().dashboard.body,
+        `<button type="button" class="button-primary" data-route="patients">${escapeHtml(t().dashboard.primary)}</button>
+         <button type="button" class="button-secondary" data-route="queue">${escapeHtml(t().dashboard.scanShortcut)}</button>`,
+        t().dashboard.ready
+      )}
 
       ${alertMarkup("error", state.dashboardError || state.queueError)}
       ${alertMarkup("error", state.dashboardScheduleError)}
@@ -9853,12 +9841,6 @@ function renderAppFrame(content) {
               <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
-          </div>
-
-          <div class="appbar-shortcuts">
-            <button class="button-ghost appbar-shortcut" type="button" data-route="registrations">${escapeHtml(t().nav.registrations)}</button>
-            <button class="button-ghost appbar-shortcut" type="button" data-route="dashboard">${escapeHtml(t().nav.dashboard)}</button>
-            <button class="button-ghost appbar-shortcut" type="button" data-route="appointments">${escapeHtml(t().nav.appointments)}</button>
           </div>
 
           <details class="nav-menu">
