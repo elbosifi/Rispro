@@ -2349,33 +2349,115 @@ function openAppointmentSlipPrint(source) {
     return;
   }
 
-  // Validate print data
-  if (!validatePrintData(slip)) {
-    const errorMsg = state.language === "ar" 
-      ? "بيانات الطباعة غير صالحة." 
-      : "Invalid print data.";
-    console.error(errorMsg);
-    alert(errorMsg);
-    return;
-  }
-
   const printWindow = window.open("", "_blank", "width=900,height=700");
 
   if (!printWindow) {
     throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
   }
 
-  // Generate HTML using template service
-  const htmlContent = generateAppointmentSlipHtml(slip, state.language);
+  const patientArabic = slip.patientArabicName || "—";
+  const patientEnglish = slip.patientEnglishName || "—";
+  const modalityInstruction = slip.modalityInstruction || "—";
+  const examInstruction = slip.examInstruction || "—";
+  const registrationDate = slip.registrationDate ? formatDisplayDate(slip.registrationDate) : "—";
+  const registrationDateLabel =
+    state.language === "ar"
+      ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
+      : "Registration date (date the appointment was booked, not exam date)";
+  const barcodeMarkup = buildCode39Svg(slip.accessionNumber);
 
-  printWindow.document.write(htmlContent);
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(slip.accessionNumber)}</title>
+        <style>
+          @page { size: A5 portrait; margin: 10mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .sheet { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 18px; box-sizing: border-box; }
+          .top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+          .eyebrow { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; }
+          .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
+          .subtitle { color: #4b5563; font-size: 15px; }
+          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+          .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+          .card.full { grid-column: 1 / -1; }
+          .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+          .value { font-size: 16px; font-weight: 600; }
+          .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
+          .barcode { margin-top: 24px; border: 1px dashed #9ca3af; border-radius: 10px; padding: 16px; text-align: center; }
+          .barcode-lines { margin-bottom: 10px; background: #fff; padding: 6px; display: flex; justify-content: center; }
+          .barcode-svg { display: block; height: 72px; width: min(540px, 100%); }
+          .barcode-text { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
+          .footnote { margin-top: 10px; font-size: 11px; color: #6b7280; text-align: left; line-height: 1.45; }
+        </style>
+      </head>
+      <body>
+        <div class="sheet">
+          <div class="top">
+            <div>
+              <div class="eyebrow">${escapeHtml(t().print.slipPreview)}</div>
+              <div class="title">${escapeHtml(slip.accessionNumber)}</div>
+              <div class="subtitle">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
+              <div class="value">${escapeHtml(patientArabic)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
+              <div class="value">${escapeHtml(patientEnglish)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().appointments.fields.appointmentDate)}</div>
+              <div class="value">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
+              <div class="value">${escapeHtml(slip.modalityName)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
+              <div class="value">${escapeHtml(slip.examName)}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(t().print.fields.modalityInstructions)}</div>
+              <div class="value small">${escapeHtml(modalityInstruction)}</div>
+            </div>
+            <div class="card full">
+              <div class="label">${escapeHtml(t().print.fields.examInstructions)}</div>
+              <div class="value small">${escapeHtml(examInstruction)}</div>
+            </div>
+          </div>
+          ${
+            slip.notes
+              ? `
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
+              <div class="value small">${escapeHtml(slip.notes)}</div>
+            </div>
+          </div>`
+              : ""
+          }
+          <div class="barcode">
+            <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
+            <div class="barcode-lines">${barcodeMarkup}</div>
+            <div class="barcode-text">${escapeHtml(slip.accessionNumber)}</div>
+            <div class="footnote">${escapeHtml(`${registrationDateLabel}: ${registrationDate}`)}</div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
   printWindow.document.close();
   printWindow.focus();
-
-  // Auto-print with short delay to ensure rendering
-  setTimeout(() => {
-    printWindow.print();
-  }, 250);
+  printWindow.print();
 }
 
 function openDailyListPrint(appointments, title) {
@@ -2389,16 +2471,69 @@ function openDailyListPrint(appointments, title) {
     throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
   }
 
-  // Generate HTML using template service
-  const htmlContent = generateDailyListHtml(appointments, title, state.language);
+  const tableRows = appointments
+    .map(
+      (appointment) => `
+        <tr>
+          <td>${escapeHtml(appointment.accession_number || "")}</td>
+          <td>${escapeHtml(appointment.arabic_full_name || "")}</td>
+          <td>${escapeHtml(appointment.english_full_name || "")}</td>
+          <td>${escapeHtml(formatExamName(appointment))}</td>
+          <td>${escapeHtml(formatDisplayDate(appointment.appointment_date))}</td>
+          <td>${escapeHtml(appointment.status || "")}</td>
+        </tr>
+      `
+    )
+    .join("");
 
-  printWindow.document.write(htmlContent);
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(title)}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .wrap { padding: 4mm 0; }
+          .head { margin-bottom: 12px; }
+          .title { font-size: 22px; font-weight: 700; }
+          .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+          .table-wrapper { width: 100%; overflow-x: auto; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+          th { background: #f3f4f6; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="head">
+            <div class="title">${escapeHtml(title)}</div>
+            <div class="meta">${escapeHtml(formatDisplayDate(new Date()))}</div>
+          </div>
+          <div class="table-wrapper">
+            <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().appointments.fields.accessionNumber)}</th>
+                <th>${escapeHtml(t().patients.fields.arabicFullName)}</th>
+                <th>${escapeHtml(t().patients.fields.englishFullName)}</th>
+                <th>${escapeHtml(appointmentFieldLabel("examType"))}</th>
+                <th>${escapeHtml(t().appointments.fields.appointmentDate)}</th>
+                <th>${escapeHtml(t().common.status)}</th>
+              </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
+
   printWindow.document.close();
   printWindow.focus();
-
-  setTimeout(() => {
-    printWindow.print();
-  }, 250);
+  printWindow.print();
 }
 
 function openStatisticsPrint(snapshot, filters = {}) {
@@ -2418,16 +2553,155 @@ function openStatisticsPrint(snapshot, filters = {}) {
     throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
   }
 
-  // Generate HTML using template service
-  const htmlContent = generateStatisticsHtml(snapshot, filters, state.language);
+  const selectedModality = state.appointmentLookups.modalities.find(
+    (entry) => String(entry.id) === String(filters.modalityId || "")
+  );
+  const modalityLabel = selectedModality ? formatModalityName(selectedModality) : t().common.optional;
+  const rangeText =
+    filters.dateFrom || filters.dateTo
+      ? `${filters.dateFrom || filters.dateTo} → ${filters.dateTo || filters.dateFrom}`
+      : filters.date || "";
 
-  printWindow.document.write(htmlContent);
+  const modalityRows = modalityBreakdown
+    .map((entry) => {
+      const total = Number(entry.total_count || 0);
+      const noShowRate = formatPercent(entry.no_show_count, total);
+      return `
+        <tr>
+          <td>${escapeHtml(formatModalityName(entry) || `#${entry.modality_id}`)}</td>
+          <td>${escapeHtml(String(total))}</td>
+          <td>${escapeHtml(String(entry.completed_count || 0))}</td>
+          <td>${escapeHtml(noShowRate)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const statusRows = statusBreakdown
+    .map(
+      (entry) => `
+        <tr>
+          <td>${escapeHtml(formatAppointmentStatus(entry.status))}</td>
+          <td>${escapeHtml(String(entry.total_count || 0))}</td>
+          <td>${escapeHtml(formatPercent(entry.total_count, totalAppointments))}</td>
+        </tr>
+      `
+    )
+    .join("");
+
+  const dailyRows = dailyBreakdown
+    .map((entry) => {
+      const total = Number(entry.total_count || 0);
+      const noShowRate = formatPercent(entry.no_show_count, total);
+      return `
+        <tr>
+          <td>${escapeHtml(normalizeDateText(entry.appointment_date))}</td>
+          <td>${escapeHtml(String(total))}</td>
+          <td>${escapeHtml(String(entry.completed_count || 0))}</td>
+          <td>${escapeHtml(noShowRate)}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(t().statistics.title)}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .wrap { padding: 4mm 0; }
+          .head { margin-bottom: 16px; }
+          .title { font-size: 22px; font-weight: 700; }
+          .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+          .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+          .table-wrapper { width: 100%; overflow-x: auto; }
+          .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
+          .card .label { color: #6b7280; font-size: 11px; margin-bottom: 6px; }
+          .card .value { font-size: 18px; font-weight: 700; }
+          h2 { margin: 20px 0 8px; font-size: 15px; }
+          table { width: 100%; border-collapse: collapse; font-size: 12px; }
+          th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
+          th { background: #f3f4f6; font-weight: 700; }
+        </style>
+      </head>
+      <body>
+        <div class="wrap">
+          <div class="head">
+            <div class="title">${escapeHtml(t().statistics.title)}</div>
+            <div class="meta">${escapeHtml(`${t().print.date}: ${rangeText || "—"}`)}</div>
+            <div class="meta">${escapeHtml(`${t().statistics.modality}: ${modalityLabel}`)}</div>
+          </div>
+
+          <div class="summary">
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.totalAppointments)}</div>
+              <div class="value">${escapeHtml(String(totalAppointments))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.uniquePatients)}</div>
+              <div class="value">${escapeHtml(String(summary.unique_patients || 0))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().statistics.noShowRate)}</div>
+              <div class="value">${escapeHtml(formatPercent(summary.no_show_count, totalAppointments))}</div>
+            </div>
+          </div>
+
+          <h2>${escapeHtml(t().statistics.byModalityTitle)}</h2>
+          <div class="table-wrapper">
+            <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().statistics.modality)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.completed)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${modalityRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+            </table>
+          </div>
+
+          <h2>${escapeHtml(t().statistics.byStatusTitle)}</h2>
+          <div class="table-wrapper">
+            <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().common.status)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${statusRows || `<tr><td colspan="3">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+            </table>
+          </div>
+
+          <h2>${escapeHtml(t().statistics.byDayTitle)}</h2>
+          <div class="table-wrapper">
+            <table>
+            <thead>
+              <tr>
+                <th>${escapeHtml(t().print.date)}</th>
+                <th>${escapeHtml(t().statistics.totalAppointments)}</th>
+                <th>${escapeHtml(t().statistics.completed)}</th>
+                <th>${escapeHtml(t().statistics.noShowRate)}</th>
+              </tr>
+            </thead>
+            <tbody>${dailyRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
+            </table>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
+
   printWindow.document.close();
   printWindow.focus();
-
-  setTimeout(() => {
-    printWindow.print();
-  }, 250);
+  printWindow.print();
 }
 
 function appointmentFieldLabel(key) {
