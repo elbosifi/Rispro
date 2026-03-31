@@ -110,6 +110,32 @@ button {
   gap: 8px;
 }
 
+.appbar-language {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.appbar-refresh {
+  border: 1px solid var(--line-strong);
+  background: rgba(255, 255, 255, 0.12);
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: 1.2rem;
+  color: var(--text);
+  cursor: pointer;
+  transition: border 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.appbar-refresh:hover {
+  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
 .top-nav-row {
   display: flex;
   flex-wrap: wrap;
@@ -191,7 +217,7 @@ button {
 
 .brand {
   position: relative;
-  width: 100%;
+  flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;

@@ -9975,7 +9975,12 @@ function renderAppFrame(content) {
               <span></span>
               <span></span>
             </button>
-            ${languageToggle()}
+            <div class="appbar-language">${languageToggle()}</div>
+            <button class="appbar-refresh" type="button" data-action="refresh-route" aria-label="${escapeHtml(
+              t().common.refresh
+            )}">
+              ⟳
+            </button>
           </div>
         </header>
         <nav id="main-nav" class="top-nav-row${state.mobileNavOpen ? " is-open nav-stack" : ""}">
@@ -10502,6 +10507,14 @@ function handleClick(event) {
     event.preventDefault();
     state.mobileNavOpen = !state.mobileNavOpen;
     render();
+    return;
+  }
+
+  if (target.dataset.action === "refresh-route") {
+    event.preventDefault();
+    if (typeof hydrateRoute === "function") {
+      void hydrateRoute();
+    }
     return;
   }
 
