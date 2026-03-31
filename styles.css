@@ -188,6 +188,8 @@ button {
   font-weight: 800;
   font-size: 1.08rem;
   margin: 0;
+  color: #140f0c;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 .brand-title-alt {
@@ -295,6 +297,7 @@ button {
   font-size: clamp(1rem, 1.8vw, 1.35rem);
   font-weight: 800;
   text-align: left;
+  color: #150f0a;
 }
 
 .topbar-subtitle {
@@ -392,6 +395,8 @@ button {
 .hero h1 {
   margin: 0;
   font-size: clamp(1.6rem, 3vw, 2.4rem);
+  color: #0d1218;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
 }
 
 .hero p {
@@ -555,6 +560,7 @@ button {
   margin: 0;
   font-size: clamp(1rem, 1.4vw, 1.3rem);
   font-weight: 800;
+  color: #1a1410;
 }
 
 .section-head {

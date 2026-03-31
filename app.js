@@ -53,6 +53,7 @@ const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
   route: allowedRoutes.includes(localStorage.getItem("rispro-route")) ? localStorage.getItem("rispro-route") : DEFAULT_ROUTE,
+  mobileNavOpen: false,
   authChecked: false,
   session: null,
   loginForm: {
