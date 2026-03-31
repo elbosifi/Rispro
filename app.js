@@ -6170,28 +6170,42 @@ function renderPacsFindResults() {
   }
 
   return `
-    <div class="list">
-      ${state.pacsFindResults
-        .map((study) => {
-          const patientId = study.patientId || "—";
-          const patientName = study.patientName || "—";
-          const accessionNumber = study.accessionNumber || "—";
-          const modality = study.modality || "—";
-          const description = study.studyDescription || "—";
-          const studyDate = study.studyDate ? formatDicomDate(study.studyDate) : "—";
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>${escapeHtml(t().appointments.fields.pacsPatientId)}</th>
+            <th>${escapeHtml(t().pacs.fields.patientName)}</th>
+            <th>${escapeHtml(t().appointments.fields.accessionNumber)}</th>
+            <th>${escapeHtml(t().appointments.fields.pacsModality)}</th>
+            <th>${escapeHtml(t().appointments.fields.pacsStudyDescription)}</th>
+            <th>${escapeHtml(t().appointments.fields.pacsStudyDate)}</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${state.pacsFindResults
+            .map((study) => {
+              const patientId = study.patientId || "—";
+              const patientName = study.patientName || "—";
+              const accessionNumber = study.accessionNumber || "—";
+              const modality = study.modality || "—";
+              const description = study.studyDescription || "—";
+              const studyDate = study.studyDate ? formatDicomDate(study.studyDate) : "—";
 
-          return `
-            <div class="item">
-              <div class="item-copy">
-                <div class="item-title">${escapeHtml(description || patientName)}</div>
-                <div class="item-subtitle">${escapeHtml(
-                  `${patientName} • ${t().appointments.fields.pacsPatientId}: ${patientId} • ${accessionNumber} • ${t().appointments.fields.pacsModality}: ${modality} • ${t().appointments.fields.pacsStudyDate}: ${studyDate}`
-                )}</div>
-              </div>
-            </div>
-          `;
-        })
-        .join("")}
+              return `
+                <tr>
+                  <td>${escapeHtml(patientId)}</td>
+                  <td>${escapeHtml(patientName)}</td>
+                  <td>${escapeHtml(accessionNumber)}</td>
+                  <td>${escapeHtml(modality)}</td>
+                  <td>${escapeHtml(description)}</td>
+                  <td>${escapeHtml(studyDate)}</td>
+                </tr>
+              `;
+            })
+            .join("")}
+        </tbody>
+      </table>
     </div>
   `;
 }
