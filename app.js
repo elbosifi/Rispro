@@ -754,8 +754,11 @@ const copy = {
       required: "Required",
       close: "Close",
       menu: "Menu",
+      navigation: "Navigation",
       open: "Open",
       refresh: "Refresh",
+      darkMode: "Dark mode",
+      lightMode: "Light mode",
       arabic: "Arabic",
       english: "English",
       healthOk: "Connected",
@@ -1249,8 +1252,11 @@ const copy = {
       required: "إلزامي",
       close: "إغلاق",
       menu: "القائمة",
+      navigation: "التنقل",
       open: "فتح",
       refresh: "تحديث",
+      darkMode: "الوضع الداكن",
+      lightMode: "الوضع الفاتح",
       arabic: "العربية",
       english: "English",
       healthOk: "متصل",
@@ -2821,10 +2827,16 @@ function setLanguage(language) {
   render();
 }
 
+function applyTheme(theme) {
+  const normalizedTheme = theme === "dark" ? "dark" : "light";
+  state.theme = normalizedTheme;
+  document.documentElement.setAttribute("data-theme", normalizedTheme);
+  return normalizedTheme;
+}
+
 function setTheme(theme) {
-  state.theme = theme;
-  localStorage.setItem("rispro-theme", theme);
-  document.documentElement.setAttribute("data-theme", theme);
+  const normalizedTheme = applyTheme(theme);
+  localStorage.setItem("rispro-theme", normalizedTheme);
   render();
 }
 
@@ -11365,6 +11377,7 @@ document.addEventListener("change", handleInput);
 document.addEventListener("click", handleClick);
 document.addEventListener("paste", handlePaste);
 document.addEventListener("submit", handleSubmit);
+applyTheme(state.theme);
 
 async function bootstrap() {
   try {
