@@ -108,6 +108,8 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .appbar-language {
@@ -178,9 +180,10 @@ button {
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid var(--line-strong);
   color: var(--text);
-  padding: 10px 16px;
+  padding: 7px 12px;
   border-radius: 999px;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
+  min-height: 38px;
   white-space: nowrap;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -2031,6 +2034,9 @@ html[dir="rtl"] .brand-text {
     width: 100%;
     margin: 6px 0;
     justify-content: center;
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 0.82rem;
   }
 
   .topbar-actions {

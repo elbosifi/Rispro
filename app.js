@@ -9949,8 +9949,6 @@ function renderPage() {
 }
 
 function renderAppFrame(content) {
-  const routeLabel = t().nav[state.route];
-
   return `
     <div class="shell">
       <div class="layout">
@@ -9981,6 +9979,14 @@ function renderAppFrame(content) {
             )}">
               ⟳
             </button>
+            <div class="user-chip">
+              <div class="avatar">${escapeHtml(initials(state.session.fullName))}</div>
+              <div>
+                <div>${escapeHtml(state.session.fullName)}</div>
+                <div class="small">${escapeHtml(`${t().userRoleLabel} ${formatRole(state.session.role)}`)}</div>
+              </div>
+            </div>
+            <button class="button-ghost" type="button" id="logout-button">${escapeHtml(t().common.logout)}</button>
           </div>
         </header>
         <nav id="main-nav" class="top-nav-row${state.mobileNavOpen ? " is-open nav-stack" : ""}">
@@ -9996,29 +10002,6 @@ function renderAppFrame(content) {
         </nav>
 
         <div class="content">
-          <header class="topbar">
-            <div>
-              <div class="topbar-path">${escapeHtml(t().nav.dashboard)} / ${escapeHtml(routeLabel)}</div>
-              <div class="topbar-title">${escapeHtml(t().topTitle)}</div>
-              <div class="topbar-subtitle">${escapeHtml(t().topSubtitle)}</div>
-            </div>
-
-            <div class="topbar-actions">
-              <div class="topbar-meta">
-                <span class="chip subtle">${escapeHtml(localizedDate())}</span>
-                <span class="chip accent">${escapeHtml(routeLabel)}</span>
-              </div>
-              <div class="user-chip">
-                <div class="avatar">${escapeHtml(initials(state.session.fullName))}</div>
-                <div>
-                  <div>${escapeHtml(state.session.fullName)}</div>
-                  <div class="small">${escapeHtml(`${t().userRoleLabel} ${formatRole(state.session.role)}`)}</div>
-                </div>
-              </div>
-              <button class="button-ghost" type="button" id="logout-button">${escapeHtml(t().common.logout)}</button>
-            </div>
-          </header>
-
           ${state.appError ? alertMarkup("error", state.appError) : ""}
           ${content}
         </div>
