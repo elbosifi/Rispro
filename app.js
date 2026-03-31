@@ -9952,54 +9952,56 @@ function renderAppFrame(content) {
   return `
     <div class="shell">
       <div class="layout">
-        <header class="appbar">
-          <div class="brand">
-            <img class="brand-logo" src="/assets/nccb-logo.png" alt="National Cancer Center Benghazi logo" />
-            <div class="brand-text">
-              <div class="brand-title">${escapeHtml(t().appName)}</div>
-              <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
-              <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
-            </div>
-          </div>
-          <div class="appbar-actions">
-            <button
-              class="top-nav-toggle"
-              type="button"
-              aria-label="${escapeHtml(t().common.navigation)}"
-              aria-expanded="${state.mobileNavOpen ? "true" : "false"}"
-              data-action="toggle-mobile-nav"
-            >
-              <span></span>
-              <span></span>
-              <span></span>
-            </button>
-            <div class="appbar-language">${languageToggle()}</div>
-            <button class="appbar-refresh" type="button" data-action="refresh-route" aria-label="${escapeHtml(
-              t().common.refresh
-            )}">
-              ⟳
-            </button>
-            <div class="user-chip">
-              <div class="avatar">${escapeHtml(initials(state.session.fullName))}</div>
-              <div>
-                <div>${escapeHtml(state.session.fullName)}</div>
-                <div class="small">${escapeHtml(`${t().userRoleLabel} ${formatRole(state.session.role)}`)}</div>
+        <div class="appbar-wrap">
+          <header class="appbar">
+            <div class="brand">
+              <img class="brand-logo" src="/assets/nccb-logo.png" alt="National Cancer Center Benghazi logo" />
+              <div class="brand-text">
+                <div class="brand-title">${escapeHtml(t().appName)}</div>
+                <div class="brand-title-alt">${escapeHtml(t().appNameAlternate)}</div>
+                <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
               </div>
             </div>
-            <button class="button-ghost" type="button" id="logout-button">${escapeHtml(t().common.logout)}</button>
-          </div>
-        </header>
-        <nav id="main-nav" class="top-nav-row${state.mobileNavOpen ? " is-open nav-stack" : ""}">
-          ${allowedRoutes
-            .map(
-              (route) => `
-                <button class="top-nav-button ${state.route === route ? "active" : ""}" type="button" data-route="${route}">
-                  ${escapeHtml(t().nav[route])}
-                </button>
-              `
-            )
-            .join("")}
-        </nav>
+            <div class="appbar-actions">
+              <button
+                class="top-nav-toggle"
+                type="button"
+                aria-label="${escapeHtml(t().common.navigation)}"
+                aria-expanded="${state.mobileNavOpen ? "true" : "false"}"
+                data-action="toggle-mobile-nav"
+              >
+                <span></span>
+                <span></span>
+                <span></span>
+              </button>
+              <div class="appbar-language">${languageToggle()}</div>
+              <button class="appbar-refresh" type="button" data-action="refresh-route" aria-label="${escapeHtml(
+                t().common.refresh
+              )}">
+                ⟳
+              </button>
+              <div class="user-chip">
+                <div class="avatar">${escapeHtml(initials(state.session.fullName))}</div>
+                <div>
+                  <div>${escapeHtml(state.session.fullName)}</div>
+                  <div class="small">${escapeHtml(`${t().userRoleLabel} ${formatRole(state.session.role)}`)}</div>
+                </div>
+              </div>
+              <button class="button-ghost" type="button" id="logout-button">${escapeHtml(t().common.logout)}</button>
+            </div>
+          </header>
+          <nav id="main-nav" class="top-nav-row${state.mobileNavOpen ? " is-open" : ""}">
+            ${allowedRoutes
+              .map(
+                (route) => `
+                  <button class="top-nav-button ${state.route === route ? "active" : ""}" type="button" data-route="${route}">
+                    ${escapeHtml(t().nav[route])}
+                  </button>
+                `
+              )
+              .join("")}
+          </nav>
+        </div>
 
         <div class="content">
           ${state.appError ? alertMarkup("error", state.appError) : ""}
