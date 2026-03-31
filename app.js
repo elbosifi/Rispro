@@ -439,32 +439,22 @@ const copy = {
       }
     },
     pacs: {
-      title: "PACS C-FIND Requests",
-      body: "Search and review PACS studies with advanced filtering. View all C-FIND request results in a compact table format.",
+      title: "PACS search",
+      body: "Search PACS studies by patient name, patient ID, accession number, or date.",
       searchButton: "Search PACS",
-      resetButton: "Clear",
-      resultsTitle: "C-FIND Results",
-      noResults: "No studies found.",
-      loading: "Searching...",
-      testButton: "Test Connection",
-      testSuccess: "PACS connection successful.",
+      resetButton: "Clear search",
+      resultsTitle: "PACS studies",
+      noResults: "No PACS studies were found.",
+      loading: "Searching PACS...",
+      testButton: "Test PACS connection",
+      testSuccess: "PACS connection succeeded.",
       testFail: "PACS connection failed.",
-      testHint: "Sends a C-ECHO to verify connectivity.",
-      shortcuts: {
-        today: "Today",
-        yesterday: "Yesterday"
-      },
-      filters: {
-        modality: "Modality",
-        allModalities: "All Modalities"
-      },
+      testHint: "Sends a basic C-ECHO to the configured PACS.",
       fields: {
-        patientName: "Patient Name",
+        patientName: "Patient name",
         patientId: "Patient ID",
-        accessionNumber: "Accession #",
-        studyDate: "Study Date",
-        modality: "Modality",
-        studyDescription: "Study Description"
+        accessionNumber: "Accession number",
+        studyDate: "Study date"
       }
     },
     calendar: {
@@ -946,32 +936,22 @@ const copy = {
       }
     },
     pacs: {
-      title: "طلبات PACS C-FIND",
-      body: "ابحث واستعرض دراسات PACS مع فلاتر متقدمة. اعرض جميع نتائج طلبات C-FIND في جدول مدمج.",
+      title: "بحث PACS",
+      body: "ابحث في دراسات PACS باسم المريض أو رقم المريض أو رقم الدخول أو التاريخ.",
       searchButton: "بحث PACS",
-      resetButton: "مسح",
-      resultsTitle: "نتائج C-FIND",
-      noResults: "لم يتم العثور على دراسات.",
-      loading: "جارٍ البحث...",
-      testButton: "اختبار الاتصال",
+      resetButton: "مسح البحث",
+      resultsTitle: "دراسات PACS",
+      noResults: "لم يتم العثور على دراسات في PACS.",
+      loading: "جارٍ البحث في PACS...",
+      testButton: "اختبار اتصال PACS",
       testSuccess: "تم نجاح الاتصال بـ PACS.",
       testFail: "فشل الاتصال بـ PACS.",
-      testHint: "يرسل فحص C-ECHO للتحقق من الاتصال.",
-      shortcuts: {
-        today: "اليوم",
-        yesterday: "أمس"
-      },
-      filters: {
-        modality: "الجهاز",
-        allModalities: "كل الأجهزة"
-      },
+      testHint: "يرسل فحص C-ECHO إلى PACS المعرّف.",
       fields: {
         patientName: "اسم المريض",
         patientId: "رقم المريض",
         accessionNumber: "رقم الدخول",
-        studyDate: "تاريخ الدراسة",
-        modality: "الجهاز",
-        studyDescription: "وصف الدراسة"
+        studyDate: "تاريخ الدراسة"
       }
     },
     calendar: {
@@ -1664,8 +1644,7 @@ function defaultPacsSearchForm() {
     patientName: "",
     patientId: "",
     accessionNumber: "",
-    studyDate: "",
-    modality: ""
+    studyDate: ""
   };
 }
 
