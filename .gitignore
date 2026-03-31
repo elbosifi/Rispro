@@ -1,1 +1,4 @@
-Nothing needs to be added to .gitignore since only a source file (app.js) was modified and there are no build artifacts, dependencies, or temporary files in the changes.
+node_modules/
+.DS_Store
+.env
+.env.local
