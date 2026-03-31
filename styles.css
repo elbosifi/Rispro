@@ -190,14 +190,15 @@ button {
 }
 
 .brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  justify-content: center;
+  position: relative;
   width: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .brand-logo {
+  position: absolute;
   width: 56px;
   height: 56px;
   border-radius: 18px;
@@ -205,14 +206,20 @@ button {
   background: var(--surface-strong);
   padding: 4px;
   box-shadow: var(--shadow-soft);
+  left: 12px;
 }
 
 .brand-text {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  align-items: flex-start;
-  text-align: left;
+  align-items: center;
+  text-align: center;
+}
+
+html[dir="rtl"] .brand-logo {
+  left: auto;
+  right: 12px;
 }
 
 .brand-title {
