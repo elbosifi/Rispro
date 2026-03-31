@@ -13,23 +13,6 @@ const BASE_DICTIONARY = {
   "التركي": "Al-Turki"
 };
 
-// Import print module utilities
-import {
-  escapeHtml as escapeHtmlUtil,
-  validatePrintData,
-  buildCode39Svg as buildCode39SvgUtil,
-  validateBarcodeInput
-} from './src/utils/print/index.js';
-import {
-  buildAppointmentSlipData as buildSlipData,
-  generateAppointmentSlipHtml,
-  generateDailyListHtml,
-  generateStatisticsHtml,
-  formatDisplayDate as formatDisplayDateUtil,
-  formatExamName as formatExamNameUtil,
-  appointmentFieldLabel as appointmentFieldLabelUtil
-} from './src/services/print/index.js';
-
 const DEFAULT_CITY_OPTIONS = [
   "Tripoli",
   "Benghazi",
@@ -2360,69 +2343,121 @@ function buildAppointmentSlipData(source) {
 }
 
 function openAppointmentSlipPrint(source) {
-  try {
-    // Build slip data using modular service
-    const slip = buildSlipData(source);
+  const slip = buildAppointmentSlipData(source);
 
-    if (!slip) {
-      const errorMsg = state.language === "ar" 
-        ? "تعذر تحضير بيانات الوعد للطباعة." 
-        : "Unable to prepare appointment slip data.";
-      console.error(errorMsg);
-      return;
-    }
-
-    // Validate required fields
-    const validation = validatePrintData(slip, [
-      'accessionNumber',
-      'patientArabicName',
-      'appointmentDate'
-    ]);
-
-    if (!validation.isValid) {
-      const errorMsg = state.language === "ar"
-        ? `بيانات غير صالحة: ${validation.errors.join(', ')}`
-        : `Invalid data: ${validation.errors.join(', ')}`;
-      console.error(errorMsg);
-      return;
-    }
-
-    // Validate barcode
-    const barcodeValidation = validateBarcodeInput(slip.accessionNumber);
-    if (!barcodeValidation.isValid) {
-      console.error(`Barcode error: ${barcodeValidation.error}`);
-    }
-
-    // Generate HTML using template service
-    const html = generateAppointmentSlipHtml(
-      slip,
-      t(),
-      state.language,
-      formatDisplayDate
-    );
-
-    // Open print window with configured size
-    const printWindow = window.open("", "_blank", "width=900,height=700");
-
-    if (!printWindow) {
-      throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
-    }
-
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    
-    // Auto-print after short delay to ensure rendering
-    setTimeout(() => {
-      printWindow.print();
-    }, 250);
-  } catch (error) {
-    console.error('Print slip error:', error);
-    const errorMsg = state.language === "ar"
-      ? "حدث خطأ أثناء الطباعة: " + error.message
-      : "Error during printing: " + error.message;
-    alert(errorMsg);
+  if (!slip) {
+    return;
   }
+
+  const printWindow = window.open("", "_blank", "width=900,height=700");
+
+  if (!printWindow) {
+    throw new Error(state.language === "ar" ? "تعذر فتح نافذة الطباعة." : "Unable to open the print window.");
+  }
+
+  const patientArabic = slip.patientArabicName || "—";
+  const patientEnglish = slip.patientEnglishName || "—";
+  const modalityInstruction = slip.modalityInstruction || "—";
+  const examInstruction = slip.examInstruction || "—";
+  const registrationDate = slip.registrationDate ? formatDisplayDate(slip.registrationDate) : "—";
+  const registrationDateLabel =
+    state.language === "ar"
+      ? "تاريخ التسجيل (تاريخ حجز الموعد وليس تاريخ الفحص)"
+      : "Registration date (date the appointment was booked, not exam date)";
+  const barcodeMarkup = buildCode39Svg(slip.accessionNumber);
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="${escapeHtml(state.language)}">
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(slip.accessionNumber)}</title>
+        <style>
+          @page { size: A5 portrait; margin: 10mm; }
+          body { font-family: Arial, sans-serif; margin: 0; color: #1f2937; }
+          .sheet { width: 100%; border: 1px solid #d1d5db; border-radius: 12px; padding: 18px; box-sizing: border-box; }
+          .top { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 18px; }
+          .eyebrow { font-size: 12px; text-transform: uppercase; color: #6b7280; letter-spacing: 0.08em; }
+          .title { font-size: 28px; font-weight: 700; margin: 8px 0 4px; }
+          .subtitle { color: #4b5563; font-size: 15px; }
+          .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+          .card { border: 1px solid #e5e7eb; border-radius: 10px; padding: 12px; }
+          .card.full { grid-column: 1 / -1; }
+          .label { font-size: 12px; color: #6b7280; margin-bottom: 6px; }
+          .value { font-size: 16px; font-weight: 600; }
+          .value.small { font-size: 14px; font-weight: 500; line-height: 1.5; }
+          .barcode { margin-top: 24px; border: 1px dashed #9ca3af; border-radius: 10px; padding: 16px; text-align: center; }
+          .barcode-lines { margin-bottom: 10px; background: #fff; padding: 6px; display: flex; justify-content: center; }
+          .barcode-svg { display: block; height: 72px; width: min(540px, 100%); }
+          .barcode-text { font-size: 18px; font-weight: 700; letter-spacing: 0.08em; }
+          .footnote { margin-top: 10px; font-size: 11px; color: #6b7280; text-align: left; line-height: 1.45; }
+        </style>
+      </head>
+      <body>
+        <div class="sheet">
+          <div class="top">
+            <div>
+              <div class="eyebrow">${escapeHtml(t().print.slipPreview)}</div>
+              <div class="title">${escapeHtml(slip.accessionNumber)}</div>
+              <div class="subtitle">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.arabicFullName)}</div>
+              <div class="value">${escapeHtml(patientArabic)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().patients.fields.englishFullName)}</div>
+              <div class="value">${escapeHtml(patientEnglish)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(t().appointments.fields.appointmentDate)}</div>
+              <div class="value">${escapeHtml(formatDisplayDate(slip.appointmentDate))}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("modality"))}</div>
+              <div class="value">${escapeHtml(slip.modalityName)}</div>
+            </div>
+            <div class="card">
+              <div class="label">${escapeHtml(appointmentFieldLabel("examType"))}</div>
+              <div class="value">${escapeHtml(slip.examName)}</div>
+            </div>
+          </div>
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(t().print.fields.modalityInstructions)}</div>
+              <div class="value small">${escapeHtml(modalityInstruction)}</div>
+            </div>
+            <div class="card full">
+              <div class="label">${escapeHtml(t().print.fields.examInstructions)}</div>
+              <div class="value small">${escapeHtml(examInstruction)}</div>
+            </div>
+          </div>
+          ${
+            slip.notes
+              ? `
+          <div class="grid">
+            <div class="card full">
+              <div class="label">${escapeHtml(appointmentFieldLabel("notes"))}</div>
+              <div class="value small">${escapeHtml(slip.notes)}</div>
+            </div>
+          </div>`
+              : ""
+          }
+          <div class="barcode">
+            <div class="label">${escapeHtml(t().appointments.fields.accessionNumber)}</div>
+            <div class="barcode-lines">${barcodeMarkup}</div>
+            <div class="barcode-text">${escapeHtml(slip.accessionNumber)}</div>
+            <div class="footnote">${escapeHtml(`${registrationDateLabel}: ${registrationDate}`)}</div>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  printWindow.focus();
+  printWindow.print();
 }
 
 function openDailyListPrint(appointments, title) {
