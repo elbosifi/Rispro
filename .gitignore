@@ -1,1 +1,4 @@
-Nothing needs to be added to .gitignore since the changes only include source/config files (.md, .js, .css) and the existing .gitignore is empty.
+node_modules/
+.DS_Store
+.env
+.env.local
