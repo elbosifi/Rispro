@@ -788,7 +788,7 @@ const copy = {
       appointments: "إنشاء موعد",
       calendar: "التقويم",
       registrations: "التسجيلات",
-      queue: "الطابور",
+      queue: "قائمة الإنتظار",
       modality: "لوحة الجهاز",
       doctor: "لوحة الطبيب",
       print: "الطباعة",
@@ -824,9 +824,9 @@ const copy = {
       session: "الجلسة الحالية",
       modules: "الوظائف المتاحة",
       date: "اليوم",
-      waiting: "المنتظرون في الطابور",
+      waiting: "المنتظرون في قائمة الإنتظار",
       noShowReview: "مراجعة عدم الحضور",
-      scanShortcut: "فتح الطابور",
+      scanShortcut: "فتح قائمة الإنتظار",
       reviewStarts: "تبدأ المراجعة عند",
       reviewInactive: "مراجعة عدم الحضور لم تُفتح بعد.",
       reviewEmpty: "لا توجد حالات عدم حضور تنتظر التأكيد الآن.",
@@ -836,7 +836,7 @@ const copy = {
       notReady: "يحتاج متابعة",
       moduleListTitle: "المفعّل في هذا النشر",
       plannedListTitle: "تذكيرات تشغيلية",
-      plannedNote: "تابع حركة الطابور والطباعة وتأكيدات نهاية اليوم."
+      plannedNote: "تابع حركة قائمة الإنتظار والطباعة وتأكيدات نهاية اليوم."
     },
     patients: {
       title: "تسجيل المريض",
@@ -987,11 +987,11 @@ const copy = {
       noSelection: "اختر تسجيلاً من القائمة أولاً."
     },
     queue: {
-      title: "الطابور والوصول",
+      title: "قائمة الإنتظار والوصول",
       body: "امسح رقم الدخول لليوم، وتابع المرضى المنتظرين، وأضف المرضى المباشرين مباشرة إلى طابور الاستقبال.",
       scanTitle: "مسح الباركود / رقم الدخول",
       scanPlaceholder: "أدخل أو امسح رقم الدخول",
-      scanButton: "إدخال إلى الطابور",
+      scanButton: "إدخال إلى قائمة الإنتظار",
       waitingList: "قائمة الانتظار",
       walkInTitle: "مريض مباشر",
       walkInSearch: "البحث عن المريض المباشر",
@@ -1002,8 +1002,8 @@ const copy = {
       reviewTitle: "مراجعة عدم الحضور",
       reviewButton: "تأكيد عدم الحضور",
       reasonPlaceholder: "أدخل سبب عدم الحضور",
-      scannedSuccess: "تمت إضافة المريض إلى الطابور بنجاح.",
-      walkInSuccess: "تمت إضافة المريض المباشر إلى الطابور بنجاح."
+      scannedSuccess: "تمت إضافة المريض إلى قائمة الإنتظار بنجاح.",
+      walkInSuccess: "تمت إضافة المريض المباشر إلى قائمة الإنتظار بنجاح."
     },
     modality: {
       title: "سير عمل الجهاز",
@@ -1072,7 +1072,7 @@ const copy = {
     },
     statistics: {
       title: "إحصائيات المواعيد",
-      body: "تابع إجمالي المواعيد وحمل الأجهزة وحالة الطابور واتجاه عدم الحضور خلال الفترة المحددة.",
+      body: "تابع إجمالي المواعيد وحمل الأجهزة وحالة قائمة الإنتظار واتجاه عدم الحضور خلال الفترة المحددة.",
       filtersTitle: "فلاتر الإحصائيات",
       print: "طباعة الإحصائيات",
       date: "التاريخ",
@@ -1089,7 +1089,7 @@ const copy = {
       completed: "المكتمل",
       noShowRate: "نسبة عدم الحضور",
       walkIn: "المرضى المباشرون",
-      inQueue: "في الطابور",
+      inQueue: "في قائمة الإنتظار",
       statuses: {
         scheduled: "مجدول",
         arrived: "وصل",
@@ -1410,9 +1410,9 @@ const SETTINGS_META = {
   },
   queue_and_arrival: {
     titleEn: "Queue and arrival",
-    titleAr: "الطابور والوصول",
+    titleAr: "قائمة الإنتظار والوصول",
     summaryEn: "Reception arrival, walk-ins, and no-show review rules.",
-    summaryAr: "قواعد الوصول والطابور والمرضى العابرين ومراجعة عدم الحضور.",
+    summaryAr: "قواعد الوصول وقائمة الإنتظار والمرضى العابرين ومراجعة عدم الحضور.",
     fields: {
       barcode_check_in: { en: "Barcode check-in", ar: "الدخول بالباركود" },
       walk_in_queue: { en: "Walk-in queue", ar: "إضافة مريض مباشر للطابور" },
@@ -1732,7 +1732,7 @@ function formatAuditEntityType(value) {
     patient: { en: "Patient", ar: "مريض" },
     patient_merge: { en: "Patient merge", ar: "دمج المرضى" },
     appointment: { en: "Appointment", ar: "موعد" },
-    queue_entry: { en: "Queue", ar: "الطابور" },
+    queue_entry: { en: "Queue", ar: "قائمة الإنتظار" },
     document: { en: "Document", ar: "وثيقة" },
     system_setting: { en: "System setting", ar: "إعداد نظام" },
     backup: { en: "Backup", ar: "نسخة احتياطية" },
@@ -4427,7 +4427,7 @@ async function scanQueueAccession() {
 async function saveWalkInQueueEntry() {
   if (!state.queueSelectedPatient) {
     state.queueError =
-      state.language === "ar" ? "اختر مريضاً قبل إضافته مباشرة إلى الطابور." : "Select a patient before adding a walk-in.";
+      state.language === "ar" ? "اختر مريضاً قبل إضافته مباشرة إلى قائمة الإنتظار." : "Select a patient before adding a walk-in.";
     render();
     return;
   }
