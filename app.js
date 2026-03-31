@@ -52,6 +52,7 @@ const allowedRoutes = ["dashboard", "patients", "appointments", "calendar", "reg
 const DEFAULT_ROUTE = "patients";
 const state = {
   language: localStorage.getItem("rispro-language") || "ar",
+  theme: localStorage.getItem("rispro-theme") || "light",
   route: allowedRoutes.includes(localStorage.getItem("rispro-route")) ? localStorage.getItem("rispro-route") : DEFAULT_ROUTE,
   mobileNavOpen: false,
   authChecked: false,
@@ -2818,6 +2819,18 @@ function setLanguage(language) {
   state.language = language;
   localStorage.setItem("rispro-language", language);
   render();
+}
+
+function setTheme(theme) {
+  state.theme = theme;
+  localStorage.setItem("rispro-theme", theme);
+  document.documentElement.setAttribute("data-theme", theme);
+  render();
+}
+
+function toggleTheme() {
+  const newTheme = state.theme === "light" ? "dark" : "light";
+  setTheme(newTheme);
 }
 
 function setRoute(route) {
@@ -5694,6 +5707,21 @@ function languageToggle() {
       <button type="button" class="${state.language === "ar" ? "active" : ""}" data-language="ar">${t().common.arabic}</button>
       <button type="button" class="${state.language === "en" ? "active" : ""}" data-language="en">${t().common.english}</button>
     </div>
+  `;
+}
+
+function themeToggle() {
+  const isDark = state.theme === "dark";
+  return `
+    <button 
+      type="button" 
+      class="theme-toggle-btn" 
+      data-action="toggle-theme" 
+      aria-label="${isDark ? t().common.lightMode || "Light mode" : t().common.darkMode || "Dark mode"}"
+      title="${isDark ? t().common.lightMode || "Switch to light mode" : t().common.darkMode || "Switch to dark mode"}"
+    >
+      ${isDark ? "☀️" : "🌙"}
+    </button>
   `;
 }
 
@@ -9988,6 +10016,7 @@ function renderAppFrame(content) {
                 <span></span>
                 <span></span>
               </button>
+              ${themeToggle()}
               <div class="appbar-language">${languageToggle()}</div>
               <button class="appbar-refresh" type="button" data-action="refresh-route" aria-label="${escapeHtml(
                 t().common.refresh
@@ -10506,6 +10535,12 @@ function handleClick(event) {
     event.preventDefault();
     state.mobileNavOpen = !state.mobileNavOpen;
     render();
+    return;
+  }
+
+  if (target.dataset.action === "toggle-theme") {
+    event.preventDefault();
+    toggleTheme();
     return;
   }
 
