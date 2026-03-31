@@ -2497,6 +2497,7 @@ function openDailyListPrint(appointments, title) {
           .head { margin-bottom: 12px; }
           .title { font-size: 22px; font-weight: 700; }
           .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
+          .table-wrapper { width: 100%; overflow-x: auto; }
           table { width: 100%; border-collapse: collapse; font-size: 12px; }
           th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; vertical-align: top; }
           th { background: #f3f4f6; font-weight: 700; }
@@ -2508,7 +2509,8 @@ function openDailyListPrint(appointments, title) {
             <div class="title">${escapeHtml(title)}</div>
             <div class="meta">${escapeHtml(formatDisplayDate(new Date()))}</div>
           </div>
-          <table>
+          <div class="table-wrapper">
+            <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t().appointments.fields.accessionNumber)}</th>
@@ -2520,7 +2522,8 @@ function openDailyListPrint(appointments, title) {
               </tr>
             </thead>
             <tbody>${tableRows}</tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </body>
     </html>
@@ -2613,6 +2616,7 @@ function openStatisticsPrint(snapshot, filters = {}) {
           .title { font-size: 22px; font-weight: 700; }
           .meta { font-size: 12px; color: #4b5563; margin-top: 4px; }
           .summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+          .table-wrapper { width: 100%; overflow-x: auto; }
           .card { border: 1px solid #d1d5db; border-radius: 8px; padding: 10px; }
           .card .label { color: #6b7280; font-size: 11px; margin-bottom: 6px; }
           .card .value { font-size: 18px; font-weight: 700; }
@@ -2646,7 +2650,8 @@ function openStatisticsPrint(snapshot, filters = {}) {
           </div>
 
           <h2>${escapeHtml(t().statistics.byModalityTitle)}</h2>
-          <table>
+          <div class="table-wrapper">
+            <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t().statistics.modality)}</th>
@@ -2656,10 +2661,12 @@ function openStatisticsPrint(snapshot, filters = {}) {
               </tr>
             </thead>
             <tbody>${modalityRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
-          </table>
+            </table>
+          </div>
 
           <h2>${escapeHtml(t().statistics.byStatusTitle)}</h2>
-          <table>
+          <div class="table-wrapper">
+            <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t().common.status)}</th>
@@ -2668,10 +2675,12 @@ function openStatisticsPrint(snapshot, filters = {}) {
               </tr>
             </thead>
             <tbody>${statusRows || `<tr><td colspan="3">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
-          </table>
+            </table>
+          </div>
 
           <h2>${escapeHtml(t().statistics.byDayTitle)}</h2>
-          <table>
+          <div class="table-wrapper">
+            <table>
             <thead>
               <tr>
                 <th>${escapeHtml(t().print.date)}</th>
@@ -2681,7 +2690,8 @@ function openStatisticsPrint(snapshot, filters = {}) {
               </tr>
             </thead>
             <tbody>${dailyRows || `<tr><td colspan="4">${escapeHtml(t().common.noData)}</td></tr>`}</tbody>
-          </table>
+            </table>
+          </div>
         </div>
       </body>
     </html>

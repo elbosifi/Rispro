@@ -40,6 +40,7 @@ body {
     linear-gradient(180deg, var(--bg-soft), var(--bg));
   color: var(--text);
   font-family: "Manrope", "Noto Sans Arabic", "IBM Plex Sans Arabic", "Segoe UI", sans-serif;
+  font-size: 16px;
 }
 
 button,
@@ -47,6 +48,29 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+#app {
+  width: 100%;
+}
+
+.shell,
+.layout,
+.content {
+  width: min(1460px, 95%);
+  max-width: 1460px;
+  margin: 0 auto;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.table-wrapper {
+  width: 100%;
+  overflow-x: auto;
 }
 
 button {
@@ -268,7 +292,7 @@ button {
 }
 
 .topbar-title {
-  font-size: 1.12rem;
+  font-size: clamp(1rem, 1.8vw, 1.35rem);
   font-weight: 800;
   text-align: left;
 }
@@ -367,7 +391,7 @@ button {
 
 .hero h1 {
   margin: 0;
-  font-size: 2rem;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
 }
 
 .hero p {
@@ -376,6 +400,7 @@ button {
   line-height: 1.7;
   max-width: 720px;
   text-align: center;
+  font-size: clamp(0.95rem, 1.5vw, 1.08rem);
 }
 
 .hero-actions {
@@ -528,7 +553,7 @@ button {
 
 .section-title {
   margin: 0;
-  font-size: 1.18rem;
+  font-size: clamp(1rem, 1.4vw, 1.3rem);
   font-weight: 800;
 }
 
@@ -585,14 +610,15 @@ button {
 }
 
 .banner-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 14px;
+  width: clamp(40px, 6vw, 60px);
+  height: clamp(40px, 6vw, 60px);
+  border-radius: 16px;
   display: grid;
   place-items: center;
   background: rgba(15, 118, 110, 0.12);
   color: var(--teal);
   font-weight: 800;
+  font-size: clamp(0.85rem, 1.6vw, 1.25rem);
 }
 
 .banner-label {
@@ -601,7 +627,7 @@ button {
 }
 
 .banner-value {
-  font-size: 2.2rem;
+  font-size: clamp(1.9rem, 3vw, 2.6rem);
   font-weight: 800;
 }
 
@@ -1826,6 +1852,23 @@ html[dir="rtl"] .brand-text {
     grid-template-columns: 1fr;
   }
 
+  .banner-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .banner-metric {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .card-grid {
+    gap: 16px;
+  }
+
+  .availability-grid {
+    gap: 14px;
+  }
+
   .sidebar {
     position: static;
     height: auto;
@@ -1895,6 +1938,50 @@ html[dir="rtl"] .brand-text {
 }
 
 @media (max-width: 768px) {
+  body {
+    font-size: 16px;
+  }
+
+  .top-nav-row,
+  .nav,
+  .topbar,
+  .hero,
+  .banner-strip,
+  .topbar-actions,
+  .hero-actions {
+    position: static !important;
+    float: none !important;
+    width: 100%;
+  }
+
+  .top-nav-row,
+  .topbar-actions,
+  .hero-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .top-nav-row {
+    gap: 8px;
+  }
+
+  .top-nav-button,
+  .button-primary,
+  .button-secondary,
+  .button-ghost {
+    width: 100%;
+  }
+
+  .banner-metric {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .banner-divider {
+    display: none;
+  }
+
   .layout {
     padding: 8px 8px 14px;
   }
@@ -1932,11 +2019,11 @@ html[dir="rtl"] .brand-text {
   }
 
   .topbar-title {
-    font-size: 1.1rem;
+    font-size: clamp(1.05rem, 2.4vw, 1.2rem);
   }
 
   .topbar-subtitle {
-    font-size: 0.9rem;
+    font-size: clamp(0.9rem, 2vw, 1rem);
   }
 
   .hero {
@@ -1945,11 +2032,11 @@ html[dir="rtl"] .brand-text {
   }
 
   .hero h1 {
-    font-size: 1.35rem;
+    font-size: clamp(1.4rem, 4vw, 2rem);
   }
 
   .hero p {
-    font-size: 0.95rem;
+    font-size: clamp(0.9rem, 2vw, 1.05rem);
   }
 
   .surface {
