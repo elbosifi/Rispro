@@ -26,31 +26,6 @@
   --sidebar: linear-gradient(180deg, rgba(34, 26, 19, 0.95), rgba(28, 21, 16, 0.84));
 }
 
-[data-theme="dark"] {
-  --bg: #0f172a;
-  --bg-soft: #1e293b;
-  --surface: rgba(30, 41, 59, 0.86);
-  --surface-strong: #1e293b;
-  --surface-soft: rgba(51, 65, 85, 0.62);
-  --line: rgba(148, 163, 184, 0.12);
-  --line-strong: rgba(148, 163, 184, 0.2);
-  --text: #f1f5f9;
-  --muted: #94a3b8;
-  --teal: #14b8a6;
-  --teal-strong: #0d9488;
-  --amber: #f59e0b;
-  --amber-strong: #d97706;
-  --red: #ef4444;
-  --green: #22c55e;
-  --blue: #3b82f6;
-  --gray: #94a3b8;
-  --brown: #d97706;
-  --violet: #8b5cf6;
-  --shadow: 0 28px 70px rgba(0, 0, 0, 0.4);
-  --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.3);
-  --sidebar: linear-gradient(180deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.84));
-}
-
 * {
   box-sizing: border-box;
 }
@@ -149,11 +124,6 @@ button {
   justify-content: center;
 }
 
-/* Enhanced dark mode toggle visibility */
-.appbar .theme-toggle-btn {
-  margin-inline: 4px;
-}
-
 .appbar-refresh {
   border: 1px solid var(--line-strong);
   background: rgba(255, 255, 255, 0.12);
@@ -172,60 +142,6 @@ button {
   border-color: rgba(255, 255, 255, 0.6);
   background: rgba(255, 255, 255, 0.25);
   color: #fff;
-}
-
-.theme-toggle-btn {
-  border: 1px solid var(--line-strong);
-  background: rgba(255, 255, 255, 0.12);
-  width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  display: grid;
-  place-items: center;
-  font-size: 1.2rem;
-  color: var(--text);
-  cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  position: relative;
-  overflow: hidden;
-}
-
-.theme-toggle-btn::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.4), transparent 60%);
-  opacity: 0;
-  transition: opacity 0.3s ease;
-  pointer-events: none;
-}
-
-.theme-toggle-btn:hover {
-  border-color: rgba(255, 255, 255, 0.6);
-  background: rgba(255, 255, 255, 0.25);
-  color: #fff;
-  transform: translateY(-2px) scale(1.05);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
-}
-
-.theme-toggle-btn:hover::before {
-  opacity: 1;
-}
-
-.theme-toggle-btn:active {
-  transform: translateY(0) scale(0.98);
-}
-
-[data-theme="dark"] .theme-toggle-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(148, 163, 184, 0.3);
-}
-
-[data-theme="dark"] .theme-toggle-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(148, 163, 184, 0.5);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
 .top-nav-row {
@@ -2295,12 +2211,5 @@ html[dir="rtl"] .brand-text {
   .slip-card {
     padding: 14px;
     border-radius: 16px;
-  }
-
-  /* Mobile-friendly theme toggle */
-  .theme-toggle-btn {
-    width: 42px;
-    height: 42px;
-    font-size: 1.1rem;
   }
 }
