@@ -2826,6 +2826,7 @@ function setRoute(route) {
     state.settingsSection = "menu";
   }
   localStorage.setItem("rispro-route", state.route);
+  state.mobileNavOpen = false;
   render();
   void hydrateRoute();
 }
@@ -9962,8 +9963,22 @@ function renderAppFrame(content) {
               <div class="brand-subtitle">${escapeHtml(t().appSubtitle)}</div>
             </div>
           </div>
+          <div class="appbar-actions">
+            <button
+              class="top-nav-toggle"
+              type="button"
+              aria-label="${escapeHtml(t().common.navigation)}"
+              aria-expanded="${state.mobileNavOpen ? "true" : "false"}"
+              data-action="toggle-mobile-nav"
+            >
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+            ${languageToggle()}
+          </div>
         </header>
-        <nav class="top-nav-row">
+        <nav id="main-nav" class="top-nav-row${state.mobileNavOpen ? " is-open nav-stack" : ""}">
           ${allowedRoutes
             .map(
               (route) => `
@@ -9988,7 +10003,6 @@ function renderAppFrame(content) {
                 <span class="chip subtle">${escapeHtml(localizedDate())}</span>
                 <span class="chip accent">${escapeHtml(routeLabel)}</span>
               </div>
-              ${languageToggle()}
               <div class="user-chip">
                 <div class="avatar">${escapeHtml(initials(state.session.fullName))}</div>
                 <div>
@@ -10481,6 +10495,13 @@ function handleClick(event) {
     if (toastId) {
       dismissToast(toastId);
     }
+    return;
+  }
+
+  if (target.dataset.action === "toggle-mobile-nav") {
+    event.preventDefault();
+    state.mobileNavOpen = !state.mobileNavOpen;
+    render();
     return;
   }
 
