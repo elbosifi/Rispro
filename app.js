@@ -5751,7 +5751,6 @@ function renderLogin() {
 
         <section class="login-form">
           ${languageToggle()}
-          ${alertMarkup("error", state.loginError || state.appError)}
           <form id="login-form" class="stack">
             <label class="field">
               <span class="label">${escapeHtml(t().login.username)}</span>
@@ -5794,9 +5793,6 @@ function renderDashboard() {
          <button type="button" class="button-secondary" data-route="queue">${escapeHtml(t().dashboard.scanShortcut)}</button>`,
         t().dashboard.ready
       )}
-
-      ${alertMarkup("error", state.dashboardError || state.queueError)}
-      ${alertMarkup("error", state.dashboardScheduleError)}
 
       <section class="banner-strip surface">
         <div class="banner-metric">
@@ -6048,7 +6044,6 @@ function renderPatients() {
   return `
     <div class="page">
       ${pageHero(t().patients.title, t().patients.body, "", t().common.required)}
-      ${alertMarkup("error", state.patientError)}
 
       <section class="split-grid patient-grid">
         <article class="surface">
@@ -6306,7 +6301,6 @@ function renderPacsFindPanel(patient) {
       </div>
       <div class="small">${escapeHtml(t().appointments.pacsSearchHint)}</div>
       ${!hasPatientId ? `<div class="small">${escapeHtml(t().appointments.pacsMissingNationalId)}</div>` : ""}
-      ${alertMarkup("error", state.pacsFindError)}
       <div class="form-actions">
         <button class="button-secondary" type="button" data-action="pacs-cfind" ${!hasPatientId || state.pacsFindLoading ? "disabled" : ""}>
           ${escapeHtml(buttonLabel)}
@@ -6428,8 +6422,6 @@ function renderExamTypeModal() {
           <button class="button-ghost" type="button" data-action="close-exam-type-modal">×</button>
         </div>
 
-        ${alertMarkup("error", state.examTypeError)}
-
         <div class="form-grid">
           <label class="field">
             <span class="label">${escapeHtml(t().appointments.fields.examNameAr)}</span>
@@ -6504,7 +6496,6 @@ function renderAppointments() {
         "",
         state.appointmentLookupsLoading ? t().common.loading : t().appointments.selectedPatient
       )}
-      ${alertMarkup("error", state.appointmentError)}
 
       <section class="split-grid">
         <div class="stack">
@@ -6662,7 +6653,6 @@ function renderPacsPage() {
   return `
     <div class="page">
       ${pageHero(t().pacs.title, t().pacs.body, "", t().common.required)}
-      ${alertMarkup("error", state.pacsSearchError)}
       <section class="split-grid">
         <article class="surface">
           <form id="pacs-search-form" class="stack">
@@ -6864,7 +6854,6 @@ function renderCalendar() {
   return `
     <div class="page calendar-page">
       ${pageHero(t().calendar.title, t().calendar.body, heroActions, t().calendar.summary)}
-      ${alertMarkup("error", state.calendarError)}
 
       <section class="calendar-top-grid">
         <article class="surface calendar-filter-card">
@@ -7069,7 +7058,6 @@ function renderQueue() {
         `<button class="button-secondary" type="button" data-action="refresh-queue">${escapeHtml(t().common.refresh)}</button>`,
         state.queueSnapshot?.queueDate || localizedDate()
       )}
-      ${alertMarkup("error", state.queueError)}
 
       <section class="card-grid">
         ${statCard(t().dashboard.waiting, String(summary.waiting_count || 0), t().queue.waitingList, "var(--amber)")}
@@ -7614,7 +7602,6 @@ function renderModality() {
         `<button class="button-secondary" type="button" data-action="refresh-modality">${escapeHtml(t().common.refresh)}</button>`,
         t().nav.modality
       )}
-      ${alertMarkup("error", state.modalityError)}
 
       <section class="card-grid">
         ${statCard(t().dashboard.waiting, String(waitingCount), t().modality.title, "var(--amber)")}
@@ -7787,7 +7774,6 @@ function renderDoctorDetails() {
             <span class="chip subtle">${escapeHtml(appointment.accession_number)}</span>
           </div>
           <div class="small">${escapeHtml(t().doctor.protocolHint)}</div>
-          ${alertMarkup("error", state.doctorProtocolError)}
           <div class="form-grid">
             <label class="field">
               <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
@@ -7818,7 +7804,6 @@ function renderDoctorDetails() {
           <h2 class="section-title">${escapeHtml(t().doctor.documentsTitle)}</h2>
           <span class="chip subtle">${escapeHtml(String(state.doctorDocuments.length))}</span>
         </div>
-        ${alertMarkup("error", state.doctorDocumentsError)}
         ${renderDoctorDocumentsList()}
       </article>
     </div>
@@ -7834,7 +7819,6 @@ function renderDoctor() {
         `<button class="button-secondary" type="button" data-action="refresh-doctor">${escapeHtml(t().common.refresh)}</button>`,
         t().doctor.selectedRequest
       )}
-      ${alertMarkup("error", state.doctorError)}
 
       <section class="split-grid">
         <div class="stack">
@@ -7895,7 +7879,6 @@ function renderPrint() {
         `<button class="button-secondary" type="button" data-action="print-daily-list">${escapeHtml(t().print.printDaily)}</button>`,
         t().print.dailyList
       )}
-      ${alertMarkup("error", state.printError)}
 
       <section class="stack">
         <article class="surface">
@@ -8067,7 +8050,6 @@ function renderStatistics() {
          <button class="button-primary" type="button" data-action="print-statistics">${escapeHtml(t().statistics.print)}</button>`,
         t().statistics.summaryTitle
       )}
-      ${alertMarkup("error", state.statisticsError)}
 
       <section class="surface">
         <form id="statistics-filter-form" class="stack">
@@ -8186,7 +8168,6 @@ function renderRegistrations() {
   return `
     <div class="page">
       ${pageHero(t().registrations.title, t().registrations.body, "", t().registrations.detailsTitle)}
-      ${alertMarkup("error", state.printError || state.appointmentEditError)}
 
       <section class="split-grid">
         <div class="stack">
@@ -8377,7 +8358,6 @@ function renderSearch() {
   return `
     <div class="page">
       ${pageHero(t().search.title, t().search.body, "", t().common.open)}
-      ${alertMarkup("error", state.searchError)}
       <section class="split-grid">
         <div class="stack">
           <section class="surface">
@@ -8402,7 +8382,6 @@ function renderSearch() {
               <h2 class="section-title">${escapeHtml(t().patientActions.edit)}</h2>
               <span class="chip accent">${escapeHtml(state.searchSelectedPatient ? (state.searchSelectedPatient.mrn || `#${state.searchSelectedPatient.id}`) : t().common.noData)}</span>
             </div>
-            ${alertMarkup("error", state.patientUpdateError)}
             ${
                   state.searchSelectedPatient
                 ? `<form id="patient-edit-form" class="stack">
@@ -8466,7 +8445,6 @@ function renderSearch() {
               <h2 class="section-title">${escapeHtml(t().patientActions.mergeNow)}</h2>
               <span class="chip subtle">${escapeHtml("MERGE")}</span>
             </div>
-            ${alertMarkup("error", state.mergeError)}
             <div class="info-grid">
               ${infoTile(t().patientActions.mergeSource, state.mergeSourcePatient ? (state.language === "ar" ? state.mergeSourcePatient.arabic_full_name : state.mergeSourcePatient.english_full_name) : "—", "tone-warm")}
               ${infoTile(t().patientActions.mergeTarget, state.mergeTargetPatient ? (state.language === "ar" ? state.mergeTargetPatient.arabic_full_name : state.mergeTargetPatient.english_full_name) : "—", "tone-good")}
@@ -8892,7 +8870,6 @@ function renderExamTypeSettings() {
     .join("");
 
   return `
-    ${alertMarkup("error", state.examTypeSettingsError)}
     <form id="exam-type-settings-form" class="stack">
       <div class="form-grid">
         <label class="field">
@@ -9064,7 +9041,6 @@ function renderModalitySettings() {
   }
 
   return `
-    ${alertMarkup("error", state.modalitySettingsError)}
     <form id="modality-settings-form" class="stack">
       <div class="form-grid">
         <label class="field">
@@ -9507,7 +9483,6 @@ function renderSettingsPacsSection() {
         <span class="chip accent">${escapeHtml(t().common.required)}</span>
       </div>
       <div class="settings-summary">${escapeHtml(t().pacs.testHint)}</div>
-      ${alertMarkup("error", state.pacsTestError)}
       <form id="pacs-settings-form" class="stack">
         <div class="form-grid">
           <label class="field">
@@ -9639,7 +9614,6 @@ function renderSettingsDicomSection() {
           <h2 class="section-title">${escapeHtml(t().settings.dicomDevicesTitle)}</h2>
           <span class="chip subtle">${escapeHtml(String(state.dicomDevices.length))}</span>
         </div>
-        ${alertMarkup("error", state.dicomDevicesError)}
         <div class="split-grid">
           <div class="surface surface-compact">
             ${renderDicomDevicesList()}
@@ -9806,7 +9780,6 @@ function renderSettingsSectionContent() {
             <span class="chip subtle">${escapeHtml(String(state.nameDictionaryEntries.length))}</span>
           </div>
           <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
-          ${alertMarkup("error", state.nameDictionaryError)}
           ${renderNameDictionaryAddForm()}
           ${renderNameDictionaryImportForm()}
           ${renderNameDictionaryList()}
@@ -9859,7 +9832,6 @@ function renderSettingsSectionContent() {
             <h2 class="section-title">${escapeHtml(t().settings.auditTitle)}</h2>
             <span class="chip subtle">${escapeHtml(`${t().settings.auditRows}: ${state.auditEntries.length}`)}</span>
           </div>
-          ${alertMarkup("error", state.auditError)}
           ${renderAuditFilters()}
           ${renderAuditList()}
         </section>
@@ -9871,7 +9843,6 @@ function renderSettingsSectionContent() {
             <h2 class="section-title">${escapeHtml(t().settings.backupTitle)}</h2>
             <span class="chip accent">${escapeHtml(t().common.required)}</span>
           </div>
-          ${alertMarkup("error", state.backupError || state.restoreError)}
           <div class="split-grid">
             <article class="surface surface-compact">
               <div class="stack">
@@ -9924,7 +9895,6 @@ function renderSettings() {
             <span class="chip accent">${escapeHtml(t().common.required)}</span>
           </div>
           <p class="settings-summary">${escapeHtml(t().settings.reauthBody)}</p>
-          ${alertMarkup("error", state.reauthError)}
           <form id="reauth-form" class="stack">
             <label class="field">
               <span class="label">${escapeHtml(t().settings.fields.password)}</span>
@@ -9949,7 +9919,6 @@ function renderSettings() {
   return `
     <div class="page">
       ${pageHero(t().settings.title, heroBody, heroActions, t().common.required)}
-      ${alertMarkup("error", state.settingsError || state.userError)}
       ${renderSettingsSectionContent()}
     </div>
   `;
