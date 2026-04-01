@@ -2027,6 +2027,26 @@ function deriveDobFromNationalId(value) {
   return `${year}-01-01`;
 }
 
+function deriveSexFromNationalId(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+
+  if (digits.length < 1) {
+    return "";
+  }
+
+  const firstDigit = digits.charAt(0);
+
+  if (firstDigit === "1") {
+    return "male";
+  }
+
+  if (firstDigit === "2") {
+    return "female";
+  }
+
+  return "";
+}
+
 function calculateAgeYearsFromDob(dobValue) {
   const parsed = parseIsoDate(dobValue);
   if (Number.isNaN(parsed.getTime())) {
@@ -10221,6 +10241,15 @@ function handleInput(event) {
           if (ageInput) {
             ageInput.value = state.patientForm.ageYears;
           }
+        }
+      }
+
+      const derivedSex = deriveSexFromNationalId(target.value);
+      if (derivedSex) {
+        state.patientForm.sex = derivedSex;
+        const sexInput = document.querySelector('#patient-form [name="sex"]');
+        if (sexInput) {
+          sexInput.value = derivedSex;
         }
       }
     }
