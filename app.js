@@ -4771,13 +4771,14 @@ function getAppointmentPacsPatientId(patient) {
 }
 
 async function searchPacsStudies() {
-  if (!state.selectedAppointmentPatient) {
-    state.pacsFindError = t().appointments.noneSelected;
-    render();
-    return;
+  // Try to get patient ID from selected patient first, then from patient form
+  let patientId = "";
+  
+  if (state.selectedAppointmentPatient) {
+    patientId = getAppointmentPacsPatientId(state.selectedAppointmentPatient);
+  } else if (state.patientForm.nationalId) {
+    patientId = String(state.patientForm.nationalId).trim();
   }
-
-  const patientId = getAppointmentPacsPatientId(state.selectedAppointmentPatient);
 
   if (!patientId) {
     state.pacsFindError = t().appointments.pacsMissingNationalId;
@@ -6371,11 +6372,22 @@ function renderPacsSearchResults() {
 }
 
 function renderPacsFindPanel(patient) {
-  if (!patient) {
+  // Check for patient ID from selected patient or from patient form
+  let patientId = "";
+  let showPanel = false;
+  
+  if (patient) {
+    patientId = getAppointmentPacsPatientId(patient);
+    showPanel = true;
+  } else if (state.patientForm.nationalId) {
+    patientId = String(state.patientForm.nationalId).trim();
+    showPanel = true;
+  }
+  
+  if (!showPanel) {
     return "";
   }
 
-  const patientId = getAppointmentPacsPatientId(patient);
   const hasPatientId = Boolean(patientId);
   const buttonLabel = state.pacsFindLoading ? t().appointments.pacsLoading : t().appointments.pacsSearch;
 
