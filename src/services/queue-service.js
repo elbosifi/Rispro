@@ -269,8 +269,8 @@ export async function getQueueSnapshot() {
   };
 }
 
-export async function scanAppointmentIntoQueue(accessionNumber, currentUser) {
-  const cleanAccession = await resolveScanValueToAccession(accessionNumber?.scanValue, accessionNumber?.accessionNumber || accessionNumber);
+export async function scanAppointmentIntoQueue(payload, currentUser) {
+  const cleanAccession = await resolveScanValueToAccession(payload?.scanValue, payload?.accessionNumber);
 
   const queueDate = getTripoliToday();
   const client = await pool.connect();
