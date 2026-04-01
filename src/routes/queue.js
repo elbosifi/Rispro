@@ -32,6 +32,7 @@ queueRouter.post(
   "/walk-in",
   asyncRoute(async (req, res) => {
     const result = await createWalkInQueueEntry(req.body || {}, req.user, {
+      supervisorUsername: req.body.supervisorUsername,
       supervisorPassword: req.body.supervisorPassword
     });
     res.status(201).json(result);

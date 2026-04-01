@@ -393,6 +393,7 @@ const copy = {
       availableDay: "Available",
       overbookNotice: "This day is full. Supervisor overbooking is required.",
       overbookingPasswordRequired: "Supervisor password is required for overbooking.",
+      overbookingApprovalRequired: "Supervisor approval is required for overbooking.",
       invalidOverbookingPassword: "Invalid supervisor password. Overbooking cancelled.",
       dayDisabledFriday: "Friday appointments are disabled in settings.",
       dayDisabledSaturday: "Saturday appointments are disabled in settings.",
@@ -621,7 +622,6 @@ const copy = {
       sectionExamTypes: "Exam types",
       sectionModalities: "Modalities",
       sectionCapacity: "Scheduling capacity",
-      sectionPacs: "إعدادات PACS",
       sectionPacs: "PACS connection",
       sectionDicom: "DICOM gateway",
       sectionModules: "Supported modules",
@@ -895,6 +895,7 @@ const copy = {
       availableDay: "متاح",
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
       overbookingPasswordRequired: "كلمة مرور المشرف مطلوبة لتجاوز السعة.",
+      overbookingApprovalRequired: "موافقة المشرف مطلوبة لتجاوز السعة.",
       invalidOverbookingPassword: "كلمة مرور المشرف غير صحيحة. تم إلغاء تجاوز السعة.",
       dayDisabledFriday: "مواعيد يوم الجمعة غير مفعّلة في الإعدادات.",
       dayDisabledSaturday: "مواعيد يوم السبت غير مفعّلة في الإعدادات.",
@@ -1123,6 +1124,7 @@ const copy = {
       sectionExamTypes: "أنواع الفحوصات",
       sectionModalities: "الأجهزة",
       sectionCapacity: "سعة الجدولة",
+      sectionPacs: "إعدادات PACS",
       sectionDicom: "بوابة DICOM",
       sectionModules: "الوحدات المدعومة",
       sectionCategories: "سلوك النظام",
@@ -4302,22 +4304,35 @@ function isSupervisorReauthNeededForOverbooking(error) {
   return message.includes("password confirmation is required") && message.includes("overbook");
 }
 
-async function requestSupervisorPasswordForOverbooking() {
+async function requestSupervisorApprovalForOverbooking() {
   if (!isSupervisor()) {
-    return null;
+    return { supervisorUsername: null, supervisorPassword: null };
   }
 
-  const promptText =
+  const usernamePromptText =
+    state.language === "ar"
+      ? "أدخل اسم مستخدم المشرف للموافقة على تجاوز السعة:"
+      : "Enter supervisor username to approve overbooking:";
+  const supervisorUsername = window.prompt(usernamePromptText, "");
+
+  if (!supervisorUsername || !supervisorUsername.trim()) {
+    return { supervisorUsername: null, supervisorPassword: null };
+  }
+
+  const passwordPromptText =
     state.language === "ar"
       ? "أدخل كلمة مرور المشرف لتأكيد تجاوز السعة:"
       : "Enter supervisor password to confirm overbooking:";
-  const password = window.prompt(promptText, "");
+  const supervisorPassword = window.prompt(passwordPromptText, "");
 
-  if (!password || !password.trim()) {
-    return null;
+  if (!supervisorPassword || !supervisorPassword.trim()) {
+    return { supervisorUsername: null, supervisorPassword: null };
   }
 
-  return password.trim();
+  return {
+    supervisorUsername: supervisorUsername.trim(),
+    supervisorPassword: supervisorPassword.trim()
+  };
 }
 
 async function saveAppointment() {
@@ -4372,10 +4387,10 @@ async function saveAppointment() {
     await loadAppointmentAvailability();
   } catch (error) {
     if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const password = await requestSupervisorPasswordForOverbooking();
-      if (password) {
+      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
+      if (supervisorUsername && supervisorPassword) {
         try {
-          const payloadWithPassword = {
+          const payloadWithApproval = {
             patientId: state.selectedAppointmentPatient.id,
             modalityId: state.appointmentForm.modalityId,
             examTypeId: state.appointmentForm.examTypeId,
@@ -4383,11 +4398,12 @@ async function saveAppointment() {
             notes: state.appointmentForm.notes,
             overbookingReason: state.appointmentForm.overbookingReason,
             isWalkIn: state.appointmentForm.isWalkIn,
-            supervisorPassword: password
+            supervisorUsername,
+            supervisorPassword
           };
           const result = await api("/api/appointments", {
             method: "POST",
-            body: JSON.stringify(payloadWithPassword)
+            body: JSON.stringify(payloadWithApproval)
           });
           pushToast("success", t().appointments.appointmentSaved);
           state.savedAppointment = result;
@@ -4403,7 +4419,7 @@ async function saveAppointment() {
           pushToast("error", state.appointmentError);
         }
       } else {
-        state.appointmentError = t().appointments.overbookingPasswordRequired;
+        state.appointmentError = t().appointments.overbookingApprovalRequired;
         pushToast("error", state.appointmentError);
       }
     } else {
@@ -4484,21 +4500,22 @@ async function saveWalkInQueueEntry() {
     await loadQueueSnapshot();
   } catch (error) {
     if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const password = await requestSupervisorPasswordForOverbooking();
-      if (password) {
+      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
+      if (supervisorUsername && supervisorPassword) {
         try {
-          const payloadWithPassword = {
+          const payloadWithApproval = {
             patientId: state.queueSelectedPatient.id,
             modalityId: state.queueWalkInForm.modalityId,
             examTypeId: state.queueWalkInForm.examTypeId,
             reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
             notes: state.queueWalkInForm.notes,
             overbookingReason: state.queueWalkInForm.overbookingReason,
-            supervisorPassword: password
+            supervisorUsername,
+            supervisorPassword
           };
           await api("/api/queue/walk-in", {
             method: "POST",
-            body: JSON.stringify(payloadWithPassword)
+            body: JSON.stringify(payloadWithApproval)
           });
           pushToast("success", t().queue.walkInSuccess);
           state.queueWalkInForm = {
@@ -4514,7 +4531,8 @@ async function saveWalkInQueueEntry() {
           state.queueError = retryError.message;
         }
       } else {
-        pushToast("error", t().appointments.overbookingPasswordRequired);
+        state.queueError = t().appointments.overbookingApprovalRequired;
+        pushToast("error", state.queueError);
       }
     } else {
       state.queueError = error.message;
@@ -4955,13 +4973,17 @@ async function updateSelectedAppointment() {
     pushToast("success", t().print.appointmentUpdated);
   } catch (error) {
     if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const password = await requestSupervisorPasswordForOverbooking();
-      if (password) {
+      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
+      if (supervisorUsername && supervisorPassword) {
         try {
-          const payloadWithPassword = { ...state.appointmentEditForm, supervisorPassword: password };
+          const payloadWithApproval = {
+            ...state.appointmentEditForm,
+            supervisorUsername,
+            supervisorPassword
+          };
           await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
             method: "PUT",
-            body: JSON.stringify(payloadWithPassword)
+            body: JSON.stringify(payloadWithApproval)
           });
           const refreshed = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
             method: "GET"
@@ -4977,7 +4999,7 @@ async function updateSelectedAppointment() {
           state.appointmentEditError = retryError.message;
         }
       } else {
-        state.appointmentEditError = t().appointments.overbookingPasswordRequired;
+        state.appointmentEditError = t().appointments.overbookingApprovalRequired;
       }
     } else {
       state.appointmentEditError = error.message;

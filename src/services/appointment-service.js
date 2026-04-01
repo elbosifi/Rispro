@@ -686,6 +686,7 @@ export async function listAvailability(modalityId, days = 14) {
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
   const modality = await getModalityById(pool, cleanModalityId);
   const daySettings = await getAppointmentDaySettings(pool);
+  const maxCasesPerModality = await getMaxCasesPerModality(pool);
 
   const { rows } = await pool.query(
     `
@@ -730,7 +731,7 @@ export async function listAvailability(modalityId, days = 14) {
       return true;
     })
     .map((row) => {
-      const capacity = Number(modality.daily_capacity || 0);
+      const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
       const bookedCount = Number(row.booked_count || 0);
       const remaining = Math.max(capacity - bookedCount, 0);
 
@@ -1135,6 +1136,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
 }
 
 export async function createAppointment(payload, currentUser, options = {}) {
+  const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const patientId = normalizePositiveInteger(payload.patientId, "patientId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1188,19 +1190,29 @@ export async function createAppointment(payload, currentUser, options = {}) {
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = bookedCount >= capacity;
 
-    if (isOverbooked && currentUser.role !== "supervisor") {
-      throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
+    if (isOverbooked && !supervisorUsername) {
+      throw new HttpError(403, "Supervisor username is required before overbooking.");
     }
 
     if (isOverbooked && !supervisorPassword) {
-      throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
+      throw new HttpError(403, "Supervisor password is required before overbooking.");
     }
 
-    if (isOverbooked && supervisorPassword) {
+    let approvingSupervisor = null;
+    if (isOverbooked && supervisorUsername && supervisorPassword) {
       try {
-        await authenticateUser(currentUser.username, supervisorPassword);
+        approvingSupervisor = await authenticateUser(supervisorUsername, supervisorPassword);
+        if (!approvingSupervisor.is_active) {
+          throw new HttpError(403, "Supervisor account is not active.");
+        }
+        if (approvingSupervisor.role !== "supervisor") {
+          throw new HttpError(403, "Only an active supervisor can approve overbooking.");
+        }
       } catch (error) {
-        throw new HttpError(403, "Invalid supervisor password. Overbooking cancelled.");
+        if (error instanceof HttpError) {
+          throw error;
+        }
+        throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
     }
 
@@ -1261,7 +1273,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
         isWalkIn,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? currentUser.fullName : null,
+        isOverbooked ? approvingSupervisor.full_name : null,
         notes,
         currentUser.sub
       ]
@@ -1307,6 +1319,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
+  const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1343,19 +1356,33 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = slotStats.bookedCount >= capacity;
 
-    if (isOverbooked && currentUser.role !== "supervisor") {
-      throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
+    const existingModalityId = Number(existingAppointment.modality_id);
+    const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
+    const modalityOrDateChanged = existingModalityId !== modalityId || existingAppointmentDate !== appointmentDate;
+
+    if (isOverbooked && !supervisorUsername) {
+      throw new HttpError(403, "Supervisor username is required before overbooking.");
     }
 
     if (isOverbooked && !supervisorPassword) {
-      throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
+      throw new HttpError(403, "Supervisor password is required before overbooking.");
     }
 
-    if (isOverbooked && supervisorPassword) {
+    let approvingSupervisor = null;
+    if (isOverbooked && supervisorUsername && supervisorPassword) {
       try {
-        await authenticateUser(currentUser.username, supervisorPassword);
+        approvingSupervisor = await authenticateUser(supervisorUsername, supervisorPassword);
+        if (!approvingSupervisor.is_active) {
+          throw new HttpError(403, "Supervisor account is not active.");
+        }
+        if (approvingSupervisor.role !== "supervisor") {
+          throw new HttpError(403, "Only an active supervisor can approve overbooking.");
+        }
       } catch (error) {
-        throw new HttpError(403, "Invalid supervisor password. Overbooking cancelled.");
+        if (error instanceof HttpError) {
+          throw error;
+        }
+        throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
     }
 
@@ -1367,6 +1394,11 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
       existingAppointment.appointment_date?.toISOString?.().slice(0, 10) === appointmentDate
         ? existingAppointment.daily_sequence
         : await nextDailySequence(client, appointmentDate, cleanAppointmentId);
+
+    const modalitySlotNumber = modalityOrDateChanged
+      ? slotStats.slotNumber
+      : Number(existingAppointment.modality_slot_number);
+
     const accessionNumber = buildAccessionNumber(appointmentDate, sequence);
 
     const { rows } = await client.query(
@@ -1397,10 +1429,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         accessionNumber,
         appointmentDate,
         sequence,
-        slotStats.slotNumber,
+        modalitySlotNumber,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? currentUser.fullName : null,
+        isOverbooked ? approvingSupervisor.full_name : null,
         notes,
         currentUser.sub
       ]

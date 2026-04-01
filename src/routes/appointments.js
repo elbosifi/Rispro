@@ -91,6 +91,7 @@ appointmentsRouter.post(
   "/",
   asyncRoute(async (req, res) => {
     const result = await createAppointment(req.body || {}, req.user, {
+      supervisorUsername: req.body.supervisorUsername,
       supervisorPassword: req.body.supervisorPassword
     });
     res.status(201).json(result);
@@ -101,6 +102,7 @@ appointmentsRouter.put(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
     const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user, {
+      supervisorUsername: req.body.supervisorUsername,
       supervisorPassword: req.body.supervisorPassword
     });
     res.json({ appointment });
