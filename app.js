@@ -822,7 +822,7 @@ const copy = {
       next30Note: "المواعيد المجدولة خلال الشهر القادم.",
       avgNextSlotTitle: "متوسط أقرب موعد",
       nextSlotTitle: "أقرب موعد متاح لكل جهاز",
-      nextSlotNote: "عدد الأيام حتى أول فتحة متاحة.",
+      nextSlotNote: "عدد الأيام حتى أقرب موعد متاح.",
       nextSlotUnavailable: "لا توجد فتحات خلال 30 يوماً",
       daysLabel: "أيام",
       todayLabel: "اليوم",
