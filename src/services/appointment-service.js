@@ -1197,7 +1197,11 @@ export async function createAppointment(payload, currentUser, options = {}) {
     }
 
     if (isOverbooked && supervisorPassword) {
-      await authenticateUser(currentUser.username, supervisorPassword);
+      try {
+        await authenticateUser(currentUser.username, supervisorPassword);
+      } catch (error) {
+        throw new HttpError(403, "Invalid supervisor password. Overbooking cancelled.");
+      }
     }
 
     if (isOverbooked && !overbookingReason) {
@@ -1348,7 +1352,11 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     }
 
     if (isOverbooked && supervisorPassword) {
-      await authenticateUser(currentUser.username, supervisorPassword);
+      try {
+        await authenticateUser(currentUser.username, supervisorPassword);
+      } catch (error) {
+        throw new HttpError(403, "Invalid supervisor password. Overbooking cancelled.");
+      }
     }
 
     if (isOverbooked && !overbookingReason) {
