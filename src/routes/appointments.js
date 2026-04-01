@@ -1,5 +1,5 @@
 import express from "express";
-import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
+import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import {
   cancelAppointment,
@@ -91,7 +91,7 @@ appointmentsRouter.post(
   "/",
   asyncRoute(async (req, res) => {
     const result = await createAppointment(req.body || {}, req.user, {
-      supervisorReauthOk: hasRecentSupervisorReauth(req)
+      supervisorPassword: req.body.supervisorPassword
     });
     res.status(201).json(result);
   })
@@ -101,7 +101,7 @@ appointmentsRouter.put(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
     const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user, {
-      supervisorReauthOk: hasRecentSupervisorReauth(req)
+      supervisorPassword: req.body.supervisorPassword
     });
     res.json({ appointment });
   })

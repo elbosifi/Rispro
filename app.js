@@ -413,6 +413,7 @@ const copy = {
       fullDay: "Full day",
       availableDay: "Available",
       overbookNotice: "This day is full. Supervisor overbooking is required.",
+      overbookingPasswordRequired: "Supervisor password is required for overbooking.",
       dayDisabledFriday: "Friday appointments are disabled in settings.",
       dayDisabledSaturday: "Saturday appointments are disabled in settings.",
       previousNoShow: "Previous no-shows",
@@ -913,6 +914,7 @@ const copy = {
       fullDay: "اليوم ممتلئ",
       availableDay: "متاح",
       overbookNotice: "هذا اليوم ممتلئ. يلزم تجاوز السعة بواسطة مشرف.",
+      overbookingPasswordRequired: "كلمة مرور المشرف مطلوبة لتجاوز السعة.",
       dayDisabledFriday: "مواعيد يوم الجمعة غير مفعّلة في الإعدادات.",
       dayDisabledSaturday: "مواعيد يوم السبت غير مفعّلة في الإعدادات.",
       previousNoShow: "حالات عدم الحضور السابقة",
@@ -4322,9 +4324,9 @@ function isSupervisorReauthNeededForOverbooking(error) {
   return message.includes("password confirmation is required") && message.includes("overbook");
 }
 
-async function requestSupervisorOverbookingReauth() {
+async function requestSupervisorPasswordForOverbooking() {
   if (!isSupervisor()) {
-    return false;
+    return null;
   }
 
   const promptText =
@@ -4334,15 +4336,10 @@ async function requestSupervisorOverbookingReauth() {
   const password = window.prompt(promptText, "");
 
   if (!password || !password.trim()) {
-    return false;
+    return null;
   }
 
-  await api("/api/auth/re-auth", {
-    method: "POST",
-    body: JSON.stringify({ password })
-  });
-  await refreshSession();
-  return true;
+  return password.trim();
 }
 
 async function saveAppointment() {
@@ -4382,23 +4379,27 @@ async function saveAppointment() {
       overbookingReason: state.appointmentForm.overbookingReason,
       isWalkIn: state.appointmentForm.isWalkIn
     };
-    let result;
 
-    try {
-      result = await api("/api/appointments", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-    } catch (error) {
-      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
-        result = await api("/api/appointments", {
-          method: "POST",
-          body: JSON.stringify(payload)
-        });
-      } else {
-        throw error;
+    const availability = state.appointmentAvailability?.find(
+      (d) => d.appointment_date === state.appointmentForm.appointmentDate
+    );
+    const isOverbooking = availability?.is_full && isSupervisor();
+
+    if (isOverbooking) {
+      const password = await requestSupervisorPasswordForOverbooking();
+      if (!password) {
+        state.appointmentError = t().appointments.overbookingPasswordRequired;
+        state.appointmentSaving = false;
+        render();
+        return;
       }
+      payload.supervisorPassword = password;
     }
+
+    const result = await api("/api/appointments", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
 
     state.appointmentSuccess = t().appointments.appointmentSaved;
     pushToast("success", state.appointmentSuccess);
@@ -4472,21 +4473,26 @@ async function saveWalkInQueueEntry() {
       overbookingReason: state.queueWalkInForm.overbookingReason
     };
 
-    try {
-      await api("/api/queue/walk-in", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-    } catch (error) {
-      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
-        await api("/api/queue/walk-in", {
-          method: "POST",
-          body: JSON.stringify(payload)
-        });
-      } else {
-        throw error;
+    const availability = state.appointmentAvailability?.find(
+      (d) => d.appointment_date === formatIsoDate(new Date())
+    );
+    const isOverbooking = availability?.is_full && isSupervisor();
+
+    if (isOverbooking) {
+      const password = await requestSupervisorPasswordForOverbooking();
+      if (!password) {
+        state.queueError = t().appointments.overbookingPasswordRequired;
+        state.queueWalkInSaving = false;
+        render();
+        return;
       }
+      payload.supervisorPassword = password;
     }
+
+    await api("/api/queue/walk-in", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
 
     state.queueSuccess = t().queue.walkInSuccess;
     state.queueWalkInForm = {
@@ -4924,21 +4930,28 @@ async function updateSelectedAppointment() {
   render();
 
   try {
-    try {
-      await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
-        method: "PUT",
-        body: JSON.stringify(state.appointmentEditForm)
-      });
-    } catch (error) {
-      if (isSupervisorReauthNeededForOverbooking(error) && (await requestSupervisorOverbookingReauth())) {
-        await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
-          method: "PUT",
-          body: JSON.stringify(state.appointmentEditForm)
-        });
-      } else {
-        throw error;
+    const payload = { ...state.appointmentEditForm };
+
+    const availability = state.appointmentAvailability?.find(
+      (d) => d.appointment_date === state.appointmentEditForm.appointmentDate
+    );
+    const isOverbooking = availability?.is_full && isSupervisor();
+
+    if (isOverbooking) {
+      const password = await requestSupervisorPasswordForOverbooking();
+      if (!password) {
+        state.appointmentEditError = t().appointments.overbookingPasswordRequired;
+        state.appointmentEditSaving = false;
+        render();
+        return;
       }
+      payload.supervisorPassword = password;
     }
+
+    await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
 
     const refreshed = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
       method: "GET"

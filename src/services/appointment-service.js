@@ -3,6 +3,7 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
+import { authenticateUser } from "./auth-service.js";
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -1134,7 +1135,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
 }
 
 export async function createAppointment(payload, currentUser, options = {}) {
-  const supervisorReauthOk = Boolean(options.supervisorReauthOk);
+  const supervisorPassword = String(options.supervisorPassword || "").trim();
   const patientId = normalizePositiveInteger(payload.patientId, "patientId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
@@ -1191,8 +1192,12 @@ export async function createAppointment(payload, currentUser, options = {}) {
       throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
     }
 
-    if (isOverbooked && !supervisorReauthOk) {
+    if (isOverbooked && !supervisorPassword) {
       throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
+    }
+
+    if (isOverbooked && supervisorPassword) {
+      await authenticateUser(currentUser.username, supervisorPassword);
     }
 
     if (isOverbooked && !overbookingReason) {
@@ -1298,7 +1303,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
-  const supervisorReauthOk = Boolean(options.supervisorReauthOk);
+  const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
@@ -1338,8 +1343,12 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
       throw new HttpError(409, "This modality is full for the selected day. A supervisor must overbook.");
     }
 
-    if (isOverbooked && !supervisorReauthOk) {
+    if (isOverbooked && !supervisorPassword) {
       throw new HttpError(403, "Supervisor password confirmation is required before overbooking.");
+    }
+
+    if (isOverbooked && supervisorPassword) {
+      await authenticateUser(currentUser.username, supervisorPassword);
     }
 
     if (isOverbooked && !overbookingReason) {
