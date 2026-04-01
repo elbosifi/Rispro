@@ -74,7 +74,6 @@ const state = {
   dashboardNextSlots: [],
   modalityLoading: false,
   modalityError: "",
-  modalitySuccess: "",
   modalityResults: [],
   modalityFilters: defaultModalityFilters(),
   queueLoading: false,
@@ -90,10 +89,8 @@ const state = {
   noShowReasons: {},
   printLoading: false,
   printError: "",
-  printSuccess: "",
   integrationLoading: false,
   integrationError: "",
-  integrationSuccess: "",
   integrationStatus: null,
   pacsFindLoading: false,
   pacsFindError: "",
@@ -106,11 +103,9 @@ const state = {
   pacsSearchHasRun: false,
   pacsTestLoading: false,
   pacsTestError: "",
-  pacsTestSuccess: "",
   pacsSettingsForm: defaultPacsSettingsForm(),
   dicomDevicesLoading: false,
   dicomDevicesError: "",
-  dicomDevicesSuccess: "",
   dicomDevices: [],
   dicomDeviceForm: defaultDicomDeviceForm(),
   dicomDeviceSaving: false,
@@ -141,36 +136,30 @@ const state = {
   doctorProtocolExamTypeId: "",
   doctorProtocolSaving: false,
   doctorProtocolError: "",
-  doctorProtocolSuccess: "",
   documentsLoading: false,
   documentsError: "",
   appointmentDocuments: [],
   uploadForm: defaultUploadForm(),
   uploadSaving: false,
   uploadError: "",
-  uploadSuccess: "",
   searchSelectedPatient: null,
   patientEditForm: defaultPatientForm(),
   patientUpdateSaving: false,
   patientUpdateError: "",
-  patientUpdateSuccess: "",
   mergeSourcePatient: null,
   mergeTargetPatient: null,
   mergeConfirmationText: "",
   mergeSaving: false,
   mergeError: "",
-  mergeSuccess: "",
   appointmentEditForm: defaultAppointmentEditForm(),
   appointmentEditSaving: false,
   appointmentEditError: "",
-  appointmentEditSuccess: "",
   cancelReason: "",
   appointmentCancelSaving: false,
   patientForm: defaultPatientForm(),
   manualEnglishName: false,
   patientSaving: false,
   patientError: "",
-  patientSuccess: "",
   savedPatient: null,
   appointmentCreatedDialogOpen: false,
   patientSuggestions: [],
@@ -182,19 +171,16 @@ const state = {
   nameDictionaryEntries: [],
   nameDictionaryLoading: false,
   nameDictionaryError: "",
-  nameDictionarySuccess: "",
   nameDictionarySavingId: "",
   examTypeSettingsEntries: [],
   examTypeSettingsModalities: [],
   examTypeSettingsLoading: false,
   examTypeSettingsError: "",
-  examTypeSettingsSuccess: "",
   examTypeSettingsSavingId: "",
   examTypeSettingsForm: defaultExamTypeForm(),
   modalitySettingsEntries: [],
   modalitySettingsLoading: false,
   modalitySettingsError: "",
-  modalitySettingsSuccess: "",
   modalitySettingsSavingId: "",
   modalitySettingsForm: defaultModalityForm(),
   nameDictionaryForm: {
@@ -213,7 +199,6 @@ const state = {
   appointmentNoShowError: "",
   appointmentSaving: false,
   appointmentError: "",
-  appointmentSuccess: "",
   appointmentPatientQuery: "",
   appointmentPatientResults: [],
   appointmentPatientLoading: false,
@@ -230,7 +215,6 @@ const state = {
   examTypeForm: defaultExamTypeForm(),
   examTypeSaving: false,
   examTypeError: "",
-  examTypeSuccess: "",
   searchQuery: "",
   searchLoading: false,
   searchError: "",
@@ -241,7 +225,6 @@ const state = {
   settingsCatalog: {},
   settingsSection: "menu",
   settingsSavingCategory: "",
-  settingsSuccess: "",
   auditFilters: defaultAuditFilters(),
   auditMeta: {
     entityTypes: [],
@@ -257,10 +240,8 @@ const state = {
   reauthError: "",
   backupLoading: false,
   backupError: "",
-  backupSuccess: "",
   restoreLoading: false,
   restoreError: "",
-  restoreSuccess: "",
   restoreFileName: "",
   restorePayloadText: "",
   users: [],
@@ -272,7 +253,6 @@ const state = {
   },
   userSaving: false,
   userError: "",
-  userSuccess: "",
   userDeletingId: null
 };
 
@@ -2932,7 +2912,6 @@ function resetPatientForm() {
   state.patientAddressMode = "select";
   state.manualEnglishName = false;
   state.patientError = "";
-  state.patientSuccess = "";
   state.savedPatient = null;
   state.patientSuggestions = [];
   render();
@@ -3820,11 +3799,9 @@ async function signOut() {
     state.userDeletingId = null;
     state.settingsCatalog = {};
     state.settingsSection = "menu";
-    state.settingsSuccess = "";
     state.nameDictionaryEntries = [];
     state.nameDictionary = { ...BASE_DICTIONARY };
     state.nameDictionaryError = "";
-    state.nameDictionarySuccess = "";
     state.nameDictionarySavingId = "";
     state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
     state.nameDictionaryImportFile = null;
@@ -3832,12 +3809,10 @@ async function signOut() {
     state.examTypeSettingsEntries = [];
     state.examTypeSettingsModalities = [];
     state.examTypeSettingsError = "";
-    state.examTypeSettingsSuccess = "";
     state.examTypeSettingsSavingId = "";
     state.examTypeSettingsForm = defaultExamTypeForm();
     state.modalitySettingsEntries = [];
     state.modalitySettingsError = "";
-    state.modalitySettingsSuccess = "";
     state.modalitySettingsSavingId = "";
     state.modalitySettingsForm = defaultModalityForm();
     state.appointmentLookups = { modalities: [], examTypes: [], priorities: [] };
@@ -3863,7 +3838,6 @@ async function signOut() {
     state.modalityResults = [];
     state.modalityFilters = defaultModalityFilters();
     state.modalityError = "";
-    state.modalitySuccess = "";
     state.auditEntries = [];
     state.auditError = "";
     state.auditFilters = defaultAuditFilters();
@@ -3871,21 +3845,16 @@ async function signOut() {
     state.auditExportLoading = false;
     state.reauthPassword = "";
     state.reauthError = "";
-    state.backupSuccess = "";
     state.backupError = "";
-    state.restoreSuccess = "";
     state.restoreError = "";
     state.restoreFileName = "";
     state.restorePayloadText = "";
     state.printResults = [];
-    state.printSuccess = "";
     state.integrationStatus = null;
     state.integrationError = "";
-    state.integrationSuccess = "";
     state.integrationLoading = false;
     state.dicomDevices = [];
     state.dicomDevicesError = "";
-    state.dicomDevicesSuccess = "";
     state.dicomDeviceForm = defaultDicomDeviceForm();
     state.scanPreparationLoading = false;
     state.printPreparationLoading = false;
@@ -3964,7 +3933,6 @@ async function checkDuplicates() {
 async function savePatient() {
   state.patientSaving = true;
   state.patientError = "";
-  state.patientSuccess = "";
   render();
 
   try {
@@ -3986,8 +3954,7 @@ async function savePatient() {
     });
 
     state.savedPatient = result.patient;
-    state.patientSuccess = t().patients.success;
-    pushToast("success", state.patientSuccess);
+    pushToast("success", t().patients.success);
     state.patientForm = defaultPatientForm();
     state.patientAddressMode = "select";
     state.manualEnglishName = false;
@@ -4010,7 +3977,6 @@ async function startAppointmentForPatient(patient) {
   state.appointmentPatientQuery = "";
   state.appointmentPatientResults = [];
   state.appointmentError = "";
-  state.appointmentSuccess = "";
   state.appointmentNoShowSummary = { count: 0, lastDate: "" };
   state.appointmentNoShowError = "";
   state.route = "appointments";
@@ -4108,7 +4074,6 @@ async function searchQueuePatients() {
 async function createUser() {
   state.userSaving = true;
   state.userError = "";
-  state.userSuccess = "";
   render();
 
   try {
@@ -4116,8 +4081,7 @@ async function createUser() {
       method: "POST",
       body: JSON.stringify(state.userForm)
     });
-    state.userSuccess =
-      state.language === "ar" ? "تم إنشاء المستخدم بنجاح." : "User created successfully.";
+    pushToast("success", state.language === "ar" ? "تم إنشاء المستخدم بنجاح." : "User created successfully.");
     state.userForm = {
       username: "",
       fullName: "",
@@ -4140,12 +4104,11 @@ async function deleteUser(userId) {
 
   state.userDeletingId = Number(userId);
   state.userError = "";
-  state.userSuccess = "";
   render();
 
   try {
     await api(`/api/users/${encodeURIComponent(userId)}`, { method: "DELETE" });
-    state.userSuccess = t().settings.userDeleted;
+    pushToast("success", t().settings.userDeleted);
     await loadUsers();
   } catch (error) {
     state.userError = error.message;
@@ -4183,7 +4146,6 @@ async function submitSupervisorReauth() {
 async function downloadBackup() {
   state.backupLoading = true;
   state.backupError = "";
-  state.backupSuccess = "";
   render();
 
   try {
@@ -4207,8 +4169,7 @@ async function downloadBackup() {
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    state.backupSuccess =
-      state.language === "ar" ? "تم تنزيل النسخة الاحتياطية بنجاح." : "The backup was downloaded successfully.";
+    pushToast("success", state.language === "ar" ? "تم تنزيل النسخة الاحتياطية بنجاح." : "The backup was downloaded successfully.");
   } catch (error) {
     state.backupError = error.message;
   } finally {
@@ -4287,7 +4248,6 @@ async function restoreBackup() {
 
   state.restoreLoading = true;
   state.restoreError = "";
-  state.restoreSuccess = "";
   render();
 
   try {
@@ -4296,8 +4256,7 @@ async function restoreBackup() {
       method: "POST",
       body: JSON.stringify(payload)
     });
-    state.restoreSuccess =
-      state.language === "ar" ? "تمت استعادة النسخة الاحتياطية بنجاح." : "The backup was restored successfully.";
+    pushToast("success", state.language === "ar" ? "تمت استعادة النسخة الاحتياطية بنجاح." : "The backup was restored successfully.");
     state.restoreFileName = "";
     state.restorePayloadText = "";
     await refreshSession();
@@ -4313,7 +4272,6 @@ async function restoreBackup() {
 async function createExamType() {
   state.examTypeSaving = true;
   state.examTypeError = "";
-  state.examTypeSuccess = "";
   render();
 
   try {
@@ -4328,7 +4286,7 @@ async function createExamType() {
 
     state.appointmentLookups.examTypes = [result.examType, ...state.appointmentLookups.examTypes];
     state.appointmentForm.examTypeId = String(result.examType.id);
-    state.examTypeSuccess = t().appointments.examAdded;
+    pushToast("success", t().appointments.examAdded);
     state.examTypeModalOpen = false;
     state.examTypeForm = defaultExamTypeForm();
   } catch (error) {
@@ -4386,7 +4344,6 @@ async function saveAppointment() {
 
   state.appointmentSaving = true;
   state.appointmentError = "";
-  state.appointmentSuccess = "";
   render();
 
   try {
@@ -4405,8 +4362,7 @@ async function saveAppointment() {
       body: JSON.stringify(payload)
     });
 
-    state.appointmentSuccess = t().appointments.appointmentSaved;
-    pushToast("success", state.appointmentSuccess);
+    pushToast("success", t().appointments.appointmentSaved);
     state.savedAppointment = result;
     state.appointmentCreatedDialogOpen = true;
     state.appointmentForm = {
@@ -4433,8 +4389,7 @@ async function saveAppointment() {
             method: "POST",
             body: JSON.stringify(payloadWithPassword)
           });
-          state.appointmentSuccess = t().appointments.appointmentSaved;
-          pushToast("success", state.appointmentSuccess);
+          pushToast("success", t().appointments.appointmentSaved);
           state.savedAppointment = result;
           state.appointmentCreatedDialogOpen = true;
           state.appointmentForm = {
@@ -4466,7 +4421,7 @@ async function scanQueueAccession() {
 
   if (!scanValue) {
     state.queueError =
-      state.language === "ar" ? "أدخل رقم الدخول أو امسح الباركود أولاً." : "Enter or scan an accession number first.";
+      state.language === "ar" ? "أدخل رقم الموعد أو امسح الباركود" : "Enter or scan an accession number first.";
     render();
     return;
   }
@@ -4605,14 +4560,13 @@ async function confirmQueueNoShow(appointmentId) {
 async function completeModalityAppointment(appointmentId) {
   state.modalityLoading = true;
   state.modalityError = "";
-  state.modalitySuccess = "";
   render();
 
   try {
     await api(`/api/modality/${encodeURIComponent(appointmentId)}/complete`, {
       method: "POST"
     });
-    state.modalitySuccess = t().modality.completed;
+    pushToast("success", t().modality.completed);
     await loadModalityWorklist();
     await loadQueueSnapshot();
   } catch (error) {
@@ -4675,7 +4629,6 @@ async function preparePrintOutput(outputType) {
 
   state.printPreparationLoading = true;
   state.integrationError = "";
-  state.integrationSuccess = "";
   render();
 
   try {
@@ -4688,10 +4641,11 @@ async function preparePrintOutput(outputType) {
     });
 
     const preparation = result.preparation;
-    state.integrationSuccess =
+    const message =
       state.language === "ar"
         ? `تم تجهيز ${outputType === "label" ? "طباعة الملصق" : "طباعة الوصل"} باستخدام الإعداد ${preparation.printerProfile}.`
         : `${outputType === "label" ? "Label" : "Slip"} print prepared with profile ${preparation.printerProfile}.`;
+    pushToast("success", message);
   } catch (error) {
     state.integrationError = error.message;
   } finally {
@@ -4710,7 +4664,6 @@ async function prepareAppointmentSlipFromCreation() {
 
   state.printPreparationLoading = true;
   state.appointmentError = "";
-  state.appointmentSuccess = "";
   render();
 
   try {
@@ -4733,7 +4686,6 @@ async function prepareScanSession() {
 
   state.scanPreparationLoading = true;
   state.integrationError = "";
-  state.integrationSuccess = "";
   render();
 
   try {
@@ -4746,10 +4698,11 @@ async function prepareScanSession() {
     });
 
     const preparation = result.preparation;
-    state.integrationSuccess =
+    const message =
       state.language === "ar"
         ? `تم تجهيز جلسة المسح ${preparation.sessionCode}. ${preparation.guidance}`
         : `Scan session ${preparation.sessionCode} is ready. ${preparation.guidance}`;
+    pushToast("success", message);
 
     if (!state.uploadForm.fileName) {
       state.uploadForm.fileName = preparation.suggestedFileName || state.uploadForm.fileName;
@@ -4856,7 +4809,6 @@ async function testPacsConnection() {
 
   state.pacsTestLoading = true;
   state.pacsTestError = "";
-  state.pacsTestSuccess = "";
   render();
 
   try {
@@ -4872,7 +4824,7 @@ async function testPacsConnection() {
       }),
       timeoutMs: 20000
     });
-    state.pacsTestSuccess = t().pacs.testSuccess;
+    pushToast("success", t().pacs.testSuccess);
   } catch (error) {
     state.pacsTestError = error.message || t().pacs.testFail;
   } finally {
@@ -4915,7 +4867,6 @@ async function updateSelectedPatient() {
 
   state.patientUpdateSaving = true;
   state.patientUpdateError = "";
-  state.patientUpdateSuccess = "";
   render();
 
   try {
@@ -4925,10 +4876,10 @@ async function updateSelectedPatient() {
     });
     state.searchSelectedPatient = result.patient;
     fillPatientEditForm(result.patient);
-    state.patientUpdateSuccess = t().patientActions.updated;
     state.searchResults = state.searchResults.map((patient) =>
       patient.id === result.patient.id ? result.patient : patient
     );
+    pushToast("success", t().patientActions.updated);
   } catch (error) {
     state.patientUpdateError = error.message;
   } finally {
@@ -4947,7 +4898,6 @@ async function mergeSelectedPatients() {
 
   state.mergeSaving = true;
   state.mergeError = "";
-  state.mergeSuccess = "";
   render();
 
   try {
@@ -4959,7 +4909,6 @@ async function mergeSelectedPatients() {
         confirmationText: state.mergeConfirmationText
       })
     });
-    state.mergeSuccess = t().patientActions.merged;
     state.searchSelectedPatient = result.patient;
     fillPatientEditForm(result.patient);
     state.searchResults = state.searchResults.filter((patient) => patient.id !== state.mergeSourcePatient.id);
@@ -4969,6 +4918,7 @@ async function mergeSelectedPatients() {
     state.mergeSourcePatient = null;
     state.mergeTargetPatient = null;
     state.mergeConfirmationText = "";
+    pushToast("success", t().patientActions.merged);
   } catch (error) {
     state.mergeError = error.message;
   } finally {
@@ -4984,7 +4934,6 @@ async function updateSelectedAppointment() {
 
   state.appointmentEditSaving = true;
   state.appointmentEditError = "";
-  state.appointmentEditSuccess = "";
   render();
 
   try {
@@ -5000,10 +4949,10 @@ async function updateSelectedAppointment() {
     });
     state.selectedPrintAppointment = refreshed.appointment;
     fillAppointmentEditForm(refreshed.appointment);
-    state.appointmentEditSuccess = t().print.appointmentUpdated;
     state.printResults = state.printResults.map((appointment) =>
       appointment.id === refreshed.appointment.id ? refreshed.appointment : appointment
     );
+    pushToast("success", t().print.appointmentUpdated);
   } catch (error) {
     if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
       const password = await requestSupervisorPasswordForOverbooking();
@@ -5019,10 +4968,10 @@ async function updateSelectedAppointment() {
           });
           state.selectedPrintAppointment = refreshed.appointment;
           fillAppointmentEditForm(refreshed.appointment);
-          state.appointmentEditSuccess = t().print.appointmentUpdated;
           state.printResults = state.printResults.map((appointment) =>
             appointment.id === refreshed.appointment.id ? refreshed.appointment : appointment
           );
+          pushToast("success", t().print.appointmentUpdated);
           return;
         } catch (retryError) {
           state.appointmentEditError = retryError.message;
@@ -5048,7 +4997,6 @@ async function saveDoctorProtocol() {
 
   state.doctorProtocolSaving = true;
   state.doctorProtocolError = "";
-  state.doctorProtocolSuccess = "";
   render();
 
   try {
@@ -5067,7 +5015,7 @@ async function saveDoctorProtocol() {
       );
     }
 
-    state.doctorProtocolSuccess = t().doctor.protocolSaved;
+    pushToast("success", t().doctor.protocolSaved);
   } catch (error) {
     state.doctorProtocolError = error.message;
   } finally {
@@ -5083,7 +5031,6 @@ async function cancelSelectedAppointment() {
 
   state.appointmentCancelSaving = true;
   state.appointmentEditError = "";
-  state.appointmentEditSuccess = "";
   render();
 
   try {
@@ -5091,7 +5038,7 @@ async function cancelSelectedAppointment() {
       method: "POST",
       body: JSON.stringify({ cancelReason: state.cancelReason })
     });
-    state.appointmentEditSuccess = t().print.appointmentCancelled;
+    pushToast("success", t().print.appointmentCancelled);
     state.cancelReason = "";
     await loadPrintAppointments();
   } catch (error) {
@@ -5111,7 +5058,6 @@ async function saveSettingsCategory(category) {
 
   state.settingsSavingCategory = category;
   state.settingsError = "";
-  state.settingsSuccess = "";
   render();
 
   try {
@@ -5127,11 +5073,7 @@ async function saveSettingsCategory(category) {
       })
     });
 
-    state.settingsSuccess =
-      state.language === "ar"
-        ? `تم حفظ فئة ${getSettingsCategoryTitle(category)} بنجاح.`
-        : `${getSettingsCategoryTitle(category)} was saved successfully.`;
-    pushToast("success", state.settingsSuccess);
+    pushToast("success", state.language === "ar" ? `تم حفظ فئة ${getSettingsCategoryTitle(category)} بنجاح.` : `${getSettingsCategoryTitle(category)} was saved successfully.`);
     await loadSettings();
     await loadAppointmentDaySettings();
   } catch (error) {
@@ -5148,9 +5090,7 @@ async function savePacsSettings() {
 
   state.settingsSavingCategory = "pacs_connection";
   state.settingsError = "";
-  state.settingsSuccess = "";
   state.pacsTestError = "";
-  state.pacsTestSuccess = "";
   render();
 
   try {
@@ -5168,11 +5108,7 @@ async function savePacsSettings() {
       })
     });
 
-    state.settingsSuccess =
-      state.language === "ar"
-        ? `تم حفظ فئة ${getSettingsCategoryTitle("pacs_connection")} بنجاح.`
-        : `${getSettingsCategoryTitle("pacs_connection")} was saved successfully.`;
-    pushToast("success", state.settingsSuccess);
+    pushToast("success", state.language === "ar" ? `تم حفظ فئة ${getSettingsCategoryTitle("pacs_connection")} بنجاح.` : `${getSettingsCategoryTitle("pacs_connection")} was saved successfully.`);
     await loadSettings();
   } catch (error) {
     state.settingsError = error.message;
@@ -5197,7 +5133,6 @@ async function saveDicomDevice() {
 
   state.dicomDeviceSaving = true;
   state.dicomDevicesError = "";
-  state.dicomDevicesSuccess = "";
   render();
 
   try {
@@ -5226,11 +5161,11 @@ async function saveDicomDevice() {
       });
     }
 
-    state.dicomDevicesSuccess = t().settings.dicomDeviceSaved;
     state.dicomDeviceForm = {
       ...defaultDicomDeviceForm(),
       modalityId: form.modalityId
     };
+    pushToast("success", t().settings.dicomDeviceSaved);
     await loadDicomDevices();
     await loadSettings();
   } catch (error) {
@@ -5248,15 +5183,14 @@ async function deleteDicomDevice(deviceId) {
 
   state.dicomDeviceSaving = true;
   state.dicomDevicesError = "";
-  state.dicomDevicesSuccess = "";
   render();
 
   try {
     await api(`/api/settings/dicom-devices/${encodeURIComponent(deviceId)}`, { method: "DELETE" });
-    state.dicomDevicesSuccess = t().settings.dicomDeviceDeleted;
     if (String(state.dicomDeviceForm.deviceId || "") === String(deviceId)) {
       state.dicomDeviceForm = defaultDicomDeviceForm();
     }
+    pushToast("success", t().settings.dicomDeviceDeleted);
     await loadDicomDevices();
     await loadSettings();
   } catch (error) {
@@ -5289,7 +5223,6 @@ function startEditingDicomDevice(deviceId) {
   };
 
   state.dicomDevicesError = "";
-  state.dicomDevicesSuccess = "";
   render();
 }
 
@@ -5308,7 +5241,6 @@ async function createNameDictionaryEntry() {
 
   state.nameDictionarySavingId = "new";
   state.nameDictionaryError = "";
-  state.nameDictionarySuccess = "";
   render();
 
   try {
@@ -5321,8 +5253,7 @@ async function createNameDictionaryEntry() {
     state.nameDictionaryEntries = entries;
     rebuildNameDictionary(entries);
     state.nameDictionaryForm = { arabicText: "", englishText: "", isActive: true };
-    state.nameDictionarySuccess =
-      state.language === "ar" ? "تم حفظ القاموس بنجاح." : "Dictionary entry saved successfully.";
+    pushToast("success", state.language === "ar" ? "تم حفظ القاموس بنجاح." : "Dictionary entry saved successfully.");
   } catch (error) {
     state.nameDictionaryError = error.message;
   } finally {
@@ -5385,7 +5316,6 @@ async function importNameDictionaryCsv() {
 
   state.nameDictionaryImportLoading = true;
   state.nameDictionaryError = "";
-  state.nameDictionarySuccess = "";
   render();
 
   try {
@@ -5402,7 +5332,7 @@ async function importNameDictionaryCsv() {
     });
 
     state.nameDictionaryImportFile = null;
-    state.nameDictionarySuccess = t().settings.dictionaryImportSuccess;
+    pushToast("success", t().settings.dictionaryImportSuccess);
     await loadNameDictionary();
   } catch (error) {
     state.nameDictionaryError = error.message;
@@ -5421,7 +5351,6 @@ async function updateNameDictionaryEntry(entryId) {
 
   state.nameDictionarySavingId = String(entryId);
   state.nameDictionaryError = "";
-  state.nameDictionarySuccess = "";
   render();
 
   try {
@@ -5437,8 +5366,7 @@ async function updateNameDictionaryEntry(entryId) {
       item.id === updated.id ? updated : item
     );
     rebuildNameDictionary(state.nameDictionaryEntries);
-    state.nameDictionarySuccess =
-      state.language === "ar" ? "تم تحديث القاموس بنجاح." : "Dictionary entry updated successfully.";
+    pushToast("success", state.language === "ar" ? "تم تحديث القاموس بنجاح." : "Dictionary entry updated successfully.");
   } catch (error) {
     state.nameDictionaryError = error.message;
   } finally {
@@ -5450,15 +5378,13 @@ async function updateNameDictionaryEntry(entryId) {
 async function deleteNameDictionaryEntry(entryId) {
   state.nameDictionarySavingId = `delete-${entryId}`;
   state.nameDictionaryError = "";
-  state.nameDictionarySuccess = "";
   render();
 
   try {
     await api(`/api/name-dictionary/${encodeURIComponent(entryId)}`, { method: "DELETE" });
     state.nameDictionaryEntries = state.nameDictionaryEntries.filter((item) => String(item.id) !== String(entryId));
     rebuildNameDictionary(state.nameDictionaryEntries);
-    state.nameDictionarySuccess =
-      state.language === "ar" ? "تم حذف المدخل من القاموس." : "Dictionary entry deleted.";
+    pushToast("success", state.language === "ar" ? "تم حذف المدخل من القاموس." : "Dictionary entry deleted.");
   } catch (error) {
     state.nameDictionaryError = error.message;
   } finally {
@@ -5478,7 +5404,6 @@ async function createSettingsExamType() {
 
   state.examTypeSettingsSavingId = "new";
   state.examTypeSettingsError = "";
-  state.examTypeSettingsSuccess = "";
   render();
 
   try {
@@ -5493,9 +5418,7 @@ async function createSettingsExamType() {
       ...defaultExamTypeForm(),
       modalityId: state.examTypeSettingsModalities[0] ? String(state.examTypeSettingsModalities[0].id) : ""
     };
-    state.examTypeSettingsSuccess =
-      state.language === "ar" ? "تمت إضافة نوع الفحص بنجاح." : "Exam type added successfully.";
-    pushToast("success", state.examTypeSettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تمت إضافة نوع الفحص بنجاح." : "Exam type added successfully.");
   } catch (error) {
     state.examTypeSettingsError = error.message;
     pushToast("error", state.examTypeSettingsError);
@@ -5514,7 +5437,6 @@ async function updateSettingsExamType(entryId) {
 
   state.examTypeSettingsSavingId = String(entryId);
   state.examTypeSettingsError = "";
-  state.examTypeSettingsSuccess = "";
   render();
 
   try {
@@ -5535,9 +5457,7 @@ async function updateSettingsExamType(entryId) {
     state.appointmentLookups.examTypes = state.appointmentLookups.examTypes.map((item) =>
       String(item.id) === String(entryId) ? result.examType : item
     );
-    state.examTypeSettingsSuccess =
-      state.language === "ar" ? "تم تحديث نوع الفحص بنجاح." : "Exam type updated successfully.";
-    pushToast("success", state.examTypeSettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تم تحديث نوع الفحص بنجاح." : "Exam type updated successfully.");
   } catch (error) {
     state.examTypeSettingsError = error.message;
     pushToast("error", state.examTypeSettingsError);
@@ -5550,7 +5470,6 @@ async function updateSettingsExamType(entryId) {
 async function deleteSettingsExamType(entryId) {
   state.examTypeSettingsSavingId = `delete-${entryId}`;
   state.examTypeSettingsError = "";
-  state.examTypeSettingsSuccess = "";
   render();
 
   try {
@@ -5562,9 +5481,7 @@ async function deleteSettingsExamType(entryId) {
     if (String(state.appointmentForm.examTypeId) === String(entryId)) {
       state.appointmentForm.examTypeId = "";
     }
-    state.examTypeSettingsSuccess =
-      state.language === "ar" ? "تم حذف نوع الفحص." : "Exam type deleted.";
-    pushToast("success", state.examTypeSettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تم حذف نوع الفحص." : "Exam type deleted.");
   } catch (error) {
     state.examTypeSettingsError = error.message;
     pushToast("error", state.examTypeSettingsError);
@@ -5597,7 +5514,6 @@ async function createSettingsModality() {
 
   state.modalitySettingsSavingId = "new";
   state.modalitySettingsError = "";
-  state.modalitySettingsSuccess = "";
   render();
 
   try {
@@ -5609,9 +5525,7 @@ async function createSettingsModality() {
     state.modalitySettingsEntries = [result.modality, ...state.modalitySettingsEntries];
     syncModalitySettingsLookups(state.modalitySettingsEntries);
     state.modalitySettingsForm = defaultModalityForm();
-    state.modalitySettingsSuccess =
-      state.language === "ar" ? "تمت إضافة الجهاز بنجاح." : "Modality added successfully.";
-    pushToast("success", state.modalitySettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تمت إضافة الجهاز بنجاح." : "Modality added successfully.");
   } catch (error) {
     state.modalitySettingsError = error.message;
     pushToast("error", state.modalitySettingsError);
@@ -5630,7 +5544,6 @@ async function updateSettingsModality(entryId) {
 
   state.modalitySettingsSavingId = String(entryId);
   state.modalitySettingsError = "";
-  state.modalitySettingsSuccess = "";
   render();
 
   try {
@@ -5651,9 +5564,7 @@ async function updateSettingsModality(entryId) {
       String(item.id) === String(entryId) ? result.modality : item
     );
     syncModalitySettingsLookups(state.modalitySettingsEntries);
-    state.modalitySettingsSuccess =
-      state.language === "ar" ? "تم تحديث الجهاز بنجاح." : "Modality updated successfully.";
-    pushToast("success", state.modalitySettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تم تحديث الجهاز بنجاح." : "Modality updated successfully.");
   } catch (error) {
     state.modalitySettingsError = error.message;
     pushToast("error", state.modalitySettingsError);
@@ -5666,7 +5577,6 @@ async function updateSettingsModality(entryId) {
 async function deleteSettingsModality(entryId) {
   state.modalitySettingsSavingId = `delete-${entryId}`;
   state.modalitySettingsError = "";
-  state.modalitySettingsSuccess = "";
   render();
 
   try {
@@ -5676,9 +5586,7 @@ async function deleteSettingsModality(entryId) {
     if (String(state.appointmentForm.modalityId) === String(entryId)) {
       state.appointmentForm.modalityId = "";
     }
-    state.modalitySettingsSuccess =
-      state.language === "ar" ? "تم حذف الجهاز." : "Modality deleted.";
-    pushToast("success", state.modalitySettingsSuccess);
+    pushToast("success", state.language === "ar" ? "تم حذف الجهاز." : "Modality deleted.");
   } catch (error) {
     state.modalitySettingsError = error.message;
     pushToast("error", state.modalitySettingsError);
@@ -6141,7 +6049,6 @@ function renderPatients() {
     <div class="page">
       ${pageHero(t().patients.title, t().patients.body, "", t().common.required)}
       ${alertMarkup("error", state.patientError)}
-      ${alertMarkup("success", state.patientSuccess)}
 
       <section class="split-grid patient-grid">
         <article class="surface">
@@ -6522,7 +6429,6 @@ function renderExamTypeModal() {
         </div>
 
         ${alertMarkup("error", state.examTypeError)}
-        ${alertMarkup("success", state.examTypeSuccess)}
 
         <div class="form-grid">
           <label class="field">
@@ -6599,7 +6505,6 @@ function renderAppointments() {
         state.appointmentLookupsLoading ? t().common.loading : t().appointments.selectedPatient
       )}
       ${alertMarkup("error", state.appointmentError)}
-      ${alertMarkup("success", state.appointmentSuccess)}
 
       <section class="split-grid">
         <div class="stack">
@@ -7710,7 +7615,6 @@ function renderModality() {
         t().nav.modality
       )}
       ${alertMarkup("error", state.modalityError)}
-      ${alertMarkup("success", state.modalitySuccess)}
 
       <section class="card-grid">
         ${statCard(t().dashboard.waiting, String(waitingCount), t().modality.title, "var(--amber)")}
@@ -7884,7 +7788,6 @@ function renderDoctorDetails() {
           </div>
           <div class="small">${escapeHtml(t().doctor.protocolHint)}</div>
           ${alertMarkup("error", state.doctorProtocolError)}
-          ${alertMarkup("success", state.doctorProtocolSuccess)}
           <div class="form-grid">
             <label class="field">
               <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
@@ -7993,7 +7896,6 @@ function renderPrint() {
         t().print.dailyList
       )}
       ${alertMarkup("error", state.printError)}
-      ${alertMarkup("success", state.printSuccess || state.integrationSuccess)}
 
       <section class="stack">
         <article class="surface">
@@ -8285,7 +8187,6 @@ function renderRegistrations() {
     <div class="page">
       ${pageHero(t().registrations.title, t().registrations.body, "", t().registrations.detailsTitle)}
       ${alertMarkup("error", state.printError || state.appointmentEditError)}
-      ${alertMarkup("success", state.printSuccess || state.appointmentEditSuccess)}
 
       <section class="split-grid">
         <div class="stack">
@@ -8477,7 +8378,6 @@ function renderSearch() {
     <div class="page">
       ${pageHero(t().search.title, t().search.body, "", t().common.open)}
       ${alertMarkup("error", state.searchError)}
-      ${alertMarkup("success", state.patientUpdateSuccess || state.mergeSuccess)}
       <section class="split-grid">
         <div class="stack">
           <section class="surface">
@@ -8993,7 +8893,6 @@ function renderExamTypeSettings() {
 
   return `
     ${alertMarkup("error", state.examTypeSettingsError)}
-    ${alertMarkup("success", state.examTypeSettingsSuccess)}
     <form id="exam-type-settings-form" class="stack">
       <div class="form-grid">
         <label class="field">
@@ -9166,7 +9065,6 @@ function renderModalitySettings() {
 
   return `
     ${alertMarkup("error", state.modalitySettingsError)}
-    ${alertMarkup("success", state.modalitySettingsSuccess)}
     <form id="modality-settings-form" class="stack">
       <div class="form-grid">
         <label class="field">
@@ -9610,7 +9508,6 @@ function renderSettingsPacsSection() {
       </div>
       <div class="settings-summary">${escapeHtml(t().pacs.testHint)}</div>
       ${alertMarkup("error", state.pacsTestError)}
-      ${alertMarkup("success", state.pacsTestSuccess)}
       <form id="pacs-settings-form" class="stack">
         <div class="form-grid">
           <label class="field">
@@ -9743,7 +9640,6 @@ function renderSettingsDicomSection() {
           <span class="chip subtle">${escapeHtml(String(state.dicomDevices.length))}</span>
         </div>
         ${alertMarkup("error", state.dicomDevicesError)}
-        ${alertMarkup("success", state.dicomDevicesSuccess)}
         <div class="split-grid">
           <div class="surface surface-compact">
             ${renderDicomDevicesList()}
@@ -9911,7 +9807,6 @@ function renderSettingsSectionContent() {
           </div>
           <div class="settings-summary">${escapeHtml(t().settings.dictionaryBody)}</div>
           ${alertMarkup("error", state.nameDictionaryError)}
-          ${alertMarkup("success", state.nameDictionarySuccess)}
           ${renderNameDictionaryAddForm()}
           ${renderNameDictionaryImportForm()}
           ${renderNameDictionaryList()}
@@ -9977,7 +9872,6 @@ function renderSettingsSectionContent() {
             <span class="chip accent">${escapeHtml(t().common.required)}</span>
           </div>
           ${alertMarkup("error", state.backupError || state.restoreError)}
-          ${alertMarkup("success", state.backupSuccess || state.restoreSuccess)}
           <div class="split-grid">
             <article class="surface surface-compact">
               <div class="stack">
@@ -10056,7 +9950,6 @@ function renderSettings() {
     <div class="page">
       ${pageHero(t().settings.title, heroBody, heroActions, t().common.required)}
       ${alertMarkup("error", state.settingsError || state.userError)}
-      ${alertMarkup("success", state.settingsSuccess || state.userSuccess)}
       ${renderSettingsSectionContent()}
     </div>
   `;
@@ -10486,25 +10379,20 @@ function handleInput(event) {
 
   if (target.hasAttribute("data-pacs-setting-field")) {
     state.pacsSettingsForm[target.name] = target.value;
-    state.settingsSuccess = "";
     state.settingsError = "";
     state.pacsTestError = "";
-    state.pacsTestSuccess = "";
     return;
   }
 
   if (target.hasAttribute("data-dicom-device-field")) {
     state.dicomDeviceForm[target.name] = target.value;
     state.dicomDevicesError = "";
-    state.dicomDevicesSuccess = "";
     return;
   }
 
   if (target.hasAttribute("data-setting-field")) {
     const category = target.dataset.settingCategory;
     const key = target.dataset.settingKey;
-
-    state.settingsSuccess = "";
 
     if (!category || !key || !state.settingsCatalog[category]) {
       return;
@@ -10715,7 +10603,6 @@ function handleClick(event) {
     const patientId = target.dataset.patientId;
     state.searchSelectedPatient = state.searchResults.find((patient) => String(patient.id) === String(patientId)) || null;
     state.patientUpdateError = "";
-    state.patientUpdateSuccess = "";
     if (state.searchSelectedPatient) {
       fillPatientEditForm(state.searchSelectedPatient);
     }
@@ -10801,7 +10688,6 @@ function handleClick(event) {
     event.preventDefault();
     state.examTypeModalOpen = true;
     state.examTypeError = "";
-    state.examTypeSuccess = "";
     state.examTypeForm = {
       ...defaultExamTypeForm(),
       modalityId: state.appointmentForm.modalityId
@@ -10836,9 +10722,7 @@ function handleClick(event) {
     state.printError = "";
     state.uploadError = "";
     state.integrationError = "";
-    state.integrationSuccess = "";
     state.appointmentEditError = "";
-    state.appointmentEditSuccess = "";
     state.cancelReason = "";
     if (state.selectedPrintAppointment) {
       fillAppointmentEditForm(state.selectedPrintAppointment);
@@ -10855,9 +10739,7 @@ function handleClick(event) {
       (appointment) => String(appointment.id) === String(appointmentId)
     ) || null;
     state.printError = "";
-    state.printSuccess = "";
     state.appointmentEditError = "";
-    state.appointmentEditSuccess = "";
     state.cancelReason = "";
     if (state.selectedPrintAppointment) {
       fillAppointmentEditForm(state.selectedPrintAppointment);
@@ -10954,7 +10836,6 @@ function handleClick(event) {
     event.preventDefault();
     state.dicomDeviceForm = defaultDicomDeviceForm();
     state.dicomDevicesError = "";
-    state.dicomDevicesSuccess = "";
     render();
     return;
   }
@@ -11048,11 +10929,8 @@ function handleClick(event) {
 
     try {
       state.printError = "";
-      state.printSuccess = "";
       openAppointmentSlipPrint(state.selectedPrintAppointment);
-      state.printSuccess =
-        state.language === "ar" ? "تم فتح وصل الموعد للطباعة." : "The appointment slip was opened for printing.";
-      pushToast("success", state.printSuccess);
+      pushToast("success", state.language === "ar" ? "تم فتح وصل الموعد للطباعة." : "The appointment slip was opened for printing.");
     } catch (error) {
       state.printError = error.message;
       pushToast("error", state.printError);
@@ -11168,8 +11046,7 @@ function handleClick(event) {
     if (value && !isKnownCity(value)) {
       state.addressOptions = [...state.addressOptions, value];
       saveCityOptions(state.addressOptions);
-      state.patientSuccess =
-        state.language === "ar" ? "تمت إضافة المدينة إلى القائمة." : "City added to the list.";
+      pushToast("success", state.language === "ar" ? "تمت إضافة المدينة إلى القائمة." : "City added to the list.");
     }
     render();
     return;
