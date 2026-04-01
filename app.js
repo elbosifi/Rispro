@@ -79,7 +79,6 @@ const state = {
   modalityFilters: defaultModalityFilters(),
   queueLoading: false,
   queueError: "",
-  queueSuccess: "",
   queueScanValue: "",
   queueSnapshot: null,
   queueWalkInQuery: "",
@@ -3860,7 +3859,6 @@ async function signOut() {
     state.queueWalkInResults = [];
     state.queueSelectedPatient = null;
     state.queueWalkInForm = defaultQueueWalkInForm();
-    state.queueSuccess = "";
     state.noShowReasons = {};
     state.modalityResults = [];
     state.modalityFilters = defaultModalityFilters();
@@ -4475,7 +4473,6 @@ async function scanQueueAccession() {
 
   state.queueLoading = true;
   state.queueError = "";
-  state.queueSuccess = "";
   render();
 
   try {
@@ -4483,7 +4480,7 @@ async function scanQueueAccession() {
       method: "POST",
       body: JSON.stringify({ scanValue })
     });
-    state.queueSuccess = t().queue.scannedSuccess;
+    pushToast("success", t().queue.scannedSuccess);
     state.queueScanValue = "";
     await loadQueueSnapshot();
   } catch (error) {
@@ -4504,7 +4501,6 @@ async function saveWalkInQueueEntry() {
 
   state.queueWalkInSaving = true;
   state.queueError = "";
-  state.queueSuccess = "";
   render();
 
   try {
@@ -4522,7 +4518,7 @@ async function saveWalkInQueueEntry() {
       body: JSON.stringify(payload)
     });
 
-    state.queueSuccess = t().queue.walkInSuccess;
+    pushToast("success", t().queue.walkInSuccess);
     state.queueWalkInForm = {
       ...defaultQueueWalkInForm(),
       modalityId: state.queueWalkInForm.modalityId
@@ -4549,7 +4545,7 @@ async function saveWalkInQueueEntry() {
             method: "POST",
             body: JSON.stringify(payloadWithPassword)
           });
-          state.queueSuccess = t().queue.walkInSuccess;
+          pushToast("success", t().queue.walkInSuccess);
           state.queueWalkInForm = {
             ...defaultQueueWalkInForm(),
             modalityId: state.queueWalkInForm.modalityId
@@ -4563,7 +4559,7 @@ async function saveWalkInQueueEntry() {
           state.queueError = retryError.message;
         }
       } else {
-        state.queueError = t().appointments.overbookingPasswordRequired;
+        pushToast("error", t().appointments.overbookingPasswordRequired);
       }
     } else {
       state.queueError = error.message;
@@ -4585,7 +4581,6 @@ async function confirmQueueNoShow(appointmentId) {
 
   state.queueLoading = true;
   state.queueError = "";
-  state.queueSuccess = "";
   render();
 
   try {
@@ -4596,8 +4591,7 @@ async function confirmQueueNoShow(appointmentId) {
         reason
       })
     });
-    state.queueSuccess =
-      state.language === "ar" ? "تم تأكيد عدم حضور المريض." : "The no-show was confirmed successfully.";
+    pushToast("success", state.language === "ar" ? "تم تأكيد عدم حضور المريض." : "The no-show was confirmed successfully.");
     delete state.noShowReasons[appointmentId];
     await loadQueueSnapshot();
   } catch (error) {
@@ -5894,7 +5888,6 @@ function renderDashboard() {
 
       ${alertMarkup("error", state.dashboardError || state.queueError)}
       ${alertMarkup("error", state.dashboardScheduleError)}
-      ${alertMarkup("success", state.queueSuccess)}
 
       <section class="banner-strip surface">
         <div class="banner-metric">
@@ -7160,7 +7153,6 @@ function renderQueue() {
         state.queueSnapshot?.queueDate || localizedDate()
       )}
       ${alertMarkup("error", state.queueError)}
-      ${alertMarkup("success", state.queueSuccess)}
 
       <section class="card-grid">
         ${statCard(t().dashboard.waiting, String(summary.waiting_count || 0), t().queue.waitingList, "var(--amber)")}
