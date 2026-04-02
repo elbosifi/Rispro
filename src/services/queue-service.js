@@ -270,6 +270,10 @@ export async function getQueueSnapshot() {
 }
 
 export async function scanAppointmentIntoQueue(payload, currentUser) {
+  if (!currentUser?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
   const cleanAccession = await resolveScanValueToAccession(payload?.scanValue, payload?.accessionNumber);
 
   const queueDate = getTripoliToday();
@@ -287,13 +291,10 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
       throw new HttpError(409, `This appointment is already marked as ${appointment.status}.`);
     }
 
-    // For public kiosk, currentUser might be null - use a default user ID
-    const userId = currentUser?.sub || "kiosk-public";
-
-    const queueEntry = await enqueueAppointmentRecord(client, appointment, userId, queueDate);
+    const queueEntry = await enqueueAppointmentRecord(client, appointment, currentUser.sub, queueDate);
 
     if (appointment.status !== "arrived") {
-      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", userId);
+      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", currentUser.sub);
     }
 
     await logAuditEntry(
@@ -303,7 +304,7 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
         actionType: "scan_into_queue",
         oldValues: { status: appointment.status },
         newValues: { status: "arrived", accession_number: appointment.accession_number },
-        changedByUserId: userId
+        changedByUserId: currentUser.sub
       },
       client
     );
@@ -365,6 +366,10 @@ export async function createWalkInQueueEntry(payload, currentUser, options = {})
 }
 
 export async function confirmNoShow(appointmentId, reason, currentUser) {
+  if (!currentUser?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
   const cleanReason = String(reason || "").trim();
 
   if (!cleanReason) {

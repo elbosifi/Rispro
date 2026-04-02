@@ -1136,6 +1136,10 @@ export async function deleteExamType(examTypeId, currentUserId) {
 }
 
 export async function createAppointment(payload, currentUser, options = {}) {
+  if (!currentUser?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const patientId = normalizePositiveInteger(payload.patientId, "patientId");
@@ -1322,6 +1326,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
+  if (!currentUser?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
@@ -1475,6 +1483,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 }
 
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
+  if (!currentUser?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
   const client = await pool.connect();

@@ -3973,10 +3973,8 @@ async function savePatient() {
     state.patientSuggestions = [];
   } catch (error) {
     state.patientError = error.message;
-    pushToast("error", state.patientError);
-  } finally {
     state.patientSaving = false;
-    render();
+    pushToast("error", state.patientError);
   }
 }
 
@@ -4103,9 +4101,8 @@ async function createUser() {
     await loadUsers();
   } catch (error) {
     state.userError = error.message;
-  } finally {
     state.userSaving = false;
-    render();
+    pushToast("error", state.userError);
   }
 }
 
@@ -4124,9 +4121,9 @@ async function deleteUser(userId) {
     await loadUsers();
   } catch (error) {
     state.userError = error.message;
-  } finally {
     state.userDeletingId = null;
-    render();
+    pushToast("error", state.userError);
+    return;
   }
 }
 
@@ -4184,9 +4181,8 @@ async function downloadBackup() {
     pushToast("success", state.language === "ar" ? "تم تنزيل النسخة الاحتياطية بنجاح." : "The backup was downloaded successfully.");
   } catch (error) {
     state.backupError = error.message;
-  } finally {
     state.backupLoading = false;
-    render();
+    pushToast("error", state.backupError);
   }
 }
 
@@ -4275,9 +4271,8 @@ async function restoreBackup() {
     await Promise.all([loadUsers(), loadSettings(), loadAuditEntries()]);
   } catch (error) {
     state.restoreError = error.message;
-  } finally {
     state.restoreLoading = false;
-    render();
+    pushToast("error", state.restoreError);
   }
 }
 
@@ -4303,9 +4298,8 @@ async function createExamType() {
     state.examTypeForm = defaultExamTypeForm();
   } catch (error) {
     state.examTypeError = error.message;
-  } finally {
     state.examTypeSaving = false;
-    render();
+    pushToast("error", state.examTypeError);
   }
 }
 
@@ -4339,6 +4333,11 @@ function openOverbookingApprovalModal(pendingPayload) {
  * Handles the submission of the overbooking approval modal.
  */
 async function submitOverbookingApproval() {
+  // Prevent double-submit race condition
+  if (state.overbookingApprovalLoading) {
+    return;
+  }
+
   const { supervisorUsername, supervisorPassword, overbookingReason } = state.overbookingApprovalForm;
 
   if (!supervisorUsername || !supervisorUsername.trim()) {
@@ -4490,19 +4489,22 @@ async function saveAppointment() {
           return;
         } catch (retryError) {
           state.appointmentError = retryError.message;
+          state.appointmentSaving = false;
           pushToast("error", state.appointmentError);
+          return;
         }
       } else {
         state.appointmentError = t().appointments.overbookingApprovalRequired;
+        state.appointmentSaving = false;
         pushToast("error", state.appointmentError);
+        return;
       }
     } else {
       state.appointmentError = error.message;
+      state.appointmentSaving = false;
       pushToast("error", state.appointmentError);
+      return;
     }
-  } finally {
-    state.appointmentSaving = false;
-    render();
   }
 }
 
@@ -4530,10 +4532,8 @@ async function scanQueueAccession() {
     await loadQueueSnapshot();
   } catch (error) {
     state.queueError = error.message;
-    pushToast("error", state.queueError);
-  } finally {
     state.queueLoading = false;
-    render();
+    pushToast("error", state.queueError);
   }
 }
 
@@ -4602,19 +4602,22 @@ async function saveWalkInQueueEntry() {
           return;
         } catch (retryError) {
           state.queueError = retryError.message;
+          state.queueWalkInSaving = false;
           pushToast("error", state.queueError);
+          return;
         }
       } else {
         state.queueError = t().appointments.overbookingApprovalRequired;
+        state.queueWalkInSaving = false;
         pushToast("error", state.queueError);
+        return;
       }
     } else {
       state.queueError = error.message;
+      state.queueWalkInSaving = false;
       pushToast("error", state.queueError);
+      return;
     }
-  } finally {
-    state.queueWalkInSaving = false;
-    render();
   }
 }
 
@@ -4644,14 +4647,18 @@ async function confirmQueueNoShow(appointmentId) {
     await loadQueueSnapshot();
   } catch (error) {
     state.queueError = error.message;
-    pushToast("error", state.queueError);
-  } finally {
     state.queueLoading = false;
-    render();
+    pushToast("error", state.queueError);
   }
 }
 
 async function completeModalityAppointment(appointmentId) {
+  if (!appointmentId || !Number.isInteger(Number(appointmentId))) {
+    state.modalityError = "Invalid appointment ID.";
+    pushToast("error", state.modalityError);
+    return;
+  }
+
   state.modalityLoading = true;
   state.modalityError = "";
   render();
@@ -4665,10 +4672,8 @@ async function completeModalityAppointment(appointmentId) {
     await loadQueueSnapshot();
   } catch (error) {
     state.modalityError = error.message;
-    pushToast("error", state.modalityError);
-  } finally {
     state.modalityLoading = false;
-    render();
+    pushToast("error", state.modalityError);
   }
 }
 
@@ -4709,9 +4714,7 @@ async function uploadAppointmentDocument() {
     await loadAppointmentDocuments(state.selectedPrintAppointment.id);
   } catch (error) {
     state.uploadError = error.message;
-  } finally {
-    state.uploadSaving = false;
-    render();
+    pushToast("error", state.uploadError);
   }
 }
 
@@ -4743,9 +4746,9 @@ async function preparePrintOutput(outputType) {
     pushToast("success", message);
   } catch (error) {
     state.integrationError = error.message;
-  } finally {
     state.printPreparationLoading = false;
-    render();
+    pushToast("error", state.integrationError);
+    return;
   }
 }
 
@@ -4922,6 +4925,7 @@ async function testPacsConnection() {
     pushToast("success", t().pacs.testSuccess);
   } catch (error) {
     state.pacsTestError = error.message || t().pacs.testFail;
+    pushToast("error", state.pacsTestError);
   } finally {
     state.pacsTestLoading = false;
     render();
@@ -4977,9 +4981,8 @@ async function updateSelectedPatient() {
     pushToast("success", t().patientActions.updated);
   } catch (error) {
     state.patientUpdateError = error.message;
-  } finally {
     state.patientUpdateSaving = false;
-    render();
+    pushToast("error", state.patientUpdateError);
   }
 }
 
@@ -5016,14 +5019,15 @@ async function mergeSelectedPatients() {
     pushToast("success", t().patientActions.merged);
   } catch (error) {
     state.mergeError = error.message;
-  } finally {
     state.mergeSaving = false;
-    render();
+    pushToast("error", state.mergeError);
   }
 }
 
 async function updateSelectedAppointment() {
   if (!state.selectedPrintAppointment) {
+    state.appointmentEditError = "No appointment selected.";
+    pushToast("error", state.appointmentEditError);
     return;
   }
 
@@ -5077,19 +5081,22 @@ async function updateSelectedAppointment() {
           return;
         } catch (retryError) {
           state.appointmentEditError = retryError.message;
+          state.appointmentEditSaving = false;
           pushToast("error", state.appointmentEditError);
+          return;
         }
       } else {
         state.appointmentEditError = t().appointments.overbookingApprovalRequired;
+        state.appointmentEditSaving = false;
         pushToast("error", state.appointmentEditError);
+        return;
       }
     } else {
       state.appointmentEditError = error.message;
+      state.appointmentEditSaving = false;
       pushToast("error", state.appointmentEditError);
+      return;
     }
-  } finally {
-    state.appointmentEditSaving = false;
-    render();
   }
 }
 
@@ -5526,10 +5533,8 @@ async function createSettingsExamType() {
     pushToast("success", state.language === "ar" ? "تمت إضافة نوع الفحص بنجاح." : "Exam type added successfully.");
   } catch (error) {
     state.examTypeSettingsError = error.message;
-    pushToast("error", state.examTypeSettingsError);
-  } finally {
     state.examTypeSettingsSavingId = "";
-    render();
+    pushToast("error", state.examTypeSettingsError);
   }
 }
 
@@ -5633,10 +5638,8 @@ async function createSettingsModality() {
     pushToast("success", state.language === "ar" ? "تمت إضافة الجهاز بنجاح." : "Modality added successfully.");
   } catch (error) {
     state.modalitySettingsError = error.message;
-    pushToast("error", state.modalitySettingsError);
-  } finally {
     state.modalitySettingsSavingId = "";
-    render();
+    pushToast("error", state.modalitySettingsError);
   }
 }
 
@@ -5672,10 +5675,8 @@ async function updateSettingsModality(entryId) {
     pushToast("success", state.language === "ar" ? "تم تحديث الجهاز بنجاح." : "Modality updated successfully.");
   } catch (error) {
     state.modalitySettingsError = error.message;
-    pushToast("error", state.modalitySettingsError);
-  } finally {
     state.modalitySettingsSavingId = "";
-    render();
+    pushToast("error", state.modalitySettingsError);
   }
 }
 
@@ -5694,10 +5695,8 @@ async function deleteSettingsModality(entryId) {
     pushToast("success", state.language === "ar" ? "تم حذف الجهاز." : "Modality deleted.");
   } catch (error) {
     state.modalitySettingsError = error.message;
-    pushToast("error", state.modalitySettingsError);
-  } finally {
     state.modalitySettingsSavingId = "";
-    render();
+    pushToast("error", state.modalitySettingsError);
   }
 }
 
@@ -5766,6 +5765,18 @@ function alertMarkup(kind, message) {
 function pushToast(kind, message, durationMs = 4500) {
   if (!message) {
     return;
+  }
+
+  // Prevent duplicate toasts
+  const isDuplicate = state.toasts.some(toast => toast.message === message && toast.kind === kind);
+  if (isDuplicate) {
+    return;
+  }
+
+  // Cap at 5 toasts to prevent accumulation
+  const MAX_TOASTS = 5;
+  if (state.toasts.length >= MAX_TOASTS) {
+    state.toasts = state.toasts.slice(1);
   }
 
   const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -5867,17 +5878,6 @@ function renderLogin() {
             </label>
             <button class="button-primary" type="submit">${escapeHtml(state.loginLoading ? t().common.loading : t().login.signIn)}</button>
           </form>
-          
-          <div class="login-divider">
-            <span>or</span>
-          </div>
-          
-          <a href="/patient-kiosk.html" class="kiosk-link" target="_blank">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H4V4h16v16zM6 10h2v2H6zm0 4h2v2H6zm4-4h8v2h-8zm0 4h5v2h-5zm0-8h8v2h-8z"/>
-            </svg>
-            <span>${escapeHtml(state.language === "ar" ? "دخول المرضى" : "Patient Kiosk")}</span>
-          </a>
         </section>
       </div>
     </div>
