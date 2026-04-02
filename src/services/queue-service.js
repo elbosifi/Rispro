@@ -287,10 +287,13 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
       throw new HttpError(409, `This appointment is already marked as ${appointment.status}.`);
     }
 
-    const queueEntry = await enqueueAppointmentRecord(client, appointment, currentUser.sub, queueDate);
+    // For public kiosk, currentUser might be null - use a default user ID
+    const userId = currentUser?.sub || "kiosk-public";
+
+    const queueEntry = await enqueueAppointmentRecord(client, appointment, userId, queueDate);
 
     if (appointment.status !== "arrived") {
-      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", currentUser.sub);
+      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", userId);
     }
 
     await logAuditEntry(
@@ -300,7 +303,7 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
         actionType: "scan_into_queue",
         oldValues: { status: appointment.status },
         newValues: { status: "arrived", accession_number: appointment.accession_number },
-        changedByUserId: currentUser.sub
+        changedByUserId: userId
       },
       client
     );

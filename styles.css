@@ -1981,6 +1981,62 @@ html[dir="rtl"] .brand-text {
   gap: 20px;
 }
 
+.login-divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 8px 0;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid var(--border);
+}
+
+.login-divider span {
+  padding: 0 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.kiosk-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: rgba(45, 122, 79, 0.08);
+  border: 2px solid rgba(45, 122, 79, 0.2);
+  border-radius: 12px;
+  color: var(--success);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.95rem;
+  transition: all 0.2s ease;
+}
+
+.kiosk-link:hover {
+  background: rgba(45, 122, 79, 0.12);
+  border-color: var(--success);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(45, 122, 79, 0.2);
+}
+
+.kiosk-link:active {
+  transform: translateY(0);
+}
+
+.kiosk-link svg {
+  flex-shrink: 0;
+}
+
 @media (max-width: 1220px) {
   .layout {
     padding: 14px 14px 20px;
@@ -2316,4 +2372,13 @@ html[dir="rtl"] .brand-text {
     height: 42px;
     font-size: 1.1rem;
   }
+}
+
+/* Arabic RTL support */
+[lang="ar"] {
+  direction: rtl;
+}
+
+[lang="ar"] .kiosk-link {
+  flex-direction: row-reverse;
 }

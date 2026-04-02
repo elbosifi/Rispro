@@ -5867,6 +5867,17 @@ function renderLogin() {
             </label>
             <button class="button-primary" type="submit">${escapeHtml(state.loginLoading ? t().common.loading : t().login.signIn)}</button>
           </form>
+          
+          <div class="login-divider">
+            <span>or</span>
+          </div>
+          
+          <a href="/patient-kiosk.html" class="kiosk-link" target="_blank">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+              <path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H4V4h16v16zM6 10h2v2H6zm0 4h2v2H6zm4-4h8v2h-8zm0 4h5v2h-5zm0-8h8v2h-8z"/>
+            </svg>
+            <span>${escapeHtml(state.language === "ar" ? "دخول المرضى" : "Patient Kiosk")}</span>
+          </a>
         </section>
       </div>
     </div>

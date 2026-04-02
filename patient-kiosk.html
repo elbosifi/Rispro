@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RISpro Reception - Patient Kiosk</title>
+  <style>
+    :root {
+      --primary: #8c5e3c;
+      --primary-dark: #6d462b;
+      --accent: #d4a574;
+      --success: #2d7a4f;
+      --error: #c0392b;
+      --bg: #f8f5f2;
+      --surface: #ffffff;
+      --text: #2c1810;
+      --text-muted: #8b7355;
+      --border: #e8dfd6;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #f8f5f2 0%, #e8dfd6 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .kiosk-container {
+      background: var(--surface);
+      border-radius: 24px;
+      box-shadow: 0 20px 60px rgba(140, 94, 60, 0.15);
+      padding: 60px 40px;
+      max-width: 520px;
+      width: 100%;
+      text-align: center;
+    }
+
+    .logo {
+      font-size: 2rem;
+      font-weight: 800;
+      color: var(--primary);
+      margin-bottom: 8px;
+      letter-spacing: -0.5px;
+    }
+
+    .logo span {
+      color: var(--accent);
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1rem;
+      margin-bottom: 40px;
+    }
+
+    .icon-wrapper {
+      width: 120px;
+      height: 120px;
+      margin: 0 auto 32px;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 10px 30px rgba(140, 94, 60, 0.3);
+    }
+
+    .icon-wrapper svg {
+      width: 60px;
+      height: 60px;
+      fill: white;
+    }
+
+    .instruction {
+      font-size: 1.25rem;
+      color: var(--text);
+      margin-bottom: 32px;
+      line-height: 1.5;
+    }
+
+    .input-group {
+      position: relative;
+      margin-bottom: 24px;
+    }
+
+    .accession-input {
+      width: 100%;
+      padding: 20px 24px;
+      font-size: 1.5rem;
+      border: 2px solid var(--border);
+      border-radius: 16px;
+      text-align: center;
+      letter-spacing: 2px;
+      transition: all 0.3s ease;
+      outline: none;
+    }
+
+    .accession-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 4px rgba(140, 94, 60, 0.1);
+    }
+
+    .accession-input::placeholder {
+      color: var(--text-muted);
+      letter-spacing: normal;
+      font-size: 1rem;
+    }
+
+    .submit-btn {
+      width: 100%;
+      padding: 18px 32px;
+      font-size: 1.125rem;
+      font-weight: 600;
+      color: white;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      border: none;
+      border-radius: 16px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(140, 94, 60, 0.3);
+    }
+
+    .submit-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(140, 94, 60, 0.4);
+    }
+
+    .submit-btn:active {
+      transform: translateY(0);
+    }
+
+    .submit-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .message {
+      margin-top: 32px;
+      padding: 20px 24px;
+      border-radius: 16px;
+      font-size: 1rem;
+      line-height: 1.5;
+      display: none;
+      animation: slideIn 0.3s ease;
+    }
+
+    @keyframes slideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-10px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .message.success {
+      background: rgba(45, 122, 79, 0.1);
+      border: 2px solid var(--success);
+      color: var(--success);
+      display: block;
+    }
+
+    .message.error {
+      background: rgba(192, 57, 43, 0.1);
+      border: 2px solid var(--error);
+      color: var(--error);
+      display: block;
+    }
+
+    .message-icon {
+      width: 48px;
+      height: 48px;
+      margin: 0 auto 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .message.success .message-icon svg {
+      fill: var(--success);
+    }
+
+    .message.error .message-icon svg {
+      fill: var(--error);
+    }
+
+    .message-title {
+      font-weight: 700;
+      font-size: 1.125rem;
+      margin-bottom: 8px;
+    }
+
+    .message-body {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .loading-spinner {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 0.8s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .language-toggle {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .lang-btn {
+      padding: 8px 16px;
+      border: 2px solid var(--border);
+      background: var(--surface);
+      border-radius: 999px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .lang-btn.active {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: rgba(140, 94, 60, 0.05);
+    }
+
+    .lang-btn:hover {
+      border-color: var(--primary);
+    }
+
+    /* Arabic styles */
+    body.ar {
+      direction: rtl;
+    }
+
+    body.ar .logo {
+      font-family: 'Tahoma', 'Arial', sans-serif;
+    }
+
+    body.ar .accession-input {
+      font-family: 'Tahoma', 'Arial', sans-serif;
+      letter-spacing: normal;
+    }
+
+    body.ar .loading-spinner {
+      margin-right: 0;
+      margin-left: 8px;
+    }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .kiosk-container {
+        padding: 40px 24px;
+      }
+
+      .logo {
+        font-size: 1.5rem;
+      }
+
+      .icon-wrapper {
+        width: 100px;
+        height: 100px;
+      }
+
+      .icon-wrapper svg {
+        width: 50px;
+        height: 50px;
+      }
+
+      .instruction {
+        font-size: 1.1rem;
+      }
+
+      .accession-input {
+        font-size: 1.25rem;
+        padding: 16px 20px;
+      }
+
+      .submit-btn {
+        font-size: 1rem;
+        padding: 16px 24px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="language-toggle">
+    <button class="lang-btn active" data-lang="en">English</button>
+    <button class="lang-btn" data-lang="ar">العربية</button>
+  </div>
+
+  <div class="kiosk-container">
+    <div class="logo">RISpro <span>Reception</span></div>
+    <p class="subtitle" data-en="Patient Self-Service Kiosk" data-ar="محطة الخدمة الذاتية للمرضى">Patient Self-Service Kiosk</p>
+
+    <div class="icon-wrapper">
+      <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+        <path d="M4 4h16v16H4z" opacity="0"/>
+        <path d="M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 18H4V4h16v16zM6 10h2v2H6zm0 4h2v2H6zm4-4h8v2h-8zm0 4h5v2h-5zm0-8h8v2h-8z"/>
+      </svg>
+    </div>
+
+    <p class="instruction" data-en="Please scan or enter your accession number below" data-ar="يرجى مسح أو إدخال رقم الفحص الخاص بك أدناه">Please scan or enter your accession number below</p>
+
+    <form id="kiosk-form">
+      <div class="input-group">
+        <input
+          type="text"
+          class="accession-input"
+          id="accession-input"
+          name="accessionNumber"
+          placeholder="YYYYMMDD-XXX"
+          autocomplete="off"
+          autofocus
+        />
+      </div>
+
+      <button type="submit" class="submit-btn" id="submit-btn">
+        <span data-en="Join Queue" data-ar="الانضمام للطابور">Join Queue</span>
+      </button>
+    </form>
+
+    <div id="message-container" class="message"></div>
+  </div>
+
+  <script>
+    const API_BASE = window.location.origin;
+
+    const translations = {
+      en: {
+        title: 'Patient Self-Service Kiosk',
+        instruction: 'Please scan or enter your accession number below',
+        placeholder: 'YYYYMMDD-XXX',
+        submit: 'Join Queue',
+        submitting: 'Processing...',
+        successTitle: 'Welcome!',
+        successBody: 'You have been added to the queue. Please wait for your turn.',
+        errorTitle: 'Unable to Join Queue',
+        errorNotFound: 'Appointment not found. Please check your accession number or contact reception.',
+        errorAlreadyScanned: 'You have already been scanned. Please wait for your turn.',
+        errorCancelled: 'This appointment has been cancelled. Please contact reception.',
+        errorDefault: 'An error occurred. Please try again or contact reception.',
+        errorRequired: 'Please enter your accession number.'
+      },
+      ar: {
+        title: 'محطة الخدمة الذاتية للمرضى',
+        instruction: 'يرجى مسح أو إدخال رقم الفحص الخاص بك أدناه',
+        placeholder: 'YYYYMMDD-XXX',
+        submit: 'الانضمام للطابور',
+        submitting: 'جاري المعالجة...',
+        successTitle: 'مرحباً!',
+        successBody: 'تمت إضافتك إلى قائمة الانتظار. يرجى انتظار دورك.',
+        errorTitle: 'تعذر الانضمام للطابور',
+        errorNotFound: 'لم يتم العثور على الموعد. يرجى التحقق من رقم الفحص أو الاتصال بالاستقبال.',
+        errorAlreadyScanned: 'تم مسحك بالفعل. يرجى انتظار دورك.',
+        errorCancelled: 'تم إلغاء هذا الموعد. يرجى الاتصال بالاستقبال.',
+        errorDefault: 'حدث خطأ. يرجى المحاولة مرة أخرى أو الاتصال بالاستقبال.',
+        errorRequired: 'يرجى إدخال رقم الفحص.'
+      }
+    };
+
+    let currentLang = 'en';
+
+    // Language toggle
+    document.querySelectorAll('.lang-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentLang = btn.dataset.lang;
+        document.body.classList.toggle('ar', currentLang === 'ar');
+        document.querySelectorAll('.lang-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        updateTexts();
+        document.getElementById('accession-input').focus();
+      });
+    });
+
+    function updateTexts() {
+      const t = translations[currentLang];
+      document.querySelector('.subtitle').textContent = t.title;
+      document.querySelector('.instruction').textContent = t.instruction;
+      document.getElementById('accession-input').placeholder = t.placeholder;
+      const submitBtnText = document.querySelector('#submit-btn span');
+      if (submitBtnText) submitBtnText.textContent = t.submit;
+      
+      // Update message if visible
+      const messageContainer = document.getElementById('message-container');
+      if (messageContainer.classList.contains('success')) {
+        showMessage('success', t.successTitle, t.successBody);
+      } else if (messageContainer.classList.contains('error')) {
+        const errorBody = messageContainer.querySelector('.message-body');
+        if (errorBody) {
+          const errorKey = errorBody.dataset.error;
+          let errorText = t.errorDefault;
+          if (errorKey === 'not_found') errorText = t.errorNotFound;
+          else if (errorKey === 'already_scanned') errorText = t.errorAlreadyScanned;
+          else if (errorKey === 'cancelled') errorText = t.errorCancelled;
+          else if (errorKey === 'required') errorText = t.errorRequired;
+          showMessage('error', t.errorTitle, errorText);
+        }
+      }
+    }
+
+    function showMessage(type, title, body) {
+      const container = document.getElementById('message-container');
+      const t = translations[currentLang];
+      
+      const successIcon = `<svg viewBox="0 0 24 24" width="48" height="48"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>`;
+      const errorIcon = `<svg viewBox="0 0 24 24" width="48" height="48"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`;
+
+      container.className = `message ${type}`;
+      container.innerHTML = `
+        <div class="message-icon">${type === 'success' ? successIcon : errorIcon}</div>
+        <div class="message-title">${title}</div>
+        <div class="message-body" ${type === 'error' ? 'data-error="' + body + '"' : ''}>${body}</div>
+      `;
+
+      // Auto-hide success message after 5 seconds and reset form
+      if (type === 'success') {
+        setTimeout(() => {
+          container.className = 'message';
+          container.innerHTML = '';
+          document.getElementById('accession-input').value = '';
+          document.getElementById('accession-input').focus();
+        }, 5000);
+      }
+    }
+
+    function setLoading(loading) {
+      const btn = document.getElementById('submit-btn');
+      const t = translations[currentLang];
+      
+      if (loading) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="loading-spinner"></span>${t.submitting}`;
+      } else {
+        btn.disabled = false;
+        btn.innerHTML = `<span data-en="Join Queue" data-ar="الانضمام للطابور">${t.submit}</span>`;
+      }
+    }
+
+    async function submitAccessionNumber(accessionNumber) {
+      const t = translations[currentLang];
+      
+      if (!accessionNumber || !accessionNumber.trim()) {
+        showMessage('error', t.errorTitle, t.errorRequired);
+        return;
+      }
+
+      setLoading(true);
+
+      try {
+        const response = await fetch(`${API_BASE}/api/queue/kiosk-scan`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ scanValue: accessionNumber.trim() })
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          throw new Error(error.message || `HTTP ${response.status}`);
+        }
+
+        showMessage('success', t.successTitle, t.successBody);
+
+      } catch (error) {
+        const message = error.message || '';
+        let errorBody = t.errorDefault;
+        
+        if (message.toLowerCase().includes('not found')) {
+          errorBody = t.errorNotFound;
+        } else if (message.toLowerCase().includes('already')) {
+          errorBody = t.errorAlreadyScanned;
+        } else if (message.toLowerCase().includes('cancelled')) {
+          errorBody = t.errorCancelled;
+        }
+
+        showMessage('error', t.errorTitle, errorBody);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // Form submission
+    document.getElementById('kiosk-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const accessionNumber = document.getElementById('accession-input').value;
+      submitAccessionNumber(accessionNumber);
+    });
+
+    // Auto-submit on barcode scan (most scanners end with Enter)
+    document.getElementById('accession-input').addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const accessionNumber = e.target.value;
+        submitAccessionNumber(accessionNumber);
+      }
+    });
+
+    // Keep focus on input for continuous scanning
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.message')) {
+        document.getElementById('accession-input').focus();
+      }
+    });
+
+    // Initial focus
+    window.addEventListener('load', () => {
+      document.getElementById('accession-input').focus();
+    });
+  </script>
+</body>
+</html>

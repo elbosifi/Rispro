@@ -10,6 +10,15 @@ import {
 
 export const queueRouter = express.Router();
 
+// Public endpoint for patient kiosk (no auth required)
+queueRouter.post(
+  "/kiosk-scan",
+  asyncRoute(async (req, res) => {
+    const result = await scanAppointmentIntoQueue(req.body || {}, null);
+    res.json(result);
+  })
+);
+
 queueRouter.use(requireAuth);
 
 queueRouter.get(
