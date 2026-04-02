@@ -77,6 +77,7 @@ export function createApp() {
   app.use("/api", notFoundHandler);
 
   app.get("/", sendFrontendFile("index.html"));
+  app.get("/patient-kiosk.html", sendFrontendFile("patient-kiosk.html"));
   app.get("/app.js", sendFrontendFile("app.js"));
   app.get("/styles.css", sendFrontendFile("styles.css", env.isProduction ? 3600 : 0));
   app.get("/favicon.ico", (_req, res) => {
