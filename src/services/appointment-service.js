@@ -1190,16 +1190,16 @@ export async function createAppointment(payload, currentUser, options = {}) {
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = bookedCount >= capacity;
 
-    if (isOverbooked && !supervisorUsername) {
-      throw new HttpError(403, "Supervisor username is required before overbooking.");
-    }
-
-    if (isOverbooked && !supervisorPassword) {
-      throw new HttpError(403, "Supervisor password is required before overbooking.");
-    }
-
+    // Handle overbooking approval
     let approvingSupervisor = null;
-    if (isOverbooked && supervisorUsername && supervisorPassword) {
+    if (isOverbooked) {
+      if (!supervisorUsername) {
+        throw new HttpError(403, "Supervisor username is required before overbooking.");
+      }
+      if (!supervisorPassword) {
+        throw new HttpError(403, "Supervisor password is required before overbooking.");
+      }
+
       try {
         approvingSupervisor = await authenticateUser(supervisorUsername, supervisorPassword);
         if (!approvingSupervisor.is_active) {
@@ -1214,10 +1214,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
         }
         throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
-    }
 
-    if (isOverbooked && !overbookingReason) {
-      throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      if (!overbookingReason) {
+        throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      }
     }
 
     const accessionNumber = buildAccessionNumber(appointmentDate, nextDailySequence);
@@ -1237,6 +1237,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
           is_overbooked,
           overbooking_reason,
           approved_by_name,
+          approved_by_user_id,
           notes,
           created_by_user_id,
           updated_by_user_id
@@ -1255,9 +1256,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
           $10,
           nullif($11, ''),
           $12,
-          nullif($13, ''),
-          $14,
-          $14
+          $13,
+          nullif($14, ''),
+          $15,
+          $15
         )
         returning *
       `,
@@ -1274,6 +1276,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
         isOverbooked,
         overbookingReason,
         isOverbooked ? approvingSupervisor.full_name : null,
+        isOverbooked ? approvingSupervisor.id : null,
         notes,
         currentUser.sub
       ]
@@ -1360,16 +1363,16 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
     const modalityOrDateChanged = existingModalityId !== modalityId || existingAppointmentDate !== appointmentDate;
 
-    if (isOverbooked && !supervisorUsername) {
-      throw new HttpError(403, "Supervisor username is required before overbooking.");
-    }
-
-    if (isOverbooked && !supervisorPassword) {
-      throw new HttpError(403, "Supervisor password is required before overbooking.");
-    }
-
+    // Handle overbooking approval
     let approvingSupervisor = null;
-    if (isOverbooked && supervisorUsername && supervisorPassword) {
+    if (isOverbooked) {
+      if (!supervisorUsername) {
+        throw new HttpError(403, "Supervisor username is required before overbooking.");
+      }
+      if (!supervisorPassword) {
+        throw new HttpError(403, "Supervisor password is required before overbooking.");
+      }
+
       try {
         approvingSupervisor = await authenticateUser(supervisorUsername, supervisorPassword);
         if (!approvingSupervisor.is_active) {
@@ -1384,10 +1387,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         }
         throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
-    }
 
-    if (isOverbooked && !overbookingReason) {
-      throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      if (!overbookingReason) {
+        throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      }
     }
 
     const sequence =
@@ -1415,8 +1418,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
           is_overbooked = $9,
           overbooking_reason = nullif($10, ''),
           approved_by_name = case when $9 then $11 else null end,
-          notes = nullif($12, ''),
-          updated_by_user_id = $13,
+          approved_by_user_id = case when $9 then $12 else null end,
+          notes = nullif($13, ''),
+          updated_by_user_id = $14,
           updated_at = now()
         where id = $1
         returning *
@@ -1433,6 +1437,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         isOverbooked,
         overbookingReason,
         isOverbooked ? approvingSupervisor.full_name : null,
+        isOverbooked ? approvingSupervisor.id : null,
         notes,
         currentUser.sub
       ]

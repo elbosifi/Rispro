@@ -253,7 +253,16 @@ const state = {
   },
   userSaving: false,
   userError: "",
-  userDeletingId: null
+  userDeletingId: null,
+  // Overbooking approval modal state
+  overbookingApprovalModalOpen: false,
+  overbookingApprovalForm: {
+    supervisorUsername: "",
+    supervisorPassword: ""
+  },
+  overbookingApprovalLoading: false,
+  overbookingApprovalError: "",
+  overbookingPendingPayload: null
 };
 
 const copy = {
@@ -4301,38 +4310,94 @@ async function createExamType() {
 
 function isSupervisorReauthNeededForOverbooking(error) {
   const message = String(error?.message || "").toLowerCase();
-  return message.includes("password confirmation is required") && message.includes("overbook");
+  return message.includes("supervisor username is required") || 
+         message.includes("supervisor password is required") ||
+         (message.includes("supervisor credentials") && message.includes("overbook"));
 }
 
-async function requestSupervisorApprovalForOverbooking() {
-  if (!isSupervisor()) {
-    return { supervisorUsername: null, supervisorPassword: null };
-  }
+/**
+ * Opens the overbooking approval modal and waits for user input.
+ * Returns the supervisor credentials if confirmed, or null if cancelled.
+ */
+function openOverbookingApprovalModal(pendingPayload) {
+  return new Promise((resolve) => {
+    state.overbookingPendingPayload = pendingPayload;
+    state.overbookingApprovalForm = {
+      supervisorUsername: "",
+      supervisorPassword: ""
+    };
+    state.overbookingApprovalError = "";
+    state.overbookingApprovalModalOpen = true;
+    state._resolveOverbookingApproval = resolve;
+    render();
+  });
+}
 
-  const usernamePromptText =
-    state.language === "ar"
-      ? "أدخل اسم مستخدم المشرف للموافقة على تجاوز السعة:"
-      : "Enter supervisor username to approve overbooking:";
-  const supervisorUsername = window.prompt(usernamePromptText, "");
+/**
+ * Handles the submission of the overbooking approval modal.
+ */
+async function submitOverbookingApproval() {
+  const { supervisorUsername, supervisorPassword } = state.overbookingApprovalForm;
 
   if (!supervisorUsername || !supervisorUsername.trim()) {
-    return { supervisorUsername: null, supervisorPassword: null };
+    state.overbookingApprovalError = state.language === "ar" 
+      ? "اسم مستخدم المشرف مطلوب" 
+      : "Supervisor username is required.";
+    render();
+    return;
   }
-
-  const passwordPromptText =
-    state.language === "ar"
-      ? "أدخل كلمة مرور المشرف لتأكيد تجاوز السعة:"
-      : "Enter supervisor password to confirm overbooking:";
-  const supervisorPassword = window.prompt(passwordPromptText, "");
 
   if (!supervisorPassword || !supervisorPassword.trim()) {
-    return { supervisorUsername: null, supervisorPassword: null };
+    state.overbookingApprovalError = state.language === "ar" 
+      ? "كلمة مرور المشرف مطلوبة" 
+      : "Supervisor password is required.";
+    render();
+    return;
   }
 
-  return {
+  state.overbookingApprovalLoading = true;
+  state.overbookingApprovalError = "";
+  render();
+
+  // Resolve with the credentials - the calling function will handle the API call
+  const credentials = {
     supervisorUsername: supervisorUsername.trim(),
     supervisorPassword: supervisorPassword.trim()
   };
+  
+  // Close the modal and clear pending state
+  state.overbookingApprovalModalOpen = false;
+  state.overbookingApprovalLoading = false;
+  state.overbookingPendingPayload = null;
+  
+  // Resolve the promise with credentials
+  if (state._resolveOverbookingApproval) {
+    state._resolveOverbookingApproval(credentials);
+    state._resolveOverbookingApproval = null;
+  }
+  
+  render();
+}
+
+/**
+ * Cancels the overbooking approval modal.
+ */
+function cancelOverbookingApproval() {
+  state.overbookingApprovalModalOpen = false;
+  state.overbookingApprovalForm = {
+    supervisorUsername: "",
+    supervisorPassword: ""
+  };
+  state.overbookingApprovalError = "";
+  state.overbookingPendingPayload = null;
+  
+  // Resolve with null to indicate cancellation
+  if (state._resolveOverbookingApproval) {
+    state._resolveOverbookingApproval(null);
+    state._resolveOverbookingApproval = null;
+  }
+  
+  render();
 }
 
 async function saveAppointment() {
@@ -4386,20 +4451,16 @@ async function saveAppointment() {
     };
     await loadAppointmentAvailability();
   } catch (error) {
-    if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
-      if (supervisorUsername && supervisorPassword) {
+    if (isSupervisorReauthNeededForOverbooking(error)) {
+      // Open modal to get supervisor credentials
+      const credentials = await openOverbookingApprovalModal(payload);
+      
+      if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
-            patientId: state.selectedAppointmentPatient.id,
-            modalityId: state.appointmentForm.modalityId,
-            examTypeId: state.appointmentForm.examTypeId,
-            appointmentDate: state.appointmentForm.appointmentDate,
-            notes: state.appointmentForm.notes,
-            overbookingReason: state.appointmentForm.overbookingReason,
-            isWalkIn: state.appointmentForm.isWalkIn,
-            supervisorUsername,
-            supervisorPassword
+            ...payload,
+            supervisorUsername: credentials.supervisorUsername,
+            supervisorPassword: credentials.supervisorPassword
           };
           const result = await api("/api/appointments", {
             method: "POST",
@@ -4499,19 +4560,16 @@ async function saveWalkInQueueEntry() {
     state.queueSelectedPatient = null;
     await loadQueueSnapshot();
   } catch (error) {
-    if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
-      if (supervisorUsername && supervisorPassword) {
+    if (isSupervisorReauthNeededForOverbooking(error)) {
+      // Open modal to get supervisor credentials
+      const credentials = await openOverbookingApprovalModal(payload);
+      
+      if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
-            patientId: state.queueSelectedPatient.id,
-            modalityId: state.queueWalkInForm.modalityId,
-            examTypeId: state.queueWalkInForm.examTypeId,
-            reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
-            notes: state.queueWalkInForm.notes,
-            overbookingReason: state.queueWalkInForm.overbookingReason,
-            supervisorUsername,
-            supervisorPassword
+            ...payload,
+            supervisorUsername: credentials.supervisorUsername,
+            supervisorPassword: credentials.supervisorPassword
           };
           await api("/api/queue/walk-in", {
             method: "POST",
@@ -4972,14 +5030,16 @@ async function updateSelectedAppointment() {
     );
     pushToast("success", t().print.appointmentUpdated);
   } catch (error) {
-    if (isSupervisorReauthNeededForOverbooking(error) && isSupervisor()) {
-      const { supervisorUsername, supervisorPassword } = await requestSupervisorApprovalForOverbooking();
-      if (supervisorUsername && supervisorPassword) {
+    if (isSupervisorReauthNeededForOverbooking(error)) {
+      // Open modal to get supervisor credentials
+      const credentials = await openOverbookingApprovalModal(payload);
+      
+      if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
             ...state.appointmentEditForm,
-            supervisorUsername,
-            supervisorPassword
+            supervisorUsername: credentials.supervisorUsername,
+            supervisorPassword: credentials.supervisorPassword
           };
           await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
             method: "PUT",
@@ -6503,6 +6563,63 @@ function renderAppointmentCreatedDialog() {
   `;
 }
 
+function renderOverbookingApprovalModal() {
+  if (!state.overbookingApprovalModalOpen) {
+    return "";
+  }
+
+  return `
+    <section class="surface modal-surface">
+      <form id="overbooking-approval-form" class="stack">
+        <div class="section-head">
+          <h2 class="section-title">${escapeHtml(state.language === "ar" ? "موافقة المشرف لتجاوز السعة" : "Supervisor Approval Required")}</h2>
+          <button class="button-ghost" type="button" data-action="cancel-overbooking-approval">×</button>
+        </div>
+
+        <p class="settings-summary">
+          ${escapeHtml(state.language === "ar" 
+            ? "هذا اليوم ممتلئ. يرجى إدخال بيانات المشرف للموافقة على تجاوز السعة." 
+            : "This day is full. Please enter supervisor credentials to approve overbooking.")}
+        </p>
+
+        <div class="form-grid">
+          <label class="field full">
+            <span class="label">${escapeHtml(state.language === "ar" ? "اسم مستخدم المشرف" : "Supervisor Username")}</span>
+            <input 
+              class="input" 
+              name="supervisorUsername" 
+              value="${escapeHtml(state.overbookingApprovalForm.supervisorUsername)}" 
+              placeholder="${escapeHtml(state.language === "ar" ? "اسم المستخدم" : "Username")}"
+              autocomplete="username"
+            />
+          </label>
+
+          <label class="field full">
+            <span class="label">${escapeHtml(state.language === "ar" ? "كلمة مرور المشرف" : "Supervisor Password")}</span>
+            <input 
+              class="input" 
+              type="password"
+              name="supervisorPassword" 
+              value="" 
+              placeholder="${escapeHtml(state.language === "ar" ? "كلمة المرور" : "Password")}"
+              autocomplete="current-password"
+            />
+          </label>
+        </div>
+
+        ${state.overbookingApprovalError ? `<div class="alert alert-error">${escapeHtml(state.overbookingApprovalError)}</div>` : ""}
+
+        <div class="form-actions">
+          <button class="button-secondary" type="button" data-action="cancel-overbooking-approval">${escapeHtml(t().common.cancel)}</button>
+          <button class="button-primary" type="submit" ${state.overbookingApprovalLoading ? "disabled" : ""}>
+            ${escapeHtml(state.overbookingApprovalLoading ? t().common.loading : state.language === "ar" ? "تأكيد" : "Confirm")}
+          </button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
 function renderAppointments() {
   const modality = currentAppointmentModality();
   const examTypes = filteredExamTypes();
@@ -6667,6 +6784,7 @@ function renderAppointments() {
 
       ${renderExamTypeModal()}
       ${renderAppointmentCreatedDialog()}
+      ${renderOverbookingApprovalModal()}
     </div>
   `;
 }
@@ -10695,6 +10813,13 @@ function handleClick(event) {
     return;
   }
 
+  if (target.dataset.action === "cancel-overbooking-approval") {
+    event.preventDefault();
+    cancelOverbookingApproval();
+    render();
+    return;
+  }
+
   if (target.dataset.action === "select-queue-patient") {
     event.preventDefault();
     const patientId = target.dataset.patientId;
@@ -11283,6 +11408,12 @@ function handleSubmit(event) {
   if (event.target.id === "exam-type-form") {
     event.preventDefault();
     void createExamType();
+    return;
+  }
+
+  if (event.target.id === "overbooking-approval-form") {
+    event.preventDefault();
+    void submitOverbookingApproval();
     return;
   }
 
