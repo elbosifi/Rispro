@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm run *)",
       "Bash(node *)",
-      "Bash(findstr *)"
+      "Bash(findstr *)",
+      "Bash(powershell *)"
     ]
   },
   "$version": 3

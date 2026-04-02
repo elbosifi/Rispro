@@ -767,6 +767,14 @@ const copy = {
       patientCount: "Patients shown",
       usersShown: "Users shown",
       status: "Status"
+    },
+    errorMessages: {
+      "phone1 is required.": "Phone 1 is required.",
+      "phone1 must contain exactly 10 digits.": "Phone 1 must contain exactly 10 digits.",
+      "phone2 must contain exactly 10 digits.": "Phone 2 must contain exactly 10 digits.",
+      "National ID must be a positive whole number.": "National ID must be a positive whole number.",
+      "National ID must contain exactly 11 digits.": "National ID must contain exactly 11 digits.",
+      "National ID confirmation does not match.": "National ID confirmation does not match."
     }
   },
   ar: {
@@ -1269,6 +1277,14 @@ const copy = {
       patientCount: "عدد السجلات المعروضة",
       usersShown: "عدد المستخدمين المعروضين",
       status: "الحالة"
+    },
+    errorMessages: {
+      "phone1 is required.": "الهاتف 1 مطلوب.",
+      "phone1 must contain exactly 10 digits.": "يجب أن يحتوي الهاتف 1 على 10 أرقام بالضبط.",
+      "phone2 must contain exactly 10 digits.": "يجب أن يحتوي الهاتف 2 على 10 أرقام بالضبط.",
+      "National ID must be a positive whole number.": "يجب أن يكون الرقم الوطني رقماً صحيحاً موجباً.",
+      "National ID must contain exactly 11 digits.": "يجب أن يحتوي الرقم الوطني على 11 رقماً بالضبط.",
+      "National ID confirmation does not match.": "تأكيد الرقم الوطني غير متطابق."
     }
   }
 };
@@ -1670,6 +1686,11 @@ function defaultAuditFilters() {
 
 function t() {
   return copy[state.language];
+}
+
+function translateError(message) {
+  const translations = t().errorMessages;
+  return translations && translations[message] ? translations[message] : message;
 }
 
 function formatDateInput(date) {
@@ -3101,7 +3122,7 @@ async function loadQueueSnapshot() {
     const result = await api("/api/queue", { method: "GET" });
     state.queueSnapshot = result;
   } catch (error) {
-    state.queueError = error.message;
+    state.queueError = translateError(error.message);
   } finally {
     state.queueLoading = false;
     render();
@@ -3133,7 +3154,7 @@ async function loadModalityWorklist() {
     const result = await api(`/api/modality/worklist?${params.toString()}`, { method: "GET" });
     state.modalityResults = result.appointments || [];
   } catch (error) {
-    state.modalityError = error.message;
+    state.modalityError = translateError(error.message);
   } finally {
     state.modalityLoading = false;
     render();
@@ -3972,7 +3993,7 @@ async function savePatient() {
     state.manualEnglishName = false;
     state.patientSuggestions = [];
   } catch (error) {
-    state.patientError = error.message;
+    state.patientError = translateError(error.message);
     state.patientSaving = false;
     pushToast("error", state.patientError);
   }
@@ -4100,7 +4121,7 @@ async function createUser() {
     };
     await loadUsers();
   } catch (error) {
-    state.userError = error.message;
+    state.userError = translateError(error.message);
     state.userSaving = false;
     pushToast("error", state.userError);
   }
@@ -4120,7 +4141,7 @@ async function deleteUser(userId) {
     pushToast("success", t().settings.userDeleted);
     await loadUsers();
   } catch (error) {
-    state.userError = error.message;
+    state.userError = translateError(error.message);
     state.userDeletingId = null;
     pushToast("error", state.userError);
     return;
@@ -4488,7 +4509,7 @@ async function saveAppointment() {
           await loadAppointmentAvailability();
           return;
         } catch (retryError) {
-          state.appointmentError = retryError.message;
+          state.appointmentError = translateError(retryError.message);
           state.appointmentSaving = false;
           pushToast("error", state.appointmentError);
           return;
@@ -4500,7 +4521,7 @@ async function saveAppointment() {
         return;
       }
     } else {
-      state.appointmentError = error.message;
+      state.appointmentError = translateError(error.message);
       state.appointmentSaving = false;
       pushToast("error", state.appointmentError);
       return;
@@ -4531,7 +4552,7 @@ async function scanQueueAccession() {
     state.queueScanValue = "";
     await loadQueueSnapshot();
   } catch (error) {
-    state.queueError = error.message;
+    state.queueError = translateError(error.message);
     state.queueLoading = false;
     pushToast("error", state.queueError);
   }
