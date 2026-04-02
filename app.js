@@ -4438,17 +4438,17 @@ async function saveAppointment() {
   state.appointmentError = "";
   render();
 
-  try {
-    const payload = {
-      patientId: state.selectedAppointmentPatient.id,
-      modalityId: state.appointmentForm.modalityId,
-      examTypeId: state.appointmentForm.examTypeId,
-      appointmentDate: state.appointmentForm.appointmentDate,
-      notes: state.appointmentForm.notes,
-      overbookingReason: state.appointmentForm.overbookingReason,
-      isWalkIn: state.appointmentForm.isWalkIn
-    };
+  const payload = {
+    patientId: state.selectedAppointmentPatient.id,
+    modalityId: state.appointmentForm.modalityId,
+    examTypeId: state.appointmentForm.examTypeId,
+    appointmentDate: state.appointmentForm.appointmentDate,
+    notes: state.appointmentForm.notes,
+    overbookingReason: state.appointmentForm.overbookingReason,
+    isWalkIn: state.appointmentForm.isWalkIn
+  };
 
+  try {
     let result = await api("/api/appointments", {
       method: "POST",
       body: JSON.stringify(payload)
@@ -4463,10 +4463,13 @@ async function saveAppointment() {
     };
     await loadAppointmentAvailability();
   } catch (error) {
+    console.log("[saveAppointment] Catch block, error:", error?.message);
     if (isSupervisorReauthNeededForOverbooking(error)) {
       // Open modal to get supervisor credentials
+      console.log("[saveAppointment] Opening overbooking approval modal");
       const credentials = await openOverbookingApprovalModal(payload);
-      
+      console.log("[saveAppointment] Modal resolved with:", credentials ? "credentials" : "null");
+
       if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
@@ -4490,18 +4493,22 @@ async function saveAppointment() {
           return;
         } catch (retryError) {
           state.appointmentError = retryError.message;
+          console.log("[saveAppointment] Retry error:", retryError?.message);
           pushToast("error", state.appointmentError);
         }
       } else {
         state.appointmentError = t().appointments.overbookingApprovalRequired;
+        console.log("[saveAppointment] User cancelled modal, showing toast:", state.appointmentError);
         pushToast("error", state.appointmentError);
       }
     } else {
       state.appointmentError = error.message;
+      console.log("[saveAppointment] Non-overbooking error, showing toast:", state.appointmentError);
       pushToast("error", state.appointmentError);
     }
   } finally {
     state.appointmentSaving = false;
+    console.log("[saveAppointment] Finally block, calling render()");
     render();
   }
 }
