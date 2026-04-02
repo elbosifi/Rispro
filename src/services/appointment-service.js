@@ -1333,38 +1333,19 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
-  
-  // Fetch existing appointment first to use as fallback for missing fields
+  const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
+  const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
+  const reportingPriorityId = normalizePositiveInteger(payload.reportingPriorityId, "reportingPriorityId", {
+    required: false
+  });
+  const appointmentDate = normalizeAppointmentDate(payload.appointmentDate);
+  const notes = normalizeOptionalText(payload.notes);
+  const overbookingReason = normalizeOptionalText(payload.overbookingReason);
   const client = await pool.connect();
-  
+
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
-
-    // Fall back to existing values for missing fields
-    const modalityId = payload.modalityId
-      ? normalizePositiveInteger(payload.modalityId, "modalityId")
-      : Number(existingAppointment.modality_id);
-    
-    const examTypeId = payload.examTypeId
-      ? normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false })
-      : (existingAppointment.exam_type_id ? Number(existingAppointment.exam_type_id) : null);
-    
-    const reportingPriorityId = payload.reportingPriorityId
-      ? normalizePositiveInteger(payload.reportingPriorityId, "reportingPriorityId", { required: false })
-      : (existingAppointment.reporting_priority_id ? Number(existingAppointment.reporting_priority_id) : null);
-    
-    const appointmentDate = payload.appointmentDate
-      ? normalizeAppointmentDate(payload.appointmentDate)
-      : normalizeIsoDate(existingAppointment.appointment_date);
-    
-    const notes = payload.notes !== undefined
-      ? normalizeOptionalText(payload.notes)
-      : normalizeOptionalText(existingAppointment.notes);
-    
-    const overbookingReason = payload.overbookingReason !== undefined
-      ? normalizeOptionalText(payload.overbookingReason)
-      : normalizeOptionalText(existingAppointment.overbooking_reason);
 
     if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");

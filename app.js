@@ -3199,8 +3199,9 @@ async function loadPrintAppointments() {
     }
 
     if (!state.selectedPrintAppointment && state.printResults[0]) {
-      await selectAppointmentForEditing(state.printResults[0].id);
-      await loadAppointmentDocuments(state.printResults[0].id);
+      state.selectedPrintAppointment = state.printResults[0];
+      fillAppointmentEditForm(state.selectedPrintAppointment);
+      await loadAppointmentDocuments(state.selectedPrintAppointment.id);
     }
   } catch (error) {
     state.printError = error.message;
@@ -3313,7 +3314,8 @@ async function loadRegistrations() {
     }
 
     if (!state.selectedPrintAppointment && state.printResults[0]) {
-      await selectAppointmentForEditing(state.printResults[0].id);
+      state.selectedPrintAppointment = state.printResults[0];
+      fillAppointmentEditForm(state.selectedPrintAppointment);
     }
   } catch (error) {
     state.printError = error.message;
@@ -4976,24 +4978,6 @@ function fillAppointmentEditForm(appointment) {
     notes: appointment.notes || "",
     overbookingReason: appointment.overbooking_reason || ""
   };
-}
-
-async function selectAppointmentForEditing(appointmentId) {
-  if (!appointmentId) {
-    state.selectedPrintAppointment = null;
-    state.appointmentEditForm = defaultAppointmentEditForm();
-    return;
-  }
-
-  try {
-    const appointment = await api(`/api/appointments/${encodeURIComponent(appointmentId)}`, { method: "GET" });
-    state.selectedPrintAppointment = appointment;
-    fillAppointmentEditForm(appointment);
-  } catch (error) {
-    state.selectedPrintAppointment = null;
-    state.appointmentEditForm = defaultAppointmentEditForm();
-    pushToast("error", error.message);
-  }
 }
 
 async function updateSelectedPatient() {
@@ -8465,6 +8449,20 @@ function renderRegistrations() {
                 ? `<form id="appointment-edit-form" class="stack">
                     <div class="form-grid">
                       <label class="field">
+                        <span class="label">${escapeHtml(appointmentFieldLabel("modality"))}</span>
+                        <select class="select" name="modalityId">
+                          ${state.appointmentLookups.modalities
+                            .map(
+                              (entry) => `
+                                <option value="${escapeHtml(String(entry.id))}" ${String(entry.id) === String(state.appointmentEditForm.modalityId) ? "selected" : ""}>
+                                  ${escapeHtml(formatModalityName(entry))}
+                                </option>
+                              `
+                            )
+                            .join("")}
+                        </select>
+                      </label>
+                      <label class="field">
                         <span class="label">${escapeHtml(appointmentFieldLabel("examType"))}</span>
                         <select class="select" name="examTypeId">
                           <option value="">${escapeHtml(t().common.optional)}</option>
@@ -10902,12 +10900,17 @@ function handleClick(event) {
   if (target.dataset.action === "select-print-appointment") {
     event.preventDefault();
     const appointmentId = target.dataset.appointmentId;
+    state.selectedPrintAppointment = state.printResults.find(
+      (appointment) => String(appointment.id) === String(appointmentId)
+    ) || null;
     state.printError = "";
     state.uploadError = "";
     state.integrationError = "";
     state.appointmentEditError = "";
     state.cancelReason = "";
-    void selectAppointmentForEditing(appointmentId);
+    if (state.selectedPrintAppointment) {
+      fillAppointmentEditForm(state.selectedPrintAppointment);
+    }
     void loadAppointmentDocuments(appointmentId);
     render();
     return;
@@ -10916,10 +10919,15 @@ function handleClick(event) {
   if (target.dataset.action === "select-registration") {
     event.preventDefault();
     const appointmentId = target.dataset.appointmentId;
+    state.selectedPrintAppointment = state.printResults.find(
+      (appointment) => String(appointment.id) === String(appointmentId)
+    ) || null;
     state.printError = "";
     state.appointmentEditError = "";
     state.cancelReason = "";
-    void selectAppointmentForEditing(appointmentId);
+    if (state.selectedPrintAppointment) {
+      fillAppointmentEditForm(state.selectedPrintAppointment);
+    }
     render();
     return;
   }
