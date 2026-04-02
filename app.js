@@ -258,7 +258,8 @@ const state = {
   overbookingApprovalModalOpen: false,
   overbookingApprovalForm: {
     supervisorUsername: "",
-    supervisorPassword: ""
+    supervisorPassword: "",
+    overbookingReason: ""
   },
   overbookingApprovalLoading: false,
   overbookingApprovalError: "",
@@ -4324,7 +4325,8 @@ function openOverbookingApprovalModal(pendingPayload) {
     state.overbookingPendingPayload = pendingPayload;
     state.overbookingApprovalForm = {
       supervisorUsername: "",
-      supervisorPassword: ""
+      supervisorPassword: "",
+      overbookingReason: pendingPayload?.overbookingReason || ""
     };
     state.overbookingApprovalError = "";
     state.overbookingApprovalModalOpen = true;
@@ -4337,7 +4339,7 @@ function openOverbookingApprovalModal(pendingPayload) {
  * Handles the submission of the overbooking approval modal.
  */
 async function submitOverbookingApproval() {
-  const { supervisorUsername, supervisorPassword } = state.overbookingApprovalForm;
+  const { supervisorUsername, supervisorPassword, overbookingReason } = state.overbookingApprovalForm;
 
   if (!supervisorUsername || !supervisorUsername.trim()) {
     state.overbookingApprovalError = state.language === "ar" 
@@ -4355,6 +4357,14 @@ async function submitOverbookingApproval() {
     return;
   }
 
+  if (!overbookingReason || !overbookingReason.trim()) {
+    state.overbookingApprovalError = state.language === "ar" 
+      ? "سبب تجاوز السعة مطلوب" 
+      : "Overbooking reason is required.";
+    render();
+    return;
+  }
+
   state.overbookingApprovalLoading = true;
   state.overbookingApprovalError = "";
   render();
@@ -4362,7 +4372,8 @@ async function submitOverbookingApproval() {
   // Resolve with the credentials - the calling function will handle the API call
   const credentials = {
     supervisorUsername: supervisorUsername.trim(),
-    supervisorPassword: supervisorPassword.trim()
+    supervisorPassword: supervisorPassword.trim(),
+    overbookingReason: overbookingReason.trim()
   };
   
   // Close the modal and clear pending state
@@ -4386,7 +4397,8 @@ function cancelOverbookingApproval() {
   state.overbookingApprovalModalOpen = false;
   state.overbookingApprovalForm = {
     supervisorUsername: "",
-    supervisorPassword: ""
+    supervisorPassword: "",
+    overbookingReason: ""
   };
   state.overbookingApprovalError = "";
   state.overbookingPendingPayload = null;
@@ -4460,7 +4472,8 @@ async function saveAppointment() {
           const payloadWithApproval = {
             ...payload,
             supervisorUsername: credentials.supervisorUsername,
-            supervisorPassword: credentials.supervisorPassword
+            supervisorPassword: credentials.supervisorPassword,
+            overbookingReason: credentials.overbookingReason
           };
           const result = await api("/api/appointments", {
             method: "POST",
@@ -4569,7 +4582,8 @@ async function saveWalkInQueueEntry() {
           const payloadWithApproval = {
             ...payload,
             supervisorUsername: credentials.supervisorUsername,
-            supervisorPassword: credentials.supervisorPassword
+            supervisorPassword: credentials.supervisorPassword,
+            overbookingReason: credentials.overbookingReason
           };
           await api("/api/queue/walk-in", {
             method: "POST",
@@ -5039,7 +5053,8 @@ async function updateSelectedAppointment() {
           const payloadWithApproval = {
             ...state.appointmentEditForm,
             supervisorUsername: credentials.supervisorUsername,
-            supervisorPassword: credentials.supervisorPassword
+            supervisorPassword: credentials.supervisorPassword,
+            overbookingReason: credentials.overbookingReason
           };
           await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
             method: "PUT",
@@ -6604,6 +6619,14 @@ function renderOverbookingApprovalModal() {
               placeholder="${escapeHtml(state.language === "ar" ? "كلمة المرور" : "Password")}"
               autocomplete="current-password"
             />
+          </label>
+
+          <label class="field full">
+            <span class="label">${escapeHtml(state.language === "ar" ? "سبب تجاوز السعة" : "Overbooking Reason")}</span>
+            <textarea 
+              class="textarea ${state.language === "ar" ? "field-ar" : ""}" 
+              name="overbookingReason"
+            >${escapeHtml(state.overbookingApprovalForm.overbookingReason)}</textarea>
           </label>
         </div>
 
@@ -10518,6 +10541,11 @@ function handleInput(event) {
           }
         : entry
     );
+    return;
+  }
+
+  if (target.closest("#overbooking-approval-form")) {
+    state.overbookingApprovalForm[target.name] = target.value;
     return;
   }
 
