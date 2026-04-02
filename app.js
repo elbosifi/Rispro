@@ -4463,12 +4463,9 @@ async function saveAppointment() {
     };
     await loadAppointmentAvailability();
   } catch (error) {
-    console.log("[saveAppointment] Catch block, error:", error?.message);
     if (isSupervisorReauthNeededForOverbooking(error)) {
       // Open modal to get supervisor credentials
-      console.log("[saveAppointment] Opening overbooking approval modal");
       const credentials = await openOverbookingApprovalModal(payload);
-      console.log("[saveAppointment] Modal resolved with:", credentials ? "credentials" : "null");
 
       if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
@@ -4493,22 +4490,18 @@ async function saveAppointment() {
           return;
         } catch (retryError) {
           state.appointmentError = retryError.message;
-          console.log("[saveAppointment] Retry error:", retryError?.message);
           pushToast("error", state.appointmentError);
         }
       } else {
         state.appointmentError = t().appointments.overbookingApprovalRequired;
-        console.log("[saveAppointment] User cancelled modal, showing toast:", state.appointmentError);
         pushToast("error", state.appointmentError);
       }
     } else {
       state.appointmentError = error.message;
-      console.log("[saveAppointment] Non-overbooking error, showing toast:", state.appointmentError);
       pushToast("error", state.appointmentError);
     }
   } finally {
     state.appointmentSaving = false;
-    console.log("[saveAppointment] Finally block, calling render()");
     render();
   }
 }
@@ -4537,6 +4530,7 @@ async function scanQueueAccession() {
     await loadQueueSnapshot();
   } catch (error) {
     state.queueError = error.message;
+    pushToast("error", state.queueError);
   } finally {
     state.queueLoading = false;
     render();
@@ -4555,16 +4549,16 @@ async function saveWalkInQueueEntry() {
   state.queueError = "";
   render();
 
-  try {
-    const payload = {
-      patientId: state.queueSelectedPatient.id,
-      modalityId: state.queueWalkInForm.modalityId,
-      examTypeId: state.queueWalkInForm.examTypeId,
-      reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
-      notes: state.queueWalkInForm.notes,
-      overbookingReason: state.queueWalkInForm.overbookingReason
-    };
+  const payload = {
+    patientId: state.queueSelectedPatient.id,
+    modalityId: state.queueWalkInForm.modalityId,
+    examTypeId: state.queueWalkInForm.examTypeId,
+    reportingPriorityId: state.queueWalkInForm.reportingPriorityId,
+    notes: state.queueWalkInForm.notes,
+    overbookingReason: state.queueWalkInForm.overbookingReason
+  };
 
+  try {
     await api("/api/queue/walk-in", {
       method: "POST",
       body: JSON.stringify(payload)
@@ -4583,7 +4577,7 @@ async function saveWalkInQueueEntry() {
     if (isSupervisorReauthNeededForOverbooking(error)) {
       // Open modal to get supervisor credentials
       const credentials = await openOverbookingApprovalModal(payload);
-      
+
       if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
@@ -4608,6 +4602,7 @@ async function saveWalkInQueueEntry() {
           return;
         } catch (retryError) {
           state.queueError = retryError.message;
+          pushToast("error", state.queueError);
         }
       } else {
         state.queueError = t().appointments.overbookingApprovalRequired;
@@ -4615,6 +4610,7 @@ async function saveWalkInQueueEntry() {
       }
     } else {
       state.queueError = error.message;
+      pushToast("error", state.queueError);
     }
   } finally {
     state.queueWalkInSaving = false;
@@ -4648,6 +4644,7 @@ async function confirmQueueNoShow(appointmentId) {
     await loadQueueSnapshot();
   } catch (error) {
     state.queueError = error.message;
+    pushToast("error", state.queueError);
   } finally {
     state.queueLoading = false;
     render();
@@ -4668,6 +4665,7 @@ async function completeModalityAppointment(appointmentId) {
     await loadQueueSnapshot();
   } catch (error) {
     state.modalityError = error.message;
+    pushToast("error", state.modalityError);
   } finally {
     state.modalityLoading = false;
     render();
@@ -5033,9 +5031,9 @@ async function updateSelectedAppointment() {
   state.appointmentEditError = "";
   render();
 
-  try {
-    const payload = { ...state.appointmentEditForm };
+  const payload = { ...state.appointmentEditForm };
 
+  try {
     await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
       method: "PUT",
       body: JSON.stringify(payload)
@@ -5054,7 +5052,7 @@ async function updateSelectedAppointment() {
     if (isSupervisorReauthNeededForOverbooking(error)) {
       // Open modal to get supervisor credentials
       const credentials = await openOverbookingApprovalModal(payload);
-      
+
       if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
         try {
           const payloadWithApproval = {
@@ -5079,12 +5077,15 @@ async function updateSelectedAppointment() {
           return;
         } catch (retryError) {
           state.appointmentEditError = retryError.message;
+          pushToast("error", state.appointmentEditError);
         }
       } else {
         state.appointmentEditError = t().appointments.overbookingApprovalRequired;
+        pushToast("error", state.appointmentEditError);
       }
     } else {
       state.appointmentEditError = error.message;
+      pushToast("error", state.appointmentEditError);
     }
   } finally {
     state.appointmentEditSaving = false;
