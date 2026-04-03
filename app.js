@@ -124,6 +124,7 @@ const state = {
   statisticsError: "",
   statisticsSnapshot: null,
   registrationsFilters: defaultRegistrationsFilters(),
+  registrationsStatusDropdownOpen: false,
   selectedPrintAppointment: null,
   doctorLoading: false,
   doctorError: "",
@@ -8390,12 +8391,30 @@ function getStatusTriggerText(selectedStatuses) {
     return "Status: Scheduled";
   }
   if (selectedStatuses.length === 1) {
-    return `Status: ${formatStatusName(selectedStatuses[0])}`;
+    const status = selectedStatuses[0];
+    if (status === "scheduled") {
+      return "Status: Scheduled";
+    }
+    return `Status: ${formatStatusName(status)}`;
   }
   if (selectedStatuses.length <= 3) {
     return `Status: ${selectedStatuses.map(formatStatusName).join(", ")}`;
   }
   return `Status: ${selectedStatuses.length} selected`;
+}
+
+function renderStatusDropdown() {
+  return `
+    <div class="status-dropdown" id="status-dropdown">
+      <div class="status-dropdown-actions">
+        <button type="button" class="button-secondary button-small" data-action="select-all-statuses">Select all</button>
+        <button type="button" class="button-secondary button-small" data-action="reset-statuses">Reset to Scheduled</button>
+      </div>
+      <div class="status-options">
+        ${renderStatusOptions(state.registrationsFilters.status)}
+      </div>
+    </div>
+  `;
 }
 
 function renderStatusOptions(selectedStatuses) {
@@ -8460,6 +8479,15 @@ function renderRegistrations() {
                 <span class="chip accent">${escapeHtml(t().registrations.load)}</span>
               </div>
               <div class="form-grid">
+                <label class="field">
+                  <span class="label">Status</span>
+                  <div class="status-multiselect">
+                    <button type="button" class="select status-trigger" id="status-filter-trigger" data-action="toggle-status-dropdown">
+                      ${getStatusTriggerText(state.registrationsFilters.status)}
+                    </button>
+                    ${state.registrationsStatusDropdownOpen ? renderStatusDropdown() : ""}
+                  </div>
+                </label>
                 <label class="field full">
                   <span class="label">${escapeHtml(t().search.placeholder)}</span>
                   <input class="input ${state.language === "ar" ? "field-ar" : ""}" name="query" value="${escapeHtml(state.registrationsFilters.query)}" placeholder="${escapeHtml(
@@ -8492,23 +8520,6 @@ function renderRegistrations() {
                       )
                       .join("")}
                   </select>
-                </label>
-                <label class="field">
-                  <span class="label">Status</span>
-                  <div class="status-multiselect">
-                    <button type="button" class="select status-trigger" id="status-filter-trigger" data-action="toggle-status-dropdown">
-                      ${getStatusTriggerText(state.registrationsFilters.status)}
-                    </button>
-                    <div class="status-dropdown" id="status-dropdown" style="display: none;">
-                      <div class="status-dropdown-actions">
-                        <button type="button" class="button-secondary button-small" data-action="select-all-statuses">Select all</button>
-                        <button type="button" class="button-secondary button-small" data-action="reset-statuses">Reset to Scheduled</button>
-                      </div>
-                      <div class="status-options">
-                        ${renderStatusOptions(state.registrationsFilters.status)}
-                      </div>
-                    </div>
-                  </div>
                 </label>
               </div>
               <div class="form-actions">
@@ -10558,21 +10569,24 @@ function handleInput(event) {
   }
 
   if (target.closest("#status-dropdown") && target.closest(".status-option input[type='checkbox']")) {
-    const allStatuses = ["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled"];
-    const checkedBoxes = document.querySelectorAll("#status-dropdown .status-option input[type='checkbox']:checked");
-    let selectedStatuses = Array.from(checkedBoxes).map((cb) => cb.value);
+    const status = target.value;
+    let selectedStatuses = [...state.registrationsFilters.status];
+    
+    if (target.checked) {
+      if (!selectedStatuses.includes(status)) {
+        selectedStatuses.push(status);
+      }
+    } else {
+      selectedStatuses = selectedStatuses.filter((s) => s !== status);
+    }
     
     // If empty, reset to scheduled
     if (selectedStatuses.length === 0) {
       selectedStatuses = ["scheduled"];
-      // Re-check the scheduled checkbox
-      const scheduledCheckbox = document.querySelector('#status-dropdown .status-option input[value="scheduled"]');
-      if (scheduledCheckbox) {
-        scheduledCheckbox.checked = true;
-      }
     }
     
     state.registrationsFilters.status = selectedStatuses;
+    render();
     void loadRegistrations();
     return;
   }
@@ -10784,12 +10798,11 @@ function handleInput(event) {
 
 function handleClick(event) {
   // Close status dropdown when clicking outside
-  const statusDropdown = document.getElementById("status-dropdown");
-  const statusTrigger = document.getElementById("status-filter-trigger");
-  if (statusDropdown && statusDropdown.style.display === "block") {
+  if (state.registrationsStatusDropdownOpen) {
     const isInsideStatusDropdown = event.target.closest("#status-dropdown") || event.target.closest("#status-filter-trigger");
     if (!isInsideStatusDropdown) {
-      statusDropdown.style.display = "none";
+      state.registrationsStatusDropdownOpen = false;
+      render();
     }
   }
 
@@ -11097,10 +11110,8 @@ function handleClick(event) {
 
   if (target.dataset.action === "toggle-status-dropdown") {
     event.preventDefault();
-    const dropdown = document.getElementById("status-dropdown");
-    if (dropdown) {
-      dropdown.style.display = dropdown.style.display === "none" ? "block" : "none";
-    }
+    state.registrationsStatusDropdownOpen = !state.registrationsStatusDropdownOpen;
+    render();
     return;
   }
 
@@ -11108,10 +11119,8 @@ function handleClick(event) {
     event.preventDefault();
     const allStatuses = ["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled"];
     state.registrationsFilters.status = [...allStatuses];
-    const dropdown = document.getElementById("status-dropdown");
-    if (dropdown) {
-      dropdown.style.display = "none";
-    }
+    state.registrationsStatusDropdownOpen = false;
+    render();
     void loadRegistrations();
     return;
   }
@@ -11119,20 +11128,9 @@ function handleClick(event) {
   if (target.dataset.action === "reset-statuses") {
     event.preventDefault();
     state.registrationsFilters.status = ["scheduled"];
-    const dropdown = document.getElementById("status-dropdown");
-    if (dropdown) {
-      dropdown.style.display = "none";
-    }
+    state.registrationsStatusDropdownOpen = false;
+    render();
     void loadRegistrations();
-    return;
-  }
-
-  if (target.dataset.action === "close-status-dropdown") {
-    event.preventDefault();
-    const dropdown = document.getElementById("status-dropdown");
-    if (dropdown) {
-      dropdown.style.display = "none";
-    }
     return;
   }
 
