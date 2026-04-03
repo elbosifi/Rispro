@@ -1478,9 +1478,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
           is_overbooked = $9,
           overbooking_reason = nullif($10, ''),
           approved_by_name = case when $9 then $11 else null end,
-          approved_by_user_id = case when $9 then $12 else null end,
+          approved_by_user_id = case when $9 then $12::bigint else null end,
           notes = nullif($13, ''),
-          updated_by_user_id = $14,
+          updated_by_user_id = $14::bigint,
           updated_at = now()
         where id = $1
         returning *
