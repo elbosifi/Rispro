@@ -481,7 +481,20 @@ const copy = {
       detailsTitle: "Registration details",
       load: "Load registrations",
       delete: "Delete registration",
-      noSelection: "Choose a registration from the list first."
+      noSelection: "Choose a registration from the list first.",
+      statusFilter: "Status",
+      statusSelectAll: "Select all",
+      statusResetScheduled: "Reset to Scheduled",
+      statusLabels: {
+        "scheduled": "Scheduled",
+        "arrived": "Arrived",
+        "waiting": "Waiting",
+        "completed": "Completed",
+        "no-show": "No Show",
+        "cancelled": "Cancelled"
+      },
+      statusTriggerSingle: "Status: {{status}}",
+      statusTriggerMulti: "Status: {{count}} selected"
     },
     queue: {
       title: "Queue and arrival",
@@ -991,7 +1004,20 @@ const copy = {
       detailsTitle: "تفاصيل التسجيل",
       load: "تحميل التسجيلات",
       delete: "حذف التسجيل",
-      noSelection: "اختر تسجيلاً من القائمة أولاً."
+      noSelection: "اختر تسجيلاً من القائمة أولاً.",
+      statusFilter: "الحالة",
+      statusSelectAll: "تحديد الكل",
+      statusResetScheduled: "إعادة إلى مجدول",
+      statusLabels: {
+        "scheduled": "مجدول",
+        "arrived": "وصل",
+        "waiting": "منتظر",
+        "completed": "مكتمل",
+        "no-show": "لم يحضر",
+        "cancelled": "ملغي"
+      },
+      statusTriggerSingle: "الحالة: {{status}}",
+      statusTriggerMulti: "الحالة: {{count}} محدد"
     },
     queue: {
       title: "قائمة الإنتظار والوصول",
@@ -2205,15 +2231,8 @@ function formatModalityName(entry) {
 }
 
 function formatStatusName(status) {
-  const statusMap = {
-    "scheduled": "Scheduled",
-    "arrived": "Arrived",
-    "waiting": "Waiting",
-    "completed": "Completed",
-    "no-show": "No Show",
-    "cancelled": "Cancelled"
-  };
-  return statusMap[status] || status;
+  const labels = t().registrations.statusLabels || {};
+  return labels[status] || status;
 }
 
 function normalizeModalityKey(entry) {
@@ -3331,10 +3350,6 @@ async function loadRegistrations() {
     ) {
       state.selectedPrintAppointment = null;
       state.appointmentDocuments = [];
-    }
-
-    if (!state.selectedPrintAppointment && state.printResults[0]) {
-      await selectAppointmentForEditing(state.printResults[0].id);
     }
   } catch (error) {
     state.printError = error.message;
@@ -8387,27 +8402,24 @@ function renderStatistics() {
 
 function getStatusTriggerText(selectedStatuses) {
   if (!selectedStatuses || selectedStatuses.length === 0) {
-    return "Status: Scheduled";
+    return formatStatusName("scheduled");
   }
   if (selectedStatuses.length === 1) {
     const status = selectedStatuses[0];
-    if (status === "scheduled") {
-      return "Status: Scheduled";
-    }
-    return `Status: ${formatStatusName(status)}`;
+    return t().registrations.statusTriggerSingle.replace("{{status}}", formatStatusName(status));
   }
   if (selectedStatuses.length <= 3) {
-    return `Status: ${selectedStatuses.map(formatStatusName).join(", ")}`;
+    return t().registrations.statusTriggerSingle.replace("{{status}}", selectedStatuses.map(formatStatusName).join(", "));
   }
-  return `Status: ${selectedStatuses.length} selected`;
+  return t().registrations.statusTriggerMulti.replace("{{count}}", String(selectedStatuses.length));
 }
 
 function renderStatusDropdown() {
   return `
     <div class="status-dropdown" id="status-dropdown">
       <div class="status-dropdown-actions">
-        <button type="button" class="button-secondary button-small" data-action="select-all-statuses">Select all</button>
-        <button type="button" class="button-secondary button-small" data-action="reset-statuses">Reset to Scheduled</button>
+        <button type="button" class="button-secondary button-small" data-action="select-all-statuses">${escapeHtml(t().registrations.statusSelectAll)}</button>
+        <button type="button" class="button-secondary button-small" data-action="reset-statuses">${escapeHtml(t().registrations.statusResetScheduled)}</button>
       </div>
       <div class="status-options">
         ${renderStatusOptions(state.registrationsFilters.status)}
@@ -8479,7 +8491,7 @@ function renderRegistrations() {
               </div>
               <div class="form-grid">
                 <label class="field">
-                  <span class="label">Status</span>
+                  <span class="label">${escapeHtml(t().registrations.statusFilter)}</span>
                   <div class="status-multiselect">
                     <button type="button" class="select status-trigger" id="status-filter-trigger" data-action="toggle-status-dropdown">
                       ${getStatusTriggerText(state.registrationsFilters.status)}
