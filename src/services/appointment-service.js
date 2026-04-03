@@ -1326,10 +1326,12 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
-  console.log("[updateAppointment] START", { appointmentId, payload, options: { supervisorUsername: options.supervisorUsername } });
+  console.log("[updateAppointment] START appointmentId:", appointmentId);
+  console.log("[updateAppointment] payload keys:", Object.keys(payload || {}));
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
   }
+  console.log("[updateAppointment] currentUser:", currentUser.sub);
 
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
@@ -1381,8 +1383,8 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         : normalizeOptionalText(payload.overbookingReason);
     console.log("[updateAppointment] overbookingReason:", overbookingReason);
 
-    const existingDate = normalizeIsoDate(existingAppointment.appointment_date);
-    if (existingDate !== appointmentDate) {
+    const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
+    if (existingAppointmentDate !== appointmentDate) {
       console.log("[updateAppointment] date changed, checking day enabled");
       await requireAppointmentDayEnabled(client, appointmentDate);
     }
@@ -1405,7 +1407,6 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     console.log("[updateAppointment] capacity:", capacity);
 
     const existingModalityId = Number(existingAppointment.modality_id);
-    const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
     const modalityOrDateChanged = existingModalityId !== modalityId || existingAppointmentDate !== appointmentDate;
     console.log("[updateAppointment] modalityOrDateChanged:", modalityOrDateChanged);
 
@@ -1445,7 +1446,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     }
 
     const sequence =
-      existingAppointment.appointment_date?.toISOString?.().slice(0, 10) === appointmentDate
+      existingAppointmentDate === appointmentDate
         ? existingAppointment.daily_sequence
         : await nextDailySequence(client, appointmentDate, cleanAppointmentId);
 
