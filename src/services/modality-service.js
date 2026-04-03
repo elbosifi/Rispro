@@ -1,9 +1,48 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 
+/**
+ * @typedef ModalityWorklistRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} status
+ * @property {string | null} notes
+ * @property {string | null} arrived_at
+ * @property {string | null} completed_at
+ * @property {number | null} modality_slot_number
+ * @property {number} patient_id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string} sex
+ * @property {number} modality_id
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} priority_name_ar
+ * @property {string | null} priority_name_en
+ */
+
+/**
+ * @typedef AppointmentStatusRow
+ * @property {number} id
+ * @property {string} status
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -22,6 +61,9 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeDate(value) {
   const raw = String(value || getTripoliToday()).trim();
 
@@ -32,6 +74,9 @@ function normalizeDate(value) {
   return raw;
 }
 
+/**
+ * @param {{ scope?: string, modalityId?: number | string, date?: string }} [filters]
+ */
 export async function listModalityWorklist(filters = {}) {
   const scope = String(filters.scope || "").trim();
   const useAllDates = scope === "all";
@@ -95,9 +140,13 @@ export async function listModalityWorklist(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {ModalityWorklistRow[]} */ (rows);
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @param {number | string | null} currentUserId
+ */
 export async function markAppointmentCompleted(appointmentId, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const client = await pool.connect();
@@ -114,7 +163,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
       [cleanAppointmentId]
     );
 
-    const appointment = rows[0];
+    const appointment = /** @type {AppointmentStatusRow | undefined} */ (rows[0]);
 
     if (!appointment) {
       throw new HttpError(404, "Appointment not found.");

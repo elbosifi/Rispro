@@ -1,3 +1,5 @@
+// @ts-check
+
 import express from "express";
 import { createRateLimiter } from "../middleware/rate-limit.js";
 import { asyncRoute } from "../utils/async-route.js";
@@ -13,6 +15,12 @@ import {
 import { logAuditEntry } from "../services/audit-service.js";
 import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 
+/**
+ * @typedef {object} AuthRequest
+ * @property {Record<string, unknown>} [body]
+ * @property {{ username?: string, sub?: number | string, role?: string }} [user]
+ */
+
 export const authRouter = express.Router();
 const loginRateLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
@@ -24,7 +32,10 @@ authRouter.post(
   "/login",
   loginRateLimiter,
   asyncRoute(async (req, res) => {
-    const { username = "", password = "" } = req.body || {};
+    const request = /** @type {AuthRequest} */ (req);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const username = String(body.username || "");
+    const password = String(body.password || "");
     const user = await authenticateUser(username, password);
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
@@ -57,9 +68,10 @@ authRouter.post("/logout", (_req, res) => {
 });
 
 authRouter.get("/me", requireAuth, (req, res) => {
+  const request = /** @type {AuthRequest} */ (req);
   res.json({
     user: {
-      ...req.user,
+      ...request.user,
       recentSupervisorReauth: hasRecentSupervisorReauth(req)
     }
   });
@@ -69,8 +81,10 @@ authRouter.post(
   "/re-auth",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const { password = "" } = req.body || {};
-    const user = await authenticateUser(req.user.username, password);
+    const request = /** @type {AuthRequest} */ (req);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const password = String(body.password || "");
+    const user = await authenticateUser(String(request.user?.username || ""), password);
     const reauthToken = buildSupervisorReauthToken(user);
     writeSupervisorReauthCookie(res, reauthToken);
 

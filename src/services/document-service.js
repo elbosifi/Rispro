@@ -1,3 +1,5 @@
+// @ts-check
+
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -11,6 +13,34 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 
+/**
+ * @typedef DocumentUploadPayload
+ * @property {number | string} [patientId]
+ * @property {number | string} [appointmentId]
+ * @property {string} [documentType]
+ * @property {string} [originalFilename]
+ * @property {string} [mimeType]
+ * @property {string} [fileContentBase64]
+ */
+
+/**
+ * @typedef DocumentRow
+ * @property {number} id
+ * @property {number | null} patient_id
+ * @property {number | null} appointment_id
+ * @property {string} document_type
+ * @property {string} original_filename
+ * @property {string} stored_path
+ * @property {string} mime_type
+ * @property {number} file_size
+ * @property {string} created_at
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -29,6 +59,9 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {unknown} fileName
+ */
 function sanitizeFileName(fileName) {
   const cleaned = String(fileName || "document")
     .replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -37,6 +70,9 @@ function sanitizeFileName(fileName) {
   return cleaned || "document";
 }
 
+/**
+ * @param {unknown} fileContentBase64
+ */
 function decodeBase64File(fileContentBase64) {
   const raw = String(fileContentBase64 || "").trim();
 
@@ -48,8 +84,11 @@ function decodeBase64File(fileContentBase64) {
   return Buffer.from(normalized, "base64");
 }
 
+/**
+ * @param {unknown} storedPath
+ */
 function resolveStoredPath(storedPath) {
-  const absolutePath = path.resolve(rootDir, storedPath || "");
+  const absolutePath = path.resolve(rootDir, String(storedPath || ""));
 
   if (!absolutePath.startsWith(rootDir)) {
     throw new HttpError(400, "Invalid document path.");
@@ -58,6 +97,10 @@ function resolveStoredPath(storedPath) {
   return absolutePath;
 }
 
+/**
+ * @param {number | null} patientId
+ * @param {number | null} appointmentId
+ */
 async function ensureRelatedRecords(patientId, appointmentId) {
   if (!patientId && !appointmentId) {
     throw new HttpError(400, "patientId or appointmentId is required.");
@@ -80,6 +123,9 @@ async function ensureRelatedRecords(patientId, appointmentId) {
   }
 }
 
+/**
+ * @param {{ patientId?: number | string, appointmentId?: number | string }} [filters]
+ */
 export async function listDocuments(filters = {}) {
   const params = [];
   const conditions = [];
@@ -106,9 +152,12 @@ export async function listDocuments(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {DocumentRow[]} */ (rows);
 }
 
+/**
+ * @param {number | string} documentId
+ */
 export async function getDocumentById(documentId) {
   const cleanDocumentId = normalizePositiveInteger(documentId, "documentId");
   const { rows } = await pool.query(
@@ -121,17 +170,26 @@ export async function getDocumentById(documentId) {
     [cleanDocumentId]
   );
 
-  if (!rows[0]) {
+  const document = /** @type {DocumentRow | undefined} */ (rows[0]);
+
+  if (!document) {
     throw new HttpError(404, "Document not found.");
   }
 
-  return rows[0];
+  return document;
 }
 
+/**
+ * @param {{ stored_path?: string }} document
+ */
 export function getDocumentAbsolutePath(document) {
   return resolveStoredPath(document.stored_path);
 }
 
+/**
+ * @param {DocumentUploadPayload} payload
+ * @param {number | string | null | undefined} currentUserId
+ */
 export async function uploadDocument(payload, currentUserId) {
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });
   const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
@@ -172,15 +230,16 @@ export async function uploadDocument(payload, currentUserId) {
     `,
     [patientId, appointmentId, documentType, originalFilename, relativeStoredPath, mimeType, fileBuffer.length, currentUserId]
   );
+  const savedDocument = /** @type {DocumentRow} */ (rows[0]);
 
   await logAuditEntry({
     entityType: "document",
-    entityId: rows[0].id,
+    entityId: savedDocument.id,
     actionType: "upload",
     oldValues: null,
-    newValues: rows[0],
+    newValues: savedDocument,
     changedByUserId: currentUserId
   });
 
-  return rows[0];
+  return savedDocument;
 }

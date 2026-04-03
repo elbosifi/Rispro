@@ -1,15 +1,32 @@
+// @ts-check
+
 import dimse from "dicom-dimse-native";
 import os from "os";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
-const DEFAULT_DIMSE_SOURCE_PORT = "11112";
+const DEFAULT_DIMSE_SOURCE_PORT = 11112;
 
+/**
+ * @typedef StudySearchCriteria
+ * @property {string} patientId
+ * @property {string} patientName
+ * @property {string} accessionNumber
+ * @property {string} studyDate
+ */
+
+/**
+ * @param {unknown} value
+ */
 function parseEnabled(value) {
   return String(value || "").trim() === "enabled";
 }
 
+/**
+ * @param {unknown} value
+ * @param {number} fallback
+ */
 function parsePositiveInteger(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0 || !Number.isInteger(parsed)) {
@@ -32,6 +49,9 @@ function getDimseSourceIp() {
   return "0.0.0.0";
 }
 
+/**
+ * @param {string[]} categories
+ */
 async function loadSettingsMap(categories) {
   const { rows } = await pool.query(
     `
@@ -49,9 +69,12 @@ async function loadSettingsMap(categories) {
 
     accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeDateForDicom(value) {
   const clean = String(value || "").trim();
   if (!clean) {
@@ -69,6 +92,10 @@ function normalizeDateForDicom(value) {
   throw new HttpError(400, "studyDate must be in YYYY-MM-DD format.");
 }
 
+/**
+ * @param {Record<string, unknown>} [payload]
+ * @returns {StudySearchCriteria}
+ */
 function normalizeStudySearchCriteria(payload = {}) {
   const patientId = String(payload.patientId || payload.patientNationalId || "").trim();
   const patientName = String(payload.patientName || "").trim();
@@ -87,12 +114,17 @@ function normalizeStudySearchCriteria(payload = {}) {
   };
 }
 
+/**
+ * @param {Record<string, unknown>} dataset
+ * @param {string} tag
+ */
 function extractTagValue(dataset, tag) {
   if (!dataset || typeof dataset !== "object") {
     return "";
   }
 
-  const candidates = [dataset[tag], dataset[tag?.toUpperCase()], dataset[tag?.toLowerCase()]];
+  const datasetRecord = /** @type {Record<string, unknown>} */ (dataset);
+  const candidates = [datasetRecord[tag], datasetRecord[tag?.toUpperCase()], datasetRecord[tag?.toLowerCase()]];
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null) {
       continue;
@@ -107,29 +139,33 @@ function extractTagValue(dataset, tag) {
 
       const firstValue = candidate[0];
       if (firstValue && typeof firstValue === "object") {
-        return String(firstValue.Alphabetic || firstValue.Ideographic || firstValue.Phonetic || "");
+        const firstValueRecord = /** @type {Record<string, unknown>} */ (firstValue);
+        return String(firstValueRecord.Alphabetic || firstValueRecord.Ideographic || firstValueRecord.Phonetic || "");
       }
 
       return String(firstValue ?? "");
     }
     if (typeof candidate === "object") {
-      if (Array.isArray(candidate.Value)) {
-        if (!candidate.Value.length) {
+      const candidateRecord = /** @type {Record<string, unknown>} */ (candidate);
+      const candidateValue = candidateRecord.Value;
+      if (Array.isArray(candidateValue)) {
+        if (!candidateValue.length) {
           return "";
         }
 
-        const firstValue = candidate.Value[0];
+        const firstValue = candidateValue[0];
         if (firstValue && typeof firstValue === "object") {
-          return String(firstValue.Alphabetic || firstValue.Ideographic || firstValue.Phonetic || "");
+          const firstValueRecord = /** @type {Record<string, unknown>} */ (firstValue);
+          return String(firstValueRecord.Alphabetic || firstValueRecord.Ideographic || firstValueRecord.Phonetic || "");
         }
 
         return String(firstValue ?? "");
       }
-      if (candidate.Value !== undefined) {
-        return String(candidate.Value ?? "");
+      if (candidateValue !== undefined) {
+        return String(candidateValue ?? "");
       }
-      if (candidate.value !== undefined) {
-        return String(candidate.value ?? "");
+      if (candidateRecord.value !== undefined) {
+        return String(candidateRecord.value ?? "");
       }
     }
   }
@@ -137,6 +173,9 @@ function extractTagValue(dataset, tag) {
   return "";
 }
 
+/**
+ * @param {Record<string, unknown>} dataset
+ */
 function extractStudySummary(dataset) {
   const patientId =
     extractTagValue(dataset, "00100020") ||
@@ -167,6 +206,9 @@ function extractStudySummary(dataset) {
   };
 }
 
+/**
+ * @param {unknown} rawResult
+ */
 function normalizeStudyList(rawResult) {
   const candidates = [];
 
@@ -175,14 +217,12 @@ function normalizeStudyList(rawResult) {
   }
 
   if (rawResult && typeof rawResult === "object") {
+    const rawRecord = /** @type {Record<string, unknown>} */ (rawResult);
     const possibleArrays = [
-      rawResult.container,
-      rawResult.datasets,
-      rawResult.results,
-      rawResult.responses,
-      rawResult.container?.datasets,
-      rawResult.container?.results,
-      rawResult.container?.responses
+      rawRecord.container,
+      rawRecord.datasets,
+      rawRecord.results,
+      rawRecord.responses
     ];
 
     for (const arrayValue of possibleArrays) {
@@ -193,10 +233,14 @@ function normalizeStudyList(rawResult) {
   }
 
   return candidates
-    .map((dataset) => extractStudySummary(dataset))
+    .map((dataset) => extractStudySummary(/** @type {Record<string, unknown>} */ (dataset)))
     .filter((entry) => entry.patientId || entry.modality || entry.studyDescription || entry.studyDate);
 }
 
+/**
+ * @param {unknown} result
+ * @returns {Record<string, unknown> | null}
+ */
 function parseDimseResult(result) {
   if (!result) {
     return null;
@@ -207,15 +251,18 @@ function parseDimseResult(result) {
     parsed = JSON.parse(result);
   }
 
-  if (parsed?.container && typeof parsed.container === "string") {
+  if (parsed && typeof parsed === "object") {
+    const parsedRecord = /** @type {Record<string, unknown>} */ (parsed);
+    if (parsedRecord.container && typeof parsedRecord.container === "string") {
     try {
-      parsed.container = JSON.parse(parsed.container);
+      parsedRecord.container = JSON.parse(parsedRecord.container);
     } catch (error) {
-      parsed.container = parsed.container;
+      parsedRecord.container = parsedRecord.container;
+    }
     }
   }
 
-  return parsed;
+  return parsed && typeof parsed === "object" ? /** @type {Record<string, unknown>} */ (parsed) : null;
 }
 
 async function loadPacsSettings() {
@@ -239,6 +286,9 @@ async function loadPacsSettings() {
   };
 }
 
+/**
+ * @param {Record<string, unknown>} [input]
+ */
 function normalizePacsSettingsInput(input = {}) {
   return {
     enabled: parseEnabled(input.enabled || "enabled"),
@@ -250,6 +300,9 @@ function normalizePacsSettingsInput(input = {}) {
   };
 }
 
+/**
+ * @param {StudySearchCriteria} criteria
+ */
 function buildStudySearchTags(criteria) {
   const tags = [
     { key: "00080052", value: "STUDY" },
@@ -281,7 +334,7 @@ async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeT
         target: {
           aet: calledAeTitle,
           ip: host,
-          port: String(port)
+          port: Number(port)
         },
         tags: buildStudySearchTags(criteria),
         timeout: Number(timeoutSeconds),
@@ -297,7 +350,8 @@ async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeT
 
         const parsed = parseDimseResult(result);
         if (parsed?.error || parsed?.status === "failure") {
-          reject(new Error(parsed?.error || parsed?.message || "PACS query failed."));
+          const errorMessage = String(parsed?.error || parsed?.message || "PACS query failed.");
+          reject(new Error(errorMessage));
           return;
         }
 
@@ -326,7 +380,7 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
         target: {
           aet: calledAeTitle,
           ip: host,
-          port: String(port)
+          port: Number(port)
         },
         timeout: Number(timeoutSeconds),
         verbose: true
@@ -341,7 +395,8 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
 
         const parsed = parseDimseResult(result);
         if (parsed?.error || parsed?.status === "failure") {
-          reject(new Error(parsed?.error || parsed?.message || "PACS echo failed."));
+          const errorMessage = String(parsed?.error || parsed?.message || "PACS echo failed.");
+          reject(new Error(errorMessage));
           return;
         }
 
@@ -353,6 +408,9 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
   });
 }
 
+/**
+ * @param {{ criteria: Record<string, unknown>, currentUserId: number | string | null | undefined }} params
+ */
 export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }) {
   const criteria = normalizeStudySearchCriteria(rawCriteria);
   const settings = await loadPacsSettings();
@@ -376,7 +434,8 @@ export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }
       timeoutSeconds: settings.timeoutSeconds
     });
   } catch (error) {
-    throw new HttpError(502, `PACS connection failed. ${error.message || ""}`.trim());
+    const message = error instanceof Error ? error.message : "";
+    throw new HttpError(502, `PACS connection failed. ${message}`.trim());
   }
 
   const studies = normalizeStudyList(rawResult);
@@ -403,6 +462,9 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
   });
 }
 
+/**
+ * @param {{ currentUserId: number | string | null | undefined, overrides?: Record<string, unknown> | null }} params
+ */
 export async function testPacsConnection({ currentUserId, overrides = null }) {
   const settings = overrides ? normalizePacsSettingsInput(overrides) : await loadPacsSettings();
 
@@ -423,7 +485,8 @@ export async function testPacsConnection({ currentUserId, overrides = null }) {
       timeoutSeconds: settings.timeoutSeconds
     });
   } catch (error) {
-    throw new HttpError(502, `PACS connection failed. ${error.message || ""}`.trim());
+    const message = error instanceof Error ? error.message : "";
+    throw new HttpError(502, `PACS connection failed. ${message}`.trim());
   }
 
   await logAuditEntry({

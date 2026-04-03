@@ -1,7 +1,29 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/**
+ * @typedef NameDictionaryRow
+ * @property {number} id
+ * @property {string} arabic_text
+ * @property {string} english_text
+ * @property {boolean} is_active
+ * @property {string} created_at
+ */
+
+/**
+ * @typedef NameDictionaryPayload
+ * @property {string} [arabicText]
+ * @property {string} [englishText]
+ * @property {boolean | string | number | null} [isActive]
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizeDictionaryText(value, fieldName) {
   const clean = String(value || "").trim();
 
@@ -12,6 +34,9 @@ function normalizeDictionaryText(value, fieldName) {
   return clean;
 }
 
+/**
+ * @param {boolean | string | number | null | undefined} value
+ */
 function normalizeActiveFlag(value) {
   if (value === undefined || value === null || value === "") {
     return true;
@@ -24,6 +49,9 @@ function normalizeActiveFlag(value) {
   return String(value).trim().toLowerCase() !== "false";
 }
 
+/**
+ * @param {{ includeInactive?: boolean }} [options]
+ */
 export async function listNameDictionary({ includeInactive = false } = {}) {
   const { rows } = await pool.query(
     `
@@ -34,9 +62,13 @@ export async function listNameDictionary({ includeInactive = false } = {}) {
     `
   );
 
-  return rows;
+  return /** @type {NameDictionaryRow[]} */ (rows);
 }
 
+/**
+ * @param {NameDictionaryPayload | null | undefined} payload
+ * @param {number | string} currentUserId
+ */
 export async function upsertNameDictionary(payload, currentUserId) {
   const arabicText = normalizeDictionaryText(payload?.arabicText, "arabicText");
   const englishText = normalizeDictionaryText(payload?.englishText, "englishText");
@@ -53,7 +85,7 @@ export async function upsertNameDictionary(payload, currentUserId) {
     [arabicText, englishText, isActive]
   );
 
-  const entry = rows[0];
+  const entry = /** @type {NameDictionaryRow} */ (rows[0]);
 
   await logAuditEntry({
     entityType: "name_dictionary",
@@ -67,6 +99,11 @@ export async function upsertNameDictionary(payload, currentUserId) {
   return entry;
 }
 
+/**
+ * @param {number | string} entryId
+ * @param {NameDictionaryPayload | null | undefined} payload
+ * @param {number | string} currentUserId
+ */
 export async function updateNameDictionaryEntry(entryId, payload, currentUserId) {
   const cleanEntryId = Number(entryId);
 
@@ -84,7 +121,7 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
     [cleanEntryId]
   );
 
-  const existing = existingRows[0];
+  const existing = /** @type {NameDictionaryRow | undefined} */ (existingRows[0]);
 
   if (!existing) {
     throw new HttpError(404, "Dictionary entry not found.");
@@ -104,7 +141,7 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
     [cleanEntryId, englishText, isActive]
   );
 
-  const updated = rows[0];
+  const updated = /** @type {NameDictionaryRow} */ (rows[0]);
 
   await logAuditEntry({
     entityType: "name_dictionary",
@@ -118,6 +155,10 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
   return updated;
 }
 
+/**
+ * @param {number | string} entryId
+ * @param {number | string} currentUserId
+ */
 export async function deleteNameDictionaryEntry(entryId, currentUserId) {
   const cleanEntryId = Number(entryId);
 
@@ -134,7 +175,7 @@ export async function deleteNameDictionaryEntry(entryId, currentUserId) {
     [cleanEntryId]
   );
 
-  const removed = rows[0];
+  const removed = /** @type {NameDictionaryRow | undefined} */ (rows[0]);
 
   if (!removed) {
     throw new HttpError(404, "Dictionary entry not found.");
@@ -152,6 +193,10 @@ export async function deleteNameDictionaryEntry(entryId, currentUserId) {
   return removed;
 }
 
+/**
+ * @param {Array<NameDictionaryPayload | null | undefined>} entries
+ * @param {number | string} currentUserId
+ */
 export async function importNameDictionaryEntries(entries, currentUserId) {
   if (!Array.isArray(entries) || !entries.length) {
     throw new HttpError(400, "entries must be a non-empty array.");

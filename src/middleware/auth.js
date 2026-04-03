@@ -1,15 +1,45 @@
+// @ts-check
+
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
 
+/**
+ * @typedef {object} AuthUser
+ * @property {number | string} sub
+ * @property {string} role
+ * @property {string} [purpose]
+ */
+
+/**
+ * @typedef {object} AuthRequest
+ * @property {Record<string, string | undefined>} [cookies]
+ * @property {AuthUser} [user]
+ */
+
+/**
+ * @typedef {(error?: unknown) => void} NextFunction
+ */
+
+/**
+ * @param {AuthRequest} req
+ */
 export function readToken(req) {
   return req.cookies?.[env.cookieName] || "";
 }
 
+/**
+ * @param {AuthRequest} req
+ */
 export function readSupervisorReauthToken(req) {
   return req.cookies?.[env.reauthCookieName] || "";
 }
 
+/**
+ * @param {AuthRequest} req
+ * @param {unknown} _res
+ * @param {NextFunction} next
+ */
 export function requireAuth(req, _res, next) {
   try {
     const token = readToken(req);
@@ -18,17 +48,25 @@ export function requireAuth(req, _res, next) {
       throw new HttpError(401, "Authentication required.");
     }
 
-    req.user = jwt.verify(token, env.jwtSecret);
+    req.user = /** @type {AuthUser} */ (jwt.verify(token, env.jwtSecret));
     next();
   } catch (error) {
+    const isJwtError =
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      ["JsonWebTokenError", "TokenExpiredError"].includes(String(error.name));
     next(
-      ["JsonWebTokenError", "TokenExpiredError"].includes(error.name)
-        ? new HttpError(401, "Invalid session.")
-        : error
+      isJwtError ? new HttpError(401, "Invalid session.") : error
     );
   }
 }
 
+/**
+ * @param {AuthRequest} req
+ * @param {unknown} _res
+ * @param {NextFunction} next
+ */
 export function requireSupervisor(req, _res, next) {
   if (!req.user) {
     return next(new HttpError(401, "Authentication required."));
@@ -41,7 +79,15 @@ export function requireSupervisor(req, _res, next) {
   return next();
 }
 
+/**
+ * @param {string[]} allowedRoles
+ */
 export function requireAnyRole(allowedRoles) {
+  /**
+   * @param {AuthRequest} req
+   * @param {unknown} _res
+   * @param {NextFunction} next
+   */
   return function roleGuard(req, _res, next) {
     if (!req.user) {
       return next(new HttpError(401, "Authentication required."));
@@ -55,6 +101,9 @@ export function requireAnyRole(allowedRoles) {
   };
 }
 
+/**
+ * @param {AuthRequest} req
+ */
 export function hasRecentSupervisorReauth(req) {
   try {
     const token = readSupervisorReauthToken(req);
@@ -63,7 +112,7 @@ export function hasRecentSupervisorReauth(req) {
       return false;
     }
 
-    const payload = jwt.verify(token, env.jwtSecret);
+    const payload = /** @type {AuthUser} */ (jwt.verify(token, env.jwtSecret));
     return (
       payload?.purpose === "supervisor-reauth" &&
       Number(payload?.sub) === Number(req.user.sub) &&
@@ -74,6 +123,11 @@ export function hasRecentSupervisorReauth(req) {
   }
 }
 
+/**
+ * @param {AuthRequest} req
+ * @param {unknown} _res
+ * @param {NextFunction} next
+ */
 export function requireRecentSupervisorReauth(req, _res, next) {
   if (!hasRecentSupervisorReauth(req)) {
     return next(new HttpError(403, "Recent supervisor re-authentication is required."));

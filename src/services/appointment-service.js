@@ -1,9 +1,193 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
+
+/** @typedef {import("../types/domain.js").Appointment} DomainAppointment */
+
+/**
+ * @typedef SchedulingSettingRow
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef AppointmentStatusRow
+ * @property {number} id
+ * @property {string} status
+ */
+
+/**
+ * @typedef SequenceRow
+ * @property {number | string | null} last_daily_sequence
+ */
+
+/**
+ * @typedef ModalitySlotAggregateRow
+ * @property {number | string | null} booked_count
+ * @property {number | string | null} last_slot_number
+ */
+
+/**
+ * @typedef BookingStatsRow
+ * @property {number | string | null} booked_count
+ * @property {number | string | null} last_slot_number
+ * @property {number | string | null} last_daily_sequence
+ */
+
+/**
+ * @typedef AppointmentDbRow
+ * @property {number} id
+ * @property {number} patient_id
+ * @property {number} modality_id
+ * @property {number | null} exam_type_id
+ * @property {number | null} reporting_priority_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {number} daily_sequence
+ * @property {number | null} modality_slot_number
+ * @property {string} status
+ * @property {string | null} notes
+ * @property {string | null} overbooking_reason
+ */
+
+/**
+ * @typedef PatientLookupRow
+ * @property {number} id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} estimated_date_of_birth
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} phone_2
+ * @property {string | null} address
+ */
+
+/**
+ * @typedef ModalityRow
+ * @property {number} id
+ * @property {string} code
+ * @property {string} name_ar
+ * @property {string} name_en
+ * @property {number | null} daily_capacity
+ * @property {string | null} general_instruction_ar
+ * @property {string | null} general_instruction_en
+ * @property {boolean} is_active
+ */
+
+/**
+ * @typedef ExamTypeRow
+ * @property {number} id
+ * @property {number} modality_id
+ * @property {string} name_ar
+ * @property {string} name_en
+ * @property {string | null} specific_instruction_ar
+ * @property {string | null} specific_instruction_en
+ * @property {boolean} is_active
+ */
+
+/**
+ * @typedef ReportingPriorityRow
+ * @property {number} id
+ * @property {string} code
+ * @property {string} name_ar
+ * @property {string} name_en
+ */
+
+/**
+ * @typedef AppointmentCreateResult
+ * @property {AppointmentDbRow} appointment
+ * @property {Record<string, unknown>} patient
+ * @property {Record<string, unknown>} modality
+ * @property {Record<string, unknown> | null} examType
+ * @property {Record<string, unknown> | null} priority
+ * @property {string} barcodeValue
+ */
+
+/**
+ * @typedef AppointmentStatsSummaryRow
+ * @property {number | string} total_appointments
+ * @property {number | string} unique_patients
+ * @property {number | string} unique_modalities
+ * @property {number | string} scheduled_count
+ * @property {number | string} in_queue_count
+ * @property {number | string} completed_count
+ * @property {number | string} no_show_count
+ * @property {number | string} cancelled_count
+ * @property {number | string} walk_in_count
+ */
+
+/**
+ * @typedef AppointmentListRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} created_at
+ * @property {number | null} modality_slot_number
+ * @property {string} status
+ * @property {string | null} notes
+ * @property {boolean} is_walk_in
+ * @property {boolean} is_overbooked
+ * @property {string | null} overbooking_reason
+ * @property {number} patient_id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} address
+ * @property {number} modality_id
+ * @property {string} modality_code
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} general_instruction_ar
+ * @property {string | null} general_instruction_en
+ * @property {number | null} exam_type_id
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} specific_instruction_ar
+ * @property {string | null} specific_instruction_en
+ * @property {string | null} priority_name_ar
+ * @property {string | null} priority_name_en
+ */
+
+/**
+ * @typedef ModalityBreakdownRow
+ * @property {number} modality_id
+ * @property {string} modality_code
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {number | string} total_count
+ * @property {number | string} scheduled_count
+ * @property {number | string} in_queue_count
+ * @property {number | string} completed_count
+ * @property {number | string} no_show_count
+ * @property {number | string} cancelled_count
+ */
+
+/**
+ * @typedef StatusBreakdownRow
+ * @property {string} status
+ * @property {number | string} total_count
+ */
+
+/**
+ * @typedef DailyBreakdownRow
+ * @property {string} appointment_date
+ * @property {number | string} total_count
+ * @property {number | string} completed_count
+ * @property {number | string} cancelled_count
+ * @property {number | string} no_show_count
+ */
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -106,10 +290,11 @@ export async function getAppointmentDaySettings(client = pool) {
     `
   );
 
-  const values = rows.reduce((accumulator, row) => {
+  const settingsRows = /** @type {SchedulingSettingRow[]} */ (rows);
+  const values = settingsRows.reduce((accumulator, row) => {
     accumulator[row.setting_key] = row.setting_value?.value;
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, unknown>} */ ({}));
 
   return {
     fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
@@ -141,7 +326,8 @@ async function getMaxCasesPerModality(client) {
     `
   );
 
-  const raw = rows[0]?.setting_value?.value;
+  const settingRow = /** @type {{ setting_value?: { value?: unknown } } | undefined} */ (rows[0]);
+  const raw = settingRow?.setting_value?.value;
   return normalizeCapacityLimit(raw);
 }
 
@@ -168,11 +354,13 @@ async function getAppointmentById(client, appointmentId) {
     [cleanAppointmentId]
   );
 
-  if (!rows[0]) {
+  const appointment = /** @type {(AppointmentDbRow & Partial<DomainAppointment>) | undefined} */ (rows[0]);
+
+  if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return rows[0];
+  return appointment;
 }
 
 async function nextDailySequence(client, appointmentDate, excludeAppointmentId = null) {
@@ -194,7 +382,8 @@ async function nextDailySequence(client, appointmentDate, excludeAppointmentId =
     params
   );
 
-  return Number(rows[0]?.last_daily_sequence || 0) + 1;
+  const sequenceRow = /** @type {SequenceRow | undefined} */ (rows[0]);
+  return Number(sequenceRow?.last_daily_sequence || 0) + 1;
 }
 
 async function nextModalitySlotNumber(client, modalityId, appointmentDate, excludeAppointmentId = null) {
@@ -219,9 +408,10 @@ async function nextModalitySlotNumber(client, modalityId, appointmentDate, exclu
     params
   );
 
+  const aggregateRow = /** @type {ModalitySlotAggregateRow | undefined} */ (rows[0]);
   return {
-    bookedCount: Number(rows[0]?.booked_count || 0),
-    slotNumber: Number(rows[0]?.last_slot_number || 0) + 1
+    bookedCount: Number(aggregateRow?.booked_count || 0),
+    slotNumber: Number(aggregateRow?.last_slot_number || 0) + 1
   };
 }
 
@@ -244,11 +434,13 @@ async function getPatientById(client, patientId) {
     [patientId]
   );
 
-  if (!rows[0]) {
+  const patient = /** @type {PatientLookupRow | undefined} */ (rows[0]);
+
+  if (!patient) {
     throw new HttpError(404, "Patient not found.");
   }
 
-  return rows[0];
+  return patient;
 }
 
 async function getModalityById(client, modalityId) {
@@ -262,11 +454,13 @@ async function getModalityById(client, modalityId) {
     [modalityId]
   );
 
-  if (!rows[0] || !rows[0].is_active) {
+  const modality = /** @type {ModalityRow | undefined} */ (rows[0]);
+
+  if (!modality || !modality.is_active) {
     throw new HttpError(404, "Modality not found.");
   }
 
-  return rows[0];
+  return modality;
 }
 
 async function getExamTypeById(client, examTypeId, modalityId) {
@@ -284,15 +478,17 @@ async function getExamTypeById(client, examTypeId, modalityId) {
     [examTypeId]
   );
 
-  if (!rows[0] || !rows[0].is_active) {
+  const examType = /** @type {ExamTypeRow | undefined} */ (rows[0]);
+
+  if (!examType || !examType.is_active) {
     throw new HttpError(404, "Exam type not found.");
   }
 
-  if (Number(rows[0].modality_id) !== Number(modalityId)) {
+  if (Number(examType.modality_id) !== Number(modalityId)) {
     throw new HttpError(400, "The selected exam type does not belong to the selected modality.");
   }
 
-  return rows[0];
+  return examType;
 }
 
 async function getPriorityById(client, reportingPriorityId) {
@@ -310,11 +506,13 @@ async function getPriorityById(client, reportingPriorityId) {
     [reportingPriorityId]
   );
 
-  if (!rows[0]) {
+  const priority = /** @type {ReportingPriorityRow | undefined} */ (rows[0]);
+
+  if (!priority) {
     throw new HttpError(404, "Reporting priority not found.");
   }
 
-  return rows[0];
+  return priority;
 }
 
 export async function listAppointmentLookups() {
@@ -345,9 +543,9 @@ export async function listAppointmentLookups() {
   ]);
 
   return {
-    modalities: modalitiesResult.rows,
-    examTypes: examTypesResult.rows,
-    priorities: prioritiesResult.rows
+    modalities: /** @type {ModalityRow[]} */ (modalitiesResult.rows),
+    examTypes: /** @type {ExamTypeRow[]} */ (examTypesResult.rows),
+    priorities: /** @type {ReportingPriorityRow[]} */ (prioritiesResult.rows)
   };
 }
 
@@ -372,8 +570,8 @@ export async function listExamTypesForSettings() {
   ]);
 
   return {
-    modalities: modalitiesResult.rows,
-    examTypes: examTypesResult.rows
+    modalities: /** @type {ModalityRow[]} */ (modalitiesResult.rows),
+    examTypes: /** @type {ExamTypeRow[]} */ (examTypesResult.rows)
   };
 }
 
@@ -484,7 +682,7 @@ export async function listAppointmentsForPrint(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {AppointmentListRow[]} */ (rows);
 }
 
 export async function listAppointmentStatistics(filters = {}) {
@@ -585,7 +783,19 @@ export async function listAppointmentStatistics(filters = {}) {
     )
   ]);
 
-  const summary = summaryResult.rows[0] || {};
+  const summary = /** @type {AppointmentStatsSummaryRow} */ (
+    /** @type {AppointmentStatsSummaryRow | undefined} */ (summaryResult.rows[0]) || {
+      total_appointments: 0,
+      unique_patients: 0,
+      unique_modalities: 0,
+      scheduled_count: 0,
+      in_queue_count: 0,
+      completed_count: 0,
+      no_show_count: 0,
+      cancelled_count: 0,
+      walk_in_count: 0
+    }
+  );
 
   return {
     filters: {
@@ -605,7 +815,7 @@ export async function listAppointmentStatistics(filters = {}) {
       cancelled_count: Number(summary.cancelled_count || 0),
       walk_in_count: Number(summary.walk_in_count || 0)
     },
-    modalityBreakdown: modalityResult.rows.map((row) => ({
+    modalityBreakdown: /** @type {ModalityBreakdownRow[]} */ (modalityResult.rows).map((row) => ({
       modality_id: row.modality_id,
       modality_code: row.modality_code,
       modality_name_ar: row.modality_name_ar,
@@ -617,11 +827,11 @@ export async function listAppointmentStatistics(filters = {}) {
       no_show_count: Number(row.no_show_count || 0),
       cancelled_count: Number(row.cancelled_count || 0)
     })),
-    statusBreakdown: statusResult.rows.map((row) => ({
+    statusBreakdown: /** @type {StatusBreakdownRow[]} */ (statusResult.rows).map((row) => ({
       status: row.status,
       total_count: Number(row.total_count || 0)
     })),
-    dailyBreakdown: dailyResult.rows.map((row) => ({
+    dailyBreakdown: /** @type {DailyBreakdownRow[]} */ (dailyResult.rows).map((row) => ({
       appointment_date: row.appointment_date,
       total_count: Number(row.total_count || 0),
       completed_count: Number(row.completed_count || 0),
@@ -686,11 +896,13 @@ export async function getAppointmentPrintDetails(appointmentId) {
     [cleanAppointmentId]
   );
 
-  if (!rows[0]) {
+  const fallbackAppointment = /** @type {AppointmentListRow | undefined} */ (rows[0]);
+
+  if (!fallbackAppointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return rows[0];
+  return fallbackAppointment;
 }
 
 export async function listAvailability(modalityId, days = 14) {
@@ -804,15 +1016,16 @@ export async function createModality(payload, currentUserId = null) {
       `,
       [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
+    const createdModality = /** @type {ModalityRow} */ (rows[0]);
 
     if (currentUserId) {
       await logAuditEntry(
         {
           entityType: "modality",
-          entityId: rows[0].id,
+          entityId: createdModality.id,
           actionType: "create",
           oldValues: null,
-          newValues: rows[0],
+          newValues: createdModality,
           changedByUserId: currentUserId
         },
         client
@@ -820,7 +1033,7 @@ export async function createModality(payload, currentUserId = null) {
     }
 
     await client.query("commit");
-    return rows[0];
+    return createdModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -858,7 +1071,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
       [cleanModalityId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ModalityRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing) {
       throw new HttpError(404, "Modality not found.");
@@ -881,6 +1094,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
       `,
       [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
+    const updatedModality = /** @type {ModalityRow} */ (rows[0]);
 
     await logAuditEntry(
       {
@@ -888,14 +1102,14 @@ export async function updateModality(modalityId, payload, currentUserId) {
         entityId: cleanModalityId,
         actionType: "update",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: updatedModality,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return updatedModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -921,7 +1135,7 @@ export async function deleteModality(modalityId, currentUserId) {
       [cleanModalityId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ModalityRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Modality not found.");
@@ -938,6 +1152,7 @@ export async function deleteModality(modalityId, currentUserId) {
       `,
       [cleanModalityId]
     );
+    const deletedModality = /** @type {ModalityRow} */ (rows[0]);
 
     await logAuditEntry(
       {
@@ -945,14 +1160,14 @@ export async function deleteModality(modalityId, currentUserId) {
         entityId: cleanModalityId,
         actionType: "delete",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: deletedModality,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return deletedModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -991,15 +1206,16 @@ export async function createExamType(payload, currentUserId = null) {
       `,
       [modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
+    const createdExamType = /** @type {ExamTypeRow} */ (rows[0]);
 
     if (currentUserId) {
       await logAuditEntry(
         {
           entityType: "exam_type",
-          entityId: rows[0].id,
+          entityId: createdExamType.id,
           actionType: "create",
           oldValues: null,
-          newValues: rows[0],
+          newValues: createdExamType,
           changedByUserId: currentUserId
         },
         client
@@ -1007,7 +1223,7 @@ export async function createExamType(payload, currentUserId = null) {
     }
 
     await client.query("commit");
-    return rows[0];
+    return createdExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1043,7 +1259,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       [cleanExamTypeId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ExamTypeRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Exam type not found.");
@@ -1067,6 +1283,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       `,
       [cleanExamTypeId, modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
+    const updatedExamType = /** @type {ExamTypeRow} */ (rows[0]);
 
     await logAuditEntry(
       {
@@ -1074,14 +1291,14 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
         entityId: cleanExamTypeId,
         actionType: "update",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: updatedExamType,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return updatedExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1107,7 +1324,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
       [cleanExamTypeId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ExamTypeRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Exam type not found.");
@@ -1124,6 +1341,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
       `,
       [cleanExamTypeId]
     );
+    const deletedExamType = /** @type {ExamTypeRow} */ (rows[0]);
 
     await logAuditEntry(
       {
@@ -1131,14 +1349,14 @@ export async function deleteExamType(examTypeId, currentUserId) {
         entityId: cleanExamTypeId,
         actionType: "delete",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: deletedExamType,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return deletedExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1147,6 +1365,12 @@ export async function deleteExamType(examTypeId, currentUserId) {
   }
 }
 
+/**
+ * @param {Record<string, unknown>} payload
+ * @param {{ sub?: number | string, id?: number | string, role?: string }} currentUser
+ * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
+ * @returns {Promise<AppointmentCreateResult>}
+ */
 export async function createAppointment(payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1200,9 +1424,11 @@ export async function createAppointment(payload, currentUser, options = {}) {
     );
 
     const maxCasesPerModality = await getMaxCasesPerModality(client);
-    const bookedCount = Number(bookingStats.rows[0]?.booked_count || 0);
-    const nextSlotNumber = Number(bookingStats.rows[0]?.last_slot_number || 0) + 1;
-    const nextDailySequence = Number(globalStats.rows[0]?.last_daily_sequence || 0) + 1;
+    const bookingStatsRow = /** @type {BookingStatsRow | undefined} */ (bookingStats.rows[0]);
+    const globalStatsRow = /** @type {SequenceRow | undefined} */ (globalStats.rows[0]);
+    const bookedCount = Number(bookingStatsRow?.booked_count || 0);
+    const nextSlotNumber = Number(bookingStatsRow?.last_slot_number || 0) + 1;
+    const nextDailySequence = Number(globalStatsRow?.last_daily_sequence || 0) + 1;
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
     const isOverbooked = bookedCount >= capacity;
 
@@ -1297,32 +1523,33 @@ export async function createAppointment(payload, currentUser, options = {}) {
         currentUser.sub
       ]
     );
+    const createdAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
 
     await client.query(
       `
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, null, 'scheduled', $2, $3)
       `,
-      [rows[0].id, currentUser.sub, isOverbooked ? overbookingReason : null]
+      [createdAppointment.id, currentUser.sub, isOverbooked ? overbookingReason : null]
     );
 
     await logAuditEntry(
       {
         entityType: "appointment",
-        entityId: rows[0].id,
+        entityId: createdAppointment.id,
         actionType: "create",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdAppointment,
         changedByUserId: currentUser.sub
       },
       client
     );
 
     await client.query("commit");
-    scheduleWorklistSync(rows[0].id);
+    scheduleWorklistSync(createdAppointment.id);
 
     return {
-      appointment: rows[0],
+      appointment: createdAppointment,
       patient,
       modality,
       examType,
@@ -1337,6 +1564,12 @@ export async function createAppointment(payload, currentUser, options = {}) {
   }
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @param {Record<string, unknown>} payload
+ * @param {{ sub?: number | string, id?: number | string, role?: string }} currentUser
+ * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
+ */
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1350,8 +1583,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
+    const existingStatus = String(existingAppointment.status || "");
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
+    if (!["scheduled", "arrived", "waiting"].includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");
     }
 
@@ -1495,13 +1729,14 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         updatedByUserId
       ]
     );
+    const updatedAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
 
     await client.query(
       `
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, $2, $3, $4)
       `,
-      [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Appointment edited or rescheduled"]
+      [cleanAppointmentId, existingStatus, currentUser.sub, "Appointment edited or rescheduled"]
     );
 
     await logAuditEntry(
@@ -1510,7 +1745,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         entityId: cleanAppointmentId,
         actionType: "update",
         oldValues: existingAppointment,
-        newValues: rows[0],
+        newValues: updatedAppointment,
         changedByUserId: currentUser.sub
       },
       client
@@ -1518,7 +1753,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 
     await client.query("commit");
     scheduleWorklistSync(cleanAppointmentId);
-    return rows[0];
+    return updatedAppointment;
   } catch (error) {
     console.error("[updateAppointment] ERROR:", error.message, error.stack);
     await client.query("rollback");
@@ -1528,6 +1763,11 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   }
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @param {{ examTypeId?: number | string }} payload
+ * @param {{ sub?: number | string }} currentUser
+ */
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1540,8 +1780,9 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
+    const existingStatus = String(existingAppointment.status || "");
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
+    if (!["scheduled", "arrived", "waiting"].includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be updated.");
     }
 
@@ -1559,13 +1800,14 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
       `,
       [cleanAppointmentId, examType?.id || null, currentUser.sub]
     );
+    const protocolUpdatedAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
 
     await client.query(
       `
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, $2, $3, $4)
       `,
-      [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Protocol updated"]
+      [cleanAppointmentId, existingStatus, currentUser.sub, "Protocol updated"]
     );
 
     await logAuditEntry(
@@ -1574,7 +1816,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
         entityId: cleanAppointmentId,
         actionType: "update",
         oldValues: existingAppointment,
-        newValues: rows[0],
+        newValues: protocolUpdatedAppointment,
         changedByUserId: currentUser.sub
       },
       client
@@ -1582,7 +1824,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
 
     await client.query("commit");
     scheduleWorklistSync(cleanAppointmentId);
-    return rows[0];
+    return protocolUpdatedAppointment;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1604,8 +1846,9 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
   try {
     await client.query("begin");
     const appointment = await getAppointmentById(client, cleanAppointmentId);
+    const appointmentStatus = String(appointment.status || "");
 
-    if (["cancelled", "completed", "discontinued", "no-show", "in-progress"].includes(appointment.status)) {
+    if (["cancelled", "completed", "discontinued", "no-show", "in-progress"].includes(appointmentStatus)) {
       throw new HttpError(409, "This appointment can no longer be cancelled.");
     }
 
@@ -1636,7 +1879,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, 'cancelled', $3, $4)
       `,
-      [cleanAppointmentId, appointment.status, currentUserId, cleanReason]
+      [cleanAppointmentId, appointmentStatus, currentUserId, cleanReason]
     );
 
     await logAuditEntry(

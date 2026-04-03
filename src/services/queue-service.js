@@ -1,3 +1,5 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
@@ -7,6 +9,74 @@ import { resolveScanValueToAccession, scheduleWorklistSync } from "./dicom-servi
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 
+/**
+ * @typedef QueueEntryRow
+ * @property {number} id
+ * @property {string} queue_date
+ * @property {number} queue_number
+ * @property {string} queue_status
+ * @property {string | null} scanned_at
+ * @property {number} appointment_id
+ * @property {string} accession_number
+ * @property {string} appointment_status
+ * @property {boolean} is_walk_in
+ * @property {string | null} notes
+ * @property {number} patient_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} phone_1
+ * @property {string | null} national_id
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ */
+
+/**
+ * @typedef QueueSummaryRow
+ * @property {number | string} total_appointments
+ * @property {number | string} scheduled_count
+ * @property {number | string} waiting_count
+ * @property {number | string} no_show_count
+ * @property {number | string} arrived_count
+ */
+
+/**
+ * @typedef NoShowCandidateRow
+ * @property {number} appointment_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string | null} notes
+ * @property {number} patient_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} phone_1
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ */
+
+/**
+ * @typedef {object} CurrentUser
+ * @property {number | string} sub
+ * @property {string} [role]
+ */
+
+/**
+ * @typedef {object} QueueScanPayload
+ * @property {string} [scanValue]
+ * @property {string} [accessionNumber]
+ */
+
+/**
+ * @typedef {object} QueueWalkInOptions
+ * @property {string} [supervisorUsername]
+ * @property {string} [supervisorPassword]
+ */
+
+/**
+ * @param {Date} [date]
+ * @returns {{ year?: string, month?: string, day?: string, hour?: string, minute?: string, second?: string }}
+ */
 function getTripoliParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: TRIPOLI_TIME_ZONE,
@@ -33,6 +103,9 @@ function getTripoliMinutesSinceMidnight() {
   return Number(parts.hour) * 60 + Number(parts.minute);
 }
 
+/**
+ * @param {unknown} value
+ */
 function parseTimeToMinutes(value) {
   const raw = String(value || DEFAULT_NO_SHOW_REVIEW_TIME).trim();
   const match = raw.match(/^(\d{1,2}):(\d{2})$/);
@@ -56,10 +129,14 @@ async function getNoShowReviewTime() {
     `
   );
 
-  const value = rows[0]?.setting_value?.value;
+  const firstRow = /** @type {{ setting_value?: { value?: unknown } } | undefined } */ (rows[0]);
+  const value = firstRow?.setting_value?.value;
   return typeof value === "string" && value ? value : DEFAULT_NO_SHOW_REVIEW_TIME;
 }
 
+/**
+ * @param {string} queueDate
+ */
 async function getQueueEntries(queueDate) {
   const { rows } = await pool.query(
     `
@@ -94,9 +171,12 @@ async function getQueueEntries(queueDate) {
     [queueDate]
   );
 
-  return rows;
+  return /** @type {NoShowCandidateRow[]} */ (rows);
 }
 
+/**
+ * @param {string} queueDate
+ */
 async function getQueueSummary(queueDate) {
   const { rows } = await pool.query(
     `
@@ -112,7 +192,7 @@ async function getQueueSummary(queueDate) {
     [queueDate]
   );
 
-  return rows[0] || {
+  return /** @type {QueueSummaryRow | undefined} */ (rows[0]) || {
     total_appointments: 0,
     scheduled_count: 0,
     waiting_count: 0,
@@ -121,6 +201,10 @@ async function getQueueSummary(queueDate) {
   };
 }
 
+/**
+ * @param {string} queueDate
+ * @param {boolean} reviewActive
+ */
 async function getNoShowCandidates(queueDate, reviewActive) {
   if (!reviewActive) {
     return [];
@@ -149,9 +233,13 @@ async function getNoShowCandidates(queueDate, reviewActive) {
     [queueDate]
   );
 
-  return rows;
+  return /** @type {QueueEntryRow[]} */ (rows);
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {string} identifier
+ */
 async function getAppointmentForQueue(client, identifier) {
   const { rows } = await client.query(
     `
@@ -181,6 +269,12 @@ async function getAppointmentForQueue(client, identifier) {
   return rows[0];
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {Record<string, unknown>} appointment
+ * @param {number | string} currentUserId
+ * @param {string} queueDate
+ */
 async function enqueueAppointmentRecord(client, appointment, currentUserId, queueDate) {
   const existingEntry = await client.query(
     `
@@ -226,6 +320,14 @@ async function enqueueAppointmentRecord(client, appointment, currentUserId, queu
   return insertResult.rows[0];
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} appointmentId
+ * @param {string} oldStatus
+ * @param {string} newStatus
+ * @param {number | string} currentUserId
+ * @param {string | null} [reason]
+ */
 async function updateAppointmentStatus(client, appointmentId, oldStatus, newStatus, currentUserId, reason = null) {
   await client.query(
     `
@@ -269,6 +371,10 @@ export async function getQueueSnapshot() {
   };
 }
 
+/**
+ * @param {QueueScanPayload} payload
+ * @param {CurrentUser | null | undefined} currentUser
+ */
 export async function scanAppointmentIntoQueue(payload, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -345,6 +451,11 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
   }
 }
 
+/**
+ * @param {Record<string, unknown>} payload
+ * @param {CurrentUser} currentUser
+ * @param {QueueWalkInOptions} [options]
+ */
 export async function createWalkInQueueEntry(payload, currentUser, options = {}) {
   const queueDate = getTripoliToday();
   const appointmentResult = await createAppointment(
@@ -357,7 +468,10 @@ export async function createWalkInQueueEntry(payload, currentUser, options = {})
     options
   );
 
-  const scanResult = await scanAppointmentIntoQueue(appointmentResult.barcodeValue, currentUser);
+  const scanResult = await scanAppointmentIntoQueue(
+    { scanValue: appointmentResult.barcodeValue },
+    currentUser
+  );
 
   return {
     ...scanResult,
@@ -365,6 +479,11 @@ export async function createWalkInQueueEntry(payload, currentUser, options = {})
   };
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @param {string | null | undefined} reason
+ * @param {CurrentUser | null | undefined} currentUser
+ */
 export async function confirmNoShow(appointmentId, reason, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");

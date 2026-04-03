@@ -1,3 +1,5 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -8,6 +10,38 @@ import {
   normalizeLibyanPhone
 } from "../utils/normalize.js";
 
+/**
+ * @typedef {object} PatientRegistrationRules
+ * @property {string} nationalIdRule
+ * @property {string} phoneRule
+ * @property {string} dobRule
+ */
+
+/**
+ * @typedef {object} PatientPayload
+ * @property {string} [nationalId]
+ * @property {string} [nationalIdConfirmation]
+ * @property {string} [arabicFullName]
+ * @property {string} [englishFullName]
+ * @property {number | string} [ageYears]
+ * @property {string} [estimatedDateOfBirth]
+ * @property {string} [sex]
+ * @property {string} [phone1]
+ * @property {string} [phone2]
+ * @property {string} [address]
+ */
+
+/**
+ * @typedef {object} MergePatientsPayload
+ * @property {number | string} [targetPatientId]
+ * @property {number | string} [sourcePatientId]
+ * @property {string} [confirmationText]
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizePositiveInteger(value, fieldName) {
   const parsed = Number(value);
 
@@ -18,9 +52,14 @@ function normalizePositiveInteger(value, fieldName) {
   return parsed;
 }
 
+/**
+ * @param {unknown} nationalId
+ * @param {unknown} nationalIdConfirmation
+ * @param {string} rule
+ */
 function validateNationalId(nationalId, nationalIdConfirmation, rule) {
-  const cleanId = (nationalId || "").replace(/\D/g, "");
-  const cleanConfirmation = (nationalIdConfirmation || "").replace(/\D/g, "");
+  const cleanId = String(nationalId || "").replace(/\D/g, "");
+  const cleanConfirmation = String(nationalIdConfirmation || "").replace(/\D/g, "");
   const hasAny = cleanId.length > 0 || cleanConfirmation.length > 0;
 
   if (rule === "optional") {
@@ -62,8 +101,13 @@ function validateNationalId(nationalId, nationalIdConfirmation, rule) {
   return cleanId;
 }
 
+/**
+ * @param {unknown} phone
+ * @param {string} fieldName
+ * @param {{ required: boolean }} options
+ */
 function validatePhone(phone, fieldName, { required }) {
-  const normalized = normalizeLibyanPhone(phone);
+  const normalized = normalizeLibyanPhone(String(phone || ""));
 
   if (!normalized && !required) {
     return "";
@@ -84,6 +128,10 @@ function validatePhone(phone, fieldName, { required }) {
   return normalized;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizeDateString(value, fieldName) {
   const raw = String(value || "").trim();
 
@@ -98,6 +146,9 @@ function normalizeDateString(value, fieldName) {
   return raw;
 }
 
+/**
+ * @param {string} dob
+ */
 function calculateAgeYearsFromDob(dob) {
   const parsed = new Date(`${dob}T00:00:00Z`);
 
@@ -121,6 +172,9 @@ function calculateAgeYearsFromDob(dob) {
   return age;
 }
 
+/**
+ * @returns {Promise<PatientRegistrationRules>}
+ */
 async function loadPatientRegistrationSettings() {
   const { rows } = await pool.query(
     `
@@ -133,7 +187,7 @@ async function loadPatientRegistrationSettings() {
   const settings = rows.reduce((accumulator, row) => {
     accumulator[row.setting_key] = row.setting_value?.value ?? "";
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, string>} */ ({}));
 
   return {
     nationalIdRule: settings.national_id_required || "required_with_confirmation",
@@ -142,6 +196,10 @@ async function loadPatientRegistrationSettings() {
   };
 }
 
+/**
+ * @param {PatientPayload} payload
+ * @param {PatientRegistrationRules} rules
+ */
 function validatePatientPayload(payload, rules) {
   const {
     nationalId,
@@ -212,6 +270,9 @@ function validatePatientPayload(payload, rules) {
   };
 }
 
+/**
+ * @param {number | string} patientId
+ */
 export async function getPatientById(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await pool.query(
@@ -231,6 +292,9 @@ export async function getPatientById(patientId) {
   return rows[0];
 }
 
+/**
+ * @param {number | string} patientId
+ */
 export async function getPatientNoShowSummary(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await pool.query(
@@ -250,6 +314,9 @@ export async function getPatientNoShowSummary(patientId) {
   };
 }
 
+/**
+ * @param {string} [searchTerm]
+ */
 export async function searchPatients(searchTerm = "") {
   const term = searchTerm.trim();
   const pattern = `%${term}%`;
@@ -273,6 +340,10 @@ export async function searchPatients(searchTerm = "") {
   return rows;
 }
 
+/**
+ * @param {PatientPayload} payload
+ * @param {number | string | null | undefined} createdByUserId
+ */
 export async function createPatient(payload, createdByUserId) {
   const rules = await loadPatientRegistrationSettings();
   const validated = validatePatientPayload(payload, rules);
@@ -338,7 +409,12 @@ export async function createPatient(payload, createdByUserId) {
 
     return rows[0];
   } catch (error) {
-    if (error.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code) === "23505"
+    ) {
       throw new HttpError(409, "A patient with that national ID or MRN already exists.");
     }
 
@@ -346,6 +422,11 @@ export async function createPatient(payload, createdByUserId) {
   }
 }
 
+/**
+ * @param {number | string} patientId
+ * @param {PatientPayload} payload
+ * @param {number | string | null | undefined} updatedByUserId
+ */
 export async function updatePatient(patientId, payload, updatedByUserId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const previousPatient = await getPatientById(cleanPatientId);
@@ -401,7 +482,12 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
 
     return rows[0];
   } catch (error) {
-    if (error.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code) === "23505"
+    ) {
       throw new HttpError(409, "Another patient already uses that national ID or MRN.");
     }
 
@@ -409,6 +495,10 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
   }
 }
 
+/**
+ * @param {MergePatientsPayload} payload
+ * @param {number | string | null | undefined} updatedByUserId
+ */
 export async function mergePatients(payload, updatedByUserId) {
   const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId");
   const sourcePatientId = normalizePositiveInteger(payload.sourcePatientId, "sourcePatientId");

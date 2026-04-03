@@ -1,3 +1,5 @@
+// @ts-check
+
 import bcrypt from "bcryptjs";
 import { env } from "../config/env.js";
 import { pool } from "./pool.js";

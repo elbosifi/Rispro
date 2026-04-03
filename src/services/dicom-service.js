@@ -1,3 +1,5 @@
+// @ts-check
+
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -13,6 +15,93 @@ const rootDir = path.resolve(__dirname, "..", "..");
 
 const ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting", "in-progress"]);
 const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
+
+/**
+ * @typedef DicomSettingRow
+ * @property {string} category
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef GatewaySettingsMap
+ * @property {Record<string, unknown>} [dicom_gateway]
+ * @property {Record<string, unknown>} [pacs_connection]
+ */
+
+/**
+ * @typedef DicomDeviceRow
+ * @property {number} id
+ * @property {number} modality_id
+ * @property {string} device_name
+ * @property {string} modality_ae_title
+ * @property {string} scheduled_station_ae_title
+ * @property {string} station_name
+ * @property {string} station_location
+ * @property {string | null} source_ip
+ */
+
+/**
+ * @typedef DicomDeviceListRow
+ * @property {number} id
+ * @property {number} modality_id
+ * @property {string} device_name
+ * @property {string} modality_ae_title
+ * @property {string} scheduled_station_ae_title
+ * @property {string | null} station_name
+ * @property {string | null} station_location
+ * @property {string | null} source_ip
+ * @property {boolean} mwl_enabled
+ * @property {boolean} mpps_enabled
+ * @property {boolean} is_active
+ * @property {string} modality_code
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ */
+
+/**
+ * @typedef WorklistAppointmentRow
+ * @property {number} id
+ * @property {number} patient_id
+ * @property {number} modality_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} status
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string} modality_code
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} estimated_date_of_birth
+ * @property {string | null} sex
+ */
+
+/**
+ * @typedef MppsAppointmentRow
+ * @property {number} id
+ * @property {string} status
+ * @property {string | null} completed_at
+ * @property {string | null} mpps_sop_instance_uid
+ */
+
+/**
+ * @typedef DicomMessageLogRow
+ * @property {number} id
+ * @property {string} processing_status
+ * @property {number | null} appointment_id
+ * @property {number | null} device_id
+ */
+
+/**
+ * @typedef DicomLogSummaryRow
+ * @property {number | string} processed_count
+ * @property {number | string} failed_count
+ * @property {number | string} total_count
+ */
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
@@ -225,14 +314,16 @@ async function loadSettingsMap(categories) {
     [categories]
   );
 
-  return rows.reduce((accumulator, row) => {
+  const settingRows = /** @type {DicomSettingRow[]} */ (rows);
+
+  return settingRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
       accumulator[row.category] = {};
     }
 
     accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
 }
 
 async function listDevicesForModality(client, modalityId) {
@@ -248,7 +339,7 @@ async function listDevicesForModality(client, modalityId) {
     [modalityId]
   );
 
-  return rows;
+  return /** @type {DicomDeviceRow[]} */ (rows);
 }
 
 async function getAppointmentWorklistContext(client, appointmentId) {
@@ -293,7 +384,7 @@ async function getAppointmentWorklistContext(client, appointmentId) {
     [cleanAppointmentId]
   );
 
-  return rows[0] || null;
+  return /** @type {WorklistAppointmentRow | null} */ (rows[0] || null);
 }
 
 async function removeMatchingFiles(directory, prefix) {
@@ -389,6 +480,11 @@ function buildWorklistManifest({ appointment, device }) {
   };
 }
 
+/**
+ * @param {WorklistAppointmentRow} appointment
+ * @param {DicomDeviceRow[]} devices
+ * @param {{ worklistSourceDir: string, worklistOutputDir: string }} gatewaySettings
+ */
 async function writeWorklistSourceFiles(appointment, devices, gatewaySettings) {
   const sourceDir = gatewaySettings.worklistSourceDir;
   const outputDir = gatewaySettings.worklistOutputDir;
@@ -419,6 +515,11 @@ async function writeWorklistSourceFiles(appointment, devices, gatewaySettings) {
   return { files: writtenFiles, removedOnly: false };
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number} appointmentId
+ * @param {DicomDeviceRow[]} devices
+ */
 async function updateAppointmentStationAeTitle(client, appointmentId, devices) {
   const firstDevice = devices[0] || null;
   await client.query(
@@ -473,11 +574,13 @@ async function findDicomDevice(client, { remoteAeTitle, performedStationAeTitle,
     [aeCandidates]
   );
 
+  const devices = /** @type {DicomDeviceRow[]} */ (rows);
+
   if (!sourceIp) {
-    return rows[0] || null;
+    return devices[0] || null;
   }
 
-  return rows.find((row) => !row.source_ip || row.source_ip === sourceIp) || null;
+  return devices.find((row) => !row.source_ip || row.source_ip === sourceIp) || null;
 }
 
 async function findAppointmentForMpps(client, { accessionNumber, mppsSopInstanceUid }) {
@@ -492,8 +595,9 @@ async function findAppointmentForMpps(client, { accessionNumber, mppsSopInstance
       [normalizeOptionalText(accessionNumber)]
     );
 
-    if (rows[0]) {
-      return rows[0];
+    const appointmentByAccession = /** @type {MppsAppointmentRow | undefined} */ (rows[0]);
+    if (appointmentByAccession) {
+      return appointmentByAccession;
     }
   }
 
@@ -508,7 +612,7 @@ async function findAppointmentForMpps(client, { accessionNumber, mppsSopInstance
       [normalizeOptionalText(mppsSopInstanceUid)]
     );
 
-    return rows[0] || null;
+    return /** @type {MppsAppointmentRow | null} */ (rows[0] || null);
   }
 
   return null;
@@ -521,7 +625,8 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
   const finishedAt = payload.finishedAt || nowIso;
 
   if (mppsStatus === "IN PROGRESS") {
-    const nextStatus = appointment.status === "completed" ? "completed" : "in-progress";
+    const currentStatus = String(appointment.status || "");
+    const nextStatus = currentStatus === "completed" ? "completed" : "in-progress";
     const { rows } = await client.query(
       `
         update appointments
@@ -547,13 +652,13 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
       [appointment.id]
     );
 
-    if (appointment.status !== nextStatus) {
+    if (currentStatus !== nextStatus) {
       await client.query(
         `
           insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
           values ($1, $2, $3, null, $4)
         `,
-        [appointment.id, appointment.status, nextStatus, "MPPS IN PROGRESS received from modality"]
+        [appointment.id, currentStatus, nextStatus, "MPPS IN PROGRESS received from modality"]
       );
     }
 
@@ -573,7 +678,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
       client
     );
 
-    return rows[0];
+    return /** @type {MppsAppointmentRow} */ (rows[0]);
   }
 
   const nextStatus = mppsStatus === "COMPLETED" ? "completed" : "discontinued";
@@ -611,13 +716,15 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
     [appointment.id]
   );
 
-  if (appointment.status !== nextStatus) {
+  const currentStatus = String(appointment.status || "");
+
+  if (currentStatus !== nextStatus) {
     await client.query(
       `
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, $3, null, $4)
       `,
-      [appointment.id, appointment.status, nextStatus, `MPPS ${mppsStatus} received from modality`]
+      [appointment.id, currentStatus, nextStatus, `MPPS ${mppsStatus} received from modality`]
     );
   }
 
@@ -637,7 +744,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
     client
   );
 
-  return rows[0];
+  return /** @type {MppsAppointmentRow} */ (rows[0]);
 }
 
 export async function getDicomGatewaySettings() {
@@ -701,7 +808,7 @@ export async function listDicomDevices({ includeInactive = false } = {}) {
     params
   );
 
-  return rows;
+  return /** @type {DicomDeviceListRow[]} */ (rows);
 }
 
 export async function createDicomDevice(payload, currentUserId) {
@@ -765,14 +872,15 @@ export async function createDicomDevice(payload, currentUserId) {
         currentUserId
       ]
     );
+    const createdDevice = /** @type {DicomDeviceRow} */ (rows[0]);
 
     await logAuditEntry(
       {
         entityType: "integration",
-        entityId: rows[0].id,
+        entityId: createdDevice.id,
         actionType: "create_dicom_device",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdDevice,
         changedByUserId: currentUserId
       },
       client
@@ -780,7 +888,7 @@ export async function createDicomDevice(payload, currentUserId) {
 
     await client.query("commit");
     scheduleWorklistRebuild();
-    return rows[0];
+    return createdDevice;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -815,7 +923,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
       [cleanDeviceId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {DicomDeviceRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing) {
       throw new HttpError(404, "DICOM device not found.");
@@ -855,6 +963,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
         currentUserId
       ]
     );
+    const updatedDevice = /** @type {DicomDeviceRow} */ (rows[0]);
 
     await logAuditEntry(
       {
@@ -862,7 +971,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
         entityId: cleanDeviceId,
         actionType: "update_dicom_device",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: updatedDevice,
         changedByUserId: currentUserId
       },
       client
@@ -870,7 +979,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
 
     await client.query("commit");
     scheduleWorklistRebuild();
-    return rows[0];
+    return updatedDevice;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -894,7 +1003,7 @@ export async function deleteDicomDevice(deviceId, currentUserId) {
       `,
       [cleanDeviceId]
     );
-    const existing = existingResult.rows[0];
+    const existing = /** @type {DicomDeviceRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing) {
       throw new HttpError(404, "DICOM device not found.");
@@ -1031,7 +1140,7 @@ export async function ingestMppsEvent(payload) {
       ]
     );
 
-    const logEntry = logRows[0];
+    const logEntry = /** @type {DicomMessageLogRow} */ (logRows[0]);
     const device = await findDicomDevice(client, {
       remoteAeTitle: payload.remoteAeTitle,
       performedStationAeTitle: payload.performedStationAeTitle,
@@ -1099,10 +1208,12 @@ export async function getDicomGatewayOverview() {
     )
   ]);
 
+  const summary = /** @type {DicomLogSummaryRow | undefined} */ (logSummary.rows[0]);
+
   return {
     settings,
     devices,
-    logSummary: logSummary.rows[0] || {
+    logSummary: summary || {
       processed_count: 0,
       failed_count: 0,
       total_count: 0

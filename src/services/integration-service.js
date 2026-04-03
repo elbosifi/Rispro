@@ -1,9 +1,46 @@
+// @ts-check
+
 import crypto from "crypto";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDicomGatewayOverview } from "./dicom-service.js";
 
+/**
+ * @typedef SettingMapRow
+ * @property {string} category
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef AppointmentSummaryRow
+ * @property {number} id
+ * @property {number} patient_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} arabic_full_name
+ * @property {string} english_full_name
+ */
+
+/**
+ * @typedef PrintPreparePayload
+ * @property {number | string} [appointmentId]
+ * @property {"slip" | "label" | string} [outputType]
+ */
+
+/**
+ * @typedef ScanPreparePayload
+ * @property {number | string} [appointmentId]
+ * @property {number | string} [patientId]
+ * @property {string} [documentType]
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -22,6 +59,9 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {string[]} categories
+ */
 async function loadSettingsMap(categories) {
   const { rows } = await pool.query(
     `
@@ -32,20 +72,28 @@ async function loadSettingsMap(categories) {
     [categories]
   );
 
-  return rows.reduce((accumulator, row) => {
+  const settingRows = /** @type {SettingMapRow[]} */ (rows);
+
+  return settingRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
       accumulator[row.category] = {};
     }
 
     accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
 }
 
+/**
+ * @param {unknown} value
+ */
 function parseEnabled(value) {
   return String(value || "").trim() === "enabled";
 }
 
+/**
+ * @param {unknown} value
+ */
 function parseCsvList(value) {
   return String(value || "")
     .split(",")
@@ -53,6 +101,9 @@ function parseCsvList(value) {
     .filter(Boolean);
 }
 
+/**
+ * @param {number | string} appointmentId
+ */
 async function getAppointmentSummary(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const { rows } = await pool.query(
@@ -72,11 +123,13 @@ async function getAppointmentSummary(appointmentId) {
     [cleanAppointmentId]
   );
 
-  if (!rows[0]) {
+  const appointment = /** @type {AppointmentSummaryRow | undefined} */ (rows[0]);
+
+  if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return rows[0];
+  return appointment;
 }
 
 export async function getIntegrationStatus() {
@@ -124,6 +177,10 @@ export async function getIntegrationStatus() {
   };
 }
 
+/**
+ * @param {PrintPreparePayload} payload
+ * @param {number | string | null | undefined} currentUserId
+ */
 export async function preparePrintJob(payload, currentUserId) {
   const appointment = await getAppointmentSummary(payload.appointmentId);
   const outputType = String(payload.outputType || "").trim();
@@ -164,6 +221,10 @@ export async function preparePrintJob(payload, currentUserId) {
   return preparation;
 }
 
+/**
+ * @param {ScanPreparePayload} payload
+ * @param {number | string | null | undefined} currentUserId
+ */
 export async function prepareScanSession(payload, currentUserId) {
   const documentType = String(payload.documentType || "referral_request").trim() || "referral_request";
   const appointment = payload.appointmentId ? await getAppointmentSummary(payload.appointmentId) : null;

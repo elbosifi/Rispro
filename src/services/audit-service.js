@@ -1,6 +1,34 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 
+/** @typedef {import("../types/domain.js").AuditEvent} DomainAuditEvent */
+/** @typedef {import("../types/db.js").DbExecutor} DbExecutor */
+
+/**
+ * @typedef AuditEntryInput
+ * @property {string} entityType
+ * @property {number | string | null} [entityId]
+ * @property {string} actionType
+ * @property {unknown} [oldValues]
+ * @property {unknown} [newValues]
+ * @property {number | string | null} [changedByUserId]
+ */
+
+/**
+ * @typedef AuditFilters
+ * @property {number | string} [limit]
+ * @property {string} [entityType]
+ * @property {string} [actionType]
+ * @property {number | string} [changedByUserId]
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ */
+
+/**
+ * @param {DbExecutor} [executor]
+ */
 async function isAuditEnabled(executor = pool) {
   const { rows } = await executor.query(
     `
@@ -12,10 +40,15 @@ async function isAuditEnabled(executor = pool) {
     `
   );
 
-  const value = rows[0]?.setting_value?.value;
+  const firstRow = /** @type {{ setting_value?: { value?: unknown } } | undefined} */ (rows[0]);
+  const value = firstRow?.setting_value?.value;
   return value !== "disabled";
 }
 
+/**
+ * @param {AuditEntryInput & Partial<DomainAuditEvent>} entry
+ * @param {DbExecutor} [executor]
+ */
 export async function logAuditEntry(
   {
     entityType,
@@ -57,6 +90,11 @@ export async function logAuditEntry(
   return rows[0];
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean, max?: number }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = false, max = 5000 } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -75,11 +113,18 @@ function normalizePositiveInteger(value, fieldName, { required = false, max = 50
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeStringFilter(value) {
   const clean = String(value || "").trim();
   return clean || null;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizeDateFilter(value, fieldName) {
   const clean = String(value || "").trim();
 
@@ -94,6 +139,10 @@ function normalizeDateFilter(value, fieldName) {
   return clean;
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ * @param {{ includeLimit?: boolean }} [options]
+ */
 function buildAuditFilterQuery(filters = {}, { includeLimit = true } = {}) {
   const cleanLimit = includeLimit ? Math.min(Math.max(Number(filters.limit) || 100, 1), 5000) : null;
   const entityType = normalizeStringFilter(filters.entityType);
@@ -145,6 +194,9 @@ function buildAuditFilterQuery(filters = {}, { includeLimit = true } = {}) {
   return { params, whereClause, limitClause };
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ */
 export async function listAuditEntries(filters = {}) {
   const { params, whereClause, limitClause } = buildAuditFilterQuery(filters, { includeLimit: true });
 
@@ -208,11 +260,17 @@ export async function listAuditFilterOptions() {
   };
 }
 
+/**
+ * @param {unknown} value
+ */
 function escapeCsvValue(value) {
   const clean = String(value ?? "");
   return `"${clean.replaceAll('"', '""')}"`;
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ */
 export async function exportAuditEntriesCsv(filters = {}) {
   const rows = await listAuditEntries({ ...filters, limit: filters.limit || 2000 });
   const header = [

@@ -1,3 +1,5 @@
+// @ts-check
+
 import express from "express";
 import { HttpError } from "../utils/http-error.js";
 import { requireAuth } from "../middleware/auth.js";
@@ -8,6 +10,15 @@ import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from 
 
 export const integrationsRouter = express.Router();
 
+/**
+ * @typedef {object} IntegrationsRequest
+ * @property {Record<string, unknown>} [headers]
+ * @property {string} [ip]
+ * @property {{ remoteAddress?: string }} [socket]
+ * @property {Record<string, unknown>} [body]
+ * @property {{ sub: number | string, role: string }} [user]
+ */
+
 function isLoopbackAddress(value) {
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(value || "").trim());
 }
@@ -15,15 +26,16 @@ function isLoopbackAddress(value) {
 integrationsRouter.post(
   "/dicom/mpps-event",
   asyncRoute(async (req, res) => {
+    const request = /** @type {IntegrationsRequest} */ (req);
     const settings = await getDicomGatewaySettings();
-    const headerSecret = String(req.headers["x-rispro-dicom-secret"] || "").trim();
-    const remoteAddress = req.ip || req.socket?.remoteAddress || "";
+    const headerSecret = String(request.headers?.["x-rispro-dicom-secret"] || "").trim();
+    const remoteAddress = request.ip || request.socket?.remoteAddress || "";
 
     if (headerSecret !== settings.callbackSecret && !isLoopbackAddress(remoteAddress)) {
       throw new HttpError(403, "DICOM callback authentication failed.");
     }
 
-    const result = await ingestMppsEvent(buildMppsEventPayload(req.body || {}));
+    const result = await ingestMppsEvent(buildMppsEventPayload(request.body || {}));
     res.status(result.ok ? 200 : 202).json(result);
   })
 );
@@ -41,7 +53,8 @@ integrationsRouter.get(
 integrationsRouter.post(
   "/print-prepare",
   asyncRoute(async (req, res) => {
-    const preparation = await preparePrintJob(req.body || {}, req.user.sub);
+    const request = /** @type {IntegrationsRequest} */ (req);
+    const preparation = await preparePrintJob(request.body || {}, request.user?.sub);
     res.json({ preparation });
   })
 );
@@ -49,7 +62,8 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/scan-prepare",
   asyncRoute(async (req, res) => {
-    const preparation = await prepareScanSession(req.body || {}, req.user.sub);
+    const request = /** @type {IntegrationsRequest} */ (req);
+    const preparation = await prepareScanSession(request.body || {}, request.user?.sub);
     res.json({ preparation });
   })
 );
@@ -57,9 +71,10 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-cfind",
   asyncRoute(async (req, res) => {
+    const request = /** @type {IntegrationsRequest} */ (req);
     const studies = await runPacsCFind({
-      patientNationalId: req.body?.patientNationalId,
-      currentUserId: req.user.sub
+      patientNationalId: request.body?.patientNationalId,
+      currentUserId: request.user?.sub
     });
     res.json({ studies });
   })
@@ -68,9 +83,10 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-search",
   asyncRoute(async (req, res) => {
+    const request = /** @type {IntegrationsRequest} */ (req);
     const studies = await searchPacsStudies({
-      criteria: req.body || {},
-      currentUserId: req.user.sub
+      criteria: request.body || {},
+      currentUserId: request.user?.sub
     });
     res.json({ studies });
   })
@@ -79,7 +95,8 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-test",
   asyncRoute(async (req, res) => {
-    await testPacsConnection({ currentUserId: req.user.sub, overrides: req.body || null });
+    const request = /** @type {IntegrationsRequest} */ (req);
+    await testPacsConnection({ currentUserId: request.user?.sub, overrides: request.body || null });
     res.json({ ok: true });
   })
 );

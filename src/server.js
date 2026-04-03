@@ -1,3 +1,5 @@
+// @ts-check
+
 import http from "http";
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
@@ -8,6 +10,9 @@ const app = createApp();
 const server = http.createServer(app);
 let isShuttingDown = false;
 
+/**
+ * @param {"SIGINT" | "SIGTERM"} signal
+ */
 async function shutdown(signal) {
   if (isShuttingDown) {
     return;

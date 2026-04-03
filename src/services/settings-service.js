@@ -1,6 +1,23 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+
+/**
+ * @typedef SettingsRow
+ * @property {number} id
+ * @property {string} category
+ * @property {string} setting_key
+ * @property {unknown} setting_value
+ * @property {string} updated_at
+ */
+
+/**
+ * @typedef SettingsEntryInput
+ * @property {string} key
+ * @property {unknown} [value]
+ */
 
 export async function listSettingsCatalog() {
   const { rows } = await pool.query(
@@ -10,19 +27,23 @@ export async function listSettingsCatalog() {
       order by category asc, setting_key asc
     `
   );
+  const settingsRows = /** @type {SettingsRow[]} */ (rows);
 
-  const grouped = rows.reduce((accumulator, row) => {
+  const grouped = settingsRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
       accumulator[row.category] = [];
     }
 
     accumulator[row.category].push(row);
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, SettingsRow[]>} */ ({}));
 
   return grouped;
 }
 
+/**
+ * @param {string} category
+ */
 export async function getSettingsByCategory(category) {
   const { rows } = await pool.query(
     `
@@ -34,9 +55,14 @@ export async function getSettingsByCategory(category) {
     [category]
   );
 
-  return rows;
+  return /** @type {SettingsRow[]} */ (rows);
 }
 
+/**
+ * @param {string} category
+ * @param {SettingsEntryInput[]} entries
+ * @param {number | string} updatedByUserId
+ */
 export async function upsertSettings(category, entries, updatedByUserId) {
   if (!Array.isArray(entries) || entries.length === 0) {
     throw new HttpError(400, "entries must be a non-empty array.");
@@ -79,20 +105,21 @@ export async function upsertSettings(category, entries, updatedByUserId) {
         `,
         [category, entry.key, JSON.stringify(entry.value ?? {}), updatedByUserId]
       );
+      const savedRow = /** @type {SettingsRow} */ (rows[0]);
 
       await logAuditEntry(
         {
           entityType: "system_setting",
-          entityId: rows[0].id,
+          entityId: savedRow.id,
           actionType: "upsert",
           oldValues: previousSetting,
-          newValues: rows[0],
+          newValues: savedRow,
           changedByUserId: updatedByUserId
         },
         client
       );
 
-      results.push(rows[0]);
+      results.push(savedRow);
     }
 
     await client.query("commit");

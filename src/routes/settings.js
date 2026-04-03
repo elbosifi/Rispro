@@ -1,3 +1,5 @@
+// @ts-check
+
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
@@ -25,6 +27,20 @@ import {
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
 
+/**
+ * @typedef {object} SettingsRequest
+ * @property {{ includeInactive?: string }} [query]
+ * @property {{ sub: number | string, role: string }} [user]
+ * @property {Record<string, unknown>} [body]
+ * @property {{
+ *   category?: string,
+ *   entryId?: string,
+ *   modalityId?: string,
+ *   examTypeId?: string,
+ *   deviceId?: string
+ * }} [params]
+ */
+
 export const settingsRouter = express.Router();
 
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
@@ -40,7 +56,8 @@ settingsRouter.get(
 settingsRouter.get(
   "/name-dictionary",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = String(request.query?.includeInactive || "").trim() === "true";
     const entries = await listNameDictionary({ includeInactive });
     res.json({ entries });
   })
@@ -73,7 +90,8 @@ settingsRouter.delete(
 settingsRouter.get(
   "/modalities",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = String(request.query?.includeInactive || "").trim() === "true";
     const result = await listModalitiesForSettings({ includeInactive });
     res.json(result);
   })
@@ -138,7 +156,8 @@ settingsRouter.delete(
 settingsRouter.get(
   "/dicom-devices",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = String(request.query?.includeInactive || "").trim() === "true";
     const devices = await listDicomDevices({ includeInactive });
     res.json({ devices });
   })

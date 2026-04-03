@@ -1,3 +1,5 @@
+// @ts-check
+
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -30,11 +32,26 @@ const backupTables = [
   "audit_log"
 ];
 
+/**
+ * @typedef {Record<string, unknown>} BackupRow
+ */
+
+/**
+ * @typedef {BackupRow & { stored_path?: string, file_content_base64?: string }} BackupDocumentRow
+ */
+
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {string} tableName
+ */
 async function listRows(client, tableName) {
   const { rows } = await client.query(`select * from ${tableName} order by 1 asc`);
   return rows;
 }
 
+/**
+ * @param {BackupDocumentRow[]} documentRows
+ */
 async function readDocumentFiles(documentRows) {
   const enriched = [];
 
@@ -61,6 +78,16 @@ async function readDocumentFiles(documentRows) {
   return enriched;
 }
 
+/**
+ * @typedef BackupPayload
+ * @property {number} version
+ * @property {string} created_at
+ * @property {Record<string, BackupRow[]>} tables
+ */
+
+/**
+ * @param {number | string | null} currentUserId
+ */
 export async function buildBackupSnapshot(currentUserId) {
   const client = await pool.connect();
 
@@ -106,12 +133,22 @@ export async function buildBackupSnapshot(currentUserId) {
   }
 }
 
+/**
+ * @param {unknown} payload
+ * @returns {asserts payload is BackupPayload}
+ */
 function requireBackupShape(payload) {
-  if (!payload || typeof payload !== "object" || typeof payload.version !== "number" || !payload.tables) {
+  const payloadRecord =
+    payload && typeof payload === "object" ? /** @type {Record<string, unknown>} */ (payload) : null;
+
+  if (!payloadRecord || typeof payloadRecord.version !== "number" || !payloadRecord.tables) {
     throw new HttpError(400, "Invalid backup payload.");
   }
 }
 
+/**
+ * @param {BackupDocumentRow[]} documentRows
+ */
 async function restoreDocumentFiles(documentRows) {
   for (const row of documentRows) {
     if (!row.stored_path || !row.file_content_base64) {
@@ -124,6 +161,11 @@ async function restoreDocumentFiles(documentRows) {
   }
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {string} tableName
+ * @param {BackupRow[]} rows
+ */
 async function insertRows(client, tableName, rows) {
   if (!rows?.length) {
     return;
@@ -142,7 +184,7 @@ async function insertRows(client, tableName, rows) {
   const columns = Object.keys(sanitizedRows[0]);
 
   for (const row of sanitizedRows) {
-    const values = columns.map((column) => row[column]);
+    const values = /** @type {unknown[]} */ (columns.map((column) => row[column]));
     const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
     await client.query(
       `insert into ${tableName} (${columns.join(", ")}) values (${placeholders})`,
@@ -151,6 +193,10 @@ async function insertRows(client, tableName, rows) {
   }
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string | null} userId
+ */
 async function userExists(client, userId) {
   if (!userId) {
     return false;
@@ -160,6 +206,10 @@ async function userExists(client, userId) {
   return rowCount > 0;
 }
 
+/**
+ * @param {unknown} payload
+ * @param {number | string | null} currentUserId
+ */
 export async function restoreBackupSnapshot(payload, currentUserId) {
   requireBackupShape(payload);
   const client = await pool.connect();

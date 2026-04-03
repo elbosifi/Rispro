@@ -1,5 +1,11 @@
+// @ts-check
+
 const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
 
+/**
+ * @param {Date} [date]
+ * @returns {{ year?: string, month?: string, day?: string }}
+ */
 function getTripoliParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: TRIPOLI_TIME_ZONE,
@@ -17,11 +23,17 @@ function getTripoliParts(date = new Date()) {
   }, {});
 }
 
+/**
+ * @param {Date} [date]
+ */
 export function getTripoliToday(date = new Date()) {
   const parts = getTripoliParts(date);
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/**
+ * @param {Date | string | null | undefined} value
+ */
 export function normalizeDateValue(value) {
   if (value instanceof Date) {
     return getTripoliToday(value);
