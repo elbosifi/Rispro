@@ -1326,12 +1326,9 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
-  console.log("[updateAppointment] START appointmentId:", appointmentId);
-  console.log("[updateAppointment] payload keys:", Object.keys(payload || {}));
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
   }
-  console.log("[updateAppointment] currentUser:", currentUser.sub);
 
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
@@ -1341,7 +1338,6 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
-    console.log("[updateAppointment] existingAppointment", { id: existingAppointment.id, status: existingAppointment.status, modality_id: existingAppointment.modality_id, appointment_date: existingAppointment.appointment_date });
 
     if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");
@@ -1351,69 +1347,53 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
       payload.modalityId === undefined || payload.modalityId === null || payload.modalityId === ""
         ? Number(existingAppointment.modality_id)
         : normalizePositiveInteger(payload.modalityId, "modalityId");
-    console.log("[updateAppointment] modalityId:", modalityId);
 
     const examTypeId =
       payload.examTypeId === undefined || payload.examTypeId === null || payload.examTypeId === ""
         ? existingAppointment.exam_type_id
         : normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
-    console.log("[updateAppointment] examTypeId:", examTypeId);
 
     const reportingPriorityId =
       payload.reportingPriorityId === undefined || payload.reportingPriorityId === null || payload.reportingPriorityId === ""
         ? existingAppointment.reporting_priority_id
         : normalizePositiveInteger(payload.reportingPriorityId, "reportingPriorityId", { required: false });
-    console.log("[updateAppointment] reportingPriorityId:", reportingPriorityId);
 
     const appointmentDate =
       payload.appointmentDate === undefined || payload.appointmentDate === null || payload.appointmentDate === ""
         ? normalizeIsoDate(existingAppointment.appointment_date)
         : normalizeAppointmentDate(payload.appointmentDate);
-    console.log("[updateAppointment] appointmentDate:", appointmentDate);
 
     const notes =
       payload.notes === undefined || payload.notes === null || payload.notes === ""
         ? normalizeOptionalText(existingAppointment.notes)
         : normalizeOptionalText(payload.notes);
-    console.log("[updateAppointment] notes:", notes);
 
     const overbookingReason =
       payload.overbookingReason === undefined || payload.overbookingReason === null || payload.overbookingReason === ""
         ? normalizeOptionalText(existingAppointment.overbooking_reason)
         : normalizeOptionalText(payload.overbookingReason);
-    console.log("[updateAppointment] overbookingReason:", overbookingReason);
 
     const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
     if (existingAppointmentDate !== appointmentDate) {
-      console.log("[updateAppointment] date changed, checking day enabled");
       await requireAppointmentDayEnabled(client, appointmentDate);
     }
 
-    console.log("[updateAppointment] acquiring advisory locks");
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
-    console.log("[updateAppointment] fetching modality, examType, priority");
     const modality = await getModalityById(client, modalityId);
-    console.log("[updateAppointment] modality:", modality.code);
     const examType = await getExamTypeById(client, examTypeId, modalityId);
-    console.log("[updateAppointment] examType:", examType ? examType.name_en : null);
     const priority = await getPriorityById(client, reportingPriorityId);
-    console.log("[updateAppointment] priority:", priority ? priority.name_en : null);
     const slotStats = await nextModalitySlotNumber(client, modalityId, appointmentDate, cleanAppointmentId);
-    console.log("[updateAppointment] slotStats:", slotStats);
     const maxCasesPerModality = await getMaxCasesPerModality(client);
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
-    console.log("[updateAppointment] capacity:", capacity);
 
     const existingModalityId = Number(existingAppointment.modality_id);
     const modalityOrDateChanged = existingModalityId !== modalityId || existingAppointmentDate !== appointmentDate;
-    console.log("[updateAppointment] modalityOrDateChanged:", modalityOrDateChanged);
 
     // Only check overbooking when date or modality changes (treat as new appointment)
     // Editing fields on the same date/modality does not require supervisor approval
     const isOverbooked = modalityOrDateChanged && slotStats.bookedCount >= capacity;
-    console.log("[updateAppointment] isOverbooked:", isOverbooked);
 
     // Handle overbooking approval
     let approvingSupervisor = null;
@@ -1478,6 +1458,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
           is_overbooked = $9,
           overbooking_reason = nullif($10, ''),
           approved_by_name = case when $9 then $11 else null end,
+          -- Explicit ::bigint casts prevent PostgreSQL type mismatch in CASE/update expressions
           approved_by_user_id = case when $9 then $12::bigint else null end,
           notes = nullif($13, ''),
           updated_by_user_id = $14::bigint,
