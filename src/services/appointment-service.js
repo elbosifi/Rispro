@@ -1456,6 +1456,14 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 
     const accessionNumber = buildAccessionNumber(appointmentDate, sequence);
 
+    const approvedByUserId = isOverbooked && approvingSupervisor?.id != null
+      ? Number(approvingSupervisor.id)
+      : null;
+
+    const updatedByUserId = currentUser?.id != null
+      ? Number(currentUser.id)
+      : (currentUser?.sub != null ? Number(currentUser.sub) : null);
+
     const { rows } = await client.query(
       `
         update appointments
@@ -1489,9 +1497,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         isOverbooked,
         overbookingReason,
         isOverbooked ? approvingSupervisor.full_name : null,
-        isOverbooked ? approvingSupervisor.id : null,
+        approvedByUserId,
         notes,
-        currentUser.sub
+        updatedByUserId
       ]
     );
 
