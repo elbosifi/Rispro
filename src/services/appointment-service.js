@@ -1349,12 +1349,12 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         : normalizePositiveInteger(payload.modalityId, "modalityId");
 
     const examTypeId =
-      payload.examTypeId === undefined
+      payload.examTypeId === undefined || payload.examTypeId === null || payload.examTypeId === ""
         ? existingAppointment.exam_type_id
         : normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
 
     const reportingPriorityId =
-      payload.reportingPriorityId === undefined
+      payload.reportingPriorityId === undefined || payload.reportingPriorityId === null || payload.reportingPriorityId === ""
         ? existingAppointment.reporting_priority_id
         : normalizePositiveInteger(payload.reportingPriorityId, "reportingPriorityId", { required: false });
 
@@ -1364,12 +1364,12 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         : normalizeAppointmentDate(payload.appointmentDate);
 
     const notes =
-      payload.notes === undefined
+      payload.notes === undefined || payload.notes === null || payload.notes === ""
         ? normalizeOptionalText(existingAppointment.notes)
         : normalizeOptionalText(payload.notes);
 
     const overbookingReason =
-      payload.overbookingReason === undefined
+      payload.overbookingReason === undefined || payload.overbookingReason === null || payload.overbookingReason === ""
         ? normalizeOptionalText(existingAppointment.overbooking_reason)
         : normalizeOptionalText(payload.overbookingReason);
 
