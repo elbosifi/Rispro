@@ -1976,12 +1976,16 @@ function formatDisplayDate(value) {
     return "";
   }
 
-  return new Intl.DateTimeFormat(state.language === "ar" ? "ar-LY" : "en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric"
-  }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+
+  return `${day}/${month}/${year}`;
 }
 
 function formatDicomDate(value) {
@@ -2007,14 +2011,18 @@ function formatDisplayDateTime(value) {
     return "";
   }
 
-  return new Intl.DateTimeFormat(state.language === "ar" ? "ar-LY" : "en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+
+  return `${day}/${month}/${year} ${hours}:${minutes}`;
 }
 
 function normalizeDateText(value) {
