@@ -30,12 +30,19 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/",
   asyncRoute(async (req, res) => {
+    const status = req.query["status[]"]
+      ? Array.isArray(req.query["status[]"])
+        ? req.query["status[]"]
+        : [req.query["status[]"]]
+      : undefined;
+    
     const appointments = await listAppointmentsForPrint({
       date: req.query.date,
       dateFrom: req.query.dateFrom,
       dateTo: req.query.dateTo,
       modalityId: req.query.modalityId,
-      query: req.query.q
+      query: req.query.q,
+      status: status
     });
     res.json({ appointments });
   })

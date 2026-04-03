@@ -1081,6 +1081,92 @@ html[dir="rtl"] .brand-text {
   text-align: left;
 }
 
+/* Status Multiselect Dropdown */
+.status-multiselect {
+  position: relative;
+}
+
+.status-trigger {
+  width: 100%;
+  text-align: left;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  color: var(--text);
+  cursor: pointer;
+  font-size: inherit;
+  font-family: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-trigger:hover {
+  border-color: rgba(15, 118, 110, 0.34);
+}
+
+.status-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 6px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--surface-strong);
+  box-shadow: 0 8px 24px rgba(62, 36, 12, 0.15);
+  z-index: 100;
+}
+
+.status-dropdown-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.button-small {
+  padding: 6px 12px;
+  font-size: 0.875rem;
+  border-radius: 10px;
+}
+
+.status-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.status-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.status-option:hover {
+  background: var(--bg-soft);
+}
+
+.status-option input[type="checkbox"] {
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.status-option span {
+  flex: 1;
+  user-select: none;
+}
+
 .metric-tile {
   padding: 16px;
   border-radius: 18px;

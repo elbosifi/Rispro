@@ -386,6 +386,7 @@ export async function listAppointmentsForPrint(filters = {}) {
   let dateClause = "";
   let modalityFilterSql = "";
   let queryFilterSql = "";
+  let statusFilterSql = "";
 
   if (dateFrom || dateTo) {
     const start = dateFrom || dateTo;
@@ -421,6 +422,16 @@ export async function listAppointmentsForPrint(filters = {}) {
         or coalesce(patients.mrn, '') ilike $${patternIdx}
       )
     `;
+  }
+
+  if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
+    const validStatuses = filters.status.filter((s) =>
+      ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].includes(s)
+    );
+    if (validStatuses.length > 0) {
+      params.push(validStatuses);
+      statusFilterSql = ` and appointments.status = ANY($${params.length})`;
+    }
   }
 
   const orderClause = dateFrom || dateTo ? "appointments.appointment_date asc, appointments.daily_sequence asc" : "appointments.daily_sequence asc";
@@ -467,6 +478,7 @@ export async function listAppointmentsForPrint(filters = {}) {
       where ${dateClause}
       ${modalityFilterSql}
       ${queryFilterSql}
+      ${statusFilterSql}
       order by ${orderClause}
     `,
     params
