@@ -5100,7 +5100,9 @@ async function updateSelectedAppointment() {
     state.printResults = state.printResults.map((appointment) =>
       appointment.id === refreshed.appointment.id ? refreshed.appointment : appointment
     );
+    state.appointmentEditSaving = false;
     pushToast("success", t().print.appointmentUpdated);
+    render();
   } catch (error) {
     if (isSupervisorReauthNeededForOverbooking(error)) {
       // Open modal to get supervisor credentials
