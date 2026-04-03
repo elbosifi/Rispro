@@ -5085,20 +5085,16 @@ async function updateSelectedAppointment() {
   render();
 
   const payload = { ...state.appointmentEditForm };
-  console.log("updateSelectedAppointment payload:", JSON.stringify(payload));
-  console.log("selectedPrintAppointment.id:", state.selectedPrintAppointment.id);
 
   try {
     const result = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
       method: "PUT",
       body: JSON.stringify(payload)
     });
-    console.log("PUT response:", JSON.stringify(result));
 
     const refreshed = await api(`/api/appointments/${encodeURIComponent(state.selectedPrintAppointment.id)}`, {
       method: "GET"
     });
-    console.log("GET response:", JSON.stringify(refreshed));
 
     state.selectedPrintAppointment = refreshed.appointment;
     fillAppointmentEditForm(refreshed.appointment);
@@ -5109,9 +5105,8 @@ async function updateSelectedAppointment() {
     pushToast("success", t().print.appointmentUpdated);
     render();
   } catch (error) {
-    console.error("updateSelectedAppointment error:", error);
-    if (isSupervisorReauthNeededForOverbooking(error)) {
-      // Open modal to get supervisor credentials
+    const needsReauth = isSupervisorReauthNeededForOverbooking(error);
+    if (needsReauth) {
       const credentials = await openOverbookingApprovalModal(payload);
 
       if (credentials && credentials.supervisorUsername && credentials.supervisorPassword) {
@@ -8181,6 +8176,7 @@ function renderPrint() {
           ${renderPrintGroupedByModality()}
         </article>
       </section>
+      ${renderOverbookingApprovalModal()}
     </div>
   `;
 }
@@ -8547,6 +8543,7 @@ function renderRegistrations() {
           </article>
         </div>
       </section>
+      ${renderOverbookingApprovalModal()}
     </div>
   `;
 }
