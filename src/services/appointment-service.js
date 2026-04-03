@@ -274,6 +274,20 @@ function normalizeIsoDate(value) {
   return String(value || "").slice(0, 10);
 }
 
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
 function getTripoliWeekday(isoDate) {
   const date = new Date(`${isoDate}T00:00:00Z`);
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: TRIPOLI_TIME_ZONE, weekday: "long" }).format(date);
@@ -292,9 +306,9 @@ export async function getAppointmentDaySettings(client = pool) {
 
   const settingsRows = /** @type {SchedulingSettingRow[]} */ (rows);
   const values = settingsRows.reduce((accumulator, row) => {
-    accumulator[row.setting_key] = row.setting_value?.value;
+    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, unknown>} */ ({}));
+  }, /** @type {Record<string, string>} */ ({}));
 
   return {
     fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
@@ -1016,7 +1030,7 @@ export async function createModality(payload, currentUserId = null) {
       `,
       [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
-    const createdModality = /** @type {ModalityRow} */ (rows[0]);
+    const createdModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to create modality.");
 
     if (currentUserId) {
       await logAuditEntry(
@@ -1094,7 +1108,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
       `,
       [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
-    const updatedModality = /** @type {ModalityRow} */ (rows[0]);
+    const updatedModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to update modality.");
 
     await logAuditEntry(
       {
@@ -1152,7 +1166,7 @@ export async function deleteModality(modalityId, currentUserId) {
       `,
       [cleanModalityId]
     );
-    const deletedModality = /** @type {ModalityRow} */ (rows[0]);
+    const deletedModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to delete modality.");
 
     await logAuditEntry(
       {
@@ -1206,7 +1220,7 @@ export async function createExamType(payload, currentUserId = null) {
       `,
       [modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
-    const createdExamType = /** @type {ExamTypeRow} */ (rows[0]);
+    const createdExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to create exam type.");
 
     if (currentUserId) {
       await logAuditEntry(
@@ -1283,7 +1297,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       `,
       [cleanExamTypeId, modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
-    const updatedExamType = /** @type {ExamTypeRow} */ (rows[0]);
+    const updatedExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to update exam type.");
 
     await logAuditEntry(
       {
@@ -1341,7 +1355,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
       `,
       [cleanExamTypeId]
     );
-    const deletedExamType = /** @type {ExamTypeRow} */ (rows[0]);
+    const deletedExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to delete exam type.");
 
     await logAuditEntry(
       {
@@ -1523,7 +1537,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
         currentUser.sub
       ]
     );
-    const createdAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
+    const createdAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to create appointment."
+    );
 
     await client.query(
       `
@@ -1729,7 +1746,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         updatedByUserId
       ]
     );
-    const updatedAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
+    const updatedAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to update appointment."
+    );
 
     await client.query(
       `
@@ -1800,7 +1820,10 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
       `,
       [cleanAppointmentId, examType?.id || null, currentUser.sub]
     );
-    const protocolUpdatedAppointment = /** @type {AppointmentDbRow} */ (rows[0]);
+    const protocolUpdatedAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to update appointment protocol."
+    );
 
     await client.query(
       `

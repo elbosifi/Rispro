@@ -1,15 +1,17 @@
 // @ts-check
 
+/** @typedef {(error?: unknown) => void} AsyncNext */
+
 /**
  * @template TReq
  * @template TRes
- * @param {(req: TReq, res: TRes, next: (error?: unknown) => void) => unknown | Promise<unknown>} handler
+ * @param {(req: TReq, res: TRes, next: AsyncNext) => unknown | Promise<unknown>} handler
  */
 export function asyncRoute(handler) {
   /**
    * @param {TReq} req
    * @param {TRes} res
-   * @param {(error?: unknown) => void} next
+   * @param {AsyncNext} next
    */
   return function asyncRouteHandler(req, res, next) {
     Promise.resolve(handler(req, res, next)).catch(next);

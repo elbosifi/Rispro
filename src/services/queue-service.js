@@ -56,6 +56,44 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  */
 
 /**
+ * @typedef NextQueueNumberRow
+ * @property {number | string} [next_queue_number]
+ */
+
+/**
+ * @typedef QueueEntryStateRow
+ * @property {number} id
+ * @property {string} queue_date
+ * @property {number} queue_number
+ * @property {string} queue_status
+ * @property {string | null} scanned_at
+ */
+
+/**
+ * @typedef AppointmentForQueueRow
+ * @property {number} id
+ * @property {string} appointment_date
+ * @property {string} status
+ * @property {string} accession_number
+ * @property {boolean} is_walk_in
+ * @property {string | null} notes
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} phone_1
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ */
+
+/**
+ * @typedef NoShowAppointmentRow
+ * @property {number} id
+ * @property {string} status
+ * @property {string} appointment_date
+ */
+
+/**
  * @typedef {object} CurrentUser
  * @property {number | string} sub
  * @property {string} [role]
@@ -101,6 +139,20 @@ function getTripoliParts(date = new Date()) {
 function getTripoliMinutesSinceMidnight() {
   const parts = getTripoliParts();
   return Number(parts.hour) * 60 + Number(parts.minute);
+}
+
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
 }
 
 /**
@@ -171,7 +223,7 @@ async function getQueueEntries(queueDate) {
     [queueDate]
   );
 
-  return /** @type {NoShowCandidateRow[]} */ (rows);
+  return /** @type {QueueEntryRow[]} */ (rows);
 }
 
 /**
@@ -233,7 +285,7 @@ async function getNoShowCandidates(queueDate, reviewActive) {
     [queueDate]
   );
 
-  return /** @type {QueueEntryRow[]} */ (rows);
+  return /** @type {NoShowCandidateRow[]} */ (rows);
 }
 
 /**
@@ -266,12 +318,12 @@ async function getAppointmentForQueue(client, identifier) {
     throw new HttpError(404, "Appointment not found for this accession number.");
   }
 
-  return rows[0];
+  return requireRow(/** @type {AppointmentForQueueRow | undefined} */ (rows[0]), "Failed to load appointment.");
 }
 
 /**
  * @param {import("pg").PoolClient} client
- * @param {Record<string, unknown>} appointment
+ * @param {AppointmentForQueueRow} appointment
  * @param {number | string} currentUserId
  * @param {string} queueDate
  */
@@ -286,8 +338,9 @@ async function enqueueAppointmentRecord(client, appointment, currentUserId, queu
     [appointment.id]
   );
 
-  if (existingEntry.rows[0]) {
-    return existingEntry.rows[0];
+  const existingQueueEntry = /** @type {QueueEntryStateRow | undefined} */ (existingEntry.rows[0]);
+  if (existingQueueEntry) {
+    return existingQueueEntry;
   }
 
   await client.query("select pg_advisory_xact_lock(hashtext($1))", [`queue-number:${queueDate}`]);
@@ -301,7 +354,8 @@ async function enqueueAppointmentRecord(client, appointment, currentUserId, queu
     [queueDate]
   );
 
-  const nextQueueNumber = Number(nextQueueNumberResult.rows[0]?.next_queue_number || 1);
+  const nextQueueNumberRow = /** @type {NextQueueNumberRow | undefined} */ (nextQueueNumberResult.rows[0]);
+  const nextQueueNumber = Number(nextQueueNumberRow?.next_queue_number || 1);
   const insertResult = await client.query(
     `
       insert into queue_entries (
@@ -317,7 +371,7 @@ async function enqueueAppointmentRecord(client, appointment, currentUserId, queu
     [appointment.id, queueDate, nextQueueNumber, currentUserId]
   );
 
-  return insertResult.rows[0];
+  return requireRow(/** @type {QueueEntryStateRow | undefined} */ (insertResult.rows[0]), "Failed to create queue entry.");
 }
 
 /**
@@ -523,7 +577,7 @@ export async function confirmNoShow(appointmentId, reason, currentUser) {
       [cleanAppointmentId]
     );
 
-    const appointment = rows[0];
+    const appointment = /** @type {NoShowAppointmentRow | undefined} */ (rows[0]);
 
     if (!appointment) {
       throw new HttpError(404, "Appointment not found.");

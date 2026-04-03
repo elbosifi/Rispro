@@ -4,7 +4,7 @@ const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
 
 /**
  * @param {Date} [date]
- * @returns {{ year?: string, month?: string, day?: string }}
+ * @returns {{ year: string, month: string, day: string }}
  */
 function getTripoliParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -14,13 +14,19 @@ function getTripoliParts(date = new Date()) {
     day: "2-digit"
   });
 
-  return formatter.formatToParts(date).reduce((accumulator, part) => {
+  const parts = formatter.formatToParts(date).reduce((accumulator, part) => {
     if (part.type !== "literal") {
       accumulator[part.type] = part.value;
     }
 
     return accumulator;
-  }, {});
+  }, /** @type {{ year?: string, month?: string, day?: string }} */ ({}));
+
+  return {
+    year: parts.year || "1970",
+    month: parts.month || "01",
+    day: parts.day || "01"
+  };
 }
 
 /**

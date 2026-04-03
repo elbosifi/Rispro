@@ -230,7 +230,11 @@ export async function uploadDocument(payload, currentUserId) {
     `,
     [patientId, appointmentId, documentType, originalFilename, relativeStoredPath, mimeType, fileBuffer.length, currentUserId]
   );
-  const savedDocument = /** @type {DocumentRow} */ (rows[0]);
+  const savedDocument = /** @type {DocumentRow | undefined} */ (rows[0]);
+
+  if (!savedDocument) {
+    throw new HttpError(500, "Failed to save document.");
+  }
 
   await logAuditEntry({
     entityType: "document",

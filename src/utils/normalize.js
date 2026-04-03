@@ -10,10 +10,10 @@ const arabicVariants = [
 ];
 
 /**
- * @param {string | null | undefined} value
+ * @param {unknown} value
  */
 export function normalizeArabicName(value) {
-  let result = (value || "").trim().replace(/\s+/g, " ");
+  let result = String(value || "").trim().replace(/\s+/g, " ");
 
   for (const [pattern, replacement] of arabicVariants) {
     result = result.replace(pattern, replacement);
@@ -23,10 +23,10 @@ export function normalizeArabicName(value) {
 }
 
 /**
- * @param {string | null | undefined} value
+ * @param {unknown} value
  */
 export function normalizeLibyanPhone(value) {
-  return (value || "").replace(/\D/g, "");
+  return String(value || "").replace(/\D/g, "");
 }
 
 /**

@@ -20,7 +20,7 @@ async function run() {
     [env.seedSupervisorUsername, env.seedSupervisorFullName, passwordHash]
   );
 
-  console.log(rowCount ? "Seeded supervisor account." : "Supervisor account already exists.");
+  console.log(Number(rowCount || 0) > 0 ? "Seeded supervisor account." : "Supervisor account already exists.");
   await pool.end();
 }
 

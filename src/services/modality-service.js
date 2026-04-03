@@ -75,6 +75,20 @@ function normalizeDate(value) {
 }
 
 /**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
  * @param {{ scope?: string, modalityId?: number | string, date?: string }} [filters]
  */
 export async function listModalityWorklist(filters = {}) {
@@ -140,7 +154,7 @@ export async function listModalityWorklist(filters = {}) {
     params
   );
 
-  return /** @type {ModalityWorklistRow[]} */ (rows);
+    return /** @type {ModalityWorklistRow[]} */ (rows);
 }
 
 /**
@@ -168,12 +182,13 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
     if (!appointment) {
       throw new HttpError(404, "Appointment not found.");
     }
+    const currentAppointment = requireRow(appointment, "Failed to load appointment state.");
 
-    if (appointment.status === "completed") {
+    if (currentAppointment.status === "completed") {
       throw new HttpError(409, "This appointment is already completed.");
     }
 
-    if (!["waiting", "arrived", "in-progress"].includes(appointment.status)) {
+    if (!["waiting", "arrived", "in-progress"].includes(currentAppointment.status)) {
       throw new HttpError(409, "Only arrived, waiting, or in-progress appointments can be completed.");
     }
 
@@ -205,7 +220,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, 'completed', $3, 'Marked completed by modality staff')
       `,
-      [cleanAppointmentId, appointment.status, currentUserId]
+      [cleanAppointmentId, currentAppointment.status, currentUserId]
     );
 
     await logAuditEntry(
@@ -213,7 +228,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         entityType: "appointment",
         entityId: cleanAppointmentId,
         actionType: "complete",
-        oldValues: appointment,
+        oldValues: currentAppointment,
         newValues: { status: "completed" },
         changedByUserId: currentUserId
       },

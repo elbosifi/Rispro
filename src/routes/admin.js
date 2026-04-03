@@ -8,7 +8,7 @@ import { buildBackupSnapshot, restoreBackupSnapshot } from "../services/admin-se
 /**
  * @typedef {object} AdminRequest
  * @property {{ sub: number | string, role: string }} user
- * @property {unknown} body
+ * @property {Record<string, unknown>} [body]
  */
 
 export const adminRouter = express.Router();
@@ -29,7 +29,8 @@ adminRouter.post(
   "/restore",
   asyncRoute(async (req, res) => {
     const request = /** @type {AdminRequest} */ (req);
-    const result = await restoreBackupSnapshot(request.body, request.user.sub);
+    const payload = request.body || {};
+    const result = await restoreBackupSnapshot(payload, request.user.sub);
     res.json(result);
   })
 );

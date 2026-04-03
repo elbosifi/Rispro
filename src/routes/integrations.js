@@ -23,6 +23,46 @@ function isLoopbackAddress(value) {
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(value || "").trim());
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function asOptionalString(value) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+
+  return String(value);
+}
+
+/**
+ * @param {unknown} value
+ * @returns {number | string | undefined}
+ */
+function asOptionalId(value) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+
+  if (typeof value === "number") {
+    return value;
+  }
+
+  return String(value);
+}
+
+/**
+ * @param {IntegrationsRequest} request
+ * @returns {number | string}
+ */
+function requireUserSub(request) {
+  if (!request.user?.sub) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
+  return request.user.sub;
+}
+
 integrationsRouter.post(
   "/dicom/mpps-event",
   asyncRoute(async (req, res) => {
@@ -54,7 +94,14 @@ integrationsRouter.post(
   "/print-prepare",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsRequest} */ (req);
-    const preparation = await preparePrintJob(request.body || {}, request.user?.sub);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const preparation = await preparePrintJob(
+      {
+        appointmentId: asOptionalId(body.appointmentId),
+        outputType: asOptionalString(body.outputType)
+      },
+      requireUserSub(request)
+    );
     res.json({ preparation });
   })
 );
@@ -63,7 +110,15 @@ integrationsRouter.post(
   "/scan-prepare",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsRequest} */ (req);
-    const preparation = await prepareScanSession(request.body || {}, request.user?.sub);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const preparation = await prepareScanSession(
+      {
+        appointmentId: asOptionalId(body.appointmentId),
+        patientId: asOptionalId(body.patientId),
+        documentType: asOptionalString(body.documentType)
+      },
+      requireUserSub(request)
+    );
     res.json({ preparation });
   })
 );
@@ -72,9 +127,10 @@ integrationsRouter.post(
   "/pacs-cfind",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsRequest} */ (req);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const studies = await runPacsCFind({
-      patientNationalId: request.body?.patientNationalId,
-      currentUserId: request.user?.sub
+      patientNationalId: asOptionalString(body.patientNationalId),
+      currentUserId: requireUserSub(request)
     });
     res.json({ studies });
   })
@@ -84,9 +140,10 @@ integrationsRouter.post(
   "/pacs-search",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsRequest} */ (req);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const studies = await searchPacsStudies({
-      criteria: request.body || {},
-      currentUserId: request.user?.sub
+      criteria: body,
+      currentUserId: requireUserSub(request)
     });
     res.json({ studies });
   })
@@ -96,7 +153,8 @@ integrationsRouter.post(
   "/pacs-test",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsRequest} */ (req);
-    await testPacsConnection({ currentUserId: request.user?.sub, overrides: request.body || null });
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    await testPacsConnection({ currentUserId: requireUserSub(request), overrides: body });
     res.json({ ok: true });
   })
 );

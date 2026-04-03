@@ -7,7 +7,7 @@ import { createUser, deleteUser, listUsers } from "../services/user-service.js";
 
 /**
  * @typedef {object} UsersRequest
- * @property {{ sub: number | string, role: string }} [user]
+ * @property {{ sub: number | string, role: string }} user
  * @property {Record<string, unknown>} [body]
  * @property {{ userId?: string }} [params]
  */
@@ -15,6 +15,39 @@ import { createUser, deleteUser, listUsers } from "../services/user-service.js";
 export const usersRouter = express.Router();
 
 usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function asString(value) {
+  return String(value || "");
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean | undefined}
+ */
+function asOptionalBoolean(value) {
+  if (value === null || value === undefined || value === "") {
+    return undefined;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (["true", "1", "yes", "enabled", "on"].includes(normalized)) {
+    return true;
+  }
+
+  if (["false", "0", "no", "disabled", "off"].includes(normalized)) {
+    return false;
+  }
+
+  return undefined;
+}
 
 usersRouter.get(
   "/",
@@ -28,7 +61,17 @@ usersRouter.post(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {UsersRequest} */ (req);
-    const user = await createUser(request.body || {}, request.user.sub);
+    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const user = await createUser(
+      {
+        username: asString(body.username),
+        fullName: asString(body.fullName),
+        password: asString(body.password),
+        role: asString(body.role),
+        isActive: asOptionalBoolean(body.isActive)
+      },
+      request.user.sub
+    );
     res.status(201).json({ user });
   })
 );
@@ -37,7 +80,7 @@ usersRouter.delete(
   "/:userId",
   asyncRoute(async (req, res) => {
     const request = /** @type {UsersRequest} */ (req);
-    const user = await deleteUser(request.params.userId, request.user.sub);
+    const user = await deleteUser(asString(request.params?.userId), request.user.sub);
     res.json({ user });
   })
 );

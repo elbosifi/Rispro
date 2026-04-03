@@ -14,11 +14,19 @@ import {
 } from "../services/auth-service.js";
 import { logAuditEntry } from "../services/audit-service.js";
 import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
+import { HttpError } from "../utils/http-error.js";
 
 /**
  * @typedef {object} AuthRequest
  * @property {Record<string, unknown>} [body]
  * @property {{ username?: string, sub?: number | string, role?: string }} [user]
+ */
+
+/**
+ * @typedef {object} AuthenticatedUser
+ * @property {number | string} sub
+ * @property {string} role
+ * @property {string} [username]
  */
 
 export const authRouter = express.Router();
@@ -27,6 +35,22 @@ const loginRateLimiter = createRateLimiter({
   maxRequests: 10,
   message: "Too many login attempts. Please wait a few minutes and try again."
 });
+
+/**
+ * @param {AuthRequest} request
+ * @returns {AuthenticatedUser}
+ */
+function requireCurrentUser(request) {
+  if (!request.user?.sub || !request.user?.role) {
+    throw new HttpError(401, "Authentication required.");
+  }
+
+  return {
+    sub: request.user.sub,
+    role: request.user.role,
+    username: request.user.username
+  };
+}
 
 authRouter.post(
   "/login",
@@ -69,9 +93,10 @@ authRouter.post("/logout", (_req, res) => {
 
 authRouter.get("/me", requireAuth, (req, res) => {
   const request = /** @type {AuthRequest} */ (req);
+  const currentUser = requireCurrentUser(request);
   res.json({
     user: {
-      ...request.user,
+      ...currentUser,
       recentSupervisorReauth: hasRecentSupervisorReauth(req)
     }
   });
@@ -82,9 +107,10 @@ authRouter.post(
   requireAuth,
   asyncRoute(async (req, res) => {
     const request = /** @type {AuthRequest} */ (req);
+    const currentUser = requireCurrentUser(request);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const password = String(body.password || "");
-    const user = await authenticateUser(String(request.user?.username || ""), password);
+    const user = await authenticateUser(String(currentUser.username || ""), password);
     const reauthToken = buildSupervisorReauthToken(user);
     writeSupervisorReauthCookie(res, reauthToken);
 

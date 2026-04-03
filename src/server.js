@@ -11,6 +11,13 @@ const server = http.createServer(app);
 let isShuttingDown = false;
 
 /**
+ * @param {unknown} error
+ */
+function logError(error) {
+  console.error(error);
+}
+
+/**
  * @param {"SIGINT" | "SIGTERM"} signal
  */
 async function shutdown(signal) {
@@ -25,11 +32,13 @@ async function shutdown(signal) {
     try {
       await pool.end();
     } catch (poolError) {
-      console.error("Failed to close PostgreSQL pool cleanly.", poolError);
+      console.error("Failed to close PostgreSQL pool cleanly.");
+      logError(poolError);
     }
 
     if (serverError) {
-      console.error("HTTP server shutdown failed.", serverError);
+      console.error("HTTP server shutdown failed.");
+      logError(serverError);
       process.exit(1);
     }
 
@@ -43,7 +52,8 @@ async function shutdown(signal) {
 }
 
 server.on("error", (error) => {
-  console.error("Failed to start HTTP server.", error);
+  console.error("Failed to start HTTP server.");
+  logError(error);
   process.exit(1);
 });
 
@@ -56,7 +66,8 @@ async function start() {
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
   } catch (error) {
-    console.error("DICOM gateway initialization failed. Continuing without blocking startup.", error);
+    console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
+    logError(error);
   }
 
   server.listen(env.port, () => {
@@ -65,12 +76,14 @@ async function start() {
 }
 
 start().catch(async (error) => {
-  console.error("RISpro failed to start.", error);
+  console.error("RISpro failed to start.");
+  logError(error);
 
   try {
     await pool.end();
   } catch (poolError) {
-    console.error("Failed to close PostgreSQL pool after startup error.", poolError);
+    console.error("Failed to close PostgreSQL pool after startup error.");
+    logError(poolError);
   }
 
   process.exit(1);

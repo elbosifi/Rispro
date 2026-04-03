@@ -17,6 +17,13 @@ const DEFAULT_DIMSE_SOURCE_PORT = 11112;
  */
 
 /**
+ * @typedef {object} SystemSettingRow
+ * @property {string} category
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
  * @param {unknown} value
  */
 function parseEnabled(value) {
@@ -62,14 +69,15 @@ async function loadSettingsMap(categories) {
     [categories]
   );
 
-  return rows.reduce((accumulator, row) => {
+  const settingsRows = /** @type {SystemSettingRow[]} */ (rows);
+  return settingsRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
       accumulator[row.category] = {};
     }
 
-    accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
+    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
+  }, /** @type {Record<string, Record<string, string>>} */ ({}));
 }
 
 /**

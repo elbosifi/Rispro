@@ -8,6 +8,11 @@ import { pool } from "./pool.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+/**
+ * @typedef {object} SchemaMigrationRow
+ * @property {string} filename
+ */
+
 async function run() {
   const migrationsDir = path.join(__dirname, "migrations");
   const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();
@@ -30,7 +35,8 @@ async function run() {
       [file]
     );
 
-    if (existingMigration.rowCount) {
+    const existingRows = /** @type {SchemaMigrationRow[]} */ (existingMigration.rows);
+    if (existingRows.length > 0) {
       console.log(`Skipped migration: ${file}`);
       continue;
     }

@@ -9,6 +9,8 @@ import { HttpError } from "../utils/http-error.js";
  * @property {number | string} sub
  * @property {string} role
  * @property {string} [purpose]
+ * @property {string} [username]
+ * @property {string} [fullName]
  */
 
 /**
@@ -48,7 +50,21 @@ export function requireAuth(req, _res, next) {
       throw new HttpError(401, "Authentication required.");
     }
 
-    req.user = /** @type {AuthUser} */ (jwt.verify(token, env.jwtSecret));
+    const decoded = jwt.verify(token, env.jwtSecret);
+    const payload =
+      decoded && typeof decoded === "object" ? /** @type {Record<string, unknown>} */ (decoded) : null;
+
+    if (!payload || !payload.sub || !payload.role) {
+      throw new HttpError(401, "Invalid session.");
+    }
+
+    req.user = {
+      sub: /** @type {number | string} */ (payload.sub),
+      role: String(payload.role),
+      purpose: payload.purpose ? String(payload.purpose) : undefined,
+      username: payload.username ? String(payload.username) : undefined,
+      fullName: payload.fullName ? String(payload.fullName) : undefined
+    };
     next();
   } catch (error) {
     const isJwtError =

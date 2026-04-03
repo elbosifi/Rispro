@@ -60,6 +60,20 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
 }
 
 /**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
  * @param {string[]} categories
  */
 async function loadSettingsMap(categories) {
@@ -79,9 +93,9 @@ async function loadSettingsMap(categories) {
       accumulator[row.category] = {};
     }
 
-    accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
+    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
+  }, /** @type {Record<string, Record<string, string>>} */ ({}));
 }
 
 /**
@@ -129,7 +143,7 @@ async function getAppointmentSummary(appointmentId) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return appointment;
+  return requireRow(appointment, "Failed to load appointment summary.");
 }
 
 export async function getIntegrationStatus() {

@@ -64,7 +64,11 @@ export async function createUser({ username, fullName, password, role, isActive 
       [username, fullName, passwordHash, role, isActive]
     );
 
-    const createdUser = /** @type {UserRow} */ (rows[0]);
+    const createdUser = /** @type {UserRow | undefined} */ (rows[0]);
+
+    if (!createdUser) {
+      throw new HttpError(500, "Failed to create user.");
+    }
 
     await logAuditEntry(
       {

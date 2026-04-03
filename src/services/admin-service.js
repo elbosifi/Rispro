@@ -141,8 +141,28 @@ function requireBackupShape(payload) {
   const payloadRecord =
     payload && typeof payload === "object" ? /** @type {Record<string, unknown>} */ (payload) : null;
 
-  if (!payloadRecord || typeof payloadRecord.version !== "number" || !payloadRecord.tables) {
+  const tables = payloadRecord?.tables;
+  if (
+    !payloadRecord ||
+    typeof payloadRecord.version !== "number" ||
+    !tables ||
+    typeof tables !== "object" ||
+    Array.isArray(tables)
+  ) {
     throw new HttpError(400, "Invalid backup payload.");
+  }
+
+  const tableRecord = /** @type {Record<string, unknown>} */ (tables);
+  for (const tableName of backupTables) {
+    const tableRows = tableRecord[tableName];
+
+    if (tableRows === undefined) {
+      continue;
+    }
+
+    if (!Array.isArray(tableRows)) {
+      throw new HttpError(400, `Invalid backup payload for table: ${tableName}`);
+    }
   }
 }
 
@@ -212,6 +232,7 @@ async function userExists(client, userId) {
  */
 export async function restoreBackupSnapshot(payload, currentUserId) {
   requireBackupShape(payload);
+  const backupPayload = /** @type {BackupPayload} */ (payload);
   const client = await pool.connect();
 
   try {
@@ -241,10 +262,10 @@ export async function restoreBackupSnapshot(payload, currentUserId) {
     );
 
     for (const tableName of backupTables) {
-      await insertRows(client, tableName, payload.tables[tableName] || []);
+      await insertRows(client, tableName, backupPayload.tables[tableName] || []);
     }
 
-    await restoreDocumentFiles(payload.tables.documents || []);
+    await restoreDocumentFiles(/** @type {BackupDocumentRow[]} */ (backupPayload.tables.documents || []));
 
     const restoreInitiator = (await userExists(client, currentUserId)) ? currentUserId : null;
 

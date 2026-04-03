@@ -19,6 +19,20 @@ import { HttpError } from "../utils/http-error.js";
  */
 
 /**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
  * @param {string} username
  * @param {string} password
  */
@@ -35,14 +49,15 @@ export async function authenticateUser(username, password) {
   if (!user || !user.is_active) {
     throw new HttpError(401, "Invalid username or password.");
   }
+  const authenticatedUser = requireRow(user, "Failed to load authenticated user.");
 
-  const isValid = await bcrypt.compare(password, user.password_hash);
+  const isValid = await bcrypt.compare(password, authenticatedUser.password_hash);
 
   if (!isValid) {
     throw new HttpError(401, "Invalid username or password.");
   }
 
-  return user;
+  return authenticatedUser;
 }
 
 /**

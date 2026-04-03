@@ -18,6 +18,21 @@ import {
  */
 
 /**
+ * @typedef {object} PatientRow
+ * @property {number} id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} phone_2
+ * @property {string | null} address
+ * @property {string | null} estimated_date_of_birth
+ */
+
+/**
  * @typedef {object} PatientPayload
  * @property {string} [nationalId]
  * @property {string} [nationalIdConfirmation]
@@ -36,6 +51,22 @@ import {
  * @property {number | string} [targetPatientId]
  * @property {number | string} [sourcePatientId]
  * @property {string} [confirmationText]
+ */
+
+/**
+ * @typedef {object} PatientSettingRow
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef {object} PatientNoShowSummaryRow
+ * @property {number | string | null} [no_show_count]
+ * @property {string | null} [last_no_show_date]
+ */
+
+/**
+ * @typedef {Record<string, unknown> & { id: number | string }} PersistedPatientRow
  */
 
 /**
@@ -184,8 +215,9 @@ async function loadPatientRegistrationSettings() {
     `
   );
 
-  const settings = rows.reduce((accumulator, row) => {
-    accumulator[row.setting_key] = row.setting_value?.value ?? "";
+  const settingRows = /** @type {PatientSettingRow[]} */ (rows);
+  const settings = settingRows.reduce((accumulator, row) => {
+    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
   }, /** @type {Record<string, string>} */ ({}));
 
@@ -285,11 +317,13 @@ export async function getPatientById(patientId) {
     [cleanPatientId]
   );
 
-  if (!rows[0]) {
+  const patient = /** @type {PatientRow | undefined} */ (rows[0]);
+
+  if (!patient) {
     throw new HttpError(404, "Patient not found.");
   }
 
-  return rows[0];
+  return patient;
 }
 
 /**
@@ -308,9 +342,11 @@ export async function getPatientNoShowSummary(patientId) {
     [cleanPatientId]
   );
 
+  const summary = /** @type {PatientNoShowSummaryRow | undefined} */ (rows[0]);
+
   return {
-    noShowCount: Number(rows[0]?.no_show_count || 0),
-    lastNoShowDate: rows[0]?.last_no_show_date || null
+    noShowCount: Number(summary?.no_show_count || 0),
+    lastNoShowDate: summary?.last_no_show_date || null
   };
 }
 
@@ -396,18 +432,24 @@ export async function createPatient(payload, createdByUserId) {
       ]
     );
 
+    const createdPatient = /** @type {PersistedPatientRow | undefined} */ (rows[0]);
+
+    if (!createdPatient) {
+      throw new HttpError(500, "Failed to create patient.");
+    }
+
     await logAuditEntry(
       {
         entityType: "patient",
-        entityId: rows[0].id,
+        entityId: createdPatient.id,
         actionType: "create",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdPatient,
         changedByUserId: createdByUserId
       }
     );
 
-    return rows[0];
+    return createdPatient;
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -469,18 +511,24 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
       ]
     );
 
+    const updatedPatient = /** @type {PersistedPatientRow | undefined} */ (rows[0]);
+
+    if (!updatedPatient) {
+      throw new HttpError(500, "Failed to update patient.");
+    }
+
     await logAuditEntry(
       {
         entityType: "patient",
-        entityId: rows[0].id,
+        entityId: updatedPatient.id,
         actionType: "update",
         oldValues: previousPatient,
-        newValues: rows[0],
+        newValues: updatedPatient,
         changedByUserId: updatedByUserId
       }
     );
 
-    return rows[0];
+    return updatedPatient;
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -563,7 +611,13 @@ export async function mergePatients(payload, updatedByUserId) {
     );
 
     await client.query("commit");
-    return targetPatient.rows[0];
+    const mergedPatient = /** @type {PatientRow | undefined} */ (targetPatient.rows[0]);
+
+    if (!mergedPatient) {
+      throw new HttpError(500, "Failed to load merged patient.");
+    }
+
+    return mergedPatient;
   } catch (error) {
     await client.query("rollback");
     throw error;

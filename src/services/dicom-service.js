@@ -25,8 +25,8 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 
 /**
  * @typedef GatewaySettingsMap
- * @property {Record<string, unknown>} [dicom_gateway]
- * @property {Record<string, unknown>} [pacs_connection]
+ * @property {Record<string, string>} [dicom_gateway]
+ * @property {Record<string, string>} [pacs_connection]
  */
 
 /**
@@ -304,6 +304,20 @@ function parseDicomTimestamp(dateValue, timeValue) {
   return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${normalizedTime}`;
 }
 
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
 async function loadSettingsMap(categories) {
   const { rows } = await pool.query(
     `
@@ -321,9 +335,9 @@ async function loadSettingsMap(categories) {
       accumulator[row.category] = {};
     }
 
-    accumulator[row.category][row.setting_key] = row.setting_value?.value ?? "";
+    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, unknown>>} */ ({}));
+  }, /** @type {Record<string, Record<string, string>>} */ ({}));
 }
 
 async function listDevicesForModality(client, modalityId) {
@@ -678,7 +692,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
       client
     );
 
-    return /** @type {MppsAppointmentRow} */ (rows[0]);
+    return requireRow(/** @type {MppsAppointmentRow | undefined} */ (rows[0]), "Failed to update appointment from MPPS.");
   }
 
   const nextStatus = mppsStatus === "COMPLETED" ? "completed" : "discontinued";
@@ -744,7 +758,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
     client
   );
 
-  return /** @type {MppsAppointmentRow} */ (rows[0]);
+  return requireRow(/** @type {MppsAppointmentRow | undefined} */ (rows[0]), "Failed to update appointment timing.");
 }
 
 export async function getDicomGatewaySettings() {
@@ -872,7 +886,7 @@ export async function createDicomDevice(payload, currentUserId) {
         currentUserId
       ]
     );
-    const createdDevice = /** @type {DicomDeviceRow} */ (rows[0]);
+    const createdDevice = requireRow(/** @type {DicomDeviceRow | undefined} */ (rows[0]), "Failed to create DICOM device.");
 
     await logAuditEntry(
       {
@@ -963,7 +977,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
         currentUserId
       ]
     );
-    const updatedDevice = /** @type {DicomDeviceRow} */ (rows[0]);
+    const updatedDevice = requireRow(/** @type {DicomDeviceRow | undefined} */ (rows[0]), "Failed to update DICOM device.");
 
     await logAuditEntry(
       {

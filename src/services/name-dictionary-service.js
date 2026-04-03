@@ -85,7 +85,11 @@ export async function upsertNameDictionary(payload, currentUserId) {
     [arabicText, englishText, isActive]
   );
 
-  const entry = /** @type {NameDictionaryRow} */ (rows[0]);
+  const entry = /** @type {NameDictionaryRow | undefined} */ (rows[0]);
+
+  if (!entry) {
+    throw new HttpError(500, "Failed to save dictionary entry.");
+  }
 
   await logAuditEntry({
     entityType: "name_dictionary",
@@ -141,7 +145,11 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
     [cleanEntryId, englishText, isActive]
   );
 
-  const updated = /** @type {NameDictionaryRow} */ (rows[0]);
+  const updated = /** @type {NameDictionaryRow | undefined} */ (rows[0]);
+
+  if (!updated) {
+    throw new HttpError(500, "Failed to update dictionary entry.");
+  }
 
   await logAuditEntry({
     entityType: "name_dictionary",

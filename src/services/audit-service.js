@@ -27,6 +27,37 @@ import { HttpError } from "../utils/http-error.js";
  */
 
 /**
+ * @typedef AuditLogRow
+ * @property {number} id
+ * @property {string} entity_type
+ * @property {number | string | null} entity_id
+ * @property {string} action_type
+ * @property {unknown} old_values
+ * @property {unknown} new_values
+ * @property {number | string | null} changed_by_user_id
+ * @property {string} created_at
+ * @property {string | null} [changed_by_name]
+ * @property {string | null} [changed_by_username]
+ */
+
+/**
+ * @typedef AuditEntityTypeRow
+ * @property {string} entity_type
+ */
+
+/**
+ * @typedef AuditActionTypeRow
+ * @property {string} action_type
+ */
+
+/**
+ * @typedef AuditUserOptionRow
+ * @property {number | string} id
+ * @property {string | null} full_name
+ * @property {string | null} username
+ */
+
+/**
  * @param {DbExecutor} [executor]
  */
 async function isAuditEnabled(executor = pool) {
@@ -41,8 +72,22 @@ async function isAuditEnabled(executor = pool) {
   );
 
   const firstRow = /** @type {{ setting_value?: { value?: unknown } } | undefined} */ (rows[0]);
-  const value = firstRow?.setting_value?.value;
+  const value = String(firstRow?.setting_value?.value ?? "");
   return value !== "disabled";
+}
+
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
 }
 
 /**
@@ -87,7 +132,7 @@ export async function logAuditEntry(
     ]
   );
 
-  return rows[0];
+  return requireRow(/** @type {AuditLogRow | undefined} */ (rows[0]), "Failed to write audit log entry.");
 }
 
 /**
@@ -222,7 +267,7 @@ export async function listAuditEntries(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {AuditLogRow[]} */ (rows);
 }
 
 export async function listAuditFilterOptions() {
@@ -253,10 +298,14 @@ export async function listAuditFilterOptions() {
     )
   ]);
 
+  const entityTypeRows = /** @type {AuditEntityTypeRow[]} */ (entityTypeResult.rows);
+  const actionTypeRows = /** @type {AuditActionTypeRow[]} */ (actionTypeResult.rows);
+  const userRows = /** @type {AuditUserOptionRow[]} */ (userResult.rows);
+
   return {
-    entityTypes: entityTypeResult.rows.map((row) => row.entity_type),
-    actionTypes: actionTypeResult.rows.map((row) => row.action_type),
-    users: userResult.rows
+    entityTypes: entityTypeRows.map((row) => row.entity_type),
+    actionTypes: actionTypeRows.map((row) => row.action_type),
+    users: userRows
   };
 }
 

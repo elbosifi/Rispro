@@ -90,7 +90,7 @@ export async function upsertSettings(category, entries, updatedByUserId) {
         [category, entry.key]
       );
 
-      const previousSetting = previousResult.rows[0] || null;
+      const previousSetting = /** @type {SettingsRow | null} */ (previousResult.rows[0] || null);
 
       const { rows } = await client.query(
         `
@@ -105,7 +105,11 @@ export async function upsertSettings(category, entries, updatedByUserId) {
         `,
         [category, entry.key, JSON.stringify(entry.value ?? {}), updatedByUserId]
       );
-      const savedRow = /** @type {SettingsRow} */ (rows[0]);
+      const savedRow = /** @type {SettingsRow | undefined} */ (rows[0]);
+
+      if (!savedRow) {
+        throw new HttpError(500, "Failed to save setting.");
+      }
 
       await logAuditEntry(
         {

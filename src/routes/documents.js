@@ -10,7 +10,7 @@ import { getDocumentAbsolutePath, getDocumentById, listDocuments, uploadDocument
  * @property {Record<string, unknown>} [query]
  * @property {Record<string, unknown>} [body]
  * @property {{ documentId?: string }} [params]
- * @property {{ sub: number | string, role: string }} [user]
+ * @property {{ sub: number | string, role: string }} user
  */
 
 export const documentsRouter = express.Router();
@@ -50,7 +50,7 @@ documentsRouter.get(
   "/:documentId/view",
   asyncRoute(async (req, res) => {
     const request = /** @type {DocumentsRequest} */ (req);
-    const document = await getDocumentById(request.params?.documentId);
+    const document = await getDocumentById(String(request.params?.documentId || ""));
     const absolutePath = getDocumentAbsolutePath(document);
     res.setHeader("Content-Type", document.mime_type || "application/octet-stream");
     res.setHeader(
@@ -65,7 +65,7 @@ documentsRouter.post(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {DocumentsRequest} */ (req);
-    const document = await uploadDocument(request.body || {}, request.user?.sub);
+    const document = await uploadDocument(request.body || {}, request.user.sub);
     res.status(201).json({ document });
   })
 );
