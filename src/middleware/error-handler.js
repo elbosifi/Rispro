@@ -7,6 +7,7 @@ import { HttpError } from "../utils/http-error.js";
  * @param {unknown} _req
  * @param {unknown} _res
  * @param {(error?: unknown) => void} next
+ * @returns {void}
  */
 export function notFoundHandler(_req, _res, next) {
   next(new HttpError(404, "Route not found."));
@@ -17,6 +18,7 @@ export function notFoundHandler(_req, _res, next) {
  * @param {unknown} _req
  * @param {{ status: (code: number) => { json: (payload: unknown) => void } }} res
  * @param {unknown} _next
+ * @returns {void}
  */
 export function errorHandler(error, _req, res, _next) {
   const errorRecord =

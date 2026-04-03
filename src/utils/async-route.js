@@ -6,6 +6,7 @@
  * @template TReq
  * @template TRes
  * @param {(req: TReq, res: TRes, next: AsyncNext) => unknown | Promise<unknown>} handler
+ * @returns {(req: TReq, res: TRes, next: AsyncNext) => void}
  */
 export function asyncRoute(handler) {
   /**

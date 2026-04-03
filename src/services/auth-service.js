@@ -35,6 +35,7 @@ function requireRow(row, message) {
 /**
  * @param {string} username
  * @param {string} password
+ * @returns {Promise<AuthUserRow>}
  */
 export async function authenticateUser(username, password) {
   const query = `
@@ -62,6 +63,7 @@ export async function authenticateUser(username, password) {
 
 /**
  * @param {AuthUserRow} user
+ * @returns {string}
  */
 export function buildSessionToken(user) {
   return jwt.sign(
@@ -78,6 +80,7 @@ export function buildSessionToken(user) {
 
 /**
  * @param {AuthUserRow} user
+ * @returns {string}
  */
 export function buildSupervisorReauthToken(user) {
   return jwt.sign(
@@ -115,6 +118,7 @@ function reauthCookieOptions() {
 /**
  * @param {{ cookie: (name: string, value: string, options: object) => void }} res
  * @param {string} token
+ * @returns {void}
  */
 export function writeSessionCookie(res, token) {
   res.cookie(env.cookieName, token, sessionCookieOptions());
@@ -123,6 +127,7 @@ export function writeSessionCookie(res, token) {
 /**
  * @param {{ cookie: (name: string, value: string, options: object) => void }} res
  * @param {string} token
+ * @returns {void}
  */
 export function writeSupervisorReauthCookie(res, token) {
   res.cookie(env.reauthCookieName, token, reauthCookieOptions());
@@ -130,6 +135,7 @@ export function writeSupervisorReauthCookie(res, token) {
 
 /**
  * @param {{ clearCookie: (name: string, options: object) => void }} res
+ * @returns {void}
  */
 export function clearSessionCookie(res) {
   res.clearCookie(env.cookieName, sessionCookieOptions());
@@ -137,6 +143,7 @@ export function clearSessionCookie(res) {
 
 /**
  * @param {{ clearCookie: (name: string, options: object) => void }} res
+ * @returns {void}
  */
 export function clearSupervisorReauthCookie(res) {
   res.clearCookie(env.reauthCookieName, reauthCookieOptions());

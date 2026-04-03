@@ -12,6 +12,7 @@ let isShuttingDown = false;
 
 /**
  * @param {unknown} error
+ * @returns {void}
  */
 function logError(error) {
   console.error(error);
@@ -19,6 +20,7 @@ function logError(error) {
 
 /**
  * @param {"SIGINT" | "SIGTERM"} signal
+ * @returns {Promise<void>}
  */
 async function shutdown(signal) {
   if (isShuttingDown) {
@@ -60,6 +62,7 @@ server.on("error", (error) => {
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
+/** @returns {Promise<void>} */
 async function start() {
   await pingDatabase();
   try {

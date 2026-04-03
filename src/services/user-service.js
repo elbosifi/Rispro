@@ -29,6 +29,7 @@ import { logAuditEntry } from "./audit-service.js";
  * @property {boolean} [isActive]
  */
 
+/** @returns {Promise<UserRow[]>} */
 export async function listUsers() {
   const { rows } = await pool.query(`
     select id, username, full_name, role, is_active, created_at, updated_at
@@ -42,6 +43,7 @@ export async function listUsers() {
 /**
  * @param {UserCreatePayload} payload
  * @param {number | string | null} [createdByUserId]
+ * @returns {Promise<UserRow>}
  */
 export async function createUser({ username, fullName, password, role, isActive = true }, createdByUserId = null) {
   if (!username || !fullName || !password || !role) {
@@ -99,6 +101,7 @@ export async function createUser({ username, fullName, password, role, isActive 
 /**
  * @param {number | string} userId
  * @param {number | string | null} [deletedByUserId]
+ * @returns {Promise<UserRow>}
  */
 export async function deleteUser(userId, deletedByUserId = null) {
   const cleanUserId = Number(userId);

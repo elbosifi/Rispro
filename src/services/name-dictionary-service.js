@@ -51,6 +51,7 @@ function normalizeActiveFlag(value) {
 
 /**
  * @param {{ includeInactive?: boolean }} [options]
+ * @returns {Promise<NameDictionaryRow[]>}
  */
 export async function listNameDictionary({ includeInactive = false } = {}) {
   const { rows } = await pool.query(
@@ -68,6 +69,7 @@ export async function listNameDictionary({ includeInactive = false } = {}) {
 /**
  * @param {NameDictionaryPayload | null | undefined} payload
  * @param {number | string} currentUserId
+ * @returns {Promise<NameDictionaryRow>}
  */
 export async function upsertNameDictionary(payload, currentUserId) {
   const arabicText = normalizeDictionaryText(payload?.arabicText, "arabicText");
@@ -107,6 +109,7 @@ export async function upsertNameDictionary(payload, currentUserId) {
  * @param {number | string} entryId
  * @param {NameDictionaryPayload | null | undefined} payload
  * @param {number | string} currentUserId
+ * @returns {Promise<NameDictionaryRow>}
  */
 export async function updateNameDictionaryEntry(entryId, payload, currentUserId) {
   const cleanEntryId = Number(entryId);
@@ -166,6 +169,7 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
 /**
  * @param {number | string} entryId
  * @param {number | string} currentUserId
+ * @returns {Promise<NameDictionaryRow>}
  */
 export async function deleteNameDictionaryEntry(entryId, currentUserId) {
   const cleanEntryId = Number(entryId);
@@ -204,6 +208,7 @@ export async function deleteNameDictionaryEntry(entryId, currentUserId) {
 /**
  * @param {Array<NameDictionaryPayload | null | undefined>} entries
  * @param {number | string} currentUserId
+ * @returns {Promise<NameDictionaryRow[]>}
  */
 export async function importNameDictionaryEntries(entries, currentUserId) {
   if (!Array.isArray(entries) || !entries.length) {

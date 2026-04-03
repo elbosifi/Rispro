@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename);
  * @property {string} filename
  */
 
+/** @returns {Promise<void>} */
 async function run() {
   const migrationsDir = path.join(__dirname, "migrations");
   const files = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql")).sort();

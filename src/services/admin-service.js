@@ -46,7 +46,7 @@ const backupTables = [
  */
 async function listRows(client, tableName) {
   const { rows } = await client.query(`select * from ${tableName} order by 1 asc`);
-  return rows;
+  return /** @type {BackupRow[]} */ (rows);
 }
 
 /**
@@ -87,6 +87,7 @@ async function readDocumentFiles(documentRows) {
 
 /**
  * @param {number | string | null} currentUserId
+ * @returns {Promise<{ backupName: string, backup: BackupPayload }>}
  */
 export async function buildBackupSnapshot(currentUserId) {
   const client = await pool.connect();
@@ -223,12 +224,13 @@ async function userExists(client, userId) {
   }
 
   const { rowCount } = await client.query("select 1 from users where id = $1 limit 1", [userId]);
-  return rowCount > 0;
+  return Number(rowCount || 0) > 0;
 }
 
 /**
  * @param {unknown} payload
  * @param {number | string | null} currentUserId
+ * @returns {Promise<{ ok: true }>}
  */
 export async function restoreBackupSnapshot(payload, currentUserId) {
   requireBackupShape(payload);

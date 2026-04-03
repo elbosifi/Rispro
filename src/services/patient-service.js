@@ -304,6 +304,7 @@ function validatePatientPayload(payload, rules) {
 
 /**
  * @param {number | string} patientId
+ * @returns {Promise<PatientRow>}
  */
 export async function getPatientById(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
@@ -328,6 +329,7 @@ export async function getPatientById(patientId) {
 
 /**
  * @param {number | string} patientId
+ * @returns {Promise<{ noShowCount: number, lastNoShowDate: string | null }>}
  */
 export async function getPatientNoShowSummary(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
@@ -352,6 +354,7 @@ export async function getPatientNoShowSummary(patientId) {
 
 /**
  * @param {string} [searchTerm]
+ * @returns {Promise<PatientRow[]>}
  */
 export async function searchPatients(searchTerm = "") {
   const term = searchTerm.trim();
@@ -373,12 +376,13 @@ export async function searchPatients(searchTerm = "") {
     limit 25
   `;
   const { rows } = await pool.query(query, [term, pattern, normalizedPattern]);
-  return rows;
+  return /** @type {PatientRow[]} */ (rows);
 }
 
 /**
  * @param {PatientPayload} payload
  * @param {number | string | null | undefined} createdByUserId
+ * @returns {Promise<PersistedPatientRow>}
  */
 export async function createPatient(payload, createdByUserId) {
   const rules = await loadPatientRegistrationSettings();
@@ -468,6 +472,7 @@ export async function createPatient(payload, createdByUserId) {
  * @param {number | string} patientId
  * @param {PatientPayload} payload
  * @param {number | string | null | undefined} updatedByUserId
+ * @returns {Promise<PersistedPatientRow>}
  */
 export async function updatePatient(patientId, payload, updatedByUserId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
@@ -546,6 +551,7 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
 /**
  * @param {MergePatientsPayload} payload
  * @param {number | string | null | undefined} updatedByUserId
+ * @returns {Promise<PatientRow>}
  */
 export async function mergePatients(payload, updatedByUserId) {
   const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId");

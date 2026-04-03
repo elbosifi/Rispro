@@ -90,6 +90,7 @@ function requireRow(row, message) {
 
 /**
  * @param {{ scope?: string, modalityId?: number | string, date?: string }} [filters]
+ * @returns {Promise<ModalityWorklistRow[]>}
  */
 export async function listModalityWorklist(filters = {}) {
   const scope = String(filters.scope || "").trim();
@@ -154,12 +155,13 @@ export async function listModalityWorklist(filters = {}) {
     params
   );
 
-    return /** @type {ModalityWorklistRow[]} */ (rows);
+  return /** @type {ModalityWorklistRow[]} */ (rows);
 }
 
 /**
  * @param {number | string} appointmentId
  * @param {number | string | null} currentUserId
+ * @returns {Promise<{ ok: true }>}
  */
 export async function markAppointmentCompleted(appointmentId, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");

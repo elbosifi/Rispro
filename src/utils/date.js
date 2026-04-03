@@ -31,6 +31,7 @@ function getTripoliParts(date = new Date()) {
 
 /**
  * @param {Date} [date]
+ * @returns {string}
  */
 export function getTripoliToday(date = new Date()) {
   const parts = getTripoliParts(date);
@@ -39,6 +40,7 @@ export function getTripoliToday(date = new Date()) {
 
 /**
  * @param {Date | string | null | undefined} value
+ * @returns {string}
  */
 export function normalizeDateValue(value) {
   if (value instanceof Date) {

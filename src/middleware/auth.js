@@ -25,6 +25,7 @@ import { HttpError } from "../utils/http-error.js";
 
 /**
  * @param {AuthRequest} req
+ * @returns {string}
  */
 export function readToken(req) {
   return req.cookies?.[env.cookieName] || "";
@@ -32,6 +33,7 @@ export function readToken(req) {
 
 /**
  * @param {AuthRequest} req
+ * @returns {string}
  */
 export function readSupervisorReauthToken(req) {
   return req.cookies?.[env.reauthCookieName] || "";
@@ -41,6 +43,7 @@ export function readSupervisorReauthToken(req) {
  * @param {AuthRequest} req
  * @param {unknown} _res
  * @param {NextFunction} next
+ * @returns {void}
  */
 export function requireAuth(req, _res, next) {
   try {
@@ -82,6 +85,7 @@ export function requireAuth(req, _res, next) {
  * @param {AuthRequest} req
  * @param {unknown} _res
  * @param {NextFunction} next
+ * @returns {void}
  */
 export function requireSupervisor(req, _res, next) {
   if (!req.user) {
@@ -97,6 +101,7 @@ export function requireSupervisor(req, _res, next) {
 
 /**
  * @param {string[]} allowedRoles
+ * @returns {(req: AuthRequest, _res: unknown, next: NextFunction) => void}
  */
 export function requireAnyRole(allowedRoles) {
   /**
@@ -119,6 +124,7 @@ export function requireAnyRole(allowedRoles) {
 
 /**
  * @param {AuthRequest} req
+ * @returns {boolean}
  */
 export function hasRecentSupervisorReauth(req) {
   try {
@@ -143,6 +149,7 @@ export function hasRecentSupervisorReauth(req) {
  * @param {AuthRequest} req
  * @param {unknown} _res
  * @param {NextFunction} next
+ * @returns {void}
  */
 export function requireRecentSupervisorReauth(req, _res, next) {
   if (!hasRecentSupervisorReauth(req)) {

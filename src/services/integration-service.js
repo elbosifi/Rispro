@@ -14,6 +14,10 @@ import { getDicomGatewayOverview } from "./dicom-service.js";
  */
 
 /**
+ * @typedef {Record<string, string>} CategorySettings
+ */
+
+/**
  * @typedef AppointmentSummaryRow
  * @property {number} id
  * @property {number} patient_id
@@ -34,6 +38,73 @@ import { getDicomGatewayOverview } from "./dicom-service.js";
  * @property {number | string} [appointmentId]
  * @property {number | string} [patientId]
  * @property {string} [documentType]
+ */
+
+/**
+ * @typedef {object} IntegrationStatus
+ * @property {{
+ *   appointmentSlipEnabled: boolean,
+ *   patientLabelEnabled: boolean,
+ *   barcodeValueSource: string,
+ *   labelPrinterProfile: string,
+ *   slipPrinterProfile: string,
+ *   labelOutputMode: string,
+ *   directPrintBridgeMode: string,
+ *   browserPrintAvailable: boolean,
+ *   directLabelPrintReady: boolean
+ * }} printer
+ * @property {{
+ *   referralUploadEnabled: boolean,
+ *   allowedFileTypes: string[],
+ *   documentLinkScope: string,
+ *   scannerBridgeMode: string,
+ *   scannerProfileName: string,
+ *   scannerSource: string,
+ *   scanDpi: string,
+ *   scanColorMode: string,
+ *   scanFileFormat: string,
+ *   bridgeReady: boolean
+ * }} scanner
+ * @property {{
+ *   enabled: boolean,
+ *   mwlAeTitle: string,
+ *   mwlPort: number,
+ *   mppsAeTitle: string,
+ *   mppsPort: number,
+ *   deviceCount: number,
+ *   processedMessageCount: number,
+ *   failedMessageCount: number
+ * }} dicomGateway
+ */
+
+/**
+ * @typedef {object} PrintPreparation
+ * @property {string} outputType
+ * @property {string} mode
+ * @property {string} printerProfile
+ * @property {number} appointmentId
+ * @property {string} accessionNumber
+ * @property {number} patientId
+ * @property {string} patientName
+ * @property {string} guidance
+ */
+
+/**
+ * @typedef {object} ScanPreparation
+ * @property {string} sessionCode
+ * @property {string} mode
+ * @property {number | null} appointmentId
+ * @property {number | null} patientId
+ * @property {string | null} accessionNumber
+ * @property {string} documentType
+ * @property {string} scannerProfileName
+ * @property {string} scannerSource
+ * @property {string} scanDpi
+ * @property {string} scanColorMode
+ * @property {string} scanFileFormat
+ * @property {string[]} allowedFileTypes
+ * @property {string} suggestedFileName
+ * @property {string} guidance
  */
 
 /**
@@ -90,12 +161,12 @@ async function loadSettingsMap(categories) {
 
   return settingRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
-      accumulator[row.category] = {};
+      accumulator[row.category] = /** @type {CategorySettings} */ ({});
     }
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, string>>} */ ({}));
+  }, /** @type {Record<string, CategorySettings>} */ ({}));
 }
 
 /**
@@ -146,6 +217,7 @@ async function getAppointmentSummary(appointmentId) {
   return requireRow(appointment, "Failed to load appointment summary.");
 }
 
+/** @returns {Promise<IntegrationStatus>} */
 export async function getIntegrationStatus() {
   const settings = await loadSettingsMap(["printing_and_labels", "documents_and_uploads"]);
   const printSettings = settings.printing_and_labels || {};
@@ -154,7 +226,7 @@ export async function getIntegrationStatus() {
   const scannerBridgeMode = rawScannerMode === "future_local_bridge" ? "manual_browser_upload" : rawScannerMode || "manual_browser_upload";
   const dicomGateway = await getDicomGatewayOverview();
 
-  return {
+  return /** @type {IntegrationStatus} */ ({
     printer: {
       appointmentSlipEnabled: parseEnabled(printSettings.appointment_slip),
       patientLabelEnabled: parseEnabled(printSettings.patient_label),
@@ -188,12 +260,13 @@ export async function getIntegrationStatus() {
       processedMessageCount: Number(dicomGateway.logSummary.processed_count || 0),
       failedMessageCount: Number(dicomGateway.logSummary.failed_count || 0)
     }
-  };
+  });
 }
 
 /**
  * @param {PrintPreparePayload} payload
  * @param {number | string | null | undefined} currentUserId
+ * @returns {Promise<PrintPreparation>}
  */
 export async function preparePrintJob(payload, currentUserId) {
   const appointment = await getAppointmentSummary(payload.appointmentId);
@@ -209,7 +282,7 @@ export async function preparePrintJob(payload, currentUserId) {
   const mode =
     outputType === "label" ? status.printer.labelOutputMode || "browser_print" : "browser_print";
 
-  const preparation = {
+  const preparation = /** @type {PrintPreparation} */ ({
     outputType,
     mode,
     printerProfile,
@@ -221,7 +294,7 @@ export async function preparePrintJob(payload, currentUserId) {
       mode === "browser_print"
         ? "Ready to print through the browser print dialog."
         : "Ready to send to the connected printer bridge profile."
-  };
+  });
 
   await logAuditEntry({
     entityType: "integration",
@@ -238,6 +311,7 @@ export async function preparePrintJob(payload, currentUserId) {
 /**
  * @param {ScanPreparePayload} payload
  * @param {number | string | null | undefined} currentUserId
+ * @returns {Promise<ScanPreparation>}
  */
 export async function prepareScanSession(payload, currentUserId) {
   const documentType = String(payload.documentType || "referral_request").trim() || "referral_request";
@@ -256,7 +330,7 @@ export async function prepareScanSession(payload, currentUserId) {
     : `${sessionCode}-${documentType}.${status.scanner.scanFileFormat}`;
   const mode = status.scanner.bridgeReady ? "local_bridge_ready" : "manual_browser_upload";
 
-  const preparation = {
+  const preparation = /** @type {ScanPreparation} */ ({
     sessionCode,
     mode,
     appointmentId: appointment?.id || null,
@@ -274,7 +348,7 @@ export async function prepareScanSession(payload, currentUserId) {
       mode === "local_bridge_ready"
         ? "Scanner bridge is ready for this workstation session."
         : "Upload the scanned file in this session to attach it immediately."
-  };
+  });
 
   await logAuditEntry({
     entityType: "integration",

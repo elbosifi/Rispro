@@ -19,6 +19,7 @@ import { logAuditEntry } from "./audit-service.js";
  * @property {unknown} [value]
  */
 
+/** @returns {Promise<Record<string, SettingsRow[]>>} */
 export async function listSettingsCatalog() {
   const { rows } = await pool.query(
     `
@@ -43,6 +44,7 @@ export async function listSettingsCatalog() {
 
 /**
  * @param {string} category
+ * @returns {Promise<SettingsRow[]>}
  */
 export async function getSettingsByCategory(category) {
   const { rows } = await pool.query(
@@ -62,6 +64,7 @@ export async function getSettingsByCategory(category) {
  * @param {string} category
  * @param {SettingsEntryInput[]} entries
  * @param {number | string} updatedByUserId
+ * @returns {Promise<SettingsRow[]>}
  */
 export async function upsertSettings(category, entries, updatedByUserId) {
   if (!Array.isArray(entries) || entries.length === 0) {

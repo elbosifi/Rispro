@@ -26,6 +26,7 @@ pool.on("error", (error) => {
   console.error("Unexpected PostgreSQL pool error.", error);
 });
 
+/** @returns {Promise<void>} */
 export async function pingDatabase() {
   await pool.query("select 1");
 }

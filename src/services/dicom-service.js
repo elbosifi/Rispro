@@ -24,9 +24,13 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
  */
 
 /**
+ * @typedef {Record<string, string>} CategorySettings
+ */
+
+/**
  * @typedef GatewaySettingsMap
- * @property {Record<string, string>} [dicom_gateway]
- * @property {Record<string, string>} [pacs_connection]
+ * @property {CategorySettings} [dicom_gateway]
+ * @property {CategorySettings} [pacs_connection]
  */
 
 /**
@@ -332,12 +336,12 @@ async function loadSettingsMap(categories) {
 
   return settingRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
-      accumulator[row.category] = {};
+      accumulator[row.category] = /** @type {CategorySettings} */ ({});
     }
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, string>>} */ ({}));
+  }, /** @type {Record<string, CategorySettings>} */ ({}));
 }
 
 async function listDevicesForModality(client, modalityId) {
@@ -761,6 +765,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
   return requireRow(/** @type {MppsAppointmentRow | undefined} */ (rows[0]), "Failed to update appointment timing.");
 }
 
+/** @returns {Promise<{ enabled: boolean, bindHost: string, mwlAeTitle: string, mwlPort: number, mppsAeTitle: string, mppsPort: number, worklistOutputDir: string, worklistSourceDir: string, mppsInboxDir: string, mppsProcessedDir: string, mppsFailedDir: string, callbackSecret: string, rebuildBehavior: string, dump2dcmCommand: string, dcmdumpCommand: string }>} */
 export async function getDicomGatewaySettings() {
   const settings = await loadSettingsMap(["dicom_gateway"]);
   const gateway = settings.dicom_gateway || {};
@@ -784,6 +789,7 @@ export async function getDicomGatewaySettings() {
   };
 }
 
+/** @returns {Promise<{ enabled: boolean, bindHost: string, mwlAeTitle: string, mwlPort: number, mppsAeTitle: string, mppsPort: number, worklistOutputDir: string, worklistSourceDir: string, mppsInboxDir: string, mppsProcessedDir: string, mppsFailedDir: string, callbackSecret: string, rebuildBehavior: string, dump2dcmCommand: string, dcmdumpCommand: string }>} */
 export async function ensureDicomGatewayLayout(settings = null) {
   const gatewaySettings = settings || (await getDicomGatewaySettings());
   const directories = [
@@ -798,6 +804,7 @@ export async function ensureDicomGatewayLayout(settings = null) {
   return gatewaySettings;
 }
 
+/** @returns {Promise<DicomDeviceListRow[]>} */
 export async function listDicomDevices({ includeInactive = false } = {}) {
   const params = [];
   let inactiveSql = "";
@@ -825,6 +832,7 @@ export async function listDicomDevices({ includeInactive = false } = {}) {
   return /** @type {DicomDeviceListRow[]} */ (rows);
 }
 
+/** @returns {Promise<DicomDeviceRow>} */
 export async function createDicomDevice(payload, currentUserId) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const deviceName = normalizeOptionalText(payload.deviceName);
@@ -911,6 +919,7 @@ export async function createDicomDevice(payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<DicomDeviceRow>} */
 export async function updateDicomDevice(deviceId, payload, currentUserId) {
   const cleanDeviceId = normalizePositiveInteger(deviceId, "deviceId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1002,6 +1011,7 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<{ ok: true }>} */
 export async function deleteDicomDevice(deviceId, currentUserId) {
   const cleanDeviceId = normalizePositiveInteger(deviceId, "deviceId");
   const client = await pool.connect();
@@ -1048,6 +1058,7 @@ export async function deleteDicomDevice(deviceId, currentUserId) {
   }
 }
 
+/** @returns {Promise<Record<string, unknown>>} */
 export async function syncAppointmentWorklistSources(appointmentId) {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
@@ -1068,6 +1079,7 @@ export async function syncAppointmentWorklistSources(appointmentId) {
   }
 }
 
+/** @returns {Promise<{ ok: true, count: number }>} */
 export async function rebuildAllDicomWorklistSources() {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
@@ -1092,6 +1104,10 @@ export async function rebuildAllDicomWorklistSources() {
   }
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @returns {void}
+ */
 export function scheduleWorklistSync(appointmentId) {
   Promise.resolve()
     .then(() => syncAppointmentWorklistSources(appointmentId))
@@ -1100,6 +1116,7 @@ export function scheduleWorklistSync(appointmentId) {
     });
 }
 
+/** @returns {void} */
 export function scheduleWorklistRebuild() {
   Promise.resolve()
     .then(() => rebuildAllDicomWorklistSources())
@@ -1108,6 +1125,7 @@ export function scheduleWorklistRebuild() {
     });
 }
 
+/** @returns {Promise<string>} */
 export async function resolveScanValueToAccession(scanValue, accessionNumber) {
   if (normalizeOptionalText(accessionNumber)) {
     return normalizeOptionalText(accessionNumber);
@@ -1116,6 +1134,7 @@ export async function resolveScanValueToAccession(scanValue, accessionNumber) {
   return normalizeQrOrAccession(scanValue);
 }
 
+/** @returns {Promise<{ ok: boolean, reason?: string, appointment?: MppsAppointmentRow }>} */
 export async function ingestMppsEvent(payload) {
   const mppsStatus = String(payload?.mppsStatus || "").trim().toUpperCase();
 
@@ -1207,6 +1226,7 @@ export async function ingestMppsEvent(payload) {
   }
 }
 
+/** @returns {Promise<{ settings: Record<string, unknown>, devices: DicomDeviceListRow[], logSummary: DicomLogSummaryRow }>} */
 export async function getDicomGatewayOverview() {
   const [settings, devices, logSummary] = await Promise.all([
     getDicomGatewaySettings(),
@@ -1235,10 +1255,12 @@ export async function getDicomGatewayOverview() {
   };
 }
 
+/** @returns {string | null} */
 export function parseMppsTimestamp(dateValue, timeValue) {
   return parseDicomTimestamp(dateValue, timeValue);
 }
 
+/** @returns {{ sourcePath: string, sourceIp: string, remoteAeTitle: string, performedStationAeTitle: string, accessionNumber: string, mppsSopInstanceUid: string, mppsStatus: string, startedAt: string | null, finishedAt: string | null, raw: Record<string, unknown> }} */
 export function buildMppsEventPayload(input = {}) {
   return {
     sourcePath: normalizeOptionalText(input.sourcePath),
@@ -1256,6 +1278,7 @@ export function buildMppsEventPayload(input = {}) {
   };
 }
 
+/** @returns {string} */
 export function createGatewayCallbackToken(secret) {
   return normalizeOptionalText(secret) || randomUUID();
 }

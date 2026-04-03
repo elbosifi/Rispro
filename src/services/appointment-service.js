@@ -294,6 +294,7 @@ function getTripoliWeekday(isoDate) {
   return weekday.toLowerCase();
 }
 
+/** @returns {Promise<{ fridayEnabled: boolean, saturdayEnabled: boolean }>} */
 export async function getAppointmentDaySettings(client = pool) {
   const { rows } = await client.query(
     `
@@ -529,6 +530,7 @@ async function getPriorityById(client, reportingPriorityId) {
   return priority;
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[], examTypes: ExamTypeRow[], priorities: ReportingPriorityRow[] }>} */
 export async function listAppointmentLookups() {
   const [modalitiesResult, examTypesResult, prioritiesResult] = await Promise.all([
     pool.query(
@@ -563,6 +565,7 @@ export async function listAppointmentLookups() {
   };
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[], examTypes: ExamTypeRow[] }>} */
 export async function listExamTypesForSettings() {
   const [modalitiesResult, examTypesResult] = await Promise.all([
     pool.query(
@@ -589,6 +592,7 @@ export async function listExamTypesForSettings() {
   };
 }
 
+/** @returns {Promise<AppointmentListRow[]>} */
 export async function listAppointmentsForPrint(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -699,6 +703,7 @@ export async function listAppointmentsForPrint(filters = {}) {
   return /** @type {AppointmentListRow[]} */ (rows);
 }
 
+/** @returns {Promise<{ filters: { date: string | null, dateFrom: string, dateTo: string, modalityId: string }, summary: Record<string, number>, modalityBreakdown: ModalityBreakdownRow[], statusBreakdown: StatusBreakdownRow[], dailyBreakdown: DailyBreakdownRow[] }>} */
 export async function listAppointmentStatistics(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -855,6 +860,7 @@ export async function listAppointmentStatistics(filters = {}) {
   };
 }
 
+/** @returns {Promise<AppointmentListRow>} */
 export async function getAppointmentPrintDetails(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
@@ -919,6 +925,7 @@ export async function getAppointmentPrintDetails(appointmentId) {
   return fallbackAppointment;
 }
 
+/** @returns {Promise<Array<{ appointment_date: string, booked_count: number, remaining_capacity: number, daily_capacity: number, is_full: boolean }>>} */
 export async function listAvailability(modalityId, days = 14) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
@@ -983,6 +990,7 @@ export async function listAvailability(modalityId, days = 14) {
     });
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[] }>} */
 export async function listModalitiesForSettings({ includeInactive = false } = {}) {
   const whereClause = includeInactive ? "" : "where is_active = true";
   const { rows } = await pool.query(
@@ -997,6 +1005,7 @@ export async function listModalitiesForSettings({ includeInactive = false } = {}
   return { modalities: rows };
 }
 
+/** @returns {Promise<ModalityRow>} */
 export async function createModality(payload, currentUserId = null) {
   const code = String(payload.code || "").trim();
   const nameAr = String(payload.nameAr || "").trim();
@@ -1056,6 +1065,7 @@ export async function createModality(payload, currentUserId = null) {
   }
 }
 
+/** @returns {Promise<ModalityRow>} */
 export async function updateModality(modalityId, payload, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const code = String(payload.code || "").trim();
@@ -1132,6 +1142,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<ModalityRow>} */
 export async function deleteModality(modalityId, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const client = await pool.connect();
@@ -1190,6 +1201,7 @@ export async function deleteModality(modalityId, currentUserId) {
   }
 }
 
+/** @returns {Promise<ExamTypeRow>} */
 export async function createExamType(payload, currentUserId = null) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const nameAr = String(payload.nameAr || "").trim();
@@ -1246,6 +1258,7 @@ export async function createExamType(payload, currentUserId = null) {
   }
 }
 
+/** @returns {Promise<ExamTypeRow>} */
 export async function updateExamType(examTypeId, payload, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1321,6 +1334,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<ExamTypeRow>} */
 export async function deleteExamType(examTypeId, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const client = await pool.connect();
@@ -1587,6 +1601,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
  * @param {{ sub?: number | string, id?: number | string, role?: string }} currentUser
  * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
  */
+/** @returns {Promise<AppointmentDbRow>} */
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1788,6 +1803,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
  * @param {{ examTypeId?: number | string }} payload
  * @param {{ sub?: number | string }} currentUser
  */
+/** @returns {Promise<AppointmentDbRow>} */
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1856,6 +1872,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
   }
 }
 
+/** @returns {Promise<{ ok: true }>} */
 export async function cancelAppointment(appointmentId, reason, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const cleanReason = normalizeOptionalText(reason);

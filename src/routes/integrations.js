@@ -11,12 +11,17 @@ import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from 
 export const integrationsRouter = express.Router();
 
 /**
- * @typedef {object} IntegrationsRequest
+ * @typedef {object} IntegrationsCallbackRequest
  * @property {Record<string, unknown>} [headers]
  * @property {string} [ip]
  * @property {{ remoteAddress?: string }} [socket]
  * @property {Record<string, unknown>} [body]
- * @property {{ sub: number | string, role: string }} [user]
+ */
+
+/**
+ * @typedef {object} IntegrationsAuthRequest
+ * @property {Record<string, unknown>} [body]
+ * @property {{ sub: number | string, role: string }} user
  */
 
 function isLoopbackAddress(value) {
@@ -52,11 +57,11 @@ function asOptionalId(value) {
 }
 
 /**
- * @param {IntegrationsRequest} request
+ * @param {IntegrationsAuthRequest} request
  * @returns {number | string}
  */
 function requireUserSub(request) {
-  if (!request.user?.sub) {
+  if (!request.user.sub) {
     throw new HttpError(401, "Authentication required.");
   }
 
@@ -66,7 +71,7 @@ function requireUserSub(request) {
 integrationsRouter.post(
   "/dicom/mpps-event",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsCallbackRequest} */ (req);
     const settings = await getDicomGatewaySettings();
     const headerSecret = String(request.headers?.["x-rispro-dicom-secret"] || "").trim();
     const remoteAddress = request.ip || request.socket?.remoteAddress || "";
@@ -93,7 +98,7 @@ integrationsRouter.get(
 integrationsRouter.post(
   "/print-prepare",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const preparation = await preparePrintJob(
       {
@@ -109,7 +114,7 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/scan-prepare",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const preparation = await prepareScanSession(
       {
@@ -126,7 +131,7 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-cfind",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const studies = await runPacsCFind({
       patientNationalId: asOptionalString(body.patientNationalId),
@@ -139,7 +144,7 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-search",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const studies = await searchPacsStudies({
       criteria: body,
@@ -152,7 +157,7 @@ integrationsRouter.post(
 integrationsRouter.post(
   "/pacs-test",
   asyncRoute(async (req, res) => {
-    const request = /** @type {IntegrationsRequest} */ (req);
+    const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     await testPacsConnection({ currentUserId: requireUserSub(request), overrides: body });
     res.json({ ok: true });

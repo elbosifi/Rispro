@@ -35,7 +35,7 @@ nameDictionaryRouter.get(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {NameDictionaryRequest} */ (req);
-    const canSeeInactive = request.user?.role === "supervisor" && hasRecentSupervisorReauth(request);
+    const canSeeInactive = request.user.role === "supervisor" && hasRecentSupervisorReauth(request);
     const includeInactive = asString(request.query?.includeInactive).trim() === "true" && canSeeInactive;
     const entries = await listNameDictionary({ includeInactive });
     res.json({ entries });

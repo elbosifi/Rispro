@@ -94,6 +94,38 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  */
 
 /**
+ * @typedef QueueSnapshot
+ * @property {string} queueDate
+ * @property {string} reviewTime
+ * @property {boolean} reviewActive
+ * @property {QueueSummaryRow} summary
+ * @property {QueueEntryRow[]} queueEntries
+ * @property {NoShowCandidateRow[]} noShowCandidates
+ */
+
+/**
+ * @typedef QueueScanResult
+ * @property {QueueEntryStateRow} queueEntry
+ * @property {{
+ *   id: number,
+ *   accession_number: string,
+ *   is_walk_in: boolean,
+ *   notes: string | null,
+ *   status: "arrived"
+ * }} appointment
+ * @property {{
+ *   arabic_full_name: string,
+ *   english_full_name: string | null,
+ *   phone_1: string | null
+ * }} patient
+ * @property {{
+ *   name_ar: string,
+ *   name_en: string
+ * }} modality
+ * @property {{ name_ar: string | null, name_en: string | null } | null} examType
+ */
+
+/**
  * @typedef {object} CurrentUser
  * @property {number | string} sub
  * @property {string} [role]
@@ -405,6 +437,7 @@ async function updateAppointmentStatus(client, appointmentId, oldStatus, newStat
   );
 }
 
+/** @returns {Promise<QueueSnapshot>} */
 export async function getQueueSnapshot() {
   const queueDate = getTripoliToday();
   const reviewTime = await getNoShowReviewTime();
@@ -428,6 +461,7 @@ export async function getQueueSnapshot() {
 /**
  * @param {QueueScanPayload} payload
  * @param {CurrentUser | null | undefined} currentUser
+ * @returns {Promise<QueueScanResult>}
  */
 export async function scanAppointmentIntoQueue(payload, currentUser) {
   if (!currentUser?.sub) {
@@ -509,6 +543,7 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
  * @param {Record<string, unknown>} payload
  * @param {CurrentUser} currentUser
  * @param {QueueWalkInOptions} [options]
+ * @returns {Promise<QueueScanResult & { createdAppointment: Record<string, unknown> }>}
  */
 export async function createWalkInQueueEntry(payload, currentUser, options = {}) {
   const queueDate = getTripoliToday();
@@ -537,6 +572,7 @@ export async function createWalkInQueueEntry(payload, currentUser, options = {})
  * @param {number | string} appointmentId
  * @param {string | null | undefined} reason
  * @param {CurrentUser | null | undefined} currentUser
+ * @returns {Promise<{ ok: true }>}
  */
 export async function confirmNoShow(appointmentId, reason, currentUser) {
   if (!currentUser?.sub) {

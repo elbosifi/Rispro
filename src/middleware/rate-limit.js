@@ -4,6 +4,7 @@ import { HttpError } from "../utils/http-error.js";
 
 /**
  * @param {{ windowMs: number, maxRequests: number, message: string }} options
+ * @returns {(req: { ip?: string }, _res: unknown, next: (error?: unknown) => void) => void}
  */
 export function createRateLimiter({ windowMs, maxRequests, message }) {
   /** @type {Map<string, number[]>} */

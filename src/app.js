@@ -28,6 +28,7 @@ const rootDir = path.resolve(__dirname, "..");
 /**
  * @param {string} fileName
  * @param {number} [cacheSeconds]
+ * @returns {(_req: unknown, res: { setHeader: (name: string, value: string) => void, sendFile: (path: string) => void }) => void}
  */
 function sendFrontendFile(fileName, cacheSeconds = 0) {
   /**
@@ -45,6 +46,7 @@ function sendFrontendFile(fileName, cacheSeconds = 0) {
   };
 }
 
+/** @returns {object} */
 export function createApp() {
   const app = express();
 

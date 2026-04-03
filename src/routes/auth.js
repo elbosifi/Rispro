@@ -17,9 +17,14 @@ import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../utils/http-error.js";
 
 /**
- * @typedef {object} AuthRequest
+ * @typedef {object} AuthLoginRequest
  * @property {Record<string, unknown>} [body]
- * @property {{ username?: string, sub?: number | string, role?: string }} [user]
+ */
+
+/**
+ * @typedef {object} AuthSessionRequest
+ * @property {Record<string, unknown>} [body]
+ * @property {{ sub: number | string, role: string, username?: string }} user
  */
 
 /**
@@ -37,11 +42,11 @@ const loginRateLimiter = createRateLimiter({
 });
 
 /**
- * @param {AuthRequest} request
+ * @param {AuthSessionRequest} request
  * @returns {AuthenticatedUser}
  */
 function requireCurrentUser(request) {
-  if (!request.user?.sub || !request.user?.role) {
+  if (!request.user.sub || !request.user.role) {
     throw new HttpError(401, "Authentication required.");
   }
 
@@ -56,7 +61,7 @@ authRouter.post(
   "/login",
   loginRateLimiter,
   asyncRoute(async (req, res) => {
-    const request = /** @type {AuthRequest} */ (req);
+    const request = /** @type {AuthLoginRequest} */ (req);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const username = String(body.username || "");
     const password = String(body.password || "");
@@ -92,12 +97,12 @@ authRouter.post("/logout", (_req, res) => {
 });
 
 authRouter.get("/me", requireAuth, (req, res) => {
-  const request = /** @type {AuthRequest} */ (req);
+  const request = /** @type {AuthSessionRequest} */ (req);
   const currentUser = requireCurrentUser(request);
   res.json({
     user: {
       ...currentUser,
-      recentSupervisorReauth: hasRecentSupervisorReauth(req)
+      recentSupervisorReauth: hasRecentSupervisorReauth(request)
     }
   });
 });
@@ -106,7 +111,7 @@ authRouter.post(
   "/re-auth",
   requireAuth,
   asyncRoute(async (req, res) => {
-    const request = /** @type {AuthRequest} */ (req);
+    const request = /** @type {AuthSessionRequest} */ (req);
     const currentUser = requireCurrentUser(request);
     const body = /** @type {Record<string, unknown>} */ (request.body || {});
     const password = String(body.password || "");

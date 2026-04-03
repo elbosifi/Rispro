@@ -17,10 +17,34 @@ const DEFAULT_DIMSE_SOURCE_PORT = 11112;
  */
 
 /**
+ * @typedef {object} StudySummary
+ * @property {string} patientId
+ * @property {string} patientName
+ * @property {string} accessionNumber
+ * @property {string} modality
+ * @property {string} studyDescription
+ * @property {string} studyDate
+ */
+
+/**
  * @typedef {object} SystemSettingRow
  * @property {string} category
  * @property {string} setting_key
  * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef {Record<string, string>} CategorySettings
+ */
+
+/**
+ * @typedef {object} PacsSettings
+ * @property {boolean} enabled
+ * @property {string} host
+ * @property {number} port
+ * @property {string} calledAeTitle
+ * @property {string} callingAeTitle
+ * @property {number} timeoutSeconds
  */
 
 /**
@@ -72,12 +96,12 @@ async function loadSettingsMap(categories) {
   const settingsRows = /** @type {SystemSettingRow[]} */ (rows);
   return settingsRows.reduce((accumulator, row) => {
     if (!accumulator[row.category]) {
-      accumulator[row.category] = {};
+      accumulator[row.category] = /** @type {CategorySettings} */ ({});
     }
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, Record<string, string>>} */ ({}));
+  }, /** @type {Record<string, CategorySettings>} */ ({}));
 }
 
 /**
@@ -216,6 +240,7 @@ function extractStudySummary(dataset) {
 
 /**
  * @param {unknown} rawResult
+ * @returns {StudySummary[]}
  */
 function normalizeStudyList(rawResult) {
   const candidates = [];
@@ -273,6 +298,7 @@ function parseDimseResult(result) {
   return parsed && typeof parsed === "object" ? /** @type {Record<string, unknown>} */ (parsed) : null;
 }
 
+/** @returns {Promise<PacsSettings>} */
 async function loadPacsSettings() {
   const settings = await loadSettingsMap(["pacs_connection"]);
   const pacs = settings.pacs_connection || {};
@@ -284,18 +310,19 @@ async function loadPacsSettings() {
   const callingAeTitle = String(pacs.calling_ae_title || "").trim();
   const timeoutSeconds = parsePositiveInteger(pacs.timeout_seconds, 10);
 
-  return {
+  return /** @type {PacsSettings} */ ({
     enabled,
     host,
     port,
     calledAeTitle,
     callingAeTitle,
     timeoutSeconds
-  };
+  });
 }
 
 /**
  * @param {Record<string, unknown>} [input]
+ * @returns {PacsSettings}
  */
 function normalizePacsSettingsInput(input = {}) {
   return {
@@ -418,6 +445,7 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
 
 /**
  * @param {{ criteria: Record<string, unknown>, currentUserId: number | string | null | undefined }} params
+ * @returns {Promise<StudySummary[]>}
  */
 export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }) {
   const criteria = normalizeStudySearchCriteria(rawCriteria);
@@ -463,6 +491,10 @@ export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }
   return studies;
 }
 
+/**
+ * @param {{ patientNationalId?: string, currentUserId: number | string | null | undefined }} params
+ * @returns {Promise<StudySummary[]>}
+ */
 export async function runPacsCFind({ patientNationalId, currentUserId }) {
   return searchPacsStudies({
     criteria: { patientId: patientNationalId },
@@ -472,6 +504,7 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
 
 /**
  * @param {{ currentUserId: number | string | null | undefined, overrides?: Record<string, unknown> | null }} params
+ * @returns {Promise<{ ok: true }>}
  */
 export async function testPacsConnection({ currentUserId, overrides = null }) {
   const settings = overrides ? normalizePacsSettingsInput(overrides) : await loadPacsSettings();

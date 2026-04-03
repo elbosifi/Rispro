@@ -93,6 +93,7 @@ function requireRow(row, message) {
 /**
  * @param {AuditEntryInput & Partial<DomainAuditEvent>} entry
  * @param {DbExecutor} [executor]
+ * @returns {Promise<AuditLogRow | null>}
  */
 export async function logAuditEntry(
   {
@@ -241,6 +242,7 @@ function buildAuditFilterQuery(filters = {}, { includeLimit = true } = {}) {
 
 /**
  * @param {AuditFilters} [filters]
+ * @returns {Promise<AuditLogRow[]>}
  */
 export async function listAuditEntries(filters = {}) {
   const { params, whereClause, limitClause } = buildAuditFilterQuery(filters, { includeLimit: true });
@@ -270,6 +272,7 @@ export async function listAuditEntries(filters = {}) {
   return /** @type {AuditLogRow[]} */ (rows);
 }
 
+/** @returns {Promise<{ entityTypes: string[], actionTypes: string[], users: AuditUserOptionRow[] }>} */
 export async function listAuditFilterOptions() {
   const [entityTypeResult, actionTypeResult, userResult] = await Promise.all([
     pool.query(
@@ -319,6 +322,7 @@ function escapeCsvValue(value) {
 
 /**
  * @param {AuditFilters} [filters]
+ * @returns {Promise<string>}
  */
 export async function exportAuditEntriesCsv(filters = {}) {
   const rows = await listAuditEntries({ ...filters, limit: filters.limit || 2000 });

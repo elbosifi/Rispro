@@ -109,7 +109,7 @@ async function ensureRelatedRecords(patientId, appointmentId) {
   if (patientId) {
     const { rowCount } = await pool.query("select 1 from patients where id = $1 limit 1", [patientId]);
 
-    if (!rowCount) {
+    if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Patient not found.");
     }
   }
@@ -117,7 +117,7 @@ async function ensureRelatedRecords(patientId, appointmentId) {
   if (appointmentId) {
     const { rowCount } = await pool.query("select 1 from appointments where id = $1 limit 1", [appointmentId]);
 
-    if (!rowCount) {
+    if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Appointment not found.");
     }
   }
@@ -125,6 +125,7 @@ async function ensureRelatedRecords(patientId, appointmentId) {
 
 /**
  * @param {{ patientId?: number | string, appointmentId?: number | string }} [filters]
+ * @returns {Promise<DocumentRow[]>}
  */
 export async function listDocuments(filters = {}) {
   const params = [];
@@ -157,6 +158,7 @@ export async function listDocuments(filters = {}) {
 
 /**
  * @param {number | string} documentId
+ * @returns {Promise<DocumentRow>}
  */
 export async function getDocumentById(documentId) {
   const cleanDocumentId = normalizePositiveInteger(documentId, "documentId");
@@ -181,6 +183,7 @@ export async function getDocumentById(documentId) {
 
 /**
  * @param {{ stored_path?: string }} document
+ * @returns {string}
  */
 export function getDocumentAbsolutePath(document) {
   return resolveStoredPath(document.stored_path);
@@ -189,6 +192,7 @@ export function getDocumentAbsolutePath(document) {
 /**
  * @param {DocumentUploadPayload} payload
  * @param {number | string | null | undefined} currentUserId
+ * @returns {Promise<DocumentRow>}
  */
 export async function uploadDocument(payload, currentUserId) {
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });

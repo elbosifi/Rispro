@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { env } from "../config/env.js";
 import { pool } from "./pool.js";
 
+/** @returns {Promise<void>} */
 async function run() {
   if (env.isProduction && env.seedSupervisorPassword === "ChangeMe123!") {
     throw new Error("SEED_SUPERVISOR_PASSWORD must be changed before production seeding.");

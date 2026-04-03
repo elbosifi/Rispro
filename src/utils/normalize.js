@@ -11,6 +11,7 @@ const arabicVariants = [
 
 /**
  * @param {unknown} value
+ * @returns {string}
  */
 export function normalizeArabicName(value) {
   let result = String(value || "").trim().replace(/\s+/g, " ");
@@ -24,6 +25,7 @@ export function normalizeArabicName(value) {
 
 /**
  * @param {unknown} value
+ * @returns {string}
  */
 export function normalizeLibyanPhone(value) {
   return String(value || "").replace(/\D/g, "");
@@ -31,6 +33,7 @@ export function normalizeLibyanPhone(value) {
 
 /**
  * @param {number} ageYears
+ * @returns {Date | null}
  */
 export function buildEstimatedDobFromAge(ageYears) {
   if (!Number.isInteger(ageYears) || ageYears < 0 || ageYears > 130) {
@@ -43,6 +46,7 @@ export function buildEstimatedDobFromAge(ageYears) {
 
 /**
  * @param {Date | null | undefined} date
+ * @returns {string | null}
  */
 export function formatDateForSql(date) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
