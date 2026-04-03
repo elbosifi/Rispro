@@ -1387,11 +1387,14 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     const slotStats = await nextModalitySlotNumber(client, modalityId, appointmentDate, cleanAppointmentId);
     const maxCasesPerModality = await getMaxCasesPerModality(client);
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
-    const isOverbooked = slotStats.bookedCount >= capacity;
 
     const existingModalityId = Number(existingAppointment.modality_id);
     const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
     const modalityOrDateChanged = existingModalityId !== modalityId || existingAppointmentDate !== appointmentDate;
+
+    // Only check overbooking when date or modality changes (treat as new appointment)
+    // Editing fields on the same date/modality does not require supervisor approval
+    const isOverbooked = modalityOrDateChanged && slotStats.bookedCount >= capacity;
 
     // Handle overbooking approval
     let approvingSupervisor = null;
