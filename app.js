@@ -2209,7 +2209,6 @@ function formatStatusName(status) {
     "scheduled": "Scheduled",
     "arrived": "Arrived",
     "waiting": "Waiting",
-    "in-progress": "In Progress",
     "completed": "Completed",
     "no-show": "No Show",
     "cancelled": "Cancelled"
@@ -8418,7 +8417,7 @@ function renderStatusDropdown() {
 }
 
 function renderStatusOptions(selectedStatuses) {
-  const allStatuses = ["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled"];
+  const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"];
   return allStatuses
     .map(
       (status) => `
@@ -10535,12 +10534,31 @@ function handleInput(event) {
     return;
   }
 
-  if (target.closest("#registrations-filter-form")) {
-    // Ignore status dropdown internal elements (handled by click handler)
-    if (target.closest("#status-dropdown") || target.id === "status-filter-trigger") {
-      return;
+  if (target.closest("#status-dropdown") && target.type === "checkbox") {
+    event.stopPropagation();
+    const status = target.value;
+    let selectedStatuses = [...state.registrationsFilters.status];
+
+    if (target.checked) {
+      if (!selectedStatuses.includes(status)) {
+        selectedStatuses.push(status);
+      }
+    } else {
+      selectedStatuses = selectedStatuses.filter((s) => s !== status);
     }
-    
+
+    // If empty, reset to scheduled
+    if (selectedStatuses.length === 0) {
+      selectedStatuses = ["scheduled"];
+    }
+
+    state.registrationsFilters.status = selectedStatuses;
+    render();
+    void loadRegistrations();
+    return;
+  }
+
+  if (target.closest("#registrations-filter-form")) {
     state.registrationsFilters[target.name] = target.value;
     if (target.name === "date") {
       state.registrationsFilters.dateFrom = "";
@@ -10565,29 +10583,6 @@ function handleInput(event) {
     if (target.name === "date") {
       state.modalityFilters.scope = "day";
     }
-    return;
-  }
-
-  if (target.closest("#status-dropdown") && target.closest(".status-option input[type='checkbox']")) {
-    const status = target.value;
-    let selectedStatuses = [...state.registrationsFilters.status];
-    
-    if (target.checked) {
-      if (!selectedStatuses.includes(status)) {
-        selectedStatuses.push(status);
-      }
-    } else {
-      selectedStatuses = selectedStatuses.filter((s) => s !== status);
-    }
-    
-    // If empty, reset to scheduled
-    if (selectedStatuses.length === 0) {
-      selectedStatuses = ["scheduled"];
-    }
-    
-    state.registrationsFilters.status = selectedStatuses;
-    render();
-    void loadRegistrations();
     return;
   }
 
@@ -11117,7 +11112,7 @@ function handleClick(event) {
 
   if (target.dataset.action === "select-all-statuses") {
     event.preventDefault();
-    const allStatuses = ["scheduled", "arrived", "waiting", "in-progress", "completed", "no-show", "cancelled"];
+    const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"];
     state.registrationsFilters.status = [...allStatuses];
     state.registrationsStatusDropdownOpen = false;
     render();

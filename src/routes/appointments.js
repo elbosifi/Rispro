@@ -30,12 +30,18 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/",
   asyncRoute(async (req, res) => {
-    const status = req.query["status[]"]
-      ? Array.isArray(req.query["status[]"])
+    // Parse status array from query (handles both ?status[]=x&status[]=y and ?status=x)
+    let status;
+    if (req.query["status[]"]) {
+      status = Array.isArray(req.query["status[]"])
         ? req.query["status[]"]
-        : [req.query["status[]"]]
-      : undefined;
-    
+        : [req.query["status[]"]];
+    } else if (req.query.status) {
+      status = Array.isArray(req.query.status)
+        ? req.query.status
+        : [req.query.status];
+    }
+
     const appointments = await listAppointmentsForPrint({
       date: req.query.date,
       dateFrom: req.query.dateFrom,
