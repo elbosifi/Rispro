@@ -157,16 +157,20 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   // Handlers
   const handleArabicNameChange = (value: string) => {
-    const tokens = value.trim().split(/\s+/).filter(Boolean);
-    const cc = tokens.length, pc = prevArabicTokenCountRef.current;
+    const prevEndsWithSpace = form.arabicFullName.endsWith(" ");
+    const nowEndsWithSpace = value.endsWith(" ");
+    const nowTokens = value.trim().split(/\s+/).filter(Boolean);
+    const tokenJustCompleted = !prevEndsWithSpace && nowEndsWithSpace;
+
     setForm((f) => {
       const u: Partial<PatientFormState> = { arabicFullName: value };
-      if (!englishNameManuallyEdited && cc > pc) {
+      // Generate English only when a token is completed (space typed after word)
+      if (!englishNameManuallyEdited && tokenJustCompleted) {
         u.englishFullName = generateEnglishFromDictionary(value, dictionary).englishName;
       }
       return { ...f, ...u };
     });
-    prevArabicTokenCountRef.current = cc;
+    prevArabicTokenCountRef.current = nowTokens.length;
   };
 
   const handleEnglishNameChange = (v: string) => {
@@ -239,6 +243,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const isNat = form.identifierType === "national_id";
+    // National ID confirmation is mandatory when national ID has any content
+    if (isNat && form.identifierValue.length > 0 && form.nationalIdConfirmation.length === 0) {
+      return;
+    }
+    if (isNat && form.identifierValue.length > 0 && form.identifierValue !== form.nationalIdConfirmation) {
+      return;
+    }
     const payload = {
       arabicFullName: form.arabicFullName,
       englishFullName: form.englishFullName || undefined,
@@ -258,7 +269,16 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   };
 
   const currentMissingTokens = form.arabicFullName
-    ? generateEnglishFromDictionary(form.arabicFullName, dictionary).missingTokens : [];
+    ? (() => {
+        // Only consider completed tokens (those followed by a space)
+        const parts = form.arabicFullName.split(" ");
+        // Remove the last part if it doesn't end with space (user still typing it)
+        if (!form.arabicFullName.endsWith(" ")) parts.pop();
+        const completedTokens = parts.filter(Boolean);
+        const result = generateEnglishFromDictionary(completedTokens.join(" "), dictionary);
+        return result.missingTokens;
+      })()
+    : [];
   const isNationalId = form.identifierType === "national_id";
   const submitLabel = mutation.isPending
     ? (isEdit ? "Updating…" : "Registering…")
@@ -316,7 +336,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => ({ ...f, identifierValue: v }))} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
           )}
           {isNationalId && (
-            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" />
+            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={form.identifierValue.length > 0} />
           )}
         </div>
       </div>
@@ -380,7 +400,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                       {p.phone1 && <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>}
                       {p.address && <p className="text-xs text-stone-500 dark:text-stone-400">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
                     </div>
-                    <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="w-full text-center py-2 px-3 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors border-t border-amber-200/50 dark:border-amber-800/50">Create Appointment for this Patient</button>
+                    <div className="flex gap-2 border-t border-amber-200/50 dark:border-amber-800/50">
+                      <button type="button" onClick={() => navigate(`/patients/${p.id}/edit`)} className="flex-1 text-center py-2 px-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">Edit Patient</button>
+                      <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="flex-1 text-center py-2 px-2 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors">Create Appointment</button>
+                    </div>
                   </li>
                 ))}
               </ul>
