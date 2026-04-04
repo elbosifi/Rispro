@@ -9,7 +9,10 @@
       "Bash(npx *)",
       "Bash(find *)",
       "Bash(type *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git branch *)"
     ]
   },
   "$version": 3
