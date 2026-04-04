@@ -4,12 +4,18 @@ import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
-import { PlaceholderPage } from "@/pages/placeholder/placeholder-page";
 import SearchPage from "@/pages/search/search-page";
 import PatientsPage from "@/pages/patients/patients-page";
 import AppointmentsPage from "@/pages/appointments/appointments-page";
+import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
 import QueuePage from "@/pages/queue/queue-page";
+import ModalityPage from "@/pages/modality/modality-page";
+import DoctorPage from "@/pages/doctor/doctor-page";
+import PrintPage from "@/pages/print/print-page";
+import StatisticsPage from "@/pages/statistics/statistics-page";
+import PacsPage from "@/pages/pacs/pacs-page";
+import SettingsPage from "@/pages/settings/settings-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { QueryProvider } from "@/providers/query-provider";
 
@@ -118,16 +124,16 @@ function AppContent() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/patients" element={<PatientsPage />} />
             <Route path="/appointments" element={<AppointmentsPage />} />
-            <Route path="/calendar" element={<PlaceholderPage route="calendar" />} />
+            <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/registrations" element={<RegistrationsPage />} />
             <Route path="/queue" element={<QueuePage />} />
-            <Route path="/modality" element={<PlaceholderPage route="modality" />} />
-            <Route path="/doctor" element={<PlaceholderPage route="doctor" />} />
-            <Route path="/print" element={<PlaceholderPage route="print" />} />
-            <Route path="/statistics" element={<PlaceholderPage route="statistics" />} />
+            <Route path="/modality" element={<ModalityPage />} />
+            <Route path="/doctor" element={<DoctorPage />} />
+            <Route path="/print" element={<PrintPage />} />
+            <Route path="/statistics" element={<StatisticsPage />} />
             <Route path="/search" element={<SearchPage />} />
-            <Route path="/pacs" element={<PlaceholderPage route="pacs" />} />
-            <Route path="/settings" element={<PlaceholderPage route="settings" />} />
+            <Route path="/pacs" element={<PacsPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
