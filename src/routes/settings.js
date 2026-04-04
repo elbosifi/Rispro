@@ -48,15 +48,8 @@ import {
 
 export const settingsRouter = express.Router();
 
-settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
-
-settingsRouter.get(
-  "/",
-  asyncRoute(async (_req, res) => {
-    const settings = await listSettingsCatalog();
-    res.json({ settings });
-  })
-);
+// Name-dictionary routes: only require auth, not supervisor re-auth
+settingsRouter.use(requireAuth);
 
 settingsRouter.get(
   "/name-dictionary",
@@ -92,6 +85,17 @@ settingsRouter.delete(
     const request = /** @type {SettingsRequest} */ (req);
     const entry = await deleteNameDictionaryEntry(asString(request.params?.entryId), request.user.sub);
     res.json({ entry });
+  })
+);
+
+// Supervisor-only settings
+settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+
+settingsRouter.get(
+  "/",
+  asyncRoute(async (_req, res) => {
+    const settings = await listSettingsCatalog();
+    res.json({ settings });
   })
 );
 
