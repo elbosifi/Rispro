@@ -54,13 +54,16 @@ function patientToForm(p: Patient): PatientFormState {
   const dob = p.estimatedDateOfBirth
     ? (p.estimatedDateOfBirth.includes("T") ? p.estimatedDateOfBirth.slice(0, 10) : p.estimatedDateOfBirth)
     : "";
+  // Normalize sex to M/F (old registrations may have stored "male"/"female")
+  const rawSex = p.sex || "";
+  const sex = rawSex === "male" ? "M" : rawSex === "female" ? "F" : rawSex;
   return {
     arabicFullName: p.arabicFullName || "",
     englishFullName: p.englishFullName || "",
     identifierType: (p.identifierType as IdentifierType) || "national_id",
     identifierValue: p.identifierValue || p.nationalId || "",
     nationalIdConfirmation: "",
-    sex: p.sex || "",
+    sex,
     estimatedDateOfBirth: dob,
     ageYears: p.ageYears ? String(p.ageYears) : "",
     phone1: p.phone1 || "",
