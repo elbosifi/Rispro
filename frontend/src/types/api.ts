@@ -32,10 +32,14 @@ export interface AuthSession {
   recentSupervisorReauth?: boolean;
 }
 
+export type IdentifierType = 'national_id' | 'passport' | 'other';
+
 export interface Patient {
   id: number;
   mrn?: string | null;
   nationalId?: string | null;
+  identifierType?: IdentifierType | null;
+  identifierValue?: string | null;
   arabicFullName: string;
   englishFullName?: string | null;
   ageYears: number;

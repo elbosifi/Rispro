@@ -9,6 +9,13 @@ import {
   normalizeArabicName,
   normalizeLibyanPhone
 } from "../utils/normalize.js";
+import { transliterateArabicName } from "../utils/transliterate.js";
+import {
+  isValidNationalId,
+  deriveSexFromNationalId,
+  deriveDobFromNationalId,
+  calculateAgeFromDob
+} from "../utils/national-id.js";
 
 /** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 /** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
@@ -28,6 +35,8 @@ import {
  * @property {number} id
  * @property {string | null} mrn
  * @property {string | null} national_id
+ * @property {string | null} identifier_type
+ * @property {string | null} identifier_value
  * @property {string} arabic_full_name
  * @property {string | null} english_full_name
  * @property {number} age_years
@@ -42,6 +51,8 @@ import {
  * @typedef {object} PatientPayload
  * @property {string} [nationalId]
  * @property {string} [nationalIdConfirmation]
+ * @property {string} [identifierType]
+ * @property {string} [identifierValue]
  * @property {string} [arabicFullName]
  * @property {string} [englishFullName]
  * @property {UserId} [ageYears]
@@ -50,6 +61,7 @@ import {
  * @property {string} [phone1]
  * @property {string} [phone2]
  * @property {string} [address]
+ * @property {boolean} [autoGenerateEnglish]
  */
 
 /**
@@ -92,16 +104,31 @@ function normalizePositiveInteger(value, fieldName) {
 /**
  * @param {unknown} nationalId
  * @param {unknown} nationalIdConfirmation
+ * @param {string} identifierType
+ * @param {unknown} identifierValue
  * @param {string} rule
  */
-function validateNationalId(nationalId, nationalIdConfirmation, rule) {
-  const cleanId = String(nationalId || "").replace(/\D/g, "");
-  const cleanConfirmation = String(nationalIdConfirmation || "").replace(/\D/g, "");
-  const hasAny = cleanId.length > 0 || cleanConfirmation.length > 0;
+function validateNationalId(nationalId, nationalIdConfirmation, identifierType, identifierValue, rule) {
+  // For national_id type
+  if (identifierType === 'national_id' || (!identifierType && nationalId)) {
+    const cleanId = String(nationalId || identifierValue || '').replace(/\D/g, '');
+    const cleanConfirmation = String(nationalIdConfirmation || '').replace(/\D/g, '');
+    const hasAny = cleanId.length > 0 || cleanConfirmation.length > 0;
 
-  if (rule === "optional") {
-    if (!hasAny) {
-      return "";
+    if (rule === "optional") {
+      if (!hasAny) {
+        return { nationalId: "", identifierValue: "" };
+      }
+
+      if (cleanId.length !== 11) {
+        throw new HttpError(400, "National ID must contain exactly 11 digits.");
+      }
+
+      if (cleanConfirmation && cleanId !== cleanConfirmation) {
+        throw new HttpError(400, "National ID confirmation does not match.");
+      }
+
+      return { nationalId: cleanId, identifierValue: cleanId };
     }
 
     if (cleanId.length !== 11) {
@@ -112,30 +139,12 @@ function validateNationalId(nationalId, nationalIdConfirmation, rule) {
       throw new HttpError(400, "National ID confirmation does not match.");
     }
 
-    return cleanId;
+    return { nationalId: cleanId, identifierValue: cleanId };
   }
 
-  if (rule === "required") {
-    if (cleanId.length !== 11) {
-      throw new HttpError(400, "National ID must contain exactly 11 digits.");
-    }
-
-    if (cleanConfirmation && cleanId !== cleanConfirmation) {
-      throw new HttpError(400, "National ID confirmation does not match.");
-    }
-
-    return cleanId;
-  }
-
-  if (cleanId.length !== 11) {
-    throw new HttpError(400, "National ID must contain exactly 11 digits.");
-  }
-
-  if (cleanId !== cleanConfirmation) {
-    throw new HttpError(400, "National ID confirmation does not match.");
-  }
-
-  return cleanId;
+  // For passport or other types, just validate the identifier_value
+  const cleanValue = String(identifierValue || '').trim();
+  return { nationalId: null, identifierValue: cleanValue || null };
 }
 
 /**
@@ -242,6 +251,8 @@ function validatePatientPayload(payload, rules) {
   const {
     nationalId,
     nationalIdConfirmation,
+    identifierType,
+    identifierValue,
     arabicFullName,
     englishFullName,
     ageYears,
@@ -249,14 +260,18 @@ function validatePatientPayload(payload, rules) {
     sex,
     phone1,
     phone2 = "",
-    address = ""
+    address = "",
+    autoGenerateEnglish = false
   } = payload;
 
-  if (!arabicFullName || !sex) {
-    throw new HttpError(400, "arabicFullName and sex are required.");
+  if (!arabicFullName) {
+    throw new HttpError(400, "arabicFullName is required.");
   }
 
-  const cleanNationalId = validateNationalId(nationalId, nationalIdConfirmation, rules.nationalIdRule);
+  const resolvedIdentifierType = identifierType || 'national_id';
+  const { nationalId: cleanNationalId, identifierValue: cleanIdentifierValue } = validateNationalId(
+    nationalId, nationalIdConfirmation, resolvedIdentifierType, identifierValue, rules.nationalIdRule
+  );
   const cleanPhone1 = validatePhone(phone1, "phone1", { required: rules.phoneRule !== "optional" });
   const cleanPhone2 = validatePhone(phone2, "phone2", { required: false });
   const dobValue = normalizeDateString(estimatedDateOfBirth, "estimatedDateOfBirth");
@@ -280,28 +295,62 @@ function validatePatientPayload(payload, rules) {
     throw new HttpError(400, "ageYears or estimatedDateOfBirth is required.");
   }
 
-  let resolvedAge = null;
-  let estimatedDob = "";
+  // Auto-derive sex/DOB/age from national ID if applicable
+  let resolvedSex = sex;
+  let resolvedDob = dobValue;
+  let resolvedAge = parsedAge;
 
-  if (hasDob) {
-    estimatedDob = dobValue;
-    resolvedAge = calculateAgeYearsFromDob(dobValue);
-  } else if (hasAgeValue) {
-    resolvedAge = parsedAge;
+  if (resolvedIdentifierType === 'national_id' && cleanNationalId && isValidNationalId(cleanNationalId)) {
+    const derivedSex = deriveSexFromNationalId(cleanNationalId);
+    const derivedDob = deriveDobFromNationalId(cleanNationalId);
+
+    // Only auto-derive if not explicitly provided
+    if (!resolvedSex && derivedSex) {
+      resolvedSex = derivedSex;
+    }
+    if (!resolvedDob && derivedDob) {
+      resolvedDob = derivedDob;
+      const derivedAge = calculateAgeFromDob(derivedDob);
+      if (derivedAge !== null && !hasAgeValue) {
+        resolvedAge = derivedAge;
+      }
+    }
   }
 
-  if (resolvedAge === null || resolvedAge === undefined) {
+  if (!resolvedSex) {
+    throw new HttpError(400, "sex is required.");
+  }
+
+  let finalAge = resolvedAge;
+  let finalDob = resolvedDob;
+
+  if (hasDob) {
+    finalDob = dobValue;
+    finalAge = calculateAgeFromDob(dobValue);
+  } else if (hasAgeValue) {
+    finalAge = parsedAge;
+  }
+
+  if (finalAge === null || finalAge === undefined) {
     throw new HttpError(400, "ageYears is required when DOB cannot be calculated.");
+  }
+
+  // Auto-generate English name from Arabic transliteration
+  let finalEnglishName = String(englishFullName || "").trim();
+  if (autoGenerateEnglish && !englishFullName) {
+    finalEnglishName = transliterateArabicName(arabicFullName);
   }
 
   return {
     cleanNationalId,
+    identifierType: resolvedIdentifierType,
+    cleanIdentifierValue: cleanIdentifierValue,
     arabicFullName: arabicFullName.trim(),
-    englishFullName: String(englishFullName || "").trim(),
+    englishFullName: finalEnglishName,
     normalizedArabicName: normalizeArabicName(arabicFullName),
-    parsedAge: resolvedAge,
-    estimatedDob: estimatedDob || formatDateForSql(buildEstimatedDobFromAge(resolvedAge)),
-    sex,
+    parsedAge: finalAge,
+    estimatedDob: finalDob || formatDateForSql(buildEstimatedDobFromAge(finalAge)),
+    sex: resolvedSex,
     cleanPhone1,
     cleanPhone2,
     address: address.trim()
@@ -316,7 +365,7 @@ export async function getPatientById(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await pool.query(
     `
-      select id, mrn, national_id, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
+      select id, mrn, national_id, identifier_type, identifier_value, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
       from patients
       where id = $1
       limit 1
@@ -367,12 +416,13 @@ export async function searchPatients(searchTerm = "") {
   const pattern = `%${term}%`;
   const normalizedPattern = `%${normalizeArabicName(term)}%`;
   const query = `
-    select id, mrn, national_id, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
+    select id, mrn, national_id, identifier_type, identifier_value, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
     from patients
     where
       $1 = ''
       or mrn ilike $2
       or national_id ilike $2
+      or identifier_value ilike $2
       or phone_1 ilike $2
       or phone_2 ilike $2
       or arabic_full_name ilike $2
@@ -399,6 +449,8 @@ export async function createPatient(payload, createdByUserId) {
       `
         insert into patients (
           national_id,
+          identifier_type,
+          identifier_value,
           arabic_full_name,
           english_full_name,
           normalized_arabic_name,
@@ -416,19 +468,23 @@ export async function createPatient(payload, createdByUserId) {
           $2,
           nullif($3, ''),
           $4,
-          $5,
+          nullif($5, ''),
           $6,
           $7,
-          nullif($8, ''),
-          nullif($9, ''),
+          $8,
+          $9,
           nullif($10, ''),
-          $11,
-          $11
+          nullif($11, ''),
+          nullif($12, ''),
+          $13,
+          $13
         )
         returning *
       `,
       [
         validated.cleanNationalId,
+        validated.identifierType,
+        validated.cleanIdentifierValue,
         validated.arabicFullName,
         validated.englishFullName,
         validated.normalizedArabicName,
@@ -492,16 +548,18 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
         update patients
         set
           national_id = nullif($2, ''),
-          arabic_full_name = $3,
-          english_full_name = nullif($4, ''),
-          normalized_arabic_name = $5,
-          age_years = $6,
-          estimated_date_of_birth = $7,
-          sex = $8,
-          phone_1 = nullif($9, ''),
-          phone_2 = nullif($10, ''),
-          address = nullif($11, ''),
-          updated_by_user_id = $12,
+          identifier_type = $3,
+          identifier_value = nullif($4, ''),
+          arabic_full_name = $5,
+          english_full_name = nullif($6, ''),
+          normalized_arabic_name = $7,
+          age_years = $8,
+          estimated_date_of_birth = $9,
+          sex = $10,
+          phone_1 = nullif($11, ''),
+          phone_2 = nullif($12, ''),
+          address = nullif($13, ''),
+          updated_by_user_id = $14,
           updated_at = now()
         where id = $1
         returning *
@@ -509,6 +567,8 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
       [
         cleanPatientId,
         validated.cleanNationalId,
+        validated.identifierType,
+        validated.cleanIdentifierValue,
         validated.arabicFullName,
         validated.englishFullName,
         validated.normalizedArabicName,

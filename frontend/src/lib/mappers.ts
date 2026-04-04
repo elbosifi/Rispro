@@ -13,6 +13,8 @@ export function mapPatient(raw: any): Patient {
     id: raw.id,
     mrn: raw.mrn ?? raw.patient_mrn ?? null,
     nationalId: raw.national_id ?? raw.nationalId ?? null,
+    identifierType: raw.identifier_type ?? raw.identifierType ?? null,
+    identifierValue: raw.identifier_value ?? raw.identifierValue ?? null,
     arabicFullName: raw.arabic_full_name ?? raw.arabicFullName ?? "",
     englishFullName: raw.english_full_name ?? raw.englishFullName ?? null,
     ageYears: raw.age_years ?? raw.ageYears ?? 0,
@@ -182,6 +184,8 @@ function mapQueueEntry(raw: any): any {
     englishFullName: raw.english_full_name ?? raw.englishFullName ?? null,
     phone1: raw.phone_1 ?? raw.phone1 ?? null,
     nationalId: raw.national_id ?? raw.nationalId ?? null,
+    identifierType: raw.identifier_type ?? raw.identifierType ?? null,
+    identifierValue: raw.identifier_value ?? raw.identifierValue ?? null,
     modalityNameAr: raw.modality_name_ar ?? raw.modalityNameAr ?? "",
     modalityNameEn: raw.modality_name_en ?? raw.modalityNameEn ?? "",
     examNameAr: raw.exam_name_ar ?? raw.examNameAr ?? null,
@@ -199,6 +203,9 @@ function mapNoShowCandidate(raw: any): any {
     arabicFullName: raw.arabic_full_name ?? raw.arabicFullName ?? "",
     englishFullName: raw.english_full_name ?? raw.englishFullName ?? null,
     phone1: raw.phone_1 ?? raw.phone1 ?? null,
+    nationalId: raw.national_id ?? raw.nationalId ?? null,
+    identifierType: raw.identifier_type ?? raw.identifierType ?? null,
+    identifierValue: raw.identifier_value ?? raw.identifierValue ?? null,
     modalityNameAr: raw.modality_name_ar ?? raw.modalityNameAr ?? "",
     modalityNameEn: raw.modality_name_en ?? raw.modalityNameEn ?? ""
   };
