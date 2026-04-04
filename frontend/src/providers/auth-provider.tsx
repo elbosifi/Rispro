@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchCurrentSession, login as loginApi, logout as logoutApi } from "@/lib/api-hooks";
+import { fetchCurrentSession, login as loginApi, logout as logoutApi, reAuthSupervisor } from "@/lib/api-hooks";
 import type { User } from "@/types/api";
 
 interface AuthContextValue {
@@ -8,6 +8,7 @@ interface AuthContextValue {
   isLoading: boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  reAuth: (password: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -37,7 +38,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     onSuccess: () => {
       queryClient.setQueryData(["auth-session"], null);
       queryClient.clear();
-      window.location.href = "/"; 
+      window.location.href = "/";
+    }
+  });
+
+  const reAuthMutation = useMutation({
+    mutationFn: (password: string) => reAuthSupervisor(password),
+    onSuccess: (userData) => {
+      queryClient.setQueryData(["auth-session"], { ...userData, recentSupervisorReauth: true });
     }
   });
 
@@ -50,13 +58,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await logoutMutation.mutateAsync();
   };
 
+  const reAuth = async (password: string) => {
+    await reAuthMutation.mutateAsync(password);
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user: user ?? null,
         isLoading: isLoading || isTransitioning,
         login,
-        logout
+        logout,
+        reAuth
       }}
     >
       {children}

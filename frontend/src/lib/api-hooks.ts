@@ -33,6 +33,14 @@ export async function login(username: string, password: string): Promise<User> {
   return mapUser(res.user);
 }
 
+export async function reAuthSupervisor(password: string): Promise<User> {
+  const res = await api<{ user: any }>("/auth/re-auth", {
+    method: "POST",
+    body: JSON.stringify({ password })
+  });
+  return mapUser(res.user);
+}
+
 export async function logout() {
   await api("/auth/logout", { method: "POST" });
 }

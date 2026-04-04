@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
   fetchAuditEntries,
@@ -10,6 +10,7 @@ import {
   fetchSettings,
   fetchPacsConnection
 } from "@/lib/api-hooks";
+import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 
 type SettingsSection =
   | "menu"
@@ -41,6 +42,26 @@ const SECTIONS: { key: SettingsSection; label: string }[] = [
 
 export default function SettingsPage() {
   const [section, setSection] = useState<SettingsSection>("menu");
+  const [showReAuthModal, setShowReAuthModal] = useState(false);
+  const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[]>([]);
+  const queryClient = useQueryClient();
+
+  const handleReAuthSuccess = () => {
+    setShowReAuthModal(false);
+    // Refetch all pending queries that failed due to re-auth
+    for (const key of pendingReAuthKeys) {
+      queryClient.invalidateQueries({ queryKey: key.split(",") });
+    }
+    setPendingReAuthKeys([]);
+    // Also refetch auth-session to update recentSupervisorReauth flag
+    queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+  };
+
+  const requestReAuth = (queryKey: string[]) => {
+    const keyStr = queryKey.join(",");
+    setPendingReAuthKeys((prev) => (prev.includes(keyStr) ? prev : [...prev, keyStr]));
+    setShowReAuthModal(true);
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -73,17 +94,24 @@ export default function SettingsPage() {
               {SECTIONS.find((s) => s.key === section)?.label}
             </h3>
 
-            {section === "users" && <UsersSection />}
-            {section === "audit_log" && <AuditSection />}
-            {section === "exam_types" && <ExamTypesSection />}
-            {section === "modalities" && <ModalitiesSection />}
-            {section === "name_dictionary" && <NameDictionarySection />}
-            {section === "pacs_connection" && <PacsConnectionSection />}
-            {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" />}
-            {section === "scheduling_and_capacity" && <SimpleSettingsSection category="scheduling_and_capacity" />}
-            {section === "queue_and_arrival" && <SimpleSettingsSection category="queue_and_arrival" />}
-            {section === "dicom_gateway" && <DicomGatewaySection />}
+            {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
+            {section === "audit_log" && <AuditSection onReAuthRequired={requestReAuth} />}
+            {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
+            {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
+            {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
+            {section === "pacs_connection" && <PacsConnectionSection onReAuthRequired={requestReAuth} />}
+            {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" onReAuthRequired={requestReAuth} />}
+            {section === "scheduling_and_capacity" && <SimpleSettingsSection category="scheduling_and_capacity" onReAuthRequired={requestReAuth} />}
+            {section === "queue_and_arrival" && <SimpleSettingsSection category="queue_and_arrival" onReAuthRequired={requestReAuth} />}
+            {section === "dicom_gateway" && <DicomGatewaySection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection />}
+
+            {showReAuthModal && (
+              <SupervisorReAuthModal
+                onClose={() => setShowReAuthModal(false)}
+                onSuccess={handleReAuthSuccess}
+              />
+            )}
           </div>
         </div>
       )}
@@ -91,14 +119,18 @@ export default function SettingsPage() {
   );
 }
 
-function UsersSection() {
+function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["users"],
     queryFn: fetchUsers
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["users"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -122,7 +154,7 @@ function UsersSection() {
   );
 }
 
-function AuditSection() {
+function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const limit = 50;
   const { data, isLoading, error } = useQuery({
     queryKey: ["audit", limit],
@@ -130,7 +162,11 @@ function AuditSection() {
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["audit", String(limit)])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -150,14 +186,18 @@ function AuditSection() {
   );
 }
 
-function ExamTypesSection() {
+function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["exam-types"],
     queryFn: fetchExamTypes
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["exam-types"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -176,14 +216,18 @@ function ExamTypesSection() {
   );
 }
 
-function ModalitiesSection() {
+function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["modalities"],
     queryFn: fetchModalitiesSettings
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["modalities"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -207,14 +251,18 @@ function ModalitiesSection() {
   );
 }
 
-function NameDictionarySection() {
+function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["name-dictionary"],
     queryFn: fetchNameDictionary
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["name-dictionary"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -246,14 +294,18 @@ function NameDictionarySection() {
   );
 }
 
-function PacsConnectionSection() {
+function PacsConnectionSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings", "pacs_connection"],
     queryFn: fetchPacsConnection
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "pacs_connection"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -270,7 +322,7 @@ function PacsConnectionSection() {
   );
 }
 
-function SimpleSettingsSection({ category }: { category: string }) {
+function SimpleSettingsSection({ category, onReAuthRequired }: { category: string; onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings", category],
     queryFn: () => fetchSettings(category)
@@ -279,7 +331,7 @@ function SimpleSettingsSection({ category }: { category: string }) {
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) {
-      return <QueryError message="Recent supervisor re-authentication is required. Please re-authenticate and try again." />;
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", category])} />;
     }
     return <QueryError message={msg} />;
   }
@@ -300,14 +352,18 @@ function SimpleSettingsSection({ category }: { category: string }) {
   );
 }
 
-function DicomGatewaySection() {
+function DicomGatewaySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["dicom-devices"],
     queryFn: fetchDicomDevices
   });
 
   if (error) {
-    return <QueryError message={(error as Error).message} />;
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["dicom-devices"])} />;
+    }
+    return <QueryError message={msg} />;
   }
 
   return (
@@ -349,6 +405,25 @@ function QueryError({ message }: { message: string }) {
     <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
       <p className="text-sm font-medium text-red-700 dark:text-red-400">Failed to load settings</p>
       <p className="text-xs text-red-600 dark:text-red-500 mt-1 font-mono break-all">{message}</p>
+    </div>
+  );
+}
+
+function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
+  return (
+    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
+      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+        Supervisor re-authentication required
+      </p>
+      <p className="text-xs text-amber-600 dark:text-amber-400">
+        Re-enter your supervisor password to access this section.
+      </p>
+      <button
+        onClick={onReAuthRequired}
+        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+      >
+        Re-authenticate
+      </button>
     </div>
   );
 }
