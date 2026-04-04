@@ -205,7 +205,7 @@ export default function RegistrationsPage() {
 }
 
 async function fetchRegistrations(filters: RegistrationsFilters) {
-  const params: Record<string, string> = {};
+  const params: Record<string, string | string[]> = {};
   if (filters.dateFrom || filters.dateTo) {
     if (filters.dateFrom) params.dateFrom = filters.dateFrom;
     if (filters.dateTo) params.dateTo = filters.dateTo;
@@ -214,7 +214,10 @@ async function fetchRegistrations(filters: RegistrationsFilters) {
   }
   if (filters.modalityId) params.modalityId = filters.modalityId;
   if (filters.query) params.q = filters.query;
-  
+  if (filters.status && filters.status.length > 0) {
+    params.status = filters.status;
+  }
+
   return fetchAppointments(params);
 }
 

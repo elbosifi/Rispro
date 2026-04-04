@@ -93,9 +93,20 @@ export async function createAppointment(payload: any) {
 }
 
 // -- Registrations / Calendar / Modality / Doctor / Print (shared) --
-export async function fetchAppointments(params: Record<string, string>) {
-  const queryString = new URLSearchParams(params).toString();
-  const raw = await api<{ appointments: any[] }>(`/appointments?${queryString}`);
+export async function fetchAppointments(params: Record<string, string | string[]>) {
+  const query = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((v) => {
+        if (v) query.append(`${key}[]`, v);
+      });
+    } else if (value) {
+      query.set(key, value);
+    }
+  });
+
+  const raw = await api<{ appointments: any[] }>(`/appointments?${query.toString()}`);
   return mapAppointmentsWithDetails(raw.appointments);
 }
 

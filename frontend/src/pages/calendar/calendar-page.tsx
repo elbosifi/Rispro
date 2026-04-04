@@ -14,13 +14,13 @@ interface CalendarDay {
 
 export default function CalendarPage() {
   const today = new Date();
-  const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
+  const [displayDate, setDisplayDate] = useState(new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1)));
   const [selectedDate, setSelectedDate] = useState(formatDate(today));
   const [modalityFilter, setModalityFilter] = useState("");
 
   // Load appointments for the displayed month range
-  const startDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth(), 1));
-  const endDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth() + 1, 0));
+  const startDate = formatDate(new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth(), 1)));
+  const endDate = formatDate(new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth() + 1, 0)));
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["calendar", startDate, endDate, modalityFilter],
@@ -50,16 +50,16 @@ export default function CalendarPage() {
   const selectedAppointments = groupedByDate[selectedDate] || [];
 
   const prevMonth = () => {
-    setDisplayDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    setDisplayDate((d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)));
   };
 
   const nextMonth = () => {
-    setDisplayDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+    setDisplayDate((d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)));
   };
 
   const goToday = () => {
     const now = new Date();
-    setDisplayDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    setDisplayDate(new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1)));
     setSelectedDate(formatDate(now));
   };
 
@@ -100,7 +100,7 @@ export default function CalendarPage() {
                 </svg>
               </button>
               <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-                {displayDate.toLocaleString("default", { month: "long", year: "numeric" })}
+                {displayDate.toLocaleString("default", { month: "long", year: "numeric", timeZone: "UTC" })}
               </h3>
               <div className="flex gap-2">
                 <button
@@ -222,19 +222,19 @@ function buildCalendarGrid(
   groupedByDate: Record<string, any[]>
 ): CalendarDay[] {
   const todayStr = formatDate(new Date());
-  const firstDayOfMonth = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
-  const startOffset = firstDayOfMonth.getDay(); // 0 = Sunday
-  
-  const gridStart = new Date(firstDayOfMonth);
-  gridStart.setDate(gridStart.getDate() - startOffset);
+  const firstDayOfMonth = new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth(), 1));
+  const startOffset = firstDayOfMonth.getUTCDay(); // 0 = Sunday
+
+  const gridStart = new Date(Date.UTC(firstDayOfMonth.getUTCFullYear(), firstDayOfMonth.getUTCMonth(), firstDayOfMonth.getUTCDate()));
+  gridStart.setUTCDate(gridStart.getUTCDate() - startOffset);
 
   const days: CalendarDay[] = [];
   for (let i = 0; i < 42; i++) {
-    const date = new Date(gridStart);
-    date.setDate(date.getDate() + i);
+    const date = new Date(Date.UTC(gridStart.getUTCFullYear(), gridStart.getUTCMonth(), gridStart.getUTCDate()));
+    date.setUTCDate(date.getUTCDate() + i);
     const dateStr = formatDate(date);
     const dayAppointments = groupedByDate[dateStr] || [];
-    
+
     const summary = dayAppointments.reduce((acc, apt) => {
       const mod = apt.modalityNameEn || "Other";
       acc[mod] = (acc[mod] || 0) + 1;
@@ -243,8 +243,8 @@ function buildCalendarGrid(
 
     days.push({
       date: dateStr,
-      dayNumber: date.getDate(),
-      isCurrentMonth: date.getMonth() === displayDate.getMonth(),
+      dayNumber: date.getUTCDate(),
+      isCurrentMonth: date.getUTCMonth() === displayDate.getMonth(),
       isToday: dateStr === todayStr,
       count: dayAppointments.length,
       summary: Object.entries(summary)
@@ -257,15 +257,16 @@ function buildCalendarGrid(
 }
 
 function formatDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
 function formatDateDisplay(dateStr: string): string {
-  const date = new Date(dateStr + "T00:00:00");
-  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+  const [year, month, day] = dateStr.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
 }
 
 function Select({

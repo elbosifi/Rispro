@@ -102,7 +102,7 @@ export default function StatisticsPage() {
           <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400">
             <tr>
               <th className="text-right p-3">Date</th>
-              <th className="text-right p-3">Scheduled</th>
+              <th className="text-right p-3">Total</th>
               <th className="text-right p-3">Completed</th>
               <th className="text-right p-3">No-Show</th>
             </tr>
@@ -111,7 +111,7 @@ export default function StatisticsPage() {
             {dailyBreakdown.map((row: any) => (
               <tr key={row.appointmentDate}>
                 <td className="p-3 text-stone-900 dark:text-white font-medium">{row.appointmentDate}</td>
-                <td className="p-3 text-stone-700 dark:text-stone-300">{row.scheduledCount}</td>
+                <td className="p-3 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.completedCount}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.noShowCount}</td>
               </tr>

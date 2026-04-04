@@ -233,22 +233,20 @@ export function mapStatistics(raw: any): any {
     summary: raw.summary ?? {},
     statusBreakdown: (raw.status_breakdown ?? raw.statusBreakdown ?? []).map((item: any) => ({
       status: item.status ?? "",
-      count: item.count ?? 0
+      count: item.total_count ?? item.count ?? 0
     })),
     modalityBreakdown: (raw.modality_breakdown ?? raw.modalityBreakdown ?? []).map((item: any) => ({
       modalityId: item.modality_id ?? item.modalityId ?? 0,
       modalityNameEn: item.modality_name_en ?? item.modalityNameEn ?? "",
       modalityNameAr: item.modality_name_ar ?? item.modalityNameAr ?? "",
-      count: item.count ?? 0
+      count: item.total_count ?? item.count ?? 0
     })),
     dailyBreakdown: (raw.daily_breakdown ?? raw.dailyBreakdown ?? []).map((item: any) => ({
       appointmentDate: item.appointment_date ?? item.appointmentDate ?? "",
-      scheduledCount: item.scheduled_count ?? item.scheduledCount ?? 0,
-      arrivedCount: item.arrived_count ?? item.arrivedCount ?? 0,
-      waitingCount: item.waiting_count ?? item.waitingCount ?? 0,
+      totalCount: item.total_count ?? item.totalCount ?? 0,
       completedCount: item.completed_count ?? item.completedCount ?? 0,
-      noShowCount: item.no_show_count ?? item.noShowCount ?? 0,
-      cancelledCount: item.cancelled_count ?? item.cancelledCount ?? 0
+      cancelledCount: item.cancelled_count ?? item.cancelledCount ?? 0,
+      noShowCount: item.no_show_count ?? item.noShowCount ?? 0
     }))
   };
 }
