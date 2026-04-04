@@ -102,7 +102,7 @@ export default function PatientsPage() {
     setForm((f) => {
       const updates: Partial<RegistrationForm> = { arabicFullName: value };
       // Only auto-generate if user hasn't manually edited
-      if (!englishNameManuallyEdited && !f.englishFullName) {
+      if (!englishNameManuallyEdited) {
         const result = generateEnglishFromDictionary(value, dictionary);
         updates.englishFullName = result.englishName;
       }
