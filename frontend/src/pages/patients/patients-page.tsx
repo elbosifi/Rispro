@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPatient, searchPatients } from "@/lib/api-hooks";
 import { transliterateArabicName } from "@/lib/transliterate";
@@ -37,7 +38,7 @@ const DEFAULT_FORM: RegistrationForm = {
   ageYears: "",
   phone1: "",
   phone2: "",
-  address: ""
+  address: "benghazi"
 };
 
 export default function PatientsPage() {
@@ -48,12 +49,16 @@ export default function PatientsPage() {
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const queryClient = useQueryClient();
   const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
 
-  // Duplicate checking (search as user types name)
+  // Determine the strongest search term for duplicate checking
+  const duplicateSearchQuery = form.phone1 || form.arabicFullName || form.englishFullName || form.identifierValue || "";
+
+  // Duplicate checking (search using strongest available input)
   const { data: potentialDuplicates } = useQuery({
-    queryKey: ["duplicates", form.arabicFullName],
-    queryFn: () => searchPatients(form.arabicFullName.slice(0, 10)),
-    enabled: form.arabicFullName.length > 2,
+    queryKey: ["duplicates", duplicateSearchQuery],
+    queryFn: () => searchPatients(duplicateSearchQuery),
+    enabled: duplicateSearchQuery.length > 1,
     staleTime: 1000 * 30
   });
 
@@ -374,13 +379,37 @@ export default function PatientsPage() {
           {duplicates.length > 0 && (
             <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
               <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-                Possible Duplicates
+                Possible Duplicates ({duplicates.length})
               </h3>
               <ul className="space-y-2">
                 {duplicates.slice(0, 5).map((p) => (
-                  <li key={p.id} className="text-sm text-stone-700 dark:text-stone-300 bg-white dark:bg-stone-800 p-2 rounded">
-                    <p className="font-medium">{p.arabicFullName}</p>
-                    <p className="text-xs text-stone-500">{p.identifierValue || p.nationalId || "No ID"} • {p.mrn}</p>
+                  <li key={p.id} className="bg-white dark:bg-stone-800 rounded-lg border border-amber-200/50 dark:border-amber-800/50 overflow-hidden">
+                    <div className="p-3 space-y-1">
+                      <p className="font-medium text-sm text-stone-900 dark:text-white">{p.arabicFullName}</p>
+                      {p.englishFullName && (
+                        <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>
+                      )}
+                      <p className="text-xs text-stone-500 dark:text-stone-400">
+                        {p.identifierValue || p.nationalId || "No ID"}
+                        {p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}
+                        {" • "}MRN: {p.mrn || "—"}
+                      </p>
+                      {p.phone1 && (
+                        <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>
+                      )}
+                      {p.address && (
+                        <p className="text-xs text-stone-500 dark:text-stone-400">
+                          City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/appointments?patientId=${p.id}`)}
+                      className="w-full text-center py-2 px-3 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors border-t border-amber-200/50 dark:border-amber-800/50"
+                    >
+                      Create Appointment for this Patient
+                    </button>
                   </li>
                 ))}
               </ul>

@@ -1,10 +1,12 @@
 import { useState, useEffect, type FormEvent } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
   getAppointmentAvailability,
   searchPatients,
-  createAppointment
+  createAppointment,
+  fetchPatientById
 } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
 
@@ -31,10 +33,32 @@ const DEFAULT_FORM: AppointmentForm = {
 };
 
 export default function AppointmentsPage() {
+  const [searchParams] = useSearchParams();
+  const urlPatientId = searchParams.get("patientId");
   const [form, setForm] = useState<AppointmentForm>(DEFAULT_FORM);
   const [patientResults, setPatientResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const queryClient = useQueryClient();
+
+  // Fetch patient by ID if present in URL
+  const { data: urlPatient } = useQuery({
+    queryKey: ["patient-by-id", urlPatientId],
+    queryFn: () => fetchPatientById(parseInt(urlPatientId!, 10)),
+    enabled: !!urlPatientId && !isNaN(parseInt(urlPatientId, 10)),
+    staleTime: 1000 * 60 * 5
+  });
+
+  // Preselect patient from URL
+  useEffect(() => {
+    if (urlPatient && !selectedPatient) {
+      setSelectedPatient(urlPatient);
+      setForm((f) => ({
+        ...f,
+        patientId: urlPatient.id.toString(),
+        patientSearch: urlPatient.arabicFullName
+      }));
+    }
+  }, [urlPatient]);
 
   // Load lookups
   const { data: lookups } = useQuery({
@@ -146,14 +170,21 @@ export default function AppointmentsPage() {
                         <button
                           type="button"
                           onClick={() => selectPatient(p)}
-                          className="w-full text-right p-3 hover:bg-stone-50 dark:hover:bg-stone-600 transition-colors"
+                          className="w-full text-right p-3 hover:bg-stone-50 dark:hover:bg-stone-600 transition-colors border-b border-stone-100 dark:border-stone-600 last:border-b-0"
                         >
-                          <p className="font-medium text-stone-900 dark:text-white">
+                          <p className="font-medium text-sm text-stone-900 dark:text-white">
                             {p.arabicFullName}
                           </p>
+                          {p.englishFullName && (
+                            <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>
+                          )}
                           <p className="text-xs text-stone-500 dark:text-stone-400">
-                            {p.nationalId || "No ID"} • MRN: {p.mrn || "—"}
+                            {p.identifierValue || p.nationalId || "No ID"}
+                            {" • "}MRN: {p.mrn || "—"}
                           </p>
+                          {p.phone1 && (
+                            <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>
+                          )}
                         </button>
                       </li>
                     ))}
@@ -165,9 +196,16 @@ export default function AppointmentsPage() {
                   <p className="text-sm font-medium text-teal-800 dark:text-teal-300">
                     Selected: {selectedPatient.arabicFullName}
                   </p>
+                  {selectedPatient.englishFullName && (
+                    <p className="text-xs text-teal-600 dark:text-teal-400">{selectedPatient.englishFullName}</p>
+                  )}
                   <p className="text-xs text-teal-600 dark:text-teal-400">
-                    MRN: {selectedPatient.mrn}
+                    {selectedPatient.identifierValue || selectedPatient.nationalId || "No ID"}
+                    {" • "}MRN: {selectedPatient.mrn || "—"}
                   </p>
+                  {selectedPatient.phone1 && (
+                    <p className="text-xs text-teal-600 dark:text-teal-400">Phone: {selectedPatient.phone1}</p>
+                  )}
                 </div>
               )}
             </div>

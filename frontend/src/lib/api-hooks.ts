@@ -62,6 +62,11 @@ export async function searchPatients(query: string): Promise<Patient[]> {
 }
 
 // -- Patient CRUD --
+export async function fetchPatientById(id: number): Promise<Patient> {
+  const raw = await api<{ patient: any }>(`/patients/${id}`);
+  return mapPatient(raw.patient);
+}
+
 export async function updatePatient(id: number, payload: any) {
   const raw = await api<{ patient: any }>(`/patients/${id}`, {
     method: "PUT",
