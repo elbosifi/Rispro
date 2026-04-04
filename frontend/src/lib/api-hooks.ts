@@ -33,25 +33,42 @@ export async function fetchDaySettings() {
 }
 
 // -- Patient Search --
+function mapPatient(raw: any): Patient {
+  return {
+    id: raw.id,
+    mrn: raw.mrn ?? raw.patient_mrn ?? null,
+    nationalId: raw.national_id ?? raw.nationalId ?? null,
+    arabicFullName: raw.arabic_full_name ?? raw.arabicFullName ?? "",
+    englishFullName: raw.english_full_name ?? raw.englishFullName ?? null,
+    ageYears: raw.age_years ?? raw.ageYears ?? 0,
+    estimatedDateOfBirth: raw.estimated_date_of_birth ?? raw.estimatedDateOfBirth ?? null,
+    sex: raw.sex ?? "",
+    phone1: raw.phone_1 ?? raw.phone1 ?? "",
+    phone2: raw.phone_2 ?? raw.phone2 ?? null,
+    address: raw.address ?? null
+  };
+}
+
 export async function searchPatients(query: string): Promise<Patient[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
-  return api<{ patients: Patient[] }>(`/patients?${params.toString()}`).then((r) => r.patients);
+  return api<{ patients: any[] }>(`/patients?${params.toString()}`)
+    .then((r) => r.patients.map(mapPatient));
 }
 
 // -- Patient CRUD --
 export async function updatePatient(id: number, payload: any) {
-  return api<{ patient: Patient }>(`/patients/${id}`, {
+  return api<{ patient: any }>(`/patients/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
-  }).then((r) => r.patient);
+  }).then((r) => mapPatient(r.patient));
 }
 
 export async function createPatient(payload: any) {
-  return api<{ patient: Patient }>("/patients", {
+  return api<{ patient: any }>("/patients", {
     method: "POST",
     body: JSON.stringify(payload)
-  }).then((r) => r.patient);
+  }).then((r) => mapPatient(r.patient));
 }
 
 // -- Appointments --
