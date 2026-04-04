@@ -86,8 +86,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [originalNationalId, setOriginalNationalId] = useState("");
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
-  const [savedPatient, setSavedPatient] = useState<Patient | null>(null);
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4500);
+  };
   const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
   const [addingToken, setAddingToken] = useState<string | null>(null);
   const [addTokenError, setAddTokenError] = useState<string | null>(null);
@@ -147,7 +151,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const createMutation = useMutation({
     mutationFn: createPatient,
     onSuccess: (patient) => {
-      setSavedPatient(patient);
       setForm(DEFAULT_FORM);
       setEnglishNameManuallyEdited(false);
       setMissingTokenInputs({});
@@ -155,14 +158,15 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setAddTokenError(null);
       prevArabicTokenCountRef.current = 0;
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+      showToast(`Patient registered: ${patient.arabicFullName} (MRN: ${patient.mrn})`);
       onSuccess?.(patient);
     }
   });
   const updateMutation = useMutation({
     mutationFn: (data: { payload: any }) => updatePatient(patientId!, data.payload),
     onSuccess: (patient) => {
-      setSavedPatient(patient);
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
+      showToast(`Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
     }
   });
@@ -458,47 +462,27 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </div>
             </div>
           )}
-
-          {/* Success Banner (both create and edit) */}
-          {savedPatient && (
-            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
-              <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">
-                {isEdit ? "Updated Successfully" : "Registered Successfully"}
-              </h3>
-              <div className="text-sm text-stone-700 dark:text-stone-300">
-                <p className="font-medium">{savedPatient.arabicFullName}</p>
-                <p className="text-xs text-stone-500 mt-1">MRN: {savedPatient.mrn}</p>
-                {savedPatient.identifierValue && <p className="text-xs text-stone-500">ID: {savedPatient.identifierType === "national_id" ? "National" : savedPatient.identifierType} — {savedPatient.identifierValue}</p>}
-              </div>
-              <button onClick={() => setSavedPatient(null)} className="mt-3 text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Dismiss</button>
-            </div>
-          )}
         </div>
       </div>
     );
   }
 
-  // Edit mode: form + success banner
+  // Edit mode: form only (toast handles success)
   if (isEdit) {
     return (
-      <div className="space-y-6">
+      <>
         {formFields}
-        {savedPatient && (
-          <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
-            <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Updated Successfully</h3>
-            <div className="text-sm text-stone-700 dark:text-stone-300">
-              <p className="font-medium">{savedPatient.arabicFullName}</p>
-              <p className="text-xs text-stone-500 mt-1">MRN: {savedPatient.mrn}</p>
-              {savedPatient.identifierValue && <p className="text-xs text-stone-500">ID: {savedPatient.identifierType === "national_id" ? "National" : savedPatient.identifierType} — {savedPatient.identifierValue}</p>}
-            </div>
-            <button onClick={() => setSavedPatient(null)} className="mt-3 text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Dismiss</button>
-          </div>
-        )}
-      </div>
+        {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      </>
     );
   }
 
-  return formFields;
+  return (
+    <>
+      {formFields}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+    </>
+  );
 }
 
 // -- Sub-components --
@@ -530,6 +514,20 @@ function Field({ label, value }: { label: string; value: string }) {
     <div className="flex justify-between items-baseline py-1 border-b border-stone-100 dark:border-stone-700 last:border-b-0">
       <span className="text-stone-500 dark:text-stone-400 text-xs">{label}</span>
       <span className="text-stone-900 dark:text-white text-sm font-medium text-right">{value}</span>
+    </div>
+  );
+}
+
+function Toast({ message, type, onClose }: { message: string; type: "success" | "error"; onClose: () => void }) {
+  const bg = type === "success"
+    ? "bg-emerald-600"
+    : "bg-red-600";
+  return (
+    <div className="fixed top-6 right-6 z-[100] animate-slide-in">
+      <div className={`${bg} text-white px-5 py-3 rounded-lg shadow-lg flex items-center gap-3 max-w-sm`}>
+        <span className="text-sm font-medium flex-1">{message}</span>
+        <button onClick={onClose} className="text-white/80 hover:text-white shrink-0">✕</button>
+      </div>
     </div>
   );
 }
