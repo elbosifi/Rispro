@@ -1,6 +1,67 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 
+/** @typedef {import("../types/domain.js").AuditEvent} DomainAuditEvent */
+/** @typedef {import("../types/db.js").DbExecutor} DbExecutor */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+
+/**
+ * @typedef AuditEntryInput
+ * @property {string} entityType
+ * @property {NullableUserId} [entityId]
+ * @property {string} actionType
+ * @property {unknown} [oldValues]
+ * @property {unknown} [newValues]
+ * @property {NullableUserId} [changedByUserId]
+ */
+
+/**
+ * @typedef AuditFilters
+ * @property {UserId} [limit]
+ * @property {string} [entityType]
+ * @property {string} [actionType]
+ * @property {UserId} [changedByUserId]
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ */
+
+/**
+ * @typedef AuditLogRow
+ * @property {number} id
+ * @property {string} entity_type
+ * @property {NullableUserId} entity_id
+ * @property {string} action_type
+ * @property {unknown} old_values
+ * @property {unknown} new_values
+ * @property {NullableUserId} changed_by_user_id
+ * @property {string} created_at
+ * @property {string | null} [changed_by_name]
+ * @property {string | null} [changed_by_username]
+ */
+
+/**
+ * @typedef AuditEntityTypeRow
+ * @property {string} entity_type
+ */
+
+/**
+ * @typedef AuditActionTypeRow
+ * @property {string} action_type
+ */
+
+/**
+ * @typedef AuditUserOptionRow
+ * @property {UserId} id
+ * @property {string | null} full_name
+ * @property {string | null} username
+ */
+
+/**
+ * @param {DbExecutor} [executor]
+ */
 async function isAuditEnabled(executor = pool) {
   const { rows } = await executor.query(
     `
@@ -12,10 +73,30 @@ async function isAuditEnabled(executor = pool) {
     `
   );
 
-  const value = rows[0]?.setting_value?.value;
+  const firstRow = /** @type {{ setting_value?: { value?: unknown } } | undefined} */ (rows[0]);
+  const value = String(firstRow?.setting_value?.value ?? "");
   return value !== "disabled";
 }
 
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
+ * @param {AuditEntryInput & Partial<DomainAuditEvent>} entry
+ * @param {DbExecutor} [executor]
+ * @returns {Promise<AuditLogRow | null>}
+ */
 export async function logAuditEntry(
   {
     entityType,
@@ -54,9 +135,14 @@ export async function logAuditEntry(
     ]
   );
 
-  return rows[0];
+  return requireRow(/** @type {AuditLogRow | undefined} */ (rows[0]), "Failed to write audit log entry.");
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean, max?: number }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = false, max = 5000 } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -75,11 +161,18 @@ function normalizePositiveInteger(value, fieldName, { required = false, max = 50
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeStringFilter(value) {
   const clean = String(value || "").trim();
   return clean || null;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizeDateFilter(value, fieldName) {
   const clean = String(value || "").trim();
 
@@ -94,6 +187,10 @@ function normalizeDateFilter(value, fieldName) {
   return clean;
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ * @param {{ includeLimit?: boolean }} [options]
+ */
 function buildAuditFilterQuery(filters = {}, { includeLimit = true } = {}) {
   const cleanLimit = includeLimit ? Math.min(Math.max(Number(filters.limit) || 100, 1), 5000) : null;
   const entityType = normalizeStringFilter(filters.entityType);
@@ -145,6 +242,10 @@ function buildAuditFilterQuery(filters = {}, { includeLimit = true } = {}) {
   return { params, whereClause, limitClause };
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ * @returns {Promise<AuditLogRow[]>}
+ */
 export async function listAuditEntries(filters = {}) {
   const { params, whereClause, limitClause } = buildAuditFilterQuery(filters, { includeLimit: true });
 
@@ -170,9 +271,10 @@ export async function listAuditEntries(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {AuditLogRow[]} */ (rows);
 }
 
+/** @returns {Promise<{ entityTypes: string[], actionTypes: string[], users: AuditUserOptionRow[] }>} */
 export async function listAuditFilterOptions() {
   const [entityTypeResult, actionTypeResult, userResult] = await Promise.all([
     pool.query(
@@ -201,18 +303,29 @@ export async function listAuditFilterOptions() {
     )
   ]);
 
+  const entityTypeRows = /** @type {AuditEntityTypeRow[]} */ (entityTypeResult.rows);
+  const actionTypeRows = /** @type {AuditActionTypeRow[]} */ (actionTypeResult.rows);
+  const userRows = /** @type {AuditUserOptionRow[]} */ (userResult.rows);
+
   return {
-    entityTypes: entityTypeResult.rows.map((row) => row.entity_type),
-    actionTypes: actionTypeResult.rows.map((row) => row.action_type),
-    users: userResult.rows
+    entityTypes: entityTypeRows.map((row) => row.entity_type),
+    actionTypes: actionTypeRows.map((row) => row.action_type),
+    users: userRows
   };
 }
 
+/**
+ * @param {unknown} value
+ */
 function escapeCsvValue(value) {
   const clean = String(value ?? "");
   return `"${clean.replaceAll('"', '""')}"`;
 }
 
+/**
+ * @param {AuditFilters} [filters]
+ * @returns {Promise<string>}
+ */
 export async function exportAuditEntriesCsv(filters = {}) {
   const rows = await listAuditEntries({ ...filters, limit: filters.limit || 2000 });
   const header = [

@@ -1,3 +1,5 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -8,6 +10,75 @@ import {
   normalizeLibyanPhone
 } from "../utils/normalize.js";
 
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/db.js").NullableDbNumeric} NullableDbNumeric */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+
+/**
+ * @typedef {object} PatientRegistrationRules
+ * @property {string} nationalIdRule
+ * @property {string} phoneRule
+ * @property {string} dobRule
+ */
+
+/**
+ * @typedef {object} PatientRow
+ * @property {number} id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} phone_2
+ * @property {string | null} address
+ * @property {string | null} estimated_date_of_birth
+ */
+
+/**
+ * @typedef {object} PatientPayload
+ * @property {string} [nationalId]
+ * @property {string} [nationalIdConfirmation]
+ * @property {string} [arabicFullName]
+ * @property {string} [englishFullName]
+ * @property {UserId} [ageYears]
+ * @property {string} [estimatedDateOfBirth]
+ * @property {string} [sex]
+ * @property {string} [phone1]
+ * @property {string} [phone2]
+ * @property {string} [address]
+ */
+
+/**
+ * @typedef {object} MergePatientsPayload
+ * @property {UserId} [targetPatientId]
+ * @property {UserId} [sourcePatientId]
+ * @property {string} [confirmationText]
+ */
+
+/**
+ * @typedef {object} PatientSettingRow
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef {object} PatientNoShowSummaryRow
+ * @property {NullableDbNumeric} [no_show_count]
+ * @property {string | null} [last_no_show_date]
+ */
+
+/**
+ * @typedef {UnknownRecord & { id: UserId }} PersistedPatientRow
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizePositiveInteger(value, fieldName) {
   const parsed = Number(value);
 
@@ -18,9 +89,14 @@ function normalizePositiveInteger(value, fieldName) {
   return parsed;
 }
 
+/**
+ * @param {unknown} nationalId
+ * @param {unknown} nationalIdConfirmation
+ * @param {string} rule
+ */
 function validateNationalId(nationalId, nationalIdConfirmation, rule) {
-  const cleanId = (nationalId || "").replace(/\D/g, "");
-  const cleanConfirmation = (nationalIdConfirmation || "").replace(/\D/g, "");
+  const cleanId = String(nationalId || "").replace(/\D/g, "");
+  const cleanConfirmation = String(nationalIdConfirmation || "").replace(/\D/g, "");
   const hasAny = cleanId.length > 0 || cleanConfirmation.length > 0;
 
   if (rule === "optional") {
@@ -62,8 +138,13 @@ function validateNationalId(nationalId, nationalIdConfirmation, rule) {
   return cleanId;
 }
 
+/**
+ * @param {unknown} phone
+ * @param {string} fieldName
+ * @param {{ required: boolean }} options
+ */
 function validatePhone(phone, fieldName, { required }) {
-  const normalized = normalizeLibyanPhone(phone);
+  const normalized = normalizeLibyanPhone(String(phone || ""));
 
   if (!normalized && !required) {
     return "";
@@ -84,6 +165,10 @@ function validatePhone(phone, fieldName, { required }) {
   return normalized;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ */
 function normalizeDateString(value, fieldName) {
   const raw = String(value || "").trim();
 
@@ -98,6 +183,9 @@ function normalizeDateString(value, fieldName) {
   return raw;
 }
 
+/**
+ * @param {string} dob
+ */
 function calculateAgeYearsFromDob(dob) {
   const parsed = new Date(`${dob}T00:00:00Z`);
 
@@ -121,6 +209,9 @@ function calculateAgeYearsFromDob(dob) {
   return age;
 }
 
+/**
+ * @returns {Promise<PatientRegistrationRules>}
+ */
 async function loadPatientRegistrationSettings() {
   const { rows } = await pool.query(
     `
@@ -130,10 +221,11 @@ async function loadPatientRegistrationSettings() {
     `
   );
 
-  const settings = rows.reduce((accumulator, row) => {
-    accumulator[row.setting_key] = row.setting_value?.value ?? "";
+  const settingRows = /** @type {PatientSettingRow[]} */ (rows);
+  const settings = settingRows.reduce((accumulator, row) => {
+    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, {});
+  }, /** @type {CategorySettings} */ ({}));
 
   return {
     nationalIdRule: settings.national_id_required || "required_with_confirmation",
@@ -142,6 +234,10 @@ async function loadPatientRegistrationSettings() {
   };
 }
 
+/**
+ * @param {PatientPayload} payload
+ * @param {PatientRegistrationRules} rules
+ */
 function validatePatientPayload(payload, rules) {
   const {
     nationalId,
@@ -168,7 +264,7 @@ function validatePatientPayload(payload, rules) {
   const hasAgeValue = String(ageYears ?? "").trim() !== "";
   const parsedAge = hasAgeValue ? Number(ageYears) : null;
 
-  if (!hasDob && hasAgeValue && (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
+  if (!hasDob && hasAgeValue && (parsedAge === null || !Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
     throw new HttpError(400, "ageYears must be a whole number between 0 and 130.");
   }
 
@@ -212,6 +308,10 @@ function validatePatientPayload(payload, rules) {
   };
 }
 
+/**
+ * @param {UserId} patientId
+ * @returns {Promise<PatientRow>}
+ */
 export async function getPatientById(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await pool.query(
@@ -224,13 +324,19 @@ export async function getPatientById(patientId) {
     [cleanPatientId]
   );
 
-  if (!rows[0]) {
+  const patient = /** @type {PatientRow | undefined} */ (rows[0]);
+
+  if (!patient) {
     throw new HttpError(404, "Patient not found.");
   }
 
-  return rows[0];
+  return patient;
 }
 
+/**
+ * @param {UserId} patientId
+ * @returns {Promise<{ noShowCount: number, lastNoShowDate: string | null }>}
+ */
 export async function getPatientNoShowSummary(patientId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await pool.query(
@@ -244,12 +350,18 @@ export async function getPatientNoShowSummary(patientId) {
     [cleanPatientId]
   );
 
+  const summary = /** @type {PatientNoShowSummaryRow | undefined} */ (rows[0]);
+
   return {
-    noShowCount: Number(rows[0]?.no_show_count || 0),
-    lastNoShowDate: rows[0]?.last_no_show_date || null
+    noShowCount: Number(summary?.no_show_count || 0),
+    lastNoShowDate: summary?.last_no_show_date || null
   };
 }
 
+/**
+ * @param {string} [searchTerm]
+ * @returns {Promise<PatientRow[]>}
+ */
 export async function searchPatients(searchTerm = "") {
   const term = searchTerm.trim();
   const pattern = `%${term}%`;
@@ -270,9 +382,14 @@ export async function searchPatients(searchTerm = "") {
     limit 25
   `;
   const { rows } = await pool.query(query, [term, pattern, normalizedPattern]);
-  return rows;
+  return /** @type {PatientRow[]} */ (rows);
 }
 
+/**
+ * @param {PatientPayload} payload
+ * @param {OptionalUserId} createdByUserId
+ * @returns {Promise<PersistedPatientRow>}
+ */
 export async function createPatient(payload, createdByUserId) {
   const rules = await loadPatientRegistrationSettings();
   const validated = validatePatientPayload(payload, rules);
@@ -325,20 +442,31 @@ export async function createPatient(payload, createdByUserId) {
       ]
     );
 
+    const createdPatient = /** @type {PersistedPatientRow | undefined} */ (rows[0]);
+
+    if (!createdPatient) {
+      throw new HttpError(500, "Failed to create patient.");
+    }
+
     await logAuditEntry(
       {
         entityType: "patient",
-        entityId: rows[0].id,
+        entityId: createdPatient.id,
         actionType: "create",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdPatient,
         changedByUserId: createdByUserId
       }
     );
 
-    return rows[0];
+    return createdPatient;
   } catch (error) {
-    if (error.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code) === "23505"
+    ) {
       throw new HttpError(409, "A patient with that national ID or MRN already exists.");
     }
 
@@ -346,6 +474,12 @@ export async function createPatient(payload, createdByUserId) {
   }
 }
 
+/**
+ * @param {UserId} patientId
+ * @param {PatientPayload} payload
+ * @param {OptionalUserId} updatedByUserId
+ * @returns {Promise<PersistedPatientRow>}
+ */
 export async function updatePatient(patientId, payload, updatedByUserId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const previousPatient = await getPatientById(cleanPatientId);
@@ -388,20 +522,31 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
       ]
     );
 
+    const updatedPatient = /** @type {PersistedPatientRow | undefined} */ (rows[0]);
+
+    if (!updatedPatient) {
+      throw new HttpError(500, "Failed to update patient.");
+    }
+
     await logAuditEntry(
       {
         entityType: "patient",
-        entityId: rows[0].id,
+        entityId: updatedPatient.id,
         actionType: "update",
         oldValues: previousPatient,
-        newValues: rows[0],
+        newValues: updatedPatient,
         changedByUserId: updatedByUserId
       }
     );
 
-    return rows[0];
+    return updatedPatient;
   } catch (error) {
-    if (error.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code) === "23505"
+    ) {
       throw new HttpError(409, "Another patient already uses that national ID or MRN.");
     }
 
@@ -409,6 +554,11 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
   }
 }
 
+/**
+ * @param {MergePatientsPayload} payload
+ * @param {OptionalUserId} updatedByUserId
+ * @returns {Promise<PatientRow>}
+ */
 export async function mergePatients(payload, updatedByUserId) {
   const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId");
   const sourcePatientId = normalizePositiveInteger(payload.sourcePatientId, "sourcePatientId");
@@ -473,7 +623,13 @@ export async function mergePatients(payload, updatedByUserId) {
     );
 
     await client.query("commit");
-    return targetPatient.rows[0];
+    const mergedPatient = /** @type {PatientRow | undefined} */ (targetPatient.rows[0]);
+
+    if (!mergedPatient) {
+      throw new HttpError(500, "Failed to load merged patient.");
+    }
+
+    return mergedPatient;
   } catch (error) {
     await client.query("rollback");
     throw error;

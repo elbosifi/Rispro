@@ -1,10 +1,262 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
+import {
+  APPOINTMENT_NON_CANCELLABLE_STATUSES,
+  APPOINTMENT_RECEPTION_ACTIVE_STATUSES,
+  isListableAppointmentStatus
+} from "../constants/appointment-statuses.js";
 
+/** @typedef {import("../types/domain.js").Appointment} DomainAppointment */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
+/** @typedef {import("../types/db.js").NullableDbNumeric} NullableDbNumeric */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+/** @typedef {import("../types/http.js").AuthenticatedUserContext & { id?: UserId }} AppointmentActor */
+
+/**
+ * @typedef PrintAppointmentRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string} modality_name_en
+ * @property {string} modality_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string} status
+ * @property {boolean} is_walk_in
+ * @property {string | null} notes
+ */
+
+/**
+ * @typedef AvailabilitySlot
+ * @property {string} appointment_date
+ * @property {number} booked_count
+ * @property {number} remaining_capacity
+ * @property {number | null} daily_capacity
+ * @property {boolean} is_full
+ */
+
+/**
+ * @typedef AppointmentFilters
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ * @property {string} [date]
+ * @property {string} [modalityId]
+ * @property {string} [query]
+ * @property {string[]} [status]
+ */
+
+/**
+ * @typedef AppointmentStatisticsFilters
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ * @property {string} [date]
+ * @property {string} [modalityId]
+ */
+
+/**
+ * @typedef AppointmentUpdateOptions
+ * @property {string} [supervisorUsername]
+ * @property {string} [supervisorPassword]
+ */
+
+/**
+ * @typedef SchedulingSettingRow
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef AppointmentStatusRow
+ * @property {number} id
+ * @property {AppointmentStatus} status
+ */
+
+/**
+ * @typedef SequenceRow
+ * @property {NullableDbNumeric} last_daily_sequence
+ */
+
+/**
+ * @typedef ModalitySlotAggregateRow
+ * @property {NullableDbNumeric} booked_count
+ * @property {NullableDbNumeric} last_slot_number
+ */
+
+/**
+ * @typedef BookingStatsRow
+ * @property {NullableDbNumeric} booked_count
+ * @property {NullableDbNumeric} last_slot_number
+ * @property {NullableDbNumeric} last_daily_sequence
+ */
+
+/**
+ * @typedef AppointmentDbRow
+ * @property {number} id
+ * @property {number} patient_id
+ * @property {number} modality_id
+ * @property {number | null} exam_type_id
+ * @property {number | null} reporting_priority_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {number} daily_sequence
+ * @property {number | null} modality_slot_number
+ * @property {AppointmentStatus} status
+ * @property {string | null} notes
+ * @property {string | null} overbooking_reason
+ */
+
+/**
+ * @typedef PatientLookupRow
+ * @property {number} id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} estimated_date_of_birth
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} phone_2
+ * @property {string | null} address
+ */
+
+/**
+ * @typedef ModalityRow
+ * @property {number} id
+ * @property {string} code
+ * @property {string} name_ar
+ * @property {string} name_en
+ * @property {number | null} daily_capacity
+ * @property {string | null} general_instruction_ar
+ * @property {string | null} general_instruction_en
+ * @property {boolean} is_active
+ */
+
+/**
+ * @typedef ExamTypeRow
+ * @property {number} id
+ * @property {number} modality_id
+ * @property {string} name_ar
+ * @property {string} name_en
+ * @property {string | null} specific_instruction_ar
+ * @property {string | null} specific_instruction_en
+ * @property {boolean} is_active
+ */
+
+/**
+ * @typedef ReportingPriorityRow
+ * @property {number} id
+ * @property {string} code
+ * @property {string} name_ar
+ * @property {string} name_en
+ */
+
+/**
+ * @typedef AppointmentCreateResult
+ * @property {AppointmentDbRow} appointment
+ * @property {UnknownRecord} patient
+ * @property {UnknownRecord} modality
+ * @property {UnknownRecord | null} examType
+ * @property {UnknownRecord | null} priority
+ * @property {string} barcodeValue
+ */
+
+/**
+ * @typedef AppointmentStatsSummaryRow
+ * @property {DbNumeric} total_appointments
+ * @property {DbNumeric} unique_patients
+ * @property {DbNumeric} unique_modalities
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} in_queue_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} cancelled_count
+ * @property {DbNumeric} walk_in_count
+ */
+
+/**
+ * @typedef AppointmentListRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} created_at
+ * @property {number | null} modality_slot_number
+ * @property {AppointmentStatus} status
+ * @property {string | null} notes
+ * @property {boolean} is_walk_in
+ * @property {boolean} is_overbooked
+ * @property {string | null} overbooking_reason
+ * @property {number} patient_id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string | null} sex
+ * @property {string | null} phone_1
+ * @property {string | null} address
+ * @property {number} modality_id
+ * @property {string} modality_code
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} general_instruction_ar
+ * @property {string | null} general_instruction_en
+ * @property {number | null} exam_type_id
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} specific_instruction_ar
+ * @property {string | null} specific_instruction_en
+ * @property {string | null} priority_name_ar
+ * @property {string | null} priority_name_en
+ */
+
+/**
+ * @typedef ModalityBreakdownRow
+ * @property {number} modality_id
+ * @property {string} modality_code
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {DbNumeric} total_count
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} in_queue_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} cancelled_count
+ */
+
+/**
+ * @typedef StatusBreakdownRow
+ * @property {AppointmentStatus} status
+ * @property {DbNumeric} total_count
+ */
+
+/**
+ * @typedef DailyBreakdownRow
+ * @property {string} appointment_date
+ * @property {DbNumeric} total_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} cancelled_count
+ * @property {DbNumeric} no_show_count
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ * @returns {number | null}
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -23,6 +275,11 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} [fieldName]
+ * @returns {string}
+ */
 function normalizeAppointmentDate(value, fieldName = "appointmentDate") {
   const raw = String(value || "").trim();
 
@@ -33,15 +290,28 @@ function normalizeAppointmentDate(value, fieldName = "appointmentDate") {
   return raw;
 }
 
+/**
+ * @param {string} appointmentDate
+ * @param {number} dailySequence
+ * @returns {string}
+ */
 function buildAccessionNumber(appointmentDate, dailySequence) {
   const compactDate = appointmentDate.replaceAll("-", "");
   return `${compactDate}-${String(dailySequence).padStart(3, "0")}`;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeOptionalText(value) {
   return String(value || "").trim();
 }
 
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
 function normalizeCapacityLimit(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -50,6 +320,10 @@ function normalizeCapacityLimit(value) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
 function normalizeDailyCapacity(value) {
   if (value === undefined || value === null || value === "") {
     return 0;
@@ -64,6 +338,11 @@ function normalizeDailyCapacity(value) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @param {boolean} [defaultValue]
+ * @returns {boolean}
+ */
 function normalizeSettingToggle(value, defaultValue = true) {
   const raw = String(value || "").trim().toLowerCase();
 
@@ -82,6 +361,10 @@ function normalizeSettingToggle(value, defaultValue = true) {
   return defaultValue;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeIsoDate(value) {
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10);
@@ -90,12 +373,34 @@ function normalizeIsoDate(value) {
   return String(value || "").slice(0, 10);
 }
 
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
+ * @param {string} isoDate
+ * @returns {string}
+ */
 function getTripoliWeekday(isoDate) {
   const date = new Date(`${isoDate}T00:00:00Z`);
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: TRIPOLI_TIME_ZONE, weekday: "long" }).format(date);
   return weekday.toLowerCase();
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @returns {Promise<{ fridayEnabled: boolean, saturdayEnabled: boolean }>}
+ */
 export async function getAppointmentDaySettings(client = pool) {
   const { rows } = await client.query(
     `
@@ -106,10 +411,11 @@ export async function getAppointmentDaySettings(client = pool) {
     `
   );
 
-  const values = rows.reduce((accumulator, row) => {
-    accumulator[row.setting_key] = row.setting_value?.value;
+  const settingsRows = /** @type {SchedulingSettingRow[]} */ (rows);
+  const values = settingsRows.reduce((accumulator, row) => {
+    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, {});
+  }, /** @type {CategorySettings} */ ({}));
 
   return {
     fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
@@ -117,6 +423,11 @@ export async function getAppointmentDaySettings(client = pool) {
   };
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {string} appointmentDate
+ * @returns {Promise<void>}
+ */
 async function requireAppointmentDayEnabled(client, appointmentDate) {
   const settings = await getAppointmentDaySettings(client);
   const weekday = getTripoliWeekday(appointmentDate);
@@ -130,6 +441,10 @@ async function requireAppointmentDayEnabled(client, appointmentDate) {
   }
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @returns {Promise<number | null>}
+ */
 async function getMaxCasesPerModality(client) {
   const { rows } = await client.query(
     `
@@ -141,10 +456,16 @@ async function getMaxCasesPerModality(client) {
     `
   );
 
-  const raw = rows[0]?.setting_value?.value;
+  const settingRow = /** @type {{ setting_value?: { value?: unknown } } | undefined} */ (rows[0]);
+  const raw = settingRow?.setting_value?.value;
   return normalizeCapacityLimit(raw);
 }
 
+/**
+ * @param {number | null} modalityCapacity
+ * @param {number | null} maxCasesPerModality
+ * @returns {number | null}
+ */
 function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
   const modalityValue = normalizeCapacityLimit(modalityCapacity);
   const globalValue = normalizeCapacityLimit(maxCasesPerModality);
@@ -156,6 +477,11 @@ function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
   return modalityValue || globalValue || 1;
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} appointmentId
+ * @returns {Promise<AppointmentDbRow>}
+ */
 async function getAppointmentById(client, appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const { rows } = await client.query(
@@ -168,19 +494,27 @@ async function getAppointmentById(client, appointmentId) {
     [cleanAppointmentId]
   );
 
-  if (!rows[0]) {
+  const appointment = /** @type {AppointmentDbRow | undefined} */ (rows[0]);
+
+  if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return rows[0];
+  return appointment;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {string} appointmentDate
+ * @param {number | null} [excludeAppointmentId]
+ * @returns {Promise<number>}
+ */
 async function nextDailySequence(client, appointmentDate, excludeAppointmentId = null) {
   const params = [appointmentDate];
   let excludeSql = "";
 
   if (excludeAppointmentId) {
-    params.push(excludeAppointmentId);
+    params.push(String(excludeAppointmentId));
     excludeSql = `and id <> $${params.length}`;
   }
 
@@ -194,9 +528,17 @@ async function nextDailySequence(client, appointmentDate, excludeAppointmentId =
     params
   );
 
-  return Number(rows[0]?.last_daily_sequence || 0) + 1;
+  const sequenceRow = /** @type {SequenceRow | undefined} */ (rows[0]);
+  return Number(sequenceRow?.last_daily_sequence || 0) + 1;
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} modalityId
+ * @param {string} appointmentDate
+ * @param {number | null} [excludeAppointmentId]
+ * @returns {Promise<{ bookedCount: number, slotNumber: number }>}
+ */
 async function nextModalitySlotNumber(client, modalityId, appointmentDate, excludeAppointmentId = null) {
   const params = [modalityId, appointmentDate];
   let excludeSql = "";
@@ -219,12 +561,17 @@ async function nextModalitySlotNumber(client, modalityId, appointmentDate, exclu
     params
   );
 
+  const aggregateRow = /** @type {ModalitySlotAggregateRow | undefined} */ (rows[0]);
   return {
-    bookedCount: Number(rows[0]?.booked_count || 0),
-    slotNumber: Number(rows[0]?.last_slot_number || 0) + 1
+    bookedCount: Number(aggregateRow?.booked_count || 0),
+    slotNumber: Number(aggregateRow?.last_slot_number || 0) + 1
   };
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeDateOrToday(value) {
   if (!value) {
     return getTripoliToday();
@@ -233,7 +580,13 @@ function normalizeDateOrToday(value) {
   return normalizeAppointmentDate(value);
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} patientId
+ * @returns {Promise<PatientLookupRow>}
+ */
 async function getPatientById(client, patientId) {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await client.query(
     `
       select id, mrn, national_id, arabic_full_name, english_full_name, age_years, estimated_date_of_birth, sex, phone_1, phone_2, address
@@ -241,16 +594,23 @@ async function getPatientById(client, patientId) {
       where id = $1
       limit 1
     `,
-    [patientId]
+    [cleanPatientId]
   );
 
-  if (!rows[0]) {
+  const patient = /** @type {PatientLookupRow | undefined} */ (rows[0]);
+
+  if (!patient) {
     throw new HttpError(404, "Patient not found.");
   }
 
-  return rows[0];
+  return patient;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} modalityId
+ * @returns {Promise<ModalityRow>}
+ */
 async function getModalityById(client, modalityId) {
   const { rows } = await client.query(
     `
@@ -262,13 +622,21 @@ async function getModalityById(client, modalityId) {
     [modalityId]
   );
 
-  if (!rows[0] || !rows[0].is_active) {
+  const modality = /** @type {ModalityRow | undefined} */ (rows[0]);
+
+  if (!modality || !modality.is_active) {
     throw new HttpError(404, "Modality not found.");
   }
 
-  return rows[0];
+  return modality;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} examTypeId
+ * @param {number | string} [modalityId]
+ * @returns {Promise<ExamTypeRow | null>}
+ */
 async function getExamTypeById(client, examTypeId, modalityId) {
   if (!examTypeId) {
     return null;
@@ -284,17 +652,24 @@ async function getExamTypeById(client, examTypeId, modalityId) {
     [examTypeId]
   );
 
-  if (!rows[0] || !rows[0].is_active) {
+  const examType = /** @type {ExamTypeRow | undefined} */ (rows[0]);
+
+  if (!examType || !examType.is_active) {
     throw new HttpError(404, "Exam type not found.");
   }
 
-  if (Number(rows[0].modality_id) !== Number(modalityId)) {
+  if (Number(examType.modality_id) !== Number(modalityId)) {
     throw new HttpError(400, "The selected exam type does not belong to the selected modality.");
   }
 
-  return rows[0];
+  return examType;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} reportingPriorityId
+ * @returns {Promise<ReportingPriorityRow | null>}
+ */
 async function getPriorityById(client, reportingPriorityId) {
   if (!reportingPriorityId) {
     return null;
@@ -310,13 +685,16 @@ async function getPriorityById(client, reportingPriorityId) {
     [reportingPriorityId]
   );
 
-  if (!rows[0]) {
+  const priority = /** @type {ReportingPriorityRow | undefined} */ (rows[0]);
+
+  if (!priority) {
     throw new HttpError(404, "Reporting priority not found.");
   }
 
-  return rows[0];
+  return priority;
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[], examTypes: ExamTypeRow[], priorities: ReportingPriorityRow[] }>} */
 export async function listAppointmentLookups() {
   const [modalitiesResult, examTypesResult, prioritiesResult] = await Promise.all([
     pool.query(
@@ -345,12 +723,13 @@ export async function listAppointmentLookups() {
   ]);
 
   return {
-    modalities: modalitiesResult.rows,
-    examTypes: examTypesResult.rows,
-    priorities: prioritiesResult.rows
+    modalities: /** @type {ModalityRow[]} */ (modalitiesResult.rows),
+    examTypes: /** @type {ExamTypeRow[]} */ (examTypesResult.rows),
+    priorities: /** @type {ReportingPriorityRow[]} */ (prioritiesResult.rows)
   };
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[], examTypes: ExamTypeRow[] }>} */
 export async function listExamTypesForSettings() {
   const [modalitiesResult, examTypesResult] = await Promise.all([
     pool.query(
@@ -372,11 +751,17 @@ export async function listExamTypesForSettings() {
   ]);
 
   return {
-    modalities: modalitiesResult.rows,
-    examTypes: examTypesResult.rows
+    modalities: /** @type {ModalityRow[]} */ (modalitiesResult.rows),
+    examTypes: /** @type {ExamTypeRow[]} */ (examTypesResult.rows)
   };
 }
 
+/** @returns {Promise<AppointmentListRow[]>} */
+
+/**
+ * @param {unknown} filters
+ */
+/** @param {AppointmentFilters} [filters] */
 export async function listAppointmentsForPrint(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -392,7 +777,7 @@ export async function listAppointmentsForPrint(filters = {}) {
     const start = dateFrom || dateTo;
     const end = dateTo || dateFrom;
 
-    if (start > end) {
+    if (/** @type {string} */ (start) > /** @type {string} */ (end)) {
       throw new HttpError(400, "dateFrom cannot be later than dateTo.");
     }
 
@@ -425,9 +810,7 @@ export async function listAppointmentsForPrint(filters = {}) {
   }
 
   if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
-    const validStatuses = filters.status.filter((s) =>
-      ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].includes(s)
-    );
+    const validStatuses = filters.status.filter((s) => isListableAppointmentStatus(s));
     if (validStatuses.length > 0) {
       params.push(validStatuses);
       statusFilterSql = ` and appointments.status = ANY($${params.length})`;
@@ -484,9 +867,15 @@ export async function listAppointmentsForPrint(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {AppointmentListRow[]} */ (rows);
 }
 
+/** @returns {Promise<{ filters: { date: string | null, dateFrom: string, dateTo: string, modalityId: string }, summary: Record<string, number>, modalityBreakdown: ModalityBreakdownRow[], statusBreakdown: StatusBreakdownRow[], dailyBreakdown: DailyBreakdownRow[] }>} */
+
+/**
+ * @param {unknown} filters
+ */
+/** @param {AppointmentStatisticsFilters} [filters] */
 export async function listAppointmentStatistics(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -499,7 +888,7 @@ export async function listAppointmentStatistics(filters = {}) {
     const start = dateFrom || dateTo;
     const end = dateTo || dateFrom;
 
-    if (start > end) {
+    if (/** @type {string} */ (start) > /** @type {string} */ (end)) {
       throw new HttpError(400, "dateFrom cannot be later than dateTo.");
     }
 
@@ -585,7 +974,19 @@ export async function listAppointmentStatistics(filters = {}) {
     )
   ]);
 
-  const summary = summaryResult.rows[0] || {};
+  const summary = /** @type {AppointmentStatsSummaryRow} */ (
+    /** @type {AppointmentStatsSummaryRow | undefined} */ (summaryResult.rows[0]) || {
+      total_appointments: 0,
+      unique_patients: 0,
+      unique_modalities: 0,
+      scheduled_count: 0,
+      in_queue_count: 0,
+      completed_count: 0,
+      no_show_count: 0,
+      cancelled_count: 0,
+      walk_in_count: 0
+    }
+  );
 
   return {
     filters: {
@@ -605,7 +1006,7 @@ export async function listAppointmentStatistics(filters = {}) {
       cancelled_count: Number(summary.cancelled_count || 0),
       walk_in_count: Number(summary.walk_in_count || 0)
     },
-    modalityBreakdown: modalityResult.rows.map((row) => ({
+    modalityBreakdown: /** @type {ModalityBreakdownRow[]} */ (modalityResult.rows).map((row) => ({
       modality_id: row.modality_id,
       modality_code: row.modality_code,
       modality_name_ar: row.modality_name_ar,
@@ -617,11 +1018,11 @@ export async function listAppointmentStatistics(filters = {}) {
       no_show_count: Number(row.no_show_count || 0),
       cancelled_count: Number(row.cancelled_count || 0)
     })),
-    statusBreakdown: statusResult.rows.map((row) => ({
+    statusBreakdown: /** @type {StatusBreakdownRow[]} */ (statusResult.rows).map((row) => ({
       status: row.status,
       total_count: Number(row.total_count || 0)
     })),
-    dailyBreakdown: dailyResult.rows.map((row) => ({
+    dailyBreakdown: /** @type {DailyBreakdownRow[]} */ (dailyResult.rows).map((row) => ({
       appointment_date: row.appointment_date,
       total_count: Number(row.total_count || 0),
       completed_count: Number(row.completed_count || 0),
@@ -631,6 +1032,10 @@ export async function listAppointmentStatistics(filters = {}) {
   };
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @returns {Promise<PrintAppointmentRow>}
+ */
 export async function getAppointmentPrintDetails(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
@@ -686,19 +1091,29 @@ export async function getAppointmentPrintDetails(appointmentId) {
     [cleanAppointmentId]
   );
 
-  if (!rows[0]) {
+  const fallbackAppointment = /** @type {AppointmentListRow | undefined} */ (rows[0]);
+
+  if (!fallbackAppointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return rows[0];
+  return fallbackAppointment;
 }
 
+/**
+ * @param {number | string} [modalityId]
+ * @param {number} [days]
+ * @returns {Promise<AvailabilitySlot[]>}
+ */
 export async function listAvailability(modalityId, days = 14) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
+  if (!cleanModalityId) {
+    throw new HttpError(400, "modalityId is required.");
+  }
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
-  const modality = await getModalityById(pool, cleanModalityId);
+  const modality = await getModalityById(/** @type {any} */ (pool), cleanModalityId);
   const daySettings = await getAppointmentDaySettings(pool);
-  const maxCasesPerModality = await getMaxCasesPerModality(pool);
+  const maxCasesPerModality = await getMaxCasesPerModality(/** @type {any} */ (pool));
 
   const { rows } = await pool.query(
     `
@@ -745,7 +1160,7 @@ export async function listAvailability(modalityId, days = 14) {
     .map((row) => {
       const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
       const bookedCount = Number(row.booked_count || 0);
-      const remaining = Math.max(capacity - bookedCount, 0);
+      const remaining = Math.max((capacity || 0) - bookedCount, 0);
 
       return {
         appointment_date: row.appointment_date,
@@ -757,6 +1172,15 @@ export async function listAvailability(modalityId, days = 14) {
     });
 }
 
+/** @returns {Promise<{ modalities: ModalityRow[] }>} */
+
+/**
+ * @param {unknown} includeInactive
+ */
+/**
+ * @param {{ includeInactive?: boolean }} [options]
+ * @returns {Promise<{ modalities: ModalityRow[] }>}
+ */
 export async function listModalitiesForSettings({ includeInactive = false } = {}) {
   const whereClause = includeInactive ? "" : "where is_active = true";
   const { rows } = await pool.query(
@@ -771,6 +1195,12 @@ export async function listModalitiesForSettings({ includeInactive = false } = {}
   return { modalities: rows };
 }
 
+/** @returns {Promise<ModalityRow>} */
+/**
+ * @param {UnknownRecord} payload
+ * @param {UserId | null} [currentUserId]
+ * @returns {Promise<ModalityRow>}
+ */
 export async function createModality(payload, currentUserId = null) {
   const code = String(payload.code || "").trim();
   const nameAr = String(payload.nameAr || "").trim();
@@ -804,15 +1234,16 @@ export async function createModality(payload, currentUserId = null) {
       `,
       [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
+    const createdModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to create modality.");
 
     if (currentUserId) {
       await logAuditEntry(
         {
           entityType: "modality",
-          entityId: rows[0].id,
+          entityId: createdModality.id,
           actionType: "create",
           oldValues: null,
-          newValues: rows[0],
+          newValues: createdModality,
           changedByUserId: currentUserId
         },
         client
@@ -820,7 +1251,7 @@ export async function createModality(payload, currentUserId = null) {
     }
 
     await client.query("commit");
-    return rows[0];
+    return createdModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -829,6 +1260,13 @@ export async function createModality(payload, currentUserId = null) {
   }
 }
 
+/** @returns {Promise<ModalityRow>} */
+/**
+ * @param {number | string} modalityId
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<ModalityRow>}
+ */
 export async function updateModality(modalityId, payload, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const code = String(payload.code || "").trim();
@@ -858,7 +1296,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
       [cleanModalityId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ModalityRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing) {
       throw new HttpError(404, "Modality not found.");
@@ -881,6 +1319,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
       `,
       [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
     );
+    const updatedModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to update modality.");
 
     await logAuditEntry(
       {
@@ -888,14 +1327,14 @@ export async function updateModality(modalityId, payload, currentUserId) {
         entityId: cleanModalityId,
         actionType: "update",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: updatedModality,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return updatedModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -904,6 +1343,12 @@ export async function updateModality(modalityId, payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<ModalityRow>} */
+/**
+ * @param {number | string} modalityId
+ * @param {UserId} currentUserId
+ * @returns {Promise<ModalityRow>}
+ */
 export async function deleteModality(modalityId, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const client = await pool.connect();
@@ -921,7 +1366,7 @@ export async function deleteModality(modalityId, currentUserId) {
       [cleanModalityId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ModalityRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Modality not found.");
@@ -938,6 +1383,7 @@ export async function deleteModality(modalityId, currentUserId) {
       `,
       [cleanModalityId]
     );
+    const deletedModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to delete modality.");
 
     await logAuditEntry(
       {
@@ -945,14 +1391,14 @@ export async function deleteModality(modalityId, currentUserId) {
         entityId: cleanModalityId,
         actionType: "delete",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: deletedModality,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return deletedModality;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -961,6 +1407,11 @@ export async function deleteModality(modalityId, currentUserId) {
   }
 }
 
+/**
+ * @param {UnknownRecord} payload
+ * @param {UserId | null} [currentUserId]
+ * @returns {Promise<UnknownRecord>}
+ */
 export async function createExamType(payload, currentUserId = null) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const nameAr = String(payload.nameAr || "").trim();
@@ -976,7 +1427,7 @@ export async function createExamType(payload, currentUserId = null) {
 
   try {
     await client.query("begin");
-    await getModalityById(client, modalityId);
+    await getModalityById(client, /** @type {number | string} */ (modalityId));
     const { rows } = await client.query(
       `
         insert into exam_types (
@@ -991,15 +1442,16 @@ export async function createExamType(payload, currentUserId = null) {
       `,
       [modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
+    const createdExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to create exam type.");
 
     if (currentUserId) {
       await logAuditEntry(
         {
           entityType: "exam_type",
-          entityId: rows[0].id,
+          entityId: createdExamType.id,
           actionType: "create",
           oldValues: null,
-          newValues: rows[0],
+          newValues: createdExamType,
           changedByUserId: currentUserId
         },
         client
@@ -1007,7 +1459,7 @@ export async function createExamType(payload, currentUserId = null) {
     }
 
     await client.query("commit");
-    return rows[0];
+    return createdExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1016,6 +1468,13 @@ export async function createExamType(payload, currentUserId = null) {
   }
 }
 
+/** @returns {Promise<ExamTypeRow>} */
+/**
+ * @param {number | string} examTypeId
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<ExamTypeRow>}
+ */
 export async function updateExamType(examTypeId, payload, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1043,13 +1502,13 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       [cleanExamTypeId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ExamTypeRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Exam type not found.");
     }
 
-    await getModalityById(client, modalityId);
+    await getModalityById(client, /** @type {number | string} */ (modalityId));
 
     const { rows } = await client.query(
       `
@@ -1067,6 +1526,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       `,
       [cleanExamTypeId, modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
     );
+    const updatedExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to update exam type.");
 
     await logAuditEntry(
       {
@@ -1074,14 +1534,14 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
         entityId: cleanExamTypeId,
         actionType: "update",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: updatedExamType,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return updatedExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1090,6 +1550,12 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
   }
 }
 
+/** @returns {Promise<ExamTypeRow>} */
+/**
+ * @param {number | string} examTypeId
+ * @param {UserId} currentUserId
+ * @returns {Promise<ExamTypeRow>}
+ */
 export async function deleteExamType(examTypeId, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const client = await pool.connect();
@@ -1107,7 +1573,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
       [cleanExamTypeId]
     );
 
-    const existing = existingResult.rows[0];
+    const existing = /** @type {ExamTypeRow | undefined} */ (existingResult.rows[0]);
 
     if (!existing || !existing.is_active) {
       throw new HttpError(404, "Exam type not found.");
@@ -1124,6 +1590,7 @@ export async function deleteExamType(examTypeId, currentUserId) {
       `,
       [cleanExamTypeId]
     );
+    const deletedExamType = requireRow(/** @type {ExamTypeRow | undefined} */ (rows[0]), "Failed to delete exam type.");
 
     await logAuditEntry(
       {
@@ -1131,14 +1598,14 @@ export async function deleteExamType(examTypeId, currentUserId) {
         entityId: cleanExamTypeId,
         actionType: "delete",
         oldValues: existing,
-        newValues: rows[0],
+        newValues: deletedExamType,
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    return rows[0];
+    return deletedExamType;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1147,6 +1614,12 @@ export async function deleteExamType(examTypeId, currentUserId) {
   }
 }
 
+/**
+ * @param {UnknownRecord} payload
+ * @param {AppointmentActor | null | undefined} currentUser
+ * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
+ * @returns {Promise<AppointmentCreateResult>}
+ */
 export async function createAppointment(payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1172,10 +1645,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
-    const patient = await getPatientById(client, patientId);
-    const modality = await getModalityById(client, modalityId);
-    const examType = await getExamTypeById(client, examTypeId, modalityId);
-    const priority = await getPriorityById(client, reportingPriorityId);
+    const patient = await getPatientById(client, /** @type {number | string} */ (patientId));
+    const modality = await getModalityById(client, /** @type {number | string} */ (modalityId));
+    const examType = examTypeId ? await getExamTypeById(client, /** @type {number | string} */ (examTypeId), /** @type {number | string} */ (modalityId)) : null;
+    const priority = reportingPriorityId ? await getPriorityById(client, reportingPriorityId) : null;
 
     const bookingStats = await client.query(
       `
@@ -1200,11 +1673,13 @@ export async function createAppointment(payload, currentUser, options = {}) {
     );
 
     const maxCasesPerModality = await getMaxCasesPerModality(client);
-    const bookedCount = Number(bookingStats.rows[0]?.booked_count || 0);
-    const nextSlotNumber = Number(bookingStats.rows[0]?.last_slot_number || 0) + 1;
-    const nextDailySequence = Number(globalStats.rows[0]?.last_daily_sequence || 0) + 1;
+    const bookingStatsRow = /** @type {BookingStatsRow | undefined} */ (bookingStats.rows[0]);
+    const globalStatsRow = /** @type {SequenceRow | undefined} */ (globalStats.rows[0]);
+    const bookedCount = Number(bookingStatsRow?.booked_count || 0);
+    const nextSlotNumber = Number(bookingStatsRow?.last_slot_number || 0) + 1;
+    const nextDailySequence = Number(globalStatsRow?.last_daily_sequence || 0) + 1;
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
-    const isOverbooked = bookedCount >= capacity;
+    const isOverbooked = capacity !== null && bookedCount >= capacity;
 
     // Handle overbooking approval
     let approvingSupervisor = null;
@@ -1291,11 +1766,15 @@ export async function createAppointment(payload, currentUser, options = {}) {
         isWalkIn,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? approvingSupervisor.full_name : null,
-        isOverbooked ? approvingSupervisor.id : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.id : null,
         notes,
         currentUser.sub
       ]
+    );
+    const createdAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to create appointment."
     );
 
     await client.query(
@@ -1303,26 +1782,26 @@ export async function createAppointment(payload, currentUser, options = {}) {
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, null, 'scheduled', $2, $3)
       `,
-      [rows[0].id, currentUser.sub, isOverbooked ? overbookingReason : null]
+      [createdAppointment.id, currentUser.sub, isOverbooked ? overbookingReason : null]
     );
 
     await logAuditEntry(
       {
         entityType: "appointment",
-        entityId: rows[0].id,
+        entityId: createdAppointment.id,
         actionType: "create",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdAppointment,
         changedByUserId: currentUser.sub
       },
       client
     );
 
     await client.query("commit");
-    scheduleWorklistSync(rows[0].id);
+    scheduleWorklistSync(createdAppointment.id);
 
     return {
-      appointment: rows[0],
+      appointment: createdAppointment,
       patient,
       modality,
       examType,
@@ -1337,6 +1816,20 @@ export async function createAppointment(payload, currentUser, options = {}) {
   }
 }
 
+/**
+ * @param {UserId} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AppointmentActor | null | undefined} currentUser
+ * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
+ */
+/** @returns {Promise<AppointmentDbRow>} */
+/**
+ * @param {number | string} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AuthenticatedUserContext} currentUser
+ * @param {AppointmentUpdateOptions} [options]
+ * @returns {Promise<UnknownRecord>}
+ */
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1345,13 +1838,17 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const client = await pool.connect();
 
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
+    const existingStatus = existingAppointment.status;
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
+    if (!APPOINTMENT_RECEPTION_ACTIVE_STATUSES.includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");
     }
 
@@ -1393,10 +1890,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
-    const modality = await getModalityById(client, modalityId);
-    const examType = await getExamTypeById(client, examTypeId, modalityId);
-    const priority = await getPriorityById(client, reportingPriorityId);
-    const slotStats = await nextModalitySlotNumber(client, modalityId, appointmentDate, cleanAppointmentId);
+    const modality = await getModalityById(client, /** @type {number | string} */ (modalityId));
+    const examType = examTypeId ? await getExamTypeById(client, /** @type {number | string} */ (examTypeId), /** @type {number | string} */ (modalityId)) : null;
+    const priority = reportingPriorityId ? await getPriorityById(client, reportingPriorityId) : null;
+    const slotStats = await nextModalitySlotNumber(client, /** @type {number | string} */ (modalityId), appointmentDate, cleanAppointmentId);
     const maxCasesPerModality = await getMaxCasesPerModality(client);
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
 
@@ -1405,7 +1902,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 
     // Only check overbooking when date or modality changes (treat as new appointment)
     // Editing fields on the same date/modality does not require supervisor approval
-    const isOverbooked = modalityOrDateChanged && slotStats.bookedCount >= capacity;
+    const isOverbooked = modalityOrDateChanged && capacity !== null && slotStats.bookedCount >= capacity;
 
     // Handle overbooking approval
     let approvingSupervisor = null;
@@ -1452,8 +1949,8 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
       ? Number(approvingSupervisor.id)
       : null;
 
-    const updatedByUserId = currentUser?.id != null
-      ? Number(currentUser.id)
+    const updatedByUserId = currentUser?.sub != null
+      ? Number(currentUser.sub)
       : (currentUser?.sub != null ? Number(currentUser.sub) : null);
 
     const { rows } = await client.query(
@@ -1489,11 +1986,15 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         modalitySlotNumber,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? approvingSupervisor.full_name : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
         approvedByUserId,
         notes,
         updatedByUserId
       ]
+    );
+    const updatedAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to update appointment."
     );
 
     await client.query(
@@ -1501,7 +2002,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, $2, $3, $4)
       `,
-      [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Appointment edited or rescheduled"]
+      [cleanAppointmentId, existingStatus, currentUser.sub, "Appointment edited or rescheduled"]
     );
 
     await logAuditEntry(
@@ -1510,17 +2011,17 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         entityId: cleanAppointmentId,
         actionType: "update",
         oldValues: existingAppointment,
-        newValues: rows[0],
+        newValues: updatedAppointment,
         changedByUserId: currentUser.sub
       },
       client
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
-    return rows[0];
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
+    return updatedAppointment;
   } catch (error) {
-    console.error("[updateAppointment] ERROR:", error.message, error.stack);
+    console.error("[updateAppointment] ERROR:", /** @type {Error} */ (error).message, /** @type {Error} */ (error).stack);
     await client.query("rollback");
     throw error;
   } finally {
@@ -1528,24 +2029,34 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   }
 }
 
+/**
+ * @param {number | string} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AuthenticatedUserContext} currentUser
+ * @returns {Promise<UnknownRecord>}
+ */
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
   }
 
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
   const client = await pool.connect();
 
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
+    const existingStatus = existingAppointment.status;
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingAppointment.status)) {
+    if (!APPOINTMENT_RECEPTION_ACTIVE_STATUSES.includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be updated.");
     }
 
-    const examType = await getExamTypeById(client, examTypeId, existingAppointment.modality_id);
+    const examType = examTypeId ? await getExamTypeById(client, examTypeId, existingAppointment.modality_id) : null;
 
     const { rows } = await client.query(
       `
@@ -1559,13 +2070,17 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
       `,
       [cleanAppointmentId, examType?.id || null, currentUser.sub]
     );
+    const protocolUpdatedAppointment = requireRow(
+      /** @type {AppointmentDbRow | undefined} */ (rows[0]),
+      "Failed to update appointment protocol."
+    );
 
     await client.query(
       `
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, $2, $3, $4)
       `,
-      [cleanAppointmentId, existingAppointment.status, currentUser.sub, "Protocol updated"]
+      [cleanAppointmentId, existingStatus, currentUser.sub, "Protocol updated"]
     );
 
     await logAuditEntry(
@@ -1574,15 +2089,15 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
         entityId: cleanAppointmentId,
         actionType: "update",
         oldValues: existingAppointment,
-        newValues: rows[0],
+        newValues: protocolUpdatedAppointment,
         changedByUserId: currentUser.sub
       },
       client
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
-    return rows[0];
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
+    return protocolUpdatedAppointment;
   } catch (error) {
     await client.query("rollback");
     throw error;
@@ -1591,8 +2106,24 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
   }
 }
 
+/** @returns {Promise<{ ok: true }>} */
+
+/**
+ * @param {unknown} appointmentId
+ * @param {unknown} reason
+ * @param {unknown} currentUserId
+ */
+/**
+ * @param {number | string} appointmentId
+ * @param {string} reason
+ * @param {UserId} currentUserId
+ * @returns {Promise<{ ok: boolean }>}
+ */
 export async function cancelAppointment(appointmentId, reason, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const cleanReason = normalizeOptionalText(reason);
 
   if (!cleanReason) {
@@ -1604,8 +2135,9 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
   try {
     await client.query("begin");
     const appointment = await getAppointmentById(client, cleanAppointmentId);
+    const appointmentStatus = appointment.status;
 
-    if (["cancelled", "completed", "discontinued", "no-show", "in-progress"].includes(appointment.status)) {
+    if (APPOINTMENT_NON_CANCELLABLE_STATUSES.includes(appointmentStatus)) {
       throw new HttpError(409, "This appointment can no longer be cancelled.");
     }
 
@@ -1636,7 +2168,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, 'cancelled', $3, $4)
       `,
-      [cleanAppointmentId, appointment.status, currentUserId, cleanReason]
+      [cleanAppointmentId, appointmentStatus, currentUserId, cleanReason]
     );
 
     await logAuditEntry(
@@ -1652,7 +2184,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

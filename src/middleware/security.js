@@ -1,3 +1,11 @@
+// @ts-check
+
+/**
+ * @param {unknown} _req
+ * @param {{ setHeader: (name: string, value: string) => void }} res
+ * @param {(error?: unknown) => void} next
+ * @returns {void}
+ */
 export function securityHeaders(_req, res, next) {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");

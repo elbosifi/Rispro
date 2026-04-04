@@ -1,5 +1,11 @@
+// @ts-check
+
 const TRIPOLI_TIME_ZONE = "Africa/Tripoli";
 
+/**
+ * @param {Date} [date]
+ * @returns {{ year: string, month: string, day: string }}
+ */
 function getTripoliParts(date = new Date()) {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: TRIPOLI_TIME_ZONE,
@@ -8,20 +14,34 @@ function getTripoliParts(date = new Date()) {
     day: "2-digit"
   });
 
-  return formatter.formatToParts(date).reduce((accumulator, part) => {
-    if (part.type !== "literal") {
-      accumulator[part.type] = part.value;
+  const parts = formatter.formatToParts(date).reduce((accumulator, part) => {
+    if (part.type !== "literal" && part.type !== "unknown") {
+      accumulator[/** @type {'year' | 'month' | 'day'} */ (part.type)] = part.value;
     }
 
     return accumulator;
-  }, {});
+  }, /** @type {{ year?: string, month?: string, day?: string }} */ ({}));
+
+  return {
+    year: parts.year || "1970",
+    month: parts.month || "01",
+    day: parts.day || "01"
+  };
 }
 
+/**
+ * @param {Date} [date]
+ * @returns {string}
+ */
 export function getTripoliToday(date = new Date()) {
   const parts = getTripoliParts(date);
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
+/**
+ * @param {Date | string | null | undefined} value
+ * @returns {string}
+ */
 export function normalizeDateValue(value) {
   if (value instanceof Date) {
     return getTripoliToday(value);

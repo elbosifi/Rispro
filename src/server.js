@@ -1,3 +1,5 @@
+// @ts-check
+
 import http from "http";
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
@@ -8,6 +10,18 @@ const app = createApp();
 const server = http.createServer(app);
 let isShuttingDown = false;
 
+/**
+ * @param {unknown} error
+ * @returns {void}
+ */
+function logError(error) {
+  console.error(error);
+}
+
+/**
+ * @param {"SIGINT" | "SIGTERM"} signal
+ * @returns {Promise<void>}
+ */
 async function shutdown(signal) {
   if (isShuttingDown) {
     return;
@@ -20,11 +34,13 @@ async function shutdown(signal) {
     try {
       await pool.end();
     } catch (poolError) {
-      console.error("Failed to close PostgreSQL pool cleanly.", poolError);
+      console.error("Failed to close PostgreSQL pool cleanly.");
+      logError(poolError);
     }
 
     if (serverError) {
-      console.error("HTTP server shutdown failed.", serverError);
+      console.error("HTTP server shutdown failed.");
+      logError(serverError);
       process.exit(1);
     }
 
@@ -38,20 +54,23 @@ async function shutdown(signal) {
 }
 
 server.on("error", (error) => {
-  console.error("Failed to start HTTP server.", error);
+  console.error("Failed to start HTTP server.");
+  logError(error);
   process.exit(1);
 });
 
 process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
+/** @returns {Promise<void>} */
 async function start() {
   await pingDatabase();
   try {
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
   } catch (error) {
-    console.error("DICOM gateway initialization failed. Continuing without blocking startup.", error);
+    console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
+    logError(error);
   }
 
   server.listen(env.port, () => {
@@ -60,12 +79,14 @@ async function start() {
 }
 
 start().catch(async (error) => {
-  console.error("RISpro failed to start.", error);
+  console.error("RISpro failed to start.");
+  logError(error);
 
   try {
     await pool.end();
   } catch (poolError) {
-    console.error("Failed to close PostgreSQL pool after startup error.", poolError);
+    console.error("Failed to close PostgreSQL pool after startup error.");
+    logError(poolError);
   }
 
   process.exit(1);

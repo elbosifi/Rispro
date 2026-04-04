@@ -1,6 +1,10 @@
+// @ts-check
+
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asOptionalString, asStringArray } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import {
   cancelAppointment,
   createAppointment,
@@ -14,6 +18,17 @@ import {
   updateAppointment,
   updateAppointmentProtocol
 } from "../services/appointment-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
+/**
+ * @typedef {object} AppointmentsRequest
+ * @property {UnknownRecord} [query]
+ * @property {UnknownRecord} [body]
+ * @property {{ appointmentId?: string }} [params]
+ * @property {AuthenticatedUserContext} user
+ */
 
 export const appointmentsRouter = express.Router();
 
@@ -30,24 +45,22 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/",
   asyncRoute(async (req, res) => {
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const query = asUnknownRecord(request.query);
     // Parse status array from query (handles both ?status[]=x&status[]=y and ?status=x)
     let status;
-    if (req.query["status[]"]) {
-      status = Array.isArray(req.query["status[]"])
-        ? req.query["status[]"]
-        : [req.query["status[]"]];
-    } else if (req.query.status) {
-      status = Array.isArray(req.query.status)
-        ? req.query.status
-        : [req.query.status];
+    if (query["status[]"]) {
+      status = asStringArray(query["status[]"]);
+    } else if (query.status) {
+      status = asStringArray(query.status);
     }
 
     const appointments = await listAppointmentsForPrint({
-      date: req.query.date,
-      dateFrom: req.query.dateFrom,
-      dateTo: req.query.dateTo,
-      modalityId: req.query.modalityId,
-      query: req.query.q,
+      date: asOptionalString(query.date),
+      dateFrom: asOptionalString(query.dateFrom),
+      dateTo: asOptionalString(query.dateTo),
+      modalityId: asOptionalString(query.modalityId),
+      query: asOptionalString(query.q),
       status: status
     });
     res.json({ appointments });
@@ -57,8 +70,10 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/availability",
   asyncRoute(async (req, res) => {
-    const days = req.query.days ? Number(req.query.days) : 14;
-    const availability = await listAvailability(req.query.modalityId, days);
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const query = asUnknownRecord(request.query);
+    const days = query.days ? Number(query.days) : 14;
+    const availability = await listAvailability(asOptionalString(query.modalityId), days);
     res.json({ availability });
   })
 );
@@ -74,11 +89,13 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/statistics",
   asyncRoute(async (req, res) => {
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const query = asUnknownRecord(request.query);
     const statistics = await listAppointmentStatistics({
-      date: req.query.date,
-      dateFrom: req.query.dateFrom,
-      dateTo: req.query.dateTo,
-      modalityId: req.query.modalityId
+      date: asOptionalString(query.date),
+      dateFrom: asOptionalString(query.dateFrom),
+      dateTo: asOptionalString(query.dateTo),
+      modalityId: asOptionalString(query.modalityId)
     });
     res.json(statistics);
   })
@@ -87,7 +104,8 @@ appointmentsRouter.get(
 appointmentsRouter.get(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
-    const appointment = await getAppointmentPrintDetails(req.params.appointmentId);
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const appointment = await getAppointmentPrintDetails(String(request.params?.appointmentId || ""));
     res.json({ appointment });
   })
 );
@@ -95,7 +113,8 @@ appointmentsRouter.get(
 appointmentsRouter.post(
   "/exam-types",
   asyncRoute(async (req, res) => {
-    const examType = await createExamType(req.body || {}, req.user.sub);
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const examType = await createExamType(request.body || {}, request.user.sub);
     res.status(201).json({ examType });
   })
 );
@@ -103,9 +122,11 @@ appointmentsRouter.post(
 appointmentsRouter.post(
   "/",
   asyncRoute(async (req, res) => {
-    const result = await createAppointment(req.body || {}, req.user, {
-      supervisorUsername: req.body.supervisorUsername,
-      supervisorPassword: req.body.supervisorPassword
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const body = asUnknownRecord(request.body);
+    const result = await createAppointment(request.body || {}, request.user, {
+      supervisorUsername: String(body.supervisorUsername || ""),
+      supervisorPassword: String(body.supervisorPassword || "")
     });
     res.status(201).json(result);
   })
@@ -114,9 +135,11 @@ appointmentsRouter.post(
 appointmentsRouter.put(
   "/:appointmentId",
   asyncRoute(async (req, res) => {
-    const appointment = await updateAppointment(req.params.appointmentId, req.body || {}, req.user, {
-      supervisorUsername: req.body.supervisorUsername,
-      supervisorPassword: req.body.supervisorPassword
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const body = asUnknownRecord(request.body);
+    const appointment = await updateAppointment(String(request.params?.appointmentId || ""), request.body || {}, request.user, {
+      supervisorUsername: String(body.supervisorUsername || ""),
+      supervisorPassword: String(body.supervisorPassword || "")
     });
     res.json({ appointment });
   })
@@ -125,8 +148,9 @@ appointmentsRouter.put(
 appointmentsRouter.put(
   "/:appointmentId/protocol",
   asyncRoute(async (req, res) => {
-    await updateAppointmentProtocol(req.params.appointmentId, req.body || {}, req.user);
-    const appointment = await getAppointmentPrintDetails(req.params.appointmentId);
+    const request = /** @type {AppointmentsRequest} */ (req);
+    await updateAppointmentProtocol(String(request.params?.appointmentId || ""), request.body || {}, request.user);
+    const appointment = await getAppointmentPrintDetails(String(request.params?.appointmentId || ""));
     res.json({ appointment });
   })
 );
@@ -134,7 +158,13 @@ appointmentsRouter.put(
 appointmentsRouter.post(
   "/:appointmentId/cancel",
   asyncRoute(async (req, res) => {
-    const result = await cancelAppointment(req.params.appointmentId, req.body?.cancelReason, req.user.sub);
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const body = asUnknownRecord(request.body);
+    const result = await cancelAppointment(
+      String(request.params?.appointmentId || ""),
+      asOptionalString(body.cancelReason) || "",
+      request.user.sub
+    );
     res.json(result);
   })
 );

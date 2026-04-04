@@ -1,6 +1,13 @@
+// @ts-check
+
 import { HttpError } from "../utils/http-error.js";
 
+/**
+ * @param {{ windowMs: number, maxRequests: number, message: string }} options
+ * @returns {(req: { ip?: string }, _res: unknown, next: (error?: unknown) => void) => void}
+ */
 export function createRateLimiter({ windowMs, maxRequests, message }) {
+  /** @type {Map<string, number[]>} */
   const requestLog = new Map();
 
   setInterval(() => {
@@ -18,6 +25,11 @@ export function createRateLimiter({ windowMs, maxRequests, message }) {
     }
   }, windowMs).unref();
 
+  /**
+   * @param {{ ip?: string }} req
+   * @param {unknown} _res
+   * @param {(error?: unknown) => void} next
+   */
   return function rateLimiter(req, _res, next) {
     const key = req.ip || "unknown";
     const now = Date.now();

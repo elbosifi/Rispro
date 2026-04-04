@@ -4,7 +4,12 @@
       "Bash(npm run *)",
       "Bash(node *)",
       "Bash(findstr *)",
-      "Bash(powershell *)"
+      "Bash(powershell *)",
+      "Bash(dir *)",
+      "Bash(npx *)",
+      "Bash(find *)",
+      "Bash(type *)",
+      "Bash(git add *)"
     ]
   },
   "$version": 3

@@ -1,6 +1,10 @@
+// @ts-check
+
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asBooleanFlag, asString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
 import {
   createExamType,
@@ -25,6 +29,23 @@ import {
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
 
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
+/**
+ * @typedef {object} SettingsRequest
+ * @property {{ includeInactive?: string }} [query]
+ * @property {AuthenticatedUserContext} user
+ * @property {UnknownRecord} [body]
+ * @property {{
+ *   category?: string,
+ *   entryId?: string,
+ *   modalityId?: string,
+ *   examTypeId?: string,
+ *   deviceId?: string
+ * }} [params]
+ */
+
 export const settingsRouter = express.Router();
 
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
@@ -40,7 +61,8 @@ settingsRouter.get(
 settingsRouter.get(
   "/name-dictionary",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = asBooleanFlag(request.query?.includeInactive);
     const entries = await listNameDictionary({ includeInactive });
     res.json({ entries });
   })
@@ -49,7 +71,8 @@ settingsRouter.get(
 settingsRouter.post(
   "/name-dictionary",
   asyncRoute(async (req, res) => {
-    const entry = await upsertNameDictionary(req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const entry = await upsertNameDictionary(request.body || {}, request.user.sub);
     res.status(201).json({ entry });
   })
 );
@@ -57,7 +80,8 @@ settingsRouter.post(
 settingsRouter.put(
   "/name-dictionary/:entryId",
   asyncRoute(async (req, res) => {
-    const entry = await updateNameDictionaryEntry(req.params.entryId, req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const entry = await updateNameDictionaryEntry(asString(request.params?.entryId), request.body || {}, request.user.sub);
     res.json({ entry });
   })
 );
@@ -65,7 +89,8 @@ settingsRouter.put(
 settingsRouter.delete(
   "/name-dictionary/:entryId",
   asyncRoute(async (req, res) => {
-    const entry = await deleteNameDictionaryEntry(req.params.entryId, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const entry = await deleteNameDictionaryEntry(asString(request.params?.entryId), request.user.sub);
     res.json({ entry });
   })
 );
@@ -73,7 +98,8 @@ settingsRouter.delete(
 settingsRouter.get(
   "/modalities",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = asBooleanFlag(request.query?.includeInactive);
     const result = await listModalitiesForSettings({ includeInactive });
     res.json(result);
   })
@@ -82,7 +108,8 @@ settingsRouter.get(
 settingsRouter.post(
   "/modalities",
   asyncRoute(async (req, res) => {
-    const modality = await createModality(req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const modality = await createModality(request.body || {}, request.user.sub);
     res.status(201).json({ modality });
   })
 );
@@ -90,7 +117,8 @@ settingsRouter.post(
 settingsRouter.put(
   "/modalities/:modalityId",
   asyncRoute(async (req, res) => {
-    const modality = await updateModality(req.params.modalityId, req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const modality = await updateModality(asString(request.params?.modalityId), request.body || {}, request.user.sub);
     res.json({ modality });
   })
 );
@@ -98,7 +126,8 @@ settingsRouter.put(
 settingsRouter.delete(
   "/modalities/:modalityId",
   asyncRoute(async (req, res) => {
-    const modality = await deleteModality(req.params.modalityId, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const modality = await deleteModality(asString(request.params?.modalityId), request.user.sub);
     res.json({ modality });
   })
 );
@@ -114,7 +143,8 @@ settingsRouter.get(
 settingsRouter.post(
   "/exam-types",
   asyncRoute(async (req, res) => {
-    const examType = await createExamType(req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const examType = await createExamType(request.body || {}, request.user.sub);
     res.status(201).json({ examType });
   })
 );
@@ -122,7 +152,8 @@ settingsRouter.post(
 settingsRouter.put(
   "/exam-types/:examTypeId",
   asyncRoute(async (req, res) => {
-    const examType = await updateExamType(req.params.examTypeId, req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const examType = await updateExamType(asString(request.params?.examTypeId), request.body || {}, request.user.sub);
     res.json({ examType });
   })
 );
@@ -130,7 +161,8 @@ settingsRouter.put(
 settingsRouter.delete(
   "/exam-types/:examTypeId",
   asyncRoute(async (req, res) => {
-    const examType = await deleteExamType(req.params.examTypeId, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const examType = await deleteExamType(asString(request.params?.examTypeId), request.user.sub);
     res.json({ examType });
   })
 );
@@ -138,7 +170,8 @@ settingsRouter.delete(
 settingsRouter.get(
   "/dicom-devices",
   asyncRoute(async (req, res) => {
-    const includeInactive = String(req.query.includeInactive || "").trim() === "true";
+    const request = /** @type {SettingsRequest} */ (req);
+    const includeInactive = asBooleanFlag(request.query?.includeInactive);
     const devices = await listDicomDevices({ includeInactive });
     res.json({ devices });
   })
@@ -147,7 +180,8 @@ settingsRouter.get(
 settingsRouter.post(
   "/dicom-devices",
   asyncRoute(async (req, res) => {
-    const device = await createDicomDevice(req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const device = await createDicomDevice(request.body || {}, request.user.sub);
     res.status(201).json({ device });
   })
 );
@@ -155,7 +189,8 @@ settingsRouter.post(
 settingsRouter.put(
   "/dicom-devices/:deviceId",
   asyncRoute(async (req, res) => {
-    const device = await updateDicomDevice(req.params.deviceId, req.body || {}, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const device = await updateDicomDevice(asString(request.params?.deviceId), request.body || {}, request.user.sub);
     res.json({ device });
   })
 );
@@ -163,7 +198,8 @@ settingsRouter.put(
 settingsRouter.delete(
   "/dicom-devices/:deviceId",
   asyncRoute(async (req, res) => {
-    const result = await deleteDicomDevice(req.params.deviceId, req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const result = await deleteDicomDevice(asString(request.params?.deviceId), request.user.sub);
     res.json(result);
   })
 );
@@ -171,7 +207,8 @@ settingsRouter.delete(
 settingsRouter.get(
   "/:category",
   asyncRoute(async (req, res) => {
-    const settings = await getSettingsByCategory(req.params.category);
+    const request = /** @type {SettingsRequest} */ (req);
+    const settings = await getSettingsByCategory(asString(request.params?.category));
     res.json({ settings });
   })
 );
@@ -179,7 +216,11 @@ settingsRouter.get(
 settingsRouter.put(
   "/:category",
   asyncRoute(async (req, res) => {
-    const settings = await upsertSettings(req.params.category, req.body?.entries || [], req.user.sub);
+    const request = /** @type {SettingsRequest} */ (req);
+    const body = asUnknownRecord(request.body);
+    const rawEntries = body.entries;
+    const entries = /** @type {{ key: string, value?: unknown }[]} */ (Array.isArray(rawEntries) ? rawEntries : []);
+    const settings = await upsertSettings(asString(request.params?.category), entries, request.user.sub);
     res.json({ settings });
   })
 );

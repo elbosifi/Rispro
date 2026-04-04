@@ -1,3 +1,5 @@
+// @ts-check
+
 import express from "express";
 import cookieParser from "cookie-parser";
 import path from "path";
@@ -23,7 +25,16 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..");
 
+/**
+ * @param {string} fileName
+ * @param {number} [cacheSeconds]
+ * @returns {(_req: unknown, res: { setHeader: (name: string, value: string) => void, sendFile: (path: string) => void }) => void}
+ */
 function sendFrontendFile(fileName, cacheSeconds = 0) {
+  /**
+   * @param {unknown} _req
+   * @param {{ setHeader: (name: string, value: string) => void, sendFile: (path: string) => void }} res
+   */
   return function frontendFileHandler(_req, res) {
     if (cacheSeconds > 0) {
       res.setHeader("Cache-Control", `public, max-age=${cacheSeconds}`);
@@ -35,6 +46,7 @@ function sendFrontendFile(fileName, cacheSeconds = 0) {
   };
 }
 
+/** @returns {object} */
 export function createApp() {
   const app = express();
 

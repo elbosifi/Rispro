@@ -1,7 +1,10 @@
+// @ts-check
+
 import bcrypt from "bcryptjs";
 import { env } from "../config/env.js";
 import { pool } from "./pool.js";
 
+/** @returns {Promise<void>} */
 async function run() {
   if (env.isProduction && env.seedSupervisorPassword === "ChangeMe123!") {
     throw new Error("SEED_SUPERVISOR_PASSWORD must be changed before production seeding.");
@@ -18,7 +21,7 @@ async function run() {
     [env.seedSupervisorUsername, env.seedSupervisorFullName, passwordHash]
   );
 
-  console.log(rowCount ? "Seeded supervisor account." : "Supervisor account already exists.");
+  console.log(Number(rowCount || 0) > 0 ? "Seeded supervisor account." : "Supervisor account already exists.");
   await pool.end();
 }
 

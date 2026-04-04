@@ -1,9 +1,56 @@
+// @ts-check
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
+import {
+  APPOINTMENT_QUEUE_WORKING_STATUSES,
+  APPOINTMENT_STATUS_COMPLETED
+} from "../constants/appointment-statuses.js";
 
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
+
+/**
+ * @typedef ModalityWorklistRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {AppointmentStatus} status
+ * @property {string | null} notes
+ * @property {string | null} arrived_at
+ * @property {string | null} completed_at
+ * @property {number | null} modality_slot_number
+ * @property {number} patient_id
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {number} age_years
+ * @property {string} sex
+ * @property {number} modality_id
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} priority_name_ar
+ * @property {string | null} priority_name_en
+ */
+
+/**
+ * @typedef AppointmentStatusRow
+ * @property {number} id
+ * @property {AppointmentStatus} status
+ */
+
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -22,6 +69,9 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ */
 function normalizeDate(value) {
   const raw = String(value || getTripoliToday()).trim();
 
@@ -32,6 +82,24 @@ function normalizeDate(value) {
   return raw;
 }
 
+/**
+ * @template T
+ * @param {T | undefined} row
+ * @param {string} message
+ * @returns {T}
+ */
+function requireRow(row, message) {
+  if (!row) {
+    throw new HttpError(500, message);
+  }
+
+  return row;
+}
+
+/**
+ * @param {{ scope?: string, modalityId?: UserId, date?: string }} [filters]
+ * @returns {Promise<ModalityWorklistRow[]>}
+ */
 export async function listModalityWorklist(filters = {}) {
   const scope = String(filters.scope || "").trim();
   const useAllDates = scope === "all";
@@ -95,9 +163,14 @@ export async function listModalityWorklist(filters = {}) {
     params
   );
 
-  return rows;
+  return /** @type {ModalityWorklistRow[]} */ (rows);
 }
 
+/**
+ * @param {UserId} appointmentId
+ * @param {NullableUserId} currentUserId
+ * @returns {Promise<{ ok: true }>}
+ */
 export async function markAppointmentCompleted(appointmentId, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const client = await pool.connect();
@@ -114,17 +187,18 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
       [cleanAppointmentId]
     );
 
-    const appointment = rows[0];
+    const appointment = /** @type {AppointmentStatusRow | undefined} */ (rows[0]);
 
     if (!appointment) {
       throw new HttpError(404, "Appointment not found.");
     }
+    const currentAppointment = requireRow(appointment, "Failed to load appointment state.");
 
-    if (appointment.status === "completed") {
+    if (currentAppointment.status === APPOINTMENT_STATUS_COMPLETED) {
       throw new HttpError(409, "This appointment is already completed.");
     }
 
-    if (!["waiting", "arrived", "in-progress"].includes(appointment.status)) {
+    if (!APPOINTMENT_QUEUE_WORKING_STATUSES.includes(currentAppointment.status)) {
       throw new HttpError(409, "Only arrived, waiting, or in-progress appointments can be completed.");
     }
 
@@ -156,7 +230,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, $2, 'completed', $3, 'Marked completed by modality staff')
       `,
-      [cleanAppointmentId, appointment.status, currentUserId]
+      [cleanAppointmentId, currentAppointment.status, currentUserId]
     );
 
     await logAuditEntry(
@@ -164,15 +238,15 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         entityType: "appointment",
         entityId: cleanAppointmentId,
         actionType: "complete",
-        oldValues: appointment,
-        newValues: { status: "completed" },
+        oldValues: currentAppointment,
+        newValues: { status: APPOINTMENT_STATUS_COMPLETED },
         changedByUserId: currentUserId
       },
       client
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

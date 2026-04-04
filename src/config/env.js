@@ -1,7 +1,13 @@
+// @ts-check
+
 import dotenv from "dotenv";
 
 dotenv.config();
 
+/**
+ * @param {string} name
+ * @param {string} [fallback]
+ */
 function requireEnv(name, fallback = "") {
   const value = process.env[name] ?? fallback;
 
@@ -12,6 +18,10 @@ function requireEnv(name, fallback = "") {
   return value;
 }
 
+/**
+ * @param {string} name
+ * @param {number} fallback
+ */
 function readPositiveInteger(name, fallback) {
   const rawValue = process.env[name];
 
@@ -28,6 +38,10 @@ function readPositiveInteger(name, fallback) {
   return parsedValue;
 }
 
+/**
+ * @param {string} name
+ * @param {boolean} [fallback]
+ */
 function readBoolean(name, fallback = false) {
   const rawValue = process.env[name];
 
@@ -46,6 +60,11 @@ function readBoolean(name, fallback = false) {
   throw new Error(`${name} must be true or false.`);
 }
 
+/**
+ * @param {string} name
+ * @param {"lax" | "strict" | "none"} [fallback]
+ * @returns {"lax" | "strict" | "none"}
+ */
 function readSameSite(name, fallback = "lax") {
   const value = (process.env[name] || fallback).toLowerCase();
 
@@ -53,9 +72,12 @@ function readSameSite(name, fallback = "lax") {
     throw new Error(`${name} must be lax, strict, or none.`);
   }
 
-  return value;
+  return /** @type {"lax" | "strict" | "none"} */ (value);
 }
 
+/**
+ * @returns {boolean | number | string}
+ */
 function readTrustProxy() {
   const rawValue = process.env.TRUST_PROXY;
 
@@ -79,6 +101,31 @@ function readTrustProxy() {
 const nodeEnv = process.env.NODE_ENV || "development";
 const isProduction = nodeEnv === "production";
 
+/**
+ * @typedef EnvConfig
+ * @property {string} nodeEnv
+ * @property {boolean} isProduction
+ * @property {number} port
+ * @property {string} databaseUrl
+ * @property {boolean} databaseSsl
+ * @property {boolean} databaseSslRejectUnauthorized
+ * @property {number} dbPoolMax
+ * @property {string} jwtSecret
+ * @property {string} cookieName
+ * @property {string} reauthCookieName
+ * @property {boolean} cookieSecure
+ * @property {"lax" | "strict" | "none"} cookieSameSite
+ * @property {number} sessionHours
+ * @property {number} supervisorReauthMinutes
+ * @property {string} requestBodyLimit
+ * @property {boolean | number | string} trustProxy
+ * @property {string} uploadsDir
+ * @property {string} seedSupervisorUsername
+ * @property {string} seedSupervisorPassword
+ * @property {string} seedSupervisorFullName
+ */
+
+/** @type {EnvConfig} */
 export const env = {
   nodeEnv,
   isProduction,

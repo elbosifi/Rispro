@@ -1,8 +1,39 @@
+// @ts-check
+
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { isRole } from "../constants/roles.js";
 
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+
+/**
+ * @typedef {import("../types/domain.js").Role} UserRole
+ */
+
+/**
+ * @typedef UserRow
+ * @property {number} id
+ * @property {string} username
+ * @property {string} full_name
+ * @property {UserRole} role
+ * @property {boolean} is_active
+ * @property {string} created_at
+ * @property {string} updated_at
+ */
+
+/**
+ * @typedef UserCreatePayload
+ * @property {string} [username]
+ * @property {string} [fullName]
+ * @property {string} [password]
+ * @property {UserRole | string} [role]
+ * @property {boolean} [isActive]
+ */
+
+/** @returns {Promise<UserRow[]>} */
 export async function listUsers() {
   const { rows } = await pool.query(`
     select id, username, full_name, role, is_active, created_at, updated_at
@@ -10,15 +41,20 @@ export async function listUsers() {
     order by created_at asc
   `);
 
-  return rows;
+  return /** @type {UserRow[]} */ (rows);
 }
 
+/**
+ * @param {UserCreatePayload} payload
+ * @param {NullableUserId} [createdByUserId]
+ * @returns {Promise<UserRow>}
+ */
 export async function createUser({ username, fullName, password, role, isActive = true }, createdByUserId = null) {
   if (!username || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
 
-  if (!["receptionist", "supervisor", "modality_staff"].includes(role)) {
+  if (!isRole(role)) {
     throw new HttpError(400, "role must be receptionist, supervisor, or modality_staff.");
   }
 
@@ -34,20 +70,31 @@ export async function createUser({ username, fullName, password, role, isActive 
       [username, fullName, passwordHash, role, isActive]
     );
 
+    const createdUser = /** @type {UserRow | undefined} */ (rows[0]);
+
+    if (!createdUser) {
+      throw new HttpError(500, "Failed to create user.");
+    }
+
     await logAuditEntry(
       {
         entityType: "user",
-        entityId: rows[0].id,
+        entityId: createdUser.id,
         actionType: "create",
         oldValues: null,
-        newValues: rows[0],
+        newValues: createdUser,
         changedByUserId: createdByUserId
       }
     );
 
-    return rows[0];
+    return createdUser;
   } catch (error) {
-    if (error.code === "23505") {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String(error.code) === "23505"
+    ) {
       throw new HttpError(409, "A user with that username already exists.");
     }
 
@@ -55,6 +102,11 @@ export async function createUser({ username, fullName, password, role, isActive 
   }
 }
 
+/**
+ * @param {UserId} userId
+ * @param {NullableUserId} [deletedByUserId]
+ * @returns {Promise<UserRow>}
+ */
 export async function deleteUser(userId, deletedByUserId = null) {
   const cleanUserId = Number(userId);
 
@@ -75,7 +127,7 @@ export async function deleteUser(userId, deletedByUserId = null) {
     [cleanUserId]
   );
 
-  const removed = rows[0];
+  const removed = /** @type {UserRow | undefined} */ (rows[0]);
 
   if (!removed) {
     throw new HttpError(404, "User not found.");
