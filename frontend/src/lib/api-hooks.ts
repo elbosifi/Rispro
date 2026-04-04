@@ -200,6 +200,13 @@ export async function fetchNameDictionary() {
   };
 }
 
+export async function upsertNameDictionaryEntry(arabicText: string, englishText: string) {
+  return api<{ entry: any }>("/settings/name-dictionary", {
+    method: "POST",
+    body: JSON.stringify({ arabicText, englishText })
+  });
+}
+
 export async function fetchDicomDevices() {
   const raw: any = await api("/settings/dicom-devices");
   return {

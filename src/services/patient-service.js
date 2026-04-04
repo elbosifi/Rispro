@@ -9,7 +9,7 @@ import {
   normalizeArabicName,
   normalizeLibyanPhone
 } from "../utils/normalize.js";
-import { transliterateArabicName } from "../utils/transliterate.js";
+import { generateEnglishFromDictionary } from "../utils/name-generation.js";
 import {
   isValidNationalId,
   deriveSexFromNationalId,
@@ -244,10 +244,26 @@ async function loadPatientRegistrationSettings() {
 }
 
 /**
+ * @returns {Promise<import("../utils/name-generation.js").NameDictionaryLookup[]>}
+ */
+async function loadNameDictionary() {
+  const { rows } = await pool.query(
+    `
+      select arabic_text, english_text
+      from name_dictionary
+      where is_active = true
+      order by arabic_text asc
+    `
+  );
+  return /** @type {import("../utils/name-generation.js").NameDictionaryLookup[]} */ (rows);
+}
+
+/**
  * @param {PatientPayload} payload
  * @param {PatientRegistrationRules} rules
+ * @param {import("../utils/name-generation.js").NameDictionaryLookup[]} dictionary
  */
-function validatePatientPayload(payload, rules) {
+async function validatePatientPayload(payload, rules, dictionary) {
   const {
     nationalId,
     nationalIdConfirmation,
@@ -335,10 +351,11 @@ function validatePatientPayload(payload, rules) {
     throw new HttpError(400, "ageYears is required when DOB cannot be calculated.");
   }
 
-  // Auto-generate English name from Arabic transliteration
+  // Auto-generate English name from dictionary
   let finalEnglishName = String(englishFullName || "").trim();
   if (autoGenerateEnglish && !englishFullName) {
-    finalEnglishName = transliterateArabicName(arabicFullName);
+    const generated = generateEnglishFromDictionary(arabicFullName, dictionary);
+    finalEnglishName = generated.englishName;
   }
 
   return {
@@ -442,7 +459,8 @@ export async function searchPatients(searchTerm = "") {
  */
 export async function createPatient(payload, createdByUserId) {
   const rules = await loadPatientRegistrationSettings();
-  const validated = validatePatientPayload(payload, rules);
+  const dictionary = await loadNameDictionary();
+  const validated = await validatePatientPayload(payload, rules, dictionary);
 
   try {
     const { rows } = await pool.query(
@@ -540,7 +558,8 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const previousPatient = await getPatientById(cleanPatientId);
   const rules = await loadPatientRegistrationSettings();
-  const validated = validatePatientPayload(payload, rules);
+  const dictionary = await loadNameDictionary();
+  const validated = await validatePatientPayload(payload, rules, dictionary);
 
   try {
     const { rows } = await pool.query(

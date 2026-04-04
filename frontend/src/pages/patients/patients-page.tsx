@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createPatient, searchPatients } from "@/lib/api-hooks";
-import { transliterateArabicName } from "@/lib/transliterate";
+import { createPatient, searchPatients, fetchNameDictionary, upsertNameDictionaryEntry } from "@/lib/api-hooks";
+import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
 import {
   deriveDemographicsFromNationalId,
   calculateAgeFromDob,
@@ -45,16 +45,25 @@ export default function PatientsPage() {
   const [form, setForm] = useState<RegistrationForm>(DEFAULT_FORM);
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [savedPatient, setSavedPatient] = useState<Patient | null>(null);
-  // Track whether the user has manually edited the English name
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
+  const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
+  const [addingToken, setAddingToken] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
+  // Load name dictionary
+  const { data: dictData } = useQuery({
+    queryKey: ["name-dictionary"],
+    queryFn: fetchNameDictionary,
+    staleTime: 1000 * 60 * 5
+  });
+  const dictionary: DictionaryEntry[] = dictData?.entries ?? [];
+
   // Determine the strongest search term for duplicate checking
   const duplicateSearchQuery = form.phone1 || form.arabicFullName || form.englishFullName || form.identifierValue || "";
 
-  // Duplicate checking (search using strongest available input)
+  // Duplicate checking
   const { data: potentialDuplicates } = useQuery({
     queryKey: ["duplicates", duplicateSearchQuery],
     queryFn: () => searchPatients(duplicateSearchQuery),
@@ -76,17 +85,19 @@ export default function PatientsPage() {
       setSavedPatient(patient);
       setForm(DEFAULT_FORM);
       setEnglishNameManuallyEdited(false);
+      setMissingTokenInputs({});
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
     }
   });
 
-  // -- Transliteration: auto-fill English name from Arabic --
+  // -- Dictionary-based English name generation --
   const handleArabicNameChange = (value: string) => {
     setForm((f) => {
       const updates: Partial<RegistrationForm> = { arabicFullName: value };
       // Only auto-generate if user hasn't manually edited
       if (!englishNameManuallyEdited && !f.englishFullName) {
-        updates.englishFullName = transliterateArabicName(value);
+        const result = generateEnglishFromDictionary(value, dictionary);
+        updates.englishFullName = result.englishName;
       }
       return { ...f, ...updates };
     });
@@ -97,10 +108,54 @@ export default function PatientsPage() {
     setForm((f) => ({ ...f, englishFullName: value }));
   };
 
-  const handleResetEnglishName = () => {
+  const handleRegenerateEnglishName = () => {
     setEnglishNameManuallyEdited(false);
-    setForm((f) => ({ ...f, englishFullName: transliterateArabicName(f.arabicFullName) }));
+    const result = generateEnglishFromDictionary(form.arabicFullName, dictionary);
+    setForm((f) => ({ ...f, englishFullName: result.englishName }));
+    // Also update missing tokens display
+    if (result.missingTokens.length > 0) {
+      setMissingTokenInputs((prev) => {
+        const next = { ...prev };
+        for (const token of result.missingTokens) {
+          if (!next[token]) next[token] = "";
+        }
+        return next;
+      });
+    }
   };
+
+  const handleMissingTokenEnglishChange = (token: string, value: string) => {
+    setMissingTokenInputs((prev) => ({ ...prev, [token]: value }));
+  };
+
+  const handleAddTokenToDictionary = async (token: string) => {
+    const englishValue = missingTokenInputs[token]?.trim();
+    if (!englishValue) return;
+    setAddingToken(token);
+    try {
+      await upsertNameDictionaryEntry(token, englishValue);
+      await queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
+      // Remove from missing tokens
+      setMissingTokenInputs((prev) => {
+        const next = { ...prev };
+        delete next[token];
+        return next;
+      });
+      // Regenerate English name with the new dictionary entry
+      const result = generateEnglishFromDictionary(form.arabicFullName, [
+        ...dictionary,
+        { arabicText: token, englishText: englishValue }
+      ]);
+      setForm((f) => ({ ...f, englishFullName: result.englishName }));
+    } finally {
+      setAddingToken(null);
+    }
+  };
+
+  // Compute current missing tokens
+  const currentMissingTokens = form.arabicFullName
+    ? generateEnglishFromDictionary(form.arabicFullName, dictionary).missingTokens
+    : [];
 
   // -- National ID derivation --
   const handleIdentifierValueChange = (value: string) => {
@@ -119,11 +174,9 @@ export default function PatientsPage() {
     });
   };
 
-  // Clear auto-derived fields if national ID becomes invalid
   useEffect(() => {
     if (form.identifierType === "national_id" && !isValidNationalId(form.identifierValue)) {
-      // Don't clear sex/DOB/age if user manually set them; just leave them as-is
-      // The backend will validate and reject if missing
+      // leave as-is; backend validates
     }
   }, [form.identifierValue, form.identifierType]);
 
@@ -163,7 +216,6 @@ export default function PatientsPage() {
       ...f,
       identifierType: type as IdentifierType,
       nationalIdConfirmation: "",
-      // Keep identifierValue so user can repurpose it
     }));
   };
 
@@ -221,15 +273,15 @@ export default function PatientsPage() {
                     onChange={handleEnglishNameChange}
                     dir="ltr"
                   />
-                  {form.arabicFullName && !englishNameManuallyEdited && form.englishFullName && (
+                  {form.arabicFullName && !englishNameManuallyEdited && (
                     <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                      Auto-generated from Arabic name.
+                      Generated from name dictionary.
                       <button
                         type="button"
-                        onClick={handleResetEnglishName}
+                        onClick={handleRegenerateEnglishName}
                         className="ml-1 text-teal-600 dark:text-teal-400 hover:underline"
                       >
-                        Reset
+                        Regenerate
                       </button>
                     </p>
                   )}
@@ -240,6 +292,35 @@ export default function PatientsPage() {
                   )}
                 </div>
               </div>
+
+              {/* Missing tokens panel */}
+              {currentMissingTokens.length > 0 && (
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    Unrecognized name tokens — add to dictionary:
+                  </p>
+                  {currentMissingTokens.map((token) => (
+                    <div key={token} className="flex items-center gap-2">
+                      <span className="text-sm text-stone-900 dark:text-white font-mono" dir="rtl">{token}</span>
+                      <input
+                        type="text"
+                        value={missingTokenInputs[token] ?? ""}
+                        onChange={(e) => handleMissingTokenEnglishChange(token, e.target.value)}
+                        placeholder="English translation…"
+                        className="flex-1 px-2 py-1 text-sm rounded border bg-white dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        disabled={!missingTokenInputs[token]?.trim() || addingToken === token}
+                        onClick={() => handleAddTokenToDictionary(token)}
+                        className="px-2 py-1 text-xs bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white rounded transition-colors"
+                      >
+                        {addingToken === token ? "Adding…" : "Add"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* Identifier Type & Value */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
