@@ -51,6 +51,8 @@ export default function PatientsPage() {
   const [addTokenError, setAddTokenError] = useState<string | null>(null);
   // Locally-added dictionary entries (optimistic, merged with server dictionary)
   const [localDictionary, setLocalDictionary] = useState<DictionaryEntry[]>([]);
+  const prevArabicNameRef = useRef(form.arabicFullName);
+  const prevArabicTokenCountRef = useRef(0);
   const queryClient = useQueryClient();
   const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -99,15 +101,23 @@ export default function PatientsPage() {
 
   // -- Dictionary-based English name generation --
   const handleArabicNameChange = (value: string) => {
+    const prevCount = prevArabicTokenCountRef.current;
+    const tokens = value.trim().split(/\s+/).filter(Boolean);
+    const currentCount = tokens.length;
+
     setForm((f) => {
       const updates: Partial<RegistrationForm> = { arabicFullName: value };
-      // Only auto-generate if user hasn't manually edited
-      if (!englishNameManuallyEdited) {
+      // Update English name when a new token is completed
+      if (!englishNameManuallyEdited && currentCount > prevCount) {
         const result = generateEnglishFromDictionary(value, dictionary);
         updates.englishFullName = result.englishName;
       }
       return { ...f, ...updates };
     });
+
+    // Track token count for next keystroke
+    prevArabicNameRef.current = value;
+    prevArabicTokenCountRef.current = currentCount;
   };
 
   const handleEnglishNameChange = (value: string) => {
