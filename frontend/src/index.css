@@ -1,0 +1,53 @@
+@import "tailwindcss";
+
+/* RISpro Design Tokens - migrated from styles.css */
+:root {
+  --bg: #f7f3eb;
+  --bg-soft: #fffaf2;
+  --surface: rgba(255, 252, 247, 0.86);
+  --surface-strong: #ffffff;
+  --surface-soft: rgba(255, 255, 255, 0.62);
+  --line: rgba(86, 60, 38, 0.12);
+  --line-strong: rgba(86, 60, 38, 0.2);
+  --text: #27180f;
+  --muted: #725b4a;
+  --teal: #0f766e;
+  --teal-strong: #115e59;
+  --amber: #d97706;
+  --amber-strong: #b45309;
+  --red: #b91c1c;
+  --green: #15803d;
+  --blue: #2563eb;
+  --gray: #6b7280;
+  --brown: #92400e;
+  --violet: #7c3aed;
+  --shadow: 0 28px 70px rgba(62, 36, 12, 0.12);
+  --shadow-soft: 0 16px 36px rgba(62, 36, 12, 0.08);
+  --radius-xl: 30px;
+  --radius-lg: 22px;
+  --radius-md: 16px;
+}
+
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --bg-soft: #1e293b;
+  --surface: rgba(30, 41, 59, 0.86);
+  --surface-strong: #1e293b;
+  --surface-soft: rgba(51, 65, 85, 0.62);
+  --line: rgba(148, 163, 184, 0.12);
+  --line-strong: rgba(148, 163, 184, 0.2);
+  --text: #f1f5f9;
+  --muted: #94a3b8;
+  --teal: #14b8a6;
+  --teal-strong: #0d9488;
+  --amber: #f59e0b;
+  --amber-strong: #d97706;
+  --red: #ef4444;
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --gray: #94a3b8;
+  --brown: #d97706;
+  --violet: #8b5cf6;
+  --shadow: 0 28px 70px rgba(0, 0, 0, 0.4);
+  --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.3);
+}

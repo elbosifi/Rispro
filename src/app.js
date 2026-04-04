@@ -88,13 +88,22 @@ export function createApp() {
   app.use("/api/name-dictionary", nameDictionaryRouter);
   app.use("/api", notFoundHandler);
 
-  app.get("/", sendFrontendFile("index.html"));
-  app.get("/app.js", sendFrontendFile("app.js"));
-  app.get("/styles.css", sendFrontendFile("styles.css", env.isProduction ? 3600 : 0));
+  // Legacy frontend (will be removed after migration is complete)
+  app.get("/legacy", sendFrontendFile("index.html"));
+  app.get("/legacy/app.js", sendFrontendFile("app.js"));
+  app.get("/legacy/styles.css", sendFrontendFile("styles.css", env.isProduction ? 3600 : 0));
+
+  // New React frontend (default)
+  const newFrontendDir = path.join(rootDir, "dist-frontend");
+  app.use(express.static(newFrontendDir, { maxAge: env.isProduction ? "1h" : 0 }));
   app.get("/favicon.ico", (_req, res) => {
     res.status(204).end();
   });
-  app.get("*", sendFrontendFile("index.html"));
+
+  // SPA fallback for new frontend
+  app.get("*", (req, res) => {
+    res.sendFile(path.join(newFrontendDir, "index.html"));
+  });
 
   app.use(errorHandler);
 
