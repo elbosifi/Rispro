@@ -48,6 +48,9 @@ export default function PatientsPage() {
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
   const [addingToken, setAddingToken] = useState<string | null>(null);
+  const [addTokenError, setAddTokenError] = useState<string | null>(null);
+  // Locally-added dictionary entries (optimistic, merged with server dictionary)
+  const [localDictionary, setLocalDictionary] = useState<DictionaryEntry[]>([]);
   const queryClient = useQueryClient();
   const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -58,7 +61,9 @@ export default function PatientsPage() {
     queryFn: fetchNameDictionary,
     staleTime: 1000 * 60 * 5
   });
-  const dictionary: DictionaryEntry[] = dictData?.entries ?? [];
+  const serverDictionary: DictionaryEntry[] = dictData?.entries ?? [];
+  // Merge server + local dictionary for all lookups
+  const dictionary: DictionaryEntry[] = [...serverDictionary, ...localDictionary];
 
   // Determine the strongest search term for duplicate checking
   const duplicateSearchQuery = form.phone1 || form.arabicFullName || form.englishFullName || form.identifierValue || "";
@@ -86,6 +91,8 @@ export default function PatientsPage() {
       setForm(DEFAULT_FORM);
       setEnglishNameManuallyEdited(false);
       setMissingTokenInputs({});
+      setLocalDictionary([]);
+      setAddTokenError(null);
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
     }
   });
@@ -132,21 +139,28 @@ export default function PatientsPage() {
     const englishValue = missingTokenInputs[token]?.trim();
     if (!englishValue) return;
     setAddingToken(token);
+    setAddTokenError(null);
     try {
-      await upsertNameDictionaryEntry(token, englishValue);
-      await queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
-      // Remove from missing tokens
+      const result = await upsertNameDictionaryEntry(token, englishValue);
+      // Optimistically add to local dictionary so it disappears from missing tokens immediately
+      const entry = result.entry;
+      const newEntry: DictionaryEntry = {
+        arabicText: entry.arabic_text ?? entry.arabicText ?? token,
+        englishText: entry.english_text ?? entry.englishText ?? englishValue
+      };
+      setLocalDictionary((prev) => [...prev, newEntry]);
+      // Remove from missing token inputs
       setMissingTokenInputs((prev) => {
         const next = { ...prev };
         delete next[token];
         return next;
       });
-      // Regenerate English name with the new dictionary entry
-      const result = generateEnglishFromDictionary(form.arabicFullName, [
-        ...dictionary,
-        { arabicText: token, englishText: englishValue }
-      ]);
-      setForm((f) => ({ ...f, englishFullName: result.englishName }));
+      // Regenerate English name — dictionary already includes the new entry
+      const result2 = generateEnglishFromDictionary(form.arabicFullName, [...serverDictionary, ...localDictionary, newEntry]);
+      setForm((f) => ({ ...f, englishFullName: result2.englishName }));
+      queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
+    } catch (err: any) {
+      setAddTokenError(err?.message || "Failed to add token to dictionary");
     } finally {
       setAddingToken(null);
     }
@@ -319,6 +333,9 @@ export default function PatientsPage() {
                       </button>
                     </div>
                   ))}
+                  {addTokenError && (
+                    <p className="text-xs text-red-600 dark:text-red-400">{addTokenError}</p>
+                  )}
                 </div>
               )}
 
