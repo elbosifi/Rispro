@@ -322,7 +322,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Identity</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Arabic Full Name" value={form.arabicFullName} onChange={handleArabicNameChange} required dir="rtl" />
+          <Input label="Arabic Full Name" value={form.arabicFullName} onChange={handleArabicNameChange} onBlur={() => { if (form.arabicFullName && !form.arabicFullName.endsWith(" ")) handleArabicNameChange(form.arabicFullName + " "); }} required dir="rtl" />
           <div>
             <Input label="English Full Name" value={form.englishFullName} onChange={handleEnglishNameChange} dir="ltr" />
             {form.arabicFullName && !englishNameManuallyEdited && (
@@ -487,13 +487,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
 // -- Sub-components --
 
-function Input({ label, value, onChange, required, type = "text", maxLength, placeholder, dir, min, max, onPaste, onDragOver, onDrop, ref }: {
-  label: string; value: string; onChange: (v: string) => void; required?: boolean; type?: string; maxLength?: number; placeholder?: string; dir?: "rtl" | "ltr"; min?: string; max?: string; onPaste?: React.ClipboardEventHandler<HTMLInputElement>; onDragOver?: React.DragEventHandler<HTMLInputElement>; onDrop?: React.DragEventHandler<HTMLInputElement>; ref?: React.RefObject<HTMLInputElement | null>;
+function Input({ label, value, onChange, required, type = "text", maxLength, placeholder, dir, min, max, onPaste, onDragOver, onDrop, onBlur, ref }: {
+  label: string; value: string; onChange: (v: string) => void; required?: boolean; type?: string; maxLength?: number; placeholder?: string; dir?: "rtl" | "ltr"; min?: string; max?: string; onPaste?: React.ClipboardEventHandler<HTMLInputElement>; onDragOver?: React.DragEventHandler<HTMLInputElement>; onDrop?: React.DragEventHandler<HTMLInputElement>; onBlur?: () => void; ref?: React.RefObject<HTMLInputElement | null>;
 }) {
   return (
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
-      <input ref={ref} type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} maxLength={maxLength} placeholder={placeholder} dir={dir} min={min} max={max} onPaste={onPaste} onDragOver={onDragOver} onDrop={onDrop} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
+      <input ref={ref} type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} maxLength={maxLength} placeholder={placeholder} dir={dir} min={min} max={max} onPaste={onPaste} onDragOver={onDragOver} onDrop={onDrop} onBlur={onBlur} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
     </div>
   );
 }
