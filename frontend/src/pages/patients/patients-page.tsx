@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent, type ChangeEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPatient, searchPatients } from "@/lib/api-hooks";
 import { transliterateArabicName } from "@/lib/transliterate";
@@ -153,10 +153,10 @@ export default function PatientsPage() {
   };
 
   // -- Identifier type change --
-  const handleIdentifierTypeChange = (type: IdentifierType) => {
+  const handleIdentifierTypeChange = (type: string) => {
     setForm((f) => ({
       ...f,
-      identifierType: type,
+      identifierType: type as IdentifierType,
       nationalIdConfirmation: "",
       // Keep identifierValue so user can repurpose it
     }));
