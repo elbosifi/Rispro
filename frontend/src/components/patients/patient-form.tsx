@@ -50,6 +50,10 @@ const DEFAULT_FORM: PatientFormState = {
 };
 
 function patientToForm(p: Patient): PatientFormState {
+  // Slice DOB to YYYY-MM-DD (backend may return full ISO datetime)
+  const dob = p.estimatedDateOfBirth
+    ? (p.estimatedDateOfBirth.includes("T") ? p.estimatedDateOfBirth.slice(0, 10) : p.estimatedDateOfBirth)
+    : "";
   return {
     arabicFullName: p.arabicFullName || "",
     englishFullName: p.englishFullName || "",
@@ -57,7 +61,7 @@ function patientToForm(p: Patient): PatientFormState {
     identifierValue: p.identifierValue || p.nationalId || "",
     nationalIdConfirmation: "",
     sex: p.sex || "",
-    estimatedDateOfBirth: p.estimatedDateOfBirth || "",
+    estimatedDateOfBirth: dob,
     ageYears: p.ageYears ? String(p.ageYears) : "",
     phone1: p.phone1 || "",
     phone2: p.phone2 || "",
@@ -75,6 +79,8 @@ interface PatientFormProps {
 export default function PatientForm({ mode, patientId, onSuccess, onCancel }: PatientFormProps) {
   const isEdit = mode === "edit";
   const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
+  // Track original national ID to know if it was edited (edit mode only)
+  const [originalNationalId, setOriginalNationalId] = useState("");
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
   const [savedPatient, setSavedPatient] = useState<Patient | null>(null);
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
@@ -106,7 +112,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   useEffect(() => {
     if (existingPatient) {
-      setForm(patientToForm(existingPatient));
+      const formState = patientToForm(existingPatient);
+      setForm(formState);
+      setOriginalNationalId(formState.identifierType === "national_id" ? formState.identifierValue : "");
       if (existingPatient.englishFullName) setEnglishNameManuallyEdited(true);
       prevArabicTokenCountRef.current = existingPatient.arabicFullName
         ? existingPatient.arabicFullName.trim().split(/\s+/).filter(Boolean).length
@@ -243,11 +251,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const isNat = form.identifierType === "national_id";
-    // National ID confirmation is mandatory when national ID has any content
-    if (isNat && form.identifierValue.length > 0 && form.nationalIdConfirmation.length === 0) {
+    // Confirmation is mandatory when it's shown (create mode or national ID was edited)
+    if (isNat && nationalIdWasEdited && form.nationalIdConfirmation.length === 0) {
       return;
     }
-    if (isNat && form.identifierValue.length > 0 && form.identifierValue !== form.nationalIdConfirmation) {
+    if (isNat && nationalIdWasEdited && form.identifierValue !== form.nationalIdConfirmation) {
       return;
     }
     const payload = {
@@ -280,6 +288,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       })()
     : [];
   const isNationalId = form.identifierType === "national_id";
+  // Show confirmation only in create mode, or in edit mode when national ID was changed
+  const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
+  const showConfirmation = isNationalId && nationalIdWasEdited;
   const submitLabel = mutation.isPending
     ? (isEdit ? "Updating…" : "Registering…")
     : (isEdit ? "Update Patient" : "Register Patient");
@@ -335,8 +346,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           ) : (
             <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => ({ ...f, identifierValue: v }))} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
           )}
-          {isNationalId && (
-            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={form.identifierValue.length > 0} />
+          {showConfirmation && (
+            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={nationalIdWasEdited} />
           )}
         </div>
       </div>
