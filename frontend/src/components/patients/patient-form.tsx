@@ -85,6 +85,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Track original national ID to know if it was edited (edit mode only)
   const [originalNationalId, setOriginalNationalId] = useState("");
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
+  const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
   const [savedPatient, setSavedPatient] = useState<Patient | null>(null);
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
@@ -160,6 +161,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const updateMutation = useMutation({
     mutationFn: (data: { payload: any }) => updatePatient(patientId!, data.payload),
     onSuccess: (patient) => {
+      setSavedPatient(patient);
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
       onSuccess?.(patient);
     }
@@ -172,9 +174,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const nowEndsWithSpace = value.endsWith(" ");
     const nowTokens = value.trim().split(/\s+/).filter(Boolean);
     const tokenJustCompleted = !prevEndsWithSpace && nowEndsWithSpace;
+    const arabicNameChanged = value !== form.arabicFullName;
 
     setForm((f) => {
       const u: Partial<PatientFormState> = { arabicFullName: value };
+      // In edit mode: if Arabic name changed, reset manual flag so transliteration works
+      if (isEdit && arabicNameChanged && englishNameManuallyEdited) {
+        setEnglishNameManuallyEdited(false);
+      }
       // Generate English only when a token is completed (space typed after word)
       if (!englishNameManuallyEdited && tokenJustCompleted) {
         u.englishFullName = generateEnglishFromDictionary(value, dictionary).englishName;
@@ -407,13 +414,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               <ul className="space-y-2">
                 {duplicates.slice(0, 5).map((p) => (
                   <li key={p.id} className="bg-white dark:bg-stone-800 rounded-lg border border-amber-200/50 dark:border-amber-800/50 overflow-hidden">
-                    <div className="p-3 space-y-1">
+                    <button type="button" onClick={() => setPreviewPatient(p)} className="w-full p-3 space-y-1 text-right hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
                       <p className="font-medium text-sm text-stone-900 dark:text-white">{p.arabicFullName}</p>
                       {p.englishFullName && <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>}
                       <p className="text-xs text-stone-500 dark:text-stone-400">{p.identifierValue || p.nationalId || "No ID"}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}MRN: {p.mrn || "—"}</p>
                       {p.phone1 && <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>}
                       {p.address && <p className="text-xs text-stone-500 dark:text-stone-400">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
-                    </div>
+                    </button>
                     <div className="flex gap-2 border-t border-amber-200/50 dark:border-amber-800/50">
                       <button type="button" onClick={() => navigate(`/patients/${p.id}/edit`)} className="flex-1 text-center py-2 px-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">Edit Patient</button>
                       <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="flex-1 text-center py-2 px-2 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors">Create Appointment</button>
@@ -423,9 +430,41 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </ul>
             </div>
           )}
+
+          {/* Patient Preview Modal */}
+          {previewPatient && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setPreviewPatient(null); }}>
+              <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-xl w-full max-w-md mx-4 p-6 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Patient Details</h3>
+                  <button onClick={() => setPreviewPatient(null)} className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200">✕</button>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <Field label="Arabic Name" value={previewPatient.arabicFullName} />
+                  {previewPatient.englishFullName && <Field label="English Name" value={previewPatient.englishFullName} />}
+                  <Field label="Identifier" value={`${previewPatient.identifierValue || previewPatient.nationalId || "No ID"}${previewPatient.identifierType && previewPatient.identifierType !== "national_id" ? ` (${previewPatient.identifierType})` : ""}`} />
+                  <Field label="MRN" value={previewPatient.mrn || "—"} />
+                  <Field label="Sex" value={previewPatient.sex === "M" ? "Male" : previewPatient.sex === "F" ? "Female" : previewPatient.sex} />
+                  <Field label="Age" value={previewPatient.ageYears ? `${previewPatient.ageYears} years` : "—"} />
+                  <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? (previewPatient.estimatedDateOfBirth.includes("T") ? previewPatient.estimatedDateOfBirth.slice(0, 10) : previewPatient.estimatedDateOfBirth) : "—"} />
+                  <Field label="Phone" value={previewPatient.phone1 || "—"} />
+                  {previewPatient.phone2 && <Field label="Phone 2" value={previewPatient.phone2} />}
+                  {previewPatient.address && <Field label="City" value={LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn || previewPatient.address} />}
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button onClick={() => navigate(`/patients/${previewPatient.id}/edit`)} className="flex-1 py-2 px-4 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 font-medium rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors text-sm">Edit</button>
+                  <button onClick={() => navigate(`/appointments?patientId=${previewPatient.id}`)} className="flex-1 py-2 px-4 bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300 font-medium rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors text-sm">Create Appointment</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Success Banner (both create and edit) */}
           {savedPatient && (
             <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
-              <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Registered Successfully</h3>
+              <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">
+                {isEdit ? "Updated Successfully" : "Registered Successfully"}
+              </h3>
               <div className="text-sm text-stone-700 dark:text-stone-300">
                 <p className="font-medium">{savedPatient.arabicFullName}</p>
                 <p className="text-xs text-stone-500 mt-1">MRN: {savedPatient.mrn}</p>
@@ -435,6 +474,26 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             </div>
           )}
         </div>
+      </div>
+    );
+  }
+
+  // Edit mode: form + success banner
+  if (isEdit) {
+    return (
+      <div className="space-y-6">
+        {formFields}
+        {savedPatient && (
+          <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
+            <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Updated Successfully</h3>
+            <div className="text-sm text-stone-700 dark:text-stone-300">
+              <p className="font-medium">{savedPatient.arabicFullName}</p>
+              <p className="text-xs text-stone-500 mt-1">MRN: {savedPatient.mrn}</p>
+              {savedPatient.identifierValue && <p className="text-xs text-stone-500">ID: {savedPatient.identifierType === "national_id" ? "National" : savedPatient.identifierType} — {savedPatient.identifierValue}</p>}
+            </div>
+            <button onClick={() => setSavedPatient(null)} className="mt-3 text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Dismiss</button>
+          </div>
+        )}
       </div>
     );
   }
@@ -462,6 +521,15 @@ function Select({ label, value, onChange, options }: { label: string; value: str
       <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
         {options.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
       </select>
+    </div>
+  );
+}
+
+function Field({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between items-baseline py-1 border-b border-stone-100 dark:border-stone-700 last:border-b-0">
+      <span className="text-stone-500 dark:text-stone-400 text-xs">{label}</span>
+      <span className="text-stone-900 dark:text-white text-sm font-medium text-right">{value}</span>
     </div>
   );
 }
