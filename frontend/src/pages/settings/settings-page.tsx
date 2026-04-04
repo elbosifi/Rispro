@@ -92,10 +92,14 @@ export default function SettingsPage() {
 }
 
 function UsersSection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["users"],
     queryFn: fetchUsers
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -120,10 +124,14 @@ function UsersSection() {
 
 function AuditSection() {
   const limit = 50;
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["audit", limit],
     queryFn: () => fetchAuditEntries(limit)
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -143,10 +151,14 @@ function AuditSection() {
 }
 
 function ExamTypesSection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["exam-types"],
     queryFn: fetchExamTypes
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -165,10 +177,14 @@ function ExamTypesSection() {
 }
 
 function ModalitiesSection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["modalities"],
     queryFn: fetchModalitiesSettings
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -192,10 +208,14 @@ function ModalitiesSection() {
 }
 
 function NameDictionarySection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["name-dictionary"],
     queryFn: fetchNameDictionary
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -227,26 +247,42 @@ function NameDictionarySection() {
 }
 
 function PacsConnectionSection() {
-  const { data } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["settings", "pacs_connection"],
     queryFn: fetchPacsConnection
   });
 
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
+
   return (
     <div className="space-y-3 text-sm">
-      <p className="text-stone-500 dark:text-stone-400">PACS connection settings are configured via the settings API.</p>
-      <pre className="bg-stone-50 dark:bg-stone-700 p-4 rounded-lg text-xs overflow-auto">
-        {JSON.stringify(data, null, 2)}
-      </pre>
+      {isLoading ? <p className="text-stone-500">Loading...</p> : (
+        <>
+          <p className="text-stone-500 dark:text-stone-400">PACS connection settings are configured via the settings API.</p>
+          <pre className="bg-stone-50 dark:bg-stone-700 p-4 rounded-lg text-xs overflow-auto">
+            {JSON.stringify(data, null, 2)}
+          </pre>
+        </>
+      )}
     </div>
   );
 }
 
 function SimpleSettingsSection({ category }: { category: string }) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["settings", category],
     queryFn: () => fetchSettings(category)
   });
+
+  if (error) {
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <QueryError message="Recent supervisor re-authentication is required. Please re-authenticate and try again." />;
+    }
+    return <QueryError message={msg} />;
+  }
 
   return (
     <div>
@@ -265,10 +301,14 @@ function SimpleSettingsSection({ category }: { category: string }) {
 }
 
 function DicomGatewaySection() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ["dicom-devices"],
     queryFn: fetchDicomDevices
   });
+
+  if (error) {
+    return <QueryError message={(error as Error).message} />;
+  }
 
   return (
     <div>
@@ -300,6 +340,15 @@ function BackupRestoreSection() {
           Download Backup
         </a>
       </div>
+    </div>
+  );
+}
+
+function QueryError({ message }: { message: string }) {
+  return (
+    <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+      <p className="text-sm font-medium text-red-700 dark:text-red-400">Failed to load settings</p>
+      <p className="text-xs text-red-600 dark:text-red-500 mt-1 font-mono break-all">{message}</p>
     </div>
   );
 }

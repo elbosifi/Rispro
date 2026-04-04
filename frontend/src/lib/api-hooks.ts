@@ -166,7 +166,7 @@ export async function completeAppointment(id: number) {
 // -- Settings --
 export async function fetchSettings(category: string) {
   const raw: any = await api(`/settings/${category}`);
-  return mapSettings(raw);
+  return mapSettings(raw.settings ?? []);
 }
 
 export async function fetchUsers() {
