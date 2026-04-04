@@ -6,6 +6,19 @@ import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils
 import { createAppointment } from "./appointment-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveScanValueToAccession, scheduleWorklistSync } from "./dicom-service.js";
+import {
+  APPOINTMENT_QUEUE_CLOSED_STATUSES,
+  APPOINTMENT_STATUS_ARRIVED,
+  APPOINTMENT_STATUS_NO_SHOW,
+  APPOINTMENT_STATUS_SCHEDULED
+} from "../constants/appointment-statuses.js";
+
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
+/** @typedef {import("../types/domain.js").QueueStatus} QueueStatus */
 
 const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 
@@ -14,11 +27,11 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  * @property {number} id
  * @property {string} queue_date
  * @property {number} queue_number
- * @property {string} queue_status
+ * @property {QueueStatus} queue_status
  * @property {string | null} scanned_at
  * @property {number} appointment_id
  * @property {string} accession_number
- * @property {string} appointment_status
+ * @property {AppointmentStatus} appointment_status
  * @property {boolean} is_walk_in
  * @property {string | null} notes
  * @property {number} patient_id
@@ -34,11 +47,11 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 
 /**
  * @typedef QueueSummaryRow
- * @property {number | string} total_appointments
- * @property {number | string} scheduled_count
- * @property {number | string} waiting_count
- * @property {number | string} no_show_count
- * @property {number | string} arrived_count
+ * @property {DbNumeric} total_appointments
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} waiting_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} arrived_count
  */
 
 /**
@@ -57,7 +70,7 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 
 /**
  * @typedef NextQueueNumberRow
- * @property {number | string} [next_queue_number]
+ * @property {DbNumeric} [next_queue_number]
  */
 
 /**
@@ -65,7 +78,7 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  * @property {number} id
  * @property {string} queue_date
  * @property {number} queue_number
- * @property {string} queue_status
+ * @property {QueueStatus} queue_status
  * @property {string | null} scanned_at
  */
 
@@ -73,7 +86,7 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  * @typedef AppointmentForQueueRow
  * @property {number} id
  * @property {string} appointment_date
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string} accession_number
  * @property {boolean} is_walk_in
  * @property {string | null} notes
@@ -89,47 +102,72 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
 /**
  * @typedef NoShowAppointmentRow
  * @property {number} id
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string} appointment_date
  */
 
 /**
- * @typedef QueueSnapshot
- * @property {string} queueDate
- * @property {string} reviewTime
- * @property {boolean} reviewActive
- * @property {QueueSummaryRow} summary
- * @property {QueueEntryRow[]} queueEntries
- * @property {NoShowCandidateRow[]} noShowCandidates
+ * @typedef QueueSummaryRow
+ * @property {DbNumeric} total_appointments
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} waiting_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} arrived_count
  */
 
 /**
- * @typedef QueueScanResult
- * @property {QueueEntryStateRow} queueEntry
- * @property {{
- *   id: number,
- *   accession_number: string,
- *   is_walk_in: boolean,
- *   notes: string | null,
- *   status: "arrived"
- * }} appointment
- * @property {{
- *   arabic_full_name: string,
- *   english_full_name: string | null,
- *   phone_1: string | null
- * }} patient
- * @property {{
- *   name_ar: string,
- *   name_en: string
- * }} modality
- * @property {{ name_ar: string | null, name_en: string | null } | null} examType
+ * @typedef NoShowCandidateRow
+ * @property {number} appointment_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string | null} notes
+ * @property {number} patient_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} phone_1
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
  */
 
 /**
- * @typedef {object} CurrentUser
- * @property {number | string} sub
- * @property {string} [role]
+ * @typedef NextQueueNumberRow
+ * @property {DbNumeric} [next_queue_number]
  */
+
+/**
+ * @typedef QueueEntryStateRow
+ * @property {number} id
+ * @property {string} queue_date
+ * @property {number} queue_number
+ * @property {QueueStatus} queue_status
+ * @property {string | null} scanned_at
+ */
+
+/**
+ * @typedef AppointmentForQueueRow
+ * @property {number} id
+ * @property {string} appointment_date
+ * @property {AppointmentStatus} status
+ * @property {string} accession_number
+ * @property {boolean} is_walk_in
+ * @property {string | null} notes
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} phone_1
+ * @property {string} modality_name_ar
+ * @property {string} modality_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ */
+
+/**
+ * @typedef NoShowAppointmentRow
+ * @property {number} id
+ * @property {AppointmentStatus} status
+ * @property {string} appointment_date
+ */
+
+/** @typedef {AuthenticatedUserContext} CurrentUser */
 
 /**
  * @typedef {object} QueueScanPayload
@@ -356,7 +394,7 @@ async function getAppointmentForQueue(client, identifier) {
 /**
  * @param {import("pg").PoolClient} client
  * @param {AppointmentForQueueRow} appointment
- * @param {number | string} currentUserId
+ * @param {UserId} currentUserId
  * @param {string} queueDate
  */
 async function enqueueAppointmentRecord(client, appointment, currentUserId, queueDate) {
@@ -408,10 +446,10 @@ async function enqueueAppointmentRecord(client, appointment, currentUserId, queu
 
 /**
  * @param {import("pg").PoolClient} client
- * @param {number | string} appointmentId
+ * @param {UserId} appointmentId
  * @param {string} oldStatus
  * @param {string} newStatus
- * @param {number | string} currentUserId
+ * @param {UserId} currentUserId
  * @param {string | null} [reason]
  */
 async function updateAppointmentStatus(client, appointmentId, oldStatus, newStatus, currentUserId, reason = null) {
@@ -481,14 +519,14 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
       throw new HttpError(409, "Only today's appointments can be scanned into the queue.");
     }
 
-    if (["cancelled", "completed", "no-show"].includes(appointment.status)) {
+    if (APPOINTMENT_QUEUE_CLOSED_STATUSES.includes(appointment.status)) {
       throw new HttpError(409, `This appointment is already marked as ${appointment.status}.`);
     }
 
     const queueEntry = await enqueueAppointmentRecord(client, appointment, currentUser.sub, queueDate);
 
-    if (appointment.status !== "arrived") {
-      await updateAppointmentStatus(client, appointment.id, appointment.status, "arrived", currentUser.sub);
+    if (appointment.status !== APPOINTMENT_STATUS_ARRIVED) {
+      await updateAppointmentStatus(client, appointment.id, appointment.status, APPOINTMENT_STATUS_ARRIVED, currentUser.sub);
     }
 
     await logAuditEntry(
@@ -497,7 +535,7 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
         entityId: appointment.id,
         actionType: "scan_into_queue",
         oldValues: { status: appointment.status },
-        newValues: { status: "arrived", accession_number: appointment.accession_number },
+        newValues: { status: APPOINTMENT_STATUS_ARRIVED, accession_number: appointment.accession_number },
         changedByUserId: currentUser.sub
       },
       client
@@ -513,7 +551,7 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
         accession_number: appointment.accession_number,
         is_walk_in: appointment.is_walk_in,
         notes: appointment.notes,
-        status: "arrived"
+        status: APPOINTMENT_STATUS_ARRIVED
       },
       patient: {
         arabic_full_name: appointment.arabic_full_name,
@@ -540,10 +578,10 @@ export async function scanAppointmentIntoQueue(payload, currentUser) {
 }
 
 /**
- * @param {Record<string, unknown>} payload
+ * @param {UnknownRecord} payload
  * @param {CurrentUser} currentUser
  * @param {QueueWalkInOptions} [options]
- * @returns {Promise<QueueScanResult & { createdAppointment: Record<string, unknown> }>}
+ * @returns {Promise<QueueScanResult & { createdAppointment: UnknownRecord }>}
  */
 export async function createWalkInQueueEntry(payload, currentUser, options = {}) {
   const queueDate = getTripoliToday();
@@ -569,7 +607,7 @@ export async function createWalkInQueueEntry(payload, currentUser, options = {})
 }
 
 /**
- * @param {number | string} appointmentId
+ * @param {UserId} appointmentId
  * @param {string | null | undefined} reason
  * @param {CurrentUser | null | undefined} currentUser
  * @returns {Promise<{ ok: true }>}
@@ -623,7 +661,7 @@ export async function confirmNoShow(appointmentId, reason, currentUser) {
       throw new HttpError(409, "Only today's appointments can be confirmed as no-show here.");
     }
 
-    if (appointment.status !== "scheduled") {
+    if (appointment.status !== APPOINTMENT_STATUS_SCHEDULED) {
       throw new HttpError(409, "Only scheduled appointments can be confirmed as no-show.");
     }
 
@@ -654,7 +692,7 @@ export async function confirmNoShow(appointmentId, reason, currentUser) {
         entityId: cleanAppointmentId,
         actionType: "confirm_no_show",
         oldValues: appointment,
-        newValues: { status: "no-show", no_show_reason: cleanReason },
+        newValues: { status: APPOINTMENT_STATUS_NO_SHOW, no_show_reason: cleanReason },
         changedByUserId: currentUser.sub
       },
       client

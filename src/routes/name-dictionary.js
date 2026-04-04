@@ -3,6 +3,8 @@
 import express from "express";
 import { hasRecentSupervisorReauth, requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import {
   deleteNameDictionaryEntry,
   importNameDictionaryEntries,
@@ -11,25 +13,20 @@ import {
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
 
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
 /**
  * @typedef {object} NameDictionaryRequest
  * @property {{ includeInactive?: string }} [query]
- * @property {{ sub: number | string, role: string }} user
- * @property {Record<string, unknown>} [body]
+ * @property {AuthenticatedUserContext} user
+ * @property {UnknownRecord} [body]
  * @property {{ entryId?: string }} [params]
  */
 
 export const nameDictionaryRouter = express.Router();
 
 nameDictionaryRouter.use(requireAuth);
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function asString(value) {
-  return String(value || "");
-}
 
 nameDictionaryRouter.get(
   "/",
@@ -59,7 +56,7 @@ nameDictionaryRouter.post(
   requireRecentSupervisorReauth,
   asyncRoute(async (req, res) => {
     const request = /** @type {NameDictionaryRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const entriesPayload = /** @type {Array<{ arabicText?: string, englishText?: string, isActive?: boolean | string | number | null } | null | undefined>} */ (
       Array.isArray(body.entries) ? body.entries : []
     );

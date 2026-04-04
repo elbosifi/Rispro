@@ -5,23 +5,25 @@ import { HttpError } from "../utils/http-error.js";
 
 /** @typedef {import("../types/domain.js").AuditEvent} DomainAuditEvent */
 /** @typedef {import("../types/db.js").DbExecutor} DbExecutor */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
 
 /**
  * @typedef AuditEntryInput
  * @property {string} entityType
- * @property {number | string | null} [entityId]
+ * @property {NullableUserId} [entityId]
  * @property {string} actionType
  * @property {unknown} [oldValues]
  * @property {unknown} [newValues]
- * @property {number | string | null} [changedByUserId]
+ * @property {NullableUserId} [changedByUserId]
  */
 
 /**
  * @typedef AuditFilters
- * @property {number | string} [limit]
+ * @property {UserId} [limit]
  * @property {string} [entityType]
  * @property {string} [actionType]
- * @property {number | string} [changedByUserId]
+ * @property {UserId} [changedByUserId]
  * @property {string} [dateFrom]
  * @property {string} [dateTo]
  */
@@ -30,11 +32,11 @@ import { HttpError } from "../utils/http-error.js";
  * @typedef AuditLogRow
  * @property {number} id
  * @property {string} entity_type
- * @property {number | string | null} entity_id
+ * @property {NullableUserId} entity_id
  * @property {string} action_type
  * @property {unknown} old_values
  * @property {unknown} new_values
- * @property {number | string | null} changed_by_user_id
+ * @property {NullableUserId} changed_by_user_id
  * @property {string} created_at
  * @property {string | null} [changed_by_name]
  * @property {string | null} [changed_by_username]
@@ -52,7 +54,7 @@ import { HttpError } from "../utils/http-error.js";
 
 /**
  * @typedef AuditUserOptionRow
- * @property {number | string} id
+ * @property {UserId} id
  * @property {string | null} full_name
  * @property {string | null} username
  */

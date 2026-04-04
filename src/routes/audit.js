@@ -4,56 +4,34 @@ import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { getTripoliToday } from "../utils/date.js";
+import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { exportAuditEntriesCsv, listAuditEntries, listAuditFilterOptions, logAuditEntry } from "../services/audit-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").UserId} UserId */
 
 /**
  * @typedef {object} AuditRequest
- * @property {Record<string, unknown>} [query]
- * @property {{ sub: number | string, role: string }} user
+ * @property {UnknownRecord} [query]
+ * @property {AuthenticatedUserContext} user
  */
 
 export const auditRouter = express.Router();
 
 auditRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 
-/**
- * @param {unknown} value
- * @returns {string | undefined}
- */
-function asOptionalString(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  return String(value);
-}
-
-/**
- * @param {unknown} value
- * @returns {number | string | undefined}
- */
-function asOptionalNumberOrString(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  if (typeof value === "number") {
-    return value;
-  }
-
-  return String(value);
-}
-
 auditRouter.get(
   "/export",
   asyncRoute(async (req, res) => {
     const request = /** @type {AuditRequest} */ (req);
-    const query = /** @type {Record<string, unknown>} */ (request.query || {});
+    const query = asUnknownRecord(request.query);
     const csv = await exportAuditEntriesCsv({
-      limit: asOptionalNumberOrString(query.limit),
+      limit: asOptionalUserId(query.limit),
       entityType: asOptionalString(query.entityType),
       actionType: asOptionalString(query.actionType),
-      changedByUserId: asOptionalNumberOrString(query.changedByUserId),
+      changedByUserId: asOptionalUserId(query.changedByUserId),
       dateFrom: asOptionalString(query.dateFrom),
       dateTo: asOptionalString(query.dateTo)
     });
@@ -84,13 +62,13 @@ auditRouter.get(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {AuditRequest} */ (req);
-    const query = /** @type {Record<string, unknown>} */ (request.query || {});
+    const query = asUnknownRecord(request.query);
     const [entries, meta] = await Promise.all([
       listAuditEntries({
-        limit: asOptionalNumberOrString(query.limit),
+        limit: asOptionalUserId(query.limit),
         entityType: asOptionalString(query.entityType),
         actionType: asOptionalString(query.actionType),
-        changedByUserId: asOptionalNumberOrString(query.changedByUserId),
+        changedByUserId: asOptionalUserId(query.changedByUserId),
         dateFrom: asOptionalString(query.dateFrom),
         dateTo: asOptionalString(query.dateTo)
       }),

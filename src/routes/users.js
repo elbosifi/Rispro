@@ -3,51 +3,23 @@
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { createUser, deleteUser, listUsers } from "../services/user-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 
 /**
  * @typedef {object} UsersRequest
- * @property {{ sub: number | string, role: string }} user
- * @property {Record<string, unknown>} [body]
+ * @property {AuthenticatedUserContext} user
+ * @property {UnknownRecord} [body]
  * @property {{ userId?: string }} [params]
  */
 
 export const usersRouter = express.Router();
 
 usersRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function asString(value) {
-  return String(value || "");
-}
-
-/**
- * @param {unknown} value
- * @returns {boolean | undefined}
- */
-function asOptionalBoolean(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  if (typeof value === "boolean") {
-    return value;
-  }
-
-  const normalized = String(value).trim().toLowerCase();
-  if (["true", "1", "yes", "enabled", "on"].includes(normalized)) {
-    return true;
-  }
-
-  if (["false", "0", "no", "disabled", "off"].includes(normalized)) {
-    return false;
-  }
-
-  return undefined;
-}
 
 usersRouter.get(
   "/",
@@ -61,7 +33,7 @@ usersRouter.post(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {UsersRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const user = await createUser(
       {
         username: asString(body.username),

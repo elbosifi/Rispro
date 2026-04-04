@@ -9,14 +9,17 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 
 /**
  * @typedef DocumentUploadPayload
- * @property {number | string} [patientId]
- * @property {number | string} [appointmentId]
+ * @property {UserId} [patientId]
+ * @property {UserId} [appointmentId]
  * @property {string} [documentType]
  * @property {string} [originalFilename]
  * @property {string} [mimeType]
@@ -124,7 +127,7 @@ async function ensureRelatedRecords(patientId, appointmentId) {
 }
 
 /**
- * @param {{ patientId?: number | string, appointmentId?: number | string }} [filters]
+ * @param {{ patientId?: UserId, appointmentId?: UserId }} [filters]
  * @returns {Promise<DocumentRow[]>}
  */
 export async function listDocuments(filters = {}) {
@@ -157,7 +160,7 @@ export async function listDocuments(filters = {}) {
 }
 
 /**
- * @param {number | string} documentId
+ * @param {UserId} documentId
  * @returns {Promise<DocumentRow>}
  */
 export async function getDocumentById(documentId) {
@@ -191,7 +194,7 @@ export function getDocumentAbsolutePath(document) {
 
 /**
  * @param {DocumentUploadPayload} payload
- * @param {number | string | null | undefined} currentUserId
+ * @param {OptionalUserId} currentUserId
  * @returns {Promise<DocumentRow>}
  */
 export async function uploadDocument(payload, currentUserId) {

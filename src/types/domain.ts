@@ -1,4 +1,16 @@
+import type { NullableUserId } from "./http.js";
+
 export type Role = "receptionist" | "supervisor" | "modality_staff";
+export type AppointmentStatus =
+  | "scheduled"
+  | "arrived"
+  | "waiting"
+  | "in-progress"
+  | "completed"
+  | "discontinued"
+  | "no-show"
+  | "cancelled";
+export type QueueStatus = "waiting" | "called" | "in-progress" | "removed";
 
 export interface User {
   id: number;
@@ -46,7 +58,7 @@ export interface Appointment {
   examTypeId?: number | null;
   accessionNumber: string;
   appointmentDate: string;
-  status: string;
+  status: AppointmentStatus;
   isWalkIn?: boolean;
   notes?: string | null;
   arrivedAt?: string | null;
@@ -58,17 +70,17 @@ export interface QueueItem {
   appointmentId: number;
   queueDate: string;
   queueNumber: number;
-  queueStatus: string;
+  queueStatus: QueueStatus;
   scannedAt?: string | null;
 }
 
 export interface AuditEvent {
   id?: number;
   entityType: string;
-  entityId?: number | string | null;
+  entityId?: NullableUserId;
   actionType: string;
   oldValues?: unknown;
   newValues?: unknown;
-  changedByUserId?: number | string | null;
+  changedByUserId?: NullableUserId;
   createdAt?: string;
 }

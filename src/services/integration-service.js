@@ -6,15 +6,16 @@ import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDicomGatewayOverview } from "./dicom-service.js";
 
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+/** @typedef {import("../types/settings.js").SettingsMap} SettingsMap */
+/** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+
 /**
  * @typedef SettingMapRow
  * @property {string} category
  * @property {string} setting_key
  * @property {{ value?: unknown } | null} [setting_value]
- */
-
-/**
- * @typedef {Record<string, string>} CategorySettings
  */
 
 /**
@@ -29,14 +30,14 @@ import { getDicomGatewayOverview } from "./dicom-service.js";
 
 /**
  * @typedef PrintPreparePayload
- * @property {number | string} [appointmentId]
+ * @property {UserId} [appointmentId]
  * @property {"slip" | "label" | string} [outputType]
  */
 
 /**
  * @typedef ScanPreparePayload
- * @property {number | string} [appointmentId]
- * @property {number | string} [patientId]
+ * @property {UserId} [appointmentId]
+ * @property {UserId} [patientId]
  * @property {string} [documentType]
  */
 
@@ -166,7 +167,7 @@ async function loadSettingsMap(categories) {
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, CategorySettings>} */ ({}));
+  }, /** @type {SettingsMap} */ ({}));
 }
 
 /**
@@ -187,7 +188,7 @@ function parseCsvList(value) {
 }
 
 /**
- * @param {number | string} appointmentId
+ * @param {UserId} appointmentId
  */
 async function getAppointmentSummary(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
@@ -265,7 +266,7 @@ export async function getIntegrationStatus() {
 
 /**
  * @param {PrintPreparePayload} payload
- * @param {number | string | null | undefined} currentUserId
+ * @param {OptionalUserId} currentUserId
  * @returns {Promise<PrintPreparation>}
  */
 export async function preparePrintJob(payload, currentUserId) {
@@ -310,7 +311,7 @@ export async function preparePrintJob(payload, currentUserId) {
 
 /**
  * @param {ScanPreparePayload} payload
- * @param {number | string | null | undefined} currentUserId
+ * @param {OptionalUserId} currentUserId
  * @returns {Promise<ScanPreparation>}
  */
 export async function prepareScanSession(payload, currentUserId) {

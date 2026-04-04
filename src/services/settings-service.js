@@ -4,6 +4,9 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/settings.js").GroupedSettings<SettingsRow>} SettingsCatalog */
+
 /**
  * @typedef SettingsRow
  * @property {number} id
@@ -19,7 +22,7 @@ import { logAuditEntry } from "./audit-service.js";
  * @property {unknown} [value]
  */
 
-/** @returns {Promise<Record<string, SettingsRow[]>>} */
+/** @returns {Promise<SettingsCatalog>} */
 export async function listSettingsCatalog() {
   const { rows } = await pool.query(
     `
@@ -37,7 +40,7 @@ export async function listSettingsCatalog() {
 
     accumulator[row.category].push(row);
     return accumulator;
-  }, /** @type {Record<string, SettingsRow[]>} */ ({}));
+  }, /** @type {SettingsCatalog} */ ({}));
 
   return grouped;
 }
@@ -63,7 +66,7 @@ export async function getSettingsByCategory(category) {
 /**
  * @param {string} category
  * @param {SettingsEntryInput[]} entries
- * @param {number | string} updatedByUserId
+ * @param {UserId} updatedByUserId
  * @returns {Promise<SettingsRow[]>}
  */
 export async function upsertSettings(category, entries, updatedByUserId) {

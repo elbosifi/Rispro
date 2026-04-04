@@ -6,8 +6,20 @@ import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
+import {
+  APPOINTMENT_NON_CANCELLABLE_STATUSES,
+  APPOINTMENT_RECEPTION_ACTIVE_STATUSES,
+  isListableAppointmentStatus
+} from "../constants/appointment-statuses.js";
 
 /** @typedef {import("../types/domain.js").Appointment} DomainAppointment */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
+/** @typedef {import("../types/db.js").NullableDbNumeric} NullableDbNumeric */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+/** @typedef {import("../types/http.js").AuthenticatedUserContext & { id?: UserId }} AppointmentActor */
 
 /**
  * @typedef SchedulingSettingRow
@@ -18,25 +30,25 @@ import { authenticateUser } from "./auth-service.js";
 /**
  * @typedef AppointmentStatusRow
  * @property {number} id
- * @property {string} status
+ * @property {AppointmentStatus} status
  */
 
 /**
  * @typedef SequenceRow
- * @property {number | string | null} last_daily_sequence
+ * @property {NullableDbNumeric} last_daily_sequence
  */
 
 /**
  * @typedef ModalitySlotAggregateRow
- * @property {number | string | null} booked_count
- * @property {number | string | null} last_slot_number
+ * @property {NullableDbNumeric} booked_count
+ * @property {NullableDbNumeric} last_slot_number
  */
 
 /**
  * @typedef BookingStatsRow
- * @property {number | string | null} booked_count
- * @property {number | string | null} last_slot_number
- * @property {number | string | null} last_daily_sequence
+ * @property {NullableDbNumeric} booked_count
+ * @property {NullableDbNumeric} last_slot_number
+ * @property {NullableDbNumeric} last_daily_sequence
  */
 
 /**
@@ -50,7 +62,7 @@ import { authenticateUser } from "./auth-service.js";
  * @property {string} appointment_date
  * @property {number} daily_sequence
  * @property {number | null} modality_slot_number
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string | null} notes
  * @property {string | null} overbooking_reason
  */
@@ -104,24 +116,24 @@ import { authenticateUser } from "./auth-service.js";
 /**
  * @typedef AppointmentCreateResult
  * @property {AppointmentDbRow} appointment
- * @property {Record<string, unknown>} patient
- * @property {Record<string, unknown>} modality
- * @property {Record<string, unknown> | null} examType
- * @property {Record<string, unknown> | null} priority
+ * @property {UnknownRecord} patient
+ * @property {UnknownRecord} modality
+ * @property {UnknownRecord | null} examType
+ * @property {UnknownRecord | null} priority
  * @property {string} barcodeValue
  */
 
 /**
  * @typedef AppointmentStatsSummaryRow
- * @property {number | string} total_appointments
- * @property {number | string} unique_patients
- * @property {number | string} unique_modalities
- * @property {number | string} scheduled_count
- * @property {number | string} in_queue_count
- * @property {number | string} completed_count
- * @property {number | string} no_show_count
- * @property {number | string} cancelled_count
- * @property {number | string} walk_in_count
+ * @property {DbNumeric} total_appointments
+ * @property {DbNumeric} unique_patients
+ * @property {DbNumeric} unique_modalities
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} in_queue_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} cancelled_count
+ * @property {DbNumeric} walk_in_count
  */
 
 /**
@@ -131,7 +143,7 @@ import { authenticateUser } from "./auth-service.js";
  * @property {string} appointment_date
  * @property {string} created_at
  * @property {number | null} modality_slot_number
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string | null} notes
  * @property {boolean} is_walk_in
  * @property {boolean} is_overbooked
@@ -166,27 +178,27 @@ import { authenticateUser } from "./auth-service.js";
  * @property {string} modality_code
  * @property {string} modality_name_ar
  * @property {string} modality_name_en
- * @property {number | string} total_count
- * @property {number | string} scheduled_count
- * @property {number | string} in_queue_count
- * @property {number | string} completed_count
- * @property {number | string} no_show_count
- * @property {number | string} cancelled_count
+ * @property {DbNumeric} total_count
+ * @property {DbNumeric} scheduled_count
+ * @property {DbNumeric} in_queue_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} no_show_count
+ * @property {DbNumeric} cancelled_count
  */
 
 /**
  * @typedef StatusBreakdownRow
- * @property {string} status
- * @property {number | string} total_count
+ * @property {AppointmentStatus} status
+ * @property {DbNumeric} total_count
  */
 
 /**
  * @typedef DailyBreakdownRow
  * @property {string} appointment_date
- * @property {number | string} total_count
- * @property {number | string} completed_count
- * @property {number | string} cancelled_count
- * @property {number | string} no_show_count
+ * @property {DbNumeric} total_count
+ * @property {DbNumeric} completed_count
+ * @property {DbNumeric} cancelled_count
+ * @property {DbNumeric} no_show_count
  */
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
@@ -309,7 +321,7 @@ export async function getAppointmentDaySettings(client = pool) {
   const values = settingsRows.reduce((accumulator, row) => {
     accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, string>} */ ({}));
+  }, /** @type {CategorySettings} */ ({}));
 
   return {
     fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
@@ -641,9 +653,7 @@ export async function listAppointmentsForPrint(filters = {}) {
   }
 
   if (filters.status && Array.isArray(filters.status) && filters.status.length > 0) {
-    const validStatuses = filters.status.filter((s) =>
-      ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].includes(s)
-    );
+    const validStatuses = filters.status.filter((s) => isListableAppointmentStatus(s));
     if (validStatuses.length > 0) {
       params.push(validStatuses);
       statusFilterSql = ` and appointments.status = ANY($${params.length})`;
@@ -1394,8 +1404,8 @@ export async function deleteExamType(examTypeId, currentUserId) {
 }
 
 /**
- * @param {Record<string, unknown>} payload
- * @param {{ sub?: number | string, id?: number | string, role?: string }} currentUser
+ * @param {UnknownRecord} payload
+ * @param {AppointmentActor | null | undefined} currentUser
  * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
  * @returns {Promise<AppointmentCreateResult>}
  */
@@ -1596,9 +1606,9 @@ export async function createAppointment(payload, currentUser, options = {}) {
 }
 
 /**
- * @param {number | string} appointmentId
- * @param {Record<string, unknown>} payload
- * @param {{ sub?: number | string, id?: number | string, role?: string }} currentUser
+ * @param {UserId} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AppointmentActor | null | undefined} currentUser
  * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
  */
 /** @returns {Promise<AppointmentDbRow>} */
@@ -1615,9 +1625,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
-    const existingStatus = String(existingAppointment.status || "");
+    const existingStatus = existingAppointment.status;
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingStatus)) {
+    if (!APPOINTMENT_RECEPTION_ACTIVE_STATUSES.includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be edited or rescheduled.");
     }
 
@@ -1799,9 +1809,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 }
 
 /**
- * @param {number | string} appointmentId
- * @param {{ examTypeId?: number | string }} payload
- * @param {{ sub?: number | string }} currentUser
+ * @param {UserId} appointmentId
+ * @param {{ examTypeId?: UserId }} payload
+ * @param {AppointmentActor | null | undefined} currentUser
  */
 /** @returns {Promise<AppointmentDbRow>} */
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
@@ -1816,9 +1826,9 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
   try {
     await client.query("begin");
     const existingAppointment = await getAppointmentById(client, cleanAppointmentId);
-    const existingStatus = String(existingAppointment.status || "");
+    const existingStatus = existingAppointment.status;
 
-    if (!["scheduled", "arrived", "waiting"].includes(existingStatus)) {
+    if (!APPOINTMENT_RECEPTION_ACTIVE_STATUSES.includes(existingStatus)) {
       throw new HttpError(409, "Only active reception appointments can be updated.");
     }
 
@@ -1886,9 +1896,9 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
   try {
     await client.query("begin");
     const appointment = await getAppointmentById(client, cleanAppointmentId);
-    const appointmentStatus = String(appointment.status || "");
+    const appointmentStatus = appointment.status;
 
-    if (["cancelled", "completed", "discontinued", "no-show", "in-progress"].includes(appointmentStatus)) {
+    if (APPOINTMENT_NON_CANCELLABLE_STATUSES.includes(appointmentStatus)) {
       throw new HttpError(409, "This appointment can no longer be cancelled.");
     }
 

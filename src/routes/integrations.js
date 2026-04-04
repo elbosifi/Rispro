@@ -4,24 +4,30 @@ import express from "express";
 import { HttpError } from "../utils/http-error.js";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
 import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
 import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from "../services/dicom-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").UserId} UserId */
 
 export const integrationsRouter = express.Router();
 
 /**
  * @typedef {object} IntegrationsCallbackRequest
- * @property {Record<string, unknown>} [headers]
+ * @property {UnknownRecord} [headers]
  * @property {string} [ip]
  * @property {{ remoteAddress?: string }} [socket]
- * @property {Record<string, unknown>} [body]
+ * @property {UnknownRecord} [body]
  */
 
 /**
  * @typedef {object} IntegrationsAuthRequest
- * @property {Record<string, unknown>} [body]
- * @property {{ sub: number | string, role: string }} user
+ * @property {UnknownRecord} [body]
+ * @property {AuthenticatedUserContext} user
  */
 
 function isLoopbackAddress(value) {
@@ -29,36 +35,8 @@ function isLoopbackAddress(value) {
 }
 
 /**
- * @param {unknown} value
- * @returns {string | undefined}
- */
-function asOptionalString(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  return String(value);
-}
-
-/**
- * @param {unknown} value
- * @returns {number | string | undefined}
- */
-function asOptionalId(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  if (typeof value === "number") {
-    return value;
-  }
-
-  return String(value);
-}
-
-/**
  * @param {IntegrationsAuthRequest} request
- * @returns {number | string}
+ * @returns {UserId}
  */
 function requireUserSub(request) {
   if (!request.user.sub) {
@@ -80,7 +58,7 @@ integrationsRouter.post(
       throw new HttpError(403, "DICOM callback authentication failed.");
     }
 
-    const result = await ingestMppsEvent(buildMppsEventPayload(request.body || {}));
+    const result = await ingestMppsEvent(buildMppsEventPayload(asUnknownRecord(request.body)));
     res.status(result.ok ? 200 : 202).json(result);
   })
 );
@@ -99,10 +77,10 @@ integrationsRouter.post(
   "/print-prepare",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const preparation = await preparePrintJob(
       {
-        appointmentId: asOptionalId(body.appointmentId),
+        appointmentId: asOptionalUserId(body.appointmentId),
         outputType: asOptionalString(body.outputType)
       },
       requireUserSub(request)
@@ -115,11 +93,11 @@ integrationsRouter.post(
   "/scan-prepare",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const preparation = await prepareScanSession(
       {
-        appointmentId: asOptionalId(body.appointmentId),
-        patientId: asOptionalId(body.patientId),
+        appointmentId: asOptionalUserId(body.appointmentId),
+        patientId: asOptionalUserId(body.patientId),
         documentType: asOptionalString(body.documentType)
       },
       requireUserSub(request)
@@ -132,7 +110,7 @@ integrationsRouter.post(
   "/pacs-cfind",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const studies = await runPacsCFind({
       patientNationalId: asOptionalString(body.patientNationalId),
       currentUserId: requireUserSub(request)
@@ -145,7 +123,7 @@ integrationsRouter.post(
   "/pacs-search",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const studies = await searchPacsStudies({
       criteria: body,
       currentUserId: requireUserSub(request)
@@ -158,7 +136,7 @@ integrationsRouter.post(
   "/pacs-test",
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     await testPacsConnection({ currentUserId: requireUserSub(request), overrides: body });
     res.json({ ok: true });
   })

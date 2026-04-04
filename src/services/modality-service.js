@@ -5,13 +5,21 @@ import { HttpError } from "../utils/http-error.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
+import {
+  APPOINTMENT_QUEUE_WORKING_STATUSES,
+  APPOINTMENT_STATUS_COMPLETED
+} from "../constants/appointment-statuses.js";
+
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
 
 /**
  * @typedef ModalityWorklistRow
  * @property {number} id
  * @property {string} accession_number
  * @property {string} appointment_date
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string | null} notes
  * @property {string | null} arrived_at
  * @property {string | null} completed_at
@@ -35,7 +43,7 @@ import { scheduleWorklistSync } from "./dicom-service.js";
 /**
  * @typedef AppointmentStatusRow
  * @property {number} id
- * @property {string} status
+ * @property {AppointmentStatus} status
  */
 
 /**
@@ -89,7 +97,7 @@ function requireRow(row, message) {
 }
 
 /**
- * @param {{ scope?: string, modalityId?: number | string, date?: string }} [filters]
+ * @param {{ scope?: string, modalityId?: UserId, date?: string }} [filters]
  * @returns {Promise<ModalityWorklistRow[]>}
  */
 export async function listModalityWorklist(filters = {}) {
@@ -159,8 +167,8 @@ export async function listModalityWorklist(filters = {}) {
 }
 
 /**
- * @param {number | string} appointmentId
- * @param {number | string | null} currentUserId
+ * @param {UserId} appointmentId
+ * @param {NullableUserId} currentUserId
  * @returns {Promise<{ ok: true }>}
  */
 export async function markAppointmentCompleted(appointmentId, currentUserId) {
@@ -186,11 +194,11 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
     }
     const currentAppointment = requireRow(appointment, "Failed to load appointment state.");
 
-    if (currentAppointment.status === "completed") {
+    if (currentAppointment.status === APPOINTMENT_STATUS_COMPLETED) {
       throw new HttpError(409, "This appointment is already completed.");
     }
 
-    if (!["waiting", "arrived", "in-progress"].includes(currentAppointment.status)) {
+    if (!APPOINTMENT_QUEUE_WORKING_STATUSES.includes(currentAppointment.status)) {
       throw new HttpError(409, "Only arrived, waiting, or in-progress appointments can be completed.");
     }
 
@@ -231,7 +239,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
         entityId: cleanAppointmentId,
         actionType: "complete",
         oldValues: currentAppointment,
-        newValues: { status: "completed" },
+        newValues: { status: APPOINTMENT_STATUS_COMPLETED },
         changedByUserId: currentUserId
       },
       client

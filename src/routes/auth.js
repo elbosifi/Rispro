@@ -15,23 +15,25 @@ import {
 import { logAuditEntry } from "../services/audit-service.js";
 import { hasRecentSupervisorReauth, requireAuth } from "../middleware/auth.js";
 import { HttpError } from "../utils/http-error.js";
+import { asString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 
 /**
  * @typedef {object} AuthLoginRequest
- * @property {Record<string, unknown>} [body]
+ * @property {UnknownRecord} [body]
  */
 
 /**
  * @typedef {object} AuthSessionRequest
- * @property {Record<string, unknown>} [body]
- * @property {{ sub: number | string, role: string, username?: string }} user
+ * @property {UnknownRecord} [body]
+ * @property {AuthenticatedUserContext} user
  */
 
 /**
- * @typedef {object} AuthenticatedUser
- * @property {number | string} sub
- * @property {string} role
- * @property {string} [username]
+ * @typedef {AuthenticatedUserContext} AuthenticatedUser
  */
 
 export const authRouter = express.Router();
@@ -62,9 +64,9 @@ authRouter.post(
   loginRateLimiter,
   asyncRoute(async (req, res) => {
     const request = /** @type {AuthLoginRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
-    const username = String(body.username || "");
-    const password = String(body.password || "");
+    const body = asUnknownRecord(request.body);
+    const username = asString(body.username);
+    const password = asString(body.password);
     const user = await authenticateUser(username, password);
     const token = buildSessionToken(user);
     writeSessionCookie(res, token);
@@ -113,9 +115,9 @@ authRouter.post(
   asyncRoute(async (req, res) => {
     const request = /** @type {AuthSessionRequest} */ (req);
     const currentUser = requireCurrentUser(request);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
-    const password = String(body.password || "");
-    const user = await authenticateUser(String(currentUser.username || ""), password);
+    const body = asUnknownRecord(request.body);
+    const password = asString(body.password);
+    const user = await authenticateUser(asString(currentUser.username), password);
     const reauthToken = buildSupervisorReauthToken(user);
     writeSupervisorReauthCookie(res, reauthToken);
 

@@ -3,6 +3,8 @@
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asBooleanFlag, asString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { getSettingsByCategory, listSettingsCatalog, upsertSettings } from "../services/settings-service.js";
 import {
   createExamType,
@@ -27,11 +29,14 @@ import {
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
 
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
 /**
  * @typedef {object} SettingsRequest
  * @property {{ includeInactive?: string }} [query]
- * @property {{ sub: number | string, role: string }} user
- * @property {Record<string, unknown>} [body]
+ * @property {AuthenticatedUserContext} user
+ * @property {UnknownRecord} [body]
  * @property {{
  *   category?: string,
  *   entryId?: string,
@@ -44,22 +49,6 @@ import {
 export const settingsRouter = express.Router();
 
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
-
-/**
- * @param {unknown} value
- * @returns {string}
- */
-function asString(value) {
-  return String(value || "");
-}
-
-/**
- * @param {unknown} value
- * @returns {boolean}
- */
-function asBooleanFlag(value) {
-  return String(value || "").trim() === "true";
-}
 
 settingsRouter.get(
   "/",
@@ -228,7 +217,7 @@ settingsRouter.put(
   "/:category",
   asyncRoute(async (req, res) => {
     const request = /** @type {SettingsRequest} */ (req);
-    const body = /** @type {Record<string, unknown>} */ (request.body || {});
+    const body = asUnknownRecord(request.body);
     const rawEntries = body.entries;
     const entries = /** @type {{ key: string, value?: unknown }[]} */ (Array.isArray(rawEntries) ? rawEntries : []);
     const settings = await upsertSettings(asString(request.params?.category), entries, request.user.sub);

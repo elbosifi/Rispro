@@ -3,12 +3,16 @@
 import express from "express";
 import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { buildBackupSnapshot, restoreBackupSnapshot } from "../services/admin-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 
 /**
  * @typedef {object} AdminRequest
- * @property {{ sub: number | string, role: string }} user
- * @property {Record<string, unknown>} [body]
+ * @property {AuthenticatedUserContext} user
+ * @property {UnknownRecord} [body]
  */
 
 export const adminRouter = express.Router();
@@ -29,7 +33,7 @@ adminRouter.post(
   "/restore",
   asyncRoute(async (req, res) => {
     const request = /** @type {AdminRequest} */ (req);
-    const payload = request.body || {};
+    const payload = asUnknownRecord(request.body);
     const result = await restoreBackupSnapshot(payload, request.user.sub);
     res.json(result);
   })

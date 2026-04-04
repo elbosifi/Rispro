@@ -3,6 +3,8 @@
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asOptionalString } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import {
   createPatient,
   getPatientById,
@@ -12,35 +14,26 @@ import {
   updatePatient
 } from "../services/patient-service.js";
 
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
 /**
  * @typedef {object} PatientsRequest
- * @property {Record<string, unknown>} [query]
- * @property {Record<string, unknown>} [body]
+ * @property {UnknownRecord} [query]
+ * @property {UnknownRecord} [body]
  * @property {{ patientId?: string }} [params]
- * @property {{ sub: number | string, role: string }} user
+ * @property {AuthenticatedUserContext} user
  */
 
 export const patientsRouter = express.Router();
 
 patientsRouter.use(requireAuth);
 
-/**
- * @param {unknown} value
- * @returns {string | undefined}
- */
-function asOptionalString(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  return String(value);
-}
-
 patientsRouter.get(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {PatientsRequest} */ (req);
-    const query = /** @type {Record<string, unknown>} */ (request.query || {});
+    const query = asUnknownRecord(request.query);
     const patients = await searchPatients(String(query.q || ""));
     res.json({ patients });
   })

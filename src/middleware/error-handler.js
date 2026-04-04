@@ -2,6 +2,7 @@
 
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
+import { asUnknownRecord } from "../utils/records.js";
 
 /**
  * @param {unknown} _req
@@ -21,8 +22,7 @@ export function notFoundHandler(_req, _res, next) {
  * @returns {void}
  */
 export function errorHandler(error, _req, res, _next) {
-  const errorRecord =
-    typeof error === "object" && error !== null ? /** @type {Record<string, unknown>} */ (error) : {};
+  const errorRecord = asUnknownRecord(error);
   const statusCode = typeof errorRecord.statusCode === "number" ? errorRecord.statusCode : 500;
   const isExpected = error instanceof HttpError;
 

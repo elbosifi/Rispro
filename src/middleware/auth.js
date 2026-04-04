@@ -3,25 +3,38 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { HttpError } from "../utils/http-error.js";
+import { isRole } from "../constants/roles.js";
+import { asUnknownRecord } from "../utils/records.js";
+
+/** @typedef {import("../types/domain.js").Role} Role */
+/** @typedef {import("../types/http.js").UserId} UserId */
 
 /**
- * @typedef {object} AuthUser
- * @property {number | string} sub
- * @property {string} role
- * @property {string} [purpose]
- * @property {string} [username]
- * @property {string} [fullName]
+ * @typedef {import("../types/http.js").AuthenticatedUserContext} AuthUser
  */
 
 /**
  * @typedef {object} AuthRequest
- * @property {Record<string, string | undefined>} [cookies]
+ * @property {import("../types/http.js").RequestCookies} [cookies]
  * @property {AuthUser} [user]
  */
 
 /**
  * @typedef {(error?: unknown) => void} NextFunction
  */
+/**
+ * @param {unknown} value
+ * @returns {Role}
+ */
+function parseRole(value) {
+  const role = String(value || "").trim();
+
+  if (!isRole(role)) {
+    throw new HttpError(401, "Invalid session.");
+  }
+
+  return role;
+}
 
 /**
  * @param {AuthRequest} req
@@ -54,16 +67,15 @@ export function requireAuth(req, _res, next) {
     }
 
     const decoded = jwt.verify(token, env.jwtSecret);
-    const payload =
-      decoded && typeof decoded === "object" ? /** @type {Record<string, unknown>} */ (decoded) : null;
+    const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
 
     if (!payload || !payload.sub || !payload.role) {
       throw new HttpError(401, "Invalid session.");
     }
 
     req.user = {
-      sub: /** @type {number | string} */ (payload.sub),
-      role: String(payload.role),
+      sub: /** @type {UserId} */ (payload.sub),
+      role: parseRole(payload.role),
       purpose: payload.purpose ? String(payload.purpose) : undefined,
       username: payload.username ? String(payload.username) : undefined,
       fullName: payload.fullName ? String(payload.fullName) : undefined

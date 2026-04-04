@@ -4,6 +4,10 @@ import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { isRole } from "../constants/roles.js";
+
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
 
 /**
  * @typedef {import("../types/domain.js").Role} UserRole
@@ -42,7 +46,7 @@ export async function listUsers() {
 
 /**
  * @param {UserCreatePayload} payload
- * @param {number | string | null} [createdByUserId]
+ * @param {NullableUserId} [createdByUserId]
  * @returns {Promise<UserRow>}
  */
 export async function createUser({ username, fullName, password, role, isActive = true }, createdByUserId = null) {
@@ -50,7 +54,7 @@ export async function createUser({ username, fullName, password, role, isActive 
     throw new HttpError(400, "username, fullName, password, and role are required.");
   }
 
-  if (!["receptionist", "supervisor", "modality_staff"].includes(role)) {
+  if (!isRole(role)) {
     throw new HttpError(400, "role must be receptionist, supervisor, or modality_staff.");
   }
 
@@ -99,8 +103,8 @@ export async function createUser({ username, fullName, password, role, isActive 
 }
 
 /**
- * @param {number | string} userId
- * @param {number | string | null} [deletedByUserId]
+ * @param {UserId} userId
+ * @param {NullableUserId} [deletedByUserId]
  * @returns {Promise<UserRow>}
  */
 export async function deleteUser(userId, deletedByUserId = null) {

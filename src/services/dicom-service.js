@@ -8,12 +8,27 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeDateValue } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
+import {
+  APPOINTMENT_ACTIVE_WORKLIST_STATUSES,
+  APPOINTMENT_STATUS_ARRIVED,
+  APPOINTMENT_STATUS_COMPLETED,
+  APPOINTMENT_STATUS_DISCONTINUED,
+  APPOINTMENT_STATUS_IN_PROGRESS,
+  APPOINTMENT_STATUS_WAITING
+} from "../constants/appointment-statuses.js";
+
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+/** @typedef {import("../types/settings.js").SettingsMap} SettingsMap */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
+/** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 
-const ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting", "in-progress"]);
+const ACTIVE_WORKLIST_STATUSES = new Set(APPOINTMENT_ACTIVE_WORKLIST_STATUSES);
 const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 
 /**
@@ -21,10 +36,6 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
  * @property {string} category
  * @property {string} setting_key
  * @property {{ value?: unknown } | null} [setting_value]
- */
-
-/**
- * @typedef {Record<string, string>} CategorySettings
  */
 
 /**
@@ -70,7 +81,7 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
  * @property {number} modality_id
  * @property {string} accession_number
  * @property {string} appointment_date
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string | null} exam_name_ar
  * @property {string | null} exam_name_en
  * @property {string} modality_name_ar
@@ -87,7 +98,7 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 /**
  * @typedef MppsAppointmentRow
  * @property {number} id
- * @property {string} status
+ * @property {AppointmentStatus} status
  * @property {string | null} completed_at
  * @property {string | null} mpps_sop_instance_uid
  */
@@ -102,9 +113,9 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 
 /**
  * @typedef DicomLogSummaryRow
- * @property {number | string} processed_count
- * @property {number | string} failed_count
- * @property {number | string} total_count
+ * @property {DbNumeric} processed_count
+ * @property {DbNumeric} failed_count
+ * @property {DbNumeric} total_count
  */
 
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
@@ -282,11 +293,11 @@ function buildSequenceDump(tag, lines) {
 }
 
 function mapAppointmentToScheduledProcedureStepStatus(status) {
-  if (status === "arrived" || status === "waiting") {
+  if (status === APPOINTMENT_STATUS_ARRIVED || status === APPOINTMENT_STATUS_WAITING) {
     return "ARRIVED";
   }
 
-  if (status === "in-progress") {
+  if (status === APPOINTMENT_STATUS_IN_PROGRESS) {
     return "STARTED";
   }
 
@@ -341,7 +352,7 @@ async function loadSettingsMap(categories) {
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, CategorySettings>} */ ({}));
+  }, /** @type {SettingsMap} */ ({}));
 }
 
 async function listDevicesForModality(client, modalityId) {
@@ -643,8 +654,8 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
   const finishedAt = payload.finishedAt || nowIso;
 
   if (mppsStatus === "IN PROGRESS") {
-    const currentStatus = String(appointment.status || "");
-    const nextStatus = currentStatus === "completed" ? "completed" : "in-progress";
+    const currentStatus = appointment.status;
+    const nextStatus = currentStatus === APPOINTMENT_STATUS_COMPLETED ? APPOINTMENT_STATUS_COMPLETED : APPOINTMENT_STATUS_IN_PROGRESS;
     const { rows } = await client.query(
       `
         update appointments
@@ -699,7 +710,7 @@ async function updateAppointmentFromMpps(client, appointment, device, payload) {
     return requireRow(/** @type {MppsAppointmentRow | undefined} */ (rows[0]), "Failed to update appointment from MPPS.");
   }
 
-  const nextStatus = mppsStatus === "COMPLETED" ? "completed" : "discontinued";
+  const nextStatus = mppsStatus === "COMPLETED" ? APPOINTMENT_STATUS_COMPLETED : APPOINTMENT_STATUS_DISCONTINUED;
   const completedAt = mppsStatus === "COMPLETED" ? finishedAt : appointment.completed_at;
 
   const { rows } = await client.query(
@@ -1058,7 +1069,7 @@ export async function deleteDicomDevice(deviceId, currentUserId) {
   }
 }
 
-/** @returns {Promise<Record<string, unknown>>} */
+/** @returns {Promise<UnknownRecord>} */
 export async function syncAppointmentWorklistSources(appointmentId) {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
@@ -1105,7 +1116,7 @@ export async function rebuildAllDicomWorklistSources() {
 }
 
 /**
- * @param {number | string} appointmentId
+ * @param {UserId} appointmentId
  * @returns {void}
  */
 export function scheduleWorklistSync(appointmentId) {
@@ -1226,7 +1237,7 @@ export async function ingestMppsEvent(payload) {
   }
 }
 
-/** @returns {Promise<{ settings: Record<string, unknown>, devices: DicomDeviceListRow[], logSummary: DicomLogSummaryRow }>} */
+/** @returns {Promise<{ settings: UnknownRecord, devices: DicomDeviceListRow[], logSummary: DicomLogSummaryRow }>} */
 export async function getDicomGatewayOverview() {
   const [settings, devices, logSummary] = await Promise.all([
     getDicomGatewaySettings(),
@@ -1260,7 +1271,7 @@ export function parseMppsTimestamp(dateValue, timeValue) {
   return parseDicomTimestamp(dateValue, timeValue);
 }
 
-/** @returns {{ sourcePath: string, sourceIp: string, remoteAeTitle: string, performedStationAeTitle: string, accessionNumber: string, mppsSopInstanceUid: string, mppsStatus: string, startedAt: string | null, finishedAt: string | null, raw: Record<string, unknown> }} */
+/** @returns {{ sourcePath: string, sourceIp: string, remoteAeTitle: string, performedStationAeTitle: string, accessionNumber: string, mppsSopInstanceUid: string, mppsStatus: string, startedAt: string | null, finishedAt: string | null, raw: UnknownRecord }} */
 export function buildMppsEventPayload(input = {}) {
   return {
     sourcePath: normalizeOptionalText(input.sourcePath),

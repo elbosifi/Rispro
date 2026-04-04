@@ -8,6 +8,9 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").NullableUserId} NullableUserId */
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
@@ -33,7 +36,7 @@ const backupTables = [
 ];
 
 /**
- * @typedef {Record<string, unknown>} BackupRow
+ * @typedef {UnknownRecord} BackupRow
  */
 
 /**
@@ -86,7 +89,7 @@ async function readDocumentFiles(documentRows) {
  */
 
 /**
- * @param {number | string | null} currentUserId
+ * @param {NullableUserId} currentUserId
  * @returns {Promise<{ backupName: string, backup: BackupPayload }>}
  */
 export async function buildBackupSnapshot(currentUserId) {
@@ -140,7 +143,7 @@ export async function buildBackupSnapshot(currentUserId) {
  */
 function requireBackupShape(payload) {
   const payloadRecord =
-    payload && typeof payload === "object" ? /** @type {Record<string, unknown>} */ (payload) : null;
+    payload && typeof payload === "object" ? /** @type {UnknownRecord} */ (payload) : null;
 
   const tables = payloadRecord?.tables;
   if (
@@ -153,7 +156,7 @@ function requireBackupShape(payload) {
     throw new HttpError(400, "Invalid backup payload.");
   }
 
-  const tableRecord = /** @type {Record<string, unknown>} */ (tables);
+  const tableRecord = /** @type {UnknownRecord} */ (tables);
   for (const tableName of backupTables) {
     const tableRows = tableRecord[tableName];
 
@@ -216,7 +219,7 @@ async function insertRows(client, tableName, rows) {
 
 /**
  * @param {import("pg").PoolClient} client
- * @param {number | string | null} userId
+ * @param {NullableUserId} userId
  */
 async function userExists(client, userId) {
   if (!userId) {
@@ -229,7 +232,7 @@ async function userExists(client, userId) {
 
 /**
  * @param {unknown} payload
- * @param {number | string | null} currentUserId
+ * @param {NullableUserId} currentUserId
  * @returns {Promise<{ ok: true }>}
  */
 export async function restoreBackupSnapshot(payload, currentUserId) {

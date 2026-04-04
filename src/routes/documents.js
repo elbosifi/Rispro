@@ -3,44 +3,33 @@
 import express from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
+import { asOptionalUserId } from "../utils/request-coercion.js";
+import { asUnknownRecord } from "../utils/records.js";
 import { getDocumentAbsolutePath, getDocumentById, listDocuments, uploadDocument } from "../services/document-service.js";
+
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 
 /**
  * @typedef {object} DocumentsRequest
- * @property {Record<string, unknown>} [query]
- * @property {Record<string, unknown>} [body]
+ * @property {UnknownRecord} [query]
+ * @property {UnknownRecord} [body]
  * @property {{ documentId?: string }} [params]
- * @property {{ sub: number | string, role: string }} user
+ * @property {AuthenticatedUserContext} user
  */
 
 export const documentsRouter = express.Router();
 
 documentsRouter.use(requireAuth);
 
-/**
- * @param {unknown} value
- * @returns {string | number | undefined}
- */
-function asOptionalFilterValue(value) {
-  if (value === null || value === undefined || value === "") {
-    return undefined;
-  }
-
-  if (typeof value === "number") {
-    return value;
-  }
-
-  return String(value);
-}
-
 documentsRouter.get(
   "/",
   asyncRoute(async (req, res) => {
     const request = /** @type {DocumentsRequest} */ (req);
-    const query = /** @type {Record<string, unknown>} */ (request.query || {});
+    const query = asUnknownRecord(request.query);
     const documents = await listDocuments({
-      patientId: asOptionalFilterValue(query.patientId),
-      appointmentId: asOptionalFilterValue(query.appointmentId)
+      patientId: asOptionalUserId(query.patientId),
+      appointmentId: asOptionalUserId(query.appointmentId)
     });
     res.json({ documents });
   })

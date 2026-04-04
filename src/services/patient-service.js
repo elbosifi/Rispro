@@ -10,6 +10,12 @@ import {
   normalizeLibyanPhone
 } from "../utils/normalize.js";
 
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
+/** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/db.js").NullableDbNumeric} NullableDbNumeric */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+
 /**
  * @typedef {object} PatientRegistrationRules
  * @property {string} nationalIdRule
@@ -38,7 +44,7 @@ import {
  * @property {string} [nationalIdConfirmation]
  * @property {string} [arabicFullName]
  * @property {string} [englishFullName]
- * @property {number | string} [ageYears]
+ * @property {UserId} [ageYears]
  * @property {string} [estimatedDateOfBirth]
  * @property {string} [sex]
  * @property {string} [phone1]
@@ -48,8 +54,8 @@ import {
 
 /**
  * @typedef {object} MergePatientsPayload
- * @property {number | string} [targetPatientId]
- * @property {number | string} [sourcePatientId]
+ * @property {UserId} [targetPatientId]
+ * @property {UserId} [sourcePatientId]
  * @property {string} [confirmationText]
  */
 
@@ -61,12 +67,12 @@ import {
 
 /**
  * @typedef {object} PatientNoShowSummaryRow
- * @property {number | string | null} [no_show_count]
+ * @property {NullableDbNumeric} [no_show_count]
  * @property {string | null} [last_no_show_date]
  */
 
 /**
- * @typedef {Record<string, unknown> & { id: number | string }} PersistedPatientRow
+ * @typedef {UnknownRecord & { id: UserId }} PersistedPatientRow
  */
 
 /**
@@ -219,7 +225,7 @@ async function loadPatientRegistrationSettings() {
   const settings = settingRows.reduce((accumulator, row) => {
     accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, string>} */ ({}));
+  }, /** @type {CategorySettings} */ ({}));
 
   return {
     nationalIdRule: settings.national_id_required || "required_with_confirmation",
@@ -303,7 +309,7 @@ function validatePatientPayload(payload, rules) {
 }
 
 /**
- * @param {number | string} patientId
+ * @param {UserId} patientId
  * @returns {Promise<PatientRow>}
  */
 export async function getPatientById(patientId) {
@@ -328,7 +334,7 @@ export async function getPatientById(patientId) {
 }
 
 /**
- * @param {number | string} patientId
+ * @param {UserId} patientId
  * @returns {Promise<{ noShowCount: number, lastNoShowDate: string | null }>}
  */
 export async function getPatientNoShowSummary(patientId) {
@@ -381,7 +387,7 @@ export async function searchPatients(searchTerm = "") {
 
 /**
  * @param {PatientPayload} payload
- * @param {number | string | null | undefined} createdByUserId
+ * @param {OptionalUserId} createdByUserId
  * @returns {Promise<PersistedPatientRow>}
  */
 export async function createPatient(payload, createdByUserId) {
@@ -469,9 +475,9 @@ export async function createPatient(payload, createdByUserId) {
 }
 
 /**
- * @param {number | string} patientId
+ * @param {UserId} patientId
  * @param {PatientPayload} payload
- * @param {number | string | null | undefined} updatedByUserId
+ * @param {OptionalUserId} updatedByUserId
  * @returns {Promise<PersistedPatientRow>}
  */
 export async function updatePatient(patientId, payload, updatedByUserId) {
@@ -550,7 +556,7 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
 
 /**
  * @param {MergePatientsPayload} payload
- * @param {number | string | null | undefined} updatedByUserId
+ * @param {OptionalUserId} updatedByUserId
  * @returns {Promise<PatientRow>}
  */
 export async function mergePatients(payload, updatedByUserId) {

@@ -6,6 +6,11 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+/** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
+/** @typedef {import("../types/settings.js").SettingsMap} SettingsMap */
+/** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
+
 const DEFAULT_DIMSE_SOURCE_PORT = 11112;
 
 /**
@@ -31,10 +36,6 @@ const DEFAULT_DIMSE_SOURCE_PORT = 11112;
  * @property {string} category
  * @property {string} setting_key
  * @property {{ value?: unknown } | null} [setting_value]
- */
-
-/**
- * @typedef {Record<string, string>} CategorySettings
  */
 
 /**
@@ -101,7 +102,7 @@ async function loadSettingsMap(categories) {
 
     accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
     return accumulator;
-  }, /** @type {Record<string, CategorySettings>} */ ({}));
+  }, /** @type {SettingsMap} */ ({}));
 }
 
 /**
@@ -125,7 +126,7 @@ function normalizeDateForDicom(value) {
 }
 
 /**
- * @param {Record<string, unknown>} [payload]
+ * @param {UnknownRecord} [payload]
  * @returns {StudySearchCriteria}
  */
 function normalizeStudySearchCriteria(payload = {}) {
@@ -147,7 +148,7 @@ function normalizeStudySearchCriteria(payload = {}) {
 }
 
 /**
- * @param {Record<string, unknown>} dataset
+ * @param {UnknownRecord} dataset
  * @param {string} tag
  */
 function extractTagValue(dataset, tag) {
@@ -155,7 +156,7 @@ function extractTagValue(dataset, tag) {
     return "";
   }
 
-  const datasetRecord = /** @type {Record<string, unknown>} */ (dataset);
+  const datasetRecord = /** @type {UnknownRecord} */ (dataset);
   const candidates = [datasetRecord[tag], datasetRecord[tag?.toUpperCase()], datasetRecord[tag?.toLowerCase()]];
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null) {
@@ -171,14 +172,14 @@ function extractTagValue(dataset, tag) {
 
       const firstValue = candidate[0];
       if (firstValue && typeof firstValue === "object") {
-        const firstValueRecord = /** @type {Record<string, unknown>} */ (firstValue);
+        const firstValueRecord = /** @type {UnknownRecord} */ (firstValue);
         return String(firstValueRecord.Alphabetic || firstValueRecord.Ideographic || firstValueRecord.Phonetic || "");
       }
 
       return String(firstValue ?? "");
     }
     if (typeof candidate === "object") {
-      const candidateRecord = /** @type {Record<string, unknown>} */ (candidate);
+      const candidateRecord = /** @type {UnknownRecord} */ (candidate);
       const candidateValue = candidateRecord.Value;
       if (Array.isArray(candidateValue)) {
         if (!candidateValue.length) {
@@ -187,7 +188,7 @@ function extractTagValue(dataset, tag) {
 
         const firstValue = candidateValue[0];
         if (firstValue && typeof firstValue === "object") {
-          const firstValueRecord = /** @type {Record<string, unknown>} */ (firstValue);
+          const firstValueRecord = /** @type {UnknownRecord} */ (firstValue);
           return String(firstValueRecord.Alphabetic || firstValueRecord.Ideographic || firstValueRecord.Phonetic || "");
         }
 
@@ -206,7 +207,7 @@ function extractTagValue(dataset, tag) {
 }
 
 /**
- * @param {Record<string, unknown>} dataset
+ * @param {UnknownRecord} dataset
  */
 function extractStudySummary(dataset) {
   const patientId =
@@ -250,7 +251,7 @@ function normalizeStudyList(rawResult) {
   }
 
   if (rawResult && typeof rawResult === "object") {
-    const rawRecord = /** @type {Record<string, unknown>} */ (rawResult);
+    const rawRecord = /** @type {UnknownRecord} */ (rawResult);
     const possibleArrays = [
       rawRecord.container,
       rawRecord.datasets,
@@ -266,13 +267,13 @@ function normalizeStudyList(rawResult) {
   }
 
   return candidates
-    .map((dataset) => extractStudySummary(/** @type {Record<string, unknown>} */ (dataset)))
+    .map((dataset) => extractStudySummary(/** @type {UnknownRecord} */ (dataset)))
     .filter((entry) => entry.patientId || entry.modality || entry.studyDescription || entry.studyDate);
 }
 
 /**
  * @param {unknown} result
- * @returns {Record<string, unknown> | null}
+ * @returns {UnknownRecord | null}
  */
 function parseDimseResult(result) {
   if (!result) {
@@ -285,7 +286,7 @@ function parseDimseResult(result) {
   }
 
   if (parsed && typeof parsed === "object") {
-    const parsedRecord = /** @type {Record<string, unknown>} */ (parsed);
+    const parsedRecord = /** @type {UnknownRecord} */ (parsed);
     if (parsedRecord.container && typeof parsedRecord.container === "string") {
     try {
       parsedRecord.container = JSON.parse(parsedRecord.container);
@@ -295,7 +296,7 @@ function parseDimseResult(result) {
     }
   }
 
-  return parsed && typeof parsed === "object" ? /** @type {Record<string, unknown>} */ (parsed) : null;
+  return parsed && typeof parsed === "object" ? /** @type {UnknownRecord} */ (parsed) : null;
 }
 
 /** @returns {Promise<PacsSettings>} */
@@ -321,7 +322,7 @@ async function loadPacsSettings() {
 }
 
 /**
- * @param {Record<string, unknown>} [input]
+ * @param {UnknownRecord} [input]
  * @returns {PacsSettings}
  */
 function normalizePacsSettingsInput(input = {}) {
@@ -444,7 +445,7 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
 }
 
 /**
- * @param {{ criteria: Record<string, unknown>, currentUserId: number | string | null | undefined }} params
+ * @param {{ criteria: UnknownRecord, currentUserId: OptionalUserId }} params
  * @returns {Promise<StudySummary[]>}
  */
 export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }) {
@@ -492,7 +493,7 @@ export async function searchPacsStudies({ criteria: rawCriteria, currentUserId }
 }
 
 /**
- * @param {{ patientNationalId?: string, currentUserId: number | string | null | undefined }} params
+ * @param {{ patientNationalId?: string, currentUserId: OptionalUserId }} params
  * @returns {Promise<StudySummary[]>}
  */
 export async function runPacsCFind({ patientNationalId, currentUserId }) {
@@ -503,7 +504,7 @@ export async function runPacsCFind({ patientNationalId, currentUserId }) {
 }
 
 /**
- * @param {{ currentUserId: number | string | null | undefined, overrides?: Record<string, unknown> | null }} params
+ * @param {{ currentUserId: OptionalUserId, overrides?: UnknownRecord | null }} params
  * @returns {Promise<{ ok: true }>}
  */
 export async function testPacsConnection({ currentUserId, overrides = null }) {

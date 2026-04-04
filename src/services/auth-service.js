@@ -7,10 +7,11 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 
 /** @typedef {import("../types/domain.js").Role} Role */
+/** @typedef {import("../types/http.js").UserId} UserId */
 
 /**
  * @typedef {object} AuthUserRow
- * @property {number | string} id
+ * @property {UserId} id
  * @property {string} username
  * @property {string} full_name
  * @property {Role} role

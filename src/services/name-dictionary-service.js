@@ -4,6 +4,8 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
+/** @typedef {import("../types/http.js").UserId} UserId */
+
 /**
  * @typedef NameDictionaryRow
  * @property {number} id
@@ -68,7 +70,7 @@ export async function listNameDictionary({ includeInactive = false } = {}) {
 
 /**
  * @param {NameDictionaryPayload | null | undefined} payload
- * @param {number | string} currentUserId
+ * @param {UserId} currentUserId
  * @returns {Promise<NameDictionaryRow>}
  */
 export async function upsertNameDictionary(payload, currentUserId) {
@@ -106,9 +108,9 @@ export async function upsertNameDictionary(payload, currentUserId) {
 }
 
 /**
- * @param {number | string} entryId
+ * @param {UserId} entryId
  * @param {NameDictionaryPayload | null | undefined} payload
- * @param {number | string} currentUserId
+ * @param {UserId} currentUserId
  * @returns {Promise<NameDictionaryRow>}
  */
 export async function updateNameDictionaryEntry(entryId, payload, currentUserId) {
@@ -167,8 +169,8 @@ export async function updateNameDictionaryEntry(entryId, payload, currentUserId)
 }
 
 /**
- * @param {number | string} entryId
- * @param {number | string} currentUserId
+ * @param {UserId} entryId
+ * @param {UserId} currentUserId
  * @returns {Promise<NameDictionaryRow>}
  */
 export async function deleteNameDictionaryEntry(entryId, currentUserId) {
@@ -207,7 +209,7 @@ export async function deleteNameDictionaryEntry(entryId, currentUserId) {
 
 /**
  * @param {Array<NameDictionaryPayload | null | undefined>} entries
- * @param {number | string} currentUserId
+ * @param {UserId} currentUserId
  * @returns {Promise<NameDictionaryRow[]>}
  */
 export async function importNameDictionaryEntries(entries, currentUserId) {
