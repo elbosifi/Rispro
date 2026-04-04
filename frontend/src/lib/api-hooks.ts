@@ -1,17 +1,36 @@
 import { api } from "@/lib/api-client";
-import type { AppointmentLookups, QueueSnapshot, Patient, Appointment } from "@/types/api";
+import {
+  mapPatient,
+  mapPatients,
+  mapAppointmentLookups,
+  mapQueueSnapshot,
+  mapUser,
+  mapAppointmentWithDetails,
+  mapAppointmentsWithDetails,
+  mapStatistics,
+  mapDicomDevices,
+  mapSettings,
+  mapNameDictionary,
+  mapAuditEntries
+} from "@/lib/mappers";
+import type { Patient, AppointmentLookups, QueueSnapshot, User } from "@/types/api";
 
 // -- Auth --
-export async function fetchCurrentSession() {
-  const res = await api<{ user: any }>("/auth/me");
-  return res.user;
+export async function fetchCurrentSession(): Promise<User | null> {
+  try {
+    const res = await api<{ user: any }>("/auth/me");
+    return mapUser(res.user);
+  } catch {
+    return null;
+  }
 }
 
-export async function login(username: string, password: string) {
-  return api<{ user: any }>("/auth/login", {
+export async function login(username: string, password: string): Promise<User> {
+  const res = await api<{ user: any }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
-  }).then((r) => r.user);
+  });
+  return mapUser(res.user);
 }
 
 export async function logout() {
@@ -20,12 +39,14 @@ export async function logout() {
 
 // -- Lookups --
 export async function fetchAppointmentLookups(): Promise<AppointmentLookups> {
-  return api("/appointments/lookups");
+  const raw = await api("/appointments/lookups");
+  return mapAppointmentLookups(raw);
 }
 
 // -- Dashboard Data --
 export async function fetchQueueSnapshot(): Promise<QueueSnapshot> {
-  return api("/queue");
+  const raw = await api("/queue");
+  return mapQueueSnapshot(raw);
 }
 
 export async function fetchDaySettings() {
@@ -33,53 +54,153 @@ export async function fetchDaySettings() {
 }
 
 // -- Patient Search --
-function mapPatient(raw: any): Patient {
-  return {
-    id: raw.id,
-    mrn: raw.mrn ?? raw.patient_mrn ?? null,
-    nationalId: raw.national_id ?? raw.nationalId ?? null,
-    arabicFullName: raw.arabic_full_name ?? raw.arabicFullName ?? "",
-    englishFullName: raw.english_full_name ?? raw.englishFullName ?? null,
-    ageYears: raw.age_years ?? raw.ageYears ?? 0,
-    estimatedDateOfBirth: raw.estimated_date_of_birth ?? raw.estimatedDateOfBirth ?? null,
-    sex: raw.sex ?? "",
-    phone1: raw.phone_1 ?? raw.phone1 ?? "",
-    phone2: raw.phone_2 ?? raw.phone2 ?? null,
-    address: raw.address ?? null
-  };
-}
-
 export async function searchPatients(query: string): Promise<Patient[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
-  return api<{ patients: any[] }>(`/patients?${params.toString()}`)
-    .then((r) => r.patients.map(mapPatient));
+  const raw = await api<{ patients: any[] }>(`/patients?${params.toString()}`);
+  return mapPatients(raw.patients);
 }
 
 // -- Patient CRUD --
 export async function updatePatient(id: number, payload: any) {
-  return api<{ patient: any }>(`/patients/${id}`, {
+  const raw = await api<{ patient: any }>(`/patients/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
-  }).then((r) => mapPatient(r.patient));
+  });
+  return mapPatient(raw.patient);
 }
 
 export async function createPatient(payload: any) {
-  return api<{ patient: any }>("/patients", {
+  const raw = await api<{ patient: any }>("/patients", {
     method: "POST",
     body: JSON.stringify(payload)
-  }).then((r) => mapPatient(r.patient));
+  });
+  return mapPatient(raw.patient);
 }
 
 // -- Appointments --
 export async function getAppointmentAvailability(modalityId: number, days = 14) {
-  return api<{ availability: any[] }>(`/appointments/availability?modalityId=${modalityId}&days=${days}`)
-    .then((r) => r.availability);
+  const raw = await api<{ availability: any[] }>(`/appointments/availability?modalityId=${modalityId}&days=${days}`);
+  return raw.availability;
 }
 
 export async function createAppointment(payload: any) {
-  return api<{ appointment: Appointment }>("/appointments", {
+  const raw = await api<{ appointment: any }>("/appointments", {
     method: "POST",
     body: JSON.stringify(payload)
-  }).then((r) => r.appointment);
+  });
+  return mapAppointmentWithDetails(raw.appointment);
+}
+
+// -- Registrations / Calendar / Modality / Doctor / Print (shared) --
+export async function fetchAppointments(params: Record<string, string>) {
+  const queryString = new URLSearchParams(params).toString();
+  const raw = await api<{ appointments: any[] }>(`/appointments?${queryString}`);
+  return mapAppointmentsWithDetails(raw.appointments);
+}
+
+// -- Statistics --
+export async function fetchStatistics(date: string, modalityId: string) {
+  const params = new URLSearchParams();
+  params.set("date", date);
+  if (modalityId) params.set("modalityId", modalityId);
+  const raw = await api(`/appointments/statistics?${params.toString()}`);
+  return mapStatistics(raw);
+}
+
+// -- Queue --
+export async function scanIntoQueue(scanValue: string) {
+  return api("/queue/scan", {
+    method: "POST",
+    body: JSON.stringify({ scanValue })
+  });
+}
+
+export async function addWalkIn(payload: any) {
+  return api("/queue/walk-in", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function confirmNoShow(appointmentId: number, reason: string) {
+  return api("/queue/confirm-no-show", {
+    method: "POST",
+    body: JSON.stringify({ appointmentId, reason })
+  });
+}
+
+// -- Modality --
+export async function fetchModalityWorklist(modalityId: string, date: string, scope: string) {
+  const params = new URLSearchParams();
+  params.set("modalityId", modalityId);
+  if (scope === "day") {
+    params.set("date", date);
+  } else {
+    params.set("scope", "all");
+  }
+  const raw = await api<{ appointments: any[] }>(`/modality/worklist?${params.toString()}`);
+  return mapAppointmentsWithDetails(raw.appointments);
+}
+
+export async function completeAppointment(id: number) {
+  return api(`/modality/${id}/complete`, { method: "POST" });
+}
+
+// -- Settings --
+export async function fetchSettings(category: string) {
+  const raw: any = await api(`/settings/${category}`);
+  return mapSettings(raw);
+}
+
+export async function fetchUsers() {
+  const raw: any = await api("/users");
+  return raw;
+}
+
+export async function fetchAuditEntries(limit: number) {
+  const raw: any = await api(`/audit?limit=${limit}`);
+  return {
+    entries: mapAuditEntries(raw.entries ?? []),
+    meta: raw.meta ?? {}
+  };
+}
+
+export async function fetchExamTypes() {
+  const raw: any = await api("/settings/exam-types");
+  return raw;
+}
+
+export async function fetchModalitiesSettings() {
+  const raw: any = await api("/settings/modalities");
+  return raw;
+}
+
+export async function fetchNameDictionary() {
+  const raw: any = await api("/settings/name-dictionary");
+  return {
+    entries: mapNameDictionary(raw.entries ?? []),
+    meta: raw.meta ?? {}
+  };
+}
+
+export async function fetchDicomDevices() {
+  const raw: any = await api("/settings/dicom-devices");
+  return {
+    devices: mapDicomDevices(raw.devices ?? []),
+    meta: raw.meta ?? {}
+  };
+}
+
+export async function fetchPacsConnection() {
+  const raw: any = await api("/settings/pacs_connection");
+  return raw;
+}
+
+// -- PACS --
+export async function searchPacs(patientNationalId: string) {
+  return api("/integrations/pacs-search", {
+    method: "POST",
+    body: JSON.stringify({ patientNationalId })
+  });
 }

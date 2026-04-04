@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import {
+  fetchUsers,
+  fetchAuditEntries,
+  fetchExamTypes,
+  fetchModalitiesSettings,
+  fetchNameDictionary,
+  fetchDicomDevices,
+  fetchSettings,
+  fetchPacsConnection
+} from "@/lib/api-hooks";
 
 type SettingsSection =
   | "menu"
@@ -83,16 +92,16 @@ export default function SettingsPage() {
 }
 
 function UsersSection() {
-  const { data: users, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["users"],
-    queryFn: () => api("/users")
+    queryFn: fetchUsers
   });
 
   return (
     <div>
       {isLoading ? <p className="text-stone-500">Loading...</p> : (
         <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-          {(users as any)?.users?.map((u: any) => (
+          {(data as any)?.users?.map((u: any) => (
             <li key={u.id} className="py-3 flex items-center justify-between">
               <div className="text-right">
                 <p className="font-medium text-stone-900 dark:text-white">{u.full_name}</p>
@@ -113,7 +122,7 @@ function AuditSection() {
   const limit = 50;
   const { data, isLoading } = useQuery({
     queryKey: ["audit", limit],
-    queryFn: () => api(`/audit?limit=${limit}`)
+    queryFn: () => fetchAuditEntries(limit)
   });
 
   return (
@@ -121,10 +130,10 @@ function AuditSection() {
       <p className="text-sm text-stone-500 dark:text-stone-400 mb-4">Showing last {limit} entries</p>
       {isLoading ? <p className="text-stone-500">Loading...</p> : (
         <ul className="space-y-2">
-          {(data as any)?.entries?.slice(0, 10).map((entry: any) => (
+          {data?.entries?.slice(0, 10).map((entry: any) => (
             <li key={entry.id} className="p-3 bg-stone-50 dark:bg-stone-700 rounded-lg text-sm">
-              <p className="text-stone-900 dark:text-white font-medium">{entry.action_type} • {entry.entity_type}</p>
-              <p className="text-stone-500 dark:text-stone-400 text-xs mt-1">{entry.created_at}</p>
+              <p className="text-stone-900 dark:text-white font-medium">{entry.actionType} • {entry.entityType}</p>
+              <p className="text-stone-500 dark:text-stone-400 text-xs mt-1">{entry.createdAt}</p>
             </li>
           ))}
         </ul>
@@ -136,7 +145,7 @@ function AuditSection() {
 function ExamTypesSection() {
   const { data, isLoading } = useQuery({
     queryKey: ["exam-types"],
-    queryFn: () => api("/settings/exam-types")
+    queryFn: fetchExamTypes
   });
 
   return (
@@ -158,7 +167,7 @@ function ExamTypesSection() {
 function ModalitiesSection() {
   const { data, isLoading } = useQuery({
     queryKey: ["modalities"],
-    queryFn: () => api("/settings/modalities")
+    queryFn: fetchModalitiesSettings
   });
 
   return (
@@ -185,13 +194,13 @@ function ModalitiesSection() {
 function NameDictionarySection() {
   const { data, isLoading } = useQuery({
     queryKey: ["name-dictionary"],
-    queryFn: () => api("/settings/name-dictionary")
+    queryFn: fetchNameDictionary
   });
 
   return (
     <div>
       <p className="text-sm text-stone-500 dark:text-stone-400 mb-4">
-        {(data as any)?.entries?.length ?? 0} entries
+        {data?.entries?.length ?? 0} entries
       </p>
       {isLoading ? <p className="text-stone-500">Loading...</p> : (
         <div className="max-h-96 overflow-y-auto">
@@ -203,10 +212,10 @@ function NameDictionarySection() {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-              {(data as any)?.entries?.slice(0, 20).map((e: any) => (
+              {data?.entries?.slice(0, 20).map((e: any) => (
                 <tr key={e.id}>
-                  <td className="p-2 text-stone-900 dark:text-white" dir="rtl">{e.arabic_text}</td>
-                  <td className="p-2 text-stone-700 dark:text-stone-300">{e.english_text}</td>
+                  <td className="p-2 text-stone-900 dark:text-white" dir="rtl">{e.arabicText}</td>
+                  <td className="p-2 text-stone-700 dark:text-stone-300">{e.englishText}</td>
                 </tr>
               ))}
             </tbody>
@@ -220,7 +229,7 @@ function NameDictionarySection() {
 function PacsConnectionSection() {
   const { data } = useQuery({
     queryKey: ["settings", "pacs_connection"],
-    queryFn: () => api("/settings/pacs_connection")
+    queryFn: fetchPacsConnection
   });
 
   return (
@@ -236,14 +245,14 @@ function PacsConnectionSection() {
 function SimpleSettingsSection({ category }: { category: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["settings", category],
-    queryFn: () => api(`/settings/${category}`)
+    queryFn: () => fetchSettings(category)
   });
 
   return (
     <div>
       {isLoading ? <p className="text-stone-500">Loading...</p> : (
         <div className="space-y-3">
-          {Object.entries(data as any || {}).map(([key, value]: [string, any]) => (
+          {Object.entries(data || {}).map(([key, value]: [string, any]) => (
             <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
               <span className="text-stone-700 dark:text-stone-300 font-medium capitalize">{key.replace(/_/g, " ")}</span>
               <span className="text-stone-900 dark:text-white">{String(value)}</span>
@@ -256,20 +265,20 @@ function SimpleSettingsSection({ category }: { category: string }) {
 }
 
 function DicomGatewaySection() {
-  const { data: devices, isLoading } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ["dicom-devices"],
-    queryFn: () => api("/settings/dicom-devices")
+    queryFn: fetchDicomDevices
   });
 
   return (
     <div>
       {isLoading ? <p className="text-stone-500">Loading...</p> : (
         <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-          {(devices as any)?.devices?.map((d: any) => (
+          {data?.devices?.map((d: any) => (
             <li key={d.id} className="py-3">
-              <p className="font-medium text-stone-900 dark:text-white">{d.device_name}</p>
+              <p className="font-medium text-stone-900 dark:text-white">{d.deviceName}</p>
               <p className="text-sm text-stone-500 dark:text-stone-400">
-                AE: {d.modality_ae_title} • MWL: {d.mwl_enabled ? "Yes" : "No"} • MPPS: {d.mpps_enabled ? "Yes" : "No"}
+                AE: {d.modalityAeTitle} • MWL: {d.mwlEnabled ? "Yes" : "No"} • MPPS: {d.mppsEnabled ? "Yes" : "No"}
               </p>
             </li>
           ))}

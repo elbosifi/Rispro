@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 
 interface CalendarDay {
   date: string;
@@ -24,20 +24,20 @@ export default function CalendarPage() {
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["calendar", startDate, endDate, modalityFilter],
-    queryFn: () => fetchCalendarAppointments(startDate, endDate, modalityFilter),
+    queryFn: () => fetchAppointments({ dateFrom: startDate, dateTo: endDate, ...(modalityFilter && { modalityId: modalityFilter }) }),
     staleTime: 1000 * 60
   });
 
   // Load lookups for modality filter
-  const { data: lookups } = useQuery<{ modalities: any[] }>({
+  const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
   // Group appointments by date
-  const groupedByDate = appointments.reduce((acc, apt: any) => {
-    const date = apt.appointment_date;
+  const groupedByDate = appointments.reduce((acc, apt) => {
+    const date = apt.appointmentDate;
     if (!acc[date]) acc[date] = [];
     acc[date].push(apt);
     return acc;
@@ -193,17 +193,17 @@ export default function CalendarPage() {
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-right flex-1">
                         <p className="font-medium text-stone-900 dark:text-white text-sm">
-                          {apt.arabic_full_name}
+                          {apt.arabicFullName}
                         </p>
                         <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-                          {apt.accession_number}
+                          {apt.accessionNumber}
                         </p>
                       </div>
                       <StatusBadge status={apt.status} />
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
-                      <span>{apt.modality_name_en}</span>
-                      <span>#{apt.daily_sequence}</span>
+                      <span>{apt.modalityNameEn}</span>
+                      <span>#{apt.dailySequence}</span>
                     </div>
                   </li>
                 ))}
@@ -236,7 +236,7 @@ function buildCalendarGrid(
     const dayAppointments = groupedByDate[dateStr] || [];
     
     const summary = dayAppointments.reduce((acc, apt) => {
-      const mod = apt.modality_name_en || "Other";
+      const mod = apt.modalityNameEn || "Other";
       acc[mod] = (acc[mod] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -263,15 +263,6 @@ function formatDate(date: Date): string {
 function formatDateDisplay(dateStr: string): string {
   const date = new Date(dateStr + "T00:00:00");
   return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
-}
-
-async function fetchCalendarAppointments(from: string, to: string, modalityId: string) {
-  const params = new URLSearchParams();
-  params.set("dateFrom", from);
-  params.set("dateTo", to);
-  if (modalityId) params.set("modalityId", modalityId);
-  
-  return api<{ appointments: any[] }>(`/appointments?${params.toString()}`).then((r) => r.appointments);
 }
 
 function Select({

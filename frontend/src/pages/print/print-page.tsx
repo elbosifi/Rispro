@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 
 export default function PrintPage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
@@ -8,15 +8,15 @@ export default function PrintPage() {
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
 
-  const { data: lookups } = useQuery<{ modalities: any[] }>({
+  const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["print-appointments", date, modalityId, query],
-    queryFn: () => fetchPrintAppointments(date, modalityId, query),
+    queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }), ...(query && { q: query }) }),
     staleTime: 1000 * 30
   });
 
@@ -28,11 +28,11 @@ export default function PrintPage() {
           <head><title>Appointment Slip</title></head>
           <body style="font-family: sans-serif; padding: 20px;">
             <h1>Appointment Slip</h1>
-            <p><strong>Accession:</strong> ${apt.accession_number}</p>
-            <p><strong>Patient:</strong> ${apt.arabic_full_name}</p>
-            <p><strong>Modality:</strong> ${apt.modality_name_en}</p>
-            <p><strong>Exam:</strong> ${apt.exam_name_en || "—"}</p>
-            <p><strong>Date:</strong> ${apt.appointment_date}</p>
+            <p><strong>Accession:</strong> ${apt.accessionNumber}</p>
+            <p><strong>Patient:</strong> ${apt.arabicFullName}</p>
+            <p><strong>Modality:</strong> ${apt.modalityNameEn}</p>
+            <p><strong>Exam:</strong> ${apt.examNameEn || "—"}</p>
+            <p><strong>Date:</strong> ${apt.appointmentDate}</p>
             <p><strong>Status:</strong> ${apt.status}</p>
           </body>
         </html>
@@ -56,9 +56,9 @@ export default function PrintPage() {
             onChange={setModalityId}
             options={[
               { value: "", label: "All" },
-              ...(lookups?.modalities ?? []).map((m: any) => ({
+              ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
-                label: m.name_en
+                label: m.nameEn
               }))
             ]}
           />
@@ -88,10 +88,10 @@ export default function PrintPage() {
                       className="text-right flex-1"
                     >
                       <p className="font-medium text-stone-900 dark:text-white">
-                        {apt.accession_number}
+                        {apt.accessionNumber}
                       </p>
                       <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                        {apt.arabic_full_name} • {apt.modality_name_en}
+                        {apt.arabicFullName} • {apt.modalityNameEn}
                       </p>
                     </button>
                     <button
@@ -128,11 +128,11 @@ export default function PrintPage() {
                   <p className="text-sm text-stone-500 dark:text-stone-400">Appointment Slip</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <Field label="Accession" value={selectedAppointment.accession_number} />
-                  <Field label="Patient" value={selectedAppointment.arabic_full_name} />
-                  <Field label="Modality" value={selectedAppointment.modality_name_en} />
-                  <Field label="Exam" value={selectedAppointment.exam_name_en} />
-                  <Field label="Date" value={selectedAppointment.appointment_date} />
+                  <Field label="Accession" value={selectedAppointment.accessionNumber} />
+                  <Field label="Patient" value={selectedAppointment.arabicFullName} />
+                  <Field label="Modality" value={selectedAppointment.modalityNameEn} />
+                  <Field label="Exam" value={selectedAppointment.examNameEn} />
+                  <Field label="Date" value={selectedAppointment.appointmentDate} />
                   <Field label="Status" value={selectedAppointment.status} />
                 </div>
               </div>
@@ -146,14 +146,6 @@ export default function PrintPage() {
       </div>
     </div>
   );
-}
-
-async function fetchPrintAppointments(date: string, modalityId: string, query: string) {
-  const params = new URLSearchParams();
-  params.set("date", date);
-  if (modalityId) params.set("modalityId", modalityId);
-  if (query) params.set("q", query);
-  return api<{ appointments: any[] }>(`/appointments?${params.toString()}`).then((r) => r.appointments);
 }
 
 function Input({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string; onChange: (v: string) => void; placeholder?: string }) {

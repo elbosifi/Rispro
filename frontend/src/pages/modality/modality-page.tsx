@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
 
 export default function ModalityPage() {
   const [modalityId, setModalityId] = useState("");
@@ -11,7 +11,7 @@ export default function ModalityPage() {
   // Load lookups
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
@@ -25,7 +25,7 @@ export default function ModalityPage() {
 
   // Complete mutation
   const completeMutation = useMutation({
-    mutationFn: (id: number) => api(`/modality/${id}/complete`, { method: "POST" }),
+    mutationFn: completeAppointment,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
     }
@@ -74,10 +74,10 @@ export default function ModalityPage() {
             >
               <option value="">Select modality...</option>
               {modalities
-                .filter((m: any) => m.is_active)
+                .filter((m: any) => m.isActive)
                 .map((m: any) => (
                   <option key={m.id} value={m.id}>
-                    {m.name_en}
+                    {m.nameEn}
                   </option>
                 ))}
             </select>
@@ -155,13 +155,13 @@ export default function ModalityPage() {
               >
                 <div className="text-right flex-1">
                   <p className="font-medium text-stone-900 dark:text-white">
-                    #{apt.modality_slot_number || "—"} • {apt.arabic_full_name}
+                    #{apt.modalitySlotNumber || "—"} • {apt.arabicFullName}
                   </p>
                   <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-                    {apt.accession_number} • {apt.modality_name_en} • {apt.exam_name_en || "—"}
+                    {apt.accessionNumber} • {apt.modalityNameEn} • {apt.examNameEn || "—"}
                   </p>
                   <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                    ID: {apt.national_id || "—"} • Age: {apt.age_years || "—"} • Priority: {apt.priority_name_en || "Normal"}
+                    ID: {apt.nationalId || "—"} • Age: {apt.ageYears || "—"} • Priority: {apt.priorityNameEn || "Normal"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 ml-4">
@@ -190,17 +190,6 @@ export default function ModalityPage() {
       </div>
     </div>
   );
-}
-
-async function fetchModalityWorklist(modalityId: string, date: string, scope: string) {
-  const params = new URLSearchParams();
-  params.set("modalityId", modalityId);
-  if (scope === "day") {
-    params.set("date", date);
-  } else {
-    params.set("scope", "all");
-  }
-  return api<{ appointments: any[] }>(`/modality/worklist?${params.toString()}`).then((r) => r.appointments);
 }
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {

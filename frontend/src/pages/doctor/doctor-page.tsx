@@ -1,21 +1,21 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 
 export default function DoctorPage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [modalityId, setModalityId] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
 
-  const { data: lookups } = useQuery<{ modalities: any[] }>({
+  const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["doctor-requests", date, modalityId],
-    queryFn: () => fetchDoctorRequests(date, modalityId),
+    queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }) }),
     staleTime: 1000 * 30
   });
 
@@ -35,9 +35,9 @@ export default function DoctorPage() {
             onChange={setModalityId}
             options={[
               { value: "", label: "All" },
-              ...(lookups?.modalities ?? []).map((m: any) => ({
+              ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
-                label: m.name_en
+                label: m.nameEn
               }))
             ]}
           />
@@ -67,13 +67,13 @@ export default function DoctorPage() {
                     }`}
                   >
                     <p className="font-medium text-stone-900 dark:text-white">
-                      {apt.accession_number}
+                      {apt.accessionNumber}
                     </p>
                     <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                      {apt.arabic_full_name} • {apt.modality_name_en}
+                      {apt.arabicFullName} • {apt.modalityNameEn}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      {apt.appointment_date} • {apt.status}
+                      {apt.appointmentDate} • {apt.status}
                     </p>
                   </button>
                 </li>
@@ -90,11 +90,11 @@ export default function DoctorPage() {
                 Appointment Details
               </h3>
               <div className="space-y-3 text-sm">
-                <Field label="Accession" value={selectedAppointment.accession_number} />
-                <Field label="Patient" value={selectedAppointment.arabic_full_name} />
-                <Field label="Modality" value={selectedAppointment.modality_name_en} />
-                <Field label="Exam" value={selectedAppointment.exam_name_en} />
-                <Field label="Date" value={selectedAppointment.appointment_date} />
+                <Field label="Accession" value={selectedAppointment.accessionNumber} />
+                <Field label="Patient" value={selectedAppointment.arabicFullName} />
+                <Field label="Modality" value={selectedAppointment.modalityNameEn} />
+                <Field label="Exam" value={selectedAppointment.examNameEn} />
+                <Field label="Date" value={selectedAppointment.appointmentDate} />
                 <Field label="Status" value={selectedAppointment.status} />
                 <Field label="Notes" value={selectedAppointment.notes} />
               </div>
@@ -108,13 +108,6 @@ export default function DoctorPage() {
       </div>
     </div>
   );
-}
-
-async function fetchDoctorRequests(date: string, modalityId: string) {
-  const params = new URLSearchParams();
-  params.set("date", date);
-  if (modalityId) params.set("modalityId", modalityId);
-  return api<{ appointments: any[] }>(`/appointments?${params.toString()}`).then((r) => r.appointments);
 }
 
 function Input({ label, type, value, onChange }: { label: string; type: string; value: string; onChange: (v: string) => void }) {

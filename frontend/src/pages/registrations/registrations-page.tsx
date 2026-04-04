@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
-import type { Appointment } from "@/types/api";
+import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 
 interface RegistrationsFilters {
   date: string;
@@ -22,7 +21,7 @@ export default function RegistrationsPage() {
     status: ["scheduled"]
   });
 
-  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
 
   // Load registrations
   const { data: appointments = [], isLoading } = useQuery({
@@ -31,9 +30,9 @@ export default function RegistrationsPage() {
   });
 
   // Load lookups for modality filter
-  const { data: lookups } = useQuery<{ modalities: any[] }>({
+  const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
@@ -95,7 +94,7 @@ export default function RegistrationsPage() {
             onChange={(v) => handleFilterChange("modalityId", v)}
             options={[
               { value: "", label: "All" },
-              ...(lookups?.modalities ?? []).map((m: any) => ({
+              ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
                 label: m.nameEn
               }))
@@ -153,7 +152,7 @@ export default function RegistrationsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-              {appointments.map((apt: any) => (
+              {appointments.map((apt) => (
                 <tr
                   key={apt.id}
                   onClick={() => setSelectedAppointment(apt)}
@@ -164,16 +163,16 @@ export default function RegistrationsPage() {
                   }`}
                 >
                   <td className="p-3 font-medium text-stone-900 dark:text-white">
-                    {apt.accession_number}
+                    {apt.accessionNumber}
                   </td>
                   <td className="p-3 text-stone-700 dark:text-stone-300">
-                    {apt.arabic_full_name}
+                    {apt.arabicFullName}
                   </td>
                   <td className="p-3 text-stone-500 dark:text-stone-400">
-                    {apt.appointment_date}
+                    {apt.appointmentDate}
                   </td>
                   <td className="p-3 text-stone-500 dark:text-stone-400">
-                    {apt.modality_name_en}
+                    {apt.modalityNameEn}
                   </td>
                   <td className="p-3">
                     <StatusBadge status={apt.status} />
@@ -192,8 +191,8 @@ export default function RegistrationsPage() {
             Appointment Details: {selectedAppointment.accessionNumber}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <Field label="Patient" value={(selectedAppointment as any).arabic_full_name} />
-            <Field label="Modality" value={(selectedAppointment as any).modality_name_en} />
+            <Field label="Patient" value={selectedAppointment.arabicFullName} />
+            <Field label="Modality" value={selectedAppointment.modalityNameEn} />
             <Field label="Date" value={selectedAppointment.appointmentDate} />
             <Field label="Status" value={selectedAppointment.status} />
             <Field label="Walk-in" value={selectedAppointment.isWalkIn ? "Yes" : "No"} />
@@ -206,20 +205,17 @@ export default function RegistrationsPage() {
 }
 
 async function fetchRegistrations(filters: RegistrationsFilters) {
-  const params = new URLSearchParams();
+  const params: Record<string, string> = {};
   if (filters.dateFrom || filters.dateTo) {
-    if (filters.dateFrom) params.set("dateFrom", filters.dateFrom);
-    if (filters.dateTo) params.set("dateTo", filters.dateTo);
+    if (filters.dateFrom) params.dateFrom = filters.dateFrom;
+    if (filters.dateTo) params.dateTo = filters.dateTo;
   } else {
-    params.set("date", filters.date);
+    params.date = filters.date;
   }
-  if (filters.modalityId) params.set("modalityId", filters.modalityId);
-  if (filters.query) params.set("q", filters.query);
-  filters.status.forEach((s) => params.append("status[]", s));
-
-  return api<{ appointments: any[] }>(`/appointments?${params.toString()}`).then(
-    (r) => r.appointments
-  );
+  if (filters.modalityId) params.modalityId = filters.modalityId;
+  if (filters.query) params.q = filters.query;
+  
+  return fetchAppointments(params);
 }
 
 function Input({

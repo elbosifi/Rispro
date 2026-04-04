@@ -1,20 +1,20 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/api-hooks";
 
 export default function StatisticsPage() {
   const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
   const [modalityId, setModalityId] = useState("");
 
-  const { data: lookups } = useQuery<{ modalities: any[] }>({
+  const { data: lookups } = useQuery({
     queryKey: ["lookups"],
-    queryFn: () => api("/appointments/lookups"),
+    queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
   const { data: stats } = useQuery({
     queryKey: ["statistics", date, modalityId],
-    queryFn: () => fetchStatistics(date, modalityId) as Promise<{ statusBreakdown: any[]; modalityBreakdown: any[]; dailyBreakdown: any[] }>,
+    queryFn: () => fetchStats(date, modalityId),
     staleTime: 1000 * 30
   });
 
@@ -24,7 +24,9 @@ export default function StatisticsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Statistics</h2>
+      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
+        Statistics
+      </h2>
 
       {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
@@ -36,9 +38,9 @@ export default function StatisticsPage() {
             onChange={setModalityId}
             options={[
               { value: "", label: "All" },
-              ...(lookups?.modalities ?? []).map((m: any) => ({
+              ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
-                label: m.name_en
+                label: m.nameEn
               }))
             ]}
           />
@@ -82,8 +84,8 @@ export default function StatisticsPage() {
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
             {modalityBreakdown.map((row: any) => (
-              <tr key={row.modality_id}>
-                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.modality_name_en}</td>
+              <tr key={row.modalityId}>
+                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.modalityNameEn}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.count}</td>
               </tr>
             ))}
@@ -107,11 +109,11 @@ export default function StatisticsPage() {
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
             {dailyBreakdown.map((row: any) => (
-              <tr key={row.appointment_date}>
-                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.appointment_date}</td>
-                <td className="p-3 text-stone-700 dark:text-stone-300">{row.scheduled_count}</td>
-                <td className="p-3 text-stone-700 dark:text-stone-300">{row.completed_count}</td>
-                <td className="p-3 text-stone-700 dark:text-stone-300">{row.no_show_count}</td>
+              <tr key={row.appointmentDate}>
+                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.appointmentDate}</td>
+                <td className="p-3 text-stone-700 dark:text-stone-300">{row.scheduledCount}</td>
+                <td className="p-3 text-stone-700 dark:text-stone-300">{row.completedCount}</td>
+                <td className="p-3 text-stone-700 dark:text-stone-300">{row.noShowCount}</td>
               </tr>
             ))}
           </tbody>
@@ -119,13 +121,6 @@ export default function StatisticsPage() {
       </div>
     </div>
   );
-}
-
-async function fetchStatistics(date: string, modalityId: string) {
-  const params = new URLSearchParams();
-  params.set("date", date);
-  if (modalityId) params.set("modalityId", modalityId);
-  return api(`/appointments/statistics?${params.toString()}`);
 }
 
 function Input({ label, type, value, onChange }: { label: string; type: string; value: string; onChange: (v: string) => void }) {
@@ -142,7 +137,9 @@ function Select({ label, value, onChange, options }: { label: string; value: str
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
       <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
-        {options.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>{opt.label}</option>
+        ))}
       </select>
     </div>
   );

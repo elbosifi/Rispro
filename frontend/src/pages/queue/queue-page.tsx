@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients } from "@/lib/api-hooks";
 import type { QueueSnapshot } from "@/types/api";
 
 export default function QueuePage() {
@@ -13,17 +13,13 @@ export default function QueuePage() {
   // Load queue snapshot
   const { data: queue } = useQuery<QueueSnapshot>({
     queryKey: ["queue"],
-    queryFn: () => api("/queue"),
+    queryFn: fetchQueueSnapshot,
     refetchInterval: 1000 * 10
   });
 
   // Scan into queue mutation
   const scanMutation = useMutation({
-    mutationFn: (value: string) =>
-      api("/queue/scan", {
-        method: "POST",
-        body: JSON.stringify({ scanValue: value })
-      }),
+    mutationFn: scanIntoQueue,
     onSuccess: () => {
       setScanValue("");
       queryClient.invalidateQueries({ queryKey: ["queue"] });
@@ -38,9 +34,7 @@ export default function QueuePage() {
   const handleWalkInSearch = (query: string) => {
     setWalkInSearch(query);
     if (query.length > 1) {
-      api<{ patients: any[] }>(`/patients?q=${encodeURIComponent(query)}`).then(
-        (r) => setWalkInResults(r.patients)
-      );
+      searchPatients(query).then(setWalkInResults);
     } else {
       setWalkInResults([]);
     }
@@ -48,11 +42,7 @@ export default function QueuePage() {
 
   // Create walk-in mutation
   const walkInMutation = useMutation({
-    mutationFn: (payload: any) =>
-      api("/queue/walk-in", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      }),
+    mutationFn: addWalkIn,
     onSuccess: () => {
       setSelectedWalkIn(null);
       setWalkInSearch("");
@@ -64,11 +54,8 @@ export default function QueuePage() {
 
   // Confirm no-show mutation
   const noShowMutation = useMutation({
-    mutationFn: (appointmentId: number) =>
-      api("/queue/confirm-no-show", {
-        method: "POST",
-        body: JSON.stringify({ appointmentId, reason: "Patient did not arrive" })
-      }),
+    mutationFn: ({ appointmentId, reason }: { appointmentId: number; reason: string }) =>
+      confirmNoShow(appointmentId, reason),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["queue"] });
     }
@@ -86,11 +73,15 @@ export default function QueuePage() {
     if (selectedWalkIn) {
       walkInMutation.mutate({
         patientId: selectedWalkIn.id,
-        modalityId: "", // Would need modality selection in real app
+        modalityId: "",
         appointmentDate: new Date().toISOString().split("T")[0],
         isWalkIn: true
       });
     }
+  };
+
+  const handleNoShow = (appointmentId: number) => {
+    noShowMutation.mutate({ appointmentId, reason: "Patient did not arrive" });
   };
 
   return (
@@ -222,7 +213,7 @@ export default function QueuePage() {
                       </span>
                       {queue.reviewActive && entry.appointmentStatus === "scheduled" && (
                         <button
-                          onClick={() => noShowMutation.mutate(entry.appointmentId)}
+                          onClick={() => handleNoShow(entry.appointmentId)}
                           className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50"
                         >
                           Mark No-show
