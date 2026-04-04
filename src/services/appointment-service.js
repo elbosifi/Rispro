@@ -16,10 +16,60 @@ import {
 /** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
 /** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
 /** @typedef {import("../types/http.js").UserId} UserId */
+/** @typedef {import("../types/http.js").AuthenticatedUserContext} AuthenticatedUserContext */
 /** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
 /** @typedef {import("../types/db.js").NullableDbNumeric} NullableDbNumeric */
 /** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
 /** @typedef {import("../types/http.js").AuthenticatedUserContext & { id?: UserId }} AppointmentActor */
+
+/**
+ * @typedef PrintAppointmentRow
+ * @property {number} id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string} modality_name_en
+ * @property {string} modality_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} exam_name_ar
+ * @property {string} status
+ * @property {boolean} is_walk_in
+ * @property {string | null} notes
+ */
+
+/**
+ * @typedef AvailabilitySlot
+ * @property {string} appointment_date
+ * @property {number} booked_count
+ * @property {number} remaining_capacity
+ * @property {number | null} daily_capacity
+ * @property {boolean} is_full
+ */
+
+/**
+ * @typedef AppointmentFilters
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ * @property {string} [date]
+ * @property {string} [modalityId]
+ * @property {string} [query]
+ * @property {string[]} [status]
+ */
+
+/**
+ * @typedef AppointmentStatisticsFilters
+ * @property {string} [dateFrom]
+ * @property {string} [dateTo]
+ * @property {string} [date]
+ * @property {string} [modalityId]
+ */
+
+/**
+ * @typedef AppointmentUpdateOptions
+ * @property {string} [supervisorUsername]
+ * @property {string} [supervisorPassword]
+ */
 
 /**
  * @typedef SchedulingSettingRow
@@ -201,6 +251,12 @@ import {
  * @property {DbNumeric} no_show_count
  */
 
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ * @returns {number | null}
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -219,6 +275,11 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @param {string} [fieldName]
+ * @returns {string}
+ */
 function normalizeAppointmentDate(value, fieldName = "appointmentDate") {
   const raw = String(value || "").trim();
 
@@ -229,15 +290,28 @@ function normalizeAppointmentDate(value, fieldName = "appointmentDate") {
   return raw;
 }
 
+/**
+ * @param {string} appointmentDate
+ * @param {number} dailySequence
+ * @returns {string}
+ */
 function buildAccessionNumber(appointmentDate, dailySequence) {
   const compactDate = appointmentDate.replaceAll("-", "");
   return `${compactDate}-${String(dailySequence).padStart(3, "0")}`;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeOptionalText(value) {
   return String(value || "").trim();
 }
 
+/**
+ * @param {unknown} value
+ * @returns {number | null}
+ */
 function normalizeCapacityLimit(value) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
@@ -246,6 +320,10 @@ function normalizeCapacityLimit(value) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {number}
+ */
 function normalizeDailyCapacity(value) {
   if (value === undefined || value === null || value === "") {
     return 0;
@@ -260,6 +338,11 @@ function normalizeDailyCapacity(value) {
   return parsed;
 }
 
+/**
+ * @param {unknown} value
+ * @param {boolean} [defaultValue]
+ * @returns {boolean}
+ */
 function normalizeSettingToggle(value, defaultValue = true) {
   const raw = String(value || "").trim().toLowerCase();
 
@@ -278,6 +361,10 @@ function normalizeSettingToggle(value, defaultValue = true) {
   return defaultValue;
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeIsoDate(value) {
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10);
@@ -300,13 +387,20 @@ function requireRow(row, message) {
   return row;
 }
 
+/**
+ * @param {string} isoDate
+ * @returns {string}
+ */
 function getTripoliWeekday(isoDate) {
   const date = new Date(`${isoDate}T00:00:00Z`);
   const weekday = new Intl.DateTimeFormat("en-US", { timeZone: TRIPOLI_TIME_ZONE, weekday: "long" }).format(date);
   return weekday.toLowerCase();
 }
 
-/** @returns {Promise<{ fridayEnabled: boolean, saturdayEnabled: boolean }>} */
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @returns {Promise<{ fridayEnabled: boolean, saturdayEnabled: boolean }>}
+ */
 export async function getAppointmentDaySettings(client = pool) {
   const { rows } = await client.query(
     `
@@ -329,6 +423,11 @@ export async function getAppointmentDaySettings(client = pool) {
   };
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {string} appointmentDate
+ * @returns {Promise<void>}
+ */
 async function requireAppointmentDayEnabled(client, appointmentDate) {
   const settings = await getAppointmentDaySettings(client);
   const weekday = getTripoliWeekday(appointmentDate);
@@ -342,6 +441,10 @@ async function requireAppointmentDayEnabled(client, appointmentDate) {
   }
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @returns {Promise<number | null>}
+ */
 async function getMaxCasesPerModality(client) {
   const { rows } = await client.query(
     `
@@ -358,6 +461,11 @@ async function getMaxCasesPerModality(client) {
   return normalizeCapacityLimit(raw);
 }
 
+/**
+ * @param {number | null} modalityCapacity
+ * @param {number | null} maxCasesPerModality
+ * @returns {number | null}
+ */
 function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
   const modalityValue = normalizeCapacityLimit(modalityCapacity);
   const globalValue = normalizeCapacityLimit(maxCasesPerModality);
@@ -369,6 +477,11 @@ function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
   return modalityValue || globalValue || 1;
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} appointmentId
+ * @returns {Promise<AppointmentDbRow>}
+ */
 async function getAppointmentById(client, appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const { rows } = await client.query(
@@ -381,7 +494,7 @@ async function getAppointmentById(client, appointmentId) {
     [cleanAppointmentId]
   );
 
-  const appointment = /** @type {(AppointmentDbRow & Partial<DomainAppointment>) | undefined} */ (rows[0]);
+  const appointment = /** @type {AppointmentDbRow | undefined} */ (rows[0]);
 
   if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
@@ -390,12 +503,18 @@ async function getAppointmentById(client, appointmentId) {
   return appointment;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {string} appointmentDate
+ * @param {number | null} [excludeAppointmentId]
+ * @returns {Promise<number>}
+ */
 async function nextDailySequence(client, appointmentDate, excludeAppointmentId = null) {
   const params = [appointmentDate];
   let excludeSql = "";
 
   if (excludeAppointmentId) {
-    params.push(excludeAppointmentId);
+    params.push(String(excludeAppointmentId));
     excludeSql = `and id <> $${params.length}`;
   }
 
@@ -413,6 +532,13 @@ async function nextDailySequence(client, appointmentDate, excludeAppointmentId =
   return Number(sequenceRow?.last_daily_sequence || 0) + 1;
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} modalityId
+ * @param {string} appointmentDate
+ * @param {number | null} [excludeAppointmentId]
+ * @returns {Promise<{ bookedCount: number, slotNumber: number }>}
+ */
 async function nextModalitySlotNumber(client, modalityId, appointmentDate, excludeAppointmentId = null) {
   const params = [modalityId, appointmentDate];
   let excludeSql = "";
@@ -442,6 +568,10 @@ async function nextModalitySlotNumber(client, modalityId, appointmentDate, exclu
   };
 }
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeDateOrToday(value) {
   if (!value) {
     return getTripoliToday();
@@ -450,7 +580,13 @@ function normalizeDateOrToday(value) {
   return normalizeAppointmentDate(value);
 }
 
+/**
+ * @param {import("pg").PoolClient} client
+ * @param {number | string} patientId
+ * @returns {Promise<PatientLookupRow>}
+ */
 async function getPatientById(client, patientId) {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
   const { rows } = await client.query(
     `
       select id, mrn, national_id, arabic_full_name, english_full_name, age_years, estimated_date_of_birth, sex, phone_1, phone_2, address
@@ -458,7 +594,7 @@ async function getPatientById(client, patientId) {
       where id = $1
       limit 1
     `,
-    [patientId]
+    [cleanPatientId]
   );
 
   const patient = /** @type {PatientLookupRow | undefined} */ (rows[0]);
@@ -470,6 +606,11 @@ async function getPatientById(client, patientId) {
   return patient;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} modalityId
+ * @returns {Promise<ModalityRow>}
+ */
 async function getModalityById(client, modalityId) {
   const { rows } = await client.query(
     `
@@ -490,6 +631,12 @@ async function getModalityById(client, modalityId) {
   return modality;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} examTypeId
+ * @param {number | string} [modalityId]
+ * @returns {Promise<ExamTypeRow | null>}
+ */
 async function getExamTypeById(client, examTypeId, modalityId) {
   if (!examTypeId) {
     return null;
@@ -518,6 +665,11 @@ async function getExamTypeById(client, examTypeId, modalityId) {
   return examType;
 }
 
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} reportingPriorityId
+ * @returns {Promise<ReportingPriorityRow | null>}
+ */
 async function getPriorityById(client, reportingPriorityId) {
   if (!reportingPriorityId) {
     return null;
@@ -605,6 +757,11 @@ export async function listExamTypesForSettings() {
 }
 
 /** @returns {Promise<AppointmentListRow[]>} */
+
+/**
+ * @param {unknown} filters
+ */
+/** @param {AppointmentFilters} [filters] */
 export async function listAppointmentsForPrint(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -620,7 +777,7 @@ export async function listAppointmentsForPrint(filters = {}) {
     const start = dateFrom || dateTo;
     const end = dateTo || dateFrom;
 
-    if (start > end) {
+    if (/** @type {string} */ (start) > /** @type {string} */ (end)) {
       throw new HttpError(400, "dateFrom cannot be later than dateTo.");
     }
 
@@ -714,6 +871,11 @@ export async function listAppointmentsForPrint(filters = {}) {
 }
 
 /** @returns {Promise<{ filters: { date: string | null, dateFrom: string, dateTo: string, modalityId: string }, summary: Record<string, number>, modalityBreakdown: ModalityBreakdownRow[], statusBreakdown: StatusBreakdownRow[], dailyBreakdown: DailyBreakdownRow[] }>} */
+
+/**
+ * @param {unknown} filters
+ */
+/** @param {AppointmentStatisticsFilters} [filters] */
 export async function listAppointmentStatistics(filters = {}) {
   const dateFrom = filters.dateFrom ? normalizeAppointmentDate(filters.dateFrom, "dateFrom") : null;
   const dateTo = filters.dateTo ? normalizeAppointmentDate(filters.dateTo, "dateTo") : null;
@@ -726,7 +888,7 @@ export async function listAppointmentStatistics(filters = {}) {
     const start = dateFrom || dateTo;
     const end = dateTo || dateFrom;
 
-    if (start > end) {
+    if (/** @type {string} */ (start) > /** @type {string} */ (end)) {
       throw new HttpError(400, "dateFrom cannot be later than dateTo.");
     }
 
@@ -870,7 +1032,10 @@ export async function listAppointmentStatistics(filters = {}) {
   };
 }
 
-/** @returns {Promise<AppointmentListRow>} */
+/**
+ * @param {number | string} appointmentId
+ * @returns {Promise<PrintAppointmentRow>}
+ */
 export async function getAppointmentPrintDetails(appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
@@ -935,13 +1100,20 @@ export async function getAppointmentPrintDetails(appointmentId) {
   return fallbackAppointment;
 }
 
-/** @returns {Promise<Array<{ appointment_date: string, booked_count: number, remaining_capacity: number, daily_capacity: number, is_full: boolean }>>} */
+/**
+ * @param {number | string} [modalityId]
+ * @param {number} [days]
+ * @returns {Promise<AvailabilitySlot[]>}
+ */
 export async function listAvailability(modalityId, days = 14) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
+  if (!cleanModalityId) {
+    throw new HttpError(400, "modalityId is required.");
+  }
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
-  const modality = await getModalityById(pool, cleanModalityId);
+  const modality = await getModalityById(/** @type {any} */ (pool), cleanModalityId);
   const daySettings = await getAppointmentDaySettings(pool);
-  const maxCasesPerModality = await getMaxCasesPerModality(pool);
+  const maxCasesPerModality = await getMaxCasesPerModality(/** @type {any} */ (pool));
 
   const { rows } = await pool.query(
     `
@@ -988,7 +1160,7 @@ export async function listAvailability(modalityId, days = 14) {
     .map((row) => {
       const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
       const bookedCount = Number(row.booked_count || 0);
-      const remaining = Math.max(capacity - bookedCount, 0);
+      const remaining = Math.max((capacity || 0) - bookedCount, 0);
 
       return {
         appointment_date: row.appointment_date,
@@ -1001,6 +1173,14 @@ export async function listAvailability(modalityId, days = 14) {
 }
 
 /** @returns {Promise<{ modalities: ModalityRow[] }>} */
+
+/**
+ * @param {unknown} includeInactive
+ */
+/**
+ * @param {{ includeInactive?: boolean }} [options]
+ * @returns {Promise<{ modalities: ModalityRow[] }>}
+ */
 export async function listModalitiesForSettings({ includeInactive = false } = {}) {
   const whereClause = includeInactive ? "" : "where is_active = true";
   const { rows } = await pool.query(
@@ -1016,6 +1196,11 @@ export async function listModalitiesForSettings({ includeInactive = false } = {}
 }
 
 /** @returns {Promise<ModalityRow>} */
+/**
+ * @param {UnknownRecord} payload
+ * @param {UserId | null} [currentUserId]
+ * @returns {Promise<ModalityRow>}
+ */
 export async function createModality(payload, currentUserId = null) {
   const code = String(payload.code || "").trim();
   const nameAr = String(payload.nameAr || "").trim();
@@ -1076,6 +1261,12 @@ export async function createModality(payload, currentUserId = null) {
 }
 
 /** @returns {Promise<ModalityRow>} */
+/**
+ * @param {number | string} modalityId
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<ModalityRow>}
+ */
 export async function updateModality(modalityId, payload, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const code = String(payload.code || "").trim();
@@ -1153,6 +1344,11 @@ export async function updateModality(modalityId, payload, currentUserId) {
 }
 
 /** @returns {Promise<ModalityRow>} */
+/**
+ * @param {number | string} modalityId
+ * @param {UserId} currentUserId
+ * @returns {Promise<ModalityRow>}
+ */
 export async function deleteModality(modalityId, currentUserId) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   const client = await pool.connect();
@@ -1211,7 +1407,11 @@ export async function deleteModality(modalityId, currentUserId) {
   }
 }
 
-/** @returns {Promise<ExamTypeRow>} */
+/**
+ * @param {UnknownRecord} payload
+ * @param {UserId | null} [currentUserId]
+ * @returns {Promise<UnknownRecord>}
+ */
 export async function createExamType(payload, currentUserId = null) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const nameAr = String(payload.nameAr || "").trim();
@@ -1227,7 +1427,7 @@ export async function createExamType(payload, currentUserId = null) {
 
   try {
     await client.query("begin");
-    await getModalityById(client, modalityId);
+    await getModalityById(client, /** @type {number | string} */ (modalityId));
     const { rows } = await client.query(
       `
         insert into exam_types (
@@ -1269,6 +1469,12 @@ export async function createExamType(payload, currentUserId = null) {
 }
 
 /** @returns {Promise<ExamTypeRow>} */
+/**
+ * @param {number | string} examTypeId
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<ExamTypeRow>}
+ */
 export async function updateExamType(examTypeId, payload, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1302,7 +1508,7 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
       throw new HttpError(404, "Exam type not found.");
     }
 
-    await getModalityById(client, modalityId);
+    await getModalityById(client, /** @type {number | string} */ (modalityId));
 
     const { rows } = await client.query(
       `
@@ -1345,6 +1551,11 @@ export async function updateExamType(examTypeId, payload, currentUserId) {
 }
 
 /** @returns {Promise<ExamTypeRow>} */
+/**
+ * @param {number | string} examTypeId
+ * @param {UserId} currentUserId
+ * @returns {Promise<ExamTypeRow>}
+ */
 export async function deleteExamType(examTypeId, currentUserId) {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId");
   const client = await pool.connect();
@@ -1434,10 +1645,10 @@ export async function createAppointment(payload, currentUser, options = {}) {
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
-    const patient = await getPatientById(client, patientId);
-    const modality = await getModalityById(client, modalityId);
-    const examType = await getExamTypeById(client, examTypeId, modalityId);
-    const priority = await getPriorityById(client, reportingPriorityId);
+    const patient = await getPatientById(client, /** @type {number | string} */ (patientId));
+    const modality = await getModalityById(client, /** @type {number | string} */ (modalityId));
+    const examType = examTypeId ? await getExamTypeById(client, /** @type {number | string} */ (examTypeId), /** @type {number | string} */ (modalityId)) : null;
+    const priority = reportingPriorityId ? await getPriorityById(client, reportingPriorityId) : null;
 
     const bookingStats = await client.query(
       `
@@ -1468,7 +1679,7 @@ export async function createAppointment(payload, currentUser, options = {}) {
     const nextSlotNumber = Number(bookingStatsRow?.last_slot_number || 0) + 1;
     const nextDailySequence = Number(globalStatsRow?.last_daily_sequence || 0) + 1;
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
-    const isOverbooked = bookedCount >= capacity;
+    const isOverbooked = capacity !== null && bookedCount >= capacity;
 
     // Handle overbooking approval
     let approvingSupervisor = null;
@@ -1555,8 +1766,8 @@ export async function createAppointment(payload, currentUser, options = {}) {
         isWalkIn,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? approvingSupervisor.full_name : null,
-        isOverbooked ? approvingSupervisor.id : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.id : null,
         notes,
         currentUser.sub
       ]
@@ -1612,6 +1823,13 @@ export async function createAppointment(payload, currentUser, options = {}) {
  * @param {{ supervisorUsername?: string, supervisorPassword?: string }} [options]
  */
 /** @returns {Promise<AppointmentDbRow>} */
+/**
+ * @param {number | string} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AuthenticatedUserContext} currentUser
+ * @param {AppointmentUpdateOptions} [options]
+ * @returns {Promise<UnknownRecord>}
+ */
 export async function updateAppointment(appointmentId, payload, currentUser, options = {}) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
@@ -1620,6 +1838,9 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
   const supervisorUsername = String(options.supervisorUsername || "").trim();
   const supervisorPassword = String(options.supervisorPassword || "").trim();
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const client = await pool.connect();
 
   try {
@@ -1669,10 +1890,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-sequence:${appointmentDate}`]);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [`appointment-slot:${modalityId}:${appointmentDate}`]);
 
-    const modality = await getModalityById(client, modalityId);
-    const examType = await getExamTypeById(client, examTypeId, modalityId);
-    const priority = await getPriorityById(client, reportingPriorityId);
-    const slotStats = await nextModalitySlotNumber(client, modalityId, appointmentDate, cleanAppointmentId);
+    const modality = await getModalityById(client, /** @type {number | string} */ (modalityId));
+    const examType = examTypeId ? await getExamTypeById(client, /** @type {number | string} */ (examTypeId), /** @type {number | string} */ (modalityId)) : null;
+    const priority = reportingPriorityId ? await getPriorityById(client, reportingPriorityId) : null;
+    const slotStats = await nextModalitySlotNumber(client, /** @type {number | string} */ (modalityId), appointmentDate, cleanAppointmentId);
     const maxCasesPerModality = await getMaxCasesPerModality(client);
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
 
@@ -1681,7 +1902,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 
     // Only check overbooking when date or modality changes (treat as new appointment)
     // Editing fields on the same date/modality does not require supervisor approval
-    const isOverbooked = modalityOrDateChanged && slotStats.bookedCount >= capacity;
+    const isOverbooked = modalityOrDateChanged && capacity !== null && slotStats.bookedCount >= capacity;
 
     // Handle overbooking approval
     let approvingSupervisor = null;
@@ -1728,8 +1949,8 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
       ? Number(approvingSupervisor.id)
       : null;
 
-    const updatedByUserId = currentUser?.id != null
-      ? Number(currentUser.id)
+    const updatedByUserId = currentUser?.sub != null
+      ? Number(currentUser.sub)
       : (currentUser?.sub != null ? Number(currentUser.sub) : null);
 
     const { rows } = await client.query(
@@ -1765,7 +1986,7 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
         modalitySlotNumber,
         isOverbooked,
         overbookingReason,
-        isOverbooked ? approvingSupervisor.full_name : null,
+        isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
         approvedByUserId,
         notes,
         updatedByUserId
@@ -1797,10 +2018,10 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return updatedAppointment;
   } catch (error) {
-    console.error("[updateAppointment] ERROR:", error.message, error.stack);
+    console.error("[updateAppointment] ERROR:", /** @type {Error} */ (error).message, /** @type {Error} */ (error).stack);
     await client.query("rollback");
     throw error;
   } finally {
@@ -1809,17 +2030,20 @@ export async function updateAppointment(appointmentId, payload, currentUser, opt
 }
 
 /**
- * @param {UserId} appointmentId
- * @param {{ examTypeId?: UserId }} payload
- * @param {AppointmentActor | null | undefined} currentUser
+ * @param {number | string} appointmentId
+ * @param {UnknownRecord} payload
+ * @param {AuthenticatedUserContext} currentUser
+ * @returns {Promise<UnknownRecord>}
  */
-/** @returns {Promise<AppointmentDbRow>} */
 export async function updateAppointmentProtocol(appointmentId, payload, currentUser) {
   if (!currentUser?.sub) {
     throw new HttpError(401, "Authentication required.");
   }
 
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", { required: false });
   const client = await pool.connect();
 
@@ -1832,7 +2056,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
       throw new HttpError(409, "Only active reception appointments can be updated.");
     }
 
-    const examType = await getExamTypeById(client, examTypeId, existingAppointment.modality_id);
+    const examType = examTypeId ? await getExamTypeById(client, examTypeId, existingAppointment.modality_id) : null;
 
     const { rows } = await client.query(
       `
@@ -1872,7 +2096,7 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return protocolUpdatedAppointment;
   } catch (error) {
     await client.query("rollback");
@@ -1883,8 +2107,23 @@ export async function updateAppointmentProtocol(appointmentId, payload, currentU
 }
 
 /** @returns {Promise<{ ok: true }>} */
+
+/**
+ * @param {unknown} appointmentId
+ * @param {unknown} reason
+ * @param {unknown} currentUserId
+ */
+/**
+ * @param {number | string} appointmentId
+ * @param {string} reason
+ * @param {UserId} currentUserId
+ * @returns {Promise<{ ok: boolean }>}
+ */
 export async function cancelAppointment(appointmentId, reason, currentUserId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (!cleanAppointmentId) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
   const cleanReason = normalizeOptionalText(reason);
 
   if (!cleanReason) {
@@ -1945,7 +2184,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

@@ -84,7 +84,7 @@ function decodeBase64File(fileContentBase64) {
   }
 
   const normalized = raw.includes(",") ? raw.split(",").pop() : raw;
-  return Buffer.from(normalized, "base64");
+  return Buffer.from(normalized || "", "base64");
 }
 
 /**

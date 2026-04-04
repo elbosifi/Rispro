@@ -7,19 +7,31 @@ import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 
 /** @typedef {import("../types/http.js").UnknownRecord} UnknownRecord */
+
+/**
+ * @typedef PacsFindResult
+ * @property {string} [patientId]
+ * @property {string} [patientName]
+ * @property {string} [accessionNumber]
+ * @property {string} [studyDate]
+ * @property {string} [studyDescription]
+ * @property {string} [modalitiesInStudy]
+ * @property {string} [numberOfStudyRelatedInstances]
+ * @property {string} [studyInstanceUid]
+ */
+
+/**
+ * @typedef StudySearchCriteria
+ * @property {string} [patientId]
+ * @property {string} [patientName]
+ * @property {string} [accessionNumber]
+ * @property {string} [studyDate]
+ */
 /** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
 /** @typedef {import("../types/settings.js").SettingsMap} SettingsMap */
 /** @typedef {import("../types/http.js").OptionalUserId} OptionalUserId */
 
 const DEFAULT_DIMSE_SOURCE_PORT = 11112;
-
-/**
- * @typedef StudySearchCriteria
- * @property {string} patientId
- * @property {string} patientName
- * @property {string} accessionNumber
- * @property {string} studyDate
- */
 
 /**
  * @typedef {object} StudySummary
@@ -338,6 +350,7 @@ function normalizePacsSettingsInput(input = {}) {
 
 /**
  * @param {StudySearchCriteria} criteria
+ * @returns {{ key: string, value: string }[]}
  */
 function buildStudySearchTags(criteria) {
   const tags = [
@@ -353,6 +366,11 @@ function buildStudySearchTags(criteria) {
   return tags;
 }
 
+
+/**
+ * @param {{ criteria: StudySearchCriteria, host: string, port: number, calledAeTitle: string, callingAeTitle: string, timeoutSeconds: number }} params
+ * @returns {Promise<PacsFindResult[]>}
+ */
 async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
@@ -391,7 +409,7 @@ async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeT
           return;
         }
 
-        resolve(parsed);
+        resolve(/** @type {PacsFindResult[]} */ (parsed || []));
       });
     } catch (error) {
       reject(error);
@@ -399,6 +417,11 @@ async function runDimseFindScu({ criteria, host, port, calledAeTitle, callingAeT
   });
 }
 
+
+/**
+ * @param {{ host: string, port: number, calledAeTitle: string, callingAeTitle: string, timeoutSeconds: number }} params
+ * @returns {Promise<boolean>}
+ */
 async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, timeoutSeconds }) {
   return new Promise((resolve, reject) => {
     try {
@@ -425,7 +448,7 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
       dimse.echoScu(options, (result) => {
         clearTimeout(timer);
         if (!result) {
-          resolve([]);
+          resolve(false);
           return;
         }
 
@@ -436,7 +459,7 @@ async function runDimseEchoScu({ host, port, calledAeTitle, callingAeTitle, time
           return;
         }
 
-        resolve(parsed);
+        resolve(Boolean(parsed));
       });
     } catch (error) {
       reject(error);

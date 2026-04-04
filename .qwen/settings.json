@@ -5,7 +5,10 @@
       "Bash(node *)",
       "Bash(findstr *)",
       "Bash(powershell *)",
-      "Bash(dir *)"
+      "Bash(dir *)",
+      "Bash(npx *)",
+      "Bash(find *)",
+      "Bash(type *)"
     ]
   },
   "$version": 3

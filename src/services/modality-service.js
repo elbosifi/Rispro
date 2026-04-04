@@ -246,7 +246,7 @@ export async function markAppointmentCompleted(appointmentId, currentUserId) {
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

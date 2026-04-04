@@ -264,7 +264,7 @@ function validatePatientPayload(payload, rules) {
   const hasAgeValue = String(ageYears ?? "").trim() !== "";
   const parsedAge = hasAgeValue ? Number(ageYears) : null;
 
-  if (!hasDob && hasAgeValue && (!Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
+  if (!hasDob && hasAgeValue && (parsedAge === null || !Number.isInteger(parsedAge) || parsedAge < 0 || parsedAge > 130)) {
     throw new HttpError(400, "ageYears must be a whole number between 0 and 130.");
   }
 

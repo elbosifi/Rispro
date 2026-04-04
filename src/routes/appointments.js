@@ -162,7 +162,7 @@ appointmentsRouter.post(
     const body = asUnknownRecord(request.body);
     const result = await cancelAppointment(
       String(request.params?.appointmentId || ""),
-      asOptionalString(body.cancelReason),
+      asOptionalString(body.cancelReason) || "",
       request.user.sub
     );
     res.json(result);

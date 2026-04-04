@@ -30,6 +30,10 @@ export const integrationsRouter = express.Router();
  * @property {AuthenticatedUserContext} user
  */
 
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
 function isLoopbackAddress(value) {
   return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(value || "").trim());
 }

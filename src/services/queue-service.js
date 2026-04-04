@@ -107,64 +107,36 @@ const DEFAULT_NO_SHOW_REVIEW_TIME = "17:00";
  */
 
 /**
- * @typedef QueueSummaryRow
- * @property {DbNumeric} total_appointments
- * @property {DbNumeric} scheduled_count
- * @property {DbNumeric} waiting_count
- * @property {DbNumeric} no_show_count
- * @property {DbNumeric} arrived_count
+ * @typedef QueueSnapshot
+ * @property {string} queueDate
+ * @property {string} reviewTime
+ * @property {boolean} reviewActive
+ * @property {QueueSummaryRow} summary
+ * @property {QueueEntryRow[]} queueEntries
+ * @property {NoShowCandidateRow[]} noShowCandidates
  */
 
 /**
- * @typedef NoShowCandidateRow
- * @property {number} appointment_id
- * @property {string} accession_number
- * @property {string} appointment_date
- * @property {string | null} notes
- * @property {number} patient_id
- * @property {string} arabic_full_name
- * @property {string | null} english_full_name
- * @property {string | null} phone_1
- * @property {string} modality_name_ar
- * @property {string} modality_name_en
- */
-
-/**
- * @typedef NextQueueNumberRow
- * @property {DbNumeric} [next_queue_number]
- */
-
-/**
- * @typedef QueueEntryStateRow
- * @property {number} id
- * @property {string} queue_date
- * @property {number} queue_number
- * @property {QueueStatus} queue_status
- * @property {string | null} scanned_at
- */
-
-/**
- * @typedef AppointmentForQueueRow
- * @property {number} id
- * @property {string} appointment_date
- * @property {AppointmentStatus} status
- * @property {string} accession_number
- * @property {boolean} is_walk_in
- * @property {string | null} notes
- * @property {string} arabic_full_name
- * @property {string | null} english_full_name
- * @property {string | null} phone_1
- * @property {string} modality_name_ar
- * @property {string} modality_name_en
- * @property {string | null} exam_name_ar
- * @property {string | null} exam_name_en
- */
-
-/**
- * @typedef NoShowAppointmentRow
- * @property {number} id
- * @property {AppointmentStatus} status
- * @property {string} appointment_date
+ * @typedef QueueScanResult
+ * @property {QueueEntryStateRow} queueEntry
+ * @property {object} appointment
+ * @property {number} appointment.id
+ * @property {string} appointment.accession_number
+ * @property {boolean} appointment.is_walk_in
+ * @property {string | null} appointment.notes
+ * @property {string} appointment.status
+ * @property {object} patient
+ * @property {string} patient.arabic_full_name
+ * @property {string | null} patient.english_full_name
+ * @property {string | null} patient.phone_1
+ * @property {object} modality
+ * @property {string} modality.name_ar
+ * @property {string} modality.name_en
+ * @property {object | null} examType
+ * @property {string | null} examType.name_ar
+ * @property {string | null} examType.name_en
+ * @property {string} [name_ar]
+ * @property {string} [name_en]
  */
 
 /** @typedef {AuthenticatedUserContext} CurrentUser */
@@ -197,13 +169,15 @@ function getTripoliParts(date = new Date()) {
     hour12: false
   });
 
-  return formatter.formatToParts(date).reduce((accumulator, part) => {
-    if (part.type !== "literal") {
-      accumulator[part.type] = part.value;
+  const parts = formatter.formatToParts(date).reduce((accumulator, part) => {
+    if (part.type !== "literal" && part.type !== "unknown") {
+      accumulator[/** @type {string} */ (part.type)] = part.value;
     }
 
     return accumulator;
-  }, {});
+  }, /** @type {Record<string, string | undefined>} */ ({}));
+
+  return parts;
 }
 
 function getTripoliMinutesSinceMidnight() {

@@ -270,7 +270,7 @@ export async function getIntegrationStatus() {
  * @returns {Promise<PrintPreparation>}
  */
 export async function preparePrintJob(payload, currentUserId) {
-  const appointment = await getAppointmentSummary(payload.appointmentId);
+  const appointment = await getAppointmentSummary(payload.appointmentId || "");
   const outputType = String(payload.outputType || "").trim();
 
   if (!["slip", "label"].includes(outputType)) {

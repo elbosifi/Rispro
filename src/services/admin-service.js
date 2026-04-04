@@ -99,6 +99,7 @@ export async function buildBackupSnapshot(currentUserId) {
     const backup = {
       version: 1,
       created_at: new Date().toISOString(),
+      /** @type {Record<string, BackupRow[]>} */
       tables: {}
     };
 

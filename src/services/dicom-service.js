@@ -21,6 +21,26 @@ import {
 /** @typedef {import("../types/settings.js").CategorySettings} CategorySettings */
 /** @typedef {import("../types/settings.js").SettingsMap} SettingsMap */
 /** @typedef {import("../types/http.js").UserId} UserId */
+
+/**
+ * @typedef MppsInput
+ * @property {string} [sourcePath]
+ * @property {string} [sourceIp]
+ * @property {string} [remoteAeTitle]
+ * @property {string} [performedStationAeTitle]
+ * @property {string} [accessionNumber]
+ * @property {string} [mppsSopInstanceUid]
+ * @property {string} [sopInstanceUid]
+ * @property {string} [mppsStatus]
+ * @property {string} [startedAt]
+ * @property {string} [startedDate]
+ * @property {string} [startedTime]
+ * @property {string} [finishedAt]
+ * @property {string} [finishedDate]
+ * @property {string} [finishedTime]
+ * @property {Record<string, unknown>} [raw]
+ */
+
 /** @typedef {import("../types/db.js").DbNumeric} DbNumeric */
 /** @typedef {import("../types/domain.js").AppointmentStatus} AppointmentStatus */
 
@@ -33,6 +53,13 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 
 /**
  * @typedef DicomSettingRow
+ * @property {string} category
+ * @property {string} setting_key
+ * @property {{ value?: unknown } | null} [setting_value]
+ */
+
+/**
+ * @typedef GatewaySettingsRow
  * @property {string} category
  * @property {string} setting_key
  * @property {{ value?: unknown } | null} [setting_value]
@@ -106,9 +133,18 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 /**
  * @typedef DicomMessageLogRow
  * @property {number} id
+ * @property {string} source_type
+ * @property {string | null} source_path
+ * @property {string} event_type
+ * @property {string | null} source_ip
+ * @property {string | null} remote_ae_title
+ * @property {string | null} accession_number
+ * @property {string | null} mpps_sop_instance_uid
+ * @property {Record<string, unknown>} payload
  * @property {string} processing_status
  * @property {number | null} appointment_id
  * @property {number | null} device_id
+ * @property {string | null} error_message
  */
 
 /**
@@ -118,6 +154,93 @@ const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
  * @property {DbNumeric} total_count
  */
 
+/**
+ * @typedef WorklistContextRow
+ * @property {number} id
+ * @property {number} patient_id
+ * @property {string} accession_number
+ * @property {string} appointment_date
+ * @property {AppointmentStatus} status
+ * @property {number} modality_id
+ * @property {string | null} exam_type_id
+ * @property {string} arabic_full_name
+ * @property {string | null} english_full_name
+ * @property {string | null} sex
+ * @property {string | null} estimated_date_of_birth
+ * @property {string | null} mrn
+ * @property {string | null} national_id
+ * @property {string | null} exam_name_ar
+ * @property {string | null} exam_name_en
+ * @property {string | null} modality_name_ar
+ * @property {string | null} modality_name_en
+ * @property {string | null} modality_code
+ */
+
+/**
+ * @typedef MppsPayload
+ * @property {string} mppsStatus
+ * @property {string} [mppsSopInstanceUid]
+ * @property {string} [startedAt]
+ * @property {string} [finishedAt]
+ * @property {string} [startedDate]
+ * @property {string} [startedTime]
+ * @property {string} [finishedDate]
+ * @property {string} [finishedTime]
+ */
+
+/**
+ * @typedef GatewaySettings
+ * @property {boolean} enabled
+ * @property {string} bindHost
+ * @property {string} mwlAeTitle
+ * @property {number} mwlPort
+ * @property {string} mppsAeTitle
+ * @property {number} mppsPort
+ * @property {string} worklistOutputDir
+ * @property {string} worklistSourceDir
+ * @property {string} mppsInboxDir
+ * @property {string} [mppsProcessedDir]
+ * @property {string} [mppsFailedDir]
+ * @property {string} [callbackSecret]
+ * @property {string} [rebuildBehavior]
+ * @property {string} [dump2dcmCommand]
+ * @property {string} [dcmdumpCommand]
+ */
+
+/**
+ * @typedef FindDicomDeviceParams
+ * @property {string} [remoteAeTitle]
+ * @property {string} [performedStationAeTitle]
+ * @property {string} [sourceIp]
+ */
+
+/**
+ * @typedef FindAppointmentForMppsParams
+ * @property {string} accessionNumber
+ * @property {string} mppsSopInstanceUid
+ */
+
+/**
+ * @typedef UpdateMppsParams
+ * @property {string} mppsStatus
+ * @property {string} [startedDate]
+ * @property {string} [startedTime]
+ * @property {string} [finishedDate]
+ * @property {string} [finishedTime]
+ */
+
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fieldName
+ * @param {unknown} required
+ */
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @param {{ required?: boolean }} [options]
+ * @returns {number | null}
+ */
 function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   if (value === undefined || value === null || value === "") {
     if (required) {
@@ -136,10 +259,28 @@ function normalizePositiveInteger(value, fieldName, { required = true } = {}) {
   return parsed;
 }
 
+
+/**
+ * @param {unknown} value
+ */
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeOptionalText(value) {
   return String(value || "").trim();
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fieldName
+ */
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @returns {boolean}
+ */
 function normalizeBooleanFlag(value, fieldName) {
   const raw = String(value || "").trim().toLowerCase();
 
@@ -158,6 +299,16 @@ function normalizeBooleanFlag(value, fieldName) {
   throw new HttpError(400, `${fieldName} must be enabled or disabled.`);
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fieldName
+ */
+/**
+ * @param {unknown} value
+ * @param {string} fieldName
+ * @returns {string | null}
+ */
 function normalizeIpAddress(value, fieldName) {
   const raw = normalizeOptionalText(value);
 
@@ -172,11 +323,26 @@ function normalizeIpAddress(value, fieldName) {
   throw new HttpError(400, `${fieldName} must be a valid IP address format.`);
 }
 
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeDateForDicom(value) {
-  const cleanValue = normalizeDateValue(value);
+  const cleanValue = normalizeDateValue(/** @type {string | Date | null | undefined} */ (value));
   return cleanValue ? cleanValue.replaceAll("-", "") : "";
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fallback
+ */
+/**
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 function normalizeTimeForDicom(value, fallback = "080000") {
   const raw = String(value || "").trim();
 
@@ -196,6 +362,18 @@ function normalizeTimeForDicom(value, fallback = "080000") {
   return fallback;
 }
 
+
+/**
+ * @param {unknown} value
+ */
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function normalizeSexForDicom(value) {
   const raw = String(value || "").trim().toUpperCase();
 
@@ -203,15 +381,23 @@ function normalizeSexForDicom(value) {
     return raw;
   }
 
-  const fallbackMap = {
+  const fallbackMap = /** @type {Record<string, string>} */ ({
     male: "M",
     female: "F",
     other: "O"
-  };
+  });
 
   return fallbackMap[raw.toLowerCase()] || "";
 }
 
+
+/**
+ * @param {unknown} scanValue
+ */
+/**
+ * @param {unknown} scanValue
+ * @returns {string}
+ */
 function normalizeQrOrAccession(scanValue) {
   const raw = String(scanValue || "").trim();
 
@@ -247,6 +433,16 @@ function normalizeQrOrAccession(scanValue) {
   throw new HttpError(400, "scanValue must contain a valid accession number.");
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fallback
+ */
+/**
+ * @param {unknown} value
+ * @param {string} fallback
+ * @returns {string}
+ */
 function toAbsolutePath(value, fallback) {
   const raw = normalizeOptionalText(value) || fallback;
 
@@ -257,6 +453,16 @@ function toAbsolutePath(value, fallback) {
   return path.join(rootDir, raw);
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fallback
+ */
+/**
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 function sanitizeFileToken(value, fallback = "unknown") {
   return String(value || fallback)
     .trim()
@@ -264,6 +470,16 @@ function sanitizeFileToken(value, fallback = "unknown") {
     .replace(/^_+|_+$/g, "") || fallback;
 }
 
+
+/**
+ * @param {unknown} englishName
+ * @param {unknown} arabicName
+ */
+/**
+ * @param {string} englishName
+ * @param {string} arabicName
+ * @returns {string}
+ */
 function formatDicomPersonName(englishName, arabicName) {
   const primary = normalizeOptionalText(englishName) || normalizeOptionalText(arabicName);
 
@@ -274,14 +490,42 @@ function formatDicomPersonName(englishName, arabicName) {
   return primary.replace(/\s+/g, "^");
 }
 
+
+/**
+ * @param {unknown} value
+ * @param {unknown} fallback
+ */
+/**
+ * @param {unknown} value
+ * @param {string} [fallback]
+ * @returns {string}
+ */
 function formatDicomString(value, fallback = "") {
   return normalizeOptionalText(value || fallback).replaceAll("\\", "/");
 }
 
+
+/**
+ * @param {unknown} value
+ */
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
 function quoteDicomValue(value) {
   return `[${String(value ?? "").replaceAll("]", "\\]")}]`;
 }
 
+
+/**
+ * @param {unknown} tag
+ * @param {unknown} lines
+ */
+/**
+ * @param {string} tag
+ * @param {string[]} lines
+ * @returns {string[]}
+ */
 function buildSequenceDump(tag, lines) {
   return [
     `${tag} SQ (Sequence with undefined length)`,
@@ -292,6 +536,14 @@ function buildSequenceDump(tag, lines) {
   ];
 }
 
+
+/**
+ * @param {unknown} status
+ */
+/**
+ * @param {string} status
+ * @returns {string}
+ */
 function mapAppointmentToScheduledProcedureStepStatus(status) {
   if (status === APPOINTMENT_STATUS_ARRIVED || status === APPOINTMENT_STATUS_WAITING) {
     return "ARRIVED";
@@ -304,6 +556,16 @@ function mapAppointmentToScheduledProcedureStepStatus(status) {
   return "SCHEDULED";
 }
 
+
+/**
+ * @param {unknown} dateValue
+ * @param {unknown} timeValue
+ */
+/**
+ * @param {string} dateValue
+ * @param {string} timeValue
+ * @returns {string | null}
+ */
 function parseDicomTimestamp(dateValue, timeValue) {
   const date = String(dateValue || "").trim();
   const time = String(timeValue || "").trim();
@@ -333,6 +595,14 @@ function requireRow(row, message) {
   return row;
 }
 
+
+/**
+ * @param {unknown} categories
+ */
+/**
+ * @param {string[]} categories
+ * @returns {Promise<SettingsMap>}
+ */
 async function loadSettingsMap(categories) {
   const { rows } = await pool.query(
     `
@@ -355,6 +625,16 @@ async function loadSettingsMap(categories) {
   }, /** @type {SettingsMap} */ ({}));
 }
 
+
+/**
+ * @param {unknown} client
+ * @param {unknown} modalityId
+ */
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} modalityId
+ * @returns {Promise<DicomDeviceRow[]>}
+ */
 async function listDevicesForModality(client, modalityId) {
   const { rows } = await client.query(
     `
@@ -371,6 +651,16 @@ async function listDevicesForModality(client, modalityId) {
   return /** @type {DicomDeviceRow[]} */ (rows);
 }
 
+
+/**
+ * @param {unknown} client
+ * @param {unknown} appointmentId
+ */
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} appointmentId
+ * @returns {Promise<WorklistAppointmentRow | null>}
+ */
 async function getAppointmentWorklistContext(client, appointmentId) {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   const { rows } = await client.query(
@@ -416,6 +706,16 @@ async function getAppointmentWorklistContext(client, appointmentId) {
   return /** @type {WorklistAppointmentRow | null} */ (rows[0] || null);
 }
 
+
+/**
+ * @param {unknown} directory
+ * @param {unknown} prefix
+ */
+/**
+ * @param {string} directory
+ * @param {string} prefix
+ * @returns {Promise<void>}
+ */
 async function removeMatchingFiles(directory, prefix) {
   try {
     const files = await fs.readdir(directory);
@@ -425,19 +725,24 @@ async function removeMatchingFiles(directory, prefix) {
         .map((file) => fs.rm(path.join(directory, file), { force: true }))
     );
   } catch (error) {
-    if (error.code !== "ENOENT") {
+    if (/** @type {NodeJS.ErrnoException} */ (error).code !== "ENOENT") {
       throw error;
     }
   }
 }
 
+
+/**
+ * @param {{ appointment: WorklistAppointmentRow, device: DicomDeviceRow }} params
+ * @returns {string}
+ */
 function buildWorklistDump({ appointment, device }) {
   const startDate = normalizeDateForDicom(appointment.appointment_date);
   const startTime = normalizeTimeForDicom("", "080000");
-  const patientName = formatDicomPersonName(appointment.english_full_name, appointment.arabic_full_name);
+  const patientName = formatDicomPersonName(appointment.english_full_name || "", appointment.arabic_full_name);
   const requestedProcedureDescription =
-    formatDicomString(appointment.exam_name_en, appointment.exam_name_ar) ||
-    formatDicomString(appointment.modality_name_en, appointment.modality_name_ar) ||
+    formatDicomString(appointment.exam_name_en || "", appointment.exam_name_ar || "") ||
+    formatDicomString(appointment.modality_name_en || "", appointment.modality_name_ar || "") ||
     "Scheduled study";
   const requestedProcedureId = appointment.accession_number;
   const scheduledProcedureStepId = `${appointment.accession_number}-${sanitizeFileToken(device.scheduled_station_ae_title)}`;
@@ -475,24 +780,34 @@ function buildWorklistDump({ appointment, device }) {
   ].join("\n");
 }
 
+
+/**
+ * @param {WorklistAppointmentRow} appointment
+ * @returns {string}
+ */
 function scheduledProcedureStepDescription(appointment) {
   return (
-    formatDicomString(appointment.exam_name_en, appointment.exam_name_ar) ||
-    formatDicomString(appointment.modality_name_en, appointment.modality_name_ar) ||
+    formatDicomString(appointment.exam_name_en || "", appointment.exam_name_ar || "") ||
+    formatDicomString(appointment.modality_name_en || "", appointment.modality_name_ar || "") ||
     "Scheduled procedure step"
   );
 }
 
+
+/**
+ * @param {{ appointment: WorklistAppointmentRow, device: DicomDeviceRow }} params
+ * @returns {Record<string, string | number | { id: number, name: string, modalityAeTitle: string, scheduledStationAeTitle: string, stationName: string, stationLocation: string, sourceIp: string | null }>}
+ */
 function buildWorklistManifest({ appointment, device }) {
   return {
     appointmentId: appointment.id,
     accessionNumber: appointment.accession_number,
     modalityId: appointment.modality_id,
-    modalityCode: appointment.modality_code,
+    modalityCode: appointment.modality_code || "",
     patientId: appointment.patient_id,
-    patientMrn: appointment.mrn,
-    patientNationalId: appointment.national_id,
-    patientNameEnglish: appointment.english_full_name,
+    patientMrn: appointment.mrn || "",
+    patientNationalId: appointment.national_id || "",
+    patientNameEnglish: appointment.english_full_name || "",
     patientNameArabic: appointment.arabic_full_name,
     appointmentDate: normalizeDateValue(appointment.appointment_date),
     appointmentStatus: appointment.status,
@@ -512,19 +827,20 @@ function buildWorklistManifest({ appointment, device }) {
 /**
  * @param {WorklistAppointmentRow} appointment
  * @param {DicomDeviceRow[]} devices
- * @param {{ worklistSourceDir: string, worklistOutputDir: string }} gatewaySettings
+ * @param {Partial<GatewaySettings> & { worklistSourceDir: string, worklistOutputDir: string }} gatewaySettings
+ * @returns {Promise<{ files: { manifestPath: string, dumpPath: string, deviceId: number }[], removedOnly: boolean, ok: boolean }>}
  */
 async function writeWorklistSourceFiles(appointment, devices, gatewaySettings) {
   const sourceDir = gatewaySettings.worklistSourceDir;
   const outputDir = gatewaySettings.worklistOutputDir;
   const sourcePrefix = `${sanitizeFileToken(appointment.accession_number)}--`;
 
-  await ensureDicomGatewayLayout(gatewaySettings);
+  await ensureDicomGatewayLayout(/** @type {GatewaySettings} */ (gatewaySettings));
   await removeMatchingFiles(sourceDir, sourcePrefix);
   await removeMatchingFiles(outputDir, sourcePrefix);
 
   if (!ACTIVE_WORKLIST_STATUSES.has(appointment.status) || !devices.length) {
-    return { files: [], removedOnly: true };
+    return { files: [], removedOnly: true, ok: true };
   }
 
   const writtenFiles = [];
@@ -541,7 +857,7 @@ async function writeWorklistSourceFiles(appointment, devices, gatewaySettings) {
     writtenFiles.push({ manifestPath, dumpPath, deviceId: device.id });
   }
 
-  return { files: writtenFiles, removedOnly: false };
+  return { files: writtenFiles, removedOnly: false, ok: true };
 }
 
 /**
@@ -563,6 +879,18 @@ async function updateAppointmentStationAeTitle(client, appointmentId, devices) {
   );
 }
 
+
+/**
+ * @param {unknown} client
+ * @param {unknown} logId
+ * @param {unknown} patch
+ */
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {number | string} logId
+ * @param {Record<string, unknown>} patch
+ * @returns {Promise<void>}
+ */
 async function updateDicomMessageLog(client, logId, patch) {
   await client.query(
     `
@@ -579,6 +907,12 @@ async function updateDicomMessageLog(client, logId, patch) {
   );
 }
 
+
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {FindDicomDeviceParams} params
+ * @returns {Promise<DicomDeviceRow | null>}
+ */
 async function findDicomDevice(client, { remoteAeTitle, performedStationAeTitle, sourceIp }) {
   const aeCandidates = [performedStationAeTitle, remoteAeTitle]
     .map((value) => normalizeOptionalText(value).toUpperCase())
@@ -612,6 +946,12 @@ async function findDicomDevice(client, { remoteAeTitle, performedStationAeTitle,
   return devices.find((row) => !row.source_ip || row.source_ip === sourceIp) || null;
 }
 
+
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {FindAppointmentForMppsParams} params
+ * @returns {Promise<MppsAppointmentRow | null>}
+ */
 async function findAppointmentForMpps(client, { accessionNumber, mppsSopInstanceUid }) {
   if (normalizeOptionalText(accessionNumber)) {
     const { rows } = await client.query(
@@ -647,6 +987,20 @@ async function findAppointmentForMpps(client, { accessionNumber, mppsSopInstance
   return null;
 }
 
+
+/**
+ * @param {unknown} client
+ * @param {unknown} appointment
+ * @param {unknown} device
+ * @param {unknown} payload
+ */
+/**
+ * @param {import("pg").Pool | import("pg").PoolClient} client
+ * @param {MppsAppointmentRow} appointment
+ * @param {DicomDeviceRow} device
+ * @param {MppsPayload} payload
+ * @returns {Promise<MppsAppointmentRow>}
+ */
 async function updateAppointmentFromMpps(client, appointment, device, payload) {
   const mppsStatus = String(payload.mppsStatus || "").trim().toUpperCase();
   const nowIso = new Date().toISOString();
@@ -801,6 +1155,11 @@ export async function getDicomGatewaySettings() {
 }
 
 /** @returns {Promise<{ enabled: boolean, bindHost: string, mwlAeTitle: string, mwlPort: number, mppsAeTitle: string, mppsPort: number, worklistOutputDir: string, worklistSourceDir: string, mppsInboxDir: string, mppsProcessedDir: string, mppsFailedDir: string, callbackSecret: string, rebuildBehavior: string, dump2dcmCommand: string, dcmdumpCommand: string }>} */
+
+/**
+ * @param {GatewaySettings | null} [settings]
+ * @returns {Promise<GatewaySettings>}
+ */
 export async function ensureDicomGatewayLayout(settings = null) {
   const gatewaySettings = settings || (await getDicomGatewaySettings());
   const directories = [
@@ -809,13 +1168,21 @@ export async function ensureDicomGatewayLayout(settings = null) {
     gatewaySettings.mppsInboxDir,
     gatewaySettings.mppsProcessedDir,
     gatewaySettings.mppsFailedDir
-  ];
+  ].filter((d) => typeof d === "string" && d.length > 0);
 
-  await Promise.all(directories.map((directory) => fs.mkdir(directory, { recursive: true })));
+  await Promise.all(/** @type {string[]} */ (directories).map((directory) => fs.mkdir(directory, { recursive: true })));
   return gatewaySettings;
 }
 
 /** @returns {Promise<DicomDeviceListRow[]>} */
+
+/**
+ * @param {unknown} includeInactive
+ */
+/**
+ * @param {{ includeInactive?: boolean }} [options]
+ * @returns {Promise<DicomDeviceListRow[]>}
+ */
 export async function listDicomDevices({ includeInactive = false } = {}) {
   const params = [];
   let inactiveSql = "";
@@ -844,6 +1211,16 @@ export async function listDicomDevices({ includeInactive = false } = {}) {
 }
 
 /** @returns {Promise<DicomDeviceRow>} */
+
+/**
+ * @param {unknown} payload
+ * @param {unknown} currentUserId
+ */
+/**
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<DicomDeviceRow>}
+ */
 export async function createDicomDevice(payload, currentUserId) {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
   const deviceName = normalizeOptionalText(payload.deviceName);
@@ -931,6 +1308,18 @@ export async function createDicomDevice(payload, currentUserId) {
 }
 
 /** @returns {Promise<DicomDeviceRow>} */
+
+/**
+ * @param {unknown} deviceId
+ * @param {unknown} payload
+ * @param {unknown} currentUserId
+ */
+/**
+ * @param {number | string} deviceId
+ * @param {UnknownRecord} payload
+ * @param {UserId} currentUserId
+ * @returns {Promise<DicomDeviceRow>}
+ */
 export async function updateDicomDevice(deviceId, payload, currentUserId) {
   const cleanDeviceId = normalizePositiveInteger(deviceId, "deviceId");
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId");
@@ -1023,6 +1412,16 @@ export async function updateDicomDevice(deviceId, payload, currentUserId) {
 }
 
 /** @returns {Promise<{ ok: true }>} */
+
+/**
+ * @param {unknown} deviceId
+ * @param {unknown} currentUserId
+ */
+/**
+ * @param {number | string} deviceId
+ * @param {UserId} currentUserId
+ * @returns {Promise<{ ok: boolean }>}
+ */
 export async function deleteDicomDevice(deviceId, currentUserId) {
   const cleanDeviceId = normalizePositiveInteger(deviceId, "deviceId");
   const client = await pool.connect();
@@ -1070,6 +1469,14 @@ export async function deleteDicomDevice(deviceId, currentUserId) {
 }
 
 /** @returns {Promise<UnknownRecord>} */
+
+/**
+ * @param {unknown} appointmentId
+ */
+/**
+ * @param {number | string} appointmentId
+ * @returns {Promise<{ ok: boolean, removedOnly?: boolean, files?: { manifestPath: string, dumpPath: string, deviceId: number }[] }>}
+ */
 export async function syncAppointmentWorklistSources(appointmentId) {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
@@ -1084,7 +1491,7 @@ export async function syncAppointmentWorklistSources(appointmentId) {
     const devices = await listDevicesForModality(client, appointment.modality_id);
     await updateAppointmentStationAeTitle(client, appointment.id, devices);
     const result = await writeWorklistSourceFiles(appointment, devices, gatewaySettings);
-    return { ok: true, ...result };
+    return result;
   } finally {
     client.release();
   }
@@ -1137,6 +1544,16 @@ export function scheduleWorklistRebuild() {
 }
 
 /** @returns {Promise<string>} */
+
+/**
+ * @param {unknown} scanValue
+ * @param {unknown} accessionNumber
+ */
+/**
+ * @param {unknown} scanValue
+ * @param {unknown} accessionNumber
+ * @returns {Promise<string>}
+ */
 export async function resolveScanValueToAccession(scanValue, accessionNumber) {
   if (normalizeOptionalText(accessionNumber)) {
     return normalizeOptionalText(accessionNumber);
@@ -1146,6 +1563,14 @@ export async function resolveScanValueToAccession(scanValue, accessionNumber) {
 }
 
 /** @returns {Promise<{ ok: boolean, reason?: string, appointment?: MppsAppointmentRow }>} */
+
+/**
+ * @param {unknown} payload
+ */
+/**
+ * @param {UnknownRecord} payload
+ * @returns {Promise<{ ok: boolean, appointment?: unknown, reason?: string }>}
+ */
 export async function ingestMppsEvent(payload) {
   const mppsStatus = String(payload?.mppsStatus || "").trim().toUpperCase();
 
@@ -1186,9 +1611,9 @@ export async function ingestMppsEvent(payload) {
 
     const logEntry = /** @type {DicomMessageLogRow} */ (logRows[0]);
     const device = await findDicomDevice(client, {
-      remoteAeTitle: payload.remoteAeTitle,
-      performedStationAeTitle: payload.performedStationAeTitle,
-      sourceIp: payload.sourceIp
+      remoteAeTitle: String(payload.remoteAeTitle || ""),
+      performedStationAeTitle: String(payload.performedStationAeTitle || ""),
+      sourceIp: String(payload.sourceIp || "")
     });
 
     if (!device) {
@@ -1201,8 +1626,8 @@ export async function ingestMppsEvent(payload) {
     }
 
     const appointment = await findAppointmentForMpps(client, {
-      accessionNumber: payload.accessionNumber,
-      mppsSopInstanceUid: payload.mppsSopInstanceUid
+      accessionNumber: String(payload.accessionNumber || ""),
+      mppsSopInstanceUid: String(payload.mppsSopInstanceUid || "")
     });
 
     if (!appointment) {
@@ -1267,29 +1692,51 @@ export async function getDicomGatewayOverview() {
 }
 
 /** @returns {string | null} */
+
+/**
+ * @param {unknown} dateValue
+ * @param {unknown} timeValue
+ */
+/**
+ * @param {string} dateValue
+ * @param {string} timeValue
+ * @returns {string | null}
+ */
 export function parseMppsTimestamp(dateValue, timeValue) {
   return parseDicomTimestamp(dateValue, timeValue);
 }
 
 /** @returns {{ sourcePath: string, sourceIp: string, remoteAeTitle: string, performedStationAeTitle: string, accessionNumber: string, mppsSopInstanceUid: string, mppsStatus: string, startedAt: string | null, finishedAt: string | null, raw: UnknownRecord }} */
+
+/**
+ * @param {unknown} input
+ */
 export function buildMppsEventPayload(input = {}) {
   return {
-    sourcePath: normalizeOptionalText(input.sourcePath),
-    sourceIp: normalizeOptionalText(input.sourceIp),
-    remoteAeTitle: normalizeOptionalText(input.remoteAeTitle).toUpperCase(),
-    performedStationAeTitle: normalizeOptionalText(input.performedStationAeTitle).toUpperCase(),
-    accessionNumber: normalizeOptionalText(input.accessionNumber),
-    mppsSopInstanceUid: normalizeOptionalText(input.mppsSopInstanceUid || input.sopInstanceUid),
-    mppsStatus: String(input.mppsStatus || "").trim().toUpperCase(),
+    sourcePath: normalizeOptionalText((/** @type {MppsInput} */ (input)).sourcePath),
+    sourceIp: normalizeOptionalText((/** @type {MppsInput} */ (input)).sourceIp),
+    remoteAeTitle: normalizeOptionalText((/** @type {MppsInput} */ (input)).remoteAeTitle).toUpperCase(),
+    performedStationAeTitle: normalizeOptionalText((/** @type {MppsInput} */ (input)).performedStationAeTitle).toUpperCase(),
+    accessionNumber: normalizeOptionalText((/** @type {MppsInput} */ (input)).accessionNumber),
+    mppsSopInstanceUid: normalizeOptionalText((/** @type {MppsInput} */ (input)).mppsSopInstanceUid || (/** @type {MppsInput} */ (input)).sopInstanceUid),
+    mppsStatus: String((/** @type {MppsInput} */ (input)).mppsStatus || "").trim().toUpperCase(),
     startedAt:
-      normalizeOptionalText(input.startedAt) || parseDicomTimestamp(input.startedDate, input.startedTime),
+      normalizeOptionalText((/** @type {MppsInput} */ (input)).startedAt) || parseDicomTimestamp((/** @type {MppsInput} */ (input)).startedDate || "", (/** @type {MppsInput} */ (input)).startedTime || ""),
     finishedAt:
-      normalizeOptionalText(input.finishedAt) || parseDicomTimestamp(input.finishedDate, input.finishedTime),
-    raw: input.raw || {}
+      normalizeOptionalText((/** @type {MppsInput} */ (input)).finishedAt) || parseDicomTimestamp((/** @type {MppsInput} */ (input)).finishedDate || "", (/** @type {MppsInput} */ (input)).finishedTime || ""),
+    raw: (/** @type {MppsInput} */ (input)).raw || {}
   };
 }
 
 /** @returns {string} */
+
+/**
+ * @param {unknown} secret
+ */
+/**
+ * @param {string} secret
+ * @returns {string}
+ */
 export function createGatewayCallbackToken(secret) {
   return normalizeOptionalText(secret) || randomUUID();
 }

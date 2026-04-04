@@ -15,8 +15,8 @@ function getTripoliParts(date = new Date()) {
   });
 
   const parts = formatter.formatToParts(date).reduce((accumulator, part) => {
-    if (part.type !== "literal") {
-      accumulator[part.type] = part.value;
+    if (part.type !== "literal" && part.type !== "unknown") {
+      accumulator[/** @type {'year' | 'month' | 'day'} */ (part.type)] = part.value;
     }
 
     return accumulator;
