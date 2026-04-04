@@ -6,6 +6,7 @@ import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
 import PatientsPage from "@/pages/patients/patients-page";
+import EditPatientPage from "@/pages/patients/edit-patient-page";
 import AppointmentsPage from "@/pages/appointments/appointments-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
@@ -122,6 +123,7 @@ function AppContent() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/patients" element={<PatientsPage />} />
+            <Route path="/patients/:id/edit" element={<EditPatientPage />} />
             <Route path="/appointments" element={<AppointmentsPage />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/registrations" element={<RegistrationsPage />} />

@@ -1,0 +1,430 @@
+import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  createPatient,
+  searchPatients,
+  fetchNameDictionary,
+  upsertNameDictionaryEntry,
+  fetchPatientById,
+  updatePatient
+} from "@/lib/api-hooks";
+import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
+import {
+  deriveDemographicsFromNationalId,
+  calculateAgeFromDob,
+  isValidNationalId
+} from "@/lib/national-id";
+import { LIBYAN_CITIES_SORTED as LIBYAN_CITIES } from "@/lib/libyan-cities";
+import type { Patient } from "@/types/api";
+
+type IdentifierType = "national_id" | "passport" | "other";
+type PatientFormMode = "create" | "edit";
+
+interface PatientFormState {
+  arabicFullName: string;
+  englishFullName: string;
+  identifierType: IdentifierType;
+  identifierValue: string;
+  nationalIdConfirmation: string;
+  sex: string;
+  estimatedDateOfBirth: string;
+  ageYears: string;
+  phone1: string;
+  phone2: string;
+  address: string;
+}
+
+const DEFAULT_FORM: PatientFormState = {
+  arabicFullName: "",
+  englishFullName: "",
+  identifierType: "national_id",
+  identifierValue: "",
+  nationalIdConfirmation: "",
+  sex: "",
+  estimatedDateOfBirth: "",
+  ageYears: "",
+  phone1: "",
+  phone2: "",
+  address: "benghazi"
+};
+
+function patientToForm(p: Patient): PatientFormState {
+  return {
+    arabicFullName: p.arabicFullName || "",
+    englishFullName: p.englishFullName || "",
+    identifierType: (p.identifierType as IdentifierType) || "national_id",
+    identifierValue: p.identifierValue || p.nationalId || "",
+    nationalIdConfirmation: "",
+    sex: p.sex || "",
+    estimatedDateOfBirth: p.estimatedDateOfBirth || "",
+    ageYears: p.ageYears ? String(p.ageYears) : "",
+    phone1: p.phone1 || "",
+    phone2: p.phone2 || "",
+    address: p.address || ""
+  };
+}
+
+interface PatientFormProps {
+  mode: PatientFormMode;
+  patientId?: number;
+  onSuccess?: (patient: Patient) => void;
+  onCancel?: () => void;
+}
+
+export default function PatientForm({ mode, patientId, onSuccess, onCancel }: PatientFormProps) {
+  const isEdit = mode === "edit";
+  const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
+  const [duplicates, setDuplicates] = useState<Patient[]>([]);
+  const [savedPatient, setSavedPatient] = useState<Patient | null>(null);
+  const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
+  const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
+  const [addingToken, setAddingToken] = useState<string | null>(null);
+  const [addTokenError, setAddTokenError] = useState<string | null>(null);
+  const [localDictionary, setLocalDictionary] = useState<DictionaryEntry[]>([]);
+  const prevArabicTokenCountRef = useRef(0);
+  const queryClient = useQueryClient();
+  const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
+  const navigate = useNavigate();
+
+  // Dictionary
+  const { data: dictData } = useQuery({
+    queryKey: ["name-dictionary"],
+    queryFn: fetchNameDictionary,
+    staleTime: 1000 * 60 * 5
+  });
+  const serverDictionary: DictionaryEntry[] = dictData?.entries ?? [];
+  const dictionary: DictionaryEntry[] = [...serverDictionary, ...localDictionary];
+
+  // Load patient for edit
+  const { data: existingPatient, isLoading: loadingPatient } = useQuery({
+    queryKey: ["patient-by-id", patientId],
+    queryFn: () => fetchPatientById(patientId!),
+    enabled: isEdit && !!patientId,
+    staleTime: 1000 * 30
+  });
+
+  useEffect(() => {
+    if (existingPatient) {
+      setForm(patientToForm(existingPatient));
+      if (existingPatient.englishFullName) setEnglishNameManuallyEdited(true);
+      prevArabicTokenCountRef.current = existingPatient.arabicFullName
+        ? existingPatient.arabicFullName.trim().split(/\s+/).filter(Boolean).length
+        : 0;
+    }
+  }, [existingPatient]);
+
+  // Duplicate checking (create only)
+  const dupQuery = !isEdit ? form.phone1 || form.arabicFullName || form.englishFullName || form.identifierValue || "" : "";
+  const { data: potentialDuplicates } = useQuery({
+    queryKey: ["duplicates", dupQuery],
+    queryFn: () => searchPatients(dupQuery),
+    enabled: !isEdit && dupQuery.length > 1,
+    staleTime: 1000 * 30
+  });
+  useEffect(() => {
+    if (potentialDuplicates && potentialDuplicates.length > 0) {
+      const filtered = isEdit ? potentialDuplicates.filter((p) => p.id !== patientId) : potentialDuplicates;
+      setDuplicates(filtered);
+    } else {
+      setDuplicates([]);
+    }
+  }, [potentialDuplicates, isEdit, patientId]);
+
+  // Mutations
+  const createMutation = useMutation({
+    mutationFn: createPatient,
+    onSuccess: (patient) => {
+      setSavedPatient(patient);
+      setForm(DEFAULT_FORM);
+      setEnglishNameManuallyEdited(false);
+      setMissingTokenInputs({});
+      setLocalDictionary([]);
+      setAddTokenError(null);
+      prevArabicTokenCountRef.current = 0;
+      queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+      onSuccess?.(patient);
+    }
+  });
+  const updateMutation = useMutation({
+    mutationFn: (data: { payload: any }) => updatePatient(patientId!, data.payload),
+    onSuccess: (patient) => {
+      queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
+      onSuccess?.(patient);
+    }
+  });
+  const mutation = isEdit ? updateMutation : createMutation;
+
+  // Handlers
+  const handleArabicNameChange = (value: string) => {
+    const tokens = value.trim().split(/\s+/).filter(Boolean);
+    const cc = tokens.length, pc = prevArabicTokenCountRef.current;
+    setForm((f) => {
+      const u: Partial<PatientFormState> = { arabicFullName: value };
+      if (!englishNameManuallyEdited && cc > pc) {
+        u.englishFullName = generateEnglishFromDictionary(value, dictionary).englishName;
+      }
+      return { ...f, ...u };
+    });
+    prevArabicTokenCountRef.current = cc;
+  };
+
+  const handleEnglishNameChange = (v: string) => {
+    setEnglishNameManuallyEdited(true);
+    setForm((f) => ({ ...f, englishFullName: v }));
+  };
+
+  const handleRegenerateEnglishName = () => {
+    setEnglishNameManuallyEdited(false);
+    const r = generateEnglishFromDictionary(form.arabicFullName, dictionary);
+    setForm((f) => ({ ...f, englishFullName: r.englishName }));
+    if (r.missingTokens.length > 0) {
+      setMissingTokenInputs((p) => {
+        const n = { ...p };
+        for (const t of r.missingTokens) if (!n[t]) n[t] = "";
+        return n;
+      });
+    }
+  };
+
+  const handleAddTokenToDictionary = async (token: string) => {
+    const ev = missingTokenInputs[token]?.trim();
+    if (!ev) return;
+    setAddingToken(token);
+    setAddTokenError(null);
+    try {
+      const res = await upsertNameDictionaryEntry(token, ev);
+      const e = res.entry;
+      const ne: DictionaryEntry = {
+        arabicText: e.arabic_text ?? e.arabicText ?? token,
+        englishText: e.english_text ?? e.englishText ?? ev
+      };
+      setLocalDictionary((p) => [...p, ne]);
+      setMissingTokenInputs((p) => { const n = { ...p }; delete n[token]; return n; });
+      const r = generateEnglishFromDictionary(form.arabicFullName, [...serverDictionary, ...localDictionary, ne]);
+      setForm((f) => ({ ...f, englishFullName: r.englishName }));
+      queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
+    } catch (err: any) {
+      setAddTokenError(err?.message || "Failed to add token to dictionary");
+    } finally {
+      setAddingToken(null);
+    }
+  };
+
+  const handleIdentifierValueChange = (value: string) => {
+    const cv = value.replace(/\D/g, "");
+    setForm((f) => {
+      const u: Partial<PatientFormState> = { identifierValue: cv };
+      if (f.identifierType === "national_id" && isValidNationalId(cv)) {
+        const d = deriveDemographicsFromNationalId(cv);
+        if (d.sex) u.sex = d.sex;
+        if (d.estimatedDateOfBirth) u.estimatedDateOfBirth = d.estimatedDateOfBirth;
+        if (d.ageYears !== undefined) u.ageYears = d.ageYears.toString();
+      }
+      return { ...f, ...u };
+    });
+  };
+
+  const handleDobChange = (dob: string) => {
+    setForm((f) => {
+      const u: Partial<PatientFormState> = { estimatedDateOfBirth: dob };
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dob)) {
+        const a = calculateAgeFromDob(dob);
+        if (a !== null) u.ageYears = a.toString();
+      }
+      return { ...f, ...u };
+    });
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    const isNat = form.identifierType === "national_id";
+    const payload = {
+      arabicFullName: form.arabicFullName,
+      englishFullName: form.englishFullName || undefined,
+      identifierType: form.identifierType,
+      identifierValue: form.identifierValue || undefined,
+      nationalId: isNat ? form.identifierValue : undefined,
+      nationalIdConfirmation: isNat ? form.nationalIdConfirmation : undefined,
+      sex: form.sex || undefined,
+      estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
+      ageYears: form.ageYears ? parseInt(form.ageYears, 10) : undefined,
+      phone1: form.phone1,
+      phone2: form.phone2 || undefined,
+      address: form.address || undefined,
+      autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName
+    };
+    mutation.mutate(isEdit ? { payload } : payload);
+  };
+
+  const currentMissingTokens = form.arabicFullName
+    ? generateEnglishFromDictionary(form.arabicFullName, dictionary).missingTokens : [];
+  const isNationalId = form.identifierType === "national_id";
+  const submitLabel = mutation.isPending
+    ? (isEdit ? "Updating…" : "Registering…")
+    : (isEdit ? "Update Patient" : "Register Patient");
+
+  if (isEdit && loadingPatient) {
+    return <div className="p-8 text-center text-stone-500">Loading patient data…</div>;
+  }
+
+  // ============================================================
+  // Shared form fields JSX (rendered in both create and edit)
+  // ============================================================
+  const formFields = (
+    <form onSubmit={handleSubmit} className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6 space-y-6">
+      {/* Identity */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Identity</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Arabic Full Name" value={form.arabicFullName} onChange={handleArabicNameChange} required dir="rtl" />
+          <div>
+            <Input label="English Full Name" value={form.englishFullName} onChange={handleEnglishNameChange} dir="ltr" />
+            {form.arabicFullName && !englishNameManuallyEdited && (
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                Generated from name dictionary.
+                <button type="button" onClick={handleRegenerateEnglishName} className="ml-1 text-teal-600 dark:text-teal-400 hover:underline">Regenerate</button>
+              </p>
+            )}
+            {englishNameManuallyEdited && (
+              <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">Manually edited. Changes to Arabic name will not override this.</p>
+            )}
+          </div>
+        </div>
+
+        {currentMissingTokens.length > 0 && (
+          <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
+            <p className="text-xs font-medium text-amber-800 dark:text-amber-300">Unrecognized name tokens — add to dictionary:</p>
+            {currentMissingTokens.map((token) => (
+              <div key={token} className="flex items-center gap-2">
+                <span className="text-sm text-stone-900 dark:text-white font-mono" dir="rtl">{token}</span>
+                <input type="text" value={missingTokenInputs[token] ?? ""} onChange={(e) => setMissingTokenInputs((p) => ({ ...p, [token]: e.target.value }))} placeholder="English translation…" className="flex-1 px-2 py-1 text-sm rounded border bg-white dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none" />
+                <button type="button" disabled={!missingTokenInputs[token]?.trim() || addingToken === token} onClick={() => handleAddTokenToDictionary(token)} className="px-2 py-1 text-xs bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white rounded transition-colors">
+                  {addingToken === token ? "Adding…" : "Add"}
+                </button>
+              </div>
+            ))}
+            {addTokenError && <p className="text-xs text-red-600 dark:text-red-400">{addTokenError}</p>}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Select label="Identifier Type" value={form.identifierType} onChange={(v) => setForm((f) => ({ ...f, identifierType: v as IdentifierType, nationalIdConfirmation: "" }))} options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]} />
+          {isNationalId ? (
+            <Input label="National ID (11 digits)" value={form.identifierValue} onChange={handleIdentifierValueChange} maxLength={11} placeholder="1xxxxxxxxxx" />
+          ) : (
+            <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => ({ ...f, identifierValue: v }))} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
+          )}
+          {isNationalId && (
+            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" />
+          )}
+        </div>
+      </div>
+
+      {/* Demographics */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Demographics</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Select label="Sex" value={form.sex} onChange={(v) => setForm((f) => ({ ...f, sex: v }))} options={[{ value: "", label: "Select..." }, { value: "M", label: "Male" }, { value: "F", label: "Female" }]} />
+          <Input label="Date of Birth" value={form.estimatedDateOfBirth} onChange={handleDobChange} type="date" />
+          <Input label="Age (years)" value={form.ageYears} onChange={(v) => setForm((f) => ({ ...f, ageYears: v.replace(/\D/g, "") }))} type="number" min="0" max="130" />
+        </div>
+        {isNationalId && isValidNationalId(form.identifierValue) && (
+          <p className="text-xs text-teal-600 dark:text-teal-400">Demographics auto-derived from National ID. You can override them manually.</p>
+        )}
+      </div>
+
+      {/* Contact */}
+      <div className="space-y-4">
+        <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Contact</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Input label="Phone 1 (Required)" value={form.phone1} onChange={(v) => setForm((f) => ({ ...f, phone1: v }))} required />
+          <Input label="Phone 2 (Optional)" value={form.phone2} onChange={(v) => setForm((f) => ({ ...f, phone2: v }))} />
+          <div className="md:col-span-2">
+            <Select label="City" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} options={[{ value: "", label: "Select a city..." }, ...LIBYAN_CITIES.map((c) => ({ value: c.code, label: `${c.nameAr} / ${c.nameEn}` }))]} />
+          </div>
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="flex gap-3">
+        {isEdit && onCancel && (
+          <button type="button" onClick={onCancel} className="flex-1 py-3 px-4 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-300 font-medium rounded-xl transition-colors">Cancel</button>
+        )}
+        <button type="submit" disabled={mutation.isPending} className="flex-1 py-3 px-4 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors">{submitLabel}</button>
+      </div>
+      {mutation.error && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">{mutation.error.message}</div>
+      )}
+    </form>
+  );
+
+  // ============================================================
+  // Layout: Create mode (form + sidebar) vs Edit mode (form only)
+  // ============================================================
+  if (!isEdit) {
+    return (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">{formFields}</div>
+        <div className="space-y-6">
+          {duplicates.length > 0 && (
+            <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Possible Duplicates ({duplicates.length})</h3>
+              <ul className="space-y-2">
+                {duplicates.slice(0, 5).map((p) => (
+                  <li key={p.id} className="bg-white dark:bg-stone-800 rounded-lg border border-amber-200/50 dark:border-amber-800/50 overflow-hidden">
+                    <div className="p-3 space-y-1">
+                      <p className="font-medium text-sm text-stone-900 dark:text-white">{p.arabicFullName}</p>
+                      {p.englishFullName && <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>}
+                      <p className="text-xs text-stone-500 dark:text-stone-400">{p.identifierValue || p.nationalId || "No ID"}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}MRN: {p.mrn || "—"}</p>
+                      {p.phone1 && <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>}
+                      {p.address && <p className="text-xs text-stone-500 dark:text-stone-400">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
+                    </div>
+                    <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="w-full text-center py-2 px-3 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors border-t border-amber-200/50 dark:border-amber-800/50">Create Appointment for this Patient</button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {savedPatient && (
+            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800 p-4">
+              <h3 className="text-sm font-semibold text-emerald-800 dark:text-emerald-300 mb-2">Registered Successfully</h3>
+              <div className="text-sm text-stone-700 dark:text-stone-300">
+                <p className="font-medium">{savedPatient.arabicFullName}</p>
+                <p className="text-xs text-stone-500 mt-1">MRN: {savedPatient.mrn}</p>
+                {savedPatient.identifierValue && <p className="text-xs text-stone-500">ID: {savedPatient.identifierType === "national_id" ? "National" : savedPatient.identifierType} — {savedPatient.identifierValue}</p>}
+              </div>
+              <button onClick={() => setSavedPatient(null)} className="mt-3 text-xs text-emerald-600 dark:text-emerald-400 hover:underline">Dismiss</button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return formFields;
+}
+
+// -- Sub-components --
+
+function Input({ label, value, onChange, required, type = "text", maxLength, placeholder, dir, min, max, onPaste, onDragOver, onDrop, ref }: {
+  label: string; value: string; onChange: (v: string) => void; required?: boolean; type?: string; maxLength?: number; placeholder?: string; dir?: "rtl" | "ltr"; min?: string; max?: string; onPaste?: React.ClipboardEventHandler<HTMLInputElement>; onDragOver?: React.DragEventHandler<HTMLInputElement>; onDrop?: React.DragEventHandler<HTMLInputElement>; ref?: React.RefObject<HTMLInputElement | null>;
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
+      <input ref={ref} type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} maxLength={maxLength} placeholder={placeholder} dir={dir} min={min} max={max} onPaste={onPaste} onDragOver={onDragOver} onDrop={onDrop} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
+    </div>
+  );
+}
+
+function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: IdentifierType | string) => void; options: { value: string; label: string }[] }) {
+  return (
+    <div>
+      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
+        {options.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+      </select>
+    </div>
+  );
+}
