@@ -21,8 +21,6 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.setAttribute("lang", language === "ar" ? "ar-LY" : "en");
-    // Keep app shell geometry stable across language switches.
-    document.documentElement.setAttribute("dir", "ltr");
     localStorage.setItem("rispro-language", language);
   }, [language]);
 
@@ -47,4 +45,3 @@ export function useLanguage() {
   }
   return context;
 }
-

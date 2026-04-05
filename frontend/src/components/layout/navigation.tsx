@@ -1,5 +1,20 @@
-﻿import type { User } from "@/types/api";
+import type { User } from "@/types/api";
 import { t, type Language } from "@/lib/i18n";
+
+type NavIcon =
+  | "dashboard"
+  | "patients"
+  | "appointments"
+  | "calendar"
+  | "registrations"
+  | "queue"
+  | "modality"
+  | "doctor"
+  | "print"
+  | "statistics"
+  | "search"
+  | "pacs"
+  | "settings";
 
 interface NavItemConfig {
   route: string;
@@ -17,30 +32,62 @@ interface NavItemConfig {
     | "nav.search"
     | "nav.pacs"
     | "nav.settings";
-  icon: string;
+  icon: NavIcon;
   roles?: string[];
 }
 
 export const NAV_ITEMS: NavItemConfig[] = [
-  { route: "dashboard", labelKey: "nav.dashboard", icon: "ðŸ“Š" },
-  { route: "patients", labelKey: "nav.patients", icon: "ðŸ‘¤" },
-  { route: "appointments", labelKey: "nav.appointments", icon: "ðŸ“…" },
-  { route: "calendar", labelKey: "nav.calendar", icon: "ðŸ—“ï¸" },
-  { route: "registrations", labelKey: "nav.registrations", icon: "ðŸ“‹" },
-  { route: "queue", labelKey: "nav.queue", icon: "ðŸš¶" },
-  { route: "modality", labelKey: "nav.modality", icon: "ðŸ–¥ï¸", roles: ["modality_staff", "supervisor"] },
-  { route: "doctor", labelKey: "nav.doctor", icon: "ðŸ©º" },
-  { route: "print", labelKey: "nav.print", icon: "ðŸ–¨ï¸" },
-  { route: "statistics", labelKey: "nav.statistics", icon: "ðŸ“ˆ" },
-  { route: "search", labelKey: "nav.search", icon: "ðŸ”" },
-  { route: "pacs", labelKey: "nav.pacs", icon: "ðŸ¥" },
-  { route: "settings", labelKey: "nav.settings", icon: "âš™ï¸", roles: ["supervisor"] }
+  { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
+  { route: "patients", labelKey: "nav.patients", icon: "patients" },
+  { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
+  { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
+  { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
+  { route: "queue", labelKey: "nav.queue", icon: "queue" },
+  { route: "modality", labelKey: "nav.modality", icon: "modality", roles: ["modality_staff", "supervisor"] },
+  { route: "doctor", labelKey: "nav.doctor", icon: "doctor" },
+  { route: "print", labelKey: "nav.print", icon: "print" },
+  { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
+  { route: "search", labelKey: "nav.search", icon: "search" },
+  { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
+  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor"] }
 ];
 
 function canAccess(item: NavItemConfig, user: User | null): boolean {
   if (!item.roles) return true;
   if (!user) return false;
   return item.roles.includes(user.role);
+}
+
+function NavIconGlyph({ icon }: { icon: NavIcon }) {
+  const common = { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" };
+  switch (icon) {
+    case "dashboard":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 13h8V3H3v10zm10 8h8V3h-8v18zM3 21h8v-6H3v6z" /></svg>;
+    case "patients":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M16 14a4 4 0 10-8 0m8 0a4 4 0 11-8 0m8 0H8m10 7a6 6 0 00-12 0" /></svg>;
+    case "appointments":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
+    case "calendar":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M7 3v3m10-3v3M4 10h16M5 21h14a1 1 0 001-1V7a1 1 0 00-1-1H5a1 1 0 00-1 1v13a1 1 0 001 1z" /></svg>;
+    case "registrations":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6M9 8h6M5 3h14a2 2 0 012 2v14l-4-2-4 2-4-2-4 2V5a2 2 0 012-2z" /></svg>;
+    case "queue":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M9 11h6m-6 4h6M4 7h16M6 19h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>;
+    case "modality":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M4 6h16v10H4V6zm2 14h12M9 16v4m6-4v4" /></svg>;
+    case "doctor":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m6-6H6m13-7H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2z" /></svg>;
+    case "print":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M6 9V4h12v5M6 18h12v2H6v-2zm-2-7h16a2 2 0 012 2v3H2v-3a2 2 0 012-2z" /></svg>;
+    case "statistics":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M7 20V10m5 10V6m5 14v-4" /></svg>;
+    case "search":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>;
+    case "pacs":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm3-7h8" /></svg>;
+    case "settings":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M10.3 3.9l.4-1.4h2.6l.4 1.4a1 1 0 00.9.7l1.5.1 1.3-1 1.8 1.8-1 1.3.1 1.5a1 1 0 00.7.9l1.4.4v2.6l-1.4.4a1 1 0 00-.7.9l-.1 1.5 1 1.3-1.8 1.8-1.3-1-1.5.1a1 1 0 00-.9.7l-.4 1.4h-2.6l-.4-1.4a1 1 0 00-.9-.7l-1.5-.1-1.3 1-1.8-1.8 1-1.3-.1-1.5a1 1 0 00-.7-.9l-1.4-.4V10l1.4-.4a1 1 0 00.7-.9l.1-1.5-1-1.3 1.8-1.8 1.3 1 1.5-.1a1 1 0 00.9-.7zM12 15.5A3.5 3.5 0 1012 8a3.5 3.5 0 000 7.5z" /></svg>;
+  }
 }
 
 export function TopBar({
@@ -138,27 +185,21 @@ export function SideNav({
   const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
 
   return (
-    <nav
-      className="hidden lg:flex flex-col w-64 min-h-full border-e overflow-y-auto"
-      style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }}
-      dir="ltr"
-    >
+    <nav className="hidden lg:flex flex-col w-64 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir="ltr">
       <div className="p-4 space-y-1">
         {visibleItems.map((item) => {
           const isActive = currentRoute === item.route;
           return (
             <button
               key={item.route}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                isActive ? "shadow-sm" : "hover:opacity-80"
-              }`}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${isActive ? "shadow-sm" : "hover:opacity-80"}`}
               style={{
                 backgroundColor: isActive ? "var(--teal)" : "transparent",
                 color: isActive ? "white" : "var(--text)"
               }}
               onClick={() => onNavigate(item.route)}
             >
-              <span className="text-lg">{item.icon}</span>
+              <span><NavIconGlyph icon={item.icon} /></span>
               <span>{t(language, item.labelKey)}</span>
             </button>
           );
@@ -190,20 +231,12 @@ export function MobileDrawer({
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div
-        className="absolute top-0 left-0 bottom-0 w-72 overflow-y-auto"
-        style={{ backgroundColor: "var(--surface-strong)" }}
-        dir="ltr"
-      >
+      <div className="absolute top-0 left-0 bottom-0 w-72 overflow-y-auto" style={{ backgroundColor: "var(--surface-strong)" }} dir="ltr">
         <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "var(--line)" }}>
           <h2 className="text-lg font-bold" style={{ color: "var(--teal)" }}>
             {t(language, "shell.menu")}
           </h2>
-          <button
-            className="p-2 rounded-lg hover:opacity-80"
-            style={{ color: "var(--muted)" }}
-            onClick={onClose}
-          >
+          <button className="p-2 rounded-lg hover:opacity-80" style={{ color: "var(--muted)" }} onClick={onClose}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -216,9 +249,7 @@ export function MobileDrawer({
             return (
               <button
                 key={item.route}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  isActive ? "shadow-sm" : "hover:opacity-80"
-                }`}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${isActive ? "shadow-sm" : "hover:opacity-80"}`}
                 style={{
                   backgroundColor: isActive ? "var(--teal)" : "transparent",
                   color: isActive ? "white" : "var(--text)"
@@ -228,7 +259,7 @@ export function MobileDrawer({
                   onClose();
                 }}
               >
-                <span className="text-lg">{item.icon}</span>
+                <span><NavIconGlyph icon={item.icon} /></span>
                 <span>{t(language, item.labelKey)}</span>
               </button>
             );
@@ -238,5 +269,3 @@ export function MobileDrawer({
     </div>
   );
 }
-
-
