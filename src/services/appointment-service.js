@@ -617,7 +617,7 @@ async function getPatientById(client, patientId) {
 async function getModalityById(client, modalityId) {
   const { rows } = await client.query(
     `
-      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
       from modalities
       where id = $1
       limit 1
@@ -702,7 +702,7 @@ export async function listAppointmentLookups() {
   const [modalitiesResult, examTypesResult, prioritiesResult] = await Promise.all([
     pool.query(
       `
-        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, safety_warning_ar, safety_warning_en, safety_warning_enabled
         from modalities
         where is_active = true
         order by name_en asc

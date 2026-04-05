@@ -69,10 +69,19 @@ export default function AppointmentsPage() {
     staleTime: 1000 * 60 * 5
   });
 
+  // Availability pagination
+  const [availPage, setAvailPage] = useState(0);
+  const AVAIL_PAGE_SIZE = 14;
+  const availDaysNeeded = (availPage + 1) * AVAIL_PAGE_SIZE;
+
+  const modalities = lookups?.modalities ?? [];
+  const examTypes = lookups?.examTypes ?? [];
+  const priorities = lookups?.priorities ?? [];
+
   // Load availability for selected modality
   const { data: availability } = useQuery({
-    queryKey: ["availability", form.modalityId],
-    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10)),
+    queryKey: ["availability", form.modalityId, availDaysNeeded],
+    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), availDaysNeeded),
     enabled: !!form.modalityId,
     staleTime: 1000 * 30
   });
@@ -101,11 +110,8 @@ export default function AppointmentsPage() {
   useEffect(() => {
     setForm((f) => ({ ...f, examTypeId: "", appointmentDate: "" }));
     setSafetyAcknowledged(false);
+    setAvailPage(0);
   }, [form.modalityId]);
-
-  const modalities = lookups?.modalities ?? [];
-  const examTypes = lookups?.examTypes ?? [];
-  const priorities = lookups?.priorities ?? [];
 
   // Safety warning state
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -114,8 +120,8 @@ export default function AppointmentsPage() {
   const selectedModality = modalities.find(
     (m) => m.id.toString() === form.modalityId
   ) as any;
-  const hasSafetyWarning = selectedModality?.safety_warning_enabled &&
-    (selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar);
+  const hasSafetyWarning = !!selectedModality?.safety_warning_enabled &&
+    !!(selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar);
   const safetyMessage = selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar || "";
 
   // Create appointment mutation
@@ -357,41 +363,90 @@ export default function AppointmentsPage() {
                 Select a modality to see availability.
               </p>
             ) : availability && availability.length > 0 ? (
-              <ul className="space-y-1.5">
-                {availability.slice(0, 14).map((day: any) => {
-                  const pct = day.daily_capacity > 0
-                    ? Math.round((day.remaining_capacity / day.daily_capacity) * 100)
-                    : 0;
-                  const barColor = pct >= 80
-                    ? "bg-emerald-500"
-                    : pct >= 60
-                    ? "bg-lime-500"
-                    : pct >= 40
-                    ? "bg-yellow-500"
-                    : pct >= 20
-                    ? "bg-orange-500"
-                    : "bg-red-500";
-                  const weekday = new Date(`${day.appointment_date}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
-                  return (
-                    <li key={day.appointment_date} className="space-y-1">
-                      <div className="flex justify-between items-center text-xs">
-                        <span className="font-medium text-stone-700 dark:text-stone-300">
-                          {weekday} {formatDateLy(day.appointment_date)}
-                        </span>
-                        <span className={`tabular-nums ${day.is_full ? "text-red-600 dark:text-red-400 font-semibold" : "text-stone-500 dark:text-stone-400"}`}>
-                          {day.remaining_capacity}/{day.daily_capacity}
-                        </span>
-                      </div>
-                      <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden">
+              <div className="space-y-2">
+                {/* Prev/Next navigation */}
+                <div className="flex justify-between items-center mb-2">
+                  <button
+                    onClick={() => setAvailPage((p) => Math.max(0, p - 1))}
+                    disabled={availPage === 0}
+                    className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-30 disabled:hover:bg-stone-100 dark:disabled:hover:bg-stone-700 rounded text-stone-700 dark:text-stone-300 transition-colors"
+                  >
+                    ← Earlier
+                  </button>
+                  <span className="text-xs text-stone-500 dark:text-stone-400">
+                    Week {availPage + 1}
+                  </span>
+                  <button
+                    onClick={() => setAvailPage((p) => p + 1)}
+                    disabled={availability.length <= availPage * AVAIL_PAGE_SIZE + AVAIL_PAGE_SIZE}
+                    className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-30 disabled:hover:bg-stone-100 dark:disabled:hover:bg-stone-700 rounded text-stone-700 dark:text-stone-300 transition-colors"
+                  >
+                    Later →
+                  </button>
+                </div>
+
+                <ul className="space-y-1.5">
+                  {availability.slice(availPage * AVAIL_PAGE_SIZE, (availPage + 1) * AVAIL_PAGE_SIZE).map((day: any, idx: number) => {
+                    const pct = day.daily_capacity > 0
+                      ? Math.round((day.remaining_capacity / day.daily_capacity) * 100)
+                      : 0;
+                    const barColor = pct >= 80
+                      ? "bg-emerald-500"
+                      : pct >= 60
+                      ? "bg-lime-500"
+                      : pct >= 40
+                      ? "bg-yellow-500"
+                      : pct >= 20
+                      ? "bg-orange-500"
+                      : "bg-red-500";
+                    // Robust date parsing: handle ISO string or Date object
+                    const dateStr = typeof day.appointment_date === "string"
+                      ? day.appointment_date
+                      : new Date(day.appointment_date).toISOString().slice(0, 10);
+                    // Parse date components directly from the string to avoid timezone issues
+                    const [y, m, d] = dateStr.split("-").map(Number);
+                    const dateObj = new Date(Date.UTC(y, m - 1, d));
+                    const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+                    const dateFormatted = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+                    const isSelected = form.appointmentDate === dateStr;
+
+                    return (
+                      <li key={dateStr} className="space-y-1">
+                        {/* Week separator: show "This Week" before first item of the page if it falls in the current week */}
+                        {idx === 0 && availPage === 0 && (
+                          <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold pt-1">Upcoming</div>
+                        )}
+                        {idx === 0 && availPage > 0 && (
+                          <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold pt-1 border-t border-stone-200 dark:border-stone-700 mt-2 pt-2">Later dates</div>
+                        )}
                         <div
-                          className={`h-full rounded-full transition-all ${barColor}`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+                          onClick={() => setForm((f) => ({ ...f, appointmentDate: dateStr }))}
+                          className={`cursor-pointer rounded p-1.5 transition-colors ${
+                            isSelected
+                              ? "bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800"
+                              : "hover:bg-stone-50 dark:hover:bg-stone-700/50 border border-transparent"
+                          }`}
+                        >
+                          <div className="flex justify-between items-center text-xs">
+                            <span className={`font-medium ${isSelected ? "text-teal-700 dark:text-teal-300" : "text-stone-700 dark:text-stone-300"}`}>
+                              {weekday} {dateFormatted}
+                            </span>
+                            <span className={`tabular-nums ${day.is_full ? "text-red-600 dark:text-red-400 font-semibold" : "text-stone-500 dark:text-stone-400"}`}>
+                              {day.remaining_capacity}/{day.daily_capacity}
+                            </span>
+                          </div>
+                          <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
+                            <div
+                              className={`h-full rounded-full transition-all ${barColor}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             ) : (
               <p className="text-sm text-stone-500 dark:text-stone-400">Loading...</p>
             )}
