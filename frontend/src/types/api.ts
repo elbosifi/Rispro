@@ -158,6 +158,51 @@ export interface QueueSnapshot {
   }[];
 }
 
+export interface AppointmentStatisticsSummary {
+  totalAppointments: number;
+  uniquePatients: number;
+  uniqueModalities: number;
+  scheduledCount: number;
+  inQueueCount: number;
+  completedCount: number;
+  noShowCount: number;
+  cancelledCount: number;
+  walkInCount: number;
+}
+
+export interface AppointmentStatisticsStatusRow {
+  status: AppointmentStatus | string;
+  count: number;
+}
+
+export interface AppointmentStatisticsModalityRow {
+  modalityId: number;
+  modalityCode: string;
+  modalityNameEn: string;
+  modalityNameAr: string;
+  totalCount: number;
+  scheduledCount: number;
+  inQueueCount: number;
+  completedCount: number;
+  noShowCount: number;
+  cancelledCount: number;
+}
+
+export interface AppointmentStatisticsDailyRow {
+  appointmentDate: string;
+  totalCount: number;
+  completedCount: number;
+  cancelledCount: number;
+  noShowCount: number;
+}
+
+export interface AppointmentStatistics {
+  summary: AppointmentStatisticsSummary;
+  statusBreakdown: AppointmentStatisticsStatusRow[];
+  modalityBreakdown: AppointmentStatisticsModalityRow[];
+  dailyBreakdown: AppointmentStatisticsDailyRow[];
+}
+
 export interface AuditEntry {
   id: number;
   entityType: string;

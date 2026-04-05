@@ -88,7 +88,7 @@ export default function StatisticsPage() {
             {modalityBreakdown.map((row: any) => (
               <tr key={row.modalityId}>
                 <td className="p-3 text-stone-900 dark:text-white font-medium">{row.modalityNameEn}</td>
-                <td className="p-3 text-stone-700 dark:text-stone-300">{row.count}</td>
+                <td className="p-3 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
               </tr>
             ))}
           </tbody>

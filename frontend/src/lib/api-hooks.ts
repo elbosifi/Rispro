@@ -13,7 +13,7 @@ import {
   mapNameDictionary,
   mapAuditEntries
 } from "@/lib/mappers";
-import type { Patient, AppointmentLookups, QueueSnapshot, User } from "@/types/api";
+import type { Patient, AppointmentLookups, QueueSnapshot, User, AppointmentStatistics } from "@/types/api";
 
 // -- Auth --
 export async function fetchCurrentSession(): Promise<User | null> {
@@ -124,7 +124,7 @@ export async function fetchAppointments(params: Record<string, string | string[]
 }
 
 // -- Statistics --
-export async function fetchStatistics(date: string, modalityId: string) {
+export async function fetchStatistics(date: string, modalityId: string): Promise<AppointmentStatistics> {
   const params = new URLSearchParams();
   params.set("date", date);
   if (modalityId) params.set("modalityId", modalityId);

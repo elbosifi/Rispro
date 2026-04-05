@@ -1,4 +1,13 @@
-import type { Patient, Modality, ExamType, ReportingPriority, Appointment, QueueSnapshot, User } from "@/types/api";
+import type {
+  Patient,
+  Modality,
+  ExamType,
+  ReportingPriority,
+  Appointment,
+  QueueSnapshot,
+  User,
+  AppointmentStatistics
+} from "@/types/api";
 
 /**
  * Central field name mapping utility.
@@ -241,27 +250,44 @@ export function mapAppointmentLookups(raw: any): { modalities: Modality[]; examT
 }
 
 // -- Statistics Mapping --
-export function mapStatistics(raw: any): any {
+export function mapStatistics(raw: any): AppointmentStatistics {
+  const summaryRaw = raw.summary ?? {};
   return {
-    summary: raw.summary ?? {},
+    summary: {
+      totalAppointments: Number(summaryRaw.total_appointments ?? summaryRaw.totalAppointments ?? 0),
+      uniquePatients: Number(summaryRaw.unique_patients ?? summaryRaw.uniquePatients ?? 0),
+      uniqueModalities: Number(summaryRaw.unique_modalities ?? summaryRaw.uniqueModalities ?? 0),
+      scheduledCount: Number(summaryRaw.scheduled_count ?? summaryRaw.scheduledCount ?? 0),
+      inQueueCount: Number(summaryRaw.in_queue_count ?? summaryRaw.inQueueCount ?? 0),
+      completedCount: Number(summaryRaw.completed_count ?? summaryRaw.completedCount ?? 0),
+      noShowCount: Number(summaryRaw.no_show_count ?? summaryRaw.noShowCount ?? 0),
+      cancelledCount: Number(summaryRaw.cancelled_count ?? summaryRaw.cancelledCount ?? 0),
+      walkInCount: Number(summaryRaw.walk_in_count ?? summaryRaw.walkInCount ?? 0)
+    },
     statusBreakdown: (raw.status_breakdown ?? raw.statusBreakdown ?? []).map((item: any) => ({
       status: item.status ?? "",
-      count: item.total_count ?? item.count ?? 0
+      count: Number(item.total_count ?? item.count ?? 0)
     })),
     modalityBreakdown: (raw.modality_breakdown ?? raw.modalityBreakdown ?? []).map((item: any) => ({
       modalityId: item.modality_id ?? item.modalityId ?? 0,
+      modalityCode: item.modality_code ?? item.modalityCode ?? "",
       modalityNameEn: item.modality_name_en ?? item.modalityNameEn ?? "",
       modalityNameAr: item.modality_name_ar ?? item.modalityNameAr ?? "",
-      count: item.total_count ?? item.count ?? 0
+      totalCount: Number(item.total_count ?? item.totalCount ?? item.count ?? 0),
+      scheduledCount: Number(item.scheduled_count ?? item.scheduledCount ?? 0),
+      inQueueCount: Number(item.in_queue_count ?? item.inQueueCount ?? 0),
+      completedCount: Number(item.completed_count ?? item.completedCount ?? 0),
+      noShowCount: Number(item.no_show_count ?? item.noShowCount ?? 0),
+      cancelledCount: Number(item.cancelled_count ?? item.cancelledCount ?? 0)
     })),
     dailyBreakdown: (raw.daily_breakdown ?? raw.dailyBreakdown ?? []).map((item: any) => ({
       appointmentDate: normalizeIsoDate(item.appointment_date ?? item.appointmentDate ?? ""),
-      totalCount: item.total_count ?? item.totalCount ?? 0,
-      completedCount: item.completed_count ?? item.completedCount ?? 0,
-      cancelledCount: item.cancelled_count ?? item.cancelledCount ?? 0,
-      noShowCount: item.no_show_count ?? item.noShowCount ?? 0
+      totalCount: Number(item.total_count ?? item.totalCount ?? 0),
+      completedCount: Number(item.completed_count ?? item.completedCount ?? 0),
+      cancelledCount: Number(item.cancelled_count ?? item.cancelledCount ?? 0),
+      noShowCount: Number(item.no_show_count ?? item.noShowCount ?? 0)
     }))
-  };
+  } as AppointmentStatistics;
 }
 
 // -- DICOM Device Mapping --
