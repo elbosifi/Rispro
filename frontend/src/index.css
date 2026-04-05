@@ -66,3 +66,89 @@
   --shadow: 0 28px 70px rgba(0, 0, 0, 0.4);
   --shadow-soft: 0 16px 36px rgba(0, 0, 0, 0.3);
 }
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1200px 500px at 8% -10%, rgba(15, 118, 110, 0.1), transparent 60%),
+    radial-gradient(900px 420px at 92% -5%, rgba(217, 119, 6, 0.08), transparent 60%),
+    var(--bg);
+  color: var(--text);
+}
+
+.card-shell {
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
+}
+
+.pill-soft {
+  background: var(--bg-soft);
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.4rem 0.75rem;
+}
+
+.description-center {
+  color: var(--muted);
+  text-align: center;
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, var(--teal), var(--teal-strong));
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: linear-gradient(180deg, var(--amber), var(--amber-strong));
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.9rem;
+  font-weight: 600;
+}
+
+.input-premium {
+  background: var(--bg-soft);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  border-radius: 0.65rem;
+  padding: 0.55rem 0.9rem;
+  outline: none;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+.input-premium:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--teal) 18%, transparent);
+}
+
+.input-rtl {
+  direction: rtl;
+  text-align: right;
+}
+
+.input-ltr {
+  direction: ltr;
+  text-align: left;
+}

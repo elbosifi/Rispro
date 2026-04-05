@@ -1,6 +1,8 @@
 import { type ReactNode, Suspense } from "react";
+import { useLanguage } from "@/providers/language-provider";
 
 function LoadingSpinner() {
+  const { t } = useLanguage();
   return (
     <div className="flex items-center justify-center min-h-[200px]">
       <div className="flex flex-col items-center gap-3">
@@ -12,7 +14,7 @@ function LoadingSpinner() {
           }}
         />
         <p className="text-sm" style={{ color: "var(--muted)" }}>
-          Loading...
+          {t("common.loading")}
         </p>
       </div>
     </div>
@@ -26,6 +28,7 @@ function ErrorBoundary({
   error: Error | null;
   onRetry: () => void;
 }) {
+  const { t } = useLanguage();
   if (!error) return null;
 
   return (
@@ -33,7 +36,7 @@ function ErrorBoundary({
       <div className="text-center space-y-3 max-w-md">
         <div className="text-4xl">⚠️</div>
         <h3 className="text-lg font-semibold" style={{ color: "var(--red)" }}>
-          Something went wrong
+          {error.name || "Error"}
         </h3>
         <p className="text-sm" style={{ color: "var(--muted)" }}>
           {error.message}
@@ -43,7 +46,7 @@ function ErrorBoundary({
           style={{ backgroundColor: "var(--teal)" }}
           onClick={onRetry}
         >
-          Try again
+          {t("common.tryAgain")}
         </button>
       </div>
     </div>

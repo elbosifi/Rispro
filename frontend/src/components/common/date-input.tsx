@@ -52,7 +52,7 @@ export function DateInput({ label, value, onChange, disabled = false }: DateInpu
           disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commitDraft}
-          className="w-full px-4 py-2 pr-12 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-left focus:ring-2 focus:ring-teal-500 outline-none disabled:opacity-50"
+          className="input-premium input-ltr w-full pr-12 disabled:opacity-50"
         />
         <button
           type="button"

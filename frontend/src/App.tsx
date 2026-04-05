@@ -19,6 +19,7 @@ import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { QueryProvider } from "@/providers/query-provider";
+import { LanguageProvider, useLanguage } from "@/providers/language-provider";
 
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
@@ -40,10 +41,6 @@ const PATH_TO_ROUTE = Object.fromEntries(
   Object.entries(ROUTE_PATHS).map(([k, v]) => [v === "/" ? "/" : v.slice(1), k])
 );
 
-function getStoredLanguage(): "ar" | "en" {
-  return (localStorage.getItem("rispro-language") as "ar" | "en") || "ar";
-}
-
 function getStoredTheme(): "light" | "dark" {
   return (localStorage.getItem("rispro-theme") as "light" | "dark") || "light";
 }
@@ -52,8 +49,8 @@ function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
+  const { language, toggleLanguage } = useLanguage();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [language, setLanguage] = useState<"ar" | "en">(getStoredLanguage);
   const [theme, setTheme] = useState<"light" | "dark">(getStoredTheme);
 
   // Apply theme
@@ -61,13 +58,6 @@ function AppContent() {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("rispro-theme", theme);
   }, [theme]);
-
-  // Apply language / direction
-  useEffect(() => {
-    document.documentElement.setAttribute("lang", language);
-    document.documentElement.setAttribute("dir", language === "ar" ? "rtl" : "ltr");
-    localStorage.setItem("rispro-language", language);
-  }, [language]);
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -101,11 +91,11 @@ function AppContent() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-stone-50 dark:bg-stone-900" dir={language === "ar" ? "rtl" : "ltr"}>
+    <div className="flex flex-col min-h-screen bg-stone-50 dark:bg-stone-900" dir="ltr">
       <TopBar
         user={user}
         language={language}
-        onToggleLanguage={() => setLanguage((l) => (l === "ar" ? "en" : "ar"))}
+        onToggleLanguage={toggleLanguage}
         onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onLogout={logout}
         onMobileNavToggle={() => setMobileNavOpen(true)}
@@ -172,12 +162,14 @@ function RouterConfig() {
 
 export function App() {
   return (
-    <BrowserRouter>
-      <QueryProvider>
-        <AuthProvider>
-          <RouterConfig />
-        </AuthProvider>
-      </QueryProvider>
-    </BrowserRouter>
+    <LanguageProvider>
+      <BrowserRouter>
+        <QueryProvider>
+          <AuthProvider>
+            <RouterConfig />
+          </AuthProvider>
+        </QueryProvider>
+      </BrowserRouter>
+    </LanguageProvider>
   );
 }

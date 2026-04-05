@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { useLanguage } from "@/providers/language-provider";
+import { chooseLocalized, statusLabel } from "@/lib/i18n";
 
 interface RegistrationsFilters {
   date: string;
@@ -14,6 +16,7 @@ interface RegistrationsFilters {
 }
 
 export default function RegistrationsPage() {
+  const { language, t } = useLanguage();
   const [filters, setFilters] = useState<RegistrationsFilters>({
     date: todayIsoDateLy(),
     dateFrom: "",
@@ -25,13 +28,11 @@ export default function RegistrationsPage() {
 
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
 
-  // Load registrations
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["registrations", filters],
     queryFn: () => fetchRegistrations(filters)
   });
 
-  // Load lookups for modality filter
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
     queryFn: fetchAppointmentLookups,
@@ -45,25 +46,19 @@ export default function RegistrationsPage() {
   const handleStatusToggle = (status: string) => {
     setFilters((f) => {
       const current = f.status.includes(status);
-      const newStatus = current
-        ? f.status.filter((s) => s !== status)
-        : [...f.status, status];
-      // Ensure at least one status is selected
+      const newStatus = current ? f.status.filter((s) => s !== status) : [...f.status, status];
       return { ...f, status: newStatus.length > 0 ? newStatus : ["scheduled"] };
     });
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-        Daily Registrations
-      </h2>
+      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t("registrations.title")}</h2>
 
-      {/* Filters */}
-      <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 space-y-4">
+      <div className="card-shell p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <DateInput
-            label="Date"
+            label={t("registrations.date")}
             value={filters.date}
             onChange={(v) => {
               handleFilterChange("date", v);
@@ -72,7 +67,7 @@ export default function RegistrationsPage() {
             }}
           />
           <DateInput
-            label="From Date"
+            label={t("registrations.dateFrom")}
             value={filters.dateFrom}
             onChange={(v) => {
               handleFilterChange("dateFrom", v);
@@ -80,7 +75,7 @@ export default function RegistrationsPage() {
             }}
           />
           <DateInput
-            label="To Date"
+            label={t("registrations.dateTo")}
             value={filters.dateTo}
             onChange={(v) => {
               handleFilterChange("dateTo", v);
@@ -88,66 +83,63 @@ export default function RegistrationsPage() {
             }}
           />
           <Select
-            label="Modality"
+            label={t("registrations.modality")}
             value={filters.modalityId}
             onChange={(v) => handleFilterChange("modalityId", v)}
             options={[
-              { value: "", label: "All" },
+              { value: "", label: t("registrations.all") },
               ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
-                label: m.nameEn
+                label: chooseLocalized(language, m.nameAr, m.nameEn)
               }))
             ]}
           />
           <Input
-            label="Search"
+            label={t("registrations.search")}
             value={filters.query}
             onChange={(v) => handleFilterChange("query", v)}
-            placeholder="Name, MRN, Accession..."
+            placeholder={t("registrations.searchPlaceholder")}
+            dir="ltr"
           />
         </div>
 
-        {/* Status Filter */}
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-200 dark:border-stone-700">
-          <span className="text-sm font-medium text-stone-700 dark:text-stone-300">Status:</span>
-          {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
-            (status) => (
-              <button
-                key={status}
-                onClick={() => handleStatusToggle(status)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                  filters.status.includes(status)
-                    ? "bg-teal-600 text-white"
-                    : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-600"
-                }`}
-              >
-                {status}
-              </button>
-            )
-          )}
+          <span className="text-sm font-medium text-stone-700 dark:text-stone-300">{t("registrations.status")}</span>
+          {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map((status) => (
+            <button
+              key={status}
+              onClick={() => handleStatusToggle(status)}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                filters.status.includes(status)
+                  ? "bg-teal-600 text-white"
+                  : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400 hover:bg-stone-200 dark:hover:bg-stone-600"
+              }`}
+            >
+              {statusLabel(language, status)}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Results */}
-      <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
+      <div className="card-shell overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
           <h3 className="font-semibold text-stone-900 dark:text-white">
-            Results ({isLoading ? "..." : appointments.length})
+            {t("registrations.results", { count: isLoading ? "..." : appointments.length })}
           </h3>
         </div>
         {isLoading ? (
-          <div className="p-8 text-center text-stone-500">Loading...</div>
+          <div className="p-8 text-center description-center">{t("common.loading")}</div>
         ) : appointments.length === 0 ? (
-          <div className="p-8 text-center text-stone-500">No appointments found</div>
+          <div className="p-8 text-center description-center">{t("registrations.noAppointmentsFound")}</div>
         ) : (
           <table className="w-full text-sm">
             <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400">
               <tr>
-                <th className="text-right p-3">Accession</th>
-                <th className="text-right p-3">Patient</th>
-                <th className="text-right p-3">Date</th>
-                <th className="text-right p-3">Modality</th>
-                <th className="text-right p-3">Status</th>
+                <th className="text-start p-3">{t("registrations.accession")}</th>
+                <th className="text-start p-3">{t("registrations.patient")}</th>
+                <th className="text-start p-3">{t("registrations.dateCol")}</th>
+                <th className="text-start p-3">{t("registrations.modalityCol")}</th>
+                <th className="text-start p-3">{t("registrations.statusCol")}</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
@@ -156,25 +148,19 @@ export default function RegistrationsPage() {
                   key={apt.id}
                   onClick={() => setSelectedAppointment(apt)}
                   className={`cursor-pointer transition-colors hover:bg-stone-50 dark:hover:bg-stone-700/50 ${
-                    selectedAppointment?.id === apt.id
-                      ? "bg-teal-50 dark:bg-teal-900/20"
-                      : ""
+                    selectedAppointment?.id === apt.id ? "bg-teal-50 dark:bg-teal-900/20" : ""
                   }`}
                 >
-                  <td className="p-3 font-medium text-stone-900 dark:text-white">
-                    {apt.accessionNumber}
-                  </td>
+                  <td className="p-3 font-medium text-stone-900 dark:text-white">{apt.accessionNumber}</td>
                   <td className="p-3 text-stone-700 dark:text-stone-300">
-                    {apt.arabicFullName}
+                    {chooseLocalized(language, apt.arabicFullName, apt.englishFullName)}
                   </td>
-                  <td className="p-3 text-stone-500 dark:text-stone-400">
-                    {formatDateLy(apt.appointmentDate)}
-                  </td>
-                  <td className="p-3 text-stone-500 dark:text-stone-400">
-                    {apt.modalityNameEn}
+                  <td className="p-3 description-center">{formatDateLy(apt.appointmentDate)}</td>
+                  <td className="p-3 description-center">
+                    {chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn)}
                   </td>
                   <td className="p-3">
-                    <StatusBadge status={apt.status} />
+                    <StatusBadge status={apt.status} label={statusLabel(language, apt.status)} />
                   </td>
                 </tr>
               ))}
@@ -183,19 +169,18 @@ export default function RegistrationsPage() {
         )}
       </div>
 
-      {/* Selected Appointment Details */}
       {selectedAppointment && (
-        <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
+        <div className="card-shell p-6">
           <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">
-            Appointment Details: {selectedAppointment.accessionNumber}
+            {t("registrations.details", { accession: selectedAppointment.accessionNumber })}
           </h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <Field label="Patient" value={selectedAppointment.arabicFullName} />
-            <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-            <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
-            <Field label="Status" value={selectedAppointment.status} />
-            <Field label="Walk-in" value={selectedAppointment.isWalkIn ? "Yes" : "No"} />
-            <Field label="Notes" value={selectedAppointment.notes} />
+            <Field label={t("registrations.patient")} value={chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)} />
+            <Field label={t("registrations.modality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />
+            <Field label={t("registrations.date")} value={formatDateLy(selectedAppointment.appointmentDate)} />
+            <Field label={t("registrations.statusCol")} value={statusLabel(language, selectedAppointment.status)} />
+            <Field label={t("registrations.walkIn")} value={selectedAppointment.isWalkIn ? t("registrations.yes") : t("registrations.no")} />
+            <Field label={t("registrations.notes")} value={selectedAppointment.notes} />
           </div>
         </div>
       )}
@@ -216,7 +201,6 @@ async function fetchRegistrations(filters: RegistrationsFilters) {
   if (filters.status && filters.status.length > 0) {
     params.status = filters.status;
   }
-
   return fetchAppointments(params);
 }
 
@@ -225,25 +209,26 @@ function Input({
   value,
   onChange,
   type = "text",
-  placeholder
+  placeholder,
+  dir
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
   placeholder?: string;
+  dir?: "ltr" | "rtl";
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-        {label}
-      </label>
+      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
       <input
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+        dir={dir}
+        className="input-premium w-full"
       />
     </div>
   );
@@ -262,14 +247,8 @@ function Select({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-        {label}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
-      >
+      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className="input-premium w-full">
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>
             {opt.label}
@@ -283,13 +262,13 @@ function Select({
 function Field({ label, value }: { label: string; value: any }) {
   return (
     <div>
-      <p className="text-stone-500 dark:text-stone-400">{label}</p>
-      <p className="mt-1 text-stone-900 dark:text-white font-medium">{value ?? "—"}</p>
+      <p className="description-center">{label}</p>
+      <p className="mt-1 text-stone-900 dark:text-white font-medium">{value ?? "-"}</p>
     </div>
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ status, label }: { status: string; label: string }) {
   const styles: Record<string, string> = {
     scheduled: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
     arrived: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
@@ -299,9 +278,5 @@ function StatusBadge({ status }: { status: string }) {
     cancelled: "bg-stone-100 dark:bg-stone-900/30 text-stone-700 dark:text-stone-400"
   };
 
-  return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>
-      {status}
-    </span>
-  );
+  return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>{label}</span>;
 }
