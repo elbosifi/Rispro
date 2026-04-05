@@ -294,6 +294,13 @@ export async function deleteNameDictionaryEntry(entryId: number) {
   return api<{ entry: any }>(`/settings/name-dictionary/${entryId}`, { method: "DELETE" });
 }
 
+export async function importNameDictionary(entries: { arabicText: string; englishText: string }[]) {
+  return api<{ entries: any[] }>("/name-dictionary/import", {
+    method: "POST",
+    body: JSON.stringify({ entries })
+  });
+}
+
 export async function fetchDicomDevices() {
   const raw: any = await api("/settings/dicom-devices");
   return {
