@@ -1,6 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import {
+  fetchCalendarSummary,
+  fetchCalendarDayAppointments,
+  fetchAppointmentLookups,
+  type CalendarDaySummary
+} from "@/lib/api-hooks";
 
 interface CalendarDay {
   date: string;
@@ -14,40 +19,61 @@ interface CalendarDay {
 
 export default function CalendarPage() {
   const today = new Date();
-  const [displayDate, setDisplayDate] = useState(new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1)));
+  const [displayDate, setDisplayDate] = useState(
+    new Date(Date.UTC(today.getFullYear(), today.getMonth(), 1))
+  );
   const [selectedDate, setSelectedDate] = useState(formatDate(today));
   const [modalityFilter, setModalityFilter] = useState("");
 
-  // Load appointments for the displayed month range
+  // Month range for API
   const startDate = formatDate(new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth(), 1)));
   const endDate = formatDate(new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth() + 1, 0)));
 
-  const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["calendar", startDate, endDate, modalityFilter],
-    queryFn: () => fetchAppointments({ dateFrom: startDate, dateTo: endDate, ...(modalityFilter && { modalityId: modalityFilter }) }),
-    staleTime: 1000 * 60
+  // -- Month summary (lightweight aggregation) --
+  const {
+    data: monthSummary = [],
+    isLoading: loadingMonth,
+    error: monthError
+  } = useQuery({
+    queryKey: ["calendar-summary", startDate, endDate, modalityFilter],
+    queryFn: () => fetchCalendarSummary(startDate, endDate, modalityFilter || undefined),
+    staleTime: 1000 * 60,
+    refetchOnMount: false
   });
 
-  // Load lookups for modality filter
+  // -- Selected day details (only fetch when date changes) --
+  const {
+    data: dayAppointments = [],
+    isLoading: loadingDay,
+    error: dayError
+  } = useQuery({
+    queryKey: ["calendar-day", selectedDate, modalityFilter],
+    queryFn: () => fetchCalendarDayAppointments(selectedDate, modalityFilter || undefined),
+    staleTime: 1000 * 30,
+    enabled: !!selectedDate
+  });
+
+  // -- Lookups for modality filter --
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
     queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
   });
 
-  // Group appointments by date
-  const groupedByDate = appointments.reduce((acc, apt) => {
-    const date = apt.appointmentDate;
-    if (!acc[date]) acc[date] = [];
-    acc[date].push(apt);
-    return acc;
-  }, {} as Record<string, any[]>);
+  // Build day summary map from month summary (useMemo to avoid recalculating)
+  const daySummaryMap = useMemo(() => {
+    const map = new Map<string, CalendarDaySummary>();
+    for (const d of monthSummary) {
+      map.set(d.appointmentDate, d);
+    }
+    return map;
+  }, [monthSummary]);
 
-  // Build grid
-  const gridDays = buildCalendarGrid(displayDate, selectedDate, groupedByDate);
-
-  // Selected day appointments
-  const selectedAppointments = groupedByDate[selectedDate] || [];
+  // Build calendar grid from summary map
+  const gridDays = useMemo(
+    () => buildCalendarGrid(displayDate, selectedDate, daySummaryMap),
+    [displayDate, selectedDate, daySummaryMap]
+  );
 
   const prevMonth = () => {
     setDisplayDate((d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - 1, 1)));
@@ -66,6 +92,8 @@ export default function CalendarPage() {
   const selectDay = (date: string) => {
     setSelectedDate(date);
   };
+
+  const todayStr = formatDate(today);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -128,8 +156,25 @@ export default function CalendarPage() {
 
             {/* Grid */}
             <div className="grid grid-cols-7">
-              {isLoading ? (
-                <div className="col-span-7 p-8 text-center text-stone-500">Loading...</div>
+              {monthError ? (
+                <div className="col-span-7 p-8">
+                  <div className="text-center text-red-600 dark:text-red-400 text-sm">
+                    Failed to load calendar data
+                    <p className="text-xs mt-1 text-stone-500 dark:text-stone-400 font-mono">{(monthError as Error).message}</p>
+                    <button
+                      onClick={() => window.location.reload()}
+                      className="mt-3 px-3 py-1 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded transition-colors"
+                    >
+                      Retry
+                    </button>
+                  </div>
+                </div>
+              ) : loadingMonth ? (
+                <div className="col-span-7 p-8 text-center text-stone-500">Loading month…</div>
+              ) : gridDays.every((d) => d.count === 0) ? (
+                <div className="col-span-7 p-8 text-center text-stone-500 dark:text-stone-400">
+                  No appointments this month
+                </div>
               ) : (
                 gridDays.map((day) => (
                   <button
@@ -174,21 +219,32 @@ export default function CalendarPage() {
           <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden sticky top-24">
             <div className="p-4 border-b border-stone-200 dark:border-stone-700">
               <h3 className="font-semibold text-stone-900 dark:text-white">
-                {selectedDate === formatDate(new Date()) ? "Today's" : formatDateDisplay(selectedDate)} Appointments
+                {selectedDate === todayStr ? "Today's" : formatDateDisplay(selectedDate)} Appointments
               </h3>
-              <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                {selectedAppointments.length} appointment{selectedAppointments.length !== 1 ? "s" : ""}
-              </p>
+              {dayError ? (
+                <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                  Failed to load day details
+                </p>
+              ) : (
+                <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                  {loadingDay ? "…" : `${dayAppointments.length} appointment${dayAppointments.length !== 1 ? "s" : ""}`}
+                </p>
+              )}
             </div>
-            {isLoading ? (
-              <div className="p-4 text-center text-stone-500">Loading...</div>
-            ) : selectedAppointments.length === 0 ? (
+
+            {dayError ? (
+              <div className="p-6 text-center text-red-600 dark:text-red-400 text-sm">
+                Failed to load appointments for this day
+              </div>
+            ) : loadingDay ? (
+              <div className="p-4 text-center text-stone-500">Loading day…</div>
+            ) : dayAppointments.length === 0 ? (
               <div className="p-6 text-center text-stone-500 dark:text-stone-400 text-sm">
-                No appointments scheduled
+                No appointments for selected day
               </div>
             ) : (
               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-                {selectedAppointments.map((apt: any) => (
+                {dayAppointments.map((apt) => (
                   <li key={apt.id} className="p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-right flex-1">
@@ -216,10 +272,12 @@ export default function CalendarPage() {
   );
 }
 
+// -- Utilities --
+
 function buildCalendarGrid(
   displayDate: Date,
   selectedDate: string,
-  groupedByDate: Record<string, any[]>
+  daySummaryMap: Map<string, CalendarDaySummary>
 ): CalendarDay[] {
   const todayStr = formatDate(new Date());
   const firstDayOfMonth = new Date(Date.UTC(displayDate.getFullYear(), displayDate.getMonth(), 1));
@@ -233,23 +291,18 @@ function buildCalendarGrid(
     const date = new Date(Date.UTC(gridStart.getUTCFullYear(), gridStart.getUTCMonth(), gridStart.getUTCDate()));
     date.setUTCDate(date.getUTCDate() + i);
     const dateStr = formatDate(date);
-    const dayAppointments = groupedByDate[dateStr] || [];
-
-    const summary = dayAppointments.reduce((acc, apt) => {
-      const mod = apt.modalityNameEn || "Other";
-      acc[mod] = (acc[mod] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
+    const summary = daySummaryMap.get(dateStr);
 
     days.push({
       date: dateStr,
       dayNumber: date.getUTCDate(),
       isCurrentMonth: date.getUTCMonth() === displayDate.getMonth(),
       isToday: dateStr === todayStr,
-      count: dayAppointments.length,
-      summary: Object.entries(summary)
-        .map(([modality, count]) => ({ modality, count: count as number }))
-        .sort((a, b) => b.count - a.count),
+      count: summary?.totalCount ?? 0,
+      summary: (summary?.modalities ?? []).map((m) => ({
+        modality: m.modalityNameEn,
+        count: m.count
+      })),
       isSelected: dateStr === selectedDate
     });
   }

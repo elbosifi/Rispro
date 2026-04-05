@@ -171,6 +171,66 @@ export async function completeAppointment(id: number) {
   return api(`/modality/${id}/complete`, { method: "POST" });
 }
 
+// -- Calendar --
+export interface CalendarDaySummary {
+  appointmentDate: string;
+  totalCount: number;
+  modalities: { modalityId: number; modalityNameEn: string; count: number }[];
+}
+
+export async function fetchCalendarSummary(dateFrom: string, dateTo: string, modalityId?: string): Promise<CalendarDaySummary[]> {
+  const query = new URLSearchParams();
+  query.set("dateFrom", dateFrom);
+  query.set("dateTo", dateTo);
+  if (modalityId) query.set("modalityId", modalityId);
+  const raw = await api<{ days: any[] }>(`/appointments/calendar-summary?${query.toString()}`);
+  return (raw.days ?? []).map((d: any) => ({
+    appointmentDate: d.appointment_date,
+    totalCount: d.total_count ?? 0,
+    modalities: (d.modalities ?? []).map((m: any) => ({
+      modalityId: m.modality_id,
+      modalityNameEn: m.modality_name_en,
+      count: m.count
+    }))
+  }));
+}
+
+export interface CalendarDayAppointment {
+  id: number;
+  accessionNumber: string;
+  appointmentDate: string;
+  dailySequence: number;
+  status: string;
+  isWalkIn: boolean;
+  isOverbooked: boolean;
+  modalitySlotNumber: number | null;
+  arabicFullName: string;
+  englishFullName: string | null;
+  modalityNameEn: string;
+  modalityNameAr: string;
+}
+
+export async function fetchCalendarDayAppointments(date: string, modalityId?: string): Promise<CalendarDayAppointment[]> {
+  const query = new URLSearchParams();
+  query.set("date", date);
+  if (modalityId) query.set("modalityId", modalityId);
+  const raw = await api<{ appointments: any[] }>(`/appointments/by-date?${query.toString()}`);
+  return (raw.appointments ?? []).map((a: any) => ({
+    id: a.id,
+    accessionNumber: a.accession_number,
+    appointmentDate: a.appointment_date,
+    dailySequence: a.daily_sequence,
+    status: a.status,
+    isWalkIn: a.is_walk_in,
+    isOverbooked: a.is_overbooked,
+    modalitySlotNumber: a.modality_slot_number,
+    arabicFullName: a.arabic_full_name,
+    englishFullName: a.english_full_name,
+    modalityNameEn: a.modality_name_en,
+    modalityNameAr: a.modality_name_ar
+  }));
+}
+
 // -- Settings --
 export async function fetchSettings(category: string) {
   const raw: any = await api(`/settings/${category}`);
