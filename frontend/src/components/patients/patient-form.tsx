@@ -16,6 +16,8 @@ import {
   isValidNationalId
 } from "@/lib/national-id";
 import { LIBYAN_CITIES_SORTED as LIBYAN_CITIES } from "@/lib/libyan-cities";
+import { formatDateLy } from "@/lib/date-format";
+import { DateInput } from "@/components/common/date-input";
 import type { Patient } from "@/types/api";
 
 type IdentifierType = "national_id" | "passport" | "other";
@@ -371,7 +373,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Demographics</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select label="Sex" value={form.sex} onChange={(v) => setForm((f) => ({ ...f, sex: v }))} options={[{ value: "", label: "Select..." }, { value: "M", label: "Male" }, { value: "F", label: "Female" }]} />
-          <Input label="Date of Birth" value={form.estimatedDateOfBirth} onChange={handleDobChange} type="date" />
+          <DateInput label="Date of Birth" value={form.estimatedDateOfBirth} onChange={handleDobChange} />
           <Input label="Age (years)" value={form.ageYears} onChange={(v) => setForm((f) => ({ ...f, ageYears: v.replace(/\D/g, "") }))} type="number" min="0" max="130" />
         </div>
         {isNationalId && isValidNationalId(form.identifierValue) && (
@@ -450,7 +452,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   <Field label="MRN" value={previewPatient.mrn || "—"} />
                   <Field label="Sex" value={previewPatient.sex === "M" ? "Male" : previewPatient.sex === "F" ? "Female" : previewPatient.sex} />
                   <Field label="Age" value={previewPatient.ageYears ? `${previewPatient.ageYears} years` : "—"} />
-                  <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? (previewPatient.estimatedDateOfBirth.includes("T") ? previewPatient.estimatedDateOfBirth.slice(0, 10) : previewPatient.estimatedDateOfBirth) : "—"} />
+                  <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? formatDateLy(previewPatient.estimatedDateOfBirth) : "—"} />
                   <Field label="Phone" value={previewPatient.phone1 || "—"} />
                   {previewPatient.phone2 && <Field label="Phone 2" value={previewPatient.phone2} />}
                   {previewPatient.address && <Field label="City" value={LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn || previewPatient.address} />}
