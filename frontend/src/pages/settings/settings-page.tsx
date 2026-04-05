@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
   fetchAuditEntries,
@@ -8,7 +8,10 @@ import {
   fetchNameDictionary,
   fetchDicomDevices,
   fetchSettings,
-  fetchPacsConnection
+  fetchPacsConnection,
+  deleteUser,
+  exportAuditCSV,
+  deleteNameDictionaryEntry
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -123,7 +126,14 @@ export default function SettingsPage() {
 
 function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
+
+  const deleteMutation = useMutation({
+    mutationFn: (userId: number) => deleteUser(userId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); }
+  });
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["users"])} />;
@@ -138,9 +148,17 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
             <p className="font-medium text-stone-900 dark:text-white">{u.full_name}</p>
             <p className="text-sm description-center">@{u.username} - {u.role}</p>
           </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-            {u.is_active ? t("settings.active") : t("settings.inactive")}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+              {u.is_active ? t("settings.active") : t("settings.inactive")}
+            </span>
+            <button
+              onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
+              className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+            >
+              Delete
+            </button>
+          </div>
         </li>
       ))}
     </ul>
@@ -151,6 +169,15 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   const { t } = useLanguage();
   const limit = 50;
   const { data, isLoading, error } = useQuery({ queryKey: ["audit", limit], queryFn: () => fetchAuditEntries(limit) });
+
+  const handleExport = async () => {
+    try {
+      await exportAuditCSV();
+    } catch {
+      // Browser handles errors naturally
+    }
+  };
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["audit", String(limit)])} />;
@@ -158,7 +185,12 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   }
   return (
     <div>
-      <p className="text-sm description-center mb-4">{t("settings.showingLastEntries", { count: limit })}</p>
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm description-center">{t("settings.showingLastEntries", { count: limit })}</p>
+        <button onClick={handleExport} className="btn-secondary text-xs">
+          Export CSV
+        </button>
+      </div>
       {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
         <ul className="space-y-2">
           {data?.entries?.slice(0, 10).map((entry: any) => (
@@ -222,7 +254,14 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
 
 function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["name-dictionary"], queryFn: fetchNameDictionary });
+
+  const deleteMutation = useMutation({
+    mutationFn: (entryId: number) => deleteNameDictionaryEntry(entryId),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); }
+  });
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["name-dictionary"])} />;
@@ -238,13 +277,22 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
               <tr>
                 <th className="text-start p-2">{t("settings.arabic")}</th>
                 <th className="text-start p-2">{t("settings.english")}</th>
+                <th className="p-2"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-              {data?.entries?.slice(0, 20).map((e: any) => (
+              {data?.entries?.slice(0, 50).map((e: any) => (
                 <tr key={e.id}>
                   <td className="p-2 text-stone-900 dark:text-white input-rtl">{e.arabicText}</td>
                   <td className="p-2 text-stone-700 dark:text-stone-300 input-ltr">{e.englishText}</td>
+                  <td className="p-2 text-center">
+                    <button
+                      onClick={() => { if (window.confirm("Delete this entry?")) deleteMutation.mutate(e.id); }}
+                      className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

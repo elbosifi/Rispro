@@ -91,6 +91,17 @@ export async function createPatient(payload: any) {
   return mapPatient(raw.patient);
 }
 
+export async function mergePatients(targetPatientId: number, sourcePatientId: number, confirmationText = "MERGE") {
+  return api<{ patient: any }>("/patients/merge", {
+    method: "POST",
+    body: JSON.stringify({ targetPatientId, sourcePatientId, confirmationText })
+  });
+}
+
+export async function fetchPatientNoShowHistory(patientId: number) {
+  return api<{ noShowCount: number; lastNoShowDate: string | null }>(`/patients/${patientId}/no-show`);
+}
+
 // -- Appointments --
 export async function getAppointmentAvailability(modalityId: number, days = 14) {
   const raw = await api<{ availability: any[] }>(`/appointments/availability?modalityId=${modalityId}&days=${days}`);
@@ -100,6 +111,34 @@ export async function getAppointmentAvailability(modalityId: number, days = 14) 
 export async function createAppointment(payload: any) {
   const raw = await api<{ appointment: any }>("/appointments", {
     method: "POST",
+    body: JSON.stringify(payload)
+  });
+  return mapAppointmentWithDetails(raw.appointment);
+}
+
+export async function getAppointmentById(id: number) {
+  const raw = await api<{ appointment: any }>(`/appointments/${id}`);
+  return mapAppointmentWithDetails(raw.appointment);
+}
+
+export async function updateAppointment(id: number, payload: any) {
+  const raw = await api<{ appointment: any }>(`/appointments/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+  return mapAppointmentWithDetails(raw.appointment);
+}
+
+export async function cancelAppointment(id: number, cancelReason: string) {
+  return api<{ appointment: any }>(`/appointments/${id}/cancel`, {
+    method: "POST",
+    body: JSON.stringify({ cancelReason })
+  });
+}
+
+export async function updateAppointmentProtocol(id: number, payload: any) {
+  const raw = await api<{ appointment: any }>(`/appointments/${id}/protocol`, {
+    method: "PUT",
     body: JSON.stringify(payload)
   });
   return mapAppointmentWithDetails(raw.appointment);
@@ -177,9 +216,32 @@ export async function fetchSettings(category: string) {
   return mapSettings(raw.settings ?? []);
 }
 
+export async function saveSettings(category: string, payload: Record<string, any>) {
+  return api<{ settings: any }>(`/settings/${category}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchSettingsCatalog() {
+  const raw: any = await api("/settings/");
+  return raw.settings ?? [];
+}
+
 export async function fetchUsers() {
   const raw: any = await api("/users");
   return raw;
+}
+
+export async function createUser(payload: { username: string; fullName: string; password: string; role: string }) {
+  return api<{ user: any }>("/users", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteUser(userId: number) {
+  return api<{ user: any }>(`/users/${userId}`, { method: "DELETE" });
 }
 
 export async function fetchAuditEntries(limit: number) {
@@ -188,6 +250,19 @@ export async function fetchAuditEntries(limit: number) {
     entries: mapAuditEntries(raw.entries ?? []),
     meta: raw.meta ?? {}
   };
+}
+
+export async function exportAuditCSV() {
+  // Use fetch directly for blob download
+  const response = await fetch(`/api/audit/export`, { credentials: "include" });
+  if (!response.ok) throw new Error("Audit export failed");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `audit-export-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 export async function fetchExamTypes() {
@@ -213,6 +288,10 @@ export async function upsertNameDictionaryEntry(arabicText: string, englishText:
     method: "POST",
     body: JSON.stringify({ arabicText, englishText })
   });
+}
+
+export async function deleteNameDictionaryEntry(entryId: number) {
+  return api<{ entry: any }>(`/settings/name-dictionary/${entryId}`, { method: "DELETE" });
 }
 
 export async function fetchDicomDevices() {
