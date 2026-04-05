@@ -160,7 +160,12 @@ export default function CalendarPage() {
                 <div className="col-span-7 p-8">
                   <div className="text-center text-red-600 dark:text-red-400 text-sm">
                     Failed to load calendar data
-                    <p className="text-xs mt-1 text-stone-500 dark:text-stone-400 font-mono">{(monthError as Error).message}</p>
+                    <p className="text-xs mt-1 text-stone-500 dark:text-stone-400 font-mono break-all max-w-md mx-auto">{(monthError as Error).message}</p>
+                    {(monthError as Error).message?.includes("appointmentId") && (
+                      <p className="text-xs mt-2 text-amber-600 dark:text-amber-400">
+                        The server may need to be restarted to load the new calendar endpoints.
+                      </p>
+                    )}
                     <button
                       onClick={() => window.location.reload()}
                       className="mt-3 px-3 py-1 text-xs bg-teal-600 hover:bg-teal-700 text-white rounded transition-colors"

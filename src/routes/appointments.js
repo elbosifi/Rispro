@@ -36,6 +36,34 @@ export const appointmentsRouter = express.Router();
 
 appointmentsRouter.use(requireAuth);
 
+// Calendar routes first — before any parameterized routes like /:appointmentId
+appointmentsRouter.get(
+  "/calendar-summary",
+  asyncRoute(async (req, res) => {
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const query = asUnknownRecord(request.query);
+    const summary = await listAppointmentsCalendarSummary({
+      dateFrom: asOptionalString(query.dateFrom) || "",
+      dateTo: asOptionalString(query.dateTo) || "",
+      modalityId: asOptionalString(query.modalityId)
+    });
+    res.json(summary);
+  })
+);
+
+appointmentsRouter.get(
+  "/by-date",
+  asyncRoute(async (req, res) => {
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const query = asUnknownRecord(request.query);
+    const appointments = await listAppointmentsByDate({
+      date: asOptionalString(query.date) || "",
+      modalityId: asOptionalString(query.modalityId)
+    });
+    res.json({ appointments });
+  })
+);
+
 appointmentsRouter.get(
   "/lookups",
   asyncRoute(async (_req, res) => {
@@ -64,35 +92,6 @@ appointmentsRouter.get(
       modalityId: asOptionalString(query.modalityId),
       query: asOptionalString(query.q),
       status: status
-    });
-    res.json({ appointments });
-  })
-);
-
-// Calendar summary: lightweight monthly summary grouped by date + modality
-appointmentsRouter.get(
-  "/calendar-summary",
-  asyncRoute(async (req, res) => {
-    const request = /** @type {AppointmentsRequest} */ (req);
-    const query = asUnknownRecord(request.query);
-    const summary = await listAppointmentsCalendarSummary({
-      dateFrom: asOptionalString(query.dateFrom) || "",
-      dateTo: asOptionalString(query.dateTo) || "",
-      modalityId: asOptionalString(query.modalityId)
-    });
-    res.json(summary);
-  })
-);
-
-// Day details: detailed appointments for a single date (calendar sidebar)
-appointmentsRouter.get(
-  "/by-date",
-  asyncRoute(async (req, res) => {
-    const request = /** @type {AppointmentsRequest} */ (req);
-    const query = asUnknownRecord(request.query);
-    const appointments = await listAppointmentsByDate({
-      date: asOptionalString(query.date) || "",
-      modalityId: asOptionalString(query.modalityId)
     });
     res.json({ appointments });
   })
