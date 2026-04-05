@@ -142,6 +142,9 @@ import {
  * @property {string | null} general_instruction_ar
  * @property {string | null} general_instruction_en
  * @property {boolean} is_active
+ * @property {string | null} safety_warning_ar
+ * @property {string | null} safety_warning_en
+ * @property {boolean} safety_warning_enabled
  */
 
 /**
@@ -1185,7 +1188,7 @@ export async function listModalitiesForSettings({ includeInactive = false } = {}
   const whereClause = includeInactive ? "" : "where is_active = true";
   const { rows } = await pool.query(
     `
-      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
       from modalities
       ${whereClause}
       order by name_en asc
@@ -1209,6 +1212,9 @@ export async function createModality(payload, currentUserId = null) {
   const generalInstructionAr = String(payload.generalInstructionAr || "").trim();
   const generalInstructionEn = String(payload.generalInstructionEn || "").trim();
   const isActive = String(payload.isActive || "enabled") === "enabled";
+  const safetyWarningAr = String(payload.safetyWarningAr || "").trim();
+  const safetyWarningEn = String(payload.safetyWarningEn || "").trim();
+  const safetyWarningEnabled = payload.safetyWarningEnabled !== false;
 
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
@@ -1227,12 +1233,15 @@ export async function createModality(payload, currentUserId = null) {
           daily_capacity,
           general_instruction_ar,
           general_instruction_en,
-          is_active
+          is_active,
+          safety_warning_ar,
+          safety_warning_en,
+          safety_warning_enabled
         )
-        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7)
-        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, nullif($8, ''), nullif($9, ''), $10)
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
       `,
-      [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
+      [code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled]
     );
     const createdModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to create modality.");
 
@@ -1276,6 +1285,9 @@ export async function updateModality(modalityId, payload, currentUserId) {
   const generalInstructionAr = String(payload.generalInstructionAr || "").trim();
   const generalInstructionEn = String(payload.generalInstructionEn || "").trim();
   const isActive = String(payload.isActive || "enabled") === "enabled";
+  const safetyWarningAr = String(payload.safetyWarningAr || "").trim();
+  const safetyWarningEn = String(payload.safetyWarningEn || "").trim();
+  const safetyWarningEnabled = payload.safetyWarningEnabled !== undefined ? Boolean(payload.safetyWarningEnabled) : true;
 
   if (!code || !nameAr || !nameEn) {
     throw new HttpError(400, "code, nameAr, and nameEn are required.");
@@ -1288,7 +1300,7 @@ export async function updateModality(modalityId, payload, currentUserId) {
 
     const existingResult = await client.query(
       `
-        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
         from modalities
         where id = $1
         limit 1
@@ -1313,11 +1325,14 @@ export async function updateModality(modalityId, payload, currentUserId) {
           general_instruction_ar = nullif($6, ''),
           general_instruction_en = nullif($7, ''),
           is_active = $8,
+          safety_warning_ar = nullif($9, ''),
+          safety_warning_en = nullif($10, ''),
+          safety_warning_enabled = $11,
           updated_at = now()
         where id = $1
-        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active, safety_warning_ar, safety_warning_en, safety_warning_enabled
       `,
-      [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive]
+      [cleanModalityId, code, nameAr, nameEn, dailyCapacity, generalInstructionAr, generalInstructionEn, isActive, safetyWarningAr, safetyWarningEn, safetyWarningEnabled]
     );
     const updatedModality = requireRow(/** @type {ModalityRow | undefined} */ (rows[0]), "Failed to update modality.");
 

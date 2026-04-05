@@ -397,7 +397,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true });
+  const [createForm, setCreateForm] = useState({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
@@ -411,7 +411,10 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       nameAr: data.name_ar,
       nameEn: data.name_en,
       dailyCapacity: data.daily_capacity,
-      isActive: data.is_active ? "enabled" : "disabled"
+      isActive: data.is_active ? "enabled" : "disabled",
+      safetyWarningAr: data.safety_warning_ar,
+      safetyWarningEn: data.safety_warning_en,
+      safetyWarningEnabled: data.safety_warning_enabled
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setEditingId(null); setMutationError(null); },
     onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
@@ -422,9 +425,12 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       nameAr: data.name_ar,
       nameEn: data.name_en,
       dailyCapacity: data.daily_capacity,
-      isActive: data.is_active ? "enabled" : "disabled"
+      isActive: data.is_active ? "enabled" : "disabled",
+      safetyWarningAr: data.safety_warning_ar,
+      safetyWarningEn: data.safety_warning_en,
+      safetyWarningEnabled: data.safety_warning_enabled
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setShowCreate(false); setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true }); setMutationError(null); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setShowCreate(false); setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true }); setMutationError(null); },
     onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
   });
 
@@ -437,7 +443,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
 
   const startEdit = (m: any) => {
     setEditingId(m.id);
-    setEditForm({ code: m.code, name_ar: m.name_ar, name_en: m.name_en, daily_capacity: m.daily_capacity ?? 0, is_active: m.is_active });
+    setEditForm({ code: m.code, name_ar: m.name_ar, name_en: m.name_en, daily_capacity: m.daily_capacity ?? 0, is_active: m.is_active, safety_warning_ar: m.safety_warning_ar || "", safety_warning_en: m.safety_warning_en || "", safety_warning_enabled: m.safety_warning_enabled !== false });
   };
 
   return (
@@ -459,8 +465,17 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
             <input value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="Code" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="Name (EN)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="Capacity" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="Daily Capacity" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
           </div>
+          <div className="flex items-center gap-3 pt-1">
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={createForm.safety_warning_enabled} onChange={(e) => setCreateForm({ ...createForm, safety_warning_enabled: e.target.checked })} className="rounded" /> Safety Warning Enabled</label>
+          </div>
+          {createForm.safety_warning_enabled && (
+            <div className="grid grid-cols-2 gap-2">
+              <textarea value={createForm.safety_warning_ar} onChange={(e) => setCreateForm({ ...createForm, safety_warning_ar: e.target.value })} placeholder="Safety Warning (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+              <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="Safety Warning (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+            </div>
+          )}
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
         </div>
       )}
@@ -476,6 +491,16 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   <input value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                   <input type="number" value={editForm.daily_capacity} onChange={(e) => setEditForm({ ...editForm, daily_capacity: parseInt(e.target.value) || 0 })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                 </div>
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.safety_warning_enabled} onChange={(e) => setEditForm({ ...editForm, safety_warning_enabled: e.target.checked })} className="rounded" /> Safety Warning Enabled</label>
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" /> Active</label>
+                </div>
+                {editForm.safety_warning_enabled && (
+                  <div className="grid grid-cols-2 gap-2">
+                    <textarea value={editForm.safety_warning_ar} onChange={(e) => setEditForm({ ...editForm, safety_warning_ar: e.target.value })} placeholder="Safety Warning (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+                    <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="Safety Warning (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>

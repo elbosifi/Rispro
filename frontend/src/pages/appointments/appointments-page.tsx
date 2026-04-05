@@ -107,10 +107,16 @@ export default function AppointmentsPage() {
   const examTypes = lookups?.examTypes ?? [];
   const priorities = lookups?.priorities ?? [];
 
+  // Safety warning state
+  const [showSafetyModal, setShowSafetyModal] = useState(false);
+  const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+
   const selectedModality = modalities.find(
     (m) => m.id.toString() === form.modalityId
-  );
-  const isMriModality = selectedModality?.nameEn.toUpperCase().includes("MRI") ?? false;
+  ) as any;
+  const hasSafetyWarning = selectedModality?.safety_warning_enabled &&
+    (selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar);
+  const safetyMessage = selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar || "";
 
   // Create appointment mutation
   const createMutation = useMutation({
@@ -124,14 +130,10 @@ export default function AppointmentsPage() {
     }
   });
 
-  // -- MRI Safety --
-  const [showSafetyModal, setShowSafetyModal] = useState(false);
-  const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
-
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    // If MRI modality and not yet acknowledged, show safety confirmation
-    if (isMriModality && !safetyAcknowledged) {
+    // If modality has safety warning and not yet acknowledged, show safety confirmation
+    if (hasSafetyWarning && !safetyAcknowledged) {
       setShowSafetyModal(true);
       return;
     }
@@ -260,17 +262,15 @@ export default function AppointmentsPage() {
                   ]}
                   required
                 />
-                {isMriModality && (
+                {hasSafetyWarning && (
                   <div className="md:col-span-2 p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
                     <div className="flex items-start gap-2">
                       <svg className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                       </svg>
                       <div>
-                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">MRI Safety Screening Required</p>
-                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
-                          Before booking this MRI appointment, you must ask the patient about MRI contraindications including: pacemakers, metallic implants, surgical clips, pregnancy, and any other metallic foreign bodies.
-                        </p>
+                        <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Safety Notice</p>
+                        <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">{safetyMessage}</p>
                       </div>
                     </div>
                   </div>
@@ -350,33 +350,47 @@ export default function AppointmentsPage() {
         <div className="lg:col-span-1">
           <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
             <h3 className="font-semibold text-stone-900 dark:text-white mb-3">
-              Modality Availability
+              Availability
             </h3>
             {!form.modalityId ? (
               <p className="text-sm text-stone-500 dark:text-stone-400">
                 Select a modality to see availability.
               </p>
             ) : availability && availability.length > 0 ? (
-              <ul className="space-y-2">
-                {availability.slice(0, 7).map((day: any) => (
-                  <li
-                    key={day.appointment_date}
-                    className="flex justify-between items-center text-sm p-2 rounded bg-stone-50 dark:bg-stone-700"
-                  >
-                    <span className="text-stone-700 dark:text-stone-300">
-                      {day.appointment_date}
-                    </span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                        day.is_full
-                          ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
-                          : "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-                      }`}
-                    >
-                      {day.remaining_capacity} slots
-                    </span>
-                  </li>
-                ))}
+              <ul className="space-y-1.5">
+                {availability.slice(0, 14).map((day: any) => {
+                  const pct = day.daily_capacity > 0
+                    ? Math.round((day.remaining_capacity / day.daily_capacity) * 100)
+                    : 0;
+                  const barColor = pct >= 80
+                    ? "bg-emerald-500"
+                    : pct >= 60
+                    ? "bg-lime-500"
+                    : pct >= 40
+                    ? "bg-yellow-500"
+                    : pct >= 20
+                    ? "bg-orange-500"
+                    : "bg-red-500";
+                  const weekday = new Date(`${day.appointment_date}T00:00:00Z`).toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
+                  return (
+                    <li key={day.appointment_date} className="space-y-1">
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="font-medium text-stone-700 dark:text-stone-300">
+                          {weekday} {formatDateLy(day.appointment_date)}
+                        </span>
+                        <span className={`tabular-nums ${day.is_full ? "text-red-600 dark:text-red-400 font-semibold" : "text-stone-500 dark:text-stone-400"}`}>
+                          {day.remaining_capacity}/{day.daily_capacity}
+                        </span>
+                      </div>
+                      <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${barColor}`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-sm text-stone-500 dark:text-stone-400">Loading...</p>
@@ -386,7 +400,7 @@ export default function AppointmentsPage() {
       </div>
     </div>
 
-    {/* MRI Safety Confirmation Modal */}
+    {/* Safety Confirmation Modal */}
     {showSafetyModal && (
       <div
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
@@ -400,19 +414,11 @@ export default function AppointmentsPage() {
               </svg>
             </div>
             <div>
-              <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-300">MRI Safety Confirmation</h3>
-              <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">
-                Have you screened this patient for MRI contraindications?
+              <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-300">Safety Confirmation</h3>
+              <p className="text-sm text-amber-700 dark:text-amber-400 mt-2">{safetyMessage}</p>
+              <p className="text-sm text-stone-600 dark:text-stone-400 mt-3 font-medium">
+                Have you confirmed this patient has no contraindications for {selectedModality?.nameEn}?
               </p>
-              <ul className="text-xs text-stone-600 dark:text-stone-400 mt-2 space-y-1 list-disc list-inside">
-                <li>Pacemaker or implanted defibrillator</li>
-                <li>Metallic implants or prostheses</li>
-                <li>Surgical clips or pins</li>
-                <li>Pregnancy (first trimester)</li>
-                <li>Metallic foreign bodies (eyes, etc.)</li>
-                <li>Cochlear implants</li>
-                <li>Insulin pumps or other electronic devices</li>
-              </ul>
             </div>
           </div>
           <div className="flex gap-3 pt-2">
