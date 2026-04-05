@@ -906,7 +906,7 @@ export async function listAppointmentsCalendarSummary(filters) {
 
   const params = [dateFrom, dateTo];
   const modalityFilterSql = modalityId ? ` and a.modality_id = $${params.length + 1}` : "";
-  if (modalityId) params.push(modalityId);
+  if (modalityId) params.push(String(modalityId));
 
   // Single aggregation query — no joins to patients, just modality name via a subselect
   const { rows } = await pool.query(
@@ -952,7 +952,7 @@ export async function listAppointmentsCalendarSummary(filters) {
   const days = rows.map((row) => ({
     appointment_date: row.appointment_date,
     total_count: Number(row.total_count || 0),
-    modalities: (row.modalities || []).map((m) => ({
+    modalities: (row.modalities || []).map(/** @param {{modality_id: string, modality_name_en: string, count: string}} m */ (m) => ({
       modality_id: Number(m.modality_id),
       modality_name_en: m.modality_name_en || "",
       count: Number(m.count)
@@ -985,7 +985,7 @@ export async function listAppointmentsByDate(filters) {
 
   const params = [date];
   const modalityFilterSql = modalityId ? ` and appointments.modality_id = $${params.length + 1}` : "";
-  if (modalityId) params.push(modalityId);
+  if (modalityId) params.push(String(modalityId));
 
   const { rows } = await pool.query(
     `

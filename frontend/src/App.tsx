@@ -18,6 +18,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { QueryProvider } from "@/providers/query-provider";
 
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
@@ -172,9 +173,11 @@ function RouterConfig() {
 export function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <RouterConfig />
-      </AuthProvider>
+      <QueryProvider>
+        <AuthProvider>
+          <RouterConfig />
+        </AuthProvider>
+      </QueryProvider>
     </BrowserRouter>
   );
 }
