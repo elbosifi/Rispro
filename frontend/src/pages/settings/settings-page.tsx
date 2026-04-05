@@ -11,6 +11,7 @@ import {
   fetchPacsConnection
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
+import { formatDateTimeLy } from "@/lib/date-format";
 
 type SettingsSection =
   | "menu"
@@ -177,7 +178,7 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
           {data?.entries?.slice(0, 10).map((entry: any) => (
             <li key={entry.id} className="p-3 bg-stone-50 dark:bg-stone-700 rounded-lg text-sm">
               <p className="text-stone-900 dark:text-white font-medium">{entry.actionType} • {entry.entityType}</p>
-              <p className="text-stone-500 dark:text-stone-400 text-xs mt-1">{entry.createdAt}</p>
+              <p className="text-stone-500 dark:text-stone-400 text-xs mt-1">{formatDateTimeLy(entry.createdAt)}</p>
             </li>
           ))}
         </ul>

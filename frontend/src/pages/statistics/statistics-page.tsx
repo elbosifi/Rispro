@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 
 export default function StatisticsPage() {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
 
   const { data: lookups } = useQuery({
@@ -110,7 +111,7 @@ export default function StatisticsPage() {
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
             {dailyBreakdown.map((row: any) => (
               <tr key={row.appointmentDate}>
-                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.appointmentDate}</td>
+                <td className="p-3 text-stone-900 dark:text-white font-medium">{formatDateLy(row.appointmentDate)}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.completedCount}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.noShowCount}</td>
@@ -127,7 +128,7 @@ function Input({ label, type, value, onChange }: { label: string; type: string; 
   return (
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
+      <input type={type} lang={type === "date" ? DATE_INPUT_LANG : undefined} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
     </div>
   );
 }

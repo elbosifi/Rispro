@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients } from "@/lib/api-hooks";
 import type { QueueSnapshot } from "@/types/api";
+import { todayIsoDateLy } from "@/lib/date-format";
 
 export default function QueuePage() {
   const [scanValue, setScanValue] = useState("");
@@ -74,7 +75,7 @@ export default function QueuePage() {
       walkInMutation.mutate({
         patientId: selectedWalkIn.id,
         modalityId: "",
-        appointmentDate: new Date().toISOString().split("T")[0],
+        appointmentDate: todayIsoDateLy(),
         isWalkIn: true
       });
     }

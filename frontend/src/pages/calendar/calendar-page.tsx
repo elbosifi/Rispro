@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 
 interface CalendarDay {
   date: string;
@@ -15,7 +16,7 @@ interface CalendarDay {
 export default function CalendarPage() {
   const today = new Date();
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
-  const [selectedDate, setSelectedDate] = useState(formatDate(today));
+  const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
   const [modalityFilter, setModalityFilter] = useState("");
 
   // Load appointments for the displayed month range
@@ -268,9 +269,7 @@ function formatDate(date: Date): string {
 }
 
 function formatDateDisplay(dateStr: string): string {
-  const [year, month, day] = dateStr.split("-").map(Number);
-  const date = new Date(year, month - 1, day);
-  return date.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
+  return formatDateLy(dateStr);
 }
 
 function Select({

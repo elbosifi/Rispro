@@ -9,6 +9,7 @@ import {
   fetchPatientById
 } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
+import { DATE_INPUT_LANG, formatDateLy } from "@/lib/date-format";
 
 interface AppointmentForm {
   patientId: string;
@@ -249,6 +250,7 @@ export default function AppointmentsPage() {
                   </label>
                   <input
                     type="date"
+                    lang={DATE_INPUT_LANG}
                     value={form.appointmentDate}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, appointmentDate: e.target.value }))
@@ -354,8 +356,8 @@ export default function AppointmentsPage() {
 function getAvailabilityText(availability: any[], date: string): string {
   const day = availability.find((d) => d.appointment_date === date);
   if (!day) return "No data for this date";
-  if (day.is_full) return "Fully booked";
-  return `${day.remaining_capacity} slots available`;
+  if (day.is_full) return `Fully booked on ${formatDateLy(date)}`;
+  return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
 }
 
 function Select({

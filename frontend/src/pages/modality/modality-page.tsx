@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
+import { DATE_INPUT_LANG, todayIsoDateLy } from "@/lib/date-format";
 
 export default function ModalityPage() {
   const [modalityId, setModalityId] = useState("");
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
   const queryClient = useQueryClient();
 
@@ -88,6 +89,7 @@ export default function ModalityPage() {
             </label>
             <input
               type="date"
+              lang={DATE_INPUT_LANG}
               value={date}
               onChange={(e) => setDate(e.target.value)}
               disabled={scope === "all"}

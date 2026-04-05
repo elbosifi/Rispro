@@ -8,6 +8,12 @@ import type { Patient, Modality, ExamType, ReportingPriority, Appointment, Queue
  */
 
 // -- Patient Mapping --
+function normalizeIsoDate(rawValue: unknown): string {
+  const raw = String(rawValue ?? "");
+  const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : raw;
+}
+
 export function mapPatient(raw: any): Patient {
   return {
     id: raw.id,
@@ -89,7 +95,7 @@ export function mapAppointment(raw: any): Appointment {
     examTypeId: raw.exam_type_id ?? raw.examTypeId ?? null,
     reportingPriorityId: raw.reporting_priority_id ?? raw.reportingPriorityId ?? null,
     accessionNumber: raw.accession_number ?? raw.accessionNumber ?? "",
-    appointmentDate: raw.appointment_date ?? raw.appointmentDate ?? "",
+    appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
     dailySequence: raw.daily_sequence ?? raw.dailySequence ?? 0,
     status: raw.status ?? "scheduled",
     isWalkIn: raw.is_walk_in ?? raw.isWalkIn ?? false,
@@ -137,7 +143,7 @@ export function mapAppointmentWithDetails(raw: any): any {
     modalitySlotNumber: raw.modality_slot_number ?? raw.modalitySlotNumber ?? null,
     dailySequence: raw.daily_sequence ?? raw.dailySequence ?? 0,
     accessionNumber: raw.accession_number ?? raw.accessionNumber ?? "",
-    appointmentDate: raw.appointment_date ?? raw.appointmentDate ?? "",
+    appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
     isWalkIn: raw.is_walk_in ?? raw.isWalkIn ?? false,
     isOverbooked: raw.is_overbooked ?? raw.isOverbooked ?? false,
     overbookingReason: raw.overbooking_reason ?? raw.overbookingReason ?? null,
@@ -197,7 +203,7 @@ function mapNoShowCandidate(raw: any): any {
   return {
     appointmentId: raw.appointment_id ?? raw.appointmentId ?? 0,
     accessionNumber: raw.accession_number ?? raw.accessionNumber ?? "",
-    appointmentDate: raw.appointment_date ?? raw.appointmentDate ?? "",
+    appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
     notes: raw.notes ?? null,
     patientId: raw.patient_id ?? raw.patientId ?? 0,
     arabicFullName: raw.arabic_full_name ?? raw.arabicFullName ?? "",
@@ -249,7 +255,7 @@ export function mapStatistics(raw: any): any {
       count: item.total_count ?? item.count ?? 0
     })),
     dailyBreakdown: (raw.daily_breakdown ?? raw.dailyBreakdown ?? []).map((item: any) => ({
-      appointmentDate: item.appointment_date ?? item.appointmentDate ?? "",
+      appointmentDate: normalizeIsoDate(item.appointment_date ?? item.appointmentDate ?? ""),
       totalCount: item.total_count ?? item.totalCount ?? 0,
       completedCount: item.completed_count ?? item.completedCount ?? 0,
       cancelledCount: item.cancelled_count ?? item.cancelledCount ?? 0,

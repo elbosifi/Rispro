@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 
 export default function PrintPage() {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
@@ -32,7 +33,7 @@ export default function PrintPage() {
             <p><strong>Patient:</strong> ${apt.arabicFullName}</p>
             <p><strong>Modality:</strong> ${apt.modalityNameEn}</p>
             <p><strong>Exam:</strong> ${apt.examNameEn || "—"}</p>
-            <p><strong>Date:</strong> ${apt.appointmentDate}</p>
+            <p><strong>Date:</strong> ${formatDateLy(apt.appointmentDate)}</p>
             <p><strong>Status:</strong> ${apt.status}</p>
           </body>
         </html>
@@ -132,7 +133,7 @@ export default function PrintPage() {
                   <Field label="Patient" value={selectedAppointment.arabicFullName} />
                   <Field label="Modality" value={selectedAppointment.modalityNameEn} />
                   <Field label="Exam" value={selectedAppointment.examNameEn} />
-                  <Field label="Date" value={selectedAppointment.appointmentDate} />
+                  <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
                   <Field label="Status" value={selectedAppointment.status} />
                 </div>
               </div>
@@ -152,7 +153,7 @@ function Input({ label, type, value, onChange, placeholder }: { label: string; t
   return (
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
+      <input type={type} lang={type === "date" ? DATE_INPUT_LANG : undefined} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
     </div>
   );
 }

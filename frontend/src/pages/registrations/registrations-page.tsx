@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 
 interface RegistrationsFilters {
   date: string;
@@ -13,7 +14,7 @@ interface RegistrationsFilters {
 
 export default function RegistrationsPage() {
   const [filters, setFilters] = useState<RegistrationsFilters>({
-    date: new Date().toISOString().split("T")[0],
+    date: todayIsoDateLy(),
     dateFrom: "",
     dateTo: "",
     modalityId: "",
@@ -169,7 +170,7 @@ export default function RegistrationsPage() {
                     {apt.arabicFullName}
                   </td>
                   <td className="p-3 text-stone-500 dark:text-stone-400">
-                    {apt.appointmentDate}
+                    {formatDateLy(apt.appointmentDate)}
                   </td>
                   <td className="p-3 text-stone-500 dark:text-stone-400">
                     {apt.modalityNameEn}
@@ -193,7 +194,7 @@ export default function RegistrationsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <Field label="Patient" value={selectedAppointment.arabicFullName} />
             <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-            <Field label="Date" value={selectedAppointment.appointmentDate} />
+            <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
             <Field label="Status" value={selectedAppointment.status} />
             <Field label="Walk-in" value={selectedAppointment.isWalkIn ? "Yes" : "No"} />
             <Field label="Notes" value={selectedAppointment.notes} />
@@ -241,6 +242,7 @@ function Input({
       </label>
       <input
         type={type}
+        lang={type === "date" ? DATE_INPUT_LANG : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

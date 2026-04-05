@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 
 export default function DoctorPage() {
-  const [date, setDate] = useState(new Date().toISOString().split("T")[0]);
+  const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
 
@@ -73,7 +74,7 @@ export default function DoctorPage() {
                       {apt.arabicFullName} • {apt.modalityNameEn}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      {apt.appointmentDate} • {apt.status}
+                      {formatDateLy(apt.appointmentDate)} • {apt.status}
                     </p>
                   </button>
                 </li>
@@ -94,7 +95,7 @@ export default function DoctorPage() {
                 <Field label="Patient" value={selectedAppointment.arabicFullName} />
                 <Field label="Modality" value={selectedAppointment.modalityNameEn} />
                 <Field label="Exam" value={selectedAppointment.examNameEn} />
-                <Field label="Date" value={selectedAppointment.appointmentDate} />
+                <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
                 <Field label="Status" value={selectedAppointment.status} />
                 <Field label="Notes" value={selectedAppointment.notes} />
               </div>
@@ -116,6 +117,7 @@ function Input({ label, type, value, onChange }: { label: string; type: string; 
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
       <input
         type={type}
+        lang={type === "date" ? DATE_INPUT_LANG : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
