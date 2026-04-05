@@ -581,6 +581,102 @@ function PacsConnectionSection({ onReAuthRequired }: { onReAuthRequired: (key: s
   );
 }
 
+// -- Settings Catalog: known keys → display labels, control types, and dropdown options --
+interface SettingControl {
+  label: string;
+  type: "dropdown" | "number" | "time" | "text";
+  options?: { value: string; label: string }[];
+  min?: string;
+  max?: string;
+  step?: string;
+}
+
+const SETTINGS_CATALOG: Record<string, SettingControl> = {
+  // Patient Registration
+  phone1_required: { label: "Phone 1 Required", type: "dropdown", options: [
+    { value: "required", label: "Required" },
+    { value: "optional", label: "Optional" }
+  ]},
+  dob_or_age_rule: { label: "DOB / Age Rule", type: "dropdown", options: [
+    { value: "age_or_dob_required", label: "Age or DOB Required" },
+    { value: "age_required", label: "Age Required" },
+    { value: "dob_required", label: "DOB Required" }
+  ]},
+  national_id_required: { label: "National ID Required", type: "dropdown", options: [
+    { value: "required", label: "Required" },
+    { value: "optional", label: "Optional" }
+  ]},
+  custom_fields_scope: { label: "Custom Fields Scope", type: "dropdown", options: [
+    { value: "all_patients", label: "All Patients" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+
+  // Scheduling & Capacity
+  capacity_mode: { label: "Capacity Mode", type: "dropdown", options: [
+    { value: "per_modality_per_day", label: "Per Modality Per Day" },
+    { value: "global", label: "Global" }
+  ]},
+  calendar_window_days: { label: "Calendar Window (Days)", type: "number", min: "1", max: "90" },
+  double_booking_prevention: { label: "Double Booking Prevention", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+  overbooking_reason_required: { label: "Overbooking Reason Required", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+  allow_friday_appointments: { label: "Allow Friday Appointments", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+  allow_saturday_appointments: { label: "Allow Saturday Appointments", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+
+  // Queue & Arrival
+  barcode_check_in: { label: "Barcode Check-In", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+  walk_in_queue: { label: "Walk-In Queue", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]},
+  no_show_review_time: { label: "No-Show Review Time", type: "time" },
+  no_show_confirmation_required: { label: "No-Show Confirmation Required", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled" },
+    { value: "disabled", label: "Disabled" }
+  ]}
+};
+
+function inferSettingControl(key: string, value: any): SettingControl {
+  const known = SETTINGS_CATALOG[key];
+  if (known) return known;
+
+  // Fallback inference for unknown keys
+  const strVal = String(value).toLowerCase();
+  if (strVal === "enabled" || strVal === "disabled") {
+    return { label: key.replace(/_/g, " "), type: "dropdown", options: [
+      { value: "enabled", label: "Enabled" },
+      { value: "disabled", label: "Disabled" }
+    ]};
+  }
+  if (strVal === "required" || strVal === "optional") {
+    return { label: key.replace(/_/g, " "), type: "dropdown", options: [
+      { value: "required", label: "Required" },
+      { value: "optional", label: "Optional" }
+    ]};
+  }
+  if (/^\d+$/.test(strVal)) {
+    return { label: key.replace(/_/g, " "), type: "number" };
+  }
+  if (/^\d{2}:\d{2}$/.test(strVal)) {
+    return { label: key.replace(/_/g, " "), type: "time" };
+  }
+  return { label: key.replace(/_/g, " "), type: "text" };
+}
+
 function SimpleSettingsSection({ category, onReAuthRequired }: { category: string; onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -588,14 +684,13 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
 
   const [mutationError, setMutationError] = useState<string | null>(null);
   const saveMutation = useMutation({
-    mutationFn: (payload: Record<string, any>) => saveSettings(category, payload),
+    mutationFn: (payload: { entries: { key: string; value: any }[] }) => saveSettings(category, payload),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["settings", category] }); setMutationError(null); },
     onError: (err: any) => { setMutationError(err?.message || "Save failed"); }
   });
 
-  const handleToggle = (key: string, currentValue: any) => {
-    const newValue = !currentValue;
-    saveMutation.mutate({ entries: [{ key, value: newValue }] });
+  const handleSave = (key: string, value: any) => {
+    saveMutation.mutate({ entries: [{ key, value }] });
   };
 
   if (error) {
@@ -612,26 +707,56 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
           <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
-      {Object.entries(data || {}).map(([key, value]: [string, any]) => (
-        <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
-          <span className="text-stone-700 dark:text-stone-300 font-medium capitalize">{key.replace(/_/g, " ")}</span>
-          {typeof value === "boolean" ? (
-            <button
-              onClick={() => handleToggle(key, value)}
-              disabled={saveMutation.isPending}
-              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                value
-                  ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-                  : "bg-stone-200 dark:bg-stone-600 text-stone-600 dark:text-stone-400"
-              }`}
-            >
-              {value ? "On" : "Off"}
-            </button>
-          ) : (
-            <span className="text-stone-900 dark:text-white">{String(value)}</span>
-          )}
-        </div>
-      ))}
+      {Object.entries(data || {}).map(([key, value]: [string, any]) => {
+        const control = inferSettingControl(key, value);
+        const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
+        return (
+          <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
+            <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{control.label}</span>
+            <div className="flex items-center gap-2">
+              {control.type === "dropdown" && control.options && (
+                <select
+                  value={String(value)}
+                  onChange={(e) => handleSave(key, e.target.value)}
+                  disabled={isPending}
+                  className="px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50"
+                >
+                  {control.options.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              )}
+              {control.type === "number" && (
+                <input
+                  type="number"
+                  value={String(value)}
+                  onChange={(e) => handleSave(key, e.target.value)}
+                  disabled={isPending}
+                  min={control.min}
+                  max={control.max}
+                  step={control.step}
+                  className="w-20 px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50 text-right"
+                />
+              )}
+              {control.type === "time" && (
+                <input
+                  type="time"
+                  value={String(value)}
+                  onChange={(e) => handleSave(key, e.target.value)}
+                  disabled={isPending}
+                  className="px-3 py-1.5 text-sm rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-1 focus:ring-teal-500 outline-none disabled:opacity-50"
+                />
+              )}
+              {control.type === "text" && (
+                <span className="text-stone-900 dark:text-white text-sm">{String(value)}</span>
+              )}
+              {isPending && (
+                <span className="w-4 h-4 border-2 border-stone-300 border-t-teal-600 rounded-full animate-spin" />
+              )}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
