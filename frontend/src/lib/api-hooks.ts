@@ -302,6 +302,60 @@ export async function fetchDicomDevices() {
   };
 }
 
+export async function createModality(payload: any) {
+  return api<{ modality: any }>("/settings/modalities", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateModality(id: number, payload: any) {
+  return api<{ modality: any }>(`/settings/modalities/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteModality(id: number) {
+  return api<{ modality: any }>(`/settings/modalities/${id}`, { method: "DELETE" });
+}
+
+export async function createExamType(payload: any) {
+  return api<{ examType: any }>("/settings/exam-types", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateExamType(id: number, payload: any) {
+  return api<{ examType: any }>(`/settings/exam-types/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteExamType(id: number) {
+  return api<{ examType: any }>(`/settings/exam-types/${id}`, { method: "DELETE" });
+}
+
+export async function createDicomDevice(payload: any) {
+  return api<{ device: any }>("/settings/dicom-devices", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateDicomDevice(id: number, payload: any) {
+  return api<{ device: any }>(`/settings/dicom-devices/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteDicomDevice(id: number) {
+  return api<{ device: any }>(`/settings/dicom-devices/${id}`, { method: "DELETE" });
+}
+
 export async function fetchPacsConnection() {
   const raw: any = await api("/settings/pacs_connection");
   return raw;

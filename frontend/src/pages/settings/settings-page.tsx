@@ -10,8 +10,19 @@ import {
   fetchSettings,
   fetchPacsConnection,
   deleteUser,
+  createUser,
   exportAuditCSV,
-  deleteNameDictionaryEntry
+  deleteNameDictionaryEntry,
+  createModality,
+  updateModality,
+  deleteModality,
+  createExamType,
+  updateExamType,
+  deleteExamType,
+  createDicomDevice,
+  updateDicomDevice,
+  deleteDicomDevice,
+  saveSettings
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -46,8 +57,23 @@ const SECTION_KEYS: SettingsSection[] = [
   "backup_restore"
 ];
 
-function sectionLabel(t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
-  return t(`settings.section.${section}` as TranslationKey);
+function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
+  // Map section keys to human-readable labels
+  const labels: Record<SettingsSection, string> = {
+    menu: "Menu",
+    patient_registration: "Patient Registration",
+    scheduling_and_capacity: "Scheduling & Capacity",
+    queue_and_arrival: "Queue & Arrival",
+    pacs_connection: "PACS Connection",
+    dicom_gateway: "DICOM Gateway",
+    users: "Users",
+    audit_log: "Audit Log",
+    exam_types: "Exam Types",
+    modalities: "Modalities",
+    name_dictionary: "Name Dictionary",
+    backup_restore: "Backup & Restore"
+  };
+  return labels[section];
 }
 
 export default function SettingsPage() {
@@ -129,9 +155,19 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
 
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ username: "", fullName: "", password: "", role: "receptionist" });
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
   const deleteMutation = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); }
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+  });
+  const createMutation = useMutation({
+    mutationFn: (data: any) => createUser(data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setShowCreate(false); setCreateForm({ username: "", fullName: "", password: "", role: "receptionist" }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
   });
 
   if (error) {
@@ -141,27 +177,55 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
   return (
-    <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-      {(data as any)?.users?.map((u: any) => (
-        <li key={u.id} className="py-3 flex items-center justify-between">
-          <div className="text-start">
-            <p className="font-medium text-stone-900 dark:text-white">{u.full_name}</p>
-            <p className="text-sm description-center">@{u.username} - {u.role}</p>
+    <div className="space-y-4">
+      {mutationError && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
+      <div className="flex justify-between items-center">
+        <span className="text-sm description-center">{(data as any)?.users?.length ?? 0} users</span>
+        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add User"}</button>
+      </div>
+
+      {showCreate && (
+        <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <input value={createForm.username} onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })} placeholder="Username" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.fullName} onChange={(e) => setCreateForm({ ...createForm, fullName: e.target.value })} placeholder="Full Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input type="password" value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} placeholder="Password" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <select value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
+              <option value="receptionist">Receptionist</option>
+              <option value="supervisor">Supervisor</option>
+            </select>
           </div>
-          <div className="flex items-center gap-2">
-            <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-              {u.is_active ? t("settings.active") : t("settings.inactive")}
-            </span>
-            <button
-              onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
-              className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-            >
-              Delete
-            </button>
-          </div>
-        </li>
-      ))}
-    </ul>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+        </div>
+      )}
+
+      <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+        {(data as any)?.users?.map((u: any) => (
+          <li key={u.id} className="py-3 flex items-center justify-between">
+            <div className="text-start">
+              <p className="font-medium text-stone-900 dark:text-white">{u.full_name}</p>
+              <p className="text-sm description-center">@{u.username} - {u.role}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                {u.is_active ? t("settings.active") : t("settings.inactive")}
+              </span>
+              <button
+                onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
+                className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -207,48 +271,233 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
 
 function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["exam-types"], queryFn: fetchExamTypes });
+  const { data: modalityData } = useQuery({ queryKey: ["modalities"], queryFn: fetchModalitiesSettings });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ modalityId: "", name_ar: "", name_en: "" });
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteExamType(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => updateExamType(id, {
+      modalityId: data.modalityId,
+      nameAr: data.name_ar,
+      nameEn: data.name_en,
+      is_active: data.is_active
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setEditingId(null); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+  });
+  const createMutation = useMutation({
+    mutationFn: (data: any) => createExamType({
+      modalityId: data.modalityId ? parseInt(data.modalityId, 10) : undefined,
+      nameAr: data.name_ar,
+      nameEn: data.name_en
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setShowCreate(false); setCreateForm({ modalityId: "", name_ar: "", name_en: "" }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+  });
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["exam-types"])} />;
     return <QueryError message={msg} />;
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+
+  const modalityOptions = ((modalityData as any)?.modalities ?? []).map((m: any) => ({
+    value: m.id,
+    label: `${m.name_en} (${m.name_ar})`
+  }));
+
+  const startEdit = (et: any) => {
+    setEditingId(et.id);
+    setEditForm({ modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: et.is_active });
+  };
+
   return (
-    <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-      {(data as any)?.examTypes?.map((et: any) => (
-        <li key={et.id} className="py-3">
-          <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, et.name_ar, et.name_en)}</p>
-          <p className="description-center text-sm">{et.name_en}</p>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-4">
+      {mutationError && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
+      <div className="flex justify-between items-center">
+        <span className="text-sm description-center">{(data as any)?.examTypes?.length ?? 0} exam types</span>
+        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Exam Type"}</button>
+      </div>
+
+      {showCreate && (
+        <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="Name (EN)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            {modalityOptions.length > 0 ? (
+              <select value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
+                <option value="">Select modality…</option>
+                {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            ) : (
+              <input value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} placeholder="Modality ID" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            )}
+          </div>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+        </div>
+      )}
+
+      <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+        {(data as any)?.examTypes?.map((et: any) => (
+          <li key={et.id} className="py-3">
+            {editingId === et.id ? (
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={editForm.name_en} onChange={(e) => setEditForm({ ...editForm, name_en: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div className="text-start">
+                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, et.name_ar, et.name_en)}</p>
+                  <p className="description-center text-sm">Modality ID: {et.modality_id ?? "—"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button onClick={() => { if (window.confirm("Delete this exam type?")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["modalities"], queryFn: fetchModalitiesSettings });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true });
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteModality(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => updateModality(id, {
+      code: data.code,
+      nameAr: data.name_ar,
+      nameEn: data.name_en,
+      dailyCapacity: data.daily_capacity,
+      isActive: data.is_active ? "enabled" : "disabled"
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setEditingId(null); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+  });
+  const createMutation = useMutation({
+    mutationFn: (data: any) => createModality({
+      code: data.code,
+      nameAr: data.name_ar,
+      nameEn: data.name_en,
+      dailyCapacity: data.daily_capacity,
+      isActive: data.is_active ? "enabled" : "disabled"
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setShowCreate(false); setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+  });
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["modalities"])} />;
     return <QueryError message={msg} />;
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+
+  const startEdit = (m: any) => {
+    setEditingId(m.id);
+    setEditForm({ code: m.code, name_ar: m.name_ar, name_en: m.name_en, daily_capacity: m.daily_capacity ?? 0, is_active: m.is_active });
+  };
+
   return (
-    <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-      {(data as any)?.modalities?.map((m: any) => (
-        <li key={m.id} className="py-3 flex items-center justify-between">
-          <div className="text-start">
-            <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, m.name_ar, m.name_en)}</p>
-            <p className="text-sm description-center">{t("settings.capacity")}: {m.daily_capacity ?? "-"}</p>
+    <div className="space-y-4">
+      {mutationError && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
+      <div className="flex justify-between items-center">
+        <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
+        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Modality"}</button>
+      </div>
+
+      {showCreate && (
+        <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <input value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="Code" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="Name (EN)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="Capacity" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
           </div>
-          <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-            {m.is_active ? t("settings.active") : t("settings.inactive")}
-          </span>
-        </li>
-      ))}
-    </ul>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+        </div>
+      )}
+
+      <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+        {(data as any)?.modalities?.map((m: any) => (
+          <li key={m.id} className="py-3">
+            {editingId === m.id ? (
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={editForm.code} onChange={(e) => setEditForm({ ...editForm, code: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.name_en} onChange={(e) => setEditForm({ ...editForm, name_en: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input type="number" value={editForm.daily_capacity} onChange={(e) => setEditForm({ ...editForm, daily_capacity: parseInt(e.target.value) || 0 })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div className="text-start">
+                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, m.name_ar, m.name_en)}</p>
+                  <p className="text-sm description-center">{t("settings.capacity")}: {m.daily_capacity ?? "-"}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {m.is_active ? t("settings.active") : t("settings.inactive")}
+                  </span>
+                  <button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button onClick={() => { if (window.confirm("Delete this modality?")) deleteMutation.mutate(m.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -257,9 +506,12 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["name-dictionary"], queryFn: fetchNameDictionary });
 
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
   const deleteMutation = useMutation({
-    mutationFn: (entryId: number) => deleteNameDictionaryEntry(entryId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); }
+    mutationFn: (id: number) => deleteNameDictionaryEntry(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
   });
 
   if (error) {
@@ -269,6 +521,12 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   }
   return (
     <div>
+      {mutationError && (
+        <div className="p-3 mb-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
       <p className="text-sm description-center mb-4">{t("settings.entriesCount", { count: data?.entries?.length ?? 0 })}</p>
       {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
         <div className="max-h-96 overflow-y-auto">
@@ -325,7 +583,21 @@ function PacsConnectionSection({ onReAuthRequired }: { onReAuthRequired: (key: s
 
 function SimpleSettingsSection({ category, onReAuthRequired }: { category: string; onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["settings", category], queryFn: () => fetchSettings(category) });
+
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  const saveMutation = useMutation({
+    mutationFn: (payload: Record<string, any>) => saveSettings(category, payload),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["settings", category] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Save failed"); }
+  });
+
+  const handleToggle = (key: string, currentValue: any) => {
+    const newValue = !currentValue;
+    saveMutation.mutate({ entries: [{ key, value: newValue }] });
+  };
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", category])} />;
@@ -334,10 +606,30 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
   return (
     <div className="space-y-3">
+      {mutationError && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
       {Object.entries(data || {}).map(([key, value]: [string, any]) => (
         <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
           <span className="text-stone-700 dark:text-stone-300 font-medium capitalize">{key.replace(/_/g, " ")}</span>
-          <span className="text-stone-900 dark:text-white">{String(value)}</span>
+          {typeof value === "boolean" ? (
+            <button
+              onClick={() => handleToggle(key, value)}
+              disabled={saveMutation.isPending}
+              className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                value
+                  ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
+                  : "bg-stone-200 dark:bg-stone-600 text-stone-600 dark:text-stone-400"
+              }`}
+            >
+              {value ? "On" : "Off"}
+            </button>
+          ) : (
+            <span className="text-stone-900 dark:text-white">{String(value)}</span>
+          )}
         </div>
       ))}
     </div>
@@ -346,24 +638,149 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
 
 function DicomGatewaySection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
+  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["dicom-devices"], queryFn: fetchDicomDevices });
+
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [showCreate, setShowCreate] = useState(false);
+  const [createForm, setCreateForm] = useState({ modality_id: "", device_name: "", modality_ae_title: "", scheduled_station_ae_title: "", station_name: "", station_location: "", source_ip: "", mwl_enabled: true, mpps_enabled: true, is_active: true });
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteDicomDevice(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: number; data: any }) => updateDicomDevice(id, {
+      deviceName: data.device_name,
+      modalityAeTitle: data.modality_ae_title,
+      scheduledStationAeTitle: data.scheduled_station_ae_title || data.modality_ae_title,
+      stationName: data.station_name,
+      stationLocation: data.station_location,
+      sourceIp: data.source_ip,
+      mwlEnabled: data.mwl_enabled ? "enabled" : "disabled",
+      mppsEnabled: data.mpps_enabled ? "enabled" : "disabled",
+      isActive: data.is_active ? "enabled" : "disabled"
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setEditingId(null); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+  });
+  const createMutation = useMutation({
+    mutationFn: (data: any) => createDicomDevice({
+      modalityId: parseInt(data.modality_id, 10),
+      deviceName: data.device_name,
+      modalityAeTitle: data.modality_ae_title,
+      scheduledStationAeTitle: data.scheduled_station_ae_title || data.modality_ae_title,
+      stationName: data.station_name,
+      stationLocation: data.station_location,
+      sourceIp: data.source_ip,
+      mwlEnabled: data.mwl_enabled ? "enabled" : "disabled",
+      mppsEnabled: data.mpps_enabled ? "enabled" : "disabled",
+      isActive: data.is_active ? "enabled" : "disabled"
+    }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setShowCreate(false); setMutationError(null); },
+    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+  });
+
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["dicom-devices"])} />;
     return <QueryError message={msg} />;
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
+
+  const startEdit = (d: any) => {
+    setEditingId(d.id);
+    setEditForm({
+      device_name: d.deviceName,
+      modality_ae_title: d.modalityAeTitle,
+      scheduled_station_ae_title: d.scheduledStationAeTitle,
+      station_name: d.stationName,
+      station_location: d.stationLocation || "",
+      source_ip: d.sourceIp || "",
+      mwl_enabled: d.mwlEnabled,
+      mpps_enabled: d.mppsEnabled,
+      is_active: d.isActive
+    });
+  };
+
   return (
-    <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-      {data?.devices?.map((d: any) => (
-        <li key={d.id} className="py-3">
-          <p className="font-medium text-stone-900 dark:text-white">{d.deviceName}</p>
-          <p className="text-sm description-center">
-            AE: {d.modalityAeTitle} - MWL: {d.mwlEnabled ? t("settings.yes") : t("settings.no")} - MPPS: {d.mppsEnabled ? t("settings.yes") : t("settings.no")}
-          </p>
-        </li>
-      ))}
-    </ul>
+    <div className="space-y-4">
+      {mutationError && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          {mutationError}
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+        </div>
+      )}
+      <div className="flex justify-between items-center">
+        <span className="text-sm description-center">{data?.devices?.length ?? 0} devices</span>
+        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Device"}</button>
+      </div>
+
+      {showCreate && (
+        <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
+          <div className="grid grid-cols-2 gap-2">
+            <input value={createForm.modality_id} onChange={(e) => setCreateForm({ ...createForm, modality_id: e.target.value })} placeholder="Modality ID" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.device_name} onChange={(e) => setCreateForm({ ...createForm, device_name: e.target.value })} placeholder="Device Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.modality_ae_title} onChange={(e) => setCreateForm({ ...createForm, modality_ae_title: e.target.value })} placeholder="AE Title" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.station_name} onChange={(e) => setCreateForm({ ...createForm, station_name: e.target.value })} placeholder="Station Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.station_location} onChange={(e) => setCreateForm({ ...createForm, station_location: e.target.value })} placeholder="Station Location" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.source_ip} onChange={(e) => setCreateForm({ ...createForm, source_ip: e.target.value })} placeholder="Source IP" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+          </div>
+          <div className="flex gap-3 text-sm">
+            <label><input type="checkbox" checked={createForm.mwl_enabled} onChange={(e) => setCreateForm({ ...createForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL</label>
+            <label><input type="checkbox" checked={createForm.mpps_enabled} onChange={(e) => setCreateForm({ ...createForm, mpps_enabled: e.target.checked })} className="mr-1" /> MPPS</label>
+            <label><input type="checkbox" checked={createForm.is_active} onChange={(e) => setCreateForm({ ...createForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
+          </div>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.modality_id || !createForm.device_name} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+        </div>
+      )}
+
+      <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+        {data?.devices?.map((d: any) => (
+          <li key={d.id} className="py-3">
+            {editingId === d.id ? (
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-2">
+                  <input value={editForm.device_name} onChange={(e) => setEditForm({ ...editForm, device_name: e.target.value })} placeholder="Device Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.modality_ae_title} onChange={(e) => setEditForm({ ...editForm, modality_ae_title: e.target.value })} placeholder="AE Title" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.station_name} onChange={(e) => setEditForm({ ...editForm, station_name: e.target.value })} placeholder="Station Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.station_location} onChange={(e) => setEditForm({ ...editForm, station_location: e.target.value })} placeholder="Location" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.source_ip} onChange={(e) => setEditForm({ ...editForm, source_ip: e.target.value })} placeholder="Source IP" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                </div>
+                <div className="flex gap-3">
+                  <label><input type="checkbox" checked={editForm.mwl_enabled} onChange={(e) => setEditForm({ ...editForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL</label>
+                  <label><input type="checkbox" checked={editForm.mpps_enabled} onChange={(e) => setEditForm({ ...editForm, mpps_enabled: e.target.checked })} className="mr-1" /> MPPS</label>
+                  <label><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => updateMutation.mutate({ id: d.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <div className="text-start">
+                  <p className="font-medium text-stone-900 dark:text-white">{d.deviceName}</p>
+                  <p className="text-sm description-center">
+                    AE: {d.modalityAeTitle} - MWL: {d.mwlEnabled ? t("settings.yes") : t("settings.no")} - MPPS: {d.mppsEnabled ? t("settings.yes") : t("settings.no")}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${d.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {d.isActive ? t("settings.active") : t("settings.inactive")}
+                  </span>
+                  <button onClick={() => startEdit(d)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button onClick={() => { if (window.confirm("Delete this DICOM device?")) deleteMutation.mutate(d.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
