@@ -14,8 +14,6 @@ import {
   listAppointmentStatistics,
   listAppointmentLookups,
   listAppointmentsForPrint,
-  listAppointmentsCalendarSummary,
-  listAppointmentsByDate,
   listAvailability,
   updateAppointment,
   updateAppointmentProtocol
@@ -35,34 +33,6 @@ import {
 export const appointmentsRouter = express.Router();
 
 appointmentsRouter.use(requireAuth);
-
-// Calendar routes first — before any parameterized routes like /:appointmentId
-appointmentsRouter.get(
-  "/calendar-summary",
-  asyncRoute(async (req, res) => {
-    const request = /** @type {AppointmentsRequest} */ (req);
-    const query = asUnknownRecord(request.query);
-    const summary = await listAppointmentsCalendarSummary({
-      dateFrom: asOptionalString(query.dateFrom) || "",
-      dateTo: asOptionalString(query.dateTo) || "",
-      modalityId: asOptionalString(query.modalityId)
-    });
-    res.json(summary);
-  })
-);
-
-appointmentsRouter.get(
-  "/by-date",
-  asyncRoute(async (req, res) => {
-    const request = /** @type {AppointmentsRequest} */ (req);
-    const query = asUnknownRecord(request.query);
-    const appointments = await listAppointmentsByDate({
-      date: asOptionalString(query.date) || "",
-      modalityId: asOptionalString(query.modalityId)
-    });
-    res.json({ appointments });
-  })
-);
 
 appointmentsRouter.get(
   "/lookups",
