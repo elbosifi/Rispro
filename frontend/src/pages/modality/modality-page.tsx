@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
-import { DATE_INPUT_LANG, todayIsoDateLy } from "@/lib/date-format";
+import { todayIsoDateLy } from "@/lib/date-format";
+import { DateInput } from "@/components/common/date-input";
 
 export default function ModalityPage() {
   const [modalityId, setModalityId] = useState("");
@@ -83,19 +84,7 @@ export default function ModalityPage() {
                 ))}
             </select>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-              Date
-            </label>
-            <input
-              type="date"
-              lang={DATE_INPUT_LANG}
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              disabled={scope === "all"}
-              className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none disabled:opacity-50"
-            />
-          </div>
+          <DateInput label="Date" value={date} onChange={setDate} disabled={scope === "all"} />
           <div>
             <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
               Scope

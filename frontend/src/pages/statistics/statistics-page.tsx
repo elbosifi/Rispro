@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/api-hooks";
-import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { DateInput } from "@/components/common/date-input";
 
 export default function StatisticsPage() {
   const [date, setDate] = useState(todayIsoDateLy());
@@ -32,7 +33,7 @@ export default function StatisticsPage() {
       {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Date" type="date" value={date} onChange={setDate} />
+          <DateInput label="Date" value={date} onChange={setDate} />
           <Select
             label="Modality"
             value={modalityId}
@@ -120,15 +121,6 @@ export default function StatisticsPage() {
           </tbody>
         </table>
       </div>
-    </div>
-  );
-}
-
-function Input({ label, type, value, onChange }: { label: string; type: string; value: string; onChange: (v: string) => void }) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <input type={type} lang={type === "date" ? DATE_INPUT_LANG : undefined} value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
     </div>
   );
 }

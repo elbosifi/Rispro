@@ -49,6 +49,39 @@ export function formatDateLy(value: unknown): string {
   return displayDateFormatter.format(date);
 }
 
+export function isoToDisplayDateLy(isoDate: string): string {
+  const normalized = extractIsoDate(isoDate);
+  if (!normalized) return "";
+  return formatDateLy(normalized);
+}
+
+export function displayDateToIso(value: string): string | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+
+  const match = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (!match) return null;
+
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  if (!Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year)) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 export function formatDateTimeLy(value: unknown): string {
   const date = toDateOrNull(value);
   if (!date) return "—";
@@ -68,4 +101,3 @@ export function todayIsoDateLy(): string {
   const year = parts.find((p) => p.type === "year")?.value ?? "1970";
   return `${year}-${month}-${day}`;
 }
-

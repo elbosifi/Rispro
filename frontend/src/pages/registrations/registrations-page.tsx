@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
-import { DATE_INPUT_LANG, formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { DateInput } from "@/components/common/date-input";
 
 interface RegistrationsFilters {
   date: string;
@@ -61,9 +62,8 @@ export default function RegistrationsPage() {
       {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          <Input
+          <DateInput
             label="Date"
-            type="date"
             value={filters.date}
             onChange={(v) => {
               handleFilterChange("date", v);
@@ -71,18 +71,16 @@ export default function RegistrationsPage() {
               handleFilterChange("dateTo", "");
             }}
           />
-          <Input
+          <DateInput
             label="From Date"
-            type="date"
             value={filters.dateFrom}
             onChange={(v) => {
               handleFilterChange("dateFrom", v);
               if (v) handleFilterChange("date", "");
             }}
           />
-          <Input
+          <DateInput
             label="To Date"
-            type="date"
             value={filters.dateTo}
             onChange={(v) => {
               handleFilterChange("dateTo", v);
@@ -242,7 +240,6 @@ function Input({
       </label>
       <input
         type={type}
-        lang={type === "date" ? DATE_INPUT_LANG : undefined}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}

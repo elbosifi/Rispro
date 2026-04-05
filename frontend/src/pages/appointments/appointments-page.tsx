@@ -9,7 +9,8 @@ import {
   fetchPatientById
 } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
-import { DATE_INPUT_LANG, formatDateLy } from "@/lib/date-format";
+import { formatDateLy } from "@/lib/date-format";
+import { DateInput } from "@/components/common/date-input";
 
 interface AppointmentForm {
   patientId: string;
@@ -245,18 +246,10 @@ export default function AppointmentsPage() {
                   ]}
                 />
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-                    Appointment Date
-                  </label>
-                  <input
-                    type="date"
-                    lang={DATE_INPUT_LANG}
+                  <DateInput
+                    label="Appointment Date"
                     value={form.appointmentDate}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, appointmentDate: e.target.value }))
-                    }
-                    required
-                    className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+                    onChange={(v) => setForm((f) => ({ ...f, appointmentDate: v }))}
                   />
                   {availability && form.appointmentDate && (
                     <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
