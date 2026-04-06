@@ -138,13 +138,6 @@ export default function AppointmentsPage() {
     setShowAllDays(false);
   }, [form.modalityId]);
 
-  useEffect(() => {
-    if (!form.patientId || !form.modalityId || form.appointmentDate || !nextOpenSlotDate) {
-      return;
-    }
-    setForm((f) => ({ ...f, appointmentDate: nextOpenSlotDate }));
-  }, [form.patientId, form.modalityId, form.appointmentDate, nextOpenSlotDate]);
-
   // Safety warning state
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
