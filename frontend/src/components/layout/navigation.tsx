@@ -90,6 +90,52 @@ function NavIconGlyph({ icon }: { icon: NavIcon }) {
   }
 }
 
+function PanelHeader({ language }: { language: Language }) {
+  return (
+    <div className="rounded-3xl p-4 text-white shadow-sm" style={{ background: "linear-gradient(135deg, var(--teal), var(--teal-strong))" }}>
+      <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">{t(language, "shell.menu")}</p>
+      <p className="mt-1 text-lg font-bold">{t(language, "shell.reception")}</p>
+      <p className="mt-2 text-xs opacity-80 leading-relaxed">
+        {language === "ar"
+          ? "تنقل سريع بين أقسام الاستقبال والمهام اليومية"
+          : "Fast access to reception and daily workflows"}
+      </p>
+    </div>
+  );
+}
+
+function NavButton({
+  item,
+  isActive,
+  label,
+  onClick
+}: {
+  item: NavItemConfig;
+  isActive: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`group w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-medium transition-all border ${
+        isActive ? "shadow-sm scale-[1.01]" : "hover:shadow-sm hover:-translate-y-[1px]"
+      }`}
+      style={{
+        backgroundColor: isActive ? "var(--teal)" : "var(--surface-strong)",
+        color: isActive ? "white" : "var(--text)",
+        borderColor: isActive ? "transparent" : "var(--line)"
+      }}
+      onClick={onClick}
+    >
+      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${isActive ? "bg-white/15" : "bg-stone-100 dark:bg-stone-700/60"}`}>
+        <NavIconGlyph icon={item.icon} />
+      </span>
+      <span className="flex-1 text-start leading-tight">{label}</span>
+      {isActive && <span className="h-2 w-2 rounded-full bg-white/90" />}
+    </button>
+  );
+}
+
 export function TopBar({
   user,
   language,
@@ -108,11 +154,11 @@ export function TopBar({
   const isArabic = language === "ar";
 
   return (
-    <header className="sticky top-0 z-50 border-b backdrop-blur-md" style={{ backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}>
-      <div className="flex items-center justify-between h-16 px-4">
+    <header className="sticky top-0 z-50 border-b backdrop-blur-xl shadow-sm" style={{ backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}>
+      <div className="flex items-center justify-between h-18 px-4 lg:px-6">
         <button
-          className="lg:hidden p-2 rounded-lg hover:opacity-80"
-          style={{ color: "var(--text)" }}
+          className="lg:hidden p-2.5 rounded-xl border hover:opacity-90"
+          style={{ color: "var(--text)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
           onClick={onMobileNavToggle}
           aria-label={t(language, "shell.toggleNav")}
         >
@@ -122,23 +168,31 @@ export function TopBar({
         </button>
 
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-bold tracking-tight" style={{ color: "var(--teal)" }}>
-            {t(language, "shell.reception")}
-          </h1>
+          <div className="hidden sm:flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: "linear-gradient(180deg, var(--teal), var(--teal-strong))" }}>
+            <span className="text-sm font-bold">R</span>
+          </div>
+          <div>
+            <h1 className="text-xl lg:text-2xl font-extrabold tracking-tight" style={{ color: "var(--teal)" }}>
+              {t(language, "shell.reception")}
+            </h1>
+            <p className="text-[11px] lg:text-xs uppercase tracking-[0.24em]" style={{ color: "var(--muted)" }}>
+              Radiology Information System
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            className="px-3 py-1.5 text-sm rounded-lg transition-opacity hover:opacity-80"
-            style={{ backgroundColor: "var(--bg-soft)", color: "var(--muted)" }}
+            className="px-3 py-2 text-sm rounded-xl transition-all hover:opacity-90 border"
+            style={{ backgroundColor: "var(--bg-soft)", color: "var(--muted)", borderColor: "var(--line)" }}
             onClick={onToggleLanguage}
           >
             {isArabic ? "EN" : "عربي"}
           </button>
 
           <button
-            className="p-2 rounded-lg transition-opacity hover:opacity-80"
-            style={{ color: "var(--muted)" }}
+            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
+            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
             onClick={onToggleTheme}
             aria-label={t(language, "shell.toggleTheme")}
           >
@@ -148,19 +202,24 @@ export function TopBar({
           </button>
 
           {user && (
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg" style={{ backgroundColor: "var(--bg-soft)" }}>
-              <span className="text-sm font-medium" style={{ color: "var(--text)" }}>
-                {user.fullName}
-              </span>
-              <span className="text-xs px-2 py-0.5 rounded-full" style={{ backgroundColor: "var(--teal)", color: "white" }}>
-                {user.role}
-              </span>
+            <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-2xl border" style={{ backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}>
+              <div className="flex h-9 w-9 items-center justify-center rounded-full text-white text-sm font-bold" style={{ background: "linear-gradient(180deg, var(--teal), var(--teal-strong))" }}>
+                {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
+              </div>
+              <div className="leading-tight">
+                <span className="block text-sm font-semibold" style={{ color: "var(--text)" }}>
+                  {user.fullName}
+                </span>
+                <span className="block text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--muted)" }}>
+                  {user.role}
+                </span>
+              </div>
             </div>
           )}
 
           <button
-            className="px-3 py-1.5 text-sm rounded-lg transition-opacity hover:opacity-80"
-            style={{ backgroundColor: "var(--red)", color: "white" }}
+            className="px-4 py-2 text-sm rounded-xl transition-all hover:opacity-90 shadow-sm"
+            style={{ background: "linear-gradient(180deg, var(--red), #991b1b)", color: "white" }}
             onClick={onLogout}
           >
             {t(language, "common.signOut")}
@@ -185,25 +244,21 @@ export function SideNav({
   const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
 
   return (
-    <nav className="hidden lg:flex flex-col w-64 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir="ltr">
-      <div className="p-4 space-y-1">
-        {visibleItems.map((item) => {
-          const isActive = currentRoute === item.route;
-          return (
-            <button
-              key={item.route}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${isActive ? "shadow-sm" : "hover:opacity-80"}`}
-              style={{
-                backgroundColor: isActive ? "var(--teal)" : "transparent",
-                color: isActive ? "white" : "var(--text)"
-              }}
-              onClick={() => onNavigate(item.route)}
-            >
-              <span><NavIconGlyph icon={item.icon} /></span>
-              <span>{t(language, item.labelKey)}</span>
-            </button>
-          );
-        })}
+    <nav className="hidden lg:flex flex-col w-72 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir="ltr">
+      <div className="p-4 border-b" style={{ borderColor: "var(--line)" }}>
+        <PanelHeader language={language} />
+      </div>
+
+      <div className="p-3 space-y-2">
+        {visibleItems.map((item) => (
+          <NavButton
+            key={item.route}
+            item={item}
+            isActive={currentRoute === item.route}
+            label={t(language, item.labelKey)}
+            onClick={() => onNavigate(item.route)}
+          />
+        ))}
       </div>
     </nav>
   );
@@ -231,39 +286,29 @@ export function MobileDrawer({
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="absolute top-0 left-0 bottom-0 w-72 overflow-y-auto" style={{ backgroundColor: "var(--surface-strong)" }} dir="ltr">
-        <div className="flex items-center justify-between p-4 border-b" style={{ borderColor: "var(--line)" }}>
-          <h2 className="text-lg font-bold" style={{ color: "var(--teal)" }}>
-            {t(language, "shell.menu")}
-          </h2>
-          <button className="p-2 rounded-lg hover:opacity-80" style={{ color: "var(--muted)" }} onClick={onClose}>
+      <div className="absolute top-0 left-0 bottom-0 w-80 overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--surface-strong)" }} dir="ltr">
+        <div className="p-4 border-b relative" style={{ borderColor: "var(--line)" }}>
+          <PanelHeader language={language} />
+          <button className="absolute right-4 top-4 p-2.5 rounded-xl hover:opacity-90 border" style={{ color: "var(--muted)", backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }} onClick={onClose}>
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        <div className="p-4 space-y-1">
-          {visibleItems.map((item) => {
-            const isActive = currentRoute === item.route;
-            return (
-              <button
-                key={item.route}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${isActive ? "shadow-sm" : "hover:opacity-80"}`}
-                style={{
-                  backgroundColor: isActive ? "var(--teal)" : "transparent",
-                  color: isActive ? "white" : "var(--text)"
-                }}
-                onClick={() => {
-                  onNavigate(item.route);
-                  onClose();
-                }}
-              >
-                <span><NavIconGlyph icon={item.icon} /></span>
-                <span>{t(language, item.labelKey)}</span>
-              </button>
-            );
-          })}
+        <div className="p-3 space-y-2">
+          {visibleItems.map((item) => (
+            <NavButton
+              key={item.route}
+              item={item}
+              isActive={currentRoute === item.route}
+              label={t(language, item.labelKey)}
+              onClick={() => {
+                onNavigate(item.route);
+                onClose();
+              }}
+            />
+          ))}
         </div>
       </div>
     </div>
