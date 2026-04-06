@@ -388,7 +388,10 @@ function ActionLink({
   };
 
   return (
-    <Link to={to} className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${styles[tone]}`}>
+    <Link
+      to={to}
+      className={`w-full px-4 py-3 rounded-xl text-center text-base font-semibold tracking-wide transition-colors ${styles[tone]}`}
+    >
       {label}
     </Link>
   );
