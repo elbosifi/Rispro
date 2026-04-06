@@ -24,31 +24,155 @@ export default function PrintPage() {
 
   const handlePrint = (apt: any) => {
     const printWindow = window.open("", "_blank");
-    if (printWindow) {
-      printWindow.document.write(`
-        <html>
-          <head><title>Appointment Slip</title></head>
-          <body style="font-family: sans-serif; padding: 20px;">
-            <h1>Appointment Slip</h1>
-            <p><strong>Accession:</strong> ${apt.accessionNumber}</p>
-            <p><strong>Patient:</strong> ${apt.arabicFullName}</p>
-            <p><strong>Modality:</strong> ${apt.modalityNameEn}</p>
-            <p><strong>Exam:</strong> ${apt.examNameEn || "—"}</p>
-            <p><strong>Date:</strong> ${formatDateLy(apt.appointmentDate)}</p>
-            <p><strong>Status:</strong> ${apt.status}</p>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.print();
-    }
+    if (!printWindow) return;
+
+    const now = new Date().toLocaleString();
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Appointment Slip</title>
+          <style>
+            @page { size: A5 portrait; margin: 10mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111827;
+              background: #fff;
+            }
+            .slip {
+              width: 100%;
+              min-height: 100%;
+              border: 2px solid #0f766e;
+              border-radius: 14px;
+              padding: 16px;
+            }
+            .header {
+              text-align: center;
+              padding-bottom: 12px;
+              margin-bottom: 12px;
+              border-bottom: 1px solid #d1d5db;
+            }
+            .brand {
+              margin: 0;
+              font-size: 20px;
+              font-weight: 800;
+              color: #0f766e;
+            }
+            .title {
+              margin: 4px 0 0;
+              font-size: 12px;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.16em;
+            }
+            .meta {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 10px 12px;
+              font-size: 12px;
+            }
+            .field {
+              min-height: 48px;
+              padding: 8px 10px;
+              background: #f9fafb;
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+            }
+            .field.full {
+              grid-column: 1 / -1;
+            }
+            .label {
+              display: block;
+              margin-bottom: 4px;
+              font-size: 10px;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+            }
+            .value {
+              font-size: 13px;
+              font-weight: 700;
+              color: #111827;
+              word-break: break-word;
+            }
+            .section {
+              margin-top: 12px;
+              padding-top: 12px;
+              border-top: 1px solid #e5e7eb;
+            }
+            .section h2 {
+              margin: 0 0 8px;
+              font-size: 12px;
+              text-transform: uppercase;
+              letter-spacing: 0.08em;
+              color: #0f766e;
+            }
+            .notes {
+              font-size: 12px;
+              line-height: 1.55;
+              color: #374151;
+              white-space: pre-wrap;
+              word-break: break-word;
+            }
+            .footer {
+              margin-top: 14px;
+              padding-top: 10px;
+              border-top: 1px dashed #d1d5db;
+              display: flex;
+              justify-content: space-between;
+              gap: 12px;
+              font-size: 10px;
+              color: #6b7280;
+            }
+            .rtl {
+              direction: rtl;
+              text-align: right;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="slip">
+            <div class="header">
+              <p class="brand">RISpro Reception</p>
+              <p class="title">Appointment Slip</p>
+            </div>
+            <div class="meta">
+              ${slipField("Accession", apt.accessionNumber)}
+              ${slipField("Appointment Date", formatDateLy(apt.appointmentDate))}
+              ${slipField("Patient", apt.arabicFullName, true)}
+              ${slipField("English Name", apt.englishFullName || "—")}
+              ${slipField("National ID", apt.nationalId || "—")}
+              ${slipField("MRN", apt.mrn || "—")}
+              ${slipField("Age / Sex", `${apt.ageYears ?? "—"} / ${apt.sex || "—"}`)}
+              ${slipField("Phone", apt.phone1 || "—")}
+              ${slipField("Modality", apt.modalityNameEn || "—")}
+              ${slipField("Exam", apt.examNameEn || "—")}
+              ${slipField("Priority", apt.priorityNameEn || "Normal")}
+              ${slipField("Status", apt.status || "—")}
+              ${slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")}
+              ${slipField("Sequence", String(apt.dailySequence ?? "—"))}
+              ${slipField("Slot", apt.modalitySlotNumber ? String(apt.modalitySlotNumber) : "—")}
+              ${slipField("Created", apt.createdAt ? formatDateLy(apt.createdAt) : "—")}
+              ${apt.notes ? `<div class="field full"><span class="label">Notes</span><span class="value">${escapeHtml(apt.notes)}</span></div>` : ""}
+            </div>
+            <div class="footer">
+              <span>Printed by RISpro</span>
+              <span>${escapeHtml(now)}</span>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Printing</h2>
 
-      {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <DateInput label="Date" value={date} onChange={setDate} />
@@ -68,7 +192,6 @@ export default function PrintPage() {
         </div>
       </div>
 
-      {/* List + Slip */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700">
@@ -109,7 +232,6 @@ export default function PrintPage() {
           )}
         </div>
 
-        {/* Slip Preview */}
         <div>
           {selectedAppointment ? (
             <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
@@ -124,18 +246,31 @@ export default function PrintPage() {
                   Print Slip
                 </button>
               </div>
-              <div className="space-y-4 border-2 border-dashed border-stone-300 dark:border-stone-600 rounded-lg p-6">
+              <div className="space-y-4 border-2 border-dashed border-stone-300 dark:border-stone-600 rounded-lg p-6 max-w-[148mm] mx-auto">
                 <div className="text-center pb-4 border-b border-stone-200 dark:border-stone-700">
-                  <h2 className="text-xl font-bold text-teal-700 dark:text-teal-500">RISpro Reception</h2>
-                  <p className="text-sm text-stone-500 dark:text-stone-400">Appointment Slip</p>
+                  <h2 className="text-2xl font-bold text-teal-700 dark:text-teal-500">RISpro Reception</h2>
+                  <p className="text-xs tracking-[0.2em] uppercase text-stone-500 dark:text-stone-400">Appointment Slip</p>
                 </div>
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <Field label="Accession" value={selectedAppointment.accessionNumber} />
-                  <Field label="Patient" value={selectedAppointment.arabicFullName} />
-                  <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-                  <Field label="Exam" value={selectedAppointment.examNameEn} />
-                  <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
-                  <Field label="Status" value={selectedAppointment.status} />
+                  <Field label="Appointment Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
+                  <Field label="Patient" value={selectedAppointment.arabicFullName} rtl />
+                  <Field label="English Name" value={selectedAppointment.englishFullName || "—"} />
+                  <Field label="National ID" value={selectedAppointment.nationalId || "—"} />
+                  <Field label="MRN" value={selectedAppointment.mrn || "—"} />
+                  <Field label="Age / Sex" value={`${selectedAppointment.ageYears ?? "—"} / ${selectedAppointment.sex || "—"}`} />
+                  <Field label="Phone" value={selectedAppointment.phone1 || "—"} />
+                  <Field label="Modality" value={selectedAppointment.modalityNameEn || "—"} />
+                  <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
+                  <Field label="Priority" value={selectedAppointment.priorityNameEn || "Normal"} />
+                  <Field label="Status" value={selectedAppointment.status || "—"} />
+                  <Field label="Walk-In" value={selectedAppointment.isWalkIn ? "Yes" : "No"} />
+                  <Field label="Sequence" value={String(selectedAppointment.dailySequence ?? "—")} />
+                  <Field label="Slot" value={selectedAppointment.modalitySlotNumber ? String(selectedAppointment.modalitySlotNumber) : "—"} />
+                  <Field label="Created" value={selectedAppointment.createdAt ? formatDateLy(selectedAppointment.createdAt) : "—"} />
+                  <div className="col-span-2">
+                    <Field label="Notes" value={selectedAppointment.notes || "—"} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -150,26 +285,93 @@ export default function PrintPage() {
   );
 }
 
-function Input({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+function Input({
+  label,
+  type,
+  value,
+  onChange,
+  placeholder
+}: {
+  label: string;
+  type: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   return (
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none" />
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+      />
     </div>
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
+function Select({
+  label,
+  value,
+  onChange,
+  options
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+}) {
   return (
     <div>
       <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
-        {options.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
       </select>
     </div>
   );
 }
 
-function Field({ label, value }: { label: string; value: any }) {
-  return (<div><p className="text-stone-500 dark:text-stone-400 text-xs">{label}</p><p className="text-stone-900 dark:text-white font-medium">{value ?? "—"}</p></div>);
+function Field({
+  label,
+  value,
+  rtl = false
+}: {
+  label: string;
+  value: any;
+  rtl?: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/40 p-3 ${label === "Notes" ? "col-span-2" : ""} ${rtl ? "rtl" : ""}`}>
+      <p className="text-stone-500 dark:text-stone-400 text-[11px] uppercase tracking-[0.14em] mb-1">{label}</p>
+      <p className="text-stone-900 dark:text-white font-semibold text-base leading-snug break-words">{value ?? "—"}</p>
+    </div>
+  );
+}
+
+function slipField(label: string, value: any, rtl = false) {
+  return `
+    <div class="field ${rtl ? "rtl" : ""}">
+      <span class="label">${escapeHtml(label)}</span>
+      <span class="value">${escapeHtml(value ?? "—")}</span>
+    </div>
+  `;
+}
+
+function escapeHtml(value: any): string {
+  return String(value ?? "—")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
