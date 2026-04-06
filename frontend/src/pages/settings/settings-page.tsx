@@ -402,7 +402,11 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteModality(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setMutationError(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["modalities"] });
+      queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      setMutationError(null);
+    },
     onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
   });
   const updateMutation = useMutation({
@@ -416,7 +420,12 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       safetyWarningEn: data.safety_warning_en,
       safetyWarningEnabled: data.safety_warning_enabled
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setEditingId(null); setMutationError(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["modalities"] });
+      queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      setEditingId(null);
+      setMutationError(null);
+    },
     onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
   });
   const createMutation = useMutation({
@@ -430,7 +439,13 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       safetyWarningEn: data.safety_warning_en,
       safetyWarningEnabled: data.safety_warning_enabled
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["modalities"] }); setShowCreate(false); setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true }); setMutationError(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["modalities"] });
+      queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      setShowCreate(false);
+      setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
+      setMutationError(null);
+    },
     onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
   });
 
