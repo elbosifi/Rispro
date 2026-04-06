@@ -132,12 +132,12 @@ export default function PrintPage() {
             .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
             .row {
               display: grid;
-              grid-template-columns: 20mm 2fr 20mm 1fr 20mm 1fr 18mm 0.9fr;
-              gap: 4px 6px;
+              grid-template-columns: 22mm 2fr 22mm 1fr 22mm 1.1fr 22mm 1.5fr;
+              gap: 5px 7px;
               align-items: center;
-              padding: 8px 10px;
+              padding: 10px 12px;
               border-bottom: 1px solid #e5e7eb;
-              font-size: 10px;
+              font-size: 11px;
             }
             .row:nth-child(odd) {
               background: #f8fafc;
@@ -145,8 +145,9 @@ export default function PrintPage() {
             .row:nth-child(even) {
               background: #eef6f5;
             }
-            .label { font-size: 8px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-            .value { font-size: 10px; font-weight: 700; color: #111827; word-break: break-word; }
+            .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+            .value { font-size: 11px; font-weight: 700; color: #111827; word-break: break-word; line-height: 1.25; }
+            .arabic { direction: rtl; text-align: right; }
             .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
           </style>
         </head>
@@ -162,13 +163,13 @@ export default function PrintPage() {
                 (apt) => `
                 <div class="row">
                   <span class="label">Accession</span><span class="value">${escapeHtml(apt.accessionNumber)}</span>
-                  <span class="label">Patient</span><span class="value">${escapeHtml(apt.arabicFullName)}</span>
+                  <span class="label">Patient</span><span class="value arabic">${escapeHtml(apt.arabicFullName)}</span>
                   <span class="label">Modality</span><span class="value">${escapeHtml(apt.modalityNameEn || "—")}</span>
                   <span class="label">Status</span><span class="value">${escapeHtml(apt.status || "—")}</span>
                   <span class="label">Exam</span><span class="value">${escapeHtml(apt.examNameEn || "—")}</span>
-                  <span class="label">Seq</span><span class="value">${escapeHtml(String(apt.dailySequence ?? "—"))}</span>
                   <span class="label">Slot</span><span class="value">${escapeHtml(apt.modalitySlotNumber ? String(apt.modalitySlotNumber) : "—")}</span>
                   <span class="label">Priority</span><span class="value">${escapeHtml(apt.priorityNameEn || "Normal")}</span>
+                  <span class="label">Notes</span><span class="value arabic">${escapeHtml(apt.notes || "—")}</span>
                 </div>
               `
               )
