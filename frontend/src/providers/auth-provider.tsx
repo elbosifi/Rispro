@@ -27,6 +27,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const loginMutation = useMutation({
     mutationFn: ({ username, password }: { username: string; password: string }) =>
       loginApi(username, password),
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: (userData) => {
       queryClient.setQueryData(["auth-session"], userData);
       setIsTransitioning(false);
@@ -35,6 +38,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logoutMutation = useMutation({
     mutationFn: logoutApi,
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: () => {
       queryClient.setQueryData(["auth-session"], null);
       queryClient.clear();
@@ -44,6 +50,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const reAuthMutation = useMutation({
     mutationFn: (password: string) => reAuthSupervisor(password),
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: (userData) => {
       queryClient.setQueryData(["auth-session"], { ...userData, recentSupervisorReauth: true });
     }

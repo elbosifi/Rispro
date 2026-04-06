@@ -145,6 +145,8 @@ export function TopBar({
   user,
   language,
   isRtl,
+  onUndo,
+  onRedo,
   onToggleLanguage,
   onToggleTheme,
   onLogout,
@@ -153,6 +155,8 @@ export function TopBar({
   user: User | null;
   language: Language;
   isRtl: boolean;
+  onUndo: () => void;
+  onRedo: () => void;
   onToggleLanguage: () => void;
   onToggleTheme: () => void;
   onLogout: () => void;
@@ -187,6 +191,28 @@ export function TopBar({
         </div>
 
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
+          <button
+            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
+            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
+            onClick={onUndo}
+            aria-label="Undo"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4 4-4m-4 4h8a6 6 0 110 12h-2" />
+            </svg>
+          </button>
+
+          <button
+            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
+            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
+            onClick={onRedo}
+            aria-label="Redo"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l4-4-4-4m4 4H11a6 6 0 100 12h2" />
+            </svg>
+          </button>
+
           <button
             className="px-3 py-2 text-sm rounded-xl transition-all hover:opacity-90 border"
             style={{ backgroundColor: "var(--bg-soft)", color: "var(--muted)", borderColor: "var(--line)" }}

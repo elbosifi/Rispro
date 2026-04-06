@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -17,6 +18,7 @@ interface RegistrationsFilters {
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
+  const navigate = useNavigate();
   const [filters, setFilters] = useState<RegistrationsFilters>({
     date: todayIsoDateLy(),
     dateFrom: "",
@@ -171,9 +173,17 @@ export default function RegistrationsPage() {
 
       {selectedAppointment && (
         <div className="card-shell p-6">
-          <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">
-            {t("registrations.details", { accession: selectedAppointment.accessionNumber })}
-          </h3>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
+              {t("registrations.details", { accession: selectedAppointment.accessionNumber })}
+            </h3>
+            <button
+              onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Print
+            </button>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
             <Field label={t("registrations.patient")} value={chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)} />
             <Field label={t("registrations.modality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />

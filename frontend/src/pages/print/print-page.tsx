@@ -1,14 +1,17 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { fetchAppointments, fetchAppointmentLookups, getAppointmentById } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 
 export default function PrintPage() {
+  const [searchParams] = useSearchParams();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const appointmentIdParam = searchParams.get("appointmentId");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -21,6 +24,25 @@ export default function PrintPage() {
     queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }), ...(query && { q: query }) }),
     staleTime: 1000 * 30
   });
+
+  const { data: appointmentById } = useQuery({
+    queryKey: ["print-appointment", appointmentIdParam],
+    queryFn: () => getAppointmentById(parseInt(appointmentIdParam!, 10)),
+    enabled: !!appointmentIdParam && !isNaN(parseInt(appointmentIdParam, 10)),
+    staleTime: 1000 * 30
+  });
+
+  useEffect(() => {
+    if (appointmentById) {
+      setSelectedAppointment(appointmentById);
+    }
+  }, [appointmentById]);
+
+  useEffect(() => {
+    if (!appointmentIdParam || selectedAppointment) return;
+    const match = appointments.find((apt: any) => String(apt.id) === appointmentIdParam);
+    if (match) setSelectedAppointment(match);
+  }, [appointmentIdParam, appointments, selectedAppointment]);
 
   const handlePrint = (apt: any) => {
     const printWindow = window.open("", "_blank");

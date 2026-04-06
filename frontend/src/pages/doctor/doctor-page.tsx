@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -8,6 +9,7 @@ export default function DoctorPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const navigate = useNavigate();
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -88,9 +90,17 @@ export default function DoctorPage() {
         <div>
           {selectedAppointment ? (
             <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
-              <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">
-                Appointment Details
-              </h3>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
+                  Appointment Details
+                </h3>
+                <button
+                  onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
+                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+                >
+                  Print
+                </button>
+              </div>
               <div className="space-y-3 text-sm">
                 <Field label="Accession" value={selectedAppointment.accessionNumber} />
                 <Field label="Patient" value={selectedAppointment.arabicFullName} />

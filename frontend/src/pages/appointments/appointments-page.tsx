@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
@@ -12,6 +12,7 @@ import {
 import type { Patient } from "@/types/api";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { pushToast } from "@/lib/toast";
 
 interface AppointmentForm {
   patientId: string;
@@ -36,6 +37,7 @@ const DEFAULT_FORM: AppointmentForm = {
 };
 
 export default function AppointmentsPage() {
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
   const [form, setForm] = useState<AppointmentForm>(DEFAULT_FORM);
@@ -166,8 +168,19 @@ export default function AppointmentsPage() {
   // Create appointment mutation
   const createMutation = useMutation({
     mutationFn: createAppointment,
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: (appointment) => {
-      alert(`Appointment created! Accession: ${appointment.accessionNumber}`);
+      pushToast({
+        type: "success",
+        title: "Appointment created",
+        message: `Accession ${appointment.accessionNumber} is ready to print.`,
+        action: {
+          label: "Print slip",
+          onClick: () => navigate(`/print?appointmentId=${appointment.id}`)
+        }
+      });
       setForm(DEFAULT_FORM);
       setSelectedPatient(null);
       setSafetyAcknowledged(false);
@@ -187,7 +200,7 @@ export default function AppointmentsPage() {
 
   const submitAppointment = () => {
     setShowSafetyModal(false);
-    createMutation.mutate({
+      createMutation.mutate({
       patientId: parseInt(form.patientId, 10),
       modalityId: parseInt(form.modalityId, 10),
       examTypeId: form.examTypeId ? parseInt(form.examTypeId, 10) : undefined,

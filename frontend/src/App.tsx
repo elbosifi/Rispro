@@ -18,6 +18,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
+import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
 
@@ -97,6 +98,8 @@ function AppContent() {
         user={user}
         language={language}
         isRtl={isArabic}
+        onUndo={() => navigate(-1)}
+        onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}
         onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onLogout={logout}
@@ -144,6 +147,8 @@ function AppContent() {
         onNavigate={handleNavigate}
         onClose={() => setMobileNavOpen(false)}
       />
+
+      <ToastViewport />
     </div>
   );
 }

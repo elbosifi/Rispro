@@ -5,6 +5,7 @@ import type { QueueSnapshot } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
+import { pushToast } from "@/lib/toast";
 
 export default function QueuePage() {
   const { language, t } = useLanguage();
@@ -22,13 +23,24 @@ export default function QueuePage() {
 
   const scanMutation = useMutation({
     mutationFn: scanIntoQueue,
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: () => {
       setScanValue("");
       queryClient.invalidateQueries({ queryKey: ["queue"] });
-      alert(t("queue.scanSuccess"));
+      pushToast({
+        type: "success",
+        title: t("queue.scanSuccess"),
+        message: t("queue.scanSuccess")
+      });
     },
     onError: (err: any) => {
-      alert(err.message || t("queue.scanFailed"));
+      pushToast({
+        type: "error",
+        title: t("queue.scanFailed"),
+        message: err.message || t("queue.scanFailed")
+      });
     }
   });
 
@@ -43,12 +55,19 @@ export default function QueuePage() {
 
   const walkInMutation = useMutation({
     mutationFn: addWalkIn,
+    meta: {
+      suppressGlobalToast: true
+    },
     onSuccess: () => {
       setSelectedWalkIn(null);
       setWalkInSearch("");
       setWalkInResults([]);
       queryClient.invalidateQueries({ queryKey: ["queue"] });
-      alert(t("queue.walkInSuccess"));
+      pushToast({
+        type: "success",
+        title: t("queue.walkInSuccess"),
+        message: t("queue.walkInSuccess")
+      });
     }
   });
 

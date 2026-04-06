@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -18,6 +19,7 @@ export default function CalendarPage() {
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
   const [modalityFilter, setModalityFilter] = useState("");
+  const navigate = useNavigate();
 
   // Load appointments for the displayed month range
   const startDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth(), 1));
@@ -209,7 +211,15 @@ export default function CalendarPage() {
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
                       <span>{apt.modalityNameEn}</span>
-                      <span>#{apt.dailySequence}</span>
+                      <div className="flex items-center gap-2">
+                        <span>#{apt.dailySequence}</span>
+                        <button
+                          onClick={() => navigate(`/print?appointmentId=${apt.id}`)}
+                          className="text-teal-700 dark:text-teal-300 underline underline-offset-2"
+                        >
+                          Print
+                        </button>
+                      </div>
                     </div>
                   </li>
                 ))}
