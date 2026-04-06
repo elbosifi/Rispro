@@ -127,23 +127,26 @@ export default function PrintPage() {
             body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
             .slip { width: 100%; min-height: 100%; border: 1.5px solid #0f766e; border-radius: 12px; padding: 10px; }
             .header { text-align: center; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
-            .brand { margin: 0; font-size: 16px; font-weight: 800; color: #0f766e; }
-            .title { margin: 3px 0 0; font-size: 9px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
-            .summary { margin: 0 0 8px; font-size: 9px; color: #374151; text-align: center; }
+            .brand { margin: 0; font-size: 17px; font-weight: 800; color: #0f766e; }
+            .title { margin: 3px 0 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
+            .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
             .row {
               display: grid;
-              grid-template-columns: 18mm 1.7fr 18mm 1fr 18mm 1fr 16mm 0.8fr;
-              gap: 3px 5px;
+              grid-template-columns: 20mm 2fr 20mm 1fr 20mm 1fr 18mm 0.9fr;
+              gap: 4px 6px;
               align-items: center;
-              padding: 5px 7px;
-              border: 1px solid #e5e7eb;
-              border-radius: 8px;
-              background: #f9fafb;
-              font-size: 8px;
-              margin-bottom: 5px;
+              padding: 8px 10px;
+              border-bottom: 1px solid #e5e7eb;
+              font-size: 10px;
             }
-            .label { font-size: 7px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
-            .value { font-size: 8px; font-weight: 700; color: #111827; word-break: break-word; }
+            .row:nth-child(odd) {
+              background: #f8fafc;
+            }
+            .row:nth-child(even) {
+              background: #eef6f5;
+            }
+            .label { font-size: 8px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+            .value { font-size: 10px; font-weight: 700; color: #111827; word-break: break-word; }
             .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
           </style>
         </head>
