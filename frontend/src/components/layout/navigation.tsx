@@ -99,9 +99,7 @@ function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }
       <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">{t(language, "shell.menu")}</p>
       <p className="mt-1 text-lg font-bold">{t(language, "shell.reception")}</p>
       <p className="mt-2 text-xs opacity-80 leading-relaxed">
-        {language === "ar"
-          ? "تنقل سريع بين أقسام الاستقبال والمهام اليومية"
-          : "Fast access to reception and daily workflows"}
+        {t(language, language === "ar" ? "navPanel.titleAr" : "navPanel.titleEn")}
       </p>
     </div>
   );
@@ -185,7 +183,7 @@ export function TopBar({
               {t(language, "shell.reception")}
             </h1>
             <p className="text-[11px] lg:text-xs uppercase tracking-[0.24em]" style={{ color: "var(--muted)" }}>
-              Radiology Information System
+              {t(language, "navPanel.subtitle")}
             </p>
           </div>
         </div>
@@ -195,7 +193,7 @@ export function TopBar({
             className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
             style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
             onClick={onUndo}
-            aria-label="Undo"
+            aria-label={t(language, "navPanel.undo")}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4 4-4m-4 4h8a6 6 0 110 12h-2" />
@@ -206,7 +204,7 @@ export function TopBar({
             className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
             style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
             onClick={onRedo}
-            aria-label="Redo"
+            aria-label={t(language, "navPanel.redo")}
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l4-4-4-4m4 4H11a6 6 0 100 12h2" />

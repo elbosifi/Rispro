@@ -4,8 +4,11 @@ import { searchPatients, deletePatient } from "@/lib/api-hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updatePatient } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 export default function SearchPage() {
+  const { language } = useLanguage();
   const [inputValue, setInputValue] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -53,7 +56,7 @@ export default function SearchPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Patient Search</h2>
+        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "search.title")}</h2>
       </div>
 
       {/* Search Input */}
@@ -68,7 +71,7 @@ export default function SearchPage() {
         >
           <input
             type="text"
-            placeholder="Search by name, MRN, or National ID..."
+            placeholder={t(language, "search.placeholder")}
             className="flex-1 px-4 py-3 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -83,7 +86,7 @@ export default function SearchPage() {
             type="submit"
             className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-xl transition-colors"
           >
-            Search
+            {t(language, "search.searchBtn")}
           </button>
         </form>
       </div>
@@ -93,19 +96,19 @@ export default function SearchPage() {
         <div className="lg:col-span-1 bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden h-[600px] flex flex-col">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/50">
             <h3 className="font-semibold text-stone-900 dark:text-white">
-              Results ({isLoading ? "..." : patients.length})
+              {t(language, "search.results", { count: isLoading ? "..." : patients.length })}
             </h3>
             {searchQuery && (
               <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-                Search term: "{searchQuery}"
+                {t(language, "search.searchTerm", { q: searchQuery })}
               </p>
             )}
           </div>
           <div className="overflow-y-auto flex-1">
             {isLoading ? (
-              <div className="p-4 text-center text-stone-500">Searching...</div>
+              <div className="p-4 text-center text-stone-500">{t(language, "search.searching")}</div>
             ) : patients.length === 0 ? (
-              <div className="p-4 text-center text-stone-500">No patients found</div>
+              <div className="p-4 text-center text-stone-500">{t(language, "search.empty")}</div>
             ) : (
               <ul className="divide-y divide-stone-200 dark:divide-stone-700">
                 {patients.map((p) => (
@@ -160,10 +163,10 @@ export default function SearchPage() {
               <div className="text-center">
                 <div className="text-4xl mb-4">👤</div>
                 <h3 className="text-lg font-medium text-stone-900 dark:text-white">
-                  Select a patient
+                  {t(language, "search.selectPatient")}
                 </h3>
                 <p className="text-stone-500 dark:text-stone-400 mt-1">
-                  Choose a patient from the list to view details or edit.
+                  {t(language, "search.selectPrompt")}
                 </p>
               </div>
             </div>
@@ -175,28 +178,29 @@ export default function SearchPage() {
 }
 
 function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void }) {
+  const { language } = useLanguage();
   return (
     <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm">
       <div className="p-6 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-        <h3 className="text-xl font-bold text-stone-900 dark:text-white">Patient Details</h3>
+        <h3 className="text-xl font-bold text-stone-900 dark:text-white">{t(language, "search.detailsHeading")}</h3>
         <button
           onClick={onEdit}
           className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
-          Edit Patient
+          {t(language, "search.editBtn")}
         </button>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Field label="Arabic Name" value={patient.arabicFullName} />
-        <Field label="English Name" value={patient.englishFullName} />
-        <Field label="National ID" value={patient.nationalId} />
-        <Field label="MRN" value={patient.mrn} />
-        <Field label="Sex" value={patient.sex} />
-        <Field label="Age" value={patient.ageYears} />
-        <Field label="DOB" value={patient.estimatedDateOfBirth} />
-        <Field label="Phone" value={patient.phone1} />
+        <Field label={t(language, "search.fieldArabicName")} value={patient.arabicFullName} />
+        <Field label={t(language, "search.fieldEnglishName")} value={patient.englishFullName} />
+        <Field label={t(language, "search.fieldNationalId")} value={patient.nationalId} />
+        <Field label={t(language, "search.fieldMRN")} value={patient.mrn} />
+        <Field label={t(language, "search.fieldSex")} value={patient.sex} />
+        <Field label={t(language, "search.fieldAge")} value={patient.ageYears} />
+        <Field label={t(language, "search.fieldDOB")} value={patient.estimatedDateOfBirth} />
+        <Field label={t(language, "search.fieldPhone")} value={patient.phone1} />
         <div className="md:col-span-2">
-          <Field label="Address" value={patient.address} />
+          <Field label={t(language, "search.fieldAddress")} value={patient.address} />
         </div>
       </div>
     </div>
@@ -218,6 +222,7 @@ function EditPatientForm({
   isSaving: boolean;
   isDeleting: boolean;
 }) {
+  const { language } = useLanguage();
   const [form, setForm] = useState({
     arabicFullName: patient.arabicFullName || "",
     englishFullName: patient.englishFullName || "",
@@ -244,19 +249,19 @@ function EditPatientForm({
       className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm"
     >
       <div className="p-6 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-        <h3 className="text-xl font-bold text-stone-900 dark:text-white">Edit Patient</h3>
+        <h3 className="text-xl font-bold text-stone-900 dark:text-white">{t(language, "patients.editTitle")}</h3>
         <div className="flex gap-2">
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Delete this patient? This cannot be undone.")) {
+              if (window.confirm(t(language, "search.deleteConfirm"))) {
                 onDelete();
               }
             }}
             disabled={isDeleting}
             className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {isDeleting ? "Deleting..." : "Delete Patient"}
+            {isDeleting ? t(language, "search.deleting") : t(language, "search.deleteBtn")}
           </button>
           <button
             type="button"
@@ -270,58 +275,58 @@ function EditPatientForm({
             disabled={isSaving}
             className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm font-medium rounded-lg transition-colors"
           >
-            {isSaving ? "Saving..." : "Save Changes"}
+            {isSaving ? t(language, "search.saving") : t(language, "search.saveBtn")}
           </button>
         </div>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         <InputField
-          label="Arabic Name"
+          label={t(language, "search.fieldArabicName")}
           value={form.arabicFullName}
           onChange={(v) => setForm((f) => ({ ...f, arabicFullName: v }))}
           required
           dir="rtl"
         />
         <InputField
-          label="English Name"
+          label={t(language, "search.fieldEnglishName")}
           value={form.englishFullName || ""}
           onChange={(v) => setForm((f) => ({ ...f, englishFullName: v }))}
           dir="ltr"
         />
         <InputField
-          label="National ID"
+          label={t(language, "search.fieldNationalId")}
           value={form.nationalId || ""}
           onChange={(v) => setForm((f) => ({ ...f, nationalId: v }))}
         />
         <SelectField
-          label="Sex"
+          label={t(language, "search.fieldSex")}
           value={form.sex}
           onChange={(v) => setForm((f) => ({ ...f, sex: v }))}
           options={[
-            { value: "", label: "Select..." },
-            { value: "M", label: "Male" },
-            { value: "F", label: "Female" }
+            { value: "", label: t(language, "search.selectLabel") },
+            { value: "M", label: t(language, "search.male") },
+            { value: "F", label: t(language, "search.female") }
           ]}
         />
         <InputField
-          label="Age"
+          label={t(language, "search.fieldAge")}
           value={form.ageYears}
           onChange={(v) => setForm((f) => ({ ...f, ageYears: v }))}
           type="number"
         />
         <InputField
-          label="DOB (YYYY-MM-DD)"
+          label={t(language, "search.fieldDOBFormat")}
           value={form.estimatedDateOfBirth || ""}
           onChange={(v) => setForm((f) => ({ ...f, estimatedDateOfBirth: v }))}
         />
         <InputField
-          label="Phone"
+          label={t(language, "search.fieldPhone")}
           value={form.phone1}
           onChange={(v) => setForm((f) => ({ ...f, phone1: v }))}
           required
         />
         <InputField
-          label="Address"
+          label={t(language, "search.fieldAddress")}
           value={form.address || ""}
           onChange={(v) => setForm((f) => ({ ...f, address: v }))}
           className="md:col-span-2"

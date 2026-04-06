@@ -1,8 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/providers/auth-provider";
 import { useNavigate, useLocation } from "react-router-dom";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 export function LoginPage() {
+  const { language } = useLanguage();
   const { login, isLoading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -19,7 +22,7 @@ export function LoginPage() {
       await login(username, password);
       navigate(from, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : t(language, "login.failed"));
     }
   };
 
@@ -28,17 +31,17 @@ export function LoginPage() {
       <div className="w-full max-w-md bg-white dark:bg-stone-800 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-700 p-8 space-y-6">
         <div className="text-center space-y-2">
           <h1 className="text-3xl font-bold text-teal-700 dark:text-teal-500">
-            RISpro Reception
+            {t(language, "login.heading")}
           </h1>
           <p className="text-stone-500 dark:text-stone-400 text-sm">
-            Sign in to access the reception workspace
+            {t(language, "login.description")}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-              Username
+              {t(language, "login.username")}
             </label>
             <input
               type="text"
@@ -53,7 +56,7 @@ export function LoginPage() {
 
           <div>
             <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-              Password
+              {t(language, "login.password")}
             </label>
             <input
               type="password"
@@ -77,7 +80,7 @@ export function LoginPage() {
             disabled={isLoading || !username || !password}
             className="w-full py-3 px-4 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
           >
-            {isLoading ? "Signing in..." : "Sign in"}
+            {isLoading ? t(language, "login.signingIn") : t(language, "login.signIn")}
           </button>
         </form>
       </div>

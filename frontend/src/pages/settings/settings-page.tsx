@@ -60,22 +60,7 @@ const SECTION_KEYS: SettingsSection[] = [
 ];
 
 function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
-  // Map section keys to human-readable labels
-  const labels: Record<SettingsSection, string> = {
-    menu: "Menu",
-    patient_registration: "Patient Registration",
-    scheduling_and_capacity: "Scheduling & Capacity",
-    queue_and_arrival: "Queue & Arrival",
-    pacs_connection: "PACS Connection",
-    dicom_gateway: "DICOM Gateway",
-    users: "Users",
-    audit_log: "Audit Log",
-    exam_types: "Exam Types",
-    modalities: "Modalities",
-    name_dictionary: "Name Dictionary",
-    backup_restore: "Backup & Restore"
-  };
-  return labels[section];
+  return _t(`settings.section.${section}` as TranslationKey);
 }
 
 export default function SettingsPage() {

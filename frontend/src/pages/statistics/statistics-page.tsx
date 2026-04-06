@@ -3,8 +3,11 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 export default function StatisticsPage() {
+  const { language } = useLanguage();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
 
@@ -27,19 +30,19 @@ export default function StatisticsPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-        Statistics
+        {t(language, "statistics.title")}
       </h2>
 
       {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DateInput label="Date" value={date} onChange={setDate} />
+          <DateInput label={t(language, "statistics.dateCol")} value={date} onChange={setDate} />
           <Select
-            label="Modality"
+            label={t(language, "statistics.modalityCol")}
             value={modalityId}
             onChange={setModalityId}
             options={[
-              { value: "", label: "All" },
+              { value: "", label: t(language, "statistics.all") },
               ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
                 label: m.nameEn
@@ -52,19 +55,19 @@ export default function StatisticsPage() {
       {/* Status Breakdown */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-          <h3 className="font-semibold text-stone-900 dark:text-white">By Status</h3>
+          <h3 className="font-semibold text-stone-900 dark:text-white">{t(language, "statistics.byStatus")}</h3>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400">
             <tr>
-              <th className="text-right p-3">Status</th>
-              <th className="text-right p-3">Count</th>
+              <th className="text-right p-3">{t(language, "statistics.statusCol")}</th>
+              <th className="text-right p-3">{t(language, "statistics.countCol")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
             {statusBreakdown.map((row: any) => (
               <tr key={row.status}>
-                <td className="p-3 text-stone-900 dark:text-white font-medium capitalize">{row.status}</td>
+                <td className="p-3 text-stone-900 dark:text-white font-medium">{t(language, `status.${row.status}` as any) || row.status}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.count}</td>
               </tr>
             ))}
@@ -75,13 +78,13 @@ export default function StatisticsPage() {
       {/* Modality Breakdown */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-          <h3 className="font-semibold text-stone-900 dark:text-white">By Modality</h3>
+          <h3 className="font-semibold text-stone-900 dark:text-white">{t(language, "statistics.byModality")}</h3>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400">
             <tr>
-              <th className="text-right p-3">Modality</th>
-              <th className="text-right p-3">Count</th>
+              <th className="text-right p-3">{t(language, "statistics.modalityCol")}</th>
+              <th className="text-right p-3">{t(language, "statistics.countCol")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
@@ -98,15 +101,15 @@ export default function StatisticsPage() {
       {/* Daily Breakdown */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-          <h3 className="font-semibold text-stone-900 dark:text-white">Daily Trend</h3>
+          <h3 className="font-semibold text-stone-900 dark:text-white">{t(language, "statistics.dailyTrend")}</h3>
         </div>
         <table className="w-full text-sm">
           <thead className="bg-stone-50 dark:bg-stone-700/50 text-stone-500 dark:text-stone-400">
             <tr>
-              <th className="text-right p-3">Date</th>
-              <th className="text-right p-3">Total</th>
-              <th className="text-right p-3">Completed</th>
-              <th className="text-right p-3">No-Show</th>
+              <th className="text-right p-3">{t(language, "statistics.dateCol")}</th>
+              <th className="text-right p-3">{t(language, "statistics.totalCol")}</th>
+              <th className="text-right p-3">{t(language, "status.completed")}</th>
+              <th className="text-right p-3">{t(language, "status.no-show")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">

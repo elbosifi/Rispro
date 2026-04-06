@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 interface CalendarDay {
   date: string;
@@ -16,6 +18,7 @@ interface CalendarDay {
 }
 
 export default function CalendarPage() {
+  const { language } = useLanguage();
   const today = new Date();
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
@@ -82,14 +85,14 @@ export default function CalendarPage() {
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-          Appointment Calendar
+          {t(language, "calendar.title")}
         </h2>
         <div className="flex items-center gap-2">
           <Select
             value={modalityFilter}
             onChange={setModalityFilter}
             options={[
-              { value: "", label: "All Modalities" },
+              { value: "", label: t(language, "calendar.allModalities") },
               ...(lookups?.modalities ?? []).map((m: any) => ({
                 value: m.id.toString(),
                 label: m.nameEn
@@ -118,7 +121,7 @@ export default function CalendarPage() {
                   onClick={goToday}
                   className="px-3 py-1.5 text-sm bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors"
                 >
-                  Today
+                  {t(language, "calendar.today")}
                 </button>
                 <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors">
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,7 +133,7 @@ export default function CalendarPage() {
 
             {/* Weekday Headers */}
             <div className="grid grid-cols-7 bg-stone-50 dark:bg-stone-700/50 border-b border-stone-200 dark:border-stone-700">
-              {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
+              {[t(language, "calendar.sun"), t(language, "calendar.mon"), t(language, "calendar.tue"), t(language, "calendar.wed"), t(language, "calendar.thu"), t(language, "calendar.fri"), t(language, "calendar.sat")].map((day) => (
                 <div key={day} className="p-2 text-center text-xs font-medium text-stone-500 dark:text-stone-400">
                   {day}
                 </div>
@@ -140,7 +143,7 @@ export default function CalendarPage() {
             {/* Grid */}
             <div className="grid grid-cols-7">
               {isLoading ? (
-                <div className="col-span-7 p-8 text-center text-stone-500">Loading...</div>
+                <div className="col-span-7 p-8 text-center text-stone-500">{t(language, "calendar.loading")}</div>
               ) : (
                 gridDays.map((day) => (
                   <button
@@ -169,7 +172,7 @@ export default function CalendarPage() {
                           </div>
                         ))}
                         {day.summary.length > 2 && (
-                          <div className="text-[10px] text-stone-400 dark:text-stone-500">+{day.summary.length - 2} more</div>
+                          <div className="text-[10px] text-stone-400 dark:text-stone-500">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
                         )}
                       </div>
                     )}
@@ -185,10 +188,10 @@ export default function CalendarPage() {
           <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden sticky top-24">
             <div className="p-4 border-b border-stone-200 dark:border-stone-700">
               <h3 className="font-semibold text-stone-900 dark:text-white">
-                {selectedDate === formatDate(new Date()) ? "Today's" : formatDateDisplay(selectedDate)} Appointments
+                {selectedDate === formatDate(new Date()) ? t(language, "calendar.todayAppointments") : t(language, "calendar.dayAppointments", { date: formatDateDisplay(selectedDate) })}
               </h3>
               <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                {selectedAppointments.length} appointment{selectedAppointments.length !== 1 ? "s" : ""}
+                {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.appointmentCount", { count: 1 }) : t(language, "calendar.appointmentCountPlural", { count: selectedAppointments.length })}
               </p>
               <div className="mt-3 flex gap-2">
                 <button
@@ -197,14 +200,14 @@ export default function CalendarPage() {
                   disabled={selectedAppointments.length === 0}
                   className="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-40 transition-colors"
                 >
-                  Print day list
+                  {t(language, "calendar.printDayList")}
                 </button>
                 <button
                   type="button"
                   onClick={() => navigate(`/print?date=${selectedDate}`)}
                   className="px-3 py-1.5 text-sm rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
                 >
-                  Open print tab
+                  {t(language, "calendar.openPrintTab")}
                 </button>
               </div>
             </div>
@@ -217,7 +220,7 @@ export default function CalendarPage() {
                     </h4>
                     {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                        Edited
+                        {t(language, "appointmentEditor.edited")}
                       </span>
                     )}
                   </div>
@@ -225,15 +228,15 @@ export default function CalendarPage() {
                     onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
                     className="text-teal-700 dark:text-teal-300 underline underline-offset-2 text-xs"
                   >
-                    Print
+                    {t(language, "calendar.print")}
                   </button>
                 </div>
                 <div className="space-y-2 text-sm">
-                  <Field label="Patient" value={selectedAppointment.arabicFullName} />
-                  <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-                  <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
-                  <Field label="Priority" value={selectedAppointment.priorityNameEn || "Normal"} />
-                  <Field label="Notes" value={selectedAppointment.notes || "—"} />
+                  <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
+                  <Field label={t(language, "calendar.fieldModality")} value={selectedAppointment.modalityNameEn} />
+                  <Field label={t(language, "calendar.fieldExam")} value={selectedAppointment.examNameEn || "—"} />
+                  <Field label={t(language, "calendar.fieldPriority")} value={selectedAppointment.priorityNameEn || t(language, "appointmentEditor.normal")} />
+                  <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
                 </div>
                 <div className="mt-4">
                 <AppointmentEditor
@@ -246,10 +249,10 @@ export default function CalendarPage() {
               </div>
             )}
             {isLoading ? (
-              <div className="p-4 text-center text-stone-500">Loading...</div>
+              <div className="p-4 text-center text-stone-500">{t(language, "calendar.loading")}</div>
             ) : selectedAppointments.length === 0 ? (
               <div className="p-6 text-center text-stone-500 dark:text-stone-400 text-sm">
-                No appointments scheduled
+                {t(language, "calendar.noAppointments")}
               </div>
             ) : (
               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
@@ -283,7 +286,7 @@ export default function CalendarPage() {
                           }}
                           className="text-teal-700 dark:text-teal-300 underline underline-offset-2"
                         >
-                          Print
+                          {t(language, "calendar.print")}
                         </button>
                       </div>
                     </div>
@@ -373,6 +376,7 @@ function Select({
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { language } = useLanguage();
   const styles: Record<string, string> = {
     scheduled: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
     arrived: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
@@ -384,7 +388,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>
-      {status}
+      {t(language, `status.${status}` as any) || status}
     </span>
   );
 }
