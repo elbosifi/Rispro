@@ -10,7 +10,7 @@ import {
   fetchSettings
 } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
-import { formatDateLy } from "@/lib/date-format";
+import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 
 interface AppointmentForm {
@@ -106,7 +106,21 @@ export default function AppointmentsPage() {
   });
   const nextOpenSlotDate = useMemo(() => {
     const rows = suggestionAvailability ?? [];
-    const next = rows.find((day: any) => !day.is_full);
+    const tripoliHour = Number(
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "Africa/Tripoli",
+        hour: "2-digit",
+        hour12: false
+      }).format(new Date())
+    );
+    const isAfterTwoPmTripoli = tripoliHour >= 14;
+    const today = todayIsoDateLy();
+    const next = rows.find((day: any) => {
+      if (day.is_full) return false;
+      const dayKey = normalizeDateKey(day.appointment_date);
+      if (isAfterTwoPmTripoli && dayKey === today) return false;
+      return true;
+    });
     return next ? normalizeDateKey(next.appointment_date) : "";
   }, [suggestionAvailability]);
 
