@@ -634,6 +634,59 @@ export async function updatePatient(patientId, payload, updatedByUserId) {
 }
 
 /**
+ * @param {UserId} patientId
+ * @param {OptionalUserId} deletedByUserId
+ * @returns {Promise<{ ok: boolean }>}
+ */
+export async function deletePatient(patientId, deletedByUserId) {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    const previousPatient = await getPatientById(cleanPatientId);
+
+    const { rows: appointmentRows } = await client.query(
+      `select id from appointments where patient_id = $1`,
+      [cleanPatientId]
+    );
+    const appointmentIds = appointmentRows.map((row) => Number(row.id)).filter((id) => Number.isInteger(id) && id > 0);
+
+    if (appointmentIds.length > 0) {
+      await client.query(`delete from queue_entries where appointment_id = any($1::bigint[])`, [appointmentIds]);
+      await client.query(`delete from documents where appointment_id = any($1::bigint[]) or patient_id = $2`, [appointmentIds, cleanPatientId]);
+      await client.query(`delete from appointment_status_history where appointment_id = any($1::bigint[])`, [appointmentIds]);
+      await client.query(`delete from appointments where patient_id = $1`, [cleanPatientId]);
+    } else {
+      await client.query(`delete from documents where patient_id = $1`, [cleanPatientId]);
+    }
+
+    await client.query(`delete from patient_custom_values where patient_id = $1`, [cleanPatientId]);
+    await client.query(`delete from patients where id = $1`, [cleanPatientId]);
+
+    await logAuditEntry(
+      {
+        entityType: "patient",
+        entityId: cleanPatientId,
+        actionType: "delete",
+        oldValues: previousPatient,
+        newValues: null,
+        changedByUserId: deletedByUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return { ok: true };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * @param {MergePatientsPayload} payload
  * @param {OptionalUserId} updatedByUserId
  * @returns {Promise<PatientRow>}

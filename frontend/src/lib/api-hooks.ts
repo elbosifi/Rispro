@@ -83,6 +83,12 @@ export async function updatePatient(id: number, payload: any) {
   return mapPatient(raw.patient);
 }
 
+export async function deletePatient(id: number) {
+  return api<{ ok: boolean }>(`/patients/${id}`, {
+    method: "DELETE"
+  });
+}
+
 export async function createPatient(payload: any) {
   const raw = await api<{ patient: any }>("/patients", {
     method: "POST",
@@ -135,6 +141,12 @@ export async function cancelAppointment(id: number, cancelReason: string) {
   return api<{ appointment: any }>(`/appointments/${id}/cancel`, {
     method: "POST",
     body: JSON.stringify({ cancelReason })
+  });
+}
+
+export async function deleteAppointment(id: number) {
+  return api<{ ok: boolean }>(`/appointments/${id}`, {
+    method: "DELETE"
   });
 }
 

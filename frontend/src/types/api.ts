@@ -97,6 +97,8 @@ export interface Appointment {
   overbookingReason?: string | null;
   approvedByName?: string | null;
   notes?: string | null;
+  modalityGeneralInstructionAr?: string | null;
+  modalityGeneralInstructionEn?: string | null;
   noShowReason?: string | null;
   cancelReason?: string | null;
   arrivedAt?: string | null;

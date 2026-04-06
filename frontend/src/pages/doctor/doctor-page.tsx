@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 
 export default function DoctorPage() {
   const [date, setDate] = useState(todayIsoDateLy());
@@ -91,9 +92,16 @@ export default function DoctorPage() {
           {selectedAppointment ? (
             <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
               <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-                  Appointment Details
-                </h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
+                    Appointment Details
+                  </h3>
+                  {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                      Edited
+                    </span>
+                  )}
+                </div>
                 <button
                   onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -109,6 +117,14 @@ export default function DoctorPage() {
                 <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
                 <Field label="Status" value={selectedAppointment.status} />
                 <Field label="Notes" value={selectedAppointment.notes} />
+              </div>
+              <div className="mt-6">
+                <AppointmentEditor
+                  appointment={selectedAppointment}
+                  lookups={lookups}
+                  onUpdated={(updated) => setSelectedAppointment(updated)}
+                  onDeleted={() => setSelectedAppointment(null)}
+                />
               </div>
             </div>
           ) : (

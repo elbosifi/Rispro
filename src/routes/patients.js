@@ -7,6 +7,7 @@ import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
   createPatient,
+  deletePatient,
   getPatientById,
   getPatientNoShowSummary,
   mergePatients,
@@ -81,5 +82,14 @@ patientsRouter.put(
     const request = /** @type {PatientsRequest} */ (req);
     const patient = await updatePatient(asOptionalString(request.params?.patientId) || "", request.body || {}, request.user.sub);
     res.json({ patient });
+  })
+);
+
+patientsRouter.delete(
+  "/:patientId",
+  asyncRoute(async (req, res) => {
+    const request = /** @type {PatientsRequest} */ (req);
+    const result = await deletePatient(asOptionalString(request.params?.patientId) || "", request.user.sub);
+    res.json(result);
   })
 );

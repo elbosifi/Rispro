@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 
 interface CalendarDay {
   date: string;
@@ -19,6 +20,7 @@ export default function CalendarPage() {
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
   const [modalityFilter, setModalityFilter] = useState("");
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
   const navigate = useNavigate();
 
   // Load appointments for the displayed month range
@@ -73,6 +75,7 @@ export default function CalendarPage() {
 
   const selectDay = (date: string) => {
     setSelectedDate(date);
+    setSelectedAppointment(null);
   };
 
   return (
@@ -205,6 +208,43 @@ export default function CalendarPage() {
                 </button>
               </div>
             </div>
+            {selectedAppointment && (
+              <div className="p-4 border-b border-stone-200 dark:border-stone-700">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <h4 className="font-semibold text-stone-900 dark:text-white">
+                      {selectedAppointment.accessionNumber}
+                    </h4>
+                    {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                        Edited
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
+                    className="text-teal-700 dark:text-teal-300 underline underline-offset-2 text-xs"
+                  >
+                    Print
+                  </button>
+                </div>
+                <div className="space-y-2 text-sm">
+                  <Field label="Patient" value={selectedAppointment.arabicFullName} />
+                  <Field label="Modality" value={selectedAppointment.modalityNameEn} />
+                  <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
+                  <Field label="Priority" value={selectedAppointment.priorityNameEn || "Normal"} />
+                  <Field label="Notes" value={selectedAppointment.notes || "—"} />
+                </div>
+                <div className="mt-4">
+                <AppointmentEditor
+                  appointment={selectedAppointment}
+                  lookups={lookups}
+                  onUpdated={(updated) => setSelectedAppointment(updated)}
+                  onDeleted={() => setSelectedAppointment(null)}
+                />
+                </div>
+              </div>
+            )}
             {isLoading ? (
               <div className="p-4 text-center text-stone-500">Loading...</div>
             ) : selectedAppointments.length === 0 ? (
@@ -214,7 +254,13 @@ export default function CalendarPage() {
             ) : (
               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
                 {selectedAppointments.map((apt: any) => (
-                  <li key={apt.id} className="p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
+                  <li
+                    key={apt.id}
+                    onClick={() => setSelectedAppointment(apt)}
+                    className={`p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors cursor-pointer ${
+                      selectedAppointment?.id === apt.id ? "bg-teal-50 dark:bg-teal-900/20" : ""
+                    }`}
+                  >
                     <div className="flex items-start justify-between gap-2">
                       <div className="text-right flex-1">
                         <p className="font-medium text-stone-900 dark:text-white text-sm">
@@ -231,7 +277,10 @@ export default function CalendarPage() {
                       <div className="flex items-center gap-2">
                         <span>#{apt.dailySequence}</span>
                         <button
-                          onClick={() => navigate(`/print?appointmentId=${apt.id}`)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            navigate(`/print?appointmentId=${apt.id}`);
+                          }}
                           className="text-teal-700 dark:text-teal-300 underline underline-offset-2"
                         >
                           Print
@@ -337,5 +386,14 @@ function StatusBadge({ status }: { status: string }) {
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>
       {status}
     </span>
+  );
+}
+
+function Field({ label, value }: { label: string; value: any }) {
+  return (
+    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/40 p-3">
+      <p className="text-stone-500 dark:text-stone-400 text-[11px] uppercase tracking-[0.14em] mb-1">{label}</p>
+      <p className="text-stone-900 dark:text-white font-semibold text-sm leading-snug break-words">{value ?? "—"}</p>
+    </div>
   );
 }

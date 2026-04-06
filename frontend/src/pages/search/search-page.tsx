@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { searchPatients } from "@/lib/api-hooks";
+import { searchPatients, deletePatient } from "@/lib/api-hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { updatePatient } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
@@ -26,6 +26,15 @@ export default function SearchPage() {
       setSelectedPatient(updatedPatient);
       setIsEditing(false);
       // Refresh search results in case name changed
+      queryClient.invalidateQueries({ queryKey: ["patients", searchQuery] });
+    }
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deletePatient(id),
+    onSuccess: () => {
+      setSelectedPatient(null);
+      setIsEditing(false);
       queryClient.invalidateQueries({ queryKey: ["patients", searchQuery] });
     }
   });
@@ -136,7 +145,9 @@ export default function SearchPage() {
                 patient={selectedPatient}
                 onSave={handleSave}
                 onCancel={() => setIsEditing(false)}
+                onDelete={() => deleteMutation.mutate(selectedPatient.id)}
                 isSaving={updateMutation.isPending}
+                isDeleting={deleteMutation.isPending}
               />
             ) : (
               <PatientView
@@ -196,12 +207,16 @@ function EditPatientForm({
   patient,
   onSave,
   onCancel,
-  isSaving
+  onDelete,
+  isSaving,
+  isDeleting
 }: {
   patient: Patient;
   onSave: (p: Partial<Patient>) => void;
   onCancel: () => void;
+  onDelete: () => void;
   isSaving: boolean;
+  isDeleting: boolean;
 }) {
   const [form, setForm] = useState({
     arabicFullName: patient.arabicFullName || "",
@@ -231,6 +246,18 @@ function EditPatientForm({
       <div className="p-6 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
         <h3 className="text-xl font-bold text-stone-900 dark:text-white">Edit Patient</h3>
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Delete this patient? This cannot be undone.")) {
+                onDelete();
+              }
+            }}
+            disabled={isDeleting}
+            className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            {isDeleting ? "Deleting..." : "Delete Patient"}
+          </button>
           <button
             type="button"
             onClick={onCancel}

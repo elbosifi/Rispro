@@ -145,6 +145,8 @@ export function mapAppointmentWithDetails(raw: any): any {
     modalityNameAr: raw.modality_name_ar ?? raw.modalityNameAr ?? "",
     modalityNameEn: raw.modality_name_en ?? raw.modalityNameEn ?? "",
     modalityCode: raw.modality_code ?? raw.modalityCode ?? "",
+    modalityGeneralInstructionAr: raw.modality_general_instruction_ar ?? raw.modalityGeneralInstructionAr ?? null,
+    modalityGeneralInstructionEn: raw.modality_general_instruction_en ?? raw.modalityGeneralInstructionEn ?? null,
     // Exam type fields
     examNameAr: raw.exam_name_ar ?? raw.examNameAr ?? null,
     examNameEn: raw.exam_name_en ?? raw.examNameEn ?? null,

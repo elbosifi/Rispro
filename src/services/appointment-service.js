@@ -2210,3 +2210,44 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
     client.release();
   }
 }
+
+/**
+ * @param {number | string} appointmentId
+ * @param {UserId} currentUserId
+ * @returns {Promise<{ ok: boolean }>}
+ */
+export async function deleteAppointment(appointmentId, currentUserId) {
+  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+    const appointment = await getAppointmentById(client, cleanAppointmentId);
+
+    await client.query(`delete from queue_entries where appointment_id = $1`, [cleanAppointmentId]);
+    await client.query(`delete from documents where appointment_id = $1`, [cleanAppointmentId]);
+    await client.query(`delete from appointment_status_history where appointment_id = $1`, [cleanAppointmentId]);
+    await client.query(`delete from appointments where id = $1`, [cleanAppointmentId]);
+
+    await logAuditEntry(
+      {
+        entityType: "appointment",
+        entityId: cleanAppointmentId,
+        actionType: "delete",
+        oldValues: appointment,
+        newValues: null,
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
+    return { ok: true };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}

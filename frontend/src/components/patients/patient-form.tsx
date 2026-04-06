@@ -8,7 +8,8 @@ import {
   fetchNameDictionary,
   upsertNameDictionaryEntry,
   fetchPatientById,
-  updatePatient
+  updatePatient,
+  deletePatient
 } from "@/lib/api-hooks";
 import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
 import {
@@ -175,6 +176,17 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
       showToast(`Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
+    }
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => deletePatient(patientId!),
+    onSuccess: () => {
+      showToast("Patient deleted");
+      queryClient.invalidateQueries();
+      onCancel?.();
+    },
+    onError: (err: any) => {
+      showToast(err?.message || "Could not delete patient", "error");
     }
   });
   const mutation = isEdit ? updateMutation : createMutation;
@@ -402,6 +414,20 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
       {/* Actions */}
       <div className="flex gap-3">
+        {isEdit && (
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Delete this patient? This cannot be undone.")) {
+                deleteMutation.mutate();
+              }
+            }}
+            disabled={deleteMutation.isPending || mutation.isPending}
+            className="flex-1 py-3 px-4 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white font-medium rounded-xl transition-colors"
+          >
+            {deleteMutation.isPending ? "Deleting..." : "Delete Patient"}
+          </button>
+        )}
         {isEdit && onCancel && (
           <button type="button" onClick={onCancel} className="flex-1 py-3 px-4 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-300 font-medium rounded-xl transition-colors">Cancel</button>
         )}

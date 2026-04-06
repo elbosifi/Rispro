@@ -9,6 +9,7 @@ import {
   cancelAppointment,
   createAppointment,
   createExamType,
+  deleteAppointment,
   getAppointmentDaySettings,
   getAppointmentPrintDetails,
   listAppointmentStatistics,
@@ -166,6 +167,15 @@ appointmentsRouter.post(
       asOptionalString(body.cancelReason) || "",
       request.user.sub
     );
+    res.json(result);
+  })
+);
+
+appointmentsRouter.delete(
+  "/:appointmentId",
+  asyncRoute(async (req, res) => {
+    const request = /** @type {AppointmentsRequest} */ (req);
+    const result = await deleteAppointment(String(request.params?.appointmentId || ""), request.user.sub);
     res.json(result);
   })
 );
