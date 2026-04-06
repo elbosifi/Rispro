@@ -77,11 +77,11 @@ export default function AppointmentsPage() {
     staleTime: 1000 * 60 * 30
   });
 
-  // Availability pagination (at least 3 weeks per page, Sunday-first grouping)
+  // Availability pagination: setting value is days per page
   const [availPage, setAvailPage] = useState(0);
-  const AVAIL_WEEKS_PER_PAGE = 3;
-  const totalDays = parseInt((schedulingSettings as any)?.calendar_window_days, 10) || 14;
-  const availDaysNeeded = totalDays;
+  const [showAllDays, setShowAllDays] = useState(false);
+  const pageDays = parseInt((schedulingSettings as any)?.calendar_window_days, 10) || 14;
+  const availOffset = availPage * pageDays;
 
   const modalities = lookups?.modalities ?? [];
   const examTypes = lookups?.examTypes ?? [];
@@ -89,56 +89,26 @@ export default function AppointmentsPage() {
 
   // Load availability for selected modality
   const { data: availability } = useQuery({
-    queryKey: ["availability", form.modalityId, availDaysNeeded],
-    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), availDaysNeeded),
+    queryKey: ["availability", form.modalityId, pageDays, availOffset],
+    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), pageDays, availOffset),
     enabled: !!form.modalityId,
     staleTime: 1000 * 30
   });
   const availabilityRows = availability ?? [];
+  const displayRows = showAllDays ? availabilityRows : availabilityRows.filter((day: any) => !day.is_full);
 
-  const availabilityWeeks = useMemo(() => {
-    const weeks: any[][] = [];
-    let currentWeek: any[] = [];
-
-    availabilityRows.forEach((day, index) => {
-      const dateKey = normalizeDateKey(day.appointment_date);
-      const dateObj = toUtcDateFromIsoDay(dateKey);
-      const isSunday = dateObj.getUTCDay() === 0;
-
-      if (index === 0 || isSunday) {
-        if (currentWeek.length > 0) {
-          weeks.push(currentWeek);
-        }
-        currentWeek = [day];
-      } else {
-        currentWeek.push(day);
-      }
-    });
-
-    if (currentWeek.length > 0) {
-      weeks.push(currentWeek);
-    }
-
-    return weeks;
-  }, [availabilityRows]);
-
-  const totalAvailPages = Math.max(1, Math.ceil(availabilityWeeks.length / AVAIL_WEEKS_PER_PAGE));
-
-  useEffect(() => {
-    setAvailPage((p) => Math.min(p, totalAvailPages - 1));
-  }, [totalAvailPages]);
-
-  const visibleAvailability = useMemo(() => {
-    const startWeek = availPage * AVAIL_WEEKS_PER_PAGE;
-    const endWeek = startWeek + AVAIL_WEEKS_PER_PAGE;
-    const pageWeeks = availabilityWeeks.slice(startWeek, endWeek);
-    return pageWeeks.flatMap((week) =>
-      week.map((day, dayIndex) => ({
-        day,
-        showWeekHeader: dayIndex === 0
-      }))
-    );
-  }, [availabilityWeeks, availPage]);
+  // Next open slot suggestion after selecting patient + modality
+  const { data: suggestionAvailability } = useQuery({
+    queryKey: ["availability-next-open", form.modalityId],
+    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), 180, 0),
+    enabled: !!form.patientId && !!form.modalityId,
+    staleTime: 1000 * 30
+  });
+  const nextOpenSlotDate = useMemo(() => {
+    const rows = suggestionAvailability ?? [];
+    const next = rows.find((day: any) => !day.is_full);
+    return next ? normalizeDateKey(next.appointment_date) : "";
+  }, [suggestionAvailability]);
 
   // Search for patient
   const handlePatientSearch = (query: string) => {
@@ -165,7 +135,15 @@ export default function AppointmentsPage() {
     setForm((f) => ({ ...f, examTypeId: "", appointmentDate: "" }));
     setSafetyAcknowledged(false);
     setAvailPage(0);
+    setShowAllDays(false);
   }, [form.modalityId]);
+
+  useEffect(() => {
+    if (!form.patientId || !form.modalityId || form.appointmentDate || !nextOpenSlotDate) {
+      return;
+    }
+    setForm((f) => ({ ...f, appointmentDate: nextOpenSlotDate }));
+  }, [form.patientId, form.modalityId, form.appointmentDate, nextOpenSlotDate]);
 
   // Safety warning state
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -353,6 +331,18 @@ export default function AppointmentsPage() {
                     value={form.appointmentDate}
                     onChange={(v) => setForm((f) => ({ ...f, appointmentDate: v }))}
                   />
+                  {!!form.patientId && !!form.modalityId && !!nextOpenSlotDate && (
+                    <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
+                      Suggested next open slot: {formatDateLy(nextOpenSlotDate)}
+                      <button
+                        type="button"
+                        onClick={() => setForm((f) => ({ ...f, appointmentDate: nextOpenSlotDate }))}
+                        className="ml-2 underline underline-offset-2"
+                      >
+                        Use this date
+                      </button>
+                    </div>
+                  )}
                   {availability && form.appointmentDate && (
                     <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
                       {getAvailabilityText(availability, form.appointmentDate)}
@@ -428,39 +418,46 @@ export default function AppointmentsPage() {
                     ← Earlier
                   </button>
                   <span className="text-xs text-stone-500 dark:text-stone-400">
-                    Weeks Page {availPage + 1} / {totalAvailPages}
+                    Page {availPage + 1}
                   </span>
                   <button
                     onClick={() => setAvailPage((p) => p + 1)}
-                    disabled={availPage + 1 >= totalAvailPages}
                     className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-30 disabled:hover:bg-stone-100 dark:disabled:hover:bg-stone-700 rounded text-stone-700 dark:text-stone-300 transition-colors"
                   >
                     Later →
                   </button>
                 </div>
                 <p className="text-[11px] text-stone-500 dark:text-stone-400">
-                  Showing {availabilityRows.length} days (configured: {totalDays} days)
+                  Showing {displayRows.length} days on this page (setting: {pageDays} days per page)
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setShowAllDays((v) => !v)}
+                  className="text-xs text-teal-700 dark:text-teal-300 underline underline-offset-2"
+                >
+                  {showAllDays ? "Hide fully booked days" : "Show all days"}
+                </button>
 
                 <ul className="space-y-1.5">
-                  {visibleAvailability.map(({ day, showWeekHeader }: { day: any; showWeekHeader: boolean }) => {
-                    const pct = day.daily_capacity > 0
-                      ? Math.round((day.remaining_capacity / day.daily_capacity) * 100)
+                  {displayRows.map((day: any, idx: number) => {
+                    const occupancyPct = day.daily_capacity > 0
+                      ? Math.min(100, Math.max(0, Math.round((day.booked_count / day.daily_capacity) * 100)))
                       : 0;
-                    const barColor = pct >= 80
-                      ? "bg-emerald-500"
-                      : pct >= 60
-                      ? "bg-lime-500"
-                      : pct >= 40
-                      ? "bg-yellow-500"
-                      : pct >= 20
+                    const barColor = occupancyPct >= 100
+                      ? "bg-red-500"
+                      : occupancyPct >= 80
                       ? "bg-orange-500"
-                      : "bg-red-500";
+                      : occupancyPct >= 60
+                      ? "bg-yellow-500"
+                      : occupancyPct >= 30
+                      ? "bg-lime-500"
+                      : "bg-emerald-500";
                     const dateStr = normalizeDateKey(day.appointment_date);
                     const dateObj = toUtcDateFromIsoDay(dateStr);
                     const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
                     const dateFormatted = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
                     const isSelected = form.appointmentDate === dateStr;
+                    const showWeekHeader = idx === 0 || dateObj.getUTCDay() === 0;
 
                     return (
                       <li key={dateStr} className="space-y-1">
@@ -489,7 +486,7 @@ export default function AppointmentsPage() {
                           <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
                             <div
                               className={`h-full rounded-full transition-all ${barColor}`}
-                              style={{ width: `${pct}%` }}
+                              style={{ width: `${occupancyPct}%` }}
                             />
                           </div>
                         </div>
@@ -497,6 +494,11 @@ export default function AppointmentsPage() {
                     );
                   })}
                 </ul>
+                {!showAllDays && displayRows.length === 0 && (
+                  <p className="text-xs text-stone-500 dark:text-stone-400">
+                    No open days on this page. Click "Show all days" or go to Later.
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-sm text-stone-500 dark:text-stone-400">Loading...</p>

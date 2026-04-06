@@ -73,7 +73,8 @@ appointmentsRouter.get(
     const request = /** @type {AppointmentsRequest} */ (req);
     const query = asUnknownRecord(request.query);
     const days = query.days ? Number(query.days) : 14;
-    const availability = await listAvailability(asOptionalString(query.modalityId), days);
+    const offset = query.offset ? Number(query.offset) : 0;
+    const availability = await listAvailability(asOptionalString(query.modalityId), days, offset);
     res.json({ availability });
   })
 );

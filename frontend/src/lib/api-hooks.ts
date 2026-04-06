@@ -103,8 +103,10 @@ export async function fetchPatientNoShowHistory(patientId: number) {
 }
 
 // -- Appointments --
-export async function getAppointmentAvailability(modalityId: number, days = 14) {
-  const raw = await api<{ availability: any[] }>(`/appointments/availability?modalityId=${modalityId}&days=${days}`);
+export async function getAppointmentAvailability(modalityId: number, days = 14, offset = 0) {
+  const raw = await api<{ availability: any[] }>(
+    `/appointments/availability?modalityId=${modalityId}&days=${days}&offset=${offset}`
+  );
   return raw.availability;
 }
 

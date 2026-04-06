@@ -1106,14 +1106,16 @@ export async function getAppointmentPrintDetails(appointmentId) {
 /**
  * @param {number | string} [modalityId]
  * @param {number} [days]
+ * @param {number} [offset]
  * @returns {Promise<AvailabilitySlot[]>}
  */
-export async function listAvailability(modalityId, days = 14) {
+export async function listAvailability(modalityId, days = 14, offset = 0) {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   if (!cleanModalityId) {
     throw new HttpError(400, "modalityId is required.");
   }
-  const windowDays = Math.min(Math.max(Number(days) || 14, 1), 31);
+  const windowDays = Math.min(Math.max(Number(days) || 14, 1), 365);
+  const dayOffset = Math.max(Number(offset) || 0, 0);
   const modality = await getModalityById(/** @type {any} */ (pool), cleanModalityId);
   const daySettings = await getAppointmentDaySettings(pool);
   const maxCasesPerModality = await getMaxCasesPerModality(/** @type {any} */ (pool));
@@ -1122,7 +1124,7 @@ export async function listAvailability(modalityId, days = 14) {
     `
       with calendar as (
         select (current_date + offset_day)::date as appointment_date
-        from generate_series(0, $2::int - 1) as offset_day
+        from generate_series($2::int, ($2::int + $3::int - 1)) as offset_day
       ),
       bookings as (
         select
@@ -1131,7 +1133,7 @@ export async function listAvailability(modalityId, days = 14) {
           max(modality_slot_number) as last_slot_number
         from appointments
         where modality_id = $1
-          and appointment_date between current_date and (current_date + ($2::int - 1))
+          and appointment_date between (current_date + $2::int) and (current_date + ($2::int + $3::int - 1))
         group by appointment_date
       )
       select
@@ -1142,7 +1144,7 @@ export async function listAvailability(modalityId, days = 14) {
       left join bookings on bookings.appointment_date = calendar.appointment_date
       order by calendar.appointment_date asc
     `,
-    [cleanModalityId, windowDays]
+    [cleanModalityId, dayOffset, windowDays]
   );
 
   return rows
