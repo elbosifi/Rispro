@@ -267,11 +267,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     const isNat = form.identifierType === "national_id";
+    const isNationalIdComplete = isValidNationalId(form.identifierValue);
+    const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
-    if (isNat && nationalIdWasEdited && form.nationalIdConfirmation.length === 0) {
+    if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
       return;
     }
-    if (isNat && nationalIdWasEdited && form.identifierValue !== form.nationalIdConfirmation) {
+    if (requiresNationalIdConfirmation && form.identifierValue !== form.nationalIdConfirmation) {
       return;
     }
     const payload = {
@@ -306,7 +308,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const isNationalId = form.identifierType === "national_id";
   // Show confirmation only in create mode, or in edit mode when national ID was changed
   const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
-  const showConfirmation = isNationalId && nationalIdWasEdited;
+  const showConfirmation = isNationalId && nationalIdWasEdited && isValidNationalId(form.identifierValue);
   const submitLabel = mutation.isPending
     ? (isEdit ? "Updating…" : "Registering…")
     : (isEdit ? "Update Patient" : "Register Patient");

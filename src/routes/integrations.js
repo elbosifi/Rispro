@@ -6,6 +6,7 @@ import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
+import { isValidNationalId } from "../utils/national-id.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
 import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
 import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from "../services/dicom-service.js";
@@ -115,8 +116,12 @@ integrationsRouter.post(
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = asUnknownRecord(request.body);
+    const patientNationalId = String(asOptionalString(body.patientNationalId) || "").replace(/\D/g, "");
+    if (!isValidNationalId(patientNationalId)) {
+      throw new HttpError(400, "National ID must contain exactly 11 digits.");
+    }
     const studies = await runPacsCFind({
-      patientNationalId: asOptionalString(body.patientNationalId),
+      patientNationalId,
       currentUserId: requireUserSub(request)
     });
     res.json({ studies });
@@ -128,8 +133,12 @@ integrationsRouter.post(
   asyncRoute(async (req, res) => {
     const request = /** @type {IntegrationsAuthRequest} */ (req);
     const body = asUnknownRecord(request.body);
+    const patientNationalId = String(asOptionalString(body.patientNationalId) || "").replace(/\D/g, "");
+    if (!isValidNationalId(patientNationalId)) {
+      throw new HttpError(400, "National ID must contain exactly 11 digits.");
+    }
     const studies = await searchPacsStudies({
-      criteria: body,
+      criteria: { ...body, patientNationalId, patientId: patientNationalId },
       currentUserId: requireUserSub(request)
     });
     res.json({ studies });
