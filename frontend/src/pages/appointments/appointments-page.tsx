@@ -128,10 +128,10 @@ export default function AppointmentsPage() {
 
   const selectedModality = modalities.find(
     (m) => m.id.toString() === form.modalityId
-  ) as any;
-  const hasSafetyWarning = !!selectedModality?.safety_warning_enabled &&
-    !!(selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar);
-  const safetyMessage = selectedModality?.safety_warning_en || selectedModality?.safety_warning_ar || "";
+  );
+  const hasSafetyWarning = !!selectedModality?.safetyWarningEnabled &&
+    !!(selectedModality?.safetyWarningEn || selectedModality?.safetyWarningAr);
+  const safetyMessage = selectedModality?.safetyWarningEn || selectedModality?.safetyWarningAr || "";
 
   // Create appointment mutation
   const createMutation = useMutation({

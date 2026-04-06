@@ -55,6 +55,9 @@ export function mapModality(raw: any): Modality {
     dailyCapacity: raw.daily_capacity ?? raw.dailyCapacity ?? null,
     generalInstructionAr: raw.general_instruction_ar ?? raw.generalInstructionAr ?? null,
     generalInstructionEn: raw.general_instruction_en ?? raw.generalInstructionEn ?? null,
+    safetyWarningAr: raw.safety_warning_ar ?? raw.safetyWarningAr ?? null,
+    safetyWarningEn: raw.safety_warning_en ?? raw.safetyWarningEn ?? null,
+    safetyWarningEnabled: raw.safety_warning_enabled ?? raw.safetyWarningEnabled ?? true,
     isActive: raw.is_active ?? raw.isActive ?? true
   };
 }

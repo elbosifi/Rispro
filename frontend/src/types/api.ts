@@ -58,6 +58,9 @@ export interface Modality {
   dailyCapacity?: number;
   generalInstructionAr?: string;
   generalInstructionEn?: string;
+  safetyWarningAr?: string | null;
+  safetyWarningEn?: string | null;
+  safetyWarningEnabled?: boolean;
   isActive?: boolean;
 }
 
