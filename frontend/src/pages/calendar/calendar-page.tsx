@@ -187,6 +187,23 @@ export default function CalendarPage() {
               <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
                 {selectedAppointments.length} appointment{selectedAppointments.length !== 1 ? "s" : ""}
               </p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/print?date=${selectedDate}`)}
+                  disabled={selectedAppointments.length === 0}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-40 transition-colors"
+                >
+                  Print day list
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate(`/print?date=${selectedDate}`)}
+                  className="px-3 py-1.5 text-sm rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                >
+                  Open print tab
+                </button>
+              </div>
             </div>
             {isLoading ? (
               <div className="p-4 text-center text-stone-500">Loading...</div>

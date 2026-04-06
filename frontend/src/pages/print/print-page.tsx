@@ -33,6 +33,13 @@ export default function PrintPage() {
   });
 
   useEffect(() => {
+    const dateParam = searchParams.get("date");
+    if (dateParam) {
+      setDate(dateParam);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
     if (appointmentById) {
       setSelectedAppointment(appointmentById);
     }
@@ -44,7 +51,7 @@ export default function PrintPage() {
     if (match) setSelectedAppointment(match);
   }, [appointmentIdParam, appointments, selectedAppointment]);
 
-  const handlePrint = (apt: any) => {
+  const handlePrintSlip = (apt: any) => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
@@ -191,9 +198,161 @@ export default function PrintPage() {
     printWindow.print();
   };
 
+  const handlePrintList = (list: any[], listDate: string) => {
+    if (list.length === 0) return;
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) return;
+
+    const now = new Date().toLocaleString();
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Appointment List</title>
+          <style>
+            @page { size: A5 portrait; margin: 10mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              font-family: Arial, Helvetica, sans-serif;
+              color: #111827;
+              background: #fff;
+            }
+            .slip {
+              width: 100%;
+              min-height: 100%;
+              border: 2px solid #0f766e;
+              border-radius: 14px;
+              padding: 16px;
+            }
+            .header {
+              text-align: center;
+              padding-bottom: 12px;
+              margin-bottom: 12px;
+              border-bottom: 1px solid #d1d5db;
+            }
+            .brand {
+              margin: 0;
+              font-size: 20px;
+              font-weight: 800;
+              color: #0f766e;
+            }
+            .title {
+              margin: 4px 0 0;
+              font-size: 12px;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.16em;
+            }
+            .summary {
+              margin: 0 0 12px;
+              font-size: 12px;
+              color: #374151;
+              text-align: center;
+            }
+            .row {
+              display: grid;
+              grid-template-columns: 18mm 1fr 18mm 1fr;
+              gap: 6px 8px;
+              align-items: center;
+              padding: 8px 10px;
+              border: 1px solid #e5e7eb;
+              border-radius: 10px;
+              background: #f9fafb;
+              font-size: 11px;
+              margin-bottom: 8px;
+            }
+            .label {
+              font-size: 9px;
+              color: #6b7280;
+              text-transform: uppercase;
+              letter-spacing: 0.06em;
+            }
+            .value {
+              font-size: 11px;
+              font-weight: 700;
+              color: #111827;
+              word-break: break-word;
+            }
+            .footer {
+              margin-top: 14px;
+              padding-top: 10px;
+              border-top: 1px dashed #d1d5db;
+              display: flex;
+              justify-content: space-between;
+              gap: 12px;
+              font-size: 10px;
+              color: #6b7280;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="slip">
+            <div class="header">
+              <p class="brand">RISpro Reception</p>
+              <p class="title">Appointment List</p>
+            </div>
+            <p class="summary">Date: ${escapeHtml(formatDateLy(listDate))} - Total: ${list.length}</p>
+            ${list.map((apt) => `
+              <div class="row">
+                <span class="label">Accession</span><span class="value">${escapeHtml(apt.accessionNumber)}</span>
+                <span class="label">Patient</span><span class="value">${escapeHtml(apt.arabicFullName)}</span>
+                <span class="label">Modality</span><span class="value">${escapeHtml(apt.modalityNameEn || "—")}</span>
+                <span class="label">Status</span><span class="value">${escapeHtml(apt.status || "—")}</span>
+                <span class="label">Exam</span><span class="value">${escapeHtml(apt.examNameEn || "—")}</span>
+                <span class="label">Seq</span><span class="value">${escapeHtml(String(apt.dailySequence ?? "—"))}</span>
+              </div>
+            `).join("")}
+            <div class="footer">
+              <span>Printed by RISpro</span>
+              <span>${escapeHtml(now)}</span>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  };
+
+  const todayList = () => {
+    const today = todayIsoDateLy();
+    setDate(today);
+    setModalityId("");
+    setQuery("");
+  };
+
+  const tomorrowList = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setDate(tomorrow.toISOString().slice(0, 10));
+    setModalityId("");
+    setQuery("");
+  };
+
+  const modalities = lookups?.modalities ?? [];
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Printing</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Printing</h2>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={todayList}
+            className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors"
+          >
+            Today List
+          </button>
+          <button
+            type="button"
+            onClick={tomorrowList}
+            className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+          >
+            Tomorrow List
+          </button>
+        </div>
+      </div>
 
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -204,7 +363,7 @@ export default function PrintPage() {
             onChange={setModalityId}
             options={[
               { value: "", label: "All" },
-              ...(lookups?.modalities ?? []).map((m) => ({
+              ...modalities.map((m: any) => ({
                 value: m.id.toString(),
                 label: m.nameEn
               }))
@@ -220,6 +379,24 @@ export default function PrintPage() {
             <h3 className="font-semibold text-stone-900 dark:text-white">
               Appointments ({isLoading ? "..." : appointments.length})
             </h3>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={appointments.length === 0}
+                onClick={() => handlePrintList(appointments, date)}
+                className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-40 transition-colors"
+              >
+                Print list
+              </button>
+              <button
+                type="button"
+                disabled={!selectedAppointment}
+                onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
+                className="px-3 py-1.5 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-40 transition-colors"
+              >
+                Print selected
+              </button>
+            </div>
           </div>
           {isLoading ? (
             <div className="p-8 text-center text-stone-500">Loading...</div>
@@ -242,7 +419,7 @@ export default function PrintPage() {
                       </p>
                     </button>
                     <button
-                      onClick={() => handlePrint(apt)}
+                      onClick={() => handlePrintSlip(apt)}
                       className="ml-4 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                     >
                       Print
@@ -262,7 +439,7 @@ export default function PrintPage() {
                   Slip Preview
                 </h3>
                 <button
-                  onClick={() => handlePrint(selectedAppointment)}
+                  onClick={() => handlePrintSlip(selectedAppointment)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   Print Slip
