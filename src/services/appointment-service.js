@@ -486,7 +486,7 @@ function resolveEffectiveCapacity(modalityCapacity, maxCasesPerModality) {
  * @returns {Promise<AppointmentDbRow>}
  */
 async function getAppointmentById(client, appointmentId) {
-  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const cleanAppointmentId = /** @type {number} */ (normalizePositiveInteger(appointmentId, "appointmentId"));
   const { rows } = await client.query(
     `
       select *
@@ -2217,7 +2217,7 @@ export async function cancelAppointment(appointmentId, reason, currentUserId) {
  * @returns {Promise<{ ok: boolean }>}
  */
 export async function deleteAppointment(appointmentId, currentUserId) {
-  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const cleanAppointmentId = /** @type {number} */ (normalizePositiveInteger(appointmentId, "appointmentId"));
   const client = await pool.connect();
 
   try {
