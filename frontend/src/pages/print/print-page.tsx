@@ -34,15 +34,11 @@ export default function PrintPage() {
 
   useEffect(() => {
     const dateParam = searchParams.get("date");
-    if (dateParam) {
-      setDate(dateParam);
-    }
+    if (dateParam) setDate(dateParam);
   }, [searchParams]);
 
   useEffect(() => {
-    if (appointmentById) {
-      setSelectedAppointment(appointmentById);
-    }
+    if (appointmentById) setSelectedAppointment(appointmentById);
   }, [appointmentById]);
 
   useEffect(() => {
@@ -63,101 +59,18 @@ export default function PrintPage() {
           <style>
             @page { size: A5 portrait; margin: 10mm; }
             * { box-sizing: border-box; }
-            body {
-              margin: 0;
-              font-family: Arial, Helvetica, sans-serif;
-              color: #111827;
-              background: #fff;
-            }
-            .slip {
-              width: 100%;
-              min-height: 100%;
-              border: 2px solid #0f766e;
-              border-radius: 14px;
-              padding: 16px;
-            }
-            .header {
-              text-align: center;
-              padding-bottom: 12px;
-              margin-bottom: 12px;
-              border-bottom: 1px solid #d1d5db;
-            }
-            .brand {
-              margin: 0;
-              font-size: 20px;
-              font-weight: 800;
-              color: #0f766e;
-            }
-            .title {
-              margin: 4px 0 0;
-              font-size: 12px;
-              color: #6b7280;
-              text-transform: uppercase;
-              letter-spacing: 0.16em;
-            }
-            .meta {
-              display: grid;
-              grid-template-columns: repeat(2, minmax(0, 1fr));
-              gap: 10px 12px;
-              font-size: 12px;
-            }
-            .field {
-              min-height: 48px;
-              padding: 8px 10px;
-              background: #f9fafb;
-              border: 1px solid #e5e7eb;
-              border-radius: 10px;
-            }
-            .field.full {
-              grid-column: 1 / -1;
-            }
-            .label {
-              display: block;
-              margin-bottom: 4px;
-              font-size: 10px;
-              color: #6b7280;
-              text-transform: uppercase;
-              letter-spacing: 0.06em;
-            }
-            .value {
-              font-size: 13px;
-              font-weight: 700;
-              color: #111827;
-              word-break: break-word;
-            }
-            .section {
-              margin-top: 12px;
-              padding-top: 12px;
-              border-top: 1px solid #e5e7eb;
-            }
-            .section h2 {
-              margin: 0 0 8px;
-              font-size: 12px;
-              text-transform: uppercase;
-              letter-spacing: 0.08em;
-              color: #0f766e;
-            }
-            .notes {
-              font-size: 12px;
-              line-height: 1.55;
-              color: #374151;
-              white-space: pre-wrap;
-              word-break: break-word;
-            }
-            .footer {
-              margin-top: 14px;
-              padding-top: 10px;
-              border-top: 1px dashed #d1d5db;
-              display: flex;
-              justify-content: space-between;
-              gap: 12px;
-              font-size: 10px;
-              color: #6b7280;
-            }
-            .rtl {
-              direction: rtl;
-              text-align: right;
-            }
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
+            .slip { width: 100%; min-height: 100%; border: 2px solid #0f766e; border-radius: 14px; padding: 16px; }
+            .header { text-align: center; padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid #d1d5db; }
+            .brand { margin: 0; font-size: 20px; font-weight: 800; color: #0f766e; }
+            .title { margin: 4px 0 0; font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.16em; }
+            .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; font-size: 12px; }
+            .field { min-height: 48px; padding: 8px 10px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 10px; }
+            .field.full { grid-column: 1 / -1; }
+            .label { display: block; margin-bottom: 4px; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
+            .value { font-size: 13px; font-weight: 700; color: #111827; word-break: break-word; }
+            .footer { margin-top: 14px; padding-top: 10px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: #6b7280; }
+            .rtl { direction: rtl; text-align: right; }
           </style>
         </head>
         <body>
@@ -209,80 +122,29 @@ export default function PrintPage() {
         <head>
           <title>Appointment List</title>
           <style>
-            @page { size: A5 portrait; margin: 10mm; }
+            @page { size: A4 landscape; margin: 8mm; }
             * { box-sizing: border-box; }
-            body {
-              margin: 0;
-              font-family: Arial, Helvetica, sans-serif;
-              color: #111827;
-              background: #fff;
-            }
-            .slip {
-              width: 100%;
-              min-height: 100%;
-              border: 2px solid #0f766e;
-              border-radius: 14px;
-              padding: 16px;
-            }
-            .header {
-              text-align: center;
-              padding-bottom: 12px;
-              margin-bottom: 12px;
-              border-bottom: 1px solid #d1d5db;
-            }
-            .brand {
-              margin: 0;
-              font-size: 20px;
-              font-weight: 800;
-              color: #0f766e;
-            }
-            .title {
-              margin: 4px 0 0;
-              font-size: 12px;
-              color: #6b7280;
-              text-transform: uppercase;
-              letter-spacing: 0.16em;
-            }
-            .summary {
-              margin: 0 0 12px;
-              font-size: 12px;
-              color: #374151;
-              text-align: center;
-            }
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
+            .slip { width: 100%; min-height: 100%; border: 1.5px solid #0f766e; border-radius: 12px; padding: 10px; }
+            .header { text-align: center; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
+            .brand { margin: 0; font-size: 16px; font-weight: 800; color: #0f766e; }
+            .title { margin: 3px 0 0; font-size: 9px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
+            .summary { margin: 0 0 8px; font-size: 9px; color: #374151; text-align: center; }
             .row {
               display: grid;
-              grid-template-columns: 18mm 1fr 18mm 1fr;
-              gap: 6px 8px;
+              grid-template-columns: 18mm 1.7fr 18mm 1fr 18mm 1fr 16mm 0.8fr;
+              gap: 3px 5px;
               align-items: center;
-              padding: 8px 10px;
+              padding: 5px 7px;
               border: 1px solid #e5e7eb;
-              border-radius: 10px;
+              border-radius: 8px;
               background: #f9fafb;
-              font-size: 11px;
-              margin-bottom: 8px;
+              font-size: 8px;
+              margin-bottom: 5px;
             }
-            .label {
-              font-size: 9px;
-              color: #6b7280;
-              text-transform: uppercase;
-              letter-spacing: 0.06em;
-            }
-            .value {
-              font-size: 11px;
-              font-weight: 700;
-              color: #111827;
-              word-break: break-word;
-            }
-            .footer {
-              margin-top: 14px;
-              padding-top: 10px;
-              border-top: 1px dashed #d1d5db;
-              display: flex;
-              justify-content: space-between;
-              gap: 12px;
-              font-size: 10px;
-              color: #6b7280;
-            }
+            .label { font-size: 7px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+            .value { font-size: 8px; font-weight: 700; color: #111827; word-break: break-word; }
+            .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
           </style>
         </head>
         <body>
@@ -292,16 +154,22 @@ export default function PrintPage() {
               <p class="title">Appointment List</p>
             </div>
             <p class="summary">Date: ${escapeHtml(formatDateLy(listDate))} - Total: ${list.length}</p>
-            ${list.map((apt) => `
-              <div class="row">
-                <span class="label">Accession</span><span class="value">${escapeHtml(apt.accessionNumber)}</span>
-                <span class="label">Patient</span><span class="value">${escapeHtml(apt.arabicFullName)}</span>
-                <span class="label">Modality</span><span class="value">${escapeHtml(apt.modalityNameEn || "—")}</span>
-                <span class="label">Status</span><span class="value">${escapeHtml(apt.status || "—")}</span>
-                <span class="label">Exam</span><span class="value">${escapeHtml(apt.examNameEn || "—")}</span>
-                <span class="label">Seq</span><span class="value">${escapeHtml(String(apt.dailySequence ?? "—"))}</span>
-              </div>
-            `).join("")}
+            ${list
+              .map(
+                (apt) => `
+                <div class="row">
+                  <span class="label">Accession</span><span class="value">${escapeHtml(apt.accessionNumber)}</span>
+                  <span class="label">Patient</span><span class="value">${escapeHtml(apt.arabicFullName)}</span>
+                  <span class="label">Modality</span><span class="value">${escapeHtml(apt.modalityNameEn || "—")}</span>
+                  <span class="label">Status</span><span class="value">${escapeHtml(apt.status || "—")}</span>
+                  <span class="label">Exam</span><span class="value">${escapeHtml(apt.examNameEn || "—")}</span>
+                  <span class="label">Seq</span><span class="value">${escapeHtml(String(apt.dailySequence ?? "—"))}</span>
+                  <span class="label">Slot</span><span class="value">${escapeHtml(apt.modalitySlotNumber ? String(apt.modalitySlotNumber) : "—")}</span>
+                  <span class="label">Priority</span><span class="value">${escapeHtml(apt.priorityNameEn || "Normal")}</span>
+                </div>
+              `
+              )
+              .join("")}
             <div class="footer">
               <span>Printed by RISpro</span>
               <span>${escapeHtml(now)}</span>
@@ -337,18 +205,10 @@ export default function PrintPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Printing</h2>
         <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={todayList}
-            className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors"
-          >
+          <button type="button" onClick={todayList} className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors">
             Today List
           </button>
-          <button
-            type="button"
-            onClick={tomorrowList}
-            className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
-          >
+          <button type="button" onClick={tomorrowList} className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors">
             Tomorrow List
           </button>
         </div>
@@ -376,9 +236,7 @@ export default function PrintPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-            <h3 className="font-semibold text-stone-900 dark:text-white">
-              Appointments ({isLoading ? "..." : appointments.length})
-            </h3>
+            <h3 className="font-semibold text-stone-900 dark:text-white">Appointments ({isLoading ? "..." : appointments.length})</h3>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -407,13 +265,8 @@ export default function PrintPage() {
               {appointments.map((apt: any) => (
                 <li key={apt.id}>
                   <div className="p-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
-                    <button
-                      onClick={() => setSelectedAppointment(apt)}
-                      className="text-right flex-1"
-                    >
-                      <p className="font-medium text-stone-900 dark:text-white">
-                        {apt.accessionNumber}
-                      </p>
+                    <button onClick={() => setSelectedAppointment(apt)} className="text-right flex-1">
+                      <p className="font-medium text-stone-900 dark:text-white">{apt.accessionNumber}</p>
                       <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
                         {apt.arabicFullName} • {apt.modalityNameEn}
                       </p>
@@ -435,9 +288,7 @@ export default function PrintPage() {
           {selectedAppointment ? (
             <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
               <div className="flex items-center justify-between mb-6">
-                <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-                  Slip Preview
-                </h3>
+                <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Slip Preview</h3>
                 <button
                   onClick={() => handlePrintSlip(selectedAppointment)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
