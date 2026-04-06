@@ -6,7 +6,8 @@ import {
   getAppointmentAvailability,
   searchPatients,
   createAppointment,
-  fetchPatientById
+  fetchPatientById,
+  fetchSettings
 } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
 import { formatDateLy } from "@/lib/date-format";
@@ -69,10 +70,18 @@ export default function AppointmentsPage() {
     staleTime: 1000 * 60 * 5
   });
 
-  // Availability pagination
+  // Load day settings + scheduling settings for calendar_window_days
+  const { data: schedulingSettings } = useQuery({
+    queryKey: ["settings", "scheduling_and_capacity"],
+    queryFn: () => fetchSettings("scheduling_and_capacity"),
+    staleTime: 1000 * 60 * 30
+  });
+
+  // Availability pagination (one week per page, up to configured window)
   const [availPage, setAvailPage] = useState(0);
-  const AVAIL_PAGE_SIZE = 14;
-  const availDaysNeeded = (availPage + 1) * AVAIL_PAGE_SIZE;
+  const AVAIL_PAGE_SIZE = 7;
+  const totalDays = parseInt((schedulingSettings as any)?.calendar_window_days, 10) || 14;
+  const availDaysNeeded = Math.min(totalDays, (availPage + 1) * AVAIL_PAGE_SIZE);
 
   const modalities = lookups?.modalities ?? [];
   const examTypes = lookups?.examTypes ?? [];
@@ -378,7 +387,7 @@ export default function AppointmentsPage() {
                   </span>
                   <button
                     onClick={() => setAvailPage((p) => p + 1)}
-                    disabled={availability.length <= availPage * AVAIL_PAGE_SIZE + AVAIL_PAGE_SIZE}
+                    disabled={!totalDays || (availPage + 1) * AVAIL_PAGE_SIZE >= totalDays}
                     className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-30 disabled:hover:bg-stone-100 dark:disabled:hover:bg-stone-700 rounded text-stone-700 dark:text-stone-300 transition-colors"
                   >
                     Later →
@@ -399,26 +408,33 @@ export default function AppointmentsPage() {
                       : pct >= 20
                       ? "bg-orange-500"
                       : "bg-red-500";
-                    // Robust date parsing: handle ISO string or Date object
-                    const dateStr = typeof day.appointment_date === "string"
-                      ? day.appointment_date
-                      : new Date(day.appointment_date).toISOString().slice(0, 10);
-                    // Parse date components directly from the string to avoid timezone issues
-                    const [y, m, d] = dateStr.split("-").map(Number);
+                    // Extract date safely: backend may return "YYYY-MM-DD" or ISO datetime
+                    const rawDate = day.appointment_date;
+                    const dateStr = typeof rawDate === "string"
+                      ? rawDate.slice(0, 10)
+                      : new Date(rawDate).toISOString().slice(0, 10);
+                    // Parse components directly to avoid timezone shifts
+                    const [yStr, mStr, dStr] = dateStr.split("-");
+                    const y = parseInt(yStr, 10);
+                    const m = parseInt(mStr, 10);
+                    const d = parseInt(dStr, 10);
                     const dateObj = new Date(Date.UTC(y, m - 1, d));
                     const weekday = dateObj.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" });
                     const dateFormatted = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
                     const isSelected = form.appointmentDate === dateStr;
 
+                    // Week separator: show before items that start a new week
+                    const dayOfWeek = dateObj.getUTCDay();
+                    const showWeekHeader = idx === 0 || dayOfWeek === 0;
+
                     return (
                       <li key={dateStr} className="space-y-1">
-                        {/* Week separator: show "This Week" before first item of the page if it falls in the current week */}
-                        {idx === 0 && availPage === 0 && (
-                          <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold pt-1">Upcoming</div>
-                        )}
-                        {idx === 0 && availPage > 0 && (
-                          <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold pt-1 border-t border-stone-200 dark:border-stone-700 mt-2 pt-2">Later dates</div>
-                        )}
+                      {/* Week separator: show header when a new week starts */}
+                      {showWeekHeader && (
+                        <div className={`text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold ${idx === 0 ? "pt-1" : "border-t border-stone-200 dark:border-stone-700 mt-3 pt-2"}`}>
+                          Week of {dateFormatted}
+                        </div>
+                      )}
                         <div
                           onClick={() => setForm((f) => ({ ...f, appointmentDate: dateStr }))}
                           className={`cursor-pointer rounded p-1.5 transition-colors ${
