@@ -50,6 +50,7 @@ function AppContent() {
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
   const { language, toggleLanguage } = useLanguage();
+  const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">(getStoredTheme);
 
@@ -91,25 +92,27 @@ function AppContent() {
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-stone-50 dark:bg-stone-900" dir="ltr">
+    <div className="flex flex-col min-h-screen bg-stone-50 dark:bg-stone-900" dir={isArabic ? "rtl" : "ltr"}>
       <TopBar
         user={user}
         language={language}
+        isRtl={isArabic}
         onToggleLanguage={toggleLanguage}
         onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onLogout={logout}
         onMobileNavToggle={() => setMobileNavOpen(true)}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className={`flex flex-1 overflow-hidden ${isArabic ? "flex-row-reverse" : ""}`}>
         <SideNav
           currentRoute={currentRoute}
           user={user}
           language={language}
+          isRtl={isArabic}
           onNavigate={handleNavigate}
         />
 
-        <main className="flex-1 overflow-y-auto p-4 lg:p-6">
+        <main className="flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
           <Routes>
             <Route path="/" element={<DashboardPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
@@ -137,6 +140,7 @@ function AppContent() {
         currentRoute={currentRoute}
         user={user}
         language={language}
+        isRtl={language === "ar"}
         onNavigate={handleNavigate}
         onClose={() => setMobileNavOpen(false)}
       />

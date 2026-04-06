@@ -90,9 +90,12 @@ function NavIconGlyph({ icon }: { icon: NavIcon }) {
   }
 }
 
-function PanelHeader({ language }: { language: Language }) {
+function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
   return (
-    <div className="rounded-3xl p-4 text-white shadow-sm" style={{ background: "linear-gradient(135deg, var(--teal), var(--teal-strong))" }}>
+    <div
+      className={`rounded-3xl p-4 text-white shadow-sm ${isRtl ? "text-center" : ""}`}
+      style={{ background: "linear-gradient(135deg, var(--teal), var(--teal-strong))" }}
+    >
       <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">{t(language, "shell.menu")}</p>
       <p className="mt-1 text-lg font-bold">{t(language, "shell.reception")}</p>
       <p className="mt-2 text-xs opacity-80 leading-relaxed">
@@ -108,18 +111,20 @@ function NavButton({
   item,
   isActive,
   label,
+  isRtl,
   onClick
 }: {
   item: NavItemConfig;
   isActive: boolean;
   label: string;
+  isRtl: boolean;
   onClick: () => void;
 }) {
   return (
     <button
       className={`group w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-medium transition-all border ${
-        isActive ? "shadow-sm scale-[1.01]" : "hover:shadow-sm hover:-translate-y-[1px]"
-      }`}
+        isRtl ? "flex-row-reverse text-end" : ""
+      } ${isActive ? "shadow-sm scale-[1.01]" : "hover:shadow-sm hover:-translate-y-[1px]"}`}
       style={{
         backgroundColor: isActive ? "var(--teal)" : "var(--surface-strong)",
         color: isActive ? "white" : "var(--text)",
@@ -130,7 +135,7 @@ function NavButton({
       <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${isActive ? "bg-white/15" : "bg-stone-100 dark:bg-stone-700/60"}`}>
         <NavIconGlyph icon={item.icon} />
       </span>
-      <span className="flex-1 text-start leading-tight">{label}</span>
+      <span className={`flex-1 leading-tight ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
       {isActive && <span className="h-2 w-2 rounded-full bg-white/90" />}
     </button>
   );
@@ -139,6 +144,7 @@ function NavButton({
 export function TopBar({
   user,
   language,
+  isRtl,
   onToggleLanguage,
   onToggleTheme,
   onLogout,
@@ -146,16 +152,15 @@ export function TopBar({
 }: {
   user: User | null;
   language: Language;
+  isRtl: boolean;
   onToggleLanguage: () => void;
   onToggleTheme: () => void;
   onLogout: () => void;
   onMobileNavToggle: () => void;
 }) {
-  const isArabic = language === "ar";
-
   return (
     <header className="sticky top-0 z-50 border-b backdrop-blur-xl shadow-sm" style={{ backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}>
-      <div className="flex items-center justify-between h-18 px-4 lg:px-6">
+      <div className={`flex items-center justify-between h-18 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
         <button
           className="lg:hidden p-2.5 rounded-xl border hover:opacity-90"
           style={{ color: "var(--text)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
@@ -167,7 +172,7 @@ export function TopBar({
           </svg>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className={`flex items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
           <div className="hidden sm:flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: "linear-gradient(180deg, var(--teal), var(--teal-strong))" }}>
             <span className="text-sm font-bold">R</span>
           </div>
@@ -181,13 +186,13 @@ export function TopBar({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
           <button
             className="px-3 py-2 text-sm rounded-xl transition-all hover:opacity-90 border"
             style={{ backgroundColor: "var(--bg-soft)", color: "var(--muted)", borderColor: "var(--line)" }}
             onClick={onToggleLanguage}
           >
-            {isArabic ? "EN" : "عربي"}
+            {isRtl ? "EN" : "عربي"}
           </button>
 
           <button
@@ -234,19 +239,21 @@ export function SideNav({
   currentRoute,
   user,
   language,
+  isRtl,
   onNavigate
 }: {
   currentRoute: string;
   user: User | null;
   language: Language;
+  isRtl: boolean;
   onNavigate: (route: string) => void;
 }) {
   const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
 
   return (
-    <nav className="hidden lg:flex flex-col w-72 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir="ltr">
+    <nav className="hidden lg:flex flex-col w-72 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir={isRtl ? "rtl" : "ltr"}>
       <div className="p-4 border-b" style={{ borderColor: "var(--line)" }}>
-        <PanelHeader language={language} />
+        <PanelHeader language={language} isRtl={isRtl} />
       </div>
 
       <div className="p-3 space-y-2">
@@ -256,6 +263,7 @@ export function SideNav({
             item={item}
             isActive={currentRoute === item.route}
             label={t(language, item.labelKey)}
+            isRtl={isRtl}
             onClick={() => onNavigate(item.route)}
           />
         ))}
@@ -269,6 +277,7 @@ export function MobileDrawer({
   currentRoute,
   user,
   language,
+  isRtl,
   onNavigate,
   onClose
 }: {
@@ -276,6 +285,7 @@ export function MobileDrawer({
   currentRoute: string;
   user: User | null;
   language: Language;
+  isRtl: boolean;
   onNavigate: (route: string) => void;
   onClose: () => void;
 }) {
@@ -286,10 +296,18 @@ export function MobileDrawer({
   return (
     <div className="fixed inset-0 z-50 lg:hidden">
       <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-      <div className="absolute top-0 left-0 bottom-0 w-80 overflow-y-auto shadow-2xl" style={{ backgroundColor: "var(--surface-strong)" }} dir="ltr">
+      <div
+        className={`absolute top-0 bottom-0 w-80 overflow-y-auto shadow-2xl ${isRtl ? "right-0" : "left-0"}`}
+        style={{ backgroundColor: "var(--surface-strong)" }}
+        dir={isRtl ? "rtl" : "ltr"}
+      >
         <div className="p-4 border-b relative" style={{ borderColor: "var(--line)" }}>
-          <PanelHeader language={language} />
-          <button className="absolute right-4 top-4 p-2.5 rounded-xl hover:opacity-90 border" style={{ color: "var(--muted)", backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }} onClick={onClose}>
+          <PanelHeader language={language} isRtl={isRtl} />
+          <button
+            className={`absolute top-4 p-2.5 rounded-xl hover:opacity-90 border ${isRtl ? "left-4" : "right-4"}`}
+            style={{ color: "var(--muted)", backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}
+            onClick={onClose}
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -303,6 +321,7 @@ export function MobileDrawer({
               item={item}
               isActive={currentRoute === item.route}
               label={t(language, item.labelKey)}
+              isRtl={isRtl}
               onClick={() => {
                 onNavigate(item.route);
                 onClose();

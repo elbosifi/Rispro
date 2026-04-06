@@ -21,6 +21,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     document.documentElement.setAttribute("lang", language === "ar" ? "ar-LY" : "en");
+    document.documentElement.setAttribute("dir", language === "ar" ? "rtl" : "ltr");
     localStorage.setItem("rispro-language", language);
   }, [language]);
 
