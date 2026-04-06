@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { deleteAppointment, updateAppointment } from "@/lib/api-hooks";
 import type { Appointment, AppointmentLookups } from "@/types/api";
-import { chooseLocalized } from "@/lib/i18n";
+import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
 
@@ -48,15 +48,13 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
         notes: notes.trim() ? notes.trim() : null
       }),
     meta: {
-      suppressGlobalToast: true,
-      toastSuccessTitle: "Appointment updated",
-      toastSuccessMessage: "Exam type or priority was updated."
+      suppressGlobalToast: true
     },
     onSuccess: (updated) => {
       pushToast({
         type: "success",
-        title: "Appointment updated",
-        message: "Exam type or priority was updated."
+        title: t(language, "appointmentEditor.toastUpdated"),
+        message: t(language, "appointmentEditor.toastUpdatedMsg")
       });
       queryClient.invalidateQueries();
       onUpdated?.(updated);
@@ -64,8 +62,8 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: "Update failed",
-        message: err?.message || "Could not update the appointment."
+        title: t(language, "appointmentEditor.toastUpdateFailed"),
+        message: err?.message || t(language, "appointmentEditor.toastUpdateFailedMsg")
       });
     }
   });
@@ -78,8 +76,8 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
     onSuccess: () => {
       pushToast({
         type: "success",
-        title: "Appointment deleted",
-        message: "The appointment was removed."
+        title: t(language, "appointmentEditor.toastDeleted"),
+        message: t(language, "appointmentEditor.toastDeletedMsg")
       });
       queryClient.invalidateQueries();
       onDeleted?.();
@@ -87,8 +85,8 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: "Delete failed",
-        message: err?.message || "Could not delete the appointment."
+        title: t(language, "appointmentEditor.toastDeleteFailed"),
+        message: err?.message || t(language, "appointmentEditor.toastDeleteFailedMsg")
       });
     }
   });
@@ -97,29 +95,29 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30 p-4 space-y-4">
       <div>
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">Edit appointment</h4>
+          <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{t(language, "appointmentEditor.title")}</h4>
           {isEdited && (
             <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-              Edited
+              {t(language, "appointmentEditor.edited")}
             </span>
           )}
         </div>
         <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
-          Exam type, priority, and notes can be changed here.
+          {t(language, "appointmentEditor.hint")}
         </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
-            Exam type
+            {t(language, "appointmentEditor.examType")}
           </label>
           <select
             value={examTypeId}
             onChange={(e) => setExamTypeId(e.target.value)}
             className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
           >
-            <option value="">No exam type</option>
+            <option value="">{t(language, "appointmentEditor.noExamType")}</option>
             {filteredExamTypes.map((examType) => (
               <option key={examType.id} value={examType.id}>
                 {chooseLocalized(language, examType.nameAr, examType.nameEn)}
@@ -130,14 +128,14 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
 
         <div>
           <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
-            Priority
+            {t(language, "appointmentEditor.priority")}
           </label>
           <select
             value={priorityId}
             onChange={(e) => setPriorityId(e.target.value)}
             className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
           >
-            <option value="">Normal</option>
+            <option value="">{t(language, "appointmentEditor.normal")}</option>
             {(lookups?.priorities ?? []).map((priority) => (
               <option key={priority.id} value={priority.id}>
                 {chooseLocalized(language, priority.nameAr, priority.nameEn)}
@@ -149,14 +147,14 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
 
       <div>
         <label className="block text-xs font-medium text-stone-600 dark:text-stone-400 mb-1">
-          Notes
+          {t(language, "appointmentEditor.notes")}
         </label>
         <textarea
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={3}
           className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
-          placeholder="Optional appointment notes"
+          placeholder={t(language, "appointmentEditor.notesPlaceholder")}
         />
       </div>
 
@@ -165,14 +163,14 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
           <button
             type="button"
             onClick={() => {
-              if (window.confirm("Delete this appointment? This cannot be undone.")) {
+              if (window.confirm(t(language, "appointmentEditor.deleteConfirm"))) {
                 deleteMutation.mutate();
               }
             }}
             disabled={deleteMutation.isPending}
             className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium transition-colors"
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete"}
+            {deleteMutation.isPending ? t(language, "appointmentEditor.deleting") : t(language, "appointmentEditor.delete")}
           </button>
           <button
             type="button"
@@ -180,7 +178,7 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
             disabled={mutation.isPending}
             className="px-4 py-2 rounded-lg bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm font-medium transition-colors"
           >
-            {mutation.isPending ? "Saving..." : "Save changes"}
+            {mutation.isPending ? t(language, "appointmentEditor.saving") : t(language, "appointmentEditor.saveChanges")}
           </button>
         </div>
       </div>

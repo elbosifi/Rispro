@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { displayDateToIso, isoToDisplayDateLy } from "@/lib/date-format";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 interface DateInputProps {
   label: string;
@@ -9,6 +11,7 @@ interface DateInputProps {
 }
 
 export function DateInput({ label, value, onChange, disabled = false }: DateInputProps) {
+  const { language } = useLanguage();
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(isoToDisplayDateLy(value));
   const inputId = useId();
@@ -48,7 +51,7 @@ export function DateInput({ label, value, onChange, disabled = false }: DateInpu
           type="text"
           dir="ltr"
           value={draft}
-          placeholder="dd/mm/yyyy"
+          placeholder={t(language, "dateInput.placeholder")}
           disabled={disabled}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={commitDraft}
@@ -59,7 +62,7 @@ export function DateInput({ label, value, onChange, disabled = false }: DateInpu
           onClick={openPicker}
           disabled={disabled}
           className="absolute inset-y-0 right-0 px-3 text-stone-500 hover:text-stone-700 dark:text-stone-400 dark:hover:text-stone-200 disabled:opacity-50"
-          aria-label={`Pick ${label}`}
+          aria-label={t(language, "toast.pickDate", { label })}
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10m-13 9h16a2 2 0 002-2V7a2 2 0 00-2-2H4a2 2 0 00-2 2v11a2 2 0 002 2z" />

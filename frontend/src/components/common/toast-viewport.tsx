@@ -1,7 +1,10 @@
 import { removeToast, useToastStore } from "@/lib/toast";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 export function ToastViewport() {
   const toasts = useToastStore();
+  const { language } = useLanguage();
 
   if (toasts.length === 0) return null;
 
@@ -40,7 +43,7 @@ export function ToastViewport() {
               className="text-xs font-semibold uppercase tracking-[0.16em] opacity-60 hover:opacity-100"
               onClick={() => removeToast(toast.id)}
             >
-              Close
+              {t(language, "toast.close")}
             </button>
           </div>
         </div>

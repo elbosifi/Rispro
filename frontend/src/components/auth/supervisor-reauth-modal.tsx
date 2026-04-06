@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, type FormEvent } from "react";
 import { useAuth } from "@/providers/auth-provider";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 interface SupervisorReAuthModalProps {
   onClose: () => void;
@@ -8,6 +10,7 @@ interface SupervisorReAuthModalProps {
 
 export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthModalProps) {
   const { reAuth } = useAuth();
+  const { language } = useLanguage();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, setIsPending] = useState(false);
@@ -36,7 +39,7 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
       await reAuth(password);
       onSuccess();
     } catch (err: any) {
-      setError(err?.message || "Re-authentication failed. Please try again.");
+      setError(err?.message || t(language, "reauth.failed"));
     } finally {
       setIsPending(false);
     }
@@ -49,10 +52,10 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
     >
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-xl w-full max-w-sm p-6 space-y-4">
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-          Supervisor Re-Authentication
+          {t(language, "reauth.title")}
         </h3>
         <p className="text-sm text-stone-500 dark:text-stone-400">
-          Enter your supervisor password to access restricted settings.
+          {t(language, "reauth.description")}
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -61,7 +64,7 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
             type="password"
             value={password}
             onChange={(e) => { setPassword(e.target.value); setError(null); }}
-            placeholder="Supervisor password…"
+            placeholder={t(language, "reauth.placeholder")}
             autoComplete="current-password"
             disabled={isPending}
             className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
@@ -78,14 +81,14 @@ export function SupervisorReAuthModal({ onClose, onSuccess }: SupervisorReAuthMo
               disabled={isPending}
               className="flex-1 py-2 px-4 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-50 text-stone-700 dark:text-stone-300 font-medium rounded-lg transition-colors text-sm"
             >
-              Cancel
+              {t(language, "common.cancel")}
             </button>
             <button
               type="submit"
               disabled={isPending || !password.trim()}
               className="flex-1 py-2 px-4 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-lg transition-colors text-sm"
             >
-              {isPending ? "Verifying…" : "Verify"}
+              {isPending ? t(language, "reauth.verifying") : t(language, "reauth.verify")}
             </button>
           </div>
         </form>

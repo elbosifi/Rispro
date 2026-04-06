@@ -162,7 +162,42 @@ const en = {
   "status.in-progress": "In Progress",
   "status.completed": "Completed",
   "status.no-show": "No-show",
-  "status.cancelled": "Cancelled"
+  "status.cancelled": "Cancelled",
+
+  "appointmentEditor.title": "Edit appointment",
+  "appointmentEditor.edited": "Edited",
+  "appointmentEditor.hint": "Exam type, priority, and notes can be changed here.",
+  "appointmentEditor.examType": "Exam type",
+  "appointmentEditor.noExamType": "No exam type",
+  "appointmentEditor.priority": "Priority",
+  "appointmentEditor.normal": "Normal",
+  "appointmentEditor.notes": "Notes",
+  "appointmentEditor.notesPlaceholder": "Optional appointment notes",
+  "appointmentEditor.deleteConfirm": "Delete this appointment? This cannot be undone.",
+  "appointmentEditor.deleting": "Deleting...",
+  "appointmentEditor.delete": "Delete",
+  "appointmentEditor.saving": "Saving...",
+  "appointmentEditor.saveChanges": "Save changes",
+  "appointmentEditor.toastUpdated": "Appointment updated",
+  "appointmentEditor.toastUpdatedMsg": "Exam type or priority was updated.",
+  "appointmentEditor.toastUpdateFailed": "Update failed",
+  "appointmentEditor.toastUpdateFailedMsg": "Could not update the appointment.",
+  "appointmentEditor.toastDeleted": "Appointment deleted",
+  "appointmentEditor.toastDeletedMsg": "The appointment was removed.",
+  "appointmentEditor.toastDeleteFailed": "Delete failed",
+  "appointmentEditor.toastDeleteFailedMsg": "Could not delete the appointment.",
+
+  "reauth.title": "Supervisor Re-Authentication",
+  "reauth.description": "Enter your supervisor password to access restricted settings.",
+  "reauth.placeholder": "Supervisor password…",
+  "reauth.failed": "Re-authentication failed. Please try again.",
+  "reauth.verifying": "Verifying…",
+  "reauth.verify": "Verify",
+
+  "toast.close": "Close",
+  "toast.pickDate": "Pick {label}",
+
+  "dateInput.placeholder": "dd/mm/yyyy"
 } satisfies Dictionary;
 
 const ar = {
@@ -325,7 +360,42 @@ const ar = {
   "status.in-progress": "قيد التنفيذ",
   "status.completed": "مكتمل",
   "status.no-show": "عدم حضور",
-  "status.cancelled": "ملغي"
+  "status.cancelled": "ملغي",
+
+  "appointmentEditor.title": "تعديل الموعد",
+  "appointmentEditor.edited": "تم التعديل",
+  "appointmentEditor.hint": "يمكن تعديل نوع الفحص والأولوية والملاحظات هنا.",
+  "appointmentEditor.examType": "نوع الفحص",
+  "appointmentEditor.noExamType": "بدون نوع فحص",
+  "appointmentEditor.priority": "الأولوية",
+  "appointmentEditor.normal": "عادي",
+  "appointmentEditor.notes": "ملاحظات",
+  "appointmentEditor.notesPlaceholder": "ملاحظات اختيارية للموعد",
+  "appointmentEditor.deleteConfirm": "هل تريد حذف هذا الموعد؟ لا يمكن التراجع عن هذا.",
+  "appointmentEditor.deleting": "جاري الحذف...",
+  "appointmentEditor.delete": "حذف",
+  "appointmentEditor.saving": "جاري الحفظ...",
+  "appointmentEditor.saveChanges": "حفظ التغييرات",
+  "appointmentEditor.toastUpdated": "تم تحديث الموعد",
+  "appointmentEditor.toastUpdatedMsg": "تم تحديث نوع الفحص أو الأولوية.",
+  "appointmentEditor.toastUpdateFailed": "فشل التحديث",
+  "appointmentEditor.toastUpdateFailedMsg": "تعذر تحديث الموعد.",
+  "appointmentEditor.toastDeleted": "تم حذف الموعد",
+  "appointmentEditor.toastDeletedMsg": "تمت إزالة الموعد.",
+  "appointmentEditor.toastDeleteFailed": "فشل الحذف",
+  "appointmentEditor.toastDeleteFailedMsg": "تعذر حذف الموعد.",
+
+  "reauth.title": "إعادة تحقق المشرف",
+  "reauth.description": "أدخل كلمة مرور المشرف للوصول إلى الأقسام المحظورة.",
+  "reauth.placeholder": "كلمة مرور المشرف…",
+  "reauth.failed": "فشل إعادة التحقق. يرجى المحاولة مرة أخرى.",
+  "reauth.verifying": "جاري التحقق…",
+  "reauth.verify": "تحقق",
+
+  "toast.close": "إغلاق",
+  "toast.pickDate": "اختيار {label}",
+
+  "dateInput.placeholder": "يوم/شهر/سنة"
 } satisfies Dictionary;
 
 const dictionaries: Record<Language, Dictionary> = { ar, en };
