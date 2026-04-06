@@ -90,6 +90,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [postCreatePatient, setPostCreatePatient] = useState<Patient | null>(null);
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4500);
@@ -161,6 +162,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       prevArabicTokenCountRef.current = 0;
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
       showToast(`Patient registered: ${patient.arabicFullName} (MRN: ${patient.mrn})`);
+      if (!isEdit) {
+        setPostCreatePatient(patient);
+      }
       onSuccess?.(patient);
     }
   });
@@ -485,6 +489,44 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     <>
       {formFields}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {postCreatePatient && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 px-4"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setPostCreatePatient(null);
+          }}
+        >
+          <div className="w-full max-w-lg rounded-3xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-6 shadow-2xl">
+            <div className="text-center space-y-3">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">
+                <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-stone-900 dark:text-white">Patient registered</h3>
+              <p className="text-sm text-stone-600 dark:text-stone-300">
+                Book an appointment for {postCreatePatient.arabicFullName} now?
+              </p>
+            </div>
+            <div className="mt-6 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                onClick={() => setPostCreatePatient(null)}
+                className="flex-1 rounded-xl border border-stone-200 dark:border-stone-700 px-4 py-3 text-sm font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+              >
+                Not now
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(`/appointments?patientId=${postCreatePatient.id}`)}
+                className="flex-1 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700 transition-colors"
+              >
+                Book appointment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
