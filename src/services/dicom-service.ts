@@ -22,6 +22,7 @@ import {
   APPOINTMENT_STATUS_WAITING
 } from "../constants/appointment-statuses.js";
 import { loadSettingsMap } from "./settings-service.js";
+import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-settings-resolver.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -940,39 +941,31 @@ async function updateAppointmentFromMpps(
 // ---------------------------------------------------------------------------
 
 export async function getDicomGatewaySettings(): Promise<GatewaySettings> {
-  const settings = await loadSettingsMap(["dicom_gateway"]);
-  const gateway = settings.dicom_gateway || {};
+  const resolved = await resolveGatewaySettings();
 
   return {
-    enabled: String(gateway.enabled || "enabled").trim() !== "disabled",
-    bindHost: normalizeOptionalText(gateway.bind_host) || "0.0.0.0",
-    mwlAeTitle: normalizeOptionalText(gateway.mwl_ae_title) || "RISPRO_MWL",
-    mwlPort: Number(gateway.mwl_port || 11112) || 11112,
-    mppsAeTitle: normalizeOptionalText(gateway.mpps_ae_title) || "RISPRO_MPPS",
-    mppsPort: Number(gateway.mpps_port || 11113) || 11113,
-    worklistOutputDir: toAbsolutePath(gateway.worklist_output_dir, "storage/dicom/worklists"),
-    worklistSourceDir: toAbsolutePath(gateway.worklist_source_dir, "storage/dicom/worklist-source"),
-    mppsInboxDir: toAbsolutePath(gateway.mpps_inbox_dir, "storage/dicom/mpps/inbox"),
-    mppsProcessedDir: toAbsolutePath(gateway.mpps_processed_dir, "storage/dicom/mpps/processed"),
-    mppsFailedDir: toAbsolutePath(gateway.mpps_failed_dir, "storage/dicom/mpps/failed"),
-    callbackSecret: normalizeOptionalText(gateway.callback_secret || process.env.DICOM_CALLBACK_SECRET) || "change-me-dicom-callback",
-    rebuildBehavior: normalizeOptionalText(gateway.rebuild_behavior) || "incremental_on_write",
-    dump2dcmCommand: normalizeOptionalText(gateway.dump2dcm_command) || "dump2dcm",
-    dcmdumpCommand: normalizeOptionalText(gateway.dcmdump_command) || "dcmdump"
+    enabled: resolved.enabled,
+    bindHost: resolved.bindHost,
+    mwlAeTitle: resolved.mwlAeTitle,
+    mwlPort: resolved.mwlPort,
+    mppsAeTitle: resolved.mppsAeTitle,
+    mppsPort: resolved.mppsPort,
+    worklistOutputDir: resolved.worklistOutputDir,
+    worklistSourceDir: resolved.worklistSourceDir,
+    mppsInboxDir: resolved.mppsInboxDir,
+    mppsProcessedDir: resolved.mppsProcessedDir,
+    mppsFailedDir: resolved.mppsFailedDir,
+    callbackSecret: resolved.callbackSecret,
+    rebuildBehavior: resolved.rebuildBehavior,
+    dump2dcmCommand: resolved.dump2dcmCommand,
+    dcmdumpCommand: resolved.dcmdumpCommand
   };
 }
 
 export async function ensureDicomGatewayLayout(settings: GatewaySettings | null = null): Promise<GatewaySettings> {
   const gatewaySettings = settings || (await getDicomGatewaySettings());
-  const directories = [
-    gatewaySettings.worklistOutputDir,
-    gatewaySettings.worklistSourceDir,
-    gatewaySettings.mppsInboxDir,
-    gatewaySettings.mppsProcessedDir,
-    gatewaySettings.mppsFailedDir
-  ].filter((d): d is string => typeof d === "string" && d.length > 0);
-
-  await Promise.all(directories.map((directory) => fs.mkdir(directory, { recursive: true })));
+  const resolved = await resolveGatewaySettings();
+  await ensureDicomDirectoriesExist(resolved);
   return gatewaySettings;
 }
 

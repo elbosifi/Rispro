@@ -25,7 +25,8 @@
       "Bash(pg_isready)",
       "Bash(docker *)",
       "Bash(docker-compose *)",
-      "Bash(select-string *)"
+      "Bash(select-string *)",
+      "Bash(./node_modules/.bin/tsc *)"
     ]
   },
   "$version": 3

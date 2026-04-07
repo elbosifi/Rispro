@@ -16,6 +16,7 @@ import { modalityRouter } from "./routes/modality.js";
 import { auditRouter } from "./routes/audit.js";
 import { settingsRouter } from "./routes/settings.js";
 import { nameDictionaryRouter } from "./routes/name-dictionary.js";
+import { dicomRouter } from "./routes/dicom.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
 
@@ -74,6 +75,7 @@ export function createApp(): Application {
   app.use("/api/audit", auditRouter);
   app.use("/api/settings", settingsRouter);
   app.use("/api/name-dictionary", nameDictionaryRouter);
+  app.use("/api/dicom", dicomRouter);
   app.use("/api", notFoundHandler);
 
   // Legacy frontend (will be removed after migration is complete)

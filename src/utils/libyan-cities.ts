@@ -44,7 +44,6 @@ export const LIBYAN_CITIES: LibyanCity[] = [
   { code: 'kufra', nameAr: 'الكفرة', nameEn: 'Kufra' },
   { code: 'marada', nameAr: 'مرادة', nameEn: 'Marada' },
   { code: 'massa', nameAr: 'الماسة', nameEn: 'Massa' },
-  { code: 'nalut', nameAr: 'نالوت', nameEn: 'Nalut' },
   { code: 'ghazaya', nameAr: 'غزايا', nameEn: 'Ghazaya' },
 ];
 

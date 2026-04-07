@@ -53,6 +53,11 @@ process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function start(): Promise<void> {
   try {
+    // Auto-seed DICOM gateway defaults if missing (zero-config installation)
+    const { seedDicomGatewayDefaultsIfMissing } = await import("./services/dicom-settings-resolver.js");
+    await seedDicomGatewayDefaultsIfMissing();
+
+    // Auto-create directories and rebuild worklists
     const { ensureDicomGatewayLayout, rebuildAllDicomWorklistSources } = await import("./services/dicom-service.js");
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
