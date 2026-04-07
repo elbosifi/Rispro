@@ -24,6 +24,28 @@ command -v node >/dev/null 2>&1 || error_exit "Node.js not installed"
 command -v npm >/dev/null 2>&1 || error_exit "npm not installed"
 command -v git >/dev/null 2>&1 || error_exit "git not installed"
 
+# 1.5. Install DCMTK DICOM tools if missing
+if ! command -v dump2dcm >/dev/null 2>&1 || ! command -v dcmdump >/dev/null 2>&1; then
+  log "Installing DCMTK DICOM tools (dcmtk package)..."
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq && apt-get install -y -qq dcmtk >/dev/null 2>&1 || log "WARNING: Failed to install dcmtk via apt-get"
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q dcmtk >/dev/null 2>&1 || log "WARNING: Failed to install dcmtk via yum"
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q dcmtk >/dev/null 2>&1 || log "WARNING: Failed to install dcmtk via dnf"
+  else
+    log "WARNING: Unknown package manager. Please install dcmtk manually (dump2dcm, dcmdump)."
+  fi
+
+  if command -v dump2dcm >/dev/null 2>&1 && command -v dcmdump >/dev/null 2>&1; then
+    log "DCMTK tools installed successfully: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump)"
+  else
+    log "WARNING: DCMTK tools not found after installation attempt. Worklist conversion will be limited."
+  fi
+else
+  log "DCMTK tools already installed: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump)"
+fi
+
 # 2. Pull latest code
 log "Fetching latest code from GitHub..."
 cd "${APP_DIR}"
