@@ -12,14 +12,14 @@ import {
   ingestMppsEvent,
   buildMppsEventPayload,
   listDicomDevices
-} from "./dicom-service.js";
+} from "../services/dicom-service.js";
 import {
   resolveGatewaySettings,
   seedDicomGatewayDefaultsIfMissing,
   ensureDicomDirectoriesExist,
   detectDicomTools,
   checkDirectoryHealth
-} from "./dicom-settings-resolver.js";
+} from "../services/dicom-settings-resolver.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
 import fs from "fs/promises";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
