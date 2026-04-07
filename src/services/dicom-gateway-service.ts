@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { pool } from "../db/pool.js";
 import { resolveGatewaySettings, detectDicomTools } from "./dicom-settings-resolver.js";
 import type { ResolvedGatewaySettings } from "./dicom-settings-resolver.js";
+import { setServiceProcess, setServiceError, setServiceStatus, getServiceProcess, getServiceServer } from "./dicom-gateway-registry.js";
 
 export interface DicomGatewayServer {
   stop(): Promise<void>;
@@ -46,7 +47,7 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       console.log(`[DICOM Gateway] Serving worklists from: ${settings.worklistOutputDir}`);
     }
 
-    return {
+    const server: DicomGatewayServer = {
       async stop() {
         if (mwlProcess) {
           mwlProcess.kill("SIGTERM");
@@ -54,9 +55,55 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
         }
       }
     };
+
+    // Register in service registry
+    setServiceProcess("mwl", mwlProcess, server);
+
+    return server;
   } catch (error) {
     console.error("[DICOM Gateway] Failed to start:", error);
+    setServiceError("mwl", error instanceof Error ? error.message : String(error));
     return null;
+  }
+}
+
+export async function restartDicomGateway(): Promise<DicomGatewayServer | null> {
+  console.log("[DICOM Gateway] Restarting MWL SCP server...");
+  setServiceStatus("mwl", "stopping");
+
+  const server = getServiceServer("mwl");
+  if (server) {
+    await server.stop();
+  }
+
+  const existingProcess = getServiceProcess("mwl");
+  if (existingProcess) {
+    existingProcess.kill("SIGKILL");
+  }
+
+  setServiceStatus("mwl", "starting");
+
+  try {
+    const newServer = await startDicomGateway();
+    return newServer;
+  } catch (error) {
+    setServiceError("mwl", error instanceof Error ? error.message : String(error));
+    throw error;
+  }
+}
+
+export async function stopDicomGateway(): Promise<void> {
+  console.log("[DICOM Gateway] Stopping MWL SCP server...");
+  setServiceStatus("mwl", "stopping");
+
+  const server = getServiceServer("mwl");
+  if (server) {
+    await server.stop();
+    setServiceProcess("mwl", null, null);
+    console.log("[DICOM Gateway] MWL SCP stopped successfully.");
+  } else {
+    console.log("[DICOM Gateway] MWL SCP was not running.");
+    setServiceStatus("mwl", "stopped");
   }
 }
 

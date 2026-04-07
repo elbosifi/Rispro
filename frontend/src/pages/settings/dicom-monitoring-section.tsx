@@ -7,6 +7,15 @@ interface DicomMonitoringSectionProps {
   onReAuthRequired: (key: string[]) => void;
 }
 
+interface ServiceEntry {
+  status: "stopped" | "starting" | "running" | "stopping" | "error";
+  process: any | null;
+  server: any | null;
+  pid: number | null;
+  startedAt: string | null;
+  lastError: string | null;
+}
+
 export default function DicomMonitoringSection(_props: DicomMonitoringSectionProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -14,7 +23,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   const [logFilter, setLogFilter] = useState({ status: "", accession: "", limit: "50" });
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const { data: overviewData, isLoading: overviewLoading } = useQuery({
+  const { data: overviewData, isLoading: overviewLoading, refetch: refetchOverview } = useQuery({
     queryKey: ["dicom", "overview"],
     queryFn: async () => {
       const response = await fetch("/api/dicom/overview");
@@ -38,6 +47,39 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
     enabled: activeTab === "logs"
   });
 
+  const { data: serviceStatusData, refetch: refetchServiceStatus } = useQuery({
+    queryKey: ["dicom", "service-status"],
+    queryFn: async () => {
+      const response = await fetch("/api/dicom/service-status");
+      if (!response.ok) throw new Error("Failed to fetch service status");
+      return response.json();
+    },
+    refetchInterval: 10000 // Poll every 10 seconds
+  });
+
+  const serviceControlMutation = useMutation({
+    mutationFn: async ({ serviceName, action }: { serviceName: string; action: "start" | "stop" | "restart" }) => {
+      const response = await fetch(`/api/dicom/service/${serviceName}/${action}`, { method: "POST" });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || `${action} failed`);
+      }
+      return response.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["dicom", "overview"] });
+      queryClient.invalidateQueries({ queryKey: ["dicom", "service-status"] });
+      refetchOverview();
+      refetchServiceStatus();
+      setActionMessage({ type: "success", text: `Service ${data.service} ${data.status.status}` });
+      setTimeout(() => setActionMessage(null), 5000);
+    },
+    onError: (err: Error) => {
+      setActionMessage({ type: "error", text: err.message });
+      setTimeout(() => setActionMessage(null), 5000);
+    }
+  });
+
   const rebuildMutation = useMutation({
     mutationFn: async () => {
       const response = await fetch("/api/dicom/rebuild", { method: "POST" });
@@ -58,6 +100,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
 
   const overview = overviewData as any;
   const logs = logsData as any;
+  const services = (serviceStatusData as any)?.services || {};
 
   if (overviewLoading) {
     return <p className="text-sm text-stone-500 dark:text-stone-400">{t("settings.loading")}</p>;
@@ -140,6 +183,36 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                 `MPPS Enabled: ${deviceSummary.mppsEnabled || 0}`
               ]}
             />
+          </div>
+
+          {/* Service Status */}
+          <div className="card-shell p-4">
+            <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">Service Status</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <ServiceStatusCard
+                serviceName="MWL SCP Server"
+                service={services.mwl}
+                onStart={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "start" })}
+                onStop={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "stop" })}
+                onRestart={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "restart" })}
+                isBusy={serviceControlMutation.isPending}
+              />
+              <ServiceStatusCard
+                serviceName="MPPS Processor"
+                service={services.mpps}
+                showControls={false}
+              />
+              <ServiceStatusCard
+                serviceName="Worklist Builder"
+                service={services.worklistBuilder}
+                showControls={false}
+              />
+              <ServiceStatusCard
+                serviceName="MPPS Worker"
+                service={services.mppsProcessor}
+                showControls={false}
+              />
+            </div>
           </div>
 
           {/* File Health */}
@@ -362,6 +435,87 @@ function FileStat({ label, count, exists }: { label: string; count: number; exis
       <div className="font-medium text-stone-900 dark:text-white">{label}</div>
       <div className="text-lg font-bold text-stone-700 dark:text-stone-300">{count}</div>
       {!exists && <div className="text-xs text-red-600 dark:text-red-400">Missing</div>}
+    </div>
+  );
+}
+
+function ServiceStatusCard({
+  serviceName,
+  service,
+  onStart,
+  onStop,
+  onRestart,
+  showControls = true,
+  isBusy = false
+}: {
+  serviceName: string;
+  service: ServiceEntry | null;
+  onStart?: () => void;
+  onStop?: () => void;
+  onRestart?: () => void;
+  showControls?: boolean;
+  isBusy?: boolean;
+}) {
+  const statusColor: Record<string, string> = {
+    running: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
+    stopped: "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400",
+    starting: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
+    stopping: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
+    error: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+  };
+
+  const statusLabel = service?.status || "unknown";
+
+  return (
+    <div className="p-3 rounded border bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700">
+      <div className="flex items-center justify-between mb-2">
+        <h5 className="text-xs font-medium text-stone-700 dark:text-stone-300">{serviceName}</h5>
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[statusLabel] || statusColor.stopped}`}>
+          {statusLabel}
+        </span>
+      </div>
+
+      {service?.pid && (
+        <div className="text-xs text-stone-500 dark:text-stone-400 mb-2">PID: {service.pid}</div>
+      )}
+
+      {service?.lastError && (
+        <div className="text-xs text-red-600 dark:text-red-400 mb-2" title={service.lastError}>
+          ⚠️ Error
+        </div>
+      )}
+
+      {showControls && (
+        <div className="flex gap-1 mt-2">
+          {statusLabel !== "running" && (
+            <button
+              onClick={onStart}
+              disabled={isBusy}
+              className="flex-1 px-2 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white rounded transition-colors"
+            >
+              Start
+            </button>
+          )}
+          {statusLabel === "running" && (
+            <>
+              <button
+                onClick={onStop}
+                disabled={isBusy}
+                className="flex-1 px-2 py-1 text-xs bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white rounded transition-colors"
+              >
+                Stop
+              </button>
+              <button
+                onClick={onRestart}
+                disabled={isBusy}
+                className="flex-1 px-2 py-1 text-xs bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded transition-colors"
+              >
+                Restart
+              </button>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

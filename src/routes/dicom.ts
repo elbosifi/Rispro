@@ -20,6 +20,15 @@ import {
   detectDicomTools,
   checkDirectoryHealth
 } from "../services/dicom-settings-resolver.js";
+import {
+  startDicomGateway,
+  stopDicomGateway,
+  restartDicomGateway
+} from "../services/dicom-gateway-service.js";
+import {
+  getAllServiceStatuses,
+  getServiceStatus
+} from "../services/dicom-gateway-registry.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
 import fs from "fs/promises";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
@@ -36,11 +45,12 @@ dicomRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 dicomRouter.get(
   "/overview",
   asyncRoute(async (_req: Request, res: Response) => {
-    const [settings, overview, tools, fileHealth] = await Promise.all([
+    const [settings, overview, tools, fileHealth, serviceStatuses] = await Promise.all([
       resolveGatewaySettings(),
       getDicomGatewayOverview(),
       detectDicomTools(),
-      checkDirectoryHealth(await resolveGatewaySettings())
+      checkDirectoryHealth(await resolveGatewaySettings()),
+      Promise.resolve(getAllServiceStatuses())
     ]);
 
     const devices = await listDicomDevices();
@@ -67,6 +77,7 @@ dicomRouter.get(
         mwlEnabledDeviceCount: devicesWithMwl.length,
         mppsEnabledDeviceCount: devicesWithMpps.length
       },
+      services: serviceStatuses,
       tools,
       fileHealth,
       logSummary: overview.logSummary,
@@ -86,6 +97,84 @@ dicomRouter.get(
         }))
       }
     });
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Service Status & Control
+// ---------------------------------------------------------------------------
+
+dicomRouter.get(
+  "/service-status",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const services = getAllServiceStatuses();
+    res.json({ services });
+  })
+);
+
+dicomRouter.post(
+  "/service/:serviceName/start",
+  asyncRoute(async (req: Request, res: Response) => {
+    const { serviceName } = req.params;
+
+    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+      throw new HttpError(400, `Unknown service: ${serviceName}`);
+    }
+
+    if (serviceName === "mwl") {
+      const server = await startDicomGateway();
+      if (!server) {
+        throw new HttpError(500, "Failed to start DICOM gateway service");
+      }
+    } else {
+      throw new HttpError(501, `Service ${serviceName} start not implemented yet`);
+    }
+
+    const status = getServiceStatus(serviceName as any);
+    res.json({ ok: true, service: serviceName, status });
+  })
+);
+
+dicomRouter.post(
+  "/service/:serviceName/stop",
+  asyncRoute(async (req: Request, res: Response) => {
+    const { serviceName } = req.params;
+
+    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+      throw new HttpError(400, `Unknown service: ${serviceName}`);
+    }
+
+    if (serviceName === "mwl") {
+      await stopDicomGateway();
+    } else {
+      throw new HttpError(501, `Service ${serviceName} stop not implemented yet`);
+    }
+
+    const status = getServiceStatus(serviceName as any);
+    res.json({ ok: true, service: serviceName, status });
+  })
+);
+
+dicomRouter.post(
+  "/service/:serviceName/restart",
+  asyncRoute(async (req: Request, res: Response) => {
+    const { serviceName } = req.params;
+
+    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+      throw new HttpError(400, `Unknown service: ${serviceName}`);
+    }
+
+    if (serviceName === "mwl") {
+      const server = await restartDicomGateway();
+      if (!server) {
+        throw new HttpError(500, "Failed to restart DICOM gateway service");
+      }
+    } else {
+      throw new HttpError(501, `Service ${serviceName} restart not implemented yet`);
+    }
+
+    const status = getServiceStatus(serviceName as any);
+    res.json({ ok: true, service: serviceName, status });
   })
 );
 
