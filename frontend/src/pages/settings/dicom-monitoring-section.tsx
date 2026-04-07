@@ -7,7 +7,7 @@ interface DicomMonitoringSectionProps {
   onReAuthRequired: (key: string[]) => void;
 }
 
-export default function DicomMonitoringSection({ onReAuthRequired }: DicomMonitoringSectionProps) {
+export default function DicomMonitoringSection(_props: DicomMonitoringSectionProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "logs" | "actions">("overview");

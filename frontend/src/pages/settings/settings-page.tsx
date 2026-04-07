@@ -6,7 +6,6 @@ import {
   fetchExamTypes,
   fetchModalitiesSettings,
   fetchNameDictionary,
-  fetchDicomDevices,
   fetchSettings,
   fetchPacsConnection,
   deleteUser,
@@ -21,9 +20,6 @@ import {
   createExamType,
   updateExamType,
   deleteExamType,
-  createDicomDevice,
-  updateDicomDevice,
-  deleteDicomDevice,
   saveSettings
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
