@@ -132,6 +132,16 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
   sleep 2
 done
 
+# 10.5. Auto-detect DICOM tools via API (if server has session cookies configured)
+log "Auto-detecting DICOM tools..."
+sleep 2
+if curl -sf -X POST http://127.0.0.1:3000/api/dicom/detect-tools \
+  -H "Content-Type: application/json" > /dev/null 2>&1; then
+  log "DICOM tools auto-detected via API"
+else
+  log "Note: DICOM tools auto-detect requires authentication. Tools will be detected on first API call."
+fi
+
 # 11. Final status
 log "========================================="
 log "Deployment successful!"

@@ -2,10 +2,12 @@ import http, { type Server } from "http";
 import { env } from "./config/env.js";
 import { createApp } from "./app.js";
 import { pool } from "./db/pool.js";
+import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
 let isShuttingDown = false;
+let dicomGateway: DicomGatewayServer | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -18,6 +20,15 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
 
   isShuttingDown = true;
   console.log(`Received ${signal}. Shutting down gracefully.`);
+
+  // Stop DICOM gateway servers
+  if (dicomGateway) {
+    try {
+      await dicomGateway.stop();
+    } catch (error) {
+      console.error("Failed to stop DICOM gateway servers.", error);
+    }
+  }
 
   server.close(async (serverError?: Error) => {
     try {
@@ -61,6 +72,10 @@ async function start(): Promise<void> {
     const { ensureDicomGatewayLayout, rebuildAllDicomWorklistSources } = await import("./services/dicom-service.js");
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
+
+    // Start DICOM MWL/MPPS SCP servers (if native module available)
+    const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
+    dicomGateway = await startDicomGateway();
   } catch (error) {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
     logError(error);
