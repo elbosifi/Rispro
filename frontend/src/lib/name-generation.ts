@@ -6,8 +6,11 @@
  */
 
 export interface DictionaryEntry {
+  id?: number;
   arabicText: string;
   englishText: string;
+  isActive?: boolean;
+  createdAt?: string | null;
 }
 
 export interface NameGenerationResult {

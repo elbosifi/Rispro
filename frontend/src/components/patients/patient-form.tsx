@@ -171,7 +171,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
   });
   const updateMutation = useMutation({
-    mutationFn: (data: { payload: any }) => updatePatient(patientId!, data.payload),
+    mutationFn: (data: Partial<Patient>) => updatePatient(patientId!, data),
     onSuccess: (patient) => {
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
       showToast(`Patient updated: ${patient.arabicFullName}`);
@@ -239,10 +239,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     setAddTokenError(null);
     try {
       const res = await upsertNameDictionaryEntry(token, ev);
-      const e = res.entry;
+      const e = res.entry as Record<string, unknown>;
       const ne: DictionaryEntry = {
-        arabicText: e.arabic_text ?? e.arabicText ?? token,
-        englishText: e.english_text ?? e.englishText ?? ev
+        arabicText: String(e.arabic_text ?? e.arabicText ?? token),
+        englishText: String(e.english_text ?? e.englishText ?? ev)
       };
       setLocalDictionary((p) => [...p, ne]);
       setMissingTokenInputs((p) => { const n = { ...p }; delete n[token]; return n; });
@@ -308,7 +308,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       address: form.address || undefined,
       autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName
     };
-    mutation.mutate(isEdit ? { payload } : payload);
+    mutation.mutate(payload);
   };
 
   const currentMissingTokens = form.arabicFullName
