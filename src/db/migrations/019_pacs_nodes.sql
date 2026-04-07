@@ -29,13 +29,14 @@ create unique index pacs_nodes_single_default_idx
   where is_default = true;
 
 -- Migrate existing pacs_connection settings into a default node
+-- Note: AE titles are uppercased since DICOM requires uppercase
 insert into pacs_nodes (name, host, port, called_ae_title, calling_ae_title, timeout_seconds, is_active, is_default)
 select
   'Primary PACS',
   coalesce((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'host'), '192.9.101.164'),
   coalesce(nullif((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'port'), '')::integer, 103),
-  coalesce((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'called_ae_title'), 'osirixr'),
-  coalesce((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'calling_ae_title'), 'RISPRO'),
+  upper(coalesce((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'called_ae_title'), 'OSIRIXR')),
+  upper(coalesce((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'calling_ae_title'), 'RISPRO')),
   coalesce(nullif((select setting_value->>'value' from system_settings where category = 'pacs_connection' and setting_key = 'timeout_seconds'), '')::integer, 10),
   true,
   true
