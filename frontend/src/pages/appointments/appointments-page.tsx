@@ -16,6 +16,7 @@ import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlip } from "@/lib/print-utils";
+import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 
 interface AppointmentForm {
   patientId: string;
@@ -46,6 +47,8 @@ export default function AppointmentsPage() {
   const [patientResults, setPatientResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [postCreateAppointment, setPostCreateAppointment] = useState<AppointmentWithDetails | null>(null);
+  const [showReAuthModal, setShowReAuthModal] = useState(false);
+  const [pendingAppointment, setPendingAppointment] = useState<Record<string, unknown> | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
 
@@ -208,6 +211,32 @@ export default function AppointmentsPage() {
       setSelectedPatient(null);
       setSafetyAcknowledged(false);
       queryClient.invalidateQueries({ queryKey: ["availability"] });
+    },
+    onError: (err: Error) => {
+      // Check if this is a supervisor re-auth required error (403)
+      if (err.message?.includes("re-authentication") || err.message?.includes("re-authenticate") || err.message?.includes("supervisor")) {
+        // Store the pending appointment data and show re-auth modal
+        const payload = {
+          patientId: parseInt(form.patientId, 10),
+          modalityId: parseInt(form.modalityId, 10),
+          examTypeId: form.examTypeId ? parseInt(form.examTypeId, 10) : undefined,
+          reportingPriorityId: form.reportingPriorityId
+            ? parseInt(form.reportingPriorityId, 10)
+            : undefined,
+          appointmentDate: form.appointmentDate,
+          notes: form.notes || undefined,
+          isWalkIn: form.isWalkIn
+        };
+        setPendingAppointment(payload);
+        setShowReAuthModal(true);
+      } else {
+        // Show regular error
+        pushToast({
+          type: "error",
+          title: "Failed to create appointment",
+          message: err.message
+        });
+      }
     }
   });
 
@@ -239,6 +268,14 @@ export default function AppointmentsPage() {
   const handleSafetyConfirm = () => {
     setSafetyAcknowledged(true);
     submitAppointment();
+  };
+
+  const handleReAuthSuccess = () => {
+    setShowReAuthModal(false);
+    if (pendingAppointment) {
+      createMutation.mutate(pendingAppointment as Parameters<typeof createAppointment>[0]);
+      setPendingAppointment(null);
+    }
   };
 
   const filteredExamTypes = examTypes.filter(
@@ -627,6 +664,14 @@ export default function AppointmentsPage() {
           </div>
         </div>
       </div>
+    )}
+
+    {/* Supervisor Re-Auth Modal for Overbooking */}
+    {showReAuthModal && (
+      <SupervisorReAuthModal
+        onClose={() => { setShowReAuthModal(false); setPendingAppointment(null); }}
+        onSuccess={handleReAuthSuccess}
+      />
     )}
     </>
   );
