@@ -5,8 +5,15 @@ import { fetchAppointments, fetchAppointmentLookups, getAppointmentById } from "
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
+
+function EditedBadge() {
+  return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">Edited</span>;
+}
 
 export default function PrintPage() {
+  const { language } = useLanguage();
   const [searchParams] = useSearchParams();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
@@ -43,10 +50,10 @@ export default function PrintPage() {
   }, [appointmentById]);
 
   useEffect(() => {
-    if (!appointmentIdParam || selectedAppointment) return;
+    if (!appointmentIdParam) return;
     const match = appointments.find((apt: any) => String(apt.id) === appointmentIdParam);
     if (match) setSelectedAppointment(match);
-  }, [appointmentIdParam, appointments, selectedAppointment]);
+  }, [appointmentIdParam, appointments]);
 
   const handlePrintSlip = (apt: any) => {
     const printWindow = window.open("", "_blank");
@@ -209,40 +216,40 @@ export default function PrintPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Printing</h2>
+        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "print.title")}</h2>
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={todayList} className="px-4 py-2 rounded-xl bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 transition-colors">
-            Today List
+            {t(language, "print.today")}
           </button>
           <button type="button" onClick={tomorrowList} className="px-4 py-2 rounded-xl bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors">
-            Tomorrow List
+            {t(language, "print.tomorrow")}
           </button>
         </div>
       </div>
 
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <DateInput label="Date" value={date} onChange={setDate} />
+          <DateInput label={t(language, "common.date")} value={date} onChange={setDate} />
           <Select
-            label="Modality"
+            label={t(language, "common.modality")}
             value={modalityId}
             onChange={setModalityId}
             options={[
-              { value: "", label: "All" },
+              { value: "", label: t(language, "print.all") },
               ...modalities.map((m: any) => ({
                 value: m.id.toString(),
                 label: m.nameEn
               }))
             ]}
           />
-          <Input label="Search" type="text" value={query} onChange={setQuery} placeholder="Name, MRN, Accession..." />
+          <Input label={t(language, "common.search")} type="text" value={query} onChange={setQuery} placeholder={t(language, "print.searchPlaceholder")} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-            <h3 className="font-semibold text-stone-900 dark:text-white">Appointments ({isLoading ? "..." : appointments.length})</h3>
+            <h3 className="font-semibold text-stone-900 dark:text-white">{t(language, "print.listHeading", { count: appointments.length })}</h3>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -250,7 +257,7 @@ export default function PrintPage() {
                 onClick={() => handlePrintList(appointments, date)}
                 className="px-3 py-1.5 rounded-lg bg-teal-600 text-white text-sm font-medium hover:bg-teal-700 disabled:opacity-40 transition-colors"
               >
-                Print list
+                {t(language, "print.printList")}
               </button>
               <button
                 type="button"
@@ -258,14 +265,14 @@ export default function PrintPage() {
                 onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
                 className="px-3 py-1.5 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm font-medium hover:bg-stone-200 dark:hover:bg-stone-600 disabled:opacity-40 transition-colors"
               >
-                Print selected
+                {t(language, "print.printSelected")}
               </button>
             </div>
           </div>
           {isLoading ? (
-            <div className="p-8 text-center text-stone-500">Loading...</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "print.loading")}</div>
           ) : appointments.length === 0 ? (
-            <div className="p-8 text-center text-stone-500">No appointments found</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "print.empty")}</div>
           ) : (
             <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
               {appointments.map((apt: any) => (
@@ -281,7 +288,7 @@ export default function PrintPage() {
                       onClick={() => handlePrintSlip(apt)}
                       className="ml-4 px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                     >
-                      Print
+                      {t(language, "common.print")}
                     </button>
                   </div>
                 </li>
@@ -295,18 +302,16 @@ export default function PrintPage() {
             <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Slip Preview</h3>
+                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">{t(language, "print.slipPreview")}</h3>
                   {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                      Edited
-                    </span>
+                    <EditedBadge />
                   )}
                 </div>
                 <button
                   onClick={() => handlePrintSlip(selectedAppointment)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Print Slip
+                  {t(language, "print.printSlip")}
                 </button>
               </div>
               <div className="space-y-4 border-2 border-dashed border-stone-300 dark:border-stone-600 rounded-lg p-6 max-w-[148mm] mx-auto">
@@ -356,7 +361,7 @@ export default function PrintPage() {
             </div>
           ) : (
             <div className="h-full flex items-center justify-center bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-8">
-              <p className="text-stone-500 dark:text-stone-400">Select an appointment to preview slip</p>
+              <p className="text-stone-500 dark:text-stone-400">{t(language, "print.selectPrompt")}</p>
             </div>
           )}
         </div>
