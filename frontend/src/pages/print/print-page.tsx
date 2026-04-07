@@ -20,6 +20,7 @@ export default function PrintPage() {
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
+  const [isEditing, setIsEditing] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
 
   const { data: lookups } = useQuery({
@@ -47,7 +48,10 @@ export default function PrintPage() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (appointmentById) setSelectedAppointment(appointmentById);
+    if (appointmentById) {
+      setSelectedAppointment(appointmentById);
+      setIsEditing(false);
+    }
   }, [appointmentById]);
 
   useEffect(() => {
@@ -351,13 +355,33 @@ export default function PrintPage() {
                   </div>
                 </div>
               </div>
-              <div className="mt-6">
-                <AppointmentEditor
-                  appointment={selectedAppointment}
-                  lookups={lookups}
-                  onUpdated={(updated) => setSelectedAppointment(updated)}
-                  onDeleted={() => setSelectedAppointment(null)}
-                />
+
+              {/* Edit toggle */}
+              <div className="mt-6 flex gap-3">
+                {!isEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(true)}
+                    className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+                  >
+                    Edit appointment
+                  </button>
+                ) : (
+                  <div className="w-full">
+                    <AppointmentEditor
+                      appointment={selectedAppointment}
+                      lookups={lookups}
+                      onUpdated={(updated) => {
+                        setSelectedAppointment(updated);
+                        setIsEditing(false);
+                      }}
+                      onDeleted={() => {
+                        setSelectedAppointment(null);
+                        setIsEditing(false);
+                      }}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           ) : (

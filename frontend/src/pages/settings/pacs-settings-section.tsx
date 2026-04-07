@@ -55,12 +55,24 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [editForm, setEditForm] = useState<PacsNodeFormState>(emptyForm);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
+  // Normalize snake_case form state to camelCase payload expected by backend
+  const toBackendPayload = (form: Partial<PacsNodeFormState>) => ({
+    name: form.name,
+    host: form.host,
+    port: form.port,
+    calledAeTitle: form.called_ae_title,
+    callingAeTitle: form.calling_ae_title,
+    timeoutSeconds: form.timeout_seconds,
+    isActive: form.is_active ? "enabled" : "disabled",
+    isDefault: form.is_default ? "enabled" : "disabled"
+  });
+
   const createMutation = useMutation({
     mutationFn: async (data: PacsNodeFormState) => {
       const resp = await fetch("/api/pacs/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify(toBackendPayload(data))
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
@@ -82,7 +94,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       const resp = await fetch(`/api/pacs/nodes/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify(toBackendPayload(data))
       });
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));

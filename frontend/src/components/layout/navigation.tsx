@@ -12,7 +12,6 @@ type NavIcon =
   | "doctor"
   | "print"
   | "statistics"
-  | "search"
   | "pacs"
   | "settings";
 
@@ -29,7 +28,6 @@ interface NavItemConfig {
     | "nav.doctor"
     | "nav.print"
     | "nav.statistics"
-    | "nav.search"
     | "nav.pacs"
     | "nav.settings";
   icon: NavIcon;
@@ -47,7 +45,6 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "doctor", labelKey: "nav.doctor", icon: "doctor" },
   { route: "print", labelKey: "nav.print", icon: "print" },
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
-  { route: "search", labelKey: "nav.search", icon: "search" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
   { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor"] }
 ];
@@ -81,8 +78,6 @@ function NavIconGlyph({ icon }: { icon: NavIcon }) {
       return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M6 9V4h12v5M6 18h12v2H6v-2zm-2-7h16a2 2 0 012 2v3H2v-3a2 2 0 012-2z" /></svg>;
     case "statistics":
       return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M7 20V10m5 10V6m5 14v-4" /></svg>;
-    case "search":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.3-4.3m1.8-5.2a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>;
     case "pacs":
       return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm3-7h8" /></svg>;
     case "settings":

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback, type FormEvent } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -15,6 +15,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { pushToast } from "@/lib/toast";
+import { printAppointmentSlip } from "@/lib/print-utils";
 
 interface AppointmentForm {
   patientId: string;
@@ -39,7 +40,6 @@ const DEFAULT_FORM: AppointmentForm = {
 };
 
 export default function AppointmentsPage() {
-  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
   const [form, setForm] = useState<AppointmentForm>(DEFAULT_FORM);
@@ -580,7 +580,7 @@ export default function AppointmentsPage() {
             </button>
             <button
               type="button"
-              onClick={() => navigate(`/print?appointmentId=${postCreateAppointment.id}`)}
+              onClick={() => printAppointmentSlip(postCreateAppointment)}
               className="flex-1 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700 transition-colors"
             >
               Print slip

@@ -13,16 +13,18 @@ import {
 import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
+const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
+const authMiddleware = [requireAuth];
+
 export const pacsRouter = express.Router();
 
 // ---------------------------------------------------------------------------
 // PACS Node CRUD (supervisor only)
 // ---------------------------------------------------------------------------
 
-pacsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
-
 pacsRouter.get(
   "/nodes",
+  ...supervisorMiddleware,
   asyncRoute(async (_req: Request, res: Response) => {
     const nodes = await listPacsNodes();
     res.json({ nodes });
@@ -31,6 +33,7 @@ pacsRouter.get(
 
 pacsRouter.post(
   "/nodes",
+  ...supervisorMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const node = await createPacsNode(asUnknownRecord(request.body ?? {}), request.user.sub as UserId);
@@ -40,6 +43,7 @@ pacsRouter.post(
 
 pacsRouter.put(
   "/nodes/:nodeId",
+  ...supervisorMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { nodeId?: string } };
     const nodeId = asOptionalString(request.params?.nodeId);
@@ -55,6 +59,7 @@ pacsRouter.put(
 
 pacsRouter.delete(
   "/nodes/:nodeId",
+  ...supervisorMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { user: AuthenticatedUserContext; params?: { nodeId?: string } };
     const nodeId = asOptionalString(request.params?.nodeId);
@@ -69,17 +74,17 @@ pacsRouter.delete(
 );
 
 // ---------------------------------------------------------------------------
-// Test connection (uses node ID or ad-hoc params)
+// Test connection (supervisor only – uses node ID or ad-hoc params)
 // ---------------------------------------------------------------------------
 
 pacsRouter.post(
   "/test",
+  ...supervisorMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});
     const nodeId = asOptionalUserId(body.nodeId);
 
-    // If nodeId provided, fetch that node's settings; otherwise use ad-hoc params
     const overrides: UnknownRecord = {};
 
     if (nodeId) {
@@ -92,7 +97,6 @@ pacsRouter.post(
       overrides.callingAeTitle = node.calling_ae_title;
       overrides.timeoutSeconds = node.timeout_seconds;
     } else if (body.host) {
-      // Use ad-hoc params from body
       overrides.host = body.host;
       overrides.port = body.port;
       overrides.calledAeTitle = body.calledAeTitle;
@@ -106,17 +110,12 @@ pacsRouter.post(
 );
 
 // ---------------------------------------------------------------------------
-// Advanced search (any authenticated user)
+// Advanced search (any authenticated user, no supervisor re-auth)
 // ---------------------------------------------------------------------------
 
-// This route is public to authenticated users (not supervisor-only)
-// It will be mounted separately below
-
-export const pacsSearchRouter = express.Router();
-pacsSearchRouter.use(requireAuth);
-
-pacsSearchRouter.post(
+pacsRouter.post(
   "/search",
+  ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});

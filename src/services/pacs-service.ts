@@ -518,8 +518,26 @@ export async function testPacsConnection({
       timeoutSeconds: settings.timeoutSeconds
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "";
-    throw new HttpError(502, `PACS connection failed. ${message}`.trim());
+    const rawMessage = error instanceof Error ? error.message : String(error);
+    let userMessage = "PACS connection failed.";
+
+    if (/timed? ?out/i.test(rawMessage)) {
+      userMessage = `Connection timed out (${settings.timeoutSeconds}s). Check that the PACS server at ${settings.host}:${settings.port} is reachable and the firewall allows DICOM traffic.`;
+    } else if (/ECONNREFUSED|connection refused/i.test(rawMessage)) {
+      userMessage = `Connection refused at ${settings.host}:${settings.port}. Verify the PACS server is running and accepting connections on that port.`;
+    } else if (/ENOTFOUND|getaddrinfo/i.test(rawMessage)) {
+      userMessage = `Could not resolve host "${settings.host}". Check the PACS server hostname or IP address.`;
+    } else if (/AE ?title|AET/i.test(rawMessage) || /rejected/i.test(rawMessage)) {
+      userMessage = `AE title rejected. Local: "${settings.callingAeTitle}", Remote: "${settings.calledAeTitle}". Verify both AE titles are correct and registered on the PACS server.`;
+    } else if (/string.*pattern|regex|match/i.test(rawMessage)) {
+      userMessage = `Invalid DICOM parameter format. AE titles must be uppercase alphanumeric (A-Z, 0-9) with no spaces or special characters. Local: "${settings.callingAeTitle}", Remote: "${settings.calledAeTitle}".`;
+    } else if (/native module|dicom-dimse|not available/i.test(rawMessage)) {
+      userMessage = "DICOM native module is not installed. Please rebuild dicom-dimse-native for your platform.";
+    } else {
+      userMessage = `PACS connection failed: ${rawMessage}`;
+    }
+
+    throw new HttpError(502, userMessage);
   }
 
   await logAuditEntry({
