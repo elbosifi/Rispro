@@ -25,6 +25,7 @@ import { LanguageProvider, useLanguage } from "@/providers/language-provider";
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
   patients: "/patients",
+  "patients.new": "/patients/new",
   appointments: "/appointments",
   calendar: "/calendar",
   registrations: "/registrations",
@@ -120,6 +121,7 @@ function AppContent() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/patients" element={<PatientsPage />} />
+            <Route path="/patients/new" element={<PatientsPage />} />
             <Route path="/patients/:id/edit" element={<EditPatientPage />} />
             <Route path="/appointments" element={<AppointmentsPage />} />
             <Route path="/calendar" element={<CalendarPage />} />

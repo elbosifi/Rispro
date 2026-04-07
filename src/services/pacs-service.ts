@@ -1,4 +1,3 @@
-import dimse from "dicom-dimse-native";
 import os from "os";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
@@ -6,6 +5,21 @@ import { logAuditEntry } from "./audit-service.js";
 import type { UnknownRecord, OptionalUserId } from "../types/http.js";
 import type { CategorySettings, SettingsMap } from "../types/settings.js";
 import type { DbQueryResult } from "../types/db.js";
+
+// Lazy-load native DICOM module to prevent crash on platforms where it's not built
+let dimse: any = null;
+
+function getDimseModule() {
+  if (!dimse) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      dimse = require("dicom-dimse-native").default;
+    } catch {
+      throw new HttpError(503, "DICOM native module not available. Please rebuild dicom-dimse-native for your platform.");
+    }
+  }
+  return dimse;
+}
 
 export interface PacsFindResult {
   patientId?: string;
