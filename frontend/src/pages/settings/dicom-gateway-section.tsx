@@ -15,17 +15,13 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
     queryFn: () => fetchSettings("dicom_gateway")
   });
 
+  // fetchSettings returns a flat Record<string, string> via mapSettings
+  const settingsMap = (data as Record<string, string>) || {};
+
   const [form, setForm] = useState<Record<string, string>>({});
   const [isEditing, setIsEditing] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-
-  const settings = (data as any)?.settings || [];
-  const settingsMap: Record<string, any> = {};
-
-  for (const s of settings) {
-    settingsMap[s.setting_key] = s.setting_value?.value ?? "";
-  }
 
   const saveMutation = useMutation({
     mutationFn: async (entries: Array<{ key: string; value: { value: string } }>) => {
@@ -34,6 +30,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings", "dicom_gateway"] });
       setIsEditing(false);
+      setForm({});
       setMutationError(null);
       setStatusMessage("Settings saved successfully.");
       setTimeout(() => setStatusMessage(null), 3000);
