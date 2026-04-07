@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
@@ -13,7 +14,7 @@ export default function ModalityPage() {
   const [modalityId, setModalityId] = useState("");
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -49,9 +50,9 @@ export default function ModalityPage() {
     queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
   };
 
-  const waitingCount = appointments.filter((a: any) => a.status === "waiting").length;
-  const arrivedCount = appointments.filter((a: any) => a.status === "arrived").length;
-  const completedCount = appointments.filter((a: any) => a.status === "completed").length;
+  const waitingCount = appointments.filter((a) => a.status === "waiting").length;
+  const arrivedCount = appointments.filter((a) => a.status === "arrived").length;
+  const completedCount = appointments.filter((a) => a.status === "completed").length;
 
   const modalities = (lookups as any)?.modalities ?? [];
 
@@ -141,7 +142,7 @@ export default function ModalityPage() {
             <div className="p-8 text-center text-stone-500">{t(language, "modality.empty")}</div>
           ) : (
             <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-              {appointments.map((apt: any) => (
+              {appointments.map((apt) => (
                 <li
                   key={apt.id}
                   onClick={() => setSelectedAppointment(apt)}

@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
@@ -44,7 +45,7 @@ export default function AppointmentsPage() {
   const [form, setForm] = useState<AppointmentForm>(DEFAULT_FORM);
   const [patientResults, setPatientResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [postCreateAppointment, setPostCreateAppointment] = useState<any>(null);
+  const [postCreateAppointment, setPostCreateAppointment] = useState<AppointmentWithDetails | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch patient by ID if present in URL

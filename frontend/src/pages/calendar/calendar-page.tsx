@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
@@ -23,7 +24,7 @@ export default function CalendarPage() {
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
   const [modalityFilter, setModalityFilter] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const navigate = useNavigate();
 
   // Load appointments for the displayed month range
@@ -256,7 +257,7 @@ export default function CalendarPage() {
               </div>
             ) : (
               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-                {selectedAppointments.map((apt: any) => (
+                {selectedAppointments.map((apt) => (
                   <li
                     key={apt.id}
                     onClick={() => setSelectedAppointment(apt)}

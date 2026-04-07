@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups, getAppointmentById } from "@/lib/api-hooks";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
@@ -18,7 +19,7 @@ export default function PrintPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const appointmentIdParam = searchParams.get("appointmentId");
 
   const { data: lookups } = useQuery({
@@ -51,11 +52,11 @@ export default function PrintPage() {
 
   useEffect(() => {
     if (!appointmentIdParam) return;
-    const match = appointments.find((apt: any) => String(apt.id) === appointmentIdParam);
+    const match = appointments.find((apt) => String(apt.id) === appointmentIdParam);
     if (match) setSelectedAppointment(match);
   }, [appointmentIdParam, appointments]);
 
-  const handlePrintSlip = (apt: any) => {
+  const handlePrintSlip = (apt: AppointmentWithDetails) => {
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
 
@@ -120,7 +121,7 @@ export default function PrintPage() {
     printWindow.print();
   };
 
-  const handlePrintList = (list: any[], listDate: string) => {
+  const handlePrintList = (list: AppointmentWithDetails[], listDate: string) => {
     if (list.length === 0) return;
     const printWindow = window.open("", "_blank");
     if (!printWindow) return;
@@ -275,7 +276,7 @@ export default function PrintPage() {
             <div className="p-8 text-center text-stone-500">{t(language, "print.empty")}</div>
           ) : (
             <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-              {appointments.map((apt: any) => (
+              {appointments.map((apt) => (
                 <li key={apt.id}>
                   <div className="p-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
                     <button onClick={() => setSelectedAppointment(apt)} className="text-right flex-1">

@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients } from "@/lib/api-hooks";
-import type { QueueSnapshot } from "@/types/api";
+import type { QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
@@ -11,8 +11,8 @@ export default function QueuePage() {
   const { language, t } = useLanguage();
   const [scanValue, setScanValue] = useState("");
   const [walkInSearch, setWalkInSearch] = useState("");
-  const [walkInResults, setWalkInResults] = useState<any[]>([]);
-  const [selectedWalkIn, setSelectedWalkIn] = useState<any>(null);
+  const [walkInResults, setWalkInResults] = useState<Patient[]>([]);
+  const [selectedWalkIn, setSelectedWalkIn] = useState<Patient | null>(null);
   const queryClient = useQueryClient();
 
   const { data: queue } = useQuery<QueueSnapshot>({
@@ -35,7 +35,7 @@ export default function QueuePage() {
         message: t("queue.scanSuccess")
       });
     },
-    onError: (err: any) => {
+    onError: (err) => {
       pushToast({
         type: "error",
         title: t("queue.scanFailed"),

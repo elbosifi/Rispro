@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
@@ -29,7 +30,7 @@ export default function RegistrationsPage() {
     status: ["scheduled"]
   });
 
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["registrations", filters],
