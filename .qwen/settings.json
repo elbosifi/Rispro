@@ -28,7 +28,8 @@
       "Bash(select-string *)",
       "Bash(./node_modules/.bin/tsc *)",
       "Bash(brew *)",
-      "Bash(ssh *)"
+      "Bash(ssh *)",
+      "Bash(dcmqrscp *)"
     ]
   },
   "$version": 3
