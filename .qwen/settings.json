@@ -27,7 +27,8 @@
       "Bash(docker-compose *)",
       "Bash(select-string *)",
       "Bash(./node_modules/.bin/tsc *)",
-      "Bash(brew *)"
+      "Bash(brew *)",
+      "Bash(ssh *)"
     ]
   },
   "$version": 3
