@@ -24,7 +24,8 @@
       "Bash(taskkill *)",
       "Bash(pg_isready)",
       "Bash(docker *)",
-      "Bash(docker-compose *)"
+      "Bash(docker-compose *)",
+      "Bash(select-string *)"
     ]
   },
   "$version": 3

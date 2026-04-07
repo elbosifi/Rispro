@@ -73,7 +73,7 @@ export default function StatisticsPage() {
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
             {statusBreakdown.map((row) => (
               <tr key={row.status}>
-                <td className="p-3 text-stone-900 dark:text-white font-medium">{t(language, `status.${row.status}` as any) || row.status}</td>
+                <td className="p-3 text-stone-900 dark:text-white font-medium">{row.status}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.count}</td>
               </tr>
             ))}

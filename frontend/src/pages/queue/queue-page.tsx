@@ -89,15 +89,6 @@ export default function QueuePage() {
     }
   });
 
-  const handleWalkInSearch = (query: string) => {
-    setWalkInSearch(query);
-    if (query.length > 1) {
-      searchPatients(query).then(setWalkInResults);
-    } else {
-      setWalkInResults([]);
-    }
-  };
-
   const walkInMutation = useMutation({
     mutationFn: addWalkIn,
     meta: {

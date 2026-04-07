@@ -30,6 +30,7 @@ import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal
 import { formatDateTimeLy } from "@/lib/date-format";
 import { chooseLocalized, type TranslationKey } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import type { User } from "@/types/api";
 
 type SettingsSection =
   | "menu"
@@ -140,7 +141,7 @@ export default function SettingsPage() {
 function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["users"], queryFn: fetchUsers });
+  const { data, isLoading, error } = useQuery<{ users: User[] }>({ queryKey: ["users"], queryFn: fetchUsers });
 
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ username: "", fullName: "", password: "", role: "receptionist" });
@@ -149,12 +150,12 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   const deleteMutation = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+    onError: (err: Error) => { setMutationError(err?.message || "Delete failed"); }
   });
   const createMutation = useMutation({
-    mutationFn: (data: any) => createUser(data),
+    mutationFn: (data: { username: string; fullName: string; password: string; role: string }) => createUser(data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setShowCreate(false); setCreateForm({ username: "", fullName: "", password: "", role: "receptionist" }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+    onError: (err: Error) => { setMutationError(err?.message || "Create failed"); }
   });
 
   if (error) {
@@ -172,7 +173,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
         </div>
       )}
       <div className="flex justify-between items-center">
-        <span className="text-sm description-center">{(data as any)?.users?.length ?? 0} users</span>
+        <span className="text-sm description-center">{data?.users?.length ?? 0} users</span>
         <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add User"}</button>
       </div>
 
@@ -192,15 +193,15 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       )}
 
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-        {(data as any)?.users?.map((u: any) => (
+        {data?.users?.map((u) => (
           <li key={u.id} className="py-3 flex items-center justify-between">
             <div className="text-start">
-              <p className="font-medium text-stone-900 dark:text-white">{u.full_name}</p>
+              <p className="font-medium text-stone-900 dark:text-white">{u.fullName}</p>
               <p className="text-sm description-center">@{u.username} - {u.role}</p>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-                {u.is_active ? t("settings.active") : t("settings.inactive")}
+              <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                {u.isActive ? t("settings.active") : t("settings.inactive")}
               </span>
               <button
                 onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}

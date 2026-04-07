@@ -377,7 +377,6 @@ function Select({
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const { language } = useLanguage();
   const styles: Record<string, string> = {
     scheduled: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
     arrived: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
@@ -389,7 +388,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>
-      {t(language, `status.${status}` as any) || status}
+      {status}
     </span>
   );
 }

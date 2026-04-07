@@ -24,7 +24,7 @@ export function debounce<TArgs extends unknown[], TResult>(
  * Debounced value hook for React - returns a debounced value that updates after delay.
  * This is a simplified version that can be used with React state.
  */
-export function useDebouncedValue<T>(value: T, delayMs = 300): T {
+export function useDebouncedValue<T>(value: T, _delayMs = 300): T {
   // This is a placeholder - actual implementation would use useState and useEffect
   // For now, we'll use debounce at the handler level instead
   return value;

@@ -127,7 +127,7 @@ export default function DoctorPage() {
                 <Field label={t(language, "doctor.fieldModality")} value={selectedAppointment.modalityNameEn} />
                 <Field label={t(language, "doctor.fieldExam")} value={selectedAppointment.examNameEn} />
                 <Field label={t(language, "doctor.fieldDate")} value={formatDateLy(selectedAppointment.appointmentDate)} />
-                <Field label={t(language, "doctor.fieldStatus")} value={t(language, `status.${selectedAppointment.status}` as any) || selectedAppointment.status} />
+                <Field label={t(language, "doctor.fieldStatus")} value={selectedAppointment.status} />
                 <Field label={t(language, "doctor.fieldNotes")} value={selectedAppointment.notes} />
               </div>
               <div className="mt-6">

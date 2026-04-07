@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
+import type { AppointmentLookups } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
@@ -18,7 +19,7 @@ export default function ModalityPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const { data: lookups } = useQuery({
+  const { data: lookups } = useQuery<AppointmentLookups>({
     queryKey: ["lookups"],
     queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5
@@ -54,7 +55,7 @@ export default function ModalityPage() {
   const arrivedCount = appointments.filter((a) => a.status === "arrived").length;
   const completedCount = appointments.filter((a) => a.status === "completed").length;
 
-  const modalities = (lookups as any)?.modalities ?? [];
+  const modalities = lookups?.modalities ?? [];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
