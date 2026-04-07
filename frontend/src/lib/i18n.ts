@@ -402,6 +402,7 @@ const en = {
   "pacs.accessionPlaceholder": "Enter accession number...",
   "pacs.defaultNode": "Default node",
   "pacs.atLeastOneField": "At least one search field is required.",
+  "pacs.resetBtn": "Reset",
 
   "login.heading": "RISpro Reception",
   "login.description": "Sign in to access the reception workspace",
@@ -870,6 +871,7 @@ const ar = {
   "pacs.accessionPlaceholder": "أدخل رقم الإحالة...",
   "pacs.defaultNode": "الخادم الافتراضي",
   "pacs.atLeastOneField": "مطلوب حقل بحث واحد على الأقل.",
+  "pacs.resetBtn": "إعادة تعيين",
 
   "login.heading": "RISpro Reception",
   "login.description": "قم بتسجيل الدخول للوصول إلى مساحة عمل الاستقبال",

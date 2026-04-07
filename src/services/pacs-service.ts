@@ -37,6 +37,7 @@ export interface StudySearchCriteria {
   patientName?: string;
   accessionNumber?: string;
   studyDate?: string;
+  modality?: string;
 }
 
 export interface StudySummary {
@@ -109,8 +110,9 @@ function normalizeStudySearchCriteria(payload: UnknownRecord = {}): StudySearchC
   const patientName = String(payload.patientName || "").trim();
   const accessionNumber = String(payload.accessionNumber || "").trim();
   const studyDate = normalizeDateForDicom(payload.studyDate || "");
+  const modality = String(payload.modality || "").trim().toUpperCase();
 
-  if (!patientId && !patientName && !accessionNumber && !studyDate) {
+  if (!patientId && !patientName && !accessionNumber && !studyDate && !modality) {
     throw new HttpError(400, "At least one PACS search field is required.");
   }
 
@@ -118,7 +120,8 @@ function normalizeStudySearchCriteria(payload: UnknownRecord = {}): StudySearchC
     patientId,
     patientName,
     accessionNumber,
-    studyDate
+    studyDate,
+    modality
   };
 }
 
@@ -302,7 +305,7 @@ function buildStudySearchTags(criteria: StudySearchCriteria): { key: string; val
     { key: "00100020", value: criteria.patientId || "" },
     { key: "00080050", value: criteria.accessionNumber || "" },
     { key: "00080020", value: criteria.studyDate || "" },
-    { key: "00080060", value: "" },
+    { key: "00080060", value: criteria.modality || "" },
     { key: "00081030", value: "" }
   ];
 

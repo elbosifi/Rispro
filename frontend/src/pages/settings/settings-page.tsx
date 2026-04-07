@@ -7,7 +7,6 @@ import {
   fetchModalitiesSettings,
   fetchNameDictionary,
   fetchSettings,
-  fetchPacsConnection,
   deleteUser,
   createUser,
   exportAuditCSV,

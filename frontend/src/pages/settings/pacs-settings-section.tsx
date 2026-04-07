@@ -216,7 +216,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   </button>
                   <button onClick={() => startEdit(node)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
                   <button
-                    onClick={() => { if (window.confirm(`Delete "${node.name}"?`)); deleteMutation.mutate(node.id); }}
+                    onClick={() => { if (window.confirm(`Delete "${node.name}"?`)) deleteMutation.mutate(node.id); }}
                     className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
                   >
                     Delete

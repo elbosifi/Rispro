@@ -85,12 +85,13 @@ pacsRouter.post(
     if (nodeId) {
       const { getPacsNode } = await import("../services/pacs-node-service.js");
       const node = await getPacsNode(nodeId);
+      overrides.enabled = "enabled";
       overrides.host = node.host;
       overrides.port = node.port;
       overrides.calledAeTitle = node.called_ae_title;
       overrides.callingAeTitle = node.calling_ae_title;
       overrides.timeoutSeconds = node.timeout_seconds;
-    } else {
+    } else if (body.host) {
       // Use ad-hoc params from body
       overrides.host = body.host;
       overrides.port = body.port;

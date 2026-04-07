@@ -234,7 +234,7 @@ export default function PacsPage() {
               onClick={handleReset}
               className="px-6 py-2.5 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-300 font-medium rounded-xl transition-colors"
             >
-              {t(language, "common.reset") || "Reset"}
+              {t(language, "pacs.resetBtn") || "Reset"}
             </button>
           </div>
 
