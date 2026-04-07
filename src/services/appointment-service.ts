@@ -1,6 +1,8 @@
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
@@ -242,28 +244,6 @@ type AppointmentActor = AuthenticatedUserContext & { id?: UserId };
 // Helper functions
 // ---------------------------------------------------------------------------
 
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = true }: { required?: boolean } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
-}
-
 function normalizeAppointmentDate(value: unknown, fieldName = "appointmentDate"): string {
   const raw = String(value || "").trim();
 
@@ -329,14 +309,6 @@ function normalizeIsoDate(value: unknown): string {
   }
 
   return String(value || "").slice(0, 10);
-}
-
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
 }
 
 function getTripoliWeekday(isoDate: string): string {

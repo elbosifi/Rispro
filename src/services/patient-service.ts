@@ -1,12 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, normalizeArabicName, normalizeLibyanPhone } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
-import {
-  buildEstimatedDobFromAge,
-  formatDateForSql,
-  normalizeArabicName,
-  normalizeLibyanPhone
-} from "../utils/normalize.js";
 import { generateEnglishFromDictionary, NameDictionaryLookup } from "../utils/name-generation.js";
 import {
   isValidNationalId,
@@ -88,16 +83,6 @@ interface PatientNoShowSummaryRow {
 }
 
 export type PersistedPatientRow = PatientRow & { id: UserId };
-
-function normalizePositiveInteger(value: unknown, fieldName: string): number {
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
-}
 
 function validateNationalIdField(
   nationalId: unknown,
@@ -352,7 +337,7 @@ async function validatePatientPayload(
 }
 
 export async function getPatientById(patientId: UserId): Promise<PatientRow> {
-  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const { rows } = await pool.query<PatientRow>(
     `
       select id, mrn, national_id, identifier_type, identifier_value, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
@@ -373,7 +358,7 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
 }
 
 export async function getPatientNoShowSummary(patientId: UserId): Promise<{ noShowCount: number; lastNoShowDate: string | null }> {
-  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const { rows } = await pool.query<PatientNoShowSummaryRow>(
     `
       select
@@ -509,7 +494,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
 }
 
 export async function updatePatient(patientId: UserId, payload: PatientPayload, updatedByUserId: OptionalUserId): Promise<PersistedPatientRow> {
-  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const previousPatient = await getPatientById(cleanPatientId);
   const rules = await loadPatientRegistrationSettings();
   const dictionary = await loadNameDictionary();
@@ -588,7 +573,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
 }
 
 export async function deletePatient(patientId: UserId, deletedByUserId: OptionalUserId): Promise<{ ok: boolean }> {
-  const cleanPatientId = normalizePositiveInteger(patientId, "patientId");
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const client = await pool.connect();
 
   try {
@@ -638,8 +623,8 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
 }
 
 export async function mergePatients(payload: MergePatientsPayload, updatedByUserId: OptionalUserId): Promise<PatientRow> {
-  const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId");
-  const sourcePatientId = normalizePositiveInteger(payload.sourcePatientId, "sourcePatientId");
+  const targetPatientId = normalizePositiveInteger(payload.targetPatientId, "targetPatientId") as number;
+  const sourcePatientId = normalizePositiveInteger(payload.sourcePatientId, "sourcePatientId") as number;
   const confirmationText = String(payload.confirmationText || "").trim().toUpperCase();
 
   if (targetPatientId === sourcePatientId) {

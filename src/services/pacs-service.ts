@@ -2,9 +2,8 @@ import os from "os";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { loadSettingsMap } from "./settings-service.js";
 import type { UnknownRecord, OptionalUserId } from "../types/http.js";
-import type { CategorySettings, SettingsMap } from "../types/settings.js";
-import type { DbQueryResult } from "../types/db.js";
 
 // Lazy-load native DICOM module to prevent crash on platforms where it's not built
 let dimse: any = null;
@@ -48,12 +47,6 @@ export interface StudySummary {
   studyDate: string;
 }
 
-interface SystemSettingRow {
-  category: string;
-  setting_key: string;
-  setting_value: { value?: unknown } | null;
-}
-
 export interface PacsSettings {
   enabled: boolean;
   host: string;
@@ -89,26 +82,6 @@ function getDimseSourceIp(): string {
   }
 
   return "0.0.0.0";
-}
-
-async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
-  const { rows } = (await pool.query(
-    `
-      select category, setting_key, setting_value
-      from system_settings
-      where category = any($1::text[])
-    `,
-    [categories]
-  )) as DbQueryResult<SystemSettingRow>;
-
-  return rows.reduce((accumulator: SettingsMap, row: SystemSettingRow) => {
-    if (!accumulator[row.category]) {
-      accumulator[row.category] = {} as CategorySettings;
-    }
-
-    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
-    return accumulator;
-  }, {} as SettingsMap);
 }
 
 function normalizeDateForDicom(value: unknown): string {

@@ -2,7 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId } from "../types/http.js";
-import type { GroupedSettings } from "../types/settings.js";
+import type { CategorySettings, GroupedSettings, SettingsMap } from "../types/settings.js";
 
 export interface SettingsRow {
   id: number;
@@ -10,6 +10,34 @@ export interface SettingsRow {
   setting_key: string;
   setting_value: unknown;
   updated_at: string;
+}
+
+interface SettingsMapRow {
+  category: string;
+  setting_key: string;
+  setting_value: { value?: unknown } | null;
+}
+
+export async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
+  const { rows } = await pool.query(
+    `
+      select category, setting_key, setting_value
+      from system_settings
+      where category = any($1::text[])
+    `,
+    [categories]
+  );
+
+  const settingRows = rows as SettingsMapRow[];
+
+  return settingRows.reduce((accumulator, row) => {
+    if (!accumulator[row.category]) {
+      accumulator[row.category] = {} as CategorySettings;
+    }
+
+    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
+    return accumulator;
+  }, {} as SettingsMap);
 }
 
 export interface SettingsEntryInput {

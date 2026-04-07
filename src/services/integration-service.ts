@@ -1,16 +1,12 @@
 import crypto from "crypto";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
 import { getDicomGatewayOverview } from "./dicom-service.js";
-import type { CategorySettings, SettingsMap } from "../types/settings.js";
+import { loadSettingsMap } from "./settings-service.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
-
-interface SettingMapRow {
-  category: string;
-  setting_key: string;
-  setting_value: { value?: unknown } | null;
-}
 
 interface AppointmentSummaryRow {
   id: number;
@@ -94,58 +90,6 @@ interface ScanPreparation {
   allowedFileTypes: string[];
   suggestedFileName: string;
   guidance: string;
-}
-
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = true }: { required?: boolean } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
-}
-
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
-}
-
-async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
-  const { rows } = await pool.query(
-    `
-      select category, setting_key, setting_value
-      from system_settings
-      where category = any($1::text[])
-    `,
-    [categories]
-  );
-
-  const settingRows = rows as SettingMapRow[];
-
-  return settingRows.reduce((accumulator, row) => {
-    if (!accumulator[row.category]) {
-      accumulator[row.category] = {} as CategorySettings;
-    }
-
-    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
-    return accumulator;
-  }, {} as SettingsMap);
 }
 
 function parseEnabled(value: unknown): boolean {

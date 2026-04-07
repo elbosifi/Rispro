@@ -1,5 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import type { AuditEvent } from "../types/domain.js";
 import type { DbExecutor } from "../types/db.js";
 import type { UserId, NullableUserId } from "../types/http.js";
@@ -65,14 +67,6 @@ async function isAuditEnabled(executor: DbExecutor = pool): Promise<boolean> {
   return value !== "disabled";
 }
 
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
-}
-
 export async function logAuditEntry(
   {
     entityType,
@@ -112,28 +106,6 @@ export async function logAuditEntry(
   );
 
   return requireRow<AuditLogRow>(rows[0] as unknown as AuditLogRow | undefined, "Failed to write audit log entry.");
-}
-
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = false, max = 5000 }: { required?: boolean; max?: number } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > max) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
 }
 
 function normalizeStringFilter(value: unknown): string | null {

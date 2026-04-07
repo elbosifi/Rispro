@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import type { Pool, PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import { normalizeDateValue } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId, UnknownRecord } from "../types/http.js";
@@ -19,6 +21,7 @@ import {
   APPOINTMENT_STATUS_IN_PROGRESS,
   APPOINTMENT_STATUS_WAITING
 } from "../constants/appointment-statuses.js";
+import { loadSettingsMap } from "./settings-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -286,28 +289,6 @@ interface LogPatch {
 // Normalization helpers
 // ---------------------------------------------------------------------------
 
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = true }: { required?: boolean } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
-}
-
 function normalizeOptionalText(value: unknown): string {
   return String(value || "").trim();
 }
@@ -491,39 +472,9 @@ function parseDicomTimestamp(dateValue: string, timeValue: string): string | nul
   return `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}T${normalizedTime}`;
 }
 
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
-}
-
 // ---------------------------------------------------------------------------
 // Settings & device helpers
 // ---------------------------------------------------------------------------
-
-async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
-  const { rows } = await pool.query(
-    `
-      select category, setting_key, setting_value
-      from system_settings
-      where category = any($1::text[])
-    `,
-    [categories]
-  );
-
-  const settingRows = rows as DicomSettingRow[];
-
-  return settingRows.reduce((accumulator, row) => {
-    if (!accumulator[row.category]) {
-      accumulator[row.category] = {} as CategorySettings;
-    }
-
-    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
-    return accumulator;
-  }, {} as SettingsMap);
-}
 
 async function listDevicesForModality(
   client: Pool | PoolClient,

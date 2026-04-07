@@ -1,5 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
@@ -47,28 +49,6 @@ interface ModalityFilters {
   date?: string;
 }
 
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = true }: { required?: boolean } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
-}
-
 function normalizeDate(value: unknown): string {
   const raw = String(value || getTripoliToday()).trim();
 
@@ -77,14 +57,6 @@ function normalizeDate(value: unknown): string {
   }
 
   return raw;
-}
-
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
 }
 
 export async function listModalityWorklist(

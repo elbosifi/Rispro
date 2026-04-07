@@ -1,6 +1,7 @@
 import type { PoolClient, QueryResult } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
 import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { createAppointment } from "./appointment-service.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -180,14 +181,6 @@ function getTripoliParts(date: Date = new Date()): TripoliParts {
 function getTripoliMinutesSinceMidnight(): number {
   const parts = getTripoliParts();
   return Number(parts.hour) * 60 + Number(parts.minute);
-}
-
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
 }
 
 function parseTimeToMinutes(value: unknown): number {

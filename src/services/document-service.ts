@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
 import { getTripoliToday } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId, OptionalUserId } from "../types/http.js";
@@ -37,28 +38,6 @@ export interface DocumentRow {
 interface DocumentFilters {
   patientId?: UserId;
   appointmentId?: UserId;
-}
-
-function normalizePositiveInteger(
-  value: unknown,
-  fieldName: string,
-  { required = true }: { required?: boolean } = {}
-): number | null {
-  if (value === undefined || value === null || value === "") {
-    if (required) {
-      throw new HttpError(400, `${fieldName} is required.`);
-    }
-
-    return null;
-  }
-
-  const parsed = Number(value);
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new HttpError(400, `${fieldName} must be a positive whole number.`);
-  }
-
-  return parsed;
 }
 
 function sanitizeFileName(fileName: unknown): string {

@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { requireRow } from "../utils/records.js";
 import type { Role } from "../types/domain.js";
 import type { UserId } from "../types/http.js";
 import type { DbQueryResult } from "../types/db.js";
@@ -22,14 +23,6 @@ interface CookieResponse {
 
 interface ClearCookieResponse {
   clearCookie: (name: string, options: object) => void;
-}
-
-function requireRow<T>(row: T | undefined, message: string): T {
-  if (!row) {
-    throw new HttpError(500, message);
-  }
-
-  return row;
 }
 
 export async function authenticateUser(

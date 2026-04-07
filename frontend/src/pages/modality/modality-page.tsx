@@ -5,8 +5,11 @@ import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } f
 import { todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
 
 export default function ModalityPage() {
+  const { language } = useLanguage();
   const [modalityId, setModalityId] = useState("");
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
@@ -55,19 +58,19 @@ export default function ModalityPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">Modality Board</h2>
+        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "modality.title")}</h2>
         <button
           onClick={handleRefresh}
           className="px-4 py-2 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-300 font-medium rounded-lg transition-colors text-sm"
         >
-          Refresh
+          {t(language, "modality.refresh")}
         </button>
       </div>
 
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">Modality</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{t(language, "modality.selectModality")}</label>
             <select
               value={modalityId}
               onChange={(e) => {
@@ -76,7 +79,7 @@ export default function ModalityPage() {
               }}
               className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
             >
-              <option value="">Select modality...</option>
+              <option value="">{t(language, "modality.selectModality")}</option>
               {modalities
                 .filter((m: any) => m.isActive)
                 .map((m: any) => (
@@ -86,9 +89,9 @@ export default function ModalityPage() {
                 ))}
             </select>
           </div>
-          <DateInput label="Date" value={date} onChange={setDate} disabled={scope === "all"} />
+          <DateInput label={t(language, "modality.date")} value={date} onChange={setDate} disabled={scope === "all"} />
           <div>
-            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">Scope</label>
+            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{t(language, "modality.scope")}</label>
             <div className="flex gap-2">
               <button
                 onClick={() => setScope("day")}
@@ -98,7 +101,7 @@ export default function ModalityPage() {
                     : "bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600"
                 }`}
               >
-                Today
+                {t(language, "modality.scopeToday")}
               </button>
               <button
                 onClick={() => setScope("all")}
@@ -108,7 +111,7 @@ export default function ModalityPage() {
                     : "bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600"
                 }`}
               >
-                All Dates
+                {t(language, "modality.scopeAll")}
               </button>
             </div>
           </div>
@@ -117,9 +120,9 @@ export default function ModalityPage() {
 
       {modalityId && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <StatCard label="Waiting" value={waitingCount} color="amber" />
-          <StatCard label="Arrived" value={arrivedCount} color="teal" />
-          <StatCard label="Completed" value={completedCount} color="emerald" />
+          <StatCard label={t(language, "modality.waiting")} value={waitingCount} color="amber" />
+          <StatCard label={t(language, "modality.arrived")} value={arrivedCount} color="teal" />
+          <StatCard label={t(language, "modality.completed")} value={completedCount} color="emerald" />
         </div>
       )}
 
@@ -127,15 +130,15 @@ export default function ModalityPage() {
         <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700">
             <h3 className="font-semibold text-stone-900 dark:text-white">
-              {isLoading ? "Loading..." : `Worklist (${appointments.length})`}
+              {isLoading ? t(language, "modality.loading") : t(language, "modality.worklist", { count: appointments.length })}
             </h3>
           </div>
           {isLoading ? (
-            <div className="p-8 text-center text-stone-500">Loading...</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "modality.loading")}</div>
           ) : !modalityId ? (
-            <div className="p-8 text-center text-stone-500">Select a modality to view worklist</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "modality.selectPrompt")}</div>
           ) : appointments.length === 0 ? (
-            <div className="p-8 text-center text-stone-500">No appointments found</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "modality.empty")}</div>
           ) : (
             <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
               {appointments.map((apt: any) => (
@@ -167,11 +170,11 @@ export default function ModalityPage() {
                         disabled={completeMutation.isPending}
                         className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm font-medium rounded-lg transition-colors"
                       >
-                        Complete
+                        {t(language, "modality.complete")}
                       </button>
                     ) : apt.status === "completed" ? (
                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
-                        Completed
+                        {t(language, "modality.completed")}
                       </span>
                     ) : (
                       <span className="px-2 py-1 rounded-full text-xs font-medium bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400">
@@ -190,10 +193,10 @@ export default function ModalityPage() {
             <>
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Appointment Review</h3>
+                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">{t(language, "modality.reviewTitle")}</h3>
                   {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                      Edited
+                      {t(language, "appointmentEditor.edited")}
                     </span>
                   )}
                 </div>
@@ -201,18 +204,18 @@ export default function ModalityPage() {
                   onClick={() => handlePrint(selectedAppointment.id)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Print
+                  {t(language, "common.print")}
                 </button>
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm">
-                <Field label="Accession" value={selectedAppointment.accessionNumber} />
-                <Field label="Patient" value={selectedAppointment.arabicFullName} />
-                <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-                <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
-                <Field label="Date" value={selectedAppointment.appointmentDate} />
-                <Field label="Status" value={selectedAppointment.status} />
-                <Field label="Priority" value={selectedAppointment.priorityNameEn || "Normal"} />
-                <Field label="Notes" value={selectedAppointment.notes || "—"} />
+                <Field label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                <Field label={t(language, "modality.fieldPatient")} value={selectedAppointment.arabicFullName} />
+                <Field label={t(language, "modality.fieldModality")} value={selectedAppointment.modalityNameEn} />
+                <Field label={t(language, "modality.fieldExam")} value={selectedAppointment.examNameEn || "—"} />
+                <Field label={t(language, "modality.fieldDate")} value={selectedAppointment.appointmentDate} />
+                <Field label={t(language, "modality.fieldStatus")} value={selectedAppointment.status} />
+                <Field label={t(language, "modality.fieldPriority")} value={selectedAppointment.priorityNameEn || "Normal"} />
+                <Field label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes || "—"} />
               </div>
               <div className="mt-6">
                 <AppointmentEditor
@@ -225,7 +228,7 @@ export default function ModalityPage() {
             </>
           ) : (
             <div className="h-full min-h-[240px] flex items-center justify-center text-stone-500 dark:text-stone-400">
-              Select an appointment to review and print it
+              {t(language, "modality.selectToReview")}
             </div>
           )}
         </div>
