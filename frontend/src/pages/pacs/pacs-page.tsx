@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
@@ -23,7 +23,6 @@ interface PacsNode {
 
 export default function PacsPage() {
   const { language } = useLanguage();
-  const queryClient = useQueryClient();
 
   // Search criteria
   const [nationalId, setNationalId] = useState("");

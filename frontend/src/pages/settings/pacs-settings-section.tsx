@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useLanguage } from "@/providers/language-provider";
 
 interface PacsNode {
   id: number;
@@ -14,8 +13,18 @@ interface PacsNode {
   is_default: boolean;
 }
 
+type PacsNodeFormState = {
+  name: string;
+  host: string;
+  port: number;
+  called_ae_title: string;
+  calling_ae_title: string;
+  timeout_seconds: number;
+  is_active: boolean;
+  is_default: boolean;
+};
+
 export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
-  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery<{ nodes: PacsNode[] }>({
     queryKey: ["pacs", "nodes"],
@@ -31,7 +40,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [testingId, setTestingId] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<{ id: number | null; ok: boolean; message: string } | null>(null);
 
-  const emptyForm = {
+  const emptyForm: PacsNodeFormState = {
     name: "",
     host: "",
     port: 104,
@@ -42,12 +51,12 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     is_default: false
   };
 
-  const [createForm, setCreateForm] = useState(emptyForm);
-  const [editForm, setEditForm] = useState<typeof emptyForm>(emptyForm);
+  const [createForm, setCreateForm] = useState<PacsNodeFormState>(emptyForm);
+  const [editForm, setEditForm] = useState<PacsNodeFormState>(emptyForm);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const createMutation = useMutation({
-    mutationFn: async (data: typeof emptyForm) => {
+    mutationFn: async (data: PacsNodeFormState) => {
       const resp = await fetch("/api/pacs/nodes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -69,7 +78,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   });
 
   const updateMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: number; data: Partial<typeof emptyForm> }) => {
+    mutationFn: async ({ id, data }: { id: number; data: Partial<PacsNodeFormState> }) => {
       const resp = await fetch(`/api/pacs/nodes/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -244,17 +253,8 @@ function PacsNodeForm({
   isPending,
   onCancel
 }: {
-  form: {
-    name: string;
-    host: string;
-    port: number;
-    called_ae_title: string;
-    calling_ae_title: string;
-    timeout_seconds: number;
-    is_active: boolean;
-    is_default: boolean;
-  };
-  onChange: (form: typeof form) => void;
+  form: PacsNodeFormState;
+  onChange: (form: PacsNodeFormState) => void;
   onSubmit: () => void;
   isPending: boolean;
   onCancel: () => void;
@@ -347,13 +347,12 @@ function QueryError({ message }: { message: string }) {
 }
 
 function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
-  const { t } = useLanguage();
   return (
     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
-      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{t("settings.reauthRequired")}</p>
-      <p className="text-xs text-amber-600 dark:text-amber-400">{t("settings.reauthHelp")}</p>
+      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Re-authentication required</p>
+      <p className="text-xs text-amber-600 dark:text-amber-400">Please re-authenticate to manage PACS nodes.</p>
       <button onClick={onReAuthRequired} className="btn-primary text-sm">
-        {t("common.reAuthenticate")}
+        Re-authenticate
       </button>
     </div>
   );
