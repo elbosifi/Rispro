@@ -4,12 +4,23 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { Select } from "@/components/common/select";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
+import type { Appointment } from "@/types/api";
+
+interface DoctorAppointment extends Appointment {
+  arabicFullName: string;
+  modalityNameEn: string;
+  examNameEn: string;
+}
 
 export default function DoctorPage() {
+  const { language } = useLanguage();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<DoctorAppointment | null>(null);
   const navigate = useNavigate();
 
   const { data: lookups } = useQuery({
@@ -23,23 +34,24 @@ export default function DoctorPage() {
     queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }) }),
     staleTime: 1000 * 30
   });
+  const typedAppointments = appointments as DoctorAppointment[];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-        Doctor Home
+        {t(language, "doctor.title")}
       </h2>
 
       {/* Filters */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DateInput label="Date" value={date} onChange={setDate} />
+          <DateInput label={t(language, "doctor.date")} value={date} onChange={setDate} />
           <Select
-            label="Modality"
+            label={t(language, "doctor.modality")}
             value={modalityId}
             onChange={setModalityId}
             options={[
-              { value: "", label: "All" },
+              { value: "", label: t(language, "doctor.all") },
               ...(lookups?.modalities ?? []).map((m) => ({
                 value: m.id.toString(),
                 label: m.nameEn
@@ -54,16 +66,16 @@ export default function DoctorPage() {
         <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-stone-200 dark:border-stone-700">
             <h3 className="font-semibold text-stone-900 dark:text-white">
-              Requests ({isLoading ? "..." : appointments.length})
+              {t(language, "doctor.requests", { count: isLoading ? 0 : typedAppointments.length })}
             </h3>
           </div>
           {isLoading ? (
-            <div className="p-8 text-center text-stone-500">Loading...</div>
-          ) : appointments.length === 0 ? (
-            <div className="p-8 text-center text-stone-500">No requests found</div>
+            <div className="p-8 text-center text-stone-500">{t(language, "common.loading")}</div>
+          ) : typedAppointments.length === 0 ? (
+            <div className="p-8 text-center text-stone-500">{t(language, "doctor.empty")}</div>
           ) : (
             <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-              {appointments.map((apt: any) => (
+              {typedAppointments.map((apt) => (
                 <li key={apt.id}>
                   <button
                     onClick={() => setSelectedAppointment(apt)}
@@ -75,10 +87,10 @@ export default function DoctorPage() {
                       {apt.accessionNumber}
                     </p>
                     <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                      {apt.arabicFullName} • {apt.modalityNameEn}
+                      {apt.arabicFullName} {"\u2022"} {apt.modalityNameEn}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      {formatDateLy(apt.appointmentDate)} • {apt.status}
+                      {formatDateLy(apt.appointmentDate)} {"\u2022"} {apt.status}
                     </p>
                   </button>
                 </li>
@@ -94,11 +106,11 @@ export default function DoctorPage() {
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div className="flex items-center gap-2">
                   <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-                    Appointment Details
+                    {t(language, "doctor.details")}
                   </h3>
                   {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
                     <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                      Edited
+                      {t(language, "appointmentEditor.edited")}
                     </span>
                   )}
                 </div>
@@ -110,13 +122,13 @@ export default function DoctorPage() {
                 </button>
               </div>
               <div className="space-y-3 text-sm">
-                <Field label="Accession" value={selectedAppointment.accessionNumber} />
-                <Field label="Patient" value={selectedAppointment.arabicFullName} />
-                <Field label="Modality" value={selectedAppointment.modalityNameEn} />
-                <Field label="Exam" value={selectedAppointment.examNameEn} />
-                <Field label="Date" value={formatDateLy(selectedAppointment.appointmentDate)} />
-                <Field label="Status" value={selectedAppointment.status} />
-                <Field label="Notes" value={selectedAppointment.notes} />
+                <Field label={t(language, "doctor.fieldAccession")} value={selectedAppointment.accessionNumber} />
+                <Field label={t(language, "doctor.fieldPatient")} value={selectedAppointment.arabicFullName} />
+                <Field label={t(language, "doctor.fieldModality")} value={selectedAppointment.modalityNameEn} />
+                <Field label={t(language, "doctor.fieldExam")} value={selectedAppointment.examNameEn} />
+                <Field label={t(language, "doctor.fieldDate")} value={formatDateLy(selectedAppointment.appointmentDate)} />
+                <Field label={t(language, "doctor.fieldStatus")} value={t(language, `status.${selectedAppointment.status}` as any) || selectedAppointment.status} />
+                <Field label={t(language, "doctor.fieldNotes")} value={selectedAppointment.notes} />
               </div>
               <div className="mt-6">
                 <AppointmentEditor
@@ -129,7 +141,7 @@ export default function DoctorPage() {
             </div>
           ) : (
             <div className="h-full flex items-center justify-center bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-8">
-              <p className="text-stone-500 dark:text-stone-400">Select an appointment to view details</p>
+              <p className="text-stone-500 dark:text-stone-400">{t(language, "doctor.selectPrompt")}</p>
             </div>
           )}
         </div>
@@ -138,20 +150,8 @@ export default function DoctorPage() {
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    </div>
-  );
-}
 
-function Field({ label, value }: { label: string; value: any }) {
+function Field({ label, value }: { label: string; value: string | undefined | null }) {
   return (
     <div>
       <p className="text-stone-500 dark:text-stone-400">{label}</p>

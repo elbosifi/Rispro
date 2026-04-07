@@ -16,7 +16,11 @@
       "Bash(npm create *)",
       "Bash(npm install)",
       "Bash(del *)",
-      "Bash(rm *)"
+      "Bash(rm *)",
+      "Bash(timeout *)",
+      "Bash(curl *)",
+      "Bash(netstat *)",
+      "Bash(tsx *)"
     ]
   },
   "$version": 3

@@ -3,8 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { Select } from "@/components/common/select";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import type {
+  AppointmentStatisticsStatusRow,
+  AppointmentStatisticsModalityRow,
+  AppointmentStatisticsDailyRow
+} from "@/types/api";
 
 export default function StatisticsPage() {
   const { language } = useLanguage();
@@ -23,9 +29,9 @@ export default function StatisticsPage() {
     staleTime: 1000 * 30
   });
 
-  const statusBreakdown = stats?.statusBreakdown ?? [];
-  const modalityBreakdown = stats?.modalityBreakdown ?? [];
-  const dailyBreakdown = stats?.dailyBreakdown ?? [];
+  const statusBreakdown: AppointmentStatisticsStatusRow[] = stats?.statusBreakdown ?? [];
+  const modalityBreakdown: AppointmentStatisticsModalityRow[] = stats?.modalityBreakdown ?? [];
+  const dailyBreakdown: AppointmentStatisticsDailyRow[] = stats?.dailyBreakdown ?? [];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -65,7 +71,7 @@ export default function StatisticsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-            {statusBreakdown.map((row: any) => (
+            {statusBreakdown.map((row) => (
               <tr key={row.status}>
                 <td className="p-3 text-stone-900 dark:text-white font-medium">{t(language, `status.${row.status}` as any) || row.status}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.count}</td>
@@ -88,7 +94,7 @@ export default function StatisticsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-            {modalityBreakdown.map((row: any) => (
+            {modalityBreakdown.map((row) => (
               <tr key={row.modalityId}>
                 <td className="p-3 text-stone-900 dark:text-white font-medium">{row.modalityNameEn}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
@@ -113,7 +119,7 @@ export default function StatisticsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
-            {dailyBreakdown.map((row: any) => (
+            {dailyBreakdown.map((row) => (
               <tr key={row.appointmentDate}>
                 <td className="p-3 text-stone-900 dark:text-white font-medium">{formatDateLy(row.appointmentDate)}</td>
                 <td className="p-3 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
@@ -128,15 +134,3 @@ export default function StatisticsPage() {
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[] }) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none">
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>{opt.label}</option>
-        ))}
-      </select>
-    </div>
-  );
-}

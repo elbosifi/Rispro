@@ -299,10 +299,15 @@ const en = {
   "modality.selectToReview": "Select an appointment to review and print it",
 
   "doctor.title": "Doctor Home",
+  "doctor.date": "Date",
+  "doctor.modality": "Modality",
   "doctor.all": "All",
   "doctor.requests": "Requests ({count})",
   "doctor.loading": "Loading...",
+  "doctor.noRequests": "No requests found",
   "doctor.empty": "No requests found",
+  "doctor.appointmentDetails": "Appointment Details",
+  "doctor.selectAppointment": "Select an appointment",
   "doctor.details": "Appointment Details",
   "doctor.selectPrompt": "Select an appointment to view details",
 
@@ -362,6 +367,9 @@ const en = {
   "pacs.searchingPacs": "Searching PACS...",
   "pacs.noStudies": "No studies found. Enter a National ID to search.",
   "pacs.studyLabel": "Study #{num}",
+  "pacs.fieldDate": "Date",
+  "pacs.fieldModality": "Modality",
+  "pacs.fieldDescription": "Description",
 
   "login.heading": "RISpro Reception",
   "login.description": "Sign in to access the reception workspace",
@@ -425,10 +433,6 @@ const en = {
   "search.fieldPhone": "Phone",
   "search.fieldAddress": "Address",
   "search.fieldDOBFormat": "DOB (YYYY-MM-DD)",
-
-  "pacs.fieldDate": "Date",
-  "pacs.fieldModality": "Modality",
-  "pacs.fieldDescription": "Description",
 
   "login.username": "Username",
   "login.password": "Password"
@@ -731,10 +735,15 @@ const ar = {
   "modality.selectToReview": "اختر موعداً للمراجعة والطباعة",
 
   "doctor.title": "صفحة الطبيب",
+  "doctor.date": "التاريخ",
+  "doctor.modality": "الجهاز",
   "doctor.all": "الكل",
   "doctor.requests": "الطلبات ({count})",
   "doctor.loading": "جاري التحميل...",
+  "doctor.noRequests": "لم يتم العثور على طلبات",
   "doctor.empty": "لم يتم العثور على طلبات",
+  "doctor.appointmentDetails": "تفاصيل الموعد",
+  "doctor.selectAppointment": "اختر موعداً",
   "doctor.details": "تفاصيل الموعد",
   "doctor.selectPrompt": "اختر موعداً لعرض التفاصيل",
 
@@ -794,6 +803,9 @@ const ar = {
   "pacs.searchingPacs": "جاري البحث في الأرشيف...",
   "pacs.noStudies": "لم يتم العثور على دراسات. أدخل رقم هوية للبحث.",
   "pacs.studyLabel": "دراسة #{num}",
+  "pacs.fieldDate": "التاريخ",
+  "pacs.fieldModality": "الجهاز",
+  "pacs.fieldDescription": "الوصف",
 
   "login.heading": "RISpro Reception",
   "login.description": "قم بتسجيل الدخول للوصول إلى مساحة عمل الاستقبال",
@@ -857,10 +869,6 @@ const ar = {
   "search.fieldPhone": "الهاتف",
   "search.fieldAddress": "العنوان",
   "search.fieldDOBFormat": "تاريخ الميلاد (YYYY-MM-DD)",
-
-  "pacs.fieldDate": "التاريخ",
-  "pacs.fieldModality": "الجهاز",
-  "pacs.fieldDescription": "الوصف",
 
   "login.username": "اسم المستخدم",
   "login.password": "كلمة المرور"

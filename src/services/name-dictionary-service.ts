@@ -1,0 +1,211 @@
+import { pool } from "../db/pool.js";
+import { HttpError } from "../utils/http-error.js";
+import { logAuditEntry } from "./audit-service.js";
+import type { UserId } from "../types/http.js";
+
+export interface NameDictionaryRow {
+  id: number;
+  arabic_text: string;
+  english_text: string;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface NameDictionaryPayload {
+  arabicText?: string;
+  englishText?: string;
+  isActive?: boolean | string | number | null;
+}
+
+function normalizeDictionaryText(value: unknown, fieldName: string): string {
+  const clean = String(value || "").trim();
+
+  if (!clean) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+
+  return clean;
+}
+
+function normalizeActiveFlag(value: boolean | string | number | null | undefined): boolean {
+  if (value === undefined || value === null || value === "") {
+    return true;
+  }
+
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  return String(value).trim().toLowerCase() !== "false";
+}
+
+export async function listNameDictionary({ includeInactive = false }: { includeInactive?: boolean } = {}): Promise<NameDictionaryRow[]> {
+  const { rows } = await pool.query(
+    `
+      select id, arabic_text, english_text, is_active, created_at
+      from name_dictionary
+      ${includeInactive ? "" : "where is_active = true"}
+      order by arabic_text asc
+    `
+  );
+
+  return rows as NameDictionaryRow[];
+}
+
+export async function upsertNameDictionary(
+  payload: NameDictionaryPayload | null | undefined,
+  currentUserId: UserId
+): Promise<NameDictionaryRow> {
+  const arabicText = normalizeDictionaryText(payload?.arabicText, "arabicText");
+  const englishText = normalizeDictionaryText(payload?.englishText, "englishText");
+  const isActive = normalizeActiveFlag(payload?.isActive);
+
+  const { rows } = await pool.query(
+    `
+      insert into name_dictionary (arabic_text, english_text, is_active)
+      values ($1, $2, $3)
+      on conflict (arabic_text)
+      do update set english_text = excluded.english_text, is_active = excluded.is_active
+      returning id, arabic_text, english_text, is_active, created_at
+    `,
+    [arabicText, englishText, isActive]
+  );
+
+  const entry = rows[0] as NameDictionaryRow | undefined;
+
+  if (!entry) {
+    throw new HttpError(500, "Failed to save dictionary entry.");
+  }
+
+  await logAuditEntry({
+    entityType: "name_dictionary",
+    entityId: entry.id,
+    actionType: "upsert",
+    oldValues: null,
+    newValues: entry,
+    changedByUserId: currentUserId
+  });
+
+  return entry;
+}
+
+export async function updateNameDictionaryEntry(
+  entryId: UserId,
+  payload: NameDictionaryPayload | null | undefined,
+  currentUserId: UserId
+): Promise<NameDictionaryRow> {
+  const cleanEntryId = Number(entryId);
+
+  if (!Number.isInteger(cleanEntryId) || cleanEntryId <= 0) {
+    throw new HttpError(400, "entryId must be a positive whole number.");
+  }
+
+  const { rows: existingRows } = await pool.query(
+    `
+      select id, arabic_text, english_text, is_active, created_at
+      from name_dictionary
+      where id = $1
+      limit 1
+    `,
+    [cleanEntryId]
+  );
+
+  const existing = existingRows[0] as NameDictionaryRow | undefined;
+
+  if (!existing) {
+    throw new HttpError(404, "Dictionary entry not found.");
+  }
+
+  const englishText = payload?.englishText
+    ? normalizeDictionaryText(payload.englishText, "englishText")
+    : existing.english_text;
+  const isActive = payload?.isActive === undefined ? existing.is_active : normalizeActiveFlag(payload.isActive);
+
+  const { rows } = await pool.query(
+    `
+      update name_dictionary
+      set english_text = $2,
+          is_active = $3
+      where id = $1
+      returning id, arabic_text, english_text, is_active, created_at
+    `,
+    [cleanEntryId, englishText, isActive]
+  );
+
+  const updated = rows[0] as NameDictionaryRow | undefined;
+
+  if (!updated) {
+    throw new HttpError(500, "Failed to update dictionary entry.");
+  }
+
+  await logAuditEntry({
+    entityType: "name_dictionary",
+    entityId: updated.id,
+    actionType: "update",
+    oldValues: existing,
+    newValues: updated,
+    changedByUserId: currentUserId
+  });
+
+  return updated;
+}
+
+export async function deleteNameDictionaryEntry(
+  entryId: UserId,
+  currentUserId: UserId
+): Promise<NameDictionaryRow> {
+  const cleanEntryId = Number(entryId);
+
+  if (!Number.isInteger(cleanEntryId) || cleanEntryId <= 0) {
+    throw new HttpError(400, "entryId must be a positive whole number.");
+  }
+
+  const { rows } = await pool.query(
+    `
+      delete from name_dictionary
+      where id = $1
+      returning id, arabic_text, english_text, is_active, created_at
+    `,
+    [cleanEntryId]
+  );
+
+  const removed = rows[0] as NameDictionaryRow | undefined;
+
+  if (!removed) {
+    throw new HttpError(404, "Dictionary entry not found.");
+  }
+
+  await logAuditEntry({
+    entityType: "name_dictionary",
+    entityId: removed.id,
+    actionType: "delete",
+    oldValues: removed,
+    newValues: null,
+    changedByUserId: currentUserId
+  });
+
+  return removed;
+}
+
+export async function importNameDictionaryEntries(
+  entries: Array<NameDictionaryPayload | null | undefined>,
+  currentUserId: UserId
+): Promise<NameDictionaryRow[]> {
+  if (!Array.isArray(entries) || !entries.length) {
+    throw new HttpError(400, "entries must be a non-empty array.");
+  }
+
+  const imported: NameDictionaryRow[] = [];
+
+  for (const entry of entries) {
+    const normalizedEntry: NameDictionaryPayload = {
+      arabicText: entry?.arabicText,
+      englishText: entry?.englishText,
+      isActive: entry?.isActive
+    };
+    const result = await upsertNameDictionary(normalizedEntry, currentUserId);
+    imported.push(result);
+  }
+
+  return imported;
+}

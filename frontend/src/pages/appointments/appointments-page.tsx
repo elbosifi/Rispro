@@ -12,6 +12,7 @@ import {
 import type { Patient } from "@/types/api";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { Select } from "@/components/common/select";
 import { pushToast } from "@/lib/toast";
 
 interface AppointmentForm {
@@ -627,38 +628,4 @@ function getAvailabilityText(availability: any[], date: string): string {
   if (!day) return "No data for this date";
   if (day.is_full) return `Fully booked on ${formatDateLy(date)}`;
   return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
-}
-
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-  required
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-  required?: boolean;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-        {label}
-      </label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        required={required}
-        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
-      >
-        {options.map((opt) => (
-          <option key={opt.value} value={opt.value}>
-            {opt.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
 }

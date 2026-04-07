@@ -1,25 +1,39 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { api } from "@/lib/api-client";
+import { api, ApiError } from "@/lib/api-client";
+import { useLanguage } from "@/providers/language-provider";
+import { t } from "@/lib/i18n";
+
+export interface PacsStudy {
+  studyDate?: string;
+  modality?: string;
+  description?: string;
+  patientId?: string;
+  patientName?: string;
+  accessionNumber?: string;
+  studyInstanceUid?: string;
+}
 
 export default function PacsPage() {
+  const { language } = useLanguage();
   const [nationalId, setNationalId] = useState("");
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<PacsStudy[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
 
   const searchMutation = useMutation({
     mutationFn: (id: string) =>
-      api("/integrations/pacs-search", {
+      api<{ studies: PacsStudy[] }>("/integrations/pacs-search", {
         method: "POST",
         body: JSON.stringify({ patientNationalId: id })
       }),
-    onSuccess: (data: any) => {
+    onSuccess: (data) => {
       setSearchResults(data.studies ?? []);
       setIsSearching(false);
     },
-    onError: (err: any) => {
-      setError(err.message || "Search failed");
+    onError: (err: unknown) => {
+      const message = err instanceof ApiError ? err.message : t(language, "pacs.searchFailed");
+      setError(message);
       setIsSearching(false);
     }
   });
@@ -29,7 +43,7 @@ export default function PacsPage() {
     const cleaned = nationalId.replace(/\D/g, "").trim();
     if (!cleaned) return;
     if (cleaned.length !== 11) {
-      setError("National ID must contain exactly 11 digits.");
+      setError(t(language, "pacs.invalidId"));
       return;
     }
     setIsSearching(true);
@@ -39,7 +53,7 @@ export default function PacsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">PACS Search</h2>
+      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "pacs.title")}</h2>
 
       {/* Search Form */}
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
@@ -48,7 +62,7 @@ export default function PacsPage() {
             type="text"
             value={nationalId}
             onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 11))}
-            placeholder="Enter Patient National ID..."
+            placeholder={t(language, "pacs.placeholder")}
             inputMode="numeric"
             maxLength={11}
             className="flex-1 px-4 py-3 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
@@ -58,7 +72,7 @@ export default function PacsPage() {
             disabled={isSearching || !nationalId.trim()}
             className="px-6 py-3 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors"
           >
-            {isSearching ? "Searching..." : "Search PACS"}
+            {isSearching ? t(language, "pacs.searching") : t(language, "pacs.searchBtn")}
           </button>
         </form>
         {error && (
@@ -70,27 +84,27 @@ export default function PacsPage() {
       <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
           <h3 className="font-semibold text-stone-900 dark:text-white">
-            Studies ({searchResults.length})
+            {t(language, "pacs.studies", { count: searchResults.length })}
           </h3>
         </div>
         {isSearching ? (
-          <div className="p-8 text-center text-stone-500">Searching PACS...</div>
+          <div className="p-8 text-center text-stone-500">{t(language, "pacs.searchingPacs")}</div>
         ) : searchResults.length === 0 ? (
-          <div className="p-8 text-center text-stone-500">No studies found. Enter a National ID to search.</div>
+          <div className="p-8 text-center text-stone-500">{t(language, "pacs.noStudies")}</div>
         ) : (
           <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-            {searchResults.map((study: any, index: number) => (
+            {searchResults.map((study, index) => (
               <li key={index} className="p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
                 <div className="flex items-center justify-between">
                   <div className="text-right flex-1">
                     <p className="font-medium text-stone-900 dark:text-white">
-                      Study #{index + 1}
+                      {t(language, "pacs.studyLabel", { num: index + 1 })}
                     </p>
                     <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                      Date: {study.studyDate || "—"} • Modality: {study.modality || "—"}
+                      {t(language, "pacs.fieldDate")}: {study.studyDate || "—"} • {t(language, "pacs.fieldModality")}: {study.modality || "—"}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      Description: {study.description || "—"}
+                      {t(language, "pacs.fieldDescription")}: {study.description || "—"}
                     </p>
                   </div>
                 </div>
