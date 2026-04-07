@@ -9,5 +9,5 @@ export interface DbQueryResult<T = UnknownRecord> {
 }
 
 export interface DbExecutor {
-  query: (sql: string, params?: unknown[]) => Promise<DbQueryResult>;
+  query: <T = UnknownRecord>(sql: string, params?: unknown[]) => Promise<DbQueryResult<T>>;
 }

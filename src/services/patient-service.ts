@@ -473,7 +473,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
         entityId: createdPatient.id,
         actionType: "create",
         oldValues: null,
-        newValues: createdPatient as unknown as UnknownRecord,
+        newValues: createdPatient,
         changedByUserId: createdByUserId
       }
     );
@@ -551,8 +551,8 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
         entityType: "patient",
         entityId: updatedPatient.id,
         actionType: "update",
-        oldValues: previousPatient as unknown as UnknownRecord,
-        newValues: updatedPatient as unknown as UnknownRecord,
+        oldValues: previousPatient,
+        newValues: updatedPatient,
         changedByUserId: updatedByUserId
       }
     );
@@ -605,7 +605,7 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
         entityType: "patient",
         entityId: cleanPatientId,
         actionType: "delete",
-        oldValues: previousPatient as unknown as UnknownRecord,
+        oldValues: previousPatient,
         newValues: null,
         changedByUserId: deletedByUserId
       },

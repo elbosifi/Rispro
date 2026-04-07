@@ -1,4 +1,5 @@
-import type { Pool, PoolClient, QueryResult, QueryResultRow } from "pg";
+import type { PoolClient, QueryResult, QueryResultRow } from "pg";
+import type { DbExecutor } from "../types/db.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -325,7 +326,7 @@ function getTripoliWeekday(isoDate: string): string {
 // ---------------------------------------------------------------------------
 
 export async function getAppointmentDaySettings(
-  client: Pool | PoolClient = pool
+  client: DbExecutor = pool
 ): Promise<{ fridayEnabled: boolean; saturdayEnabled: boolean }> {
   const { rows } = await client.query<{
     setting_key: string;
@@ -350,7 +351,7 @@ export async function getAppointmentDaySettings(
 }
 
 async function requireAppointmentDayEnabled(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   appointmentDate: string
 ): Promise<void> {
   const settings = await getAppointmentDaySettings(client);
@@ -365,7 +366,7 @@ async function requireAppointmentDayEnabled(
   }
 }
 
-async function getMaxCasesPerModality(client: PoolClient): Promise<number | null> {
+async function getMaxCasesPerModality(client: DbExecutor): Promise<number | null> {
   const { rows } = await client.query(`
     select setting_value
     from system_settings
@@ -394,7 +395,7 @@ function resolveEffectiveCapacity(
 }
 
 async function getAppointmentById(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   appointmentId: number | string
 ): Promise<AppointmentDbRow> {
   const cleanAppointmentId = normalizePositiveInteger(
@@ -421,7 +422,7 @@ async function getAppointmentById(
 }
 
 async function nextDailySequence(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   appointmentDate: string,
   excludeAppointmentId: number | null = null
 ): Promise<number> {
@@ -440,12 +441,12 @@ async function nextDailySequence(
     ${excludeSql}
   `, params);
 
-  const sequenceRow = rows[0] as SequenceRow | undefined;
+  const sequenceRow = rows[0] as unknown as SequenceRow | undefined;
   return Number(sequenceRow?.last_daily_sequence || 0) + 1;
 }
 
 async function nextModalitySlotNumber(
-  client: PoolClient,
+  client: DbExecutor,
   modalityId: number | string,
   appointmentDate: string,
   excludeAppointmentId: number | null = null
@@ -468,7 +469,7 @@ async function nextModalitySlotNumber(
     ${excludeSql}
   `, params);
 
-  const aggregateRow = rows[0] as ModalitySlotAggregateRow | undefined;
+  const aggregateRow = rows[0] as unknown as ModalitySlotAggregateRow | undefined;
   return {
     bookedCount: Number(aggregateRow?.booked_count || 0),
     slotNumber: Number(aggregateRow?.last_slot_number || 0) + 1
@@ -484,7 +485,7 @@ function normalizeDateOrToday(value: unknown): string {
 }
 
 async function getPatientById(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   patientId: number | string
 ): Promise<PatientLookupRow> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
@@ -498,7 +499,7 @@ async function getPatientById(
     [cleanPatientId]
   );
 
-  const patient = rows[0] as PatientLookupRow | undefined;
+  const patient = rows[0] as unknown as PatientLookupRow | undefined;
 
   if (!patient) {
     throw new HttpError(404, "Patient not found.");
@@ -508,7 +509,7 @@ async function getPatientById(
 }
 
 async function getModalityById(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   modalityId: number | string
 ): Promise<ModalityRow> {
   const { rows } = await client.query(
@@ -521,7 +522,7 @@ async function getModalityById(
     [modalityId]
   );
 
-  const modality = rows[0] as ModalityRow | undefined;
+  const modality = rows[0] as unknown as ModalityRow | undefined;
 
   if (!modality || !modality.is_active) {
     throw new HttpError(404, "Modality not found.");
@@ -531,7 +532,7 @@ async function getModalityById(
 }
 
 async function getExamTypeById(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   examTypeId: number | string,
   modalityId?: number | string
 ): Promise<ExamTypeRow | null> {
@@ -549,7 +550,7 @@ async function getExamTypeById(
     [examTypeId]
   );
 
-  const examType = rows[0] as ExamTypeRow | undefined;
+  const examType = rows[0] as unknown as ExamTypeRow | undefined;
 
   if (!examType || !examType.is_active) {
     throw new HttpError(404, "Exam type not found.");
@@ -563,7 +564,7 @@ async function getExamTypeById(
 }
 
 async function getPriorityById(
-  client: Pool | PoolClient,
+  client: DbExecutor,
   reportingPriorityId: number | string
 ): Promise<ReportingPriorityRow | null> {
   if (!reportingPriorityId) {
@@ -580,7 +581,7 @@ async function getPriorityById(
     [reportingPriorityId]
   );
 
-  const priority = rows[0] as ReportingPriorityRow | undefined;
+  const priority = rows[0] as unknown as ReportingPriorityRow | undefined;
 
   if (!priority) {
     throw new HttpError(404, "Reporting priority not found.");
@@ -1003,9 +1004,9 @@ export async function listAvailability(
   }
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 365);
   const dayOffset = Math.max(Number(offset) || 0, 0);
-  const modality = await getModalityById(pool as unknown as Pool | PoolClient, cleanModalityId);
+  const modality = await getModalityById(pool, cleanModalityId);
   const daySettings = await getAppointmentDaySettings(pool);
-  const maxCasesPerModality = await getMaxCasesPerModality(pool as unknown as PoolClient);
+  const maxCasesPerModality = await getMaxCasesPerModality(pool);
 
   const { rows } = await pool.query(`
     with calendar as (
