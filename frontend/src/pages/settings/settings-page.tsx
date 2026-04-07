@@ -29,6 +29,7 @@ import { useLanguage } from "@/providers/language-provider";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
+import PacsSettingsSection from "./pacs-settings-section";
 import type { User } from "@/types/api";
 
 type SettingsSection =
@@ -126,7 +127,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
-            {section === "pacs_connection" && <PacsConnectionSection onReAuthRequired={requestReAuth} />}
+            {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" onReAuthRequired={requestReAuth} />}
             {section === "scheduling_and_capacity" && <SimpleSettingsSection category="scheduling_and_capacity" onReAuthRequired={requestReAuth} />}
             {section === "queue_and_arrival" && <SimpleSettingsSection category="queue_and_arrival" onReAuthRequired={requestReAuth} />}
@@ -732,26 +733,6 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
             </tbody>
           </table>
         </div>
-      )}
-    </div>
-  );
-}
-
-function PacsConnectionSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
-  const { t } = useLanguage();
-  const { data, isLoading, error } = useQuery({ queryKey: ["settings", "pacs_connection"], queryFn: fetchPacsConnection });
-  if (error) {
-    const msg = (error as Error).message;
-    if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "pacs_connection"])} />;
-    return <QueryError message={msg} />;
-  }
-  return (
-    <div className="space-y-3 text-sm">
-      {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
-        <>
-          <p className="description-center">{t("settings.pacsConfigured")}</p>
-          <pre className="bg-stone-50 dark:bg-stone-700 p-4 rounded-lg text-xs overflow-auto">{JSON.stringify(data, null, 2)}</pre>
-        </>
       )}
     </div>
   );

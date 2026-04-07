@@ -535,3 +535,96 @@ export async function testPacsConnection({
 
   return { ok: true };
 }
+
+// ---------------------------------------------------------------------------
+// Node-specific search (for multi-PACS support)
+// ---------------------------------------------------------------------------
+
+export interface PacsNodeForSearch {
+  host: string;
+  port: number | string;
+  called_ae_title: string;
+  calling_ae_title: string;
+  timeout_seconds: number | string;
+}
+
+export async function searchPacsStudiesWithNode({
+  criteria: rawCriteria,
+  node,
+  currentUserId
+}: {
+  criteria: UnknownRecord;
+  node: PacsNodeForSearch;
+  currentUserId: OptionalUserId;
+}): Promise<StudySummary[]> {
+  const criteria = normalizeStudySearchCriteria(rawCriteria);
+
+  let rawResult;
+  try {
+    rawResult = await runDimseFindScu({
+      criteria,
+      host: node.host,
+      port: Number(node.port) || 104,
+      calledAeTitle: node.called_ae_title,
+      callingAeTitle: node.calling_ae_title,
+      timeoutSeconds: Number(node.timeout_seconds) || 10
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    throw new HttpError(502, `PACS connection failed. ${message}`.trim());
+  }
+
+  const studies = normalizeStudyList(rawResult);
+
+  await logAuditEntry({
+    entityType: "integration",
+    entityId: null,
+    actionType: "pacs_cfind",
+    oldValues: null,
+    newValues: {
+      criteria,
+      resultCount: studies.length,
+      nodeHost: node.host
+    },
+    changedByUserId: currentUserId
+  });
+
+  return studies;
+}
+
+export async function testPacsConnectionWithNode({
+  node,
+  currentUserId
+}: {
+  node: PacsNodeForSearch;
+  currentUserId: OptionalUserId;
+}): Promise<{ ok: true }> {
+  try {
+    await runDimseEchoScu({
+      host: node.host,
+      port: Number(node.port) || 104,
+      calledAeTitle: node.called_ae_title,
+      callingAeTitle: node.calling_ae_title,
+      timeoutSeconds: Number(node.timeout_seconds) || 10
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    throw new HttpError(502, `PACS connection failed. ${message}`.trim());
+  }
+
+  await logAuditEntry({
+    entityType: "integration",
+    entityId: null,
+    actionType: "pacs_echo",
+    oldValues: null,
+    newValues: {
+      host: node.host,
+      port: node.port,
+      calledAeTitle: node.called_ae_title,
+      callingAeTitle: node.calling_ae_title
+    },
+    changedByUserId: currentUserId
+  });
+
+  return { ok: true };
+}
