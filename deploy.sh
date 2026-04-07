@@ -64,13 +64,22 @@ log "Migrations completed successfully"
 log "Building frontend..."
 cd "${APP_DIR}/frontend"
 npm run build || error_exit "Frontend build failed"
+log "Frontend built successfully"
 
-# 7. Copy built frontend to backend dist directory
-log "Deploying frontend to backend..."
+# 7. Verify frontend build was placed correctly
 cd "${APP_DIR}"
-rm -rf dist-frontend
-cp -r frontend/dist dist-frontend || error_exit "Failed to copy frontend build"
-log "Frontend deployed to dist-frontend/"
+if [ -d "dist-frontend" ] && [ -f "dist-frontend/index.html" ]; then
+  log "Frontend build verified at dist-frontend/"
+else
+  log "WARNING: dist-frontend not found or missing index.html. Checking frontend/dist..."
+  if [ -d "frontend/dist" ]; then
+    rm -rf dist-frontend
+    cp -r frontend/dist dist-frontend || error_exit "Failed to copy frontend build"
+    log "Frontend deployed to dist-frontend/"
+  else
+    error_exit "Frontend build output not found in dist-frontend/ or frontend/dist/"
+  fi
+fi
 
 # 8. Restart backend service
 log "Restarting RISpro backend service..."
