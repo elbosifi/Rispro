@@ -2,7 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
 import { normalizePositiveInteger } from "../utils/normalize.js";
-import { getTripoliToday } from "../utils/date.js";
+import { getTripoliToday, validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import {
@@ -51,12 +51,7 @@ interface ModalityFilters {
 
 function normalizeDate(value: unknown): string {
   const raw = String(value || getTripoliToday()).trim();
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    throw new HttpError(400, "date must be in YYYY-MM-DD format.");
-  }
-
-  return raw;
+  return validateIsoDate(raw, "date");
 }
 
 export async function listModalityWorklist(

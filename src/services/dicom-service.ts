@@ -6,7 +6,7 @@ import type { Pool, PoolClient } from "pg";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
-import { normalizePositiveInteger } from "../utils/normalize.js";
+import { normalizePositiveInteger, normalizeOptionalText } from "../utils/normalize.js";
 import { normalizeDateValue } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId, UnknownRecord } from "../types/http.js";
@@ -288,10 +288,6 @@ interface LogPatch {
 // ---------------------------------------------------------------------------
 // Normalization helpers
 // ---------------------------------------------------------------------------
-
-function normalizeOptionalText(value: unknown): string {
-  return String(value || "").trim();
-}
 
 function normalizeBooleanFlag(value: unknown, fieldName: string): boolean {
   const raw = String(value || "").trim().toLowerCase();

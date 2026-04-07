@@ -126,8 +126,6 @@ interface QueueScanResult {
     name_ar: string | null;
     name_en: string | null;
   } | null;
-  name_ar?: string;
-  name_en?: string;
 }
 
 type CurrentUser = AuthenticatedUserContext;

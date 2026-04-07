@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients } from "@/lib/api-hooks";
+import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
@@ -13,7 +13,17 @@ export default function QueuePage() {
   const [walkInSearch, setWalkInSearch] = useState("");
   const [walkInResults, setWalkInResults] = useState<Patient[]>([]);
   const [selectedWalkIn, setSelectedWalkIn] = useState<Patient | null>(null);
+  const [selectedModalityId, setSelectedModalityId] = useState("");
   const queryClient = useQueryClient();
+
+  // Fetch modalities for walk-in form
+  const { data: lookups } = useQuery({
+    queryKey: ["lookups"],
+    queryFn: fetchAppointmentLookups,
+    staleTime: 1000 * 60 * 5
+  });
+
+  const modalities = lookups?.modalities ?? [];
 
   const { data: queue } = useQuery<QueueSnapshot>({
     queryKey: ["queue"],
@@ -88,12 +98,18 @@ export default function QueuePage() {
 
   const handleWalkInSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (selectedWalkIn) {
+    if (selectedWalkIn && selectedModalityId) {
       walkInMutation.mutate({
         patientId: selectedWalkIn.id,
-        modalityId: "",
+        modalityId: selectedModalityId,
         appointmentDate: todayIsoDateLy(),
         isWalkIn: true
+      });
+    } else if (!selectedModalityId) {
+      pushToast({
+        type: "error",
+        title: t("queue.walkInError"),
+        message: t("queue.selectModality")
       });
     }
   };
@@ -165,7 +181,27 @@ export default function QueuePage() {
                 </p>
               </div>
             )}
-            <button onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn} className="w-full btn-secondary">
+            
+            {/* Modality Selector */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
+                {t("queue.selectModality")}
+              </label>
+              <select
+                value={selectedModalityId}
+                onChange={(e) => setSelectedModalityId(e.target.value)}
+                className="input-premium w-full"
+              >
+                <option value="">{t("queue.chooseModality")}</option>
+                {modalities.map((modality) => (
+                  <option key={modality.id} value={modality.id}>
+                    {chooseLocalized(language, modality.nameAr, modality.nameEn)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            
+            <button onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn || !selectedModalityId} className="w-full btn-secondary">
               {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
             </button>
           </div>

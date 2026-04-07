@@ -102,6 +102,9 @@ const en = {
   "queue.empty": "No patients in queue",
   "queue.markNoShow": "Mark No-show",
   "queue.noShowReason": "Patient did not arrive",
+  "queue.selectModality": "Select Modality",
+  "queue.chooseModality": "Choose modality...",
+  "queue.walkInError": "Walk-in Error",
 
   "registrations.title": "Daily Registrations",
   "registrations.date": "Date",
@@ -557,6 +560,9 @@ const ar = {
   "queue.empty": "لا يوجد مرضى في الانتظار",
   "queue.markNoShow": "تأكيد عدم الحضور",
   "queue.noShowReason": "المريض لم يحضر",
+  "queue.selectModality": "اختر الجهاز",
+  "queue.chooseModality": "اختر الجهاز...",
+  "queue.walkInError": "خطأ في الحضور المباشر",
 
   "registrations.title": "التسجيلات اليومية",
   "registrations.date": "التاريخ",

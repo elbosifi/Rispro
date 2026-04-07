@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, normalizeArabicName, normalizeLibyanPhone } from "../utils/normalize.js";
+import { validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { generateEnglishFromDictionary, NameDictionaryLookup } from "../utils/name-generation.js";
 import {
@@ -42,7 +43,7 @@ export interface PatientPayload {
   identifierValue?: unknown;
   arabicFullName?: string;
   englishFullName?: string;
-  ageYears?: UserId;
+  ageYears?: number;
   estimatedDateOfBirth?: string;
   sex?: string;
   phone1?: unknown;
@@ -158,11 +159,7 @@ function normalizeDateString(value: unknown, fieldName: string): string {
     return "";
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    throw new HttpError(400, `${fieldName} must be in YYYY-MM-DD format.`);
-  }
-
-  return raw;
+  return validateIsoDate(raw, fieldName);
 }
 
 function calculateAgeYearsFromDob(dob: string): number | null {

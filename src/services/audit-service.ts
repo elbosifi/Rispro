@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
 import { normalizePositiveInteger } from "../utils/normalize.js";
+import { validateIsoDate } from "../utils/date.js";
 import type { AuditEvent } from "../types/domain.js";
 import type { DbExecutor } from "../types/db.js";
 import type { UserId, NullableUserId } from "../types/http.js";
@@ -120,11 +121,7 @@ function normalizeDateFilter(value: unknown, fieldName: string): string | null {
     return null;
   }
 
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
-    throw new HttpError(400, `${fieldName} must be in YYYY-MM-DD format.`);
-  }
-
-  return clean;
+  return validateIsoDate(clean, fieldName);
 }
 
 function buildAuditFilterQuery(

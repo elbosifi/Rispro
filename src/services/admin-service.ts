@@ -47,7 +47,14 @@ interface BackupPayload {
   tables: Record<string, BackupRow[]>;
 }
 
-async function listRows(client: PoolClient, tableName: string): Promise<BackupRow[]> {
+function isValidTableName(tableName: string): tableName is BackupTableName {
+  return (backupTables as readonly string[]).includes(tableName);
+}
+
+async function listRows(client: PoolClient, tableName: BackupTableName): Promise<BackupRow[]> {
+  if (!isValidTableName(tableName)) {
+    throw new HttpError(400, `Invalid table name: ${tableName}`);
+  }
   const { rows } = await client.query<BackupRow>(`select * from ${tableName} order by 1 asc`);
   return rows;
 }
@@ -169,11 +176,15 @@ async function restoreDocumentFiles(documentRows: BackupDocumentRow[]): Promise<
 
 async function insertRows(
   client: PoolClient,
-  tableName: string,
+  tableName: BackupTableName,
   rows: BackupRow[]
 ): Promise<void> {
   if (!rows?.length) {
     return;
+  }
+
+  if (!isValidTableName(tableName)) {
+    throw new HttpError(400, `Invalid table name: ${tableName}`);
   }
 
   const sanitizedRows = rows.map((row) => {
@@ -187,6 +198,13 @@ async function insertRows(
   });
 
   const columns = Object.keys(sanitizedRows[0]);
+
+  // Validate column names to prevent SQL injection via crafted backup files
+  for (const column of columns) {
+    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(column)) {
+      throw new HttpError(400, `Invalid column name: ${column}`);
+    }
+  }
 
   for (const row of sanitizedRows) {
     const values: unknown[] = columns.map((column) => row[column]);

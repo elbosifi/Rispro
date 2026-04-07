@@ -3,8 +3,8 @@ import type { DbExecutor } from "../types/db.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
-import { normalizePositiveInteger } from "../utils/normalize.js";
-import { getTripoliToday, TRIPOLI_TIME_ZONE } from "../utils/date.js";
+import { normalizePositiveInteger, normalizeOptionalText } from "../utils/normalize.js";
+import { getTripoliToday, TRIPOLI_TIME_ZONE, validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
@@ -246,22 +246,12 @@ type AppointmentActor = AuthenticatedUserContext & { id?: UserId };
 // ---------------------------------------------------------------------------
 
 function normalizeAppointmentDate(value: unknown, fieldName = "appointmentDate"): string {
-  const raw = String(value || "").trim();
-
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    throw new HttpError(400, `${fieldName} must be in YYYY-MM-DD format.`);
-  }
-
-  return raw;
+  return validateIsoDate(value, fieldName);
 }
 
 function buildAccessionNumber(appointmentDate: string, dailySequence: number): string {
   const compactDate = appointmentDate.replaceAll("-", "");
   return `${compactDate}-${String(dailySequence).padStart(3, "0")}`;
-}
-
-function normalizeOptionalText(value: unknown): string {
-  return String(value || "").trim();
 }
 
 function normalizeCapacityLimit(value: unknown): number | null {

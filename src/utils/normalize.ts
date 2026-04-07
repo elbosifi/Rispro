@@ -78,3 +78,7 @@ export function formatDateForSql(date: Date | null | undefined): string | null {
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+
+export function normalizeOptionalText(value: unknown): string {
+  return String(value || "").trim();
+}

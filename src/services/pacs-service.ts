@@ -1,6 +1,7 @@
 import os from "os";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
 import { loadSettingsMap } from "./settings-service.js";
 import type { UnknownRecord, OptionalUserId } from "../types/http.js";
@@ -95,6 +96,8 @@ function normalizeDateForDicom(value: unknown): string {
   }
 
   if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    // Validate it's a real date, then convert to YYYYMMDD
+    validateIsoDate(clean, "studyDate");
     return clean.replaceAll("-", "");
   }
 
