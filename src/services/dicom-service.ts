@@ -755,7 +755,8 @@ async function findDicomDevice(
     return devices[0] || null;
   }
 
-  return devices.find((row) => !row.source_ip || row.source_ip === sourceIp) || null;
+  // Prefer device with matching source_ip, then fall back to devices without source_ip
+  return devices.find((row) => row.source_ip === sourceIp) || devices.find((row) => !row.source_ip) || null;
 }
 
 async function findAppointmentForMpps(
@@ -1285,7 +1286,12 @@ export function scheduleWorklistSync(appointmentId: UserId): void {
   Promise.resolve()
     .then(() => syncAppointmentWorklistSources(appointmentId))
     .catch((error) => {
-      console.error(`Failed to sync DICOM worklist sources for appointment ${appointmentId}.`, error);
+      // Log warning but don't throw - this is fire-and-forget to not block main operations
+      // The worklist will be rebuilt on the next successful appointment mutation
+      console.warn(
+        `[DICOM Worklist] Failed to sync appointment ${appointmentId}. Will retry on next mutation.`,
+        error
+      );
     });
 }
 
@@ -1293,7 +1299,10 @@ export function scheduleWorklistRebuild(): void {
   Promise.resolve()
     .then(() => rebuildAllDicomWorklistSources())
     .catch((error) => {
-      console.error("Failed to rebuild DICOM worklist sources.", error);
+      console.warn(
+        `[DICOM Worklist] Failed to rebuild worklist sources. Manual intervention may be required.`,
+        error
+      );
     });
 }
 

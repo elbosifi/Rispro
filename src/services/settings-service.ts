@@ -1,5 +1,6 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
+import { invalidateAllCache } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
 import type { UserId } from "../types/http.js";
 import type { CategorySettings, GroupedSettings, SettingsMap } from "../types/settings.js";
@@ -149,6 +150,10 @@ export async function upsertSettings(
     }
 
     await client.query("commit");
+    
+    // Invalidate cache when settings are updated
+    invalidateAllCache();
+    
     return results;
   } catch (error) {
     await client.query("rollback");

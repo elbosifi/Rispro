@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, type FormEvent } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -46,6 +46,7 @@ export default function AppointmentsPage() {
   const [patientResults, setPatientResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [postCreateAppointment, setPostCreateAppointment] = useState<AppointmentWithDetails | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch patient by ID if present in URL
@@ -85,7 +86,8 @@ export default function AppointmentsPage() {
   // Availability pagination: setting value is days per page
   const [availPage, setAvailPage] = useState(0);
   const [showAllDays, setShowAllDays] = useState(false);
-  const pageDays = parseInt((schedulingSettings as any)?.calendar_window_days, 10) || 14;
+  const schedulingSettingsRecord = schedulingSettings as Record<string, string> | undefined;
+  const pageDays = parseInt(schedulingSettingsRecord?.calendar_window_days ?? "14", 10) || 14;
   const availOffset = availPage * pageDays;
 
   const modalities = lookups?.modalities ?? [];
@@ -129,15 +131,27 @@ export default function AppointmentsPage() {
     return next ? normalizeDateKey(next.appointment_date) : "";
   }, [suggestionAvailability]);
 
-  // Search for patient
-  const handlePatientSearch = (query: string) => {
+  // Debounced patient search
+  const handlePatientSearch = useCallback((query: string) => {
     setForm((f) => ({ ...f, patientSearch: query }));
+    
+    if (searchTimerRef.current !== null) {
+      clearTimeout(searchTimerRef.current);
+    }
+
     if (query.length > 1) {
-      searchPatients(query).then(setPatientResults);
+      searchTimerRef.current = setTimeout(() => {
+        searchPatients(query).then(setPatientResults).catch(console.error);
+        searchTimerRef.current = null;
+      }, 300);
     } else {
       setPatientResults([]);
+      if (searchTimerRef.current !== null) {
+        clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
     }
-  };
+  }, []);
 
   const selectPatient = (patient: Patient) => {
     setSelectedPatient(patient);
@@ -156,6 +170,15 @@ export default function AppointmentsPage() {
     setAvailPage(0);
     setShowAllDays(false);
   }, [form.modalityId]);
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current !== null) {
+        clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
 
   // Safety warning state
   const [showSafetyModal, setShowSafetyModal] = useState(false);
@@ -613,7 +636,7 @@ function normalizeDateKey(rawDate: unknown): string {
   if (typeof rawDate === "string") {
     return rawDate.slice(0, 10);
   }
-  return new Date(rawDate as any).toISOString().slice(0, 10);
+  return new Date(String(rawDate)).toISOString().slice(0, 10);
 }
 
 function toUtcDateFromIsoDay(isoDay: string): Date {

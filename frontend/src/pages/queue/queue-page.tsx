@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, useRef, useCallback, useEffect, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { QueueSnapshot, Patient } from "@/types/api";
@@ -14,6 +14,7 @@ export default function QueuePage() {
   const [walkInResults, setWalkInResults] = useState<Patient[]>([]);
   const [selectedWalkIn, setSelectedWalkIn] = useState<Patient | null>(null);
   const [selectedModalityId, setSelectedModalityId] = useState("");
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch modalities for walk-in form
@@ -24,6 +25,40 @@ export default function QueuePage() {
   });
 
   const modalities = lookups?.modalities ?? [];
+
+  // Debounced patient search
+  const debouncedPatientSearch = useCallback((query: string) => {
+    if (searchTimerRef.current !== null) {
+      clearTimeout(searchTimerRef.current);
+    }
+
+    searchTimerRef.current = setTimeout(() => {
+      searchPatients(query).then(setWalkInResults).catch(console.error);
+      searchTimerRef.current = null;
+    }, 300);
+  }, []);
+
+  const handleWalkInSearch = (query: string) => {
+    setWalkInSearch(query);
+    if (query.length > 1) {
+      debouncedPatientSearch(query);
+    } else {
+      setWalkInResults([]);
+      if (searchTimerRef.current !== null) {
+        clearTimeout(searchTimerRef.current);
+        searchTimerRef.current = null;
+      }
+    }
+  };
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current !== null) {
+        clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
 
   const { data: queue } = useQuery<QueueSnapshot>({
     queryKey: ["queue"],

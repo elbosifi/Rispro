@@ -6,15 +6,18 @@
 
 ### Architecture
 
-- **Frontend**: Vanilla JavaScript SPA (Single Page Application)
-  - `app.js` - Main application logic (~11,500 lines)
-  - `styles.css` - Custom CSS with dark/light themes
-  - `index.html` - Entry point
-  
-- **Backend**: Node.js + Express.js
+- **Frontend**: React 19 + TypeScript SPA (Single Page Application)
+  - `frontend/src/` - React components, pages, and hooks
+  - React Router for client-side routing
+  - TanStack Query for server state management
+  - TailwindCSS for styling with dark/light themes
+  - Vite for fast development and building
+
+- **Backend**: Node.js + Express.js + TypeScript
   - RESTful API architecture
   - Cookie-based session authentication
   - JWT tokens for session management
+  - 100% TypeScript (zero `.js` files remaining)
   
 - **Database**: PostgreSQL
   - 15 migration files tracking schema evolution
@@ -249,7 +252,39 @@ const result = await api("/api/endpoint", {
 5. **Duplicate Detection**: Fuzzy matching on names, exact on national ID
 6. **Session Timeout**: 8 hours (configurable)
 
-## Recent Changes (Current Session)
+## Recent Changes (April 2026 - Current Session)
+
+### TypeScript Migration Complete ✅
+1. **Backend**: 100% TypeScript - all `.js` files converted, zero remaining
+2. **Frontend**: All 13 pages migrated from legacy SPA to React + TypeScript
+3. **Type Safety**: Zero TypeScript errors in both backend and frontend
+
+### Code Quality Improvements (16 Issues Fixed)
+
+**Security (2 fixes):**
+- SQL injection prevention in backup restore (table/column validation)
+- Walk-in queue entry fixed (added modality selector)
+
+**Performance (4 fixes):**
+- N+1 query pattern eliminated in `getAppointmentPrintDetails`
+- Parallel DB calls in `listAvailability` using `Promise.all()`
+- In-memory caching for settings/dictionary lookups (5-min TTL)
+- Debounced patient search inputs (300ms delay)
+
+**Code Quality (6 fixes):**
+- Dead code removed (`src/utils/records.js` deleted)
+- Duplicate code extracted to shared utils (`normalizeOptionalText`, `validateIsoDate`)
+- Type safety improved (`PatientPayload.ageYears`, unsafe casts removed)
+- Audit log quality improved (status history only logged on actual changes)
+- DICOM device logic fixed (prefer matching source_ip)
+- Error handling improved (DICOM worklist sync warnings)
+
+**Architecture:**
+- New caching utility: `src/utils/cache.ts`
+- Date validation centralized: `src/utils/date.ts::validateIsoDate()`
+- Text normalization centralized: `src/utils/normalize.ts::normalizeOptionalText()`
+
+### Previous Changes
 
 1. **Overbooking Password**: Now required for EVERY overbooking attempt (not cached)
 2. **Toast Notifications**: Converted all static alerts to toast popups

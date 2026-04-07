@@ -924,12 +924,6 @@ export async function getAppointmentPrintDetails(
   appointmentId: number | string
 ): Promise<PrintAppointmentRow> {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId") as number;
-  const appointments = await listAppointmentsForPrint({ date: getTripoliToday() });
-  const appointment = appointments.find((item) => item.id === cleanAppointmentId);
-
-  if (appointment) {
-    return appointment as unknown as PrintAppointmentRow;
-  }
 
   const { rows } = await pool.query(`
     select
@@ -974,13 +968,13 @@ export async function getAppointmentPrintDetails(
     limit 1
   `, [cleanAppointmentId]);
 
-  const fallbackAppointment = rows[0] as AppointmentListRow | undefined;
+  const appointment = rows[0] as AppointmentListRow | undefined;
 
-  if (!fallbackAppointment) {
+  if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
   }
 
-  return fallbackAppointment as unknown as PrintAppointmentRow;
+  return appointment as unknown as PrintAppointmentRow;
 }
 
 export async function listAvailability(
@@ -994,9 +988,13 @@ export async function listAvailability(
   }
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 365);
   const dayOffset = Math.max(Number(offset) || 0, 0);
-  const modality = await getModalityById(pool, cleanModalityId);
-  const daySettings = await getAppointmentDaySettings(pool);
-  const maxCasesPerModality = await getMaxCasesPerModality(pool);
+
+  // Fetch all required data in parallel
+  const [modality, daySettings, maxCasesPerModality] = await Promise.all([
+    getModalityById(pool, cleanModalityId),
+    getAppointmentDaySettings(pool),
+    getMaxCasesPerModality(pool)
+  ]);
 
   const { rows } = await pool.query(`
     with calendar as (
@@ -1908,13 +1906,17 @@ export async function updateAppointment(
       "Failed to update appointment."
     );
 
-    await client.query(
-      `
-        insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
-        values ($1, $2, $2, $3, $4)
-      `,
-      [cleanAppointmentId, existingStatus, currentUser.sub, "Appointment edited or rescheduled"]
-    );
+    // Only insert status history entry when status actually changed
+    const newStatus = updatedAppointment.status as string;
+    if (newStatus !== existingStatus) {
+      await client.query(
+        `
+          insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
+          values ($1, $2, $3, $4, $5)
+        `,
+        [cleanAppointmentId, existingStatus, newStatus, currentUser.sub, "Appointment edited or rescheduled"]
+      );
+    }
 
     await logAuditEntry(
       {

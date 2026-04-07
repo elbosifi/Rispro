@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, normalizeArabicName, normalizeLibyanPhone } from "../utils/normalize.js";
 import { validateIsoDate } from "../utils/date.js";
+import { getCached, setCached, invalidateCache } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
 import { generateEnglishFromDictionary, NameDictionaryLookup } from "../utils/name-generation.js";
 import {
@@ -186,6 +187,13 @@ function calculateAgeYearsFromDob(dob: string): number | null {
 }
 
 async function loadPatientRegistrationSettings(): Promise<PatientRegistrationRules> {
+  const cacheKey = "patient_registration_settings";
+  const cached = getCached<PatientRegistrationRules>(cacheKey);
+  
+  if (cached) {
+    return cached;
+  }
+  
   const { rows } = await pool.query<PatientSettingRow>(
     `
       select setting_key, setting_value
@@ -199,14 +207,24 @@ async function loadPatientRegistrationSettings(): Promise<PatientRegistrationRul
     return accumulator;
   }, {});
 
-  return {
+  const result: PatientRegistrationRules = {
     nationalIdRule: settings.national_id_required || "required_with_confirmation",
     phoneRule: settings.phone1_required || "required",
     dobRule: settings.dob_or_age_rule || "age_or_dob_required"
   };
+  
+  setCached(cacheKey, result, 5 * 60 * 1000); // 5 minutes
+  return result;
 }
 
 async function loadNameDictionary(): Promise<NameDictionaryLookup[]> {
+  const cacheKey = "name_dictionary";
+  const cached = getCached<NameDictionaryLookup[]>(cacheKey);
+  
+  if (cached) {
+    return cached;
+  }
+  
   const { rows } = await pool.query<NameDictionaryLookup>(
     `
       select arabic_text, english_text
@@ -215,6 +233,8 @@ async function loadNameDictionary(): Promise<NameDictionaryLookup[]> {
       order by arabic_text asc
     `
   );
+  
+  setCached(cacheKey, rows, 5 * 60 * 1000); // 5 minutes
   return rows;
 }
 
