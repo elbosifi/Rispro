@@ -14,8 +14,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://${DB_USER:-rispro}:${DB_PASSWORD:-rispro_password}@postgres:5432/${DB_NAME:-rispro}}
+    # DATABASE_URL is read from .env only (set by setup-docker.sh).
+    # Do not construct it here from raw DB_PASSWORD.
 
   # -----------------------------------------------------------------------
   # PostgreSQL Database (internal)
