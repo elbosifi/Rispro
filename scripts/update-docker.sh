@@ -3,6 +3,7 @@
 # RISpro Docker Update - Pull latest code and restart
 # =============================================================================
 # Reuses existing .env. Does not prompt. Preserves volumes.
+# Reads RISPRO_DB_MODE from .env to choose compose files.
 # =============================================================================
 
 set -e
@@ -11,65 +12,76 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 APP_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 ENV_FILE="$APP_DIR/.env"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# ---------------------------------------------------------------------------
+# Output helpers
+# ---------------------------------------------------------------------------
+info()  { printf '\n[INFO] %s\n' "$1"; }
+ok()    { printf '[OK]   %s\n' "$1"; }
+warn()  { printf '[WARN] %s\n' "$1"; }
+err()   { printf '[ERROR] %s\n' "$1" >&2; }
 
-info() {
-  printf '\n${CYAN}%s${NC}\n' "$1"
-}
-
-success() {
-  printf '${GREEN}✓ %s${NC}\n' "$1"
-}
-
-warn() {
-  printf '${YELLOW}⚠ %s${NC}\n' "$1"
-}
-
-error() {
-  printf '${RED}✗ %s${NC}\n' "$1"
-}
-
-# Check prerequisites
-check_env() {
-  if [ ! -f "$ENV_FILE" ]; then
-    error ".env file not found at: $ENV_FILE"
-    error "Run ./scripts/setup-docker.sh first to configure."
-    exit 1
-  fi
-}
-
-# Detect compose command
+# ---------------------------------------------------------------------------
+# Compose detection
+# ---------------------------------------------------------------------------
 detect_compose() {
-  if command -v docker compose >/dev/null 2>&1; then
-    echo "docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    echo "docker-compose"
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+  elif docker-compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker-compose"
   else
-    error "Neither 'docker compose' nor 'docker-compose' found."
+    err "Docker Compose is not installed or not in PATH."
     exit 1
   fi
 }
 
-# Detect compose files in use
-detect_compose_files() {
-  # If the internal-db override exists and is referenced in the current stack,
-  # use both files. Otherwise use the base file only.
-  if [ -f "$APP_DIR/docker-compose.internal-db.yml" ]; then
-    # Check if the internal-db stack is actually running
-    if docker compose -f "$APP_DIR/docker-compose.yml" -f "$APP_DIR/docker-compose.internal-db.yml" ps 2>/dev/null | grep -q "rispro-db"; then
-      echo "-f docker-compose.yml -f docker-compose.internal-db.yml"
-      return
-    fi
+# ---------------------------------------------------------------------------
+# HTTP check
+# ---------------------------------------------------------------------------
+check_http() {
+  _url="$1"
+  if curl -fsS "$_url" >/dev/null 2>&1; then
+    return 0
+  elif wget -qO- "$_url" >/dev/null 2>&1; then
+    return 0
+  else
+    return 1
   fi
-  echo "-f docker-compose.yml"
 }
 
+# ---------------------------------------------------------------------------
+# Read RISPRO_DB_MODE from .env
+# ---------------------------------------------------------------------------
+read_db_mode() {
+  if [ ! -f "$ENV_FILE" ]; then
+    err ".env file not found at: $ENV_FILE"
+    err "Run ./scripts/setup-docker.sh first to configure."
+    exit 1
+  fi
+
+  DB_MODE=""
+  if grep -q '^RISPRO_DB_MODE=' "$ENV_FILE" 2>/dev/null; then
+    DB_MODE="$(grep '^RISPRO_DB_MODE=' "$ENV_FILE" | head -1 | cut -d= -f2)"
+  fi
+
+  if [ -z "$DB_MODE" ]; then
+    err "RISPRO_DB_MODE is missing from $ENV_FILE"
+    err "The .env file may be from an older setup. Please rerun:"
+    err "  ./scripts/setup-docker.sh"
+    exit 1
+  fi
+
+  case "$DB_MODE" in
+    internal|external) ;;
+    *)
+      err "Invalid RISPRO_DB_MODE='$DB_MODE' in .env (expected 'internal' or 'external')."
+      exit 1
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # Main
+# ---------------------------------------------------------------------------
 main() {
   echo ""
   echo "==================================================="
@@ -77,46 +89,59 @@ main() {
   echo "==================================================="
   echo ""
 
-  check_env
+  detect_compose
+  read_db_mode
 
-  compose_cmd="$(detect_compose)"
-  compose_files="$(detect_compose_files)"
+  ok "Database mode from .env: $DB_MODE"
 
-  info "Updating code from git..."
   cd "$APP_DIR"
-  if command -v git >/dev/null 2>&1; then
-    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      git pull --rebase || warn "Git pull failed. Continuing with local changes."
-    fi
+
+  # Pull latest code (non-blocking)
+  info "Fetching latest code from git..."
+  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git pull --rebase 2>&1 || warn "Git pull failed. Continuing with local changes."
+  else
+    warn "Not a git repository. Skipping git pull."
   fi
 
+  # Choose compose files
+  case "$DB_MODE" in
+    internal)
+      _cf="-f docker-compose.yml -f docker-compose.internal-db.yml"
+      ;;
+    external)
+      _cf="-f docker-compose.yml"
+      ;;
+  esac
+
+  # Rebuild and restart (volumes preserved automatically)
   info "Building and restarting containers..."
   # shellcheck disable=SC2086
-  eval "$compose_cmd $compose_files up -d --build"
+  $COMPOSE_CMD $_cf up -d --build
 
   echo ""
   info "Waiting for application to become healthy..."
-  attempt=0
-  max_attempts=30
-  while [ $attempt -lt $max_attempts ]; do
-    attempt=$((attempt + 1))
-    if wget -qO- "http://127.0.0.1:3000/api/health" >/dev/null 2>&1; then
-      success "Application is healthy!"
+  _attempt=0
+  _max=45
+  while [ "$_attempt" -lt "$_max" ]; do
+    _attempt=$(( _attempt + 1 ))
+    if check_http "http://127.0.0.1:3000/api/health"; then
+      ok "Application is healthy!"
       break
     fi
-    printf "  Waiting... (%d/%d)\n" "$attempt" "$max_attempts"
+    printf '  Waiting... (%d/%d)\n' "$_attempt" "$_max"
     sleep 2
   done
 
-  if [ $attempt -ge $max_attempts ]; then
-    warn "Application did not become healthy within expected time."
-    warn "Check logs with: docker compose logs -f app"
+  if [ "$_attempt" -ge "$_max" ]; then
+    err "Application did not become healthy within expected time."
+    err "Check logs: $COMPOSE_CMD logs -f app"
     exit 1
   fi
 
   echo ""
   echo "==================================================="
-  success "Update complete!"
+  ok "Update complete!"
   echo "==================================================="
   echo ""
   echo "  Web UI:     http://localhost:3000"
@@ -124,9 +149,9 @@ main() {
   echo "  DICOM MPPS: 127.0.0.1:11113 (AE: RISPRO_MPPS)"
   echo ""
   echo "  Useful commands:"
-  echo "    docker compose logs -f app        # View application logs"
-  echo "    docker compose ps                  # List running containers"
-  echo "    docker compose down                # Stop all containers"
+  echo "    $COMPOSE_CMD logs -f app         # View application logs"
+  echo "    $COMPOSE_CMD ps                   # List running containers"
+  echo "    $COMPOSE_CMD down                 # Stop all containers"
   echo ""
 }
 

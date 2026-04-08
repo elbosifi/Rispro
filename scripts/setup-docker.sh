@@ -11,32 +11,49 @@ SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
 APP_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
 ENV_FILE="$APP_DIR/.env"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# ---------------------------------------------------------------------------
+# Output helpers (no ANSI color dependency — reliable everywhere)
+# ---------------------------------------------------------------------------
+info()  { printf '\n[INFO] %s\n' "$1"; }
+ok()    { printf '[OK]   %s\n' "$1"; }
+warn()  { printf '[WARN] %s\n' "$1"; }
+err()   { printf '[ERROR] %s\n' "$1" >&2; }
 
-info() {
-  printf '\n${CYAN}%s${NC}\n' "$1"
+# ---------------------------------------------------------------------------
+# Compose detection — works for both "docker compose" (v2) and "docker-compose"
+# ---------------------------------------------------------------------------
+detect_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker compose"
+  elif docker-compose version >/dev/null 2>&1; then
+    COMPOSE_CMD="docker-compose"
+  else
+    err "Docker Compose is not installed or not in PATH."
+    err "Install Docker Compose V2 or the standalone docker-compose tool."
+    exit 1
+  fi
 }
 
-success() {
-  printf '${GREEN}✓ %s${NC}\n' "$1"
+# ---------------------------------------------------------------------------
+# HTTP check — tries curl first, then wget
+# ---------------------------------------------------------------------------
+check_http() {
+  _url="$1"
+  if curl -fsS "$_url" >/dev/null 2>&1; then
+    return 0
+  elif wget -qO- "$_url" >/dev/null 2>&1; then
+    return 0
+  else
+    return 1
+  fi
 }
 
-warn() {
-  printf '${YELLOW}⚠ %s${NC}\n' "$1"
-}
-
-error() {
-  printf '${RED}✗ %s${NC}\n' "$1"
-}
-
+# ---------------------------------------------------------------------------
+# Prompt helpers
+# ---------------------------------------------------------------------------
 prompt() {
   printf '%s [%s]: ' "$1" "$2"
-  read -r response
+  read -r response || true
   if [ -z "$response" ]; then
     echo "$2"
   else
@@ -44,51 +61,69 @@ prompt() {
   fi
 }
 
-prompt_secret() {
-  printf '%s: ' "$1"
-  # shellcheck disable=SC2162
-  read -r response
-  echo "$response"
+# Prompt with hidden input, but still allows Enter for default.
+# Usage: prompt_hidden "Prompt text" "default_value"
+prompt_hidden() {
+  _ph_prompt="$1"
+  _ph_default="$2"
+  printf '%s [press Enter to use default]: ' "$_ph_prompt"
+  # Hide input
+  stty -echo 2>/dev/null || true
+  read -r _ph_response || true
+  stty echo 2>/dev/null || true
+  printf '\n'
+  if [ -z "$_ph_response" ]; then
+    echo "$_ph_default"
+  else
+    echo "$_ph_response"
+  fi
 }
 
-# URL-encode a string (minimal: encodes @ : / # ? & = + space)
+# ---------------------------------------------------------------------------
+# URL-encode a string (minimal set: @ : / # ? & = + space)
+# ---------------------------------------------------------------------------
 url_encode() {
   echo "$1" | sed 's|@|%40|g; s|:|%3A|g; s|/|%2F|g; s|#|%23|g; s|?|%3F|g; s|&|%26|g; s|=|%3D|g; s|+|%2B|g; s| |%20|g'
 }
 
+# ---------------------------------------------------------------------------
+# Random string helpers
+# ---------------------------------------------------------------------------
+random_hex() {
+  # 32 bytes = 64 hex chars
+  openssl rand -hex 32 2>/dev/null || \
+    dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n'
+}
+
+random_base64() {
+  openssl rand -base64 18 2>/dev/null || \
+    dd if=/dev/urandom bs=18 count=1 2>/dev/null | base64 | tr -d '\n'
+}
+
+# ---------------------------------------------------------------------------
 # Check prerequisites
+# ---------------------------------------------------------------------------
 check_prerequisites() {
   info "Checking prerequisites..."
 
-  if ! command -v docker >/dev/null 2>&1; then
-    error "docker is not installed. Please install Docker first."
+  if ! docker version >/dev/null 2>&1; then
+    err "Docker is not available. Please install Docker first."
     exit 1
   fi
 
-  if ! command -v docker compose >/dev/null 2>&1; then
-    error "docker compose is not available. Please install Docker Compose V2."
-    exit 1
-  fi
+  detect_compose
 
-  success "Docker: $(docker --version)"
-  success "Docker Compose: $(docker compose version)"
+  ok "Docker: $(docker --version 2>&1 | head -1)"
+  ok "Compose: $($COMPOSE_CMD version 2>&1 | head -1)"
 }
 
+# ---------------------------------------------------------------------------
 # Generate .env for internal database mode
+# ---------------------------------------------------------------------------
 generate_internal_env() {
-  info "Generating .env for internal PostgreSQL mode..."
-
-  # Generate secure defaults
-  jwt_secret="$(openssl rand -hex 32 2>/dev/null || dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
-  supervisor_password="$(openssl rand -base64 18 2>/dev/null || dd if=/dev/urandom bs=18 count=1 2>/dev/null | base64)"
-
-  # Fallback if openssl/urandom failed
-  if [ -z "$jwt_secret" ]; then
-    jwt_secret="CHANGE_ME_TO_A_LONG_RANDOM_SECRET_MINIMUM_32_CHARS"
-  fi
-  if [ -z "$supervisor_password" ]; then
-    supervisor_password="ChangeThisPassword123!"
-  fi
+  _i_jwt="${1:-}"
+  _i_sup_pwd="${2:-}"
+  _i_db_password="${3:-}"
 
   cat > "$ENV_FILE" <<EOF
 # =============================================================================
@@ -104,14 +139,15 @@ PORT=3000
 TRUST_PROXY=1
 
 # -- Database (Internal PostgreSQL) --
-# The app will connect to the 'postgres' container on the Docker network.
-DATABASE_URL=postgresql://rispro:rispro_password@postgres:5432/rispro
+# The app connects to the 'postgres' container on the Docker network.
+DATABASE_URL=postgresql://rispro:$(url_encode "$_i_db_password")@postgres:5432/rispro
 DB_USER=rispro
-DB_PASSWORD=rispro_password
+DB_PASSWORD=${_i_db_password}
 DB_NAME=rispro
+RISPRO_DB_MODE=internal
 
 # -- Authentication --
-JWT_SECRET=${jwt_secret}
+JWT_SECRET=${_i_jwt}
 
 # -- Session Configuration --
 COOKIE_NAME=rispro_session
@@ -128,52 +164,22 @@ UPLOADS_DIR=storage/uploads
 
 # -- Initial Supervisor Account --
 SEED_SUPERVISOR_USERNAME=admin
-SEED_SUPERVISOR_PASSWORD=${supervisor_password}
+SEED_SUPERVISOR_PASSWORD=${_i_sup_pwd}
 SEED_SUPERVISOR_FULL_NAME=System Administrator
 
 # -- DICOM Gateway (Embedded) --
 # MWL and MPPS services start automatically inside the app container.
 # AE titles, ports, and directories are managed via Settings UI.
 EOF
-
-  success ".env file generated at: $ENV_FILE"
-  echo ""
-  warn "IMPORTANT: Save these credentials securely:"
-  echo "  Supervisor username: admin"
-  echo "  Supervisor password: ${supervisor_password}"
-  echo "  JWT secret: (auto-generated, stored in .env)"
 }
 
+# ---------------------------------------------------------------------------
 # Generate .env for external database mode
+# ---------------------------------------------------------------------------
 generate_external_env() {
-  info "Configuring external PostgreSQL connection..."
-
-  db_host="$(prompt "Database host" "localhost")"
-  db_port="$(prompt "Database port" "5432")"
-  db_name="$(prompt "Database name" "rispro")"
-  db_user="$(prompt "Database username" "rispro")"
-  db_password="$(prompt_secret "Database password")"
-
-  if [ -z "$db_password" ]; then
-    error "Database password is required."
-    exit 1
-  fi
-
-  # URL-encode password
-  encoded_password="$(url_encode "$db_password")"
-
-  database_url="postgresql://${db_user}:${encoded_password}@${db_host}:${db_port}/${db_name}"
-
-  # Generate secure defaults for non-DB settings
-  jwt_secret="$(openssl rand -hex 32 2>/dev/null || dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')"
-  supervisor_password="$(openssl rand -base64 18 2>/dev/null || dd if=/dev/urandom bs=18 count=1 2>/dev/null | base64)"
-
-  if [ -z "$jwt_secret" ]; then
-    jwt_secret="CHANGE_ME_TO_A_LONG_RANDOM_SECRET_MINIMUM_32_CHARS"
-  fi
-  if [ -z "$supervisor_password" ]; then
-    supervisor_password="ChangeThisPassword123!"
-  fi
+  _e_db_url="${1:-}"
+  _e_jwt="${2:-}"
+  _e_sup_pwd="${3:-}"
 
   cat > "$ENV_FILE" <<EOF
 # =============================================================================
@@ -189,10 +195,11 @@ PORT=3000
 TRUST_PROXY=1
 
 # -- Database (External PostgreSQL) --
-DATABASE_URL=${database_url}
+DATABASE_URL=${_e_db_url}
+RISPRO_DB_MODE=external
 
 # -- Authentication --
-JWT_SECRET=${jwt_secret}
+JWT_SECRET=${_e_jwt}
 
 # -- Session Configuration --
 COOKIE_NAME=rispro_session
@@ -209,23 +216,63 @@ UPLOADS_DIR=storage/uploads
 
 # -- Initial Supervisor Account --
 SEED_SUPERVISOR_USERNAME=admin
-SEED_SUPERVISOR_PASSWORD=${supervisor_password}
+SEED_SUPERVISOR_PASSWORD=${_e_sup_pwd}
 SEED_SUPERVISOR_FULL_NAME=System Administrator
 
 # -- DICOM Gateway (Embedded) --
 # MWL and MPPS services start automatically inside the app container.
 # AE titles, ports, and directories are managed via Settings UI.
 EOF
-
-  success ".env file generated at: $ENV_FILE"
-  echo ""
-  warn "IMPORTANT: Save these credentials securely:"
-  echo "  Supervisor username: admin"
-  echo "  Supervisor password: ${supervisor_password}"
-  echo "  Database: ${db_host}:${db_port}/${db_name}"
 }
 
+# ---------------------------------------------------------------------------
+# Bring up the stack based on RISPRO_DB_MODE
+# ---------------------------------------------------------------------------
+bring_up_stack() {
+  _mode="$1"
+
+  cd "$APP_DIR"
+
+  case "$_mode" in
+    internal)
+      _cf="-f docker-compose.yml -f docker-compose.internal-db.yml"
+      ;;
+    external)
+      _cf="-f docker-compose.yml"
+      ;;
+    *)
+      err "Unknown RISPRO_DB_MODE='$_mode'. Expected 'internal' or 'external'."
+      exit 1
+      ;;
+  esac
+
+  info "Building and starting Docker containers..."
+  # shellcheck disable=SC2086
+  $COMPOSE_CMD $_cf up -d --build
+
+  echo ""
+  info "Waiting for application to become healthy..."
+  _attempt=0
+  _max=45
+  while [ "$_attempt" -lt "$_max" ]; do
+    _attempt=$(( _attempt + 1 ))
+    if check_http "http://127.0.0.1:3000/api/health"; then
+      ok "Application is healthy!"
+      break
+    fi
+    printf '  Waiting... (%d/%d)\n' "$_attempt" "$_max"
+    sleep 2
+  done
+
+  if [ "$_attempt" -ge "$_max" ]; then
+    warn "Application did not become healthy within expected time."
+    warn "Check logs with: $COMPOSE_CMD logs -f app"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
+# ---------------------------------------------------------------------------
 main() {
   echo ""
   echo "==================================================="
@@ -233,90 +280,123 @@ main() {
   echo "==================================================="
   echo ""
 
-  # Check if .env already exists
+  check_prerequisites
+
+  # If .env already exists, decide whether to reuse or regenerate
   if [ -f "$ENV_FILE" ]; then
-    warn ".env file already exists at: $ENV_FILE"
-    printf "Do you want to overwrite it? (y/N): "
-    read -r overwrite
-    case "$overwrite" in
-      [yY][eE][sS]|[yY])
+    warn ".env already exists at: $ENV_FILE"
+
+    # Read current mode
+    _current_mode=""
+    if grep -q '^RISPRO_DB_MODE=' "$ENV_FILE" 2>/dev/null; then
+      _current_mode="$(grep '^RISPRO_DB_MODE=' "$ENV_FILE" | head -1 | cut -d= -f2)"
+    fi
+
+    printf 'Do you want to keep it and start the stack? (Y/n): '
+    read -r _keep || true
+    case "$_keep" in
+      [nN][oO]|[nN])
         warn "Existing .env will be overwritten."
+        # fall through to generation below
         ;;
       *)
-        info "Keeping existing .env file. Starting Docker Compose..."
-        cd "$APP_DIR"
-        docker compose up -d --build
-        success "Setup complete! Check logs with: docker compose logs -f app"
+        if [ -z "$_current_mode" ]; then
+          err "RISPRO_DB_MODE is missing from the existing .env file."
+          err "Please rerun ./scripts/setup-docker.sh to generate a fresh .env"
+          exit 1
+        fi
+        info "Using existing .env (mode: $_current_mode)..."
+        bring_up_stack "$_current_mode"
+
+        echo ""
+        echo "==================================================="
+        ok "RISpro is running!"
+        echo "==================================================="
+        echo ""
+        echo "  Web UI:     http://localhost:3000"
+        echo "  DICOM MWL:  127.0.0.1:11112 (AE: RISPRO_MWL)"
+        echo "  DICOM MPPS: 127.0.0.1:11113 (AE: RISPRO_MPPS)"
+        echo ""
+        echo "  Useful commands:"
+        echo "    $COMPOSE_CMD logs -f app         # View application logs"
+        echo "    $COMPOSE_CMD down                # Stop all containers"
+        echo "    ./scripts/update-docker.sh       # Update to latest code"
+        echo ""
         exit 0
         ;;
     esac
   fi
 
-  check_prerequisites
   echo ""
 
   # Ask for database mode
-  info "Choose your database setup:"
-  echo "  1) Internal PostgreSQL (Docker-managed, easiest)"
-  echo "  2) External PostgreSQL (connect to existing database server)"
-  echo ""
-  db_mode="$(prompt "Select mode (1 or 2)" "1")"
+  _db_mode="$(prompt "Choose database mode: 1) Internal  2) External" "1")"
 
-  case "$db_mode" in
-    1|internal|Internal)
-      generate_internal_env
-      compose_files="-f docker-compose.yml -f docker-compose.internal-db.yml"
-      ;;
+  case "$_db_mode" in
     2|external|External)
-      generate_external_env
-      compose_files="-f docker-compose.yml"
+      _db_mode="external"
       ;;
     *)
-      error "Invalid selection. Defaulting to internal database."
-      generate_internal_env
-      compose_files="-f docker-compose.yml -f docker-compose.internal-db.yml"
+      _db_mode="internal"
       ;;
   esac
 
+  # Defaults
+  _DEFAULT_DB_PASSWORD='QOYR0s1h/uI7wqZrzW0gjNfQY61VwA6ek0wXsUEx6So='
+  _jwt_secret="$(random_hex)" || _jwt_secret="CHANGE_ME_TO_A_LONG_RANDOM_SECRET_MINIMUM_32_CHARS"
+  _supervisor_pwd="$(random_base64)" || _supervisor_pwd="ChangeThisPassword123!"
+
+  if [ "$_db_mode" = "internal" ]; then
+    # Internal PostgreSQL
+    _int_db_password="$_DEFAULT_DB_PASSWORD"
+    _int_db_user="rispro"
+    _int_db_name="rispro"
+
+    generate_internal_env "$_jwt_secret" "$_supervisor_pwd" "$_int_db_password"
+    ok ".env generated for internal PostgreSQL mode."
+    _cf="-f docker-compose.yml -f docker-compose.internal-db.yml"
+  else
+    # External PostgreSQL
+    _ext_host="$(prompt "Database host" "localhost")"
+    _ext_port="$(prompt "Database port" "5432")"
+    _ext_db="$(prompt "Database name" "rispro")"
+    _ext_user="$(prompt "Database username" "rispro")"
+    _ext_pwd="$(prompt_hidden "Database password" "$_DEFAULT_DB_PASSWORD")"
+
+    _enc_pwd="$(url_encode "$_ext_pwd")"
+    _ext_db_url="postgresql://${_ext_user}:${_enc_pwd}@${_ext_host}:${_ext_port}/${_ext_db}"
+
+    generate_external_env "$_ext_db_url" "$_jwt_secret" "$_supervisor_pwd"
+    ok ".env generated for external PostgreSQL mode."
+    _cf="-f docker-compose.yml"
+  fi
+
   echo ""
-  info "Building and starting Docker containers..."
+  warn "IMPORTANT — save these credentials:"
+  echo "  Supervisor username: admin"
+  echo "  Supervisor password: $_supervisor_pwd"
+  echo ""
+
   cd "$APP_DIR"
   # shellcheck disable=SC2086
-  docker compose $compose_files up -d --build
+  bring_up_stack "$_db_mode"
 
   echo ""
-  info "Waiting for application to become healthy..."
-  attempt=0
-  max_attempts=30
-  while [ $attempt -lt $max_attempts ]; do
-    attempt=$((attempt + 1))
-    if wget -qO- "http://127.0.0.1:3000/api/health" >/dev/null 2>&1; then
-      success "Application is healthy!"
-      break
-    fi
-    printf "  Waiting... (%d/%d)\n" "$attempt" "$max_attempts"
-    sleep 2
-  done
-
-  if [ $attempt -ge $max_attempts ]; then
-    warn "Application did not become healthy within expected time."
-    warn "Check logs with: docker compose logs -f app"
-  else
-    echo ""
-    echo "==================================================="
-    success "RISpro is ready!"
-    echo "==================================================="
-    echo ""
-    echo "  Web UI:     http://localhost:3000"
-    echo "  DICOM MWL:  127.0.0.1:11112 (AE: RISPRO_MWL)"
-    echo "  DICOM MPPS: 127.0.0.1:11113 (AE: RISPRO_MPPS)"
-    echo ""
-    echo "  Useful commands:"
-    echo "    docker compose logs -f app        # View application logs"
-    echo "    docker compose down               # Stop all containers"
-    echo "    ./scripts/update-docker.sh        # Update to latest code"
-    echo ""
-  fi
+  echo "==================================================="
+  ok "RISpro is ready!"
+  echo "==================================================="
+  echo ""
+  echo "  Web UI:              http://localhost:3000"
+  echo "  DICOM MWL:           127.0.0.1:11112 (AE: RISPRO_MWL)"
+  echo "  DICOM MPPS:          127.0.0.1:11113 (AE: RISPRO_MPPS)"
+  echo "  Supervisor username: admin"
+  echo "  Supervisor password: $_supervisor_pwd"
+  echo ""
+  echo "  Useful commands:"
+  echo "    $COMPOSE_CMD logs -f app         # View application logs"
+  echo "    $COMPOSE_CMD down                # Stop all containers"
+  echo "    ./scripts/update-docker.sh       # Update to latest code"
+  echo ""
 }
 
 main "$@"

@@ -4,17 +4,21 @@
 
 ### First-Time Setup
 
-Run the interactive setup script. It will ask whether to use an internal or external database, generate secure credentials, and start everything:
+Run the interactive setup script. It asks whether to use an internal or external database, generates secure credentials, and starts everything:
 
 ```bash
 ./scripts/setup-docker.sh
 ```
 
-That's it. After the script finishes:
+Press Enter at every prompt to accept all defaults for a zero-touch install.
+
+After the script finishes:
 
 - **Web UI**: `http://localhost:3000`
 - **DICOM MWL**: `127.0.0.1:11112` (AE: `RISPRO_MWL`)
 - **DICOM MPPS**: `127.0.0.1:11113` (AE: `RISPRO_MPPS`)
+
+The supervisor credentials are printed at the end of setup.
 
 ### Updating to Latest Code
 
@@ -22,20 +26,22 @@ That's it. After the script finishes:
 ./scripts/update-docker.sh
 ```
 
-This pulls the latest code, rebuilds, restarts containers, and verifies health. Existing `.env` and data volumes are preserved.
+This reads `RISPRO_DB_MODE` from the existing `.env`, pulls the latest code, rebuilds, restarts containers, and verifies health. No prompts. Volumes are preserved.
 
 ---
 
 ## Database Modes
 
-### Mode 1: Internal PostgreSQL (Default, Easiest)
+The setup mode is stored in `.env` as `RISPRO_DB_MODE`. The update script reads this value and picks the correct compose files automatically.
 
-A PostgreSQL 16 container is started alongside the app. All data is managed by Docker volumes.
+### Mode 1: Internal PostgreSQL (Default)
 
-**Setup command:**
+A PostgreSQL 16 container is started alongside the app. Data is stored in the `postgres-data` Docker volume, managed entirely by Docker.
+
+**Setup:**
 ```bash
 ./scripts/setup-docker.sh
-# Select option 1 when prompted
+# Press Enter at the mode prompt (default: 1 = internal)
 ```
 
 **Manual commands:**
@@ -45,26 +51,26 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 
 **What this deploys:**
 
-| Container | Purpose | Ports |
-|-----------|---------|-------|
-| `rispro-app` | RISpro app + embedded DICOM | 3000, 11112, 11113 |
-| `rispro-db`  | PostgreSQL 16 | 5432 (internal only) |
+| Container | Purpose | Ports | Volume |
+|-----------|---------|-------|--------|
+| `rispro-app` | RISpro app + embedded DICOM | 3000, 11112, 11113 | `rispro-storage` |
+| `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
 ### Mode 2: External PostgreSQL
 
-Connect to an existing PostgreSQL server. No database container is started.
+Connect to an existing PostgreSQL server. Docker never creates, manages, or deletes this database.
 
-**Setup command:**
+**Setup:**
 ```bash
 ./scripts/setup-docker.sh
-# Select option 2 when prompted, enter your DB details
+# Select 2 when prompted, then enter DB details (or press Enter for defaults)
 ```
 
 **Manual setup:**
 ```bash
-# 1. Create .env with your external DATABASE_URL
-# 2. Start (no internal-db override file)
-docker compose up -d --build
+# 1. Create .env with RISPRO_DB_MODE=external and your DATABASE_URL
+# 2. Start (base file only, no internal-db override)
+docker compose -f docker-compose.yml up -d --build
 ```
 
 ---
@@ -100,7 +106,7 @@ The RISpro app container includes the complete DCMTK toolchain and runs all DICO
 | Volume | Contents |
 |--------|----------|
 | `rispro-storage` | DICOM worklists, MPPS inbox, uploads |
-| `postgres-data` | PostgreSQL data (internal DB mode only) |
+| `postgres-data` | PostgreSQL data (internal DB mode only). Never removed by update scripts. |
 
 ---
 
@@ -108,9 +114,9 @@ The RISpro app container includes the complete DCMTK toolchain and runs all DICO
 
 When the container starts, the entrypoint script (`docker/rispro/entrypoint.sh`) performs these steps automatically:
 
-1. **Wait for PostgreSQL** — polls the database until it responds (up to 60 seconds)
+1. **Wait for PostgreSQL** — polls the database until it responds (up to 60 seconds, configurable)
 2. **Run migrations** — `npm run migrate`
-3. **Seed supervisor** — `npm run seed:supervisor` (idempotent)
+3. **Seed supervisor** — `npm run seed:supervisor` (idempotent, safe to rerun)
 4. **Start the app** — `npx tsx src/server.ts`
 
 The app then:
@@ -151,7 +157,7 @@ The app then:
 docker compose logs -f app
 
 # Database logs (internal DB mode)
-docker compose logs -f postgres
+docker compose -f docker-compose.yml -f docker-compose.internal-db.yml logs -f postgres
 ```
 
 ### Health Check
@@ -197,6 +203,7 @@ docker compose exec app echoscu -v -aec RISPRO_MPPS 127.0.0.1 11113
 | `NODE_ENV` | `production` | Node.js environment |
 | `PORT` | `3000` | HTTP port for web app |
 | `DATABASE_URL` | (see .env.example) | PostgreSQL connection string |
+| `RISPRO_DB_MODE` | (written by setup) | `internal` or `external` — used by update script |
 | `JWT_SECRET` | (required) | Secret for session tokens |
 | `COOKIE_SECURE` | `false` | Set `true` behind HTTPS proxy |
 | `TRUST_PROXY` | `1` | Trust reverse proxy headers |
@@ -262,12 +269,14 @@ Volumes are preserved. Data survives container restarts.
 ### Full Cleanup
 
 ```bash
-# Stop and remove everything including volumes
+# Stop and remove everything including volumes (internal DB mode)
 docker compose -f docker-compose.yml -f docker-compose.internal-db.yml down -v
 
 # Remove built images
 docker compose -f docker-compose.yml -f docker-compose.internal-db.yml rm -f
 ```
+
+> **Warning:** `down -v` permanently deletes the `postgres-data` volume. External PostgreSQL data is never affected by Docker Compose.
 
 ---
 
@@ -280,7 +289,7 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml rm -f
 docker compose logs app
 
 # Check if database is ready (internal DB)
-docker compose exec postgres pg_isready -U rispro
+docker compose -f docker-compose.yml -f docker-compose.internal-db.yml exec postgres pg_isready -U rispro
 ```
 
 ### Database Connection Failed
@@ -293,7 +302,7 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml logs post
 For external DB:
 ```bash
 # Verify connectivity from inside the container
-docker compose exec app bash -c "wget -qO- http://127.0.0.1:3000/api/ready || echo 'Not ready'"
+docker compose exec app wget -qO- http://127.0.0.1:3000/api/ready || echo "Not ready"
 ```
 
 ### MWL/MPPS Not Responding
