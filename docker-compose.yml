@@ -1,18 +1,20 @@
 # =============================================================================
-# RISpro Reception - Docker Compose
+# RISpro Reception - Docker Compose (Base)
 # =============================================================================
-# Default mode (internal database):
+# This file defines the core RISpro application service.
+# It expects DATABASE_URL to be set in the .env file.
+#
+# For a complete stack with an internal PostgreSQL database, also include
+# the override file:
+#   docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --build
+#
+# For an external PostgreSQL database, use this file alone:
 #   docker compose up -d --build
-#
-# External database mode:
-#   docker compose --profile external-db up -d --build
-#
-# Set DATABASE_URL in .env to point to your external PostgreSQL server.
 # =============================================================================
 
 services:
   # -----------------------------------------------------------------------
-  # RISpro Application (always started)
+  # RISpro Application (embedded DICOM gateway: MWL + MPPS)
   # -----------------------------------------------------------------------
   app:
     build:
@@ -22,8 +24,6 @@ services:
     env_file:
       - .env
     environment:
-      # Override DATABASE_URL from .env if external DB is used
-      # The app will use this value directly
       DATABASE_URL: ${DATABASE_URL}
     ports:
       - "3000:3000"   # Web application
@@ -31,10 +31,6 @@ services:
       - "11113:11113" # DICOM MPPS SCP
     volumes:
       - rispro-storage:/app/storage
-    depends_on:
-      postgres:
-        condition: service_healthy
-        required: false  # Allows app to start even if postgres is skipped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
       interval: 30s
@@ -42,35 +38,6 @@ services:
       start_period: 30s
       retries: 3
     restart: unless-stopped
-    profiles:
-      - default
-      - external-db
-    networks:
-      - rispro-network
-
-  # -----------------------------------------------------------------------
-  # PostgreSQL Database (internal, optional)
-  # -----------------------------------------------------------------------
-  postgres:
-    image: postgres:16-alpine
-    container_name: rispro-db
-    environment:
-      POSTGRES_USER: ${DB_USER:-rispro}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-rispro_password}
-      POSTGRES_DB: ${DB_NAME:-rispro}
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-rispro} -d ${DB_NAME:-rispro}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-    profiles:
-      - default  # Only starts in default mode (internal DB)
     networks:
       - rispro-network
 
@@ -79,8 +46,6 @@ services:
 # ---------------------------------------------------------------------------
 volumes:
   rispro-storage:
-    driver: local
-  postgres-data:
     driver: local
 
 # ---------------------------------------------------------------------------

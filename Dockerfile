@@ -1,13 +1,13 @@
 # =============================================================================
 # RISpro Reception - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
-# Stage 1: Build DCMTK from source (includes ppsscpfs, wlmscpfs, etc.)
-# Stage 2: Build frontend assets
-# Stage 3: Production runtime (clean Alpine image with DCMTK binaries)
+# Stage 1: Build DCMTK from source (Debian bookworm)
+# Stage 2: Build frontend assets (Node Alpine)
+# Stage 3: Production runtime (Debian bookworm - consistent with DCMTK build)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Build DCMTK from source (Debian bookworm for full toolchain)
+# Stage 1: Build DCMTK from source (Debian bookworm)
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS dcmtk-builder
 
@@ -41,7 +41,7 @@ RUN wget -q "https://dcmtk.org/pub/dcmtk/dcmtk-${DCMTK_VERSION}.tar.gz" \
 # ---------------------------------------------------------------------------
 # Stage 2: Build frontend assets
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS frontend-builder
+FROM node:22-bookworm-slim AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
@@ -51,22 +51,15 @@ COPY frontend/ .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 3: Production runtime (clean Alpine + DCMTK binaries)
+# Stage 3: Production runtime (Debian bookworm - same base as DCMTK build)
 # ---------------------------------------------------------------------------
-FROM node:22-alpine AS production
+FROM node:22-bookworm-slim AS production
 
 # Install runtime dependencies
-RUN apk add --no-cache \
-    libstdc++ \
-    libgcc \
-    icu-libs \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    # DICOM smoke test tools (lightweight client binaries from DCMTK)
-    && if [ -d /opt/dcmtk ]; then \
-       cp /opt/dcmtk/bin/* /usr/local/bin/ && \
-       cp /opt/dcmtk/lib/* /usr/local/lib/ 2>/dev/null || true; \
-       ldconfig 2>/dev/null || true; \
-       fi
+    wget \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -76,6 +69,9 @@ ENV NODE_ENV=production
 COPY --from=dcmtk-builder /opt/dcmtk/bin/* /usr/local/bin/
 COPY --from=dcmtk-builder /opt/dcmtk/lib/* /usr/local/lib/
 COPY --from=dcmtk-builder /opt/dcmtk/etc/dcmtk/ /etc/dcmtk/
+
+# Update shared library cache
+RUN ldconfig
 
 # Verify DCMTK binaries are present
 RUN echo "Verifying DCMTK installation..." \
@@ -110,11 +106,15 @@ RUN mkdir -p \
     storage/dicom/mpps/failed \
     storage/uploads
 
+# Copy entrypoint script
+COPY docker/rispro/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" >/dev/null 2>&1 || exit 1
 
 EXPOSE 3000 11112 11113
 
-# Start with tsx for TypeScript execution
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["npx", "tsx", "src/server.ts"]

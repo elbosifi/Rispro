@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # =============================================================================
-# RISpro DICOM Gateway Smoke Test
+# RISpro DICOM Gateway Smoke Test (POSIX sh compatible)
 # =============================================================================
 # Validates that embedded DICOM services are running and responding.
 # Usage: ./scripts/dicom-gateway/smoke-test.sh
 # =============================================================================
 
-set -euo pipefail
+set -e
 
 # Configuration (read from environment or defaults)
 MWL_AE_TITLE="${DICOM_MWL_AE_TITLE:-RISPRO_MWL}"
@@ -15,25 +15,20 @@ MPPS_AE_TITLE="${DICOM_MPPS_AE_TITLE:-RISPRO_MPPS}"
 MPPS_PORT="${DICOM_MPPS_PORT:-11113}"
 BACKEND_URL="${RISPRO_BASE_URL:-http://127.0.0.1:3000}"
 
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
-
 pass() {
-  echo -e "${GREEN}✓ PASS${NC} $1"
+  printf '\033[0;32m✓ PASS\033[0m %s\n' "$1"
 }
 
 fail() {
-  echo -e "${RED}✗ FAIL${NC} $1"
+  printf '\033[0;31m✗ FAIL\033[0m %s\n' "$1"
 }
 
 warn() {
-  echo -e "${YELLOW}⚠ WARN${NC} $1"
+  printf '\033[1;33m⚠ WARN\033[0m %s\n' "$1"
 }
 
 info() {
-  echo -e "  INFO: $1"
+  printf '  INFO: %s\n' "$1"
 }
 
 echo "==================================================="
@@ -105,10 +100,9 @@ echo ""
 # 5. DICOM Tools Availability
 # -------------------------------------------------------------------
 echo "5. DICOM Tools Availability"
-TOOLS=("wlmscpfs" "ppsscpfs" "dump2dcm" "dcmdump" "echoscu" "findscu")
-for tool in "${TOOLS[@]}"; do
+for tool in wlmscpfs ppsscpfs dump2dcm dcmdump echoscu findscu; do
   if command -v "$tool" >/dev/null 2>&1; then
-    pass "$tool: $(which "$tool")"
+    pass "$tool: $(command -v "$tool")"
   else
     warn "$tool: not found"
   fi
@@ -119,25 +113,26 @@ echo ""
 # 6. DICOM Directory Health
 # -------------------------------------------------------------------
 echo "6. DICOM Directory Health"
-DIRS=(
-  "Worklist Source:/app/storage/dicom/worklist-source"
-  "Worklist Output:/app/storage/dicom/worklists"
-  "MPPS Inbox:/app/storage/dicom/mpps/inbox"
-  "MPPS Processed:/app/storage/dicom/mpps/processed"
-  "MPPS Failed:/app/storage/dicom/mpps/failed"
-)
-for dir_entry in "${DIRS[@]}"; do
-  IFS=':' read -r label dir_path <<< "$dir_entry"
+check_dir() {
+  label="$1"
+  dir_path="$2"
   if [ -d "$dir_path" ]; then
     if [ -w "$dir_path" ]; then
-      pass "$label: writable ($(ls -1 "$dir_path" 2>/dev/null | wc -l) files)"
+      file_count="$(ls -1 "$dir_path" 2>/dev/null | wc -l | tr -d ' ')"
+      pass "${label}: writable (${file_count} files)"
     else
-      fail "$label: not writable"
+      fail "${label}: not writable"
     fi
   else
-    fail "$label: missing ($dir_path)"
+    fail "${label}: missing (${dir_path})"
   fi
-done
+}
+
+check_dir "Worklist Source" "/app/storage/dicom/worklist-source"
+check_dir "Worklist Output" "/app/storage/dicom/worklists"
+check_dir "MPPS Inbox" "/app/storage/dicom/mpps/inbox"
+check_dir "MPPS Processed" "/app/storage/dicom/mpps/processed"
+check_dir "MPPS Failed" "/app/storage/dicom/mpps/failed"
 echo ""
 
 echo "==================================================="
