@@ -14,17 +14,19 @@ FROM debian:bookworm-slim AS dcmtk-builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
+    ca-certificates \
     libssl-dev \
     libxml2-dev \
     zlib1g-dev \
     libicu-dev \
     pkg-config \
     wget \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and build DCMTK 3.6.9 (stable release with ppsscpfs)
 ENV DCMTK_VERSION=3.6.9
-RUN wget -q "https://dcmtk.org/pub/dcmtk/dcmtk-${DCMTK_VERSION}.tar.gz" \
+RUN wget --https-only --tries=3 -O "dcmtk-${DCMTK_VERSION}.tar.gz" "https://dcmtk.org/pub/dcmtk/dcmtk-${DCMTK_VERSION}.tar.gz" \
     && tar -xzf "dcmtk-${DCMTK_VERSION}.tar.gz" \
     && cd "dcmtk-${DCMTK_VERSION}" \
     && mkdir build && cd build \
