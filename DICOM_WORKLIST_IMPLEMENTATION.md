@@ -168,7 +168,8 @@ Actions:
 
 **No Crashes If:**
 - No DICOM devices exist yet (graceful handling)
-- External binaries not found (fallback to defaults)
+- Conversion binaries not found (fallback to defaults for `dump2dcm`/`dcmdump`)
+- `wlmscpfs` is missing (MWL SCP stays disabled, backend still starts)
 - Directories missing (auto-created)
 
 ### 6. No Hidden Backend Dependencies ✅
@@ -178,6 +179,7 @@ Actions:
 - If found: stores full path in settings
 - If not found: marks as "Missing" in UI
 - Version detection attempted (displayed in UI)
+- MWL serving uses `wlmscpfs` directly and treats it as the runtime worklist server binary
 
 **Graceful Fallback:**
 - System works even without binaries (worklist source files generated)
@@ -186,6 +188,7 @@ Actions:
 
 **Architecture Made Explicit:**
 - RISpro generates worklists (`.dump` source files + `.wl` output)
+- RISpro serves MWL via `wlmscpfs -dfp <worklist-output-dir> <port>`
 - RISpro receives MPPS through file drop or callback path
 - External MWL/MPPS network serving requirements surfaced in UI if needed
 

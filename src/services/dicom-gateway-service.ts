@@ -1,5 +1,4 @@
 import fs from "fs/promises";
-import path from "path";
 import { spawn, type ChildProcess } from "child_process";
 import { pool } from "../db/pool.js";
 import { resolveGatewaySettings, detectDicomTools } from "./dicom-settings-resolver.js";
@@ -30,17 +29,17 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       await updateSettingIfDifferent("dcmdump_command", tools.dcmdump.path);
     }
 
-    // Check if dcmqrscp is available
-    const dcmqrscpPath = await findBinary("dcmqrscp");
+    // wlmscpfs is the DCMTK worklist SCP that serves .wl files from a directory.
+    const wlmscpfsPath = await findBinary("wlmscpfs");
 
-    if (!dcmqrscpPath) {
-      console.log("[DICOM Gateway] dcmqrscp not found. MWL SCP server disabled.");
+    if (!wlmscpfsPath) {
+      console.log("[DICOM Gateway] wlmscpfs not found. MWL SCP server disabled.");
       console.log("[DICOM Gateway] Install DCMTK: apt-get install -y dcmtk");
       return null;
     }
 
-    // Start MWL SCP server using dcmqrscp
-    const mwlProcess = await startMwlScpServer(settings, dcmqrscpPath);
+    // Start MWL SCP server using wlmscpfs
+    const mwlProcess = await startMwlScpServer(settings, wlmscpfsPath);
 
     if (mwlProcess) {
       console.log(`[DICOM Gateway] MWL SCP running on ${settings.bindHost}:${settings.mwlPort} (AE: ${settings.mwlAeTitle})`);
@@ -107,34 +106,15 @@ export async function stopDicomGateway(): Promise<void> {
   }
 }
 
-async function startMwlScpServer(settings: ResolvedGatewaySettings, dcmqrscpPath: string): Promise<ChildProcess | null> {
-  const configDir = path.join(settings.worklistOutputDir, "dcmqrscp-config");
-  const dbDir = path.join(settings.worklistOutputDir, "dcmqrscp-db");
-  const configFile = path.join(configDir, "dcmqrscp.cfg");
-  const indexFile = path.join(dbDir, "index.dat");
-
+async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath: string): Promise<ChildProcess | null> {
   try {
-    // Create config and DB directories
-    await fs.mkdir(configDir, { recursive: true });
-    await fs.mkdir(dbDir, { recursive: true });
+    // wlmscpfs reads worklist files directly from the output directory.
+    await fs.mkdir(settings.worklistOutputDir, { recursive: true });
 
-    // Generate dcmqrscp configuration
-    const configContent = generateDcmqrscpConfig(settings, dbDir);
-    await fs.writeFile(configFile, configContent, "utf8");
+    // Start wlmscpfs with the worklist directory and configured port.
+    const args = ["-dfp", settings.worklistOutputDir, String(settings.mwlPort)];
 
-    // Initialize the database if it doesn't exist
-    if (!(await fileExists(indexFile))) {
-      // Create initial index file
-      await fs.writeFile(indexFile, "# dcmqrscp index file\n", "utf8");
-    }
-
-    // Ensure db directory has proper permissions
-    await fs.chmod(dbDir, 0o755);
-
-    // Start dcmqrscp (port is read from config file)
-    const args = [configFile];
-
-    const proc = spawn(dcmqrscpPath, args, {
+    const proc = spawn(wlmscpfsPath, args, {
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -163,24 +143,9 @@ async function startMwlScpServer(settings: ResolvedGatewaySettings, dcmqrscpPath
 
     return proc;
   } catch (error) {
-    console.error("[DICOM MWL] Failed to start dcmqrscp:", error);
+    console.error("[DICOM MWL] Failed to start wlmscpfs:", error);
     return null;
   }
-}
-
-function generateDcmqrscpConfig(settings: ResolvedGatewaySettings, dbDir: string): string {
-  return `[GLOBAL]
-NetworkTCPPort = ${settings.mwlPort}
-MaxPDUSize = 16384
-MaxAssociations = 16
-VendorCap = Default
-
-[HOSTS]
-ANY ${settings.bindHost} ${settings.mwlPort} unverified
-
-[AETABLE]
-${settings.mwlAeTitle} ${dbDir} RW (99, 1024mb) ANY
-`;
 }
 
 async function findBinary(name: string): Promise<string | null> {
@@ -194,15 +159,6 @@ async function findBinary(name: string): Promise<string | null> {
     return stdout.trim() || null;
   } catch {
     return null;
-  }
-}
-
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }
 
