@@ -73,9 +73,13 @@ async function start(): Promise<void> {
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
 
-    // Start DICOM gateway services (MWL SCP, MPPS SCP, workers)
-    const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
-    dicomGateway = await startDicomGateway();
+    if (process.env.RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY === "1") {
+      console.log("Embedded DICOM gateway disabled by environment. Skipping in-process gateway startup.");
+    } else {
+      // Start DICOM gateway services (MWL SCP, MPPS SCP, workers)
+      const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
+      dicomGateway = await startDicomGateway();
+    }
   } catch (error) {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
     logError(error);

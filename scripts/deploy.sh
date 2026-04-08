@@ -13,9 +13,18 @@ RESTART_MODE="${RESTART_MODE:-systemd}"
 SERVICE_NAME="${SERVICE_NAME:-}"
 PM2_NAME="${PM2_NAME:-}"
 SKIP_GIT_PULL="${SKIP_GIT_PULL:-0}"
+ENABLE_DICOM_GATEWAY="${ENABLE_DICOM_GATEWAY:-0}"
+DICOM_GATEWAY_SERVICE_NAME="${DICOM_GATEWAY_SERVICE_NAME:-rispro-dicom-gateway}"
+DICOM_GATEWAY_APP_USER="${DICOM_GATEWAY_APP_USER:-www-data}"
+DICOM_INSTALL_DCMTK="${DICOM_INSTALL_DCMTK:-1}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
+}
+
+error_exit() {
+  log "ERROR: $1"
+  exit 1
 }
 
 run_cmd() {
@@ -25,6 +34,17 @@ run_cmd() {
 
   log "Running: $1"
   eval "$1"
+}
+
+is_enabled() {
+  case "${1:-0}" in
+    1|true|TRUE|yes|YES|on|ON)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 ensure_clean_worktree() {
@@ -66,10 +86,129 @@ restart_app() {
   esac
 }
 
+ensure_dcmtk_tools() {
+  if command -v dump2dcm >/dev/null 2>&1 && command -v dcmdump >/dev/null 2>&1 && command -v wlmscpfs >/dev/null 2>&1 && command -v echoscu >/dev/null 2>&1; then
+    log "DCMTK tools already installed: dump2dcm=$(command -v dump2dcm), dcmdump=$(command -v dcmdump), wlmscpfs=$(command -v wlmscpfs), echoscu=$(command -v echoscu)"
+    return 0
+  fi
+
+  if ! is_enabled "$DICOM_INSTALL_DCMTK"; then
+    log "WARNING: DCMTK tools are missing and DICOM_INSTALL_DCMTK is disabled."
+    return 1
+  fi
+
+  log "Installing DCMTK tools..."
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq dcmtk
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y -q dcmtk
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y -q dcmtk
+  else
+    log "WARNING: No supported package manager found to install dcmtk."
+    return 1
+  fi
+
+  if command -v dump2dcm >/dev/null 2>&1 && command -v dcmdump >/dev/null 2>&1 && command -v wlmscpfs >/dev/null 2>&1 && command -v echoscu >/dev/null 2>&1; then
+    log "DCMTK tools installed successfully."
+    return 0
+  fi
+
+  log "WARNING: DCMTK tools are still missing after installation."
+  return 1
+}
+
+provision_dicom_gateway_service() {
+  local template target rendered tmpdir
+  template="$APP_DIR/deploy/systemd/rispro-dicom-gateway.service"
+  target="/etc/systemd/system/${DICOM_GATEWAY_SERVICE_NAME}.service"
+
+  if [ ! -f "$template" ]; then
+    echo "Deployment stopped: missing gateway service template at $template."
+    exit 1
+  fi
+
+  tmpdir="$(mktemp -d)"
+  rendered="$tmpdir/${DICOM_GATEWAY_SERVICE_NAME}.service"
+  sed \
+    -e "s|@RISPRO_APP_DIR@|$APP_DIR|g" \
+    -e "s|@RISPRO_APP_USER@|$DICOM_GATEWAY_APP_USER|g" \
+    "$template" > "$rendered"
+
+  sudo install -D -m 0644 "$rendered" "$target"
+  rm -rf "$tmpdir"
+
+  log "Installed systemd unit: $target"
+  sudo systemctl daemon-reload
+  sudo systemctl enable "$DICOM_GATEWAY_SERVICE_NAME"
+}
+
+provision_main_app_gateway_dropin() {
+  local dropin_dir dropin_file
+  dropin_dir="/etc/systemd/system/${SERVICE_NAME}.service.d"
+  dropin_file="${dropin_dir}/10-rispro-dicom-gateway.conf"
+
+  sudo install -d "$dropin_dir"
+  sudo tee "$dropin_file" >/dev/null <<EOF
+[Service]
+Environment=RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=1
+EOF
+
+  log "Installed systemd drop-in: $dropin_file"
+  sudo systemctl daemon-reload
+}
+
+rebuild_dicom_worklist_sources() {
+  log "Rebuilding DICOM worklist sources..."
+  npm run gateway:rebuild-sources
+}
+
+restart_dicom_gateway_service() {
+  log "Restarting DICOM gateway service: $DICOM_GATEWAY_SERVICE_NAME"
+  sudo systemctl restart "$DICOM_GATEWAY_SERVICE_NAME"
+}
+
+smoke_test_dicom_echo() {
+  local mwl_ae_title mwl_port
+  mwl_ae_title="$(node --input-type=module -e 'import { pool } from "./src/db/pool.js";
+const key = process.argv[1];
+const { rows } = await pool.query("select setting_value->>\x27value\x27 as value from system_settings where category = \x27dicom_gateway\x27 and setting_key = $1 limit 1", [key]);
+process.stdout.write(String(rows[0]?.value || ""));
+await pool.end();' mwl_ae_title)"
+
+  mwl_port="$(node --input-type=module -e 'import { pool } from "./src/db/pool.js";
+const key = process.argv[1];
+const { rows } = await pool.query("select setting_value->>\x27value\x27 as value from system_settings where category = \x27dicom_gateway\x27 and setting_key = $1 limit 1", [key]);
+process.stdout.write(String(rows[0]?.value || ""));
+await pool.end();' mwl_port)"
+
+  if [ -z "$mwl_ae_title" ] || [ -z "$mwl_port" ]; then
+    echo "Deployment stopped: unable to read MWL AE title or port from the database."
+    exit 1
+  fi
+
+  log "Running DICOM C-ECHO smoke test against ${mwl_ae_title}@127.0.0.1:${mwl_port}"
+  echoscu -v -aec "$mwl_ae_title" 127.0.0.1 "$mwl_port"
+}
+
 main() {
   cd "$APP_DIR"
 
   log "Starting deployment in $APP_DIR"
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY" && [ "$RESTART_MODE" != "systemd" ]; then
+    error_exit "ENABLE_DICOM_GATEWAY=1 requires RESTART_MODE=systemd."
+  fi
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY" && [ -z "$SERVICE_NAME" ]; then
+    error_exit "ENABLE_DICOM_GATEWAY=1 requires SERVICE_NAME to identify the main app systemd unit."
+  fi
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY" && [[ "$INSTALL_CMD" == *"--omit=dev"* ]]; then
+    log "DICOM gateway enabled; installing dev dependencies so gateway rebuild scripts can run."
+    INSTALL_CMD="npm ci"
+  fi
 
   if [ "$SKIP_GIT_PULL" != "1" ]; then
     ensure_clean_worktree
@@ -85,7 +224,26 @@ main() {
   run_cmd "$INSTALL_CMD"
   run_cmd "$MIGRATE_CMD"
   run_cmd "$POST_MIGRATE_CMD"
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY"; then
+    ensure_dcmtk_tools || error_exit "DCMTK tools are required for DICOM gateway deployment."
+    provision_dicom_gateway_service
+    provision_main_app_gateway_dropin
+    rebuild_dicom_worklist_sources
+    sleep 2
+  fi
+
   restart_app
+  sleep 2
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY"; then
+    restart_dicom_gateway_service
+    sleep 2
+  fi
+
+  if is_enabled "$ENABLE_DICOM_GATEWAY"; then
+    smoke_test_dicom_echo
+  fi
 
   if [ -n "$HEALTHCHECK_URL" ]; then
     log "Checking health endpoint: $HEALTHCHECK_URL"

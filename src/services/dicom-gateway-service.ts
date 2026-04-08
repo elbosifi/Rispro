@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import net from "net";
 import { spawn, type ChildProcess } from "child_process";
 import { fileURLToPath } from "url";
 import { pool } from "../db/pool.js";
@@ -43,6 +44,13 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
 
     if (tools.dcmdump.detected && tools.dcmdump.path) {
       await updateSettingIfDifferent("dcmdump_command", tools.dcmdump.path);
+    }
+
+    if (await isPortInUse(settings.bindHost, settings.mwlPort)) {
+      console.log(
+        `[DICOM Gateway] MWL port ${settings.bindHost}:${settings.mwlPort} is already in use. Skipping embedded gateway startup.`
+      );
+      return null;
     }
 
     const startedProcesses: Array<{ serviceName: ManagedServiceName; process: ChildProcess }> = [];
@@ -164,11 +172,13 @@ export async function stopDicomGateway(): Promise<void> {
 
 async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath: string): Promise<ChildProcess | null> {
   try {
-    // wlmscpfs reads worklist files directly from the output directory.
-    await fs.mkdir(settings.worklistOutputDir, { recursive: true });
+    const mwlOutputDir = getWorklistAeOutputDir(settings.worklistOutputDir, settings.mwlAeTitle);
 
-    // Start wlmscpfs with the worklist directory, AE title, and configured port.
-    const args = ["-aet", settings.mwlAeTitle, "-dfp", settings.worklistOutputDir, String(settings.mwlPort)];
+    // wlmscpfs reads worklist files directly from the AE-specific output directory.
+    await ensureWorklistAeDirectory(mwlOutputDir);
+
+    // Start wlmscpfs against the AE-specific worklist directory.
+    const args = ["-dfp", mwlOutputDir, String(settings.mwlPort)];
 
     const proc = spawn(wlmscpfsPath, args, {
       env: { ...process.env },
@@ -249,6 +259,29 @@ async function startMppsScpServer(settings: ResolvedGatewaySettings, ppsscpfsPat
     console.error("[DICOM MPPS] Failed to start ppsscpfs:", error);
     return null;
   }
+}
+
+function getWorklistAeOutputDir(worklistOutputDir: string, aeTitle: string): string {
+  return path.join(worklistOutputDir, aeTitle);
+}
+
+async function ensureWorklistAeDirectory(directory: string): Promise<void> {
+  await fs.mkdir(directory, { recursive: true });
+  await fs.writeFile(path.join(directory, "lockfile"), "", "utf8");
+}
+
+async function isPortInUse(host: string, port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const tester = net.createServer();
+
+    tester.unref();
+    tester.once("error", () => resolve(true));
+    tester.once("listening", () => {
+      tester.close(() => resolve(false));
+    });
+
+    tester.listen({ host, port, exclusive: true });
+  });
 }
 
 async function startNodeWorker(

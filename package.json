@@ -17,7 +17,8 @@
     "build:frontend": "cd frontend && npm run build",
     "check": "rg --files -g '*.ts' -g '*.mts' -0 | xargs -0 -I{} npx tsc --noEmit \"{}\"",
     "gateway:build-worklists": "node scripts/dicom-gateway/build-worklists.mjs",
-    "gateway:process-mpps": "node scripts/dicom-gateway/process-mpps-inbox.mjs"
+    "gateway:process-mpps": "node scripts/dicom-gateway/process-mpps-inbox.mjs",
+    "gateway:rebuild-sources": "tsx scripts/dicom-gateway/rebuild-worklist-sources.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

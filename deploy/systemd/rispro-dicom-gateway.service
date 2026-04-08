@@ -1,0 +1,19 @@
+[Unit]
+Description=RISpro DICOM Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@RISPRO_APP_USER@
+Group=@RISPRO_APP_USER@
+WorkingDirectory=@RISPRO_APP_DIR@
+ExecStart=@RISPRO_APP_DIR@/scripts/dicom-gateway/run-gateway.sh
+Restart=always
+RestartSec=5
+KillMode=control-group
+Environment=NODE_ENV=production
+Environment=RISPRO_BASE_URL=http://127.0.0.1:3000
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,7 @@ const rootDir = path.resolve(__dirname, "..", "..");
 const DEFAULTS = {
   worklistSourceDir: "storage/dicom/worklist-source",
   worklistOutputDir: "storage/dicom/worklists",
+  mwlAeTitle: "RISPRO_MWL",
   dump2dcmCommand: "dump2dcm",
   pollMs: 3000
 };
@@ -36,6 +37,7 @@ async function loadSettings() {
       return {
         sourceDir: resolvePath(s.worklist_source_dir, DEFAULTS.worklistSourceDir),
         outputDir: resolvePath(s.worklist_output_dir, DEFAULTS.worklistOutputDir),
+        mwlAeTitle: s.mwl_ae_title || DEFAULTS.mwlAeTitle,
         dump2dcmCommand: s.dump2dcm_command || DEFAULTS.dump2dcmCommand,
         pollMs: Number(s.worklist_poll_ms) || DEFAULTS.pollMs
       };
@@ -48,6 +50,7 @@ async function loadSettings() {
   return {
     sourceDir: resolvePath(process.env.DICOM_WORKLIST_SOURCE_DIR, DEFAULTS.worklistSourceDir),
     outputDir: resolvePath(process.env.DICOM_WORKLIST_OUTPUT_DIR, DEFAULTS.worklistOutputDir),
+    mwlAeTitle: process.env.DICOM_MWL_AE_TITLE || DEFAULTS.mwlAeTitle,
     dump2dcmCommand: process.env.DICOM_DUMP2DCM_COMMAND || DEFAULTS.dump2dcmCommand,
     pollMs: Number(process.env.DICOM_WORKLIST_POLL_MS) || DEFAULTS.pollMs
   };
@@ -75,9 +78,39 @@ async function listFiles(directory, extension) {
     .sort();
 }
 
-async function convertDumpFile(fileName, sourceDir, outputDir, dump2dcmCommand) {
+async function listDirectories(directory) {
+  const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+  return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+}
+
+function getAeTitleFromDumpFileName(fileName, fallbackAeTitle) {
+  const stem = fileName.replace(/\.dump$/i, "");
+  const separatorIndex = stem.lastIndexOf("--");
+
+  if (separatorIndex < 0) {
+    return fallbackAeTitle;
+  }
+
+  const aeTitle = stem.slice(separatorIndex + 2).trim();
+  return aeTitle || fallbackAeTitle;
+}
+
+function getOutputStem(fileName) {
+  return fileName.replace(/\.dump$/i, ".wl");
+}
+
+function getAeOutputDir(outputDir, aeTitle) {
+  return path.join(outputDir, aeTitle);
+}
+
+async function ensureAeOutputLayout(aeOutputDir) {
+  await fs.mkdir(aeOutputDir, { recursive: true });
+  await fs.writeFile(path.join(aeOutputDir, "lockfile"), "", "utf8");
+}
+
+async function convertDumpFile(fileName, sourceDir, aeOutputDir, dump2dcmCommand) {
   const sourcePath = path.join(sourceDir, fileName);
-  const targetPath = path.join(outputDir, fileName.replace(/\.dump$/i, ".wl"));
+  const targetPath = path.join(aeOutputDir, getOutputStem(fileName));
 
   try {
     const sourceStats = await fs.stat(sourcePath);
@@ -100,25 +133,50 @@ async function convertDumpFile(fileName, sourceDir, outputDir, dump2dcmCommand) 
 }
 
 async function removeStaleOutputFiles(sourceFiles, outputDir) {
-  const sourceBasenames = new Set(sourceFiles.map((file) => file.replace(/\.dump$/i, "")));
+  const sourceBasenames = new Set(sourceFiles.map((file) => file.replace(/\.dump$/i, ".wl")));
   const outputFiles = await listFiles(outputDir, ".wl");
 
   await Promise.all(
     outputFiles
-      .filter((file) => !sourceBasenames.has(file.replace(/\.wl$/i, "")))
+      .filter((file) => !sourceBasenames.has(file))
       .map((file) => fs.rm(path.join(outputDir, file), { force: true }))
   );
 }
 
-async function runCycle(sourceDir, outputDir, dump2dcmCommand) {
+async function removeLegacyFlatOutputFiles(outputDir) {
+  const outputFiles = await listFiles(outputDir, ".wl");
+
+  await Promise.all(outputFiles.map((file) => fs.rm(path.join(outputDir, file), { force: true })));
+}
+
+async function runCycle(sourceDir, outputDir, dump2dcmCommand, fallbackAeTitle) {
   await ensureLayout(sourceDir, outputDir);
   const sourceFiles = await listFiles(sourceDir, ".dump");
+  const filesByAeTitle = new Map();
 
   for (const fileName of sourceFiles) {
-    await convertDumpFile(fileName, sourceDir, outputDir, dump2dcmCommand);
+    const aeTitle = getAeTitleFromDumpFileName(fileName, fallbackAeTitle);
+    const aeOutputDir = getAeOutputDir(outputDir, aeTitle);
+
+    if (!filesByAeTitle.has(aeTitle)) {
+      filesByAeTitle.set(aeTitle, []);
+    }
+
+    filesByAeTitle.get(aeTitle).push(fileName);
+
+    await ensureAeOutputLayout(aeOutputDir);
+    await convertDumpFile(fileName, sourceDir, aeOutputDir, dump2dcmCommand);
   }
 
-  await removeStaleOutputFiles(sourceFiles, outputDir);
+  await removeLegacyFlatOutputFiles(outputDir);
+
+  const outputDirectories = await listDirectories(outputDir);
+  for (const aeTitle of outputDirectories) {
+    const aeOutputDir = getAeOutputDir(outputDir, aeTitle);
+    const sourceFilesForAe = filesByAeTitle.get(aeTitle) || [];
+    await ensureAeOutputLayout(aeOutputDir);
+    await removeStaleOutputFiles(sourceFilesForAe, aeOutputDir);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +189,7 @@ async function main() {
 
   while (true) {
     try {
-      await runCycle(settings.sourceDir, settings.outputDir, settings.dump2dcmCommand);
+      await runCycle(settings.sourceDir, settings.outputDir, settings.dump2dcmCommand, settings.mwlAeTitle);
     } catch (error) {
       console.error("Worklist builder cycle failed.", error);
     }
