@@ -30,7 +30,10 @@
       "Bash(brew *)",
       "Bash(ssh *)",
       "Bash(dcmqrscp *)",
-      "Bash(chmod *)"
+      "Bash(chmod *)",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git stash)"
     ]
   },
   "$version": 3
