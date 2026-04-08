@@ -29,7 +29,8 @@
       "Bash(./node_modules/.bin/tsc *)",
       "Bash(brew *)",
       "Bash(ssh *)",
-      "Bash(dcmqrscp *)"
+      "Bash(dcmqrscp *)",
+      "Bash(chmod *)"
     ]
   },
   "$version": 3

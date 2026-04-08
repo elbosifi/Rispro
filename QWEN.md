@@ -337,3 +337,9 @@ const result = await api("/api/endpoint", {
 - `/docs/backend-handoff.md` - Backend architecture overview
 - `/docs/production-rollout.md` - Deployment checklist
 - `/docs/v1-specification.md` - Original feature specifications
+
+## Qwen Added Memories
+- Full production deployment script: /Users/serajalsaifi/Nextcloud/RISpro/deploy.sh
+Usage: ENABLE_DICOM_GATEWAY=1 SERVICE_NAME=rispro ./deploy.sh
+Key env vars: ENABLE_DICOM_GATEWAY, SERVICE_NAME, RESTART_MODE, DEPLOY_BRANCH, HEALTHCHECK_URL
+The script handles: git pull, npm ci, migrations, DCMTK installation, systemd service provisioning, worklist rebuild, DICOM echo smoke test
