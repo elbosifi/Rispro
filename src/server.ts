@@ -63,6 +63,8 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 
 async function start(): Promise<void> {
+  const startupSummary: Record<string, string> = {};
+
   try {
     // Auto-seed DICOM gateway defaults if missing (zero-config installation)
     const { seedDicomGatewayDefaultsIfMissing } = await import("./services/dicom-settings-resolver.js");
@@ -75,6 +77,7 @@ async function start(): Promise<void> {
 
     if (process.env.RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY === "1") {
       console.log("Embedded DICOM gateway disabled by environment. Skipping in-process gateway startup.");
+      startupSummary.dicom_gateway = "disabled_by_env";
     } else {
       // Start DICOM gateway services (MWL SCP, MPPS SCP, workers)
       const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
@@ -83,9 +86,48 @@ async function start(): Promise<void> {
   } catch (error) {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
     logError(error);
+    startupSummary.dicom_gateway = "initialization_failed";
   }
 
   server.listen(env.port, () => {
+    // Print startup summary
+    console.log("");
+    console.log("========================================");
+    console.log("  RISpro Reception - Startup Summary");
+    console.log("========================================");
+    console.log(`  Backend:        http://localhost:${env.port}`);
+    console.log(`  Environment:    ${env.nodeEnv}`);
+    console.log(`  Database:       ${env.databaseUrl.split("@")[1]?.split("/")[0] || "configured"}`);
+
+    // DICOM Gateway status
+    const { getAllServiceStatuses } = await import("./services/dicom-gateway-registry.js");
+    const { resolveGatewaySettings } = await import("./services/dicom-settings-resolver.js");
+    const services = getAllServiceStatuses();
+    const settings = await resolveGatewaySettings();
+
+    console.log("");
+    console.log("  DICOM Services:");
+
+    if (startupSummary.dicom_gateway === "disabled_by_env") {
+      console.log("    MWL SCP:        disabled_by_env");
+      console.log("    MPPS SCP:       disabled_by_env");
+      console.log("    Worklist Bldr:  disabled_by_env");
+      console.log("    MPPS Processor: disabled_by_env");
+    } else if (services.mwl?.status === "running") {
+      console.log(`    MWL SCP:        running (${settings.mwlAeTitle} @ ${settings.bindHost}:${settings.mwlPort})`);
+      console.log(`    MPPS SCP:       ${services.mpps?.status === "running" ? `running (${settings.mppsAeTitle} @ ${settings.bindHost}:${settings.mppsPort})` : "disabled_missing_binary"}`);
+      console.log(`    Worklist Bldr:  ${services.worklistBuilder?.status === "running" ? "running" : "disabled_missing_tool"}`);
+      console.log(`    MPPS Processor: ${services.mppsProcessor?.status === "running" ? "running" : "disabled_missing_tool"}`);
+      console.log(`    Worklist Dir:   ${settings.worklistOutputDir}`);
+    } else {
+      console.log("    MWL SCP:        disabled_or_failed");
+      console.log("    MPPS SCP:       disabled_or_failed");
+      console.log("    Worklist Bldr:  disabled_or_failed");
+      console.log("    MPPS Processor: disabled_or_failed");
+    }
+
+    console.log("========================================");
+    console.log("");
     console.log(`RISpro backend listening on http://localhost:${env.port}`);
   });
 }
