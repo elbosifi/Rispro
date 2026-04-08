@@ -1,47 +1,12 @@
 # =============================================================================
 # RISpro Reception - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
-# Stage 1: Build DCMTK from source (Debian bookworm)
-# Stage 2: Build frontend assets (Node Alpine)
-# Stage 3: Production runtime (Debian bookworm - consistent with DCMTK build)
+# Stage 1: Build frontend assets
+# Stage 2: Production runtime (Debian bookworm with DCMTK from apt)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Stage 1: Build DCMTK from source (Debian bookworm)
-# ---------------------------------------------------------------------------
-FROM debian:bookworm-slim AS dcmtk-builder
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    cmake \
-    ca-certificates \
-    libssl-dev \
-    libxml2-dev \
-    zlib1g-dev \
-    libicu-dev \
-    pkg-config \
-    wget \
-    && update-ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-# Download and build DCMTK 3.6.9 (stable release with ppsscpfs)
-ENV DCMTK_VERSION=3.6.9
-RUN wget --https-only --tries=3 -O "dcmtk-${DCMTK_VERSION}.tar.gz" "https://dcmtk.org/pub/dcmtk/dcmtk-${DCMTK_VERSION}.tar.gz" \
-    && tar -xzf "dcmtk-${DCMTK_VERSION}.tar.gz" \
-    && cd "dcmtk-${DCMTK_VERSION}" \
-    && mkdir build && cd build \
-    && cmake .. \
-       -DCMAKE_BUILD_TYPE=Release \
-       -DCMAKE_INSTALL_PREFIX=/opt/dcmtk \
-       -DDCMTK_WIDE_CHAR_FILE_IO_FUNCTIONS=ON \
-       -DDCMTK_ENABLE_STL=ON \
-    && make -j$(nproc) \
-    && make install/strip \
-    && cd ../.. \
-    && rm -rf "dcmtk-${DCMTK_VERSION}" "dcmtk-${DCMTK_VERSION}.tar.gz"
-
-# ---------------------------------------------------------------------------
-# Stage 2: Build frontend assets
+# Stage 1: Build frontend assets
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS frontend-builder
 
@@ -53,30 +18,23 @@ COPY frontend/ .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 3: Production runtime (Debian bookworm - same base as DCMTK build)
+# Stage 2: Production runtime (Debian bookworm + DCMTK from apt)
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS production
 
-# Install runtime dependencies
+# Install runtime dependencies including DCMTK from Debian repos
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     bash \
+    dcmtk \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy DCMTK binaries from builder stage
-COPY --from=dcmtk-builder /opt/dcmtk/bin/* /usr/local/bin/
-COPY --from=dcmtk-builder /opt/dcmtk/lib/* /usr/local/lib/
-COPY --from=dcmtk-builder /opt/dcmtk/etc/dcmtk/ /etc/dcmtk/
-
-# Update shared library cache
-RUN ldconfig
-
-# Verify DCMTK binaries are present
+# Verify all required DCMTK tools are present and executable
 RUN echo "Verifying DCMTK installation..." \
     && wlmscpfs --version 2>&1 | head -1 \
     && ppsscpfs --version 2>&1 | head -1 \
