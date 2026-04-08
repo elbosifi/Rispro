@@ -174,6 +174,13 @@ async function restoreDocumentFiles(documentRows: BackupDocumentRow[]): Promise<
   }
 }
 
+// JSONB columns that need explicit serialization during restore
+const JSONB_COLUMNS: Record<string, Set<string>> = {
+  system_settings: new Set(["setting_value"]),
+  dicom_message_log: new Set(["payload"]),
+  appointments: new Set(["metadata"])
+};
+
 async function insertRows(
   client: PoolClient,
   tableName: BackupTableName,
@@ -194,6 +201,29 @@ async function insertRows(
       delete clone.file_content_base64;
     }
 
+    // Serialize JSONB columns to strings so pg doesn't double-encode
+    // or send invalid JSON tokens.
+    const jsonbCols = JSONB_COLUMNS[tableName];
+    if (jsonbCols) {
+      for (const col of jsonbCols) {
+        if (col in clone && clone[col] !== null && clone[col] !== undefined) {
+          const val = clone[col];
+          // If already a string, ensure it's valid JSON or wrap it
+          if (typeof val === "string") {
+            try {
+              JSON.parse(val);
+              // Already valid JSON, leave as-is
+            } catch {
+              // Not valid JSON — wrap in quotes to make it a JSON string literal
+              clone[col] = JSON.stringify(val);
+            }
+          } else if (typeof val === "object") {
+            clone[col] = JSON.stringify(val);
+          }
+        }
+      }
+    }
+
     return clone;
   });
 
@@ -206,11 +236,18 @@ async function insertRows(
     }
   }
 
+  // Build explicit ::jsonb casts for jsonb columns
+  const typedColumns = columns.map((col) => {
+    const jsonbCols = JSONB_COLUMNS[tableName];
+    if (jsonbCols?.has(col)) return `${col}::jsonb`;
+    return col;
+  });
+
   for (const row of sanitizedRows) {
     const values: unknown[] = columns.map((column) => row[column]);
     const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
     await client.query(
-      `insert into ${tableName} (${columns.join(", ")}) values (${placeholders})`,
+      `insert into ${tableName} (${typedColumns.join(", ")}) values (${placeholders})`,
       values
     );
   }
