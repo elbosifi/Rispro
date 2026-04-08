@@ -61,7 +61,7 @@ jobs:
             git fetch origin "$BRANCH"
             git checkout "$BRANCH"
             git pull --rebase origin "$BRANCH"
-            chmod +x scripts/deploy.sh
+            chmod +x deploy.sh
 
             SKIP_GIT_PULL=1 \
             APP_DIR="$APP_DIR" \
@@ -74,4 +74,4 @@ jobs:
             INSTALL_CMD="${{ vars.DEPLOY_INSTALL_CMD }}" \
             MIGRATE_CMD="${{ vars.DEPLOY_MIGRATE_CMD }}" \
             POST_MIGRATE_CMD="${{ vars.DEPLOY_POST_MIGRATE_CMD }}" \
-            ./scripts/deploy.sh
+            ./deploy.sh

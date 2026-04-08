@@ -22,7 +22,7 @@ The best long-term setup for this project is:
 
 1. push changes to GitHub
 2. let GitHub Actions run validation
-3. let the server run the shared deployment script
+3. let the server run the single deployment script
 
 This repository now includes:
 
