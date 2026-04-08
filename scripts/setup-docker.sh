@@ -52,7 +52,7 @@ check_http() {
 # Prompt helpers
 # ---------------------------------------------------------------------------
 prompt() {
-  printf '%s [%s]: ' "$1" "$2"
+  printf '%s [%s]: ' "$1" "$2" >&2
   read -r response || true
   if [ -z "$response" ]; then
     echo "$2"
@@ -66,12 +66,12 @@ prompt() {
 prompt_hidden() {
   _ph_prompt="$1"
   _ph_default="$2"
-  printf '%s [press Enter to use default]: ' "$_ph_prompt"
+  printf '%s [press Enter to use default]: ' "$_ph_prompt" >&2
   # Hide input
   stty -echo 2>/dev/null || true
   read -r _ph_response || true
   stty echo 2>/dev/null || true
-  printf '\n'
+  printf '\n' >&2
   if [ -z "$_ph_response" ]; then
     echo "$_ph_default"
   else
@@ -292,7 +292,7 @@ main() {
       _current_mode="$(grep '^RISPRO_DB_MODE=' "$ENV_FILE" | head -1 | cut -d= -f2)"
     fi
 
-    printf 'Do you want to keep it and start the stack? (Y/n): '
+    printf 'Do you want to keep it and start the stack? (Y/n): ' >&2
     read -r _keep || true
     case "$_keep" in
       [nN][oO]|[nN])
