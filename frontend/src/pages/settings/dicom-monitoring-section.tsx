@@ -198,7 +198,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                 isBusy={serviceControlMutation.isPending}
               />
               <ServiceStatusCard
-                serviceName="MPPS Processor"
+                serviceName="MPPS SCP Server"
                 service={services.mpps}
                 showControls={false}
               />
@@ -208,7 +208,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
                 showControls={false}
               />
               <ServiceStatusCard
-                serviceName="MPPS Worker"
+                serviceName="MPPS Processor"
                 service={services.mppsProcessor}
                 showControls={false}
               />

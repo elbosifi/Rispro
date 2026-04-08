@@ -189,6 +189,7 @@ Actions:
 **Architecture Made Explicit:**
 - RISpro generates worklists (`.dump` source files + `.wl` output)
 - RISpro serves MWL via `wlmscpfs -dfp <worklist-output-dir> <port>`
+- RISpro serves MPPS via `ppsscpfs -aet <mpps-ae> --output-directory <mpps-inbox> <port>`
 - RISpro receives MPPS through file drop or callback path
 - External MWL/MPPS network serving requirements surfaced in UI if needed
 
@@ -209,13 +210,14 @@ Actions:
 ### 8. Worker/Process Strategy ✅
 
 **Current Approach:**
-- Worklist generation integrated into main backend process
+- Main backend now launches the MWL SCP, MPPS SCP, worklist builder, and MPPS processor
 - `scheduleWorklistSync(appointmentId)` - Fire-and-forget async on appointment mutations
 - `scheduleWorklistRebuild()` - Fire-and-forget async on device changes
 - Both functions catch errors and log warnings (don't block main operations)
 
 **Startup Integration:**
 - `server.ts` calls `ensureDicomGatewayLayout()` and `rebuildAllDicomWorklistSources()` on startup
+- `startDicomGateway()` launches the DICOM listener and background workers
 - Errors caught and logged, don't prevent server startup
 - Worklists rebuilt incrementally on every appointment create/update/cancel/delete
 

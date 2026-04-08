@@ -73,7 +73,7 @@ async function start(): Promise<void> {
     await ensureDicomGatewayLayout();
     await rebuildAllDicomWorklistSources();
 
-    // Start DICOM MWL/MPPS SCP servers (if native module available)
+    // Start DICOM gateway services (MWL SCP, MPPS SCP, workers)
     const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
     dicomGateway = await startDicomGateway();
   } catch (error) {

@@ -25,7 +25,7 @@ command -v npm >/dev/null 2>&1 || error_exit "npm not installed"
 command -v git >/dev/null 2>&1 || error_exit "git not installed"
 
 # 1.5. Install DCMTK DICOM tools if missing
-if ! command -v dump2dcm >/dev/null 2>&1 || ! command -v dcmdump >/dev/null 2>&1 || ! command -v wlmscpfs >/dev/null 2>&1; then
+if ! command -v dump2dcm >/dev/null 2>&1 || ! command -v dcmdump >/dev/null 2>&1 || ! command -v wlmscpfs >/dev/null 2>&1 || ! command -v ppsscpfs >/dev/null 2>&1; then
   log "Installing DCMTK DICOM tools (dcmtk package)..."
   if command -v apt-get >/dev/null 2>&1; then
     apt-get update -qq && apt-get install -y -qq dcmtk >/dev/null 2>&1 || log "WARNING: Failed to install dcmtk via apt-get"
@@ -37,13 +37,13 @@ if ! command -v dump2dcm >/dev/null 2>&1 || ! command -v dcmdump >/dev/null 2>&1
     log "WARNING: Unknown package manager. Please install dcmtk manually (dump2dcm, dcmdump)."
   fi
 
-  if command -v dump2dcm >/dev/null 2>&1 && command -v dcmdump >/dev/null 2>&1 && command -v wlmscpfs >/dev/null 2>&1; then
-    log "DCMTK tools installed successfully: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump), wlmscpfs=$(which wlmscpfs)"
+  if command -v dump2dcm >/dev/null 2>&1 && command -v dcmdump >/dev/null 2>&1 && command -v wlmscpfs >/dev/null 2>&1 && command -v ppsscpfs >/dev/null 2>&1; then
+    log "DCMTK tools installed successfully: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump), wlmscpfs=$(which wlmscpfs), ppsscpfs=$(which ppsscpfs)"
   else
-    log "WARNING: DCMTK tools not found after installation attempt. Worklist service may be unavailable."
+    log "WARNING: DCMTK tools not found after installation attempt. DICOM gateway services may be unavailable."
   fi
 else
-  log "DCMTK tools already installed: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump), wlmscpfs=$(which wlmscpfs)"
+  log "DCMTK tools already installed: dump2dcm=$(which dump2dcm), dcmdump=$(which dcmdump), wlmscpfs=$(which wlmscpfs), ppsscpfs=$(which ppsscpfs)"
 fi
 
 # 2. Pull latest code
