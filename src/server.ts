@@ -89,7 +89,7 @@ async function start(): Promise<void> {
     startupSummary.dicom_gateway = "initialization_failed";
   }
 
-  server.listen(env.port, () => {
+  server.listen(env.port, async () => {
     // Print startup summary
     console.log("");
     console.log("========================================");

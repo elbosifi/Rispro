@@ -56,6 +56,8 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 | `rispro-app` | RISpro app + embedded DICOM | 3000, 11112, 11113 | `rispro-storage` |
 | `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
+> **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` automatically.
+
 ### Mode 2: External PostgreSQL
 
 Connect to an existing PostgreSQL server. Docker never creates, manages, or deletes this database.
@@ -115,7 +117,7 @@ The RISpro app container includes the complete DCMTK toolchain and runs all DICO
 When the container starts, the entrypoint script (`docker/rispro/entrypoint.sh`) performs these steps automatically:
 
 1. **Wait for PostgreSQL** — polls the database until it responds (up to 60 seconds, configurable)
-2. **Run migrations** — `npm run migrate`
+2. **Run migrations** — `npm run migrate` (runs via `tsx`, installed at build time)
 3. **Seed supervisor** — `npm run seed:supervisor` (idempotent, safe to rerun)
 4. **Start the app** — `npx tsx src/server.ts`
 
@@ -204,6 +206,8 @@ docker compose exec app echoscu -v -aec RISPRO_MPPS 127.0.0.1 11113
 | `PORT` | `3000` | HTTP port for web app |
 | `DATABASE_URL` | (see .env.example) | PostgreSQL connection string |
 | `RISPRO_DB_MODE` | (written by setup) | `internal` or `external` — used by update script |
+| `DATABASE_SSL` | `false` | Must be `false` for internal Docker PostgreSQL. Set `true` only if your external server requires it. |
+| `DATABASE_SSL_REJECT_UNAUTHORIZED` | `false` | Whether to reject self-signed SSL certificates. |
 | `JWT_SECRET` | (required) | Secret for session tokens |
 | `COOKIE_SECURE` | `false` | Set `true` behind HTTPS proxy |
 | `TRUST_PROXY` | `1` | Trust reverse proxy headers |

@@ -44,9 +44,11 @@ RUN echo "Verifying DCMTK installation..." \
     && findscu --version 2>&1 | head -1 \
     && echo "All DCMTK tools verified."
 
-# Install backend dependencies
+# Install backend dependencies (include devDependencies for tsx)
+# NODE_ENV=development ensures tsx (in devDependencies) is installed.
+# The ENV NODE_ENV=production below sets the runtime mode.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN NODE_ENV=development npm ci
 
 # Copy backend source
 COPY src/ ./src/

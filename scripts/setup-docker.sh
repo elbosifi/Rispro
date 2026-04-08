@@ -146,6 +146,10 @@ DB_PASSWORD=${_i_db_password}
 DB_NAME=rispro
 RISPRO_DB_MODE=internal
 
+# -- Database SSL (Internal Docker PostgreSQL does not support SSL) --
+DATABASE_SSL=false
+DATABASE_SSL_REJECT_UNAUTHORIZED=false
+
 # -- Authentication --
 JWT_SECRET=${_i_jwt}
 
@@ -197,6 +201,11 @@ TRUST_PROXY=1
 # -- Database (External PostgreSQL) --
 DATABASE_URL=${_e_db_url}
 RISPRO_DB_MODE=external
+
+# -- Database SSL --
+# Set to true if your external PostgreSQL requires SSL.
+DATABASE_SSL=false
+DATABASE_SSL_REJECT_UNAUTHORIZED=false
 
 # -- Authentication --
 JWT_SECRET=${_e_jwt}
