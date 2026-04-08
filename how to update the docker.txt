@@ -1,0 +1,12 @@
+
+On your server, run:
+
+cd /opt/Rispro && ./scripts/update-docker.sh
+This will pull the latest code, rebuild, restart containers, and verify health — all automatically.
+
+If the update script isn’t present yet (old deployment), run manually:
+
+cd /opt/Rispro
+git pull
+docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --build
+docker compose logs -f app

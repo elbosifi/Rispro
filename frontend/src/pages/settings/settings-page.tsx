@@ -945,16 +945,22 @@ function BackupRestoreSection() {
         body: JSON.stringify(payload)
       });
 
+      const responseData = await response.json().catch(() => null);
+
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Restore failed.");
+        const errorMsg = responseData?.message || responseData?.error || `HTTP ${response.status}`;
+        console.error("[Restore] Server error:", response.status, responseData);
+        throw new Error(errorMsg);
       }
 
+      console.log("[Restore] Success:", responseData);
       setRestoreMessage({ type: "success", text: "Backup restored successfully! The page will reload..." });
       setRestoreFile(null);
       setTimeout(() => window.location.reload(), 2000);
     } catch (err) {
-      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Restore failed." });
+      const message = err instanceof Error ? err.message : "Restore failed.";
+      console.error("[Restore] Failed:", err);
+      setRestoreMessage({ type: "error", text: message });
     } finally {
       setRestoreBusy(false);
     }
