@@ -46,7 +46,7 @@ RUN echo "Verifying DCMTK installation..." \
 
 # Install backend dependencies
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 # Copy backend source
 COPY src/ ./src/
