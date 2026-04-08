@@ -26,7 +26,7 @@ The best long-term setup for this project is:
 
 This repository now includes:
 
-- a server deployment script at `/Users/seraj/Nextcloud/RISpro/scripts/deploy.sh`
+- a server deployment script at `/Users/seraj/Nextcloud/RISpro/deploy.sh`
 - a GitHub Actions workflow at `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml`
 
 The script is the real deployment logic.
@@ -43,7 +43,7 @@ On the production server:
 5. make the script executable once:
 
 ```bash
-chmod +x scripts/deploy.sh
+chmod +x deploy.sh
 ```
 
 ### Example manual run with systemd
@@ -54,7 +54,7 @@ DEPLOY_BRANCH=main \
 RESTART_MODE=systemd \
 SERVICE_NAME=rispro \
 HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
-./scripts/deploy.sh
+./deploy.sh
 ```
 
 ### Example manual run with PM2
@@ -65,7 +65,7 @@ DEPLOY_BRANCH=main \
 RESTART_MODE=pm2 \
 PM2_NAME=rispro \
 HEALTHCHECK_URL=http://127.0.0.1:3000/api/ready \
-./scripts/deploy.sh
+./deploy.sh
 ```
 
 ## GitHub Actions setup

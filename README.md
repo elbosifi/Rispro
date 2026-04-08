@@ -189,11 +189,11 @@ The recommended production deployment method is:
 
 1. push updates to GitHub
 2. let GitHub Actions validate the code
-3. let the server run `/Users/seraj/Nextcloud/RISpro/scripts/deploy.sh`
+3. let the server run `/Users/seraj/Nextcloud/RISpro/deploy.sh`
 
 This repository includes:
 
-- `/Users/seraj/Nextcloud/RISpro/scripts/deploy.sh` for server deployment
+- `/Users/seraj/Nextcloud/RISpro/deploy.sh` for server deployment
 - `/Users/seraj/Nextcloud/RISpro/.github/workflows/deploy.yml` for GitHub-based deployment automation
 
 Setup details are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
