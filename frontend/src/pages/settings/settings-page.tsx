@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
@@ -73,9 +73,12 @@ export default function SettingsPage() {
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[]>([]);
   const queryClient = useQueryClient();
+  const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
 
   const handleReAuthSuccess = () => {
     setShowReAuthModal(false);
+    // Notify backup/restore section to retry after re-auth
+    backupRestoreRef.current?.onReAuthSuccess();
     for (const key of pendingReAuthKeys) {
       queryClient.invalidateQueries({ queryKey: key.split(",") });
     }
@@ -133,7 +136,7 @@ export default function SettingsPage() {
             {section === "dicom_gateway_config" && <DicomGatewaySettingsSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
-            {section === "backup_restore" && <BackupRestoreSection />}
+            {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
           </div>
@@ -917,11 +920,52 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   );
 }
 
-function BackupRestoreSection() {
+const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReAuthRequired: (key: string[]) => void }>(
+  function BackupRestoreSection({ onReAuthRequired }, ref) {
   const { t } = useLanguage();
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [pendingPayload, setPendingPayload] = useState<unknown>(null);
+
+  useImperativeHandle(ref, () => ({
+    onReAuthSuccess: handleReAuthSuccess
+  }));
+
+  const doRestore = async (payload: unknown) => {
+    const response = await fetch("/api/admin/restore", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    const responseData = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      // Backend returns { error: { code: number, message: string } }
+      const errorMsg =
+        (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
+        responseData?.message ||
+        (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
+        `HTTP ${response.status}`;
+
+      // 403 = re-auth required — trigger modal instead of showing error
+      if (response.status === 403) {
+        setPendingPayload(payload);
+        onReAuthRequired(["admin", "restore"]);
+        throw new Error("REAUTH_REQUIRED");
+      }
+
+      console.error("[Restore] Server error:", response.status, responseData);
+      throw new Error(errorMsg);
+    }
+
+    console.log("[Restore] Success:", responseData);
+    setRestoreMessage({ type: "success", text: "Backup restored successfully! The page will reload..." });
+    setRestoreFile(null);
+    setPendingPayload(null);
+    setTimeout(() => window.location.reload(), 2000);
+  };
 
   const handleRestore = async () => {
     if (!restoreFile) return;
@@ -938,37 +982,33 @@ function BackupRestoreSection() {
     try {
       const content = await restoreFile.text();
       const payload = JSON.parse(content);
-
-      const response = await fetch("/api/admin/restore", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const responseData = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        // Backend returns { error: { code: number, message: string } }
-        // or legacy { message: string }
-        const errorMsg =
-          (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
-          responseData?.message ||
-          (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
-          `HTTP ${response.status}`;
-        console.error("[Restore] Server error:", response.status, responseData);
-        throw new Error(errorMsg);
-      }
-
-      console.log("[Restore] Success:", responseData);
-      setRestoreMessage({ type: "success", text: "Backup restored successfully! The page will reload..." });
-      setRestoreFile(null);
-      setTimeout(() => window.location.reload(), 2000);
+      await doRestore(payload);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Restore failed.";
-      console.error("[Restore] Failed:", err);
-      setRestoreMessage({ type: "error", text: message });
+      if (err instanceof Error && err.message === "REAUTH_REQUIRED") {
+        setRestoreMessage({ type: "error", text: "Re-authentication required. After re-authenticating, click Restore again." });
+      } else {
+        const message = err instanceof Error ? err.message : "Restore failed.";
+        console.error("[Restore] Failed:", err);
+        setRestoreMessage({ type: "error", text: message });
+      }
     } finally {
       setRestoreBusy(false);
+    }
+  };
+
+  // Auto-retry restore after successful re-auth
+  const handleReAuthSuccess = async () => {
+    if (pendingPayload) {
+      setRestoreBusy(true);
+      setRestoreMessage({ type: "success", text: "Re-authenticated. Retrying restore..." });
+      try {
+        await doRestore(pendingPayload);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Restore failed.";
+        setRestoreMessage({ type: "error", text: message });
+      } finally {
+        setRestoreBusy(false);
+      }
     }
   };
 
@@ -1023,7 +1063,7 @@ function BackupRestoreSection() {
       </div>
     </div>
   );
-}
+  });
 
 function QueryError({ message }: { message: string }) {
   const { t } = useLanguage();
