@@ -948,7 +948,13 @@ function BackupRestoreSection() {
       const responseData = await response.json().catch(() => null);
 
       if (!response.ok) {
-        const errorMsg = responseData?.message || responseData?.error || `HTTP ${response.status}`;
+        // Backend returns { error: { code: number, message: string } }
+        // or legacy { message: string }
+        const errorMsg =
+          (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
+          responseData?.message ||
+          (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
+          `HTTP ${response.status}`;
         console.error("[Restore] Server error:", response.status, responseData);
         throw new Error(errorMsg);
       }
