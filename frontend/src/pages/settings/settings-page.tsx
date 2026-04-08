@@ -919,13 +919,95 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
 
 function BackupRestoreSection() {
   const { t } = useLanguage();
+  const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+
+  const handleRestore = async () => {
+    if (!restoreFile) return;
+
+    if (!confirm(
+      "⚠️ WARNING: This will DELETE ALL existing data and replace it with the backup.\n\nAre you sure you want to continue?"
+    )) {
+      return;
+    }
+
+    setRestoreBusy(true);
+    setRestoreMessage(null);
+
+    try {
+      const content = await restoreFile.text();
+      const payload = JSON.parse(content);
+
+      const response = await fetch("/api/admin/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Restore failed.");
+      }
+
+      setRestoreMessage({ type: "success", text: "Backup restored successfully! The page will reload..." });
+      setRestoreFile(null);
+      setTimeout(() => window.location.reload(), 2000);
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Restore failed." });
+    } finally {
+      setRestoreBusy(false);
+    }
+  };
+
   return (
     <div className="space-y-4">
       <p className="description-center">{t("settings.backupInfo")}</p>
-      <div className="flex gap-4">
-        <a href="/api/admin/backup" className="btn-primary text-sm">
-          {t("settings.downloadBackup")}
-        </a>
+
+      {restoreMessage && (
+        <div className={`p-3 rounded-lg border text-sm ${
+          restoreMessage.type === "success"
+            ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400"
+            : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800 text-red-700 dark:text-red-400"
+        }`}>
+          {restoreMessage.text}
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {/* Download backup */}
+        <div>
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Export</h4>
+          <a href="/api/admin/backup" className="btn-primary text-sm inline-block">
+            {t("settings.downloadBackup")}
+          </a>
+        </div>
+
+        <hr className="border-stone-200 dark:border-stone-700" />
+
+        {/* Restore from backup */}
+        <div>
+          <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Restore</h4>
+          <div className="flex gap-3 items-start">
+            <input
+              type="file"
+              accept=".json"
+              onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+              className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300 file:hover:bg-stone-200 dark:file:hover:bg-stone-600 file:cursor-pointer file:transition-colors"
+              disabled={restoreBusy}
+            />
+            <button
+              onClick={handleRestore}
+              disabled={restoreBusy || !restoreFile}
+              className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {restoreBusy ? "Restoring..." : "Restore"}
+            </button>
+          </div>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            ⚠️ Restoring will delete all current data (patients, appointments, settings, etc.) and replace it with the backup.
+          </p>
+        </div>
       </div>
     </div>
   );
