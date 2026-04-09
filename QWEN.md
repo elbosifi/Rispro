@@ -20,13 +20,17 @@
   - 100% TypeScript (zero `.js` files remaining)
   
 - **Database**: PostgreSQL
-  - 15 migration files tracking schema evolution
+  - Migration history tracking schema evolution
   - Connection pooling with configurable limits
   
 - **Integrations**:
-  - DICOM gateway (MWL support)
+  - DICOM gateway (MWL-only)
   - PACS C-FIND for prior studies
   - Document upload/scanning
+
+Current release:
+- MWL is bundled and starts automatically in Docker on port 11112.
+- MPPS is not included in this release.
 
 ### Core Features
 
@@ -350,6 +354,7 @@ const result = await api("/api/endpoint", {
   - Worklist directory has correct permissions
   - AE title in settings matches the called AE title
   - No other process is using the MWL port (11112)
+- MPPS is not included in this release.
 
 ## Documentation References
 
@@ -362,4 +367,4 @@ const result = await api("/api/endpoint", {
   Usage: ENABLE_DICOM_GATEWAY=1 SERVICE_NAME=rispro ./deploy.sh
   Key env vars: ENABLE_DICOM_GATEWAY, SERVICE_NAME, RESTART_MODE, DEPLOY_BRANCH, HEALTHCHECK_URL
   The script handles: git pull, npm ci, migrations, DCMTK installation, systemd service provisioning, worklist rebuild, DICOM echo smoke test
-  Note: DICOM gateway is now embedded (MWL only). No separate sidecar container needed.
+  Note: DICOM gateway is embedded (MWL only). No separate sidecar container is shipped in this release.

@@ -35,8 +35,5 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
-echo "[DICOM Gateway] MPPS SCP: disabled_by_design"
-echo "[DICOM Gateway] MPPS Processor: disabled_by_design"
-
 cd "$MWL_OUTPUT_DIR"
 exec wlmscpfs "$DICOM_MWL_PORT"

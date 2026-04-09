@@ -16,7 +16,7 @@ After the script finishes:
 
 - **Web UI**: `http://localhost:3000`
 - **DICOM MWL**: `127.0.0.1:11112` (AE: `RISPRO_MWL`)
-- **Note**: MPPS is not supported in this build (MWL only)
+- **Note**: This release is MWL-only. MPPS is not included.
 
 The supervisor credentials are printed at the end of setup.
 
@@ -53,7 +53,7 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 
 | Container | Purpose | Ports | Volume |
 |-----------|---------|-------|--------|
-| `rispro-app` | RISpro app + embedded DICOM | 3000, 11112, 11113 | `rispro-storage` |
+| `rispro-app` | RISpro app + embedded DICOM (MWL only) | 3000, 11112 | `rispro-storage` |
 | `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
 > **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` and `DATABASE_SSL_REJECT_UNAUTHORIZED=false` automatically.
@@ -88,7 +88,7 @@ The RISpro app container includes a source-built DCMTK toolchain from the offici
 | **MWL SCP** | `wlmscpfs` | Serves modality worklist files to modalities |
 | **Worklist Builder** | Node.js worker | Generates `.wl` files from appointments |
 
-The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container.
+The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container. MPPS is intentionally omitted from this release.
 
 **No separate gateway container is needed.** Everything runs inside the single `rispro-app` container.
 
@@ -218,14 +218,14 @@ DICOM gateway settings are stored in the database and managed via the **Settings
 
 ### Disabling Embedded Gateway
 
-If you prefer an external DICOM gateway sidecar:
+If you prefer to disable the embedded DICOM gateway:
 
 ```env
 # In .env
 RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=1
 ```
 
-The app will skip starting embedded DICOM services. You can then use the legacy `docker-compose.dicom-gateway.yml` for a separate gateway container.
+The app will skip starting embedded DICOM services. This repository no longer ships a separate gateway container, and the released build remains MWL-only.
 
 ---
 
@@ -317,7 +317,7 @@ docker compose exec app ps aux | grep -E "wlmscpfs|build-worklists"
 
 ### Port Conflicts
 
-If ports 3000, 11112, or 11113 are already in use:
+If ports 3000 or 11112 are already in use:
 
 ```bash
 # Check what's using the port

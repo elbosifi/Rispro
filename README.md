@@ -40,7 +40,7 @@ Not enabled yet:
 
 - direct printer bridge execution
 - local scanner bridge execution
-- full DCMTK gateway runtime until the sidecar is deployed
+- MPPS support is not included in this release
 
 ## Local run
 
@@ -200,14 +200,17 @@ Setup details are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
 
 ## DICOM MWL Gateway
 
-This repository includes embedded MWL (Modality Worklist) support:
+This repository includes embedded MWL (Modality Worklist) support only:
 
 - MWL source file generation inside `storage/dicom/worklist-source`
 - DICOM device mapping in supervisor settings
 - DCMTK `wlmscpfs` binary bundled in the Docker image
 - Node worker to convert `.dump` worklist source files into `.wl` files
+- Worklists are served from AE-specific subdirectories with a lockfile
+- MWL startup is nearly zero-touch in Docker; only port `11112` is used for DICOM
 
 Important:
 
 - run `npm run migrate` before starting the app
 - map each real modality device in Settings → DICOM Gateway before testing MWL
+- MPPS is not included in this release
