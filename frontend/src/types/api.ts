@@ -229,7 +229,6 @@ export interface DicomDevice {
   stationLocation: string;
   sourceIp?: string | null;
   mwlEnabled: boolean;
-  mppsEnabled: boolean;
   isActive: boolean;
 }
 
