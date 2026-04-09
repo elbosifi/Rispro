@@ -124,13 +124,10 @@ COPY scripts/dicom-gateway/ ./scripts/dicom-gateway/
 # Copy frontend build from previous stage
 COPY --from=frontend-builder /app/dist-frontend ./dist-frontend/
 
-# Create DICOM gateway directories
+# Create DICOM worklist directories
 RUN mkdir -p \
     storage/dicom/worklist-source \
     storage/dicom/worklists \
-    storage/dicom/mpps/inbox \
-    storage/dicom/mpps/processed \
-    storage/dicom/mpps/failed \
     storage/uploads
 
 # Copy entrypoint script
@@ -141,7 +138,7 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
   CMD wget -qO- "http://127.0.0.1:${PORT:-3000}/api/health" >/dev/null 2>&1 || exit 1
 
-EXPOSE 3000 11112 11113
+EXPOSE 3000 11112
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["npx", "tsx", "src/server.ts"]

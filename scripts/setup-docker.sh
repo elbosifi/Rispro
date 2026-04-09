@@ -172,7 +172,7 @@ SEED_SUPERVISOR_PASSWORD=${_i_sup_pwd}
 SEED_SUPERVISOR_FULL_NAME=System Administrator
 
 # -- DICOM Gateway (Embedded) --
-# MWL and MPPS services start automatically inside the app container.
+# MWL service starts automatically inside the app container.
 # AE titles, ports, and directories are managed via Settings UI.
 EOF
 }
@@ -229,7 +229,7 @@ SEED_SUPERVISOR_PASSWORD=${_e_sup_pwd}
 SEED_SUPERVISOR_FULL_NAME=System Administrator
 
 # -- DICOM Gateway (Embedded) --
-# MWL and MPPS services start automatically inside the app container.
+# MWL service starts automatically inside the app container.
 # AE titles, ports, and directories are managed via Settings UI.
 EOF
 }
@@ -323,8 +323,7 @@ main() {
         echo "==================================================="
         echo ""
         echo "  Web UI:     http://localhost:3000"
-        echo "  DICOM MWL:  127.0.0.1:11112 (AE: RISPRO_MWL)"
-        echo "  DICOM MPPS: 127.0.0.1:11113 (AE: RISPRO_MPPS)"
+        echo "  DICOM MWL:   127.0.0.1:11112 (AE: RISPRO_MWL)"
         echo ""
         echo "  Useful commands:"
         echo "    $COMPOSE_CMD logs -f app         # View application logs"
@@ -397,7 +396,6 @@ main() {
   echo ""
   echo "  Web UI:              http://localhost:3000"
   echo "  DICOM MWL:           127.0.0.1:11112 (AE: RISPRO_MWL)"
-  echo "  DICOM MPPS:          127.0.0.1:11113 (AE: RISPRO_MPPS)"
   echo "  Supervisor username: admin"
   echo "  Supervisor password: $_supervisor_pwd"
   echo ""

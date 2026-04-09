@@ -430,7 +430,6 @@ export function mapDicomDevice(raw: RawRecord): DicomDevice {
     stationLocation: str(raw, 'station_location') || str(raw, 'stationLocation'),
     sourceIp: strOrNull(raw, 'source_ip') ?? strOrNull(raw, 'sourceIp'),
     mwlEnabled: bool(raw, 'mwl_enabled', bool(raw, 'mwlEnabled', false)),
-    mppsEnabled: bool(raw, 'mpps_enabled', bool(raw, 'mppsEnabled', false)),
     isActive: bool(raw, 'is_active', bool(raw, 'isActive', true))
   };
 }

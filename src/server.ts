@@ -110,20 +110,14 @@ async function start(): Promise<void> {
 
     if (startupSummary.dicom_gateway === "disabled_by_env") {
       console.log("    MWL SCP:        disabled_by_env");
-      console.log("    MPPS SCP:       disabled_by_env");
       console.log("    Worklist Bldr:  disabled_by_env");
-      console.log("    MPPS Processor: disabled_by_env");
     } else if (services.mwl?.status === "running") {
       console.log(`    MWL SCP:        running (${settings.mwlAeTitle} @ ${settings.bindHost}:${settings.mwlPort})`);
-      console.log("    MPPS SCP:       disabled_by_design");
       console.log(`    Worklist Bldr:  ${services.worklistBuilder?.status === "running" ? "running" : "disabled_missing_tool"}`);
-      console.log("    MPPS Processor: disabled_by_design");
       console.log(`    Worklist Dir:   ${settings.worklistOutputDir}`);
     } else {
       console.log("    MWL SCP:        disabled_or_failed");
-      console.log("    MPPS SCP:       disabled_by_design");
       console.log("    Worklist Bldr:  disabled_or_failed");
-      console.log("    MPPS Processor: disabled_by_design");
     }
 
     console.log("========================================");

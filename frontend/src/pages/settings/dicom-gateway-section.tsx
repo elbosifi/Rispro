@@ -167,22 +167,6 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
           />
 
           <SettingField
-            label="MPPS AE Title"
-            value={getField("mpps_ae_title")}
-            onChange={(v) => updateField("mpps_ae_title", v.toUpperCase())}
-            placeholder="RISPRO_MPPS"
-            maxLength={16}
-          />
-
-          <SettingField
-            label="MPPS Port"
-            type="number"
-            value={getField("mpps_port")}
-            onChange={(v) => updateField("mpps_port", v)}
-            placeholder="11113"
-          />
-
-          <SettingField
             label="Rebuild Behavior"
             type="select"
             options={[
@@ -230,27 +214,6 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
             value={getField("worklist_output_dir")}
             onChange={(v) => updateField("worklist_output_dir", v)}
             placeholder="storage/dicom/worklists"
-          />
-
-          <SettingField
-            label="Incoming MPPS Folder"
-            value={getField("mpps_inbox_dir")}
-            onChange={(v) => updateField("mpps_inbox_dir", v)}
-            placeholder="storage/dicom/mpps/inbox"
-          />
-
-          <SettingField
-            label="MPPS Processed Folder"
-            value={getField("mpps_processed_dir")}
-            onChange={(v) => updateField("mpps_processed_dir", v)}
-            placeholder="storage/dicom/mpps/processed"
-          />
-
-          <SettingField
-            label="MPPS Failed Folder"
-            value={getField("mpps_failed_dir")}
-            onChange={(v) => updateField("mpps_failed_dir", v)}
-            placeholder="storage/dicom/mpps/failed"
           />
         </div>
       </div>

@@ -7,23 +7,11 @@ import { asUnknownRecord } from "../utils/records.js";
 import { isValidNationalId } from "../utils/national-id.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
 import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
-import { buildMppsEventPayload, getDicomGatewaySettings, ingestMppsEvent } from "../services/dicom-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
-
-interface IntegrationsCallbackRequest {
-  headers?: UnknownRecord;
-  ip?: string;
-  socket?: { remoteAddress?: string };
-  body?: unknown;
-}
 
 interface IntegrationsAuthRequest {
   body?: unknown;
   user: AuthenticatedUserContext;
-}
-
-function isLoopbackAddress(value: unknown): boolean {
-  return ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(String(value || "").trim());
 }
 
 function requireUserSub(request: IntegrationsAuthRequest): UserId {
@@ -35,23 +23,6 @@ function requireUserSub(request: IntegrationsAuthRequest): UserId {
 }
 
 export const integrationsRouter = express.Router();
-
-integrationsRouter.post(
-  "/dicom/mpps-event",
-  asyncRoute(async (req: Request, res: Response) => {
-    const request = req as IntegrationsCallbackRequest;
-    const settings = await getDicomGatewaySettings();
-    const headerSecret = String((request.headers as Record<string, unknown> | undefined)?.["x-rispro-dicom-secret"] || "").trim();
-    const remoteAddress = request.ip || request.socket?.remoteAddress || "";
-
-    if (headerSecret !== settings.callbackSecret && !isLoopbackAddress(remoteAddress)) {
-      throw new HttpError(403, "DICOM callback authentication failed.");
-    }
-
-    const result = await ingestMppsEvent(buildMppsEventPayload(asUnknownRecord(request.body)));
-    res.status(result.ok ? 200 : 202).json(result);
-  })
-);
 
 integrationsRouter.use(requireAuth);
 

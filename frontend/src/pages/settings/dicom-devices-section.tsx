@@ -15,7 +15,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ modality_id: "", device_name: "", modality_ae_title: "", scheduled_station_ae_title: "", station_name: "", station_location: "", source_ip: "", mwl_enabled: true, mpps_enabled: true, is_active: true });
+  const [createForm, setCreateForm] = useState({ modality_id: "", device_name: "", modality_ae_title: "", scheduled_station_ae_title: "", station_name: "", station_location: "", source_ip: "", mwl_enabled: true, is_active: true });
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
@@ -33,7 +33,6 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       stationLocation: data.station_location,
       sourceIp: data.source_ip,
       mwlEnabled: data.mwl_enabled ? "enabled" : "disabled",
-      mppsEnabled: data.mpps_enabled ? "enabled" : "disabled",
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setEditingId(null); setMutationError(null); },
@@ -50,7 +49,6 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       stationLocation: data.station_location,
       sourceIp: data.source_ip,
       mwlEnabled: data.mwl_enabled ? "enabled" : "disabled",
-      mppsEnabled: data.mpps_enabled ? "enabled" : "disabled",
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setShowCreate(false); setMutationError(null); },
@@ -75,7 +73,6 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       station_location: d.stationLocation || "",
       source_ip: d.sourceIp || "",
       mwl_enabled: d.mwlEnabled,
-      mpps_enabled: d.mppsEnabled,
       is_active: d.isActive
     });
   };
@@ -107,7 +104,6 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
           </div>
           <div className="flex gap-3 text-sm">
             <label><input type="checkbox" checked={createForm.mwl_enabled} onChange={(e) => setCreateForm({ ...createForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL Enabled</label>
-            <label><input type="checkbox" checked={createForm.mpps_enabled} onChange={(e) => setCreateForm({ ...createForm, mpps_enabled: e.target.checked })} className="mr-1" /> MPPS Enabled</label>
             <label><input type="checkbox" checked={createForm.is_active} onChange={(e) => setCreateForm({ ...createForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
           </div>
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.modality_id || !createForm.device_name} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
@@ -128,7 +124,6 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
                 </div>
                 <div className="flex gap-3">
                   <label><input type="checkbox" checked={editForm.mwl_enabled} onChange={(e) => setEditForm({ ...editForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL</label>
-                  <label><input type="checkbox" checked={editForm.mpps_enabled} onChange={(e) => setEditForm({ ...editForm, mpps_enabled: e.target.checked })} className="mr-1" /> MPPS</label>
                   <label><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
                 </div>
                 <div className="flex gap-2">
@@ -141,7 +136,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
                 <div className="text-start">
                   <p className="font-medium text-stone-900 dark:text-white">{d.deviceName}</p>
                   <p className="text-sm text-stone-600 dark:text-stone-400">
-                    AE: {d.modalityAeTitle} | Modality: {d.modalityCode} | MWL: {d.mwlEnabled ? "Yes" : "No"} | MPPS: {d.mppsEnabled ? "Yes" : "No"}
+                    AE: {d.modalityAeTitle} | Modality: {d.modalityCode} | MWL: {d.mwlEnabled ? "Yes" : "No"}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

@@ -56,8 +56,6 @@ interface IntegrationStatus {
     enabled: boolean;
     mwlAeTitle: string;
     mwlPort: number;
-    mppsAeTitle: string;
-    mppsPort: number;
     deviceCount: number;
     processedMessageCount: number;
     failedMessageCount: number;
@@ -167,8 +165,6 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       enabled: Boolean(dicomGateway.settings.enabled),
       mwlAeTitle: String(dicomGateway.settings.mwlAeTitle || ""),
       mwlPort: Number(dicomGateway.settings.mwlPort || 0),
-      mppsAeTitle: String(dicomGateway.settings.mppsAeTitle || ""),
-      mppsPort: Number(dicomGateway.settings.mppsPort || 0),
       deviceCount: dicomGateway.devices.length,
       processedMessageCount: Number(dicomGateway.logSummary.processed_count || 0),
       failedMessageCount: Number(dicomGateway.logSummary.failed_count || 0)

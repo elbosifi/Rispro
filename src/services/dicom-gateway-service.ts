@@ -18,7 +18,7 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const scriptsDir = path.resolve(__dirname, "..", "..", "scripts", "dicom-gateway");
-type ManagedServiceName = "mwl" | "mpps" | "worklistBuilder" | "mppsProcessor";
+type ManagedServiceName = "mwl" | "worklistBuilder";
 
 export interface DicomGatewayServer {
   stop(): Promise<void>;
@@ -42,10 +42,6 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       await updateSettingIfDifferent("dump2dcm_command", tools.dump2dcm.path);
     }
 
-    if (tools.dcmdump.detected && tools.dcmdump.path) {
-      await updateSettingIfDifferent("dcmdump_command", tools.dcmdump.path);
-    }
-
     if (await isPortInUse(settings.bindHost, settings.mwlPort)) {
       console.log(
         `[DICOM Gateway] MWL port ${settings.bindHost}:${settings.mwlPort} is already in use. Skipping embedded gateway startup.`
@@ -57,9 +53,7 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
     const server: DicomGatewayServer = {
       async stop() {
         await stopManagedProcess("mwl");
-        await stopManagedProcess("mpps");
         await stopManagedProcess("worklistBuilder");
-        await stopManagedProcess("mppsProcessor");
       }
     };
 
@@ -80,9 +74,6 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       console.log(`[DICOM Gateway] MWL SCP running on ${settings.bindHost}:${settings.mwlPort} (AE: ${settings.mwlAeTitle})`);
       console.log(`[DICOM Gateway] Serving worklists from: ${settings.worklistOutputDir}`);
     }
-
-    console.log("[DICOM Gateway] MPPS SCP: disabled_by_design");
-    console.log("[DICOM Gateway] MPPS Processor: disabled_by_design");
 
     if (tools.dump2dcm.detected && tools.dump2dcm.path) {
       const worklistBuilderProcess = await startNodeWorker("worklistBuilder", "build-worklists.mjs", {
@@ -218,8 +209,8 @@ async function isPortInUse(host: string, port: number): Promise<boolean> {
 }
 
 async function startNodeWorker(
-  serviceName: "worklistBuilder" | "mppsProcessor",
-  scriptFileName: "build-worklists.mjs" | "process-mpps-inbox.mjs",
+  serviceName: "worklistBuilder",
+  scriptFileName: "build-worklists.mjs",
   envOverrides: Record<string, string>
 ): Promise<ChildProcess | null> {
   try {

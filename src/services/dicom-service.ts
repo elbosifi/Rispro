@@ -29,29 +29,10 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 
 const ACTIVE_WORKLIST_STATUSES = new Set(APPOINTMENT_ACTIVE_WORKLIST_STATUSES);
-const MPPS_STATUSES = new Set(["IN PROGRESS", "COMPLETED", "DISCONTINUED"]);
 
 // ---------------------------------------------------------------------------
 // Type definitions
 // ---------------------------------------------------------------------------
-
-export interface MppsInput {
-  sourcePath?: string;
-  sourceIp?: string;
-  remoteAeTitle?: string;
-  performedStationAeTitle?: string;
-  accessionNumber?: string;
-  mppsSopInstanceUid?: string;
-  sopInstanceUid?: string;
-  mppsStatus?: string;
-  startedAt?: string;
-  startedDate?: string;
-  startedTime?: string;
-  finishedAt?: string;
-  finishedDate?: string;
-  finishedTime?: string;
-  raw?: Record<string, unknown>;
-}
 
 export interface DicomSettingRow {
   category: string;
@@ -91,7 +72,6 @@ export interface DicomDeviceListRow {
   station_location: string | null;
   source_ip: string | null;
   mwl_enabled: boolean;
-  mpps_enabled: boolean;
   is_active: boolean;
   modality_code: string;
   modality_name_ar: string;
@@ -118,13 +98,6 @@ export interface WorklistAppointmentRow {
   sex: string | null;
 }
 
-export interface MppsAppointmentRow {
-  id: number;
-  status: AppointmentStatus;
-  completed_at: string | null;
-  mpps_sop_instance_uid: string | null;
-}
-
 export interface DicomMessageLogRow {
   id: number;
   source_type: string;
@@ -133,7 +106,6 @@ export interface DicomMessageLogRow {
   source_ip: string | null;
   remote_ae_title: string | null;
   accession_number: string | null;
-  mpps_sop_instance_uid: string | null;
   payload: Record<string, unknown>;
   processing_status: string;
   appointment_id: number | null;
@@ -168,29 +140,13 @@ export interface WorklistContextRow {
   modality_code: string | null;
 }
 
-export interface MppsPayload {
-  mppsStatus: string;
-  mppsSopInstanceUid?: string;
-  startedAt?: string;
-  finishedAt?: string;
-  startedDate?: string;
-  startedTime?: string;
-  finishedDate?: string;
-  finishedTime?: string;
-}
-
 export interface GatewaySettings {
   enabled: boolean;
   bindHost: string;
   mwlAeTitle: string;
   mwlPort: number;
-  mppsAeTitle: string;
-  mppsPort: number;
   worklistOutputDir: string;
   worklistSourceDir: string;
-  mppsInboxDir: string;
-  mppsProcessedDir?: string;
-  mppsFailedDir?: string;
   callbackSecret?: string;
   rebuildBehavior?: string;
   dump2dcmCommand?: string;
@@ -201,19 +157,6 @@ export interface FindDicomDeviceParams {
   remoteAeTitle?: string;
   performedStationAeTitle?: string;
   sourceIp?: string;
-}
-
-export interface FindAppointmentForMppsParams {
-  accessionNumber: string;
-  mppsSopInstanceUid: string;
-}
-
-export interface UpdateMppsParams {
-  mppsStatus: string;
-  startedDate?: string;
-  startedTime?: string;
-  finishedDate?: string;
-  finishedTime?: string;
 }
 
 export interface WorklistManifestFile {
@@ -228,19 +171,6 @@ export interface WorklistSyncResult {
   ok: boolean;
 }
 
-export interface MppsEventPayload {
-  sourcePath: string;
-  sourceIp: string;
-  remoteAeTitle: string;
-  performedStationAeTitle: string;
-  accessionNumber: string;
-  mppsSopInstanceUid: string;
-  mppsStatus: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-  raw: UnknownRecord;
-}
-
 export interface DicomDeviceCreatePayload {
   modalityId?: unknown;
   deviceName?: unknown;
@@ -250,7 +180,6 @@ export interface DicomDeviceCreatePayload {
   stationLocation?: unknown;
   sourceIp?: unknown;
   mwlEnabled?: unknown;
-  mppsEnabled?: unknown;
   isActive?: unknown;
 }
 
@@ -263,7 +192,6 @@ export interface DicomDeviceUpdatePayload {
   stationLocation?: unknown;
   sourceIp?: unknown;
   mwlEnabled?: unknown;
-  mppsEnabled?: unknown;
   isActive?: unknown;
 }
 
@@ -271,12 +199,6 @@ export interface DicomLogOverviewResult {
   settings: UnknownRecord;
   devices: DicomDeviceListRow[];
   logSummary: DicomLogSummaryRow;
-}
-
-export interface MppsIngestResult {
-  ok: boolean;
-  appointment?: MppsAppointmentRow;
-  reason?: string;
 }
 
 interface LogPatch {
@@ -720,223 +642,6 @@ async function updateDicomMessageLog(
 }
 
 // ---------------------------------------------------------------------------
-// Device & appointment lookups
-// ---------------------------------------------------------------------------
-
-async function findDicomDevice(
-  client: Pool | PoolClient,
-  { remoteAeTitle, performedStationAeTitle, sourceIp }: FindDicomDeviceParams
-): Promise<DicomDeviceRow | null> {
-  const aeCandidates = [performedStationAeTitle, remoteAeTitle]
-    .map((value) => normalizeOptionalText(value).toUpperCase())
-    .filter(Boolean);
-
-  if (!aeCandidates.length) {
-    return null;
-  }
-
-  const { rows } = await client.query(
-    `
-      select *
-      from dicom_devices
-      where is_active = true
-        and mpps_enabled = true
-        and (
-          upper(modality_ae_title) = any($1::text[])
-          or upper(scheduled_station_ae_title) = any($1::text[])
-        )
-      order by case when source_ip is not null then 0 else 1 end asc, id asc
-    `,
-    [aeCandidates]
-  );
-
-  const devices = rows as DicomDeviceRow[];
-
-  if (!sourceIp) {
-    return devices[0] || null;
-  }
-
-  // Prefer device with matching source_ip, then fall back to devices without source_ip
-  return devices.find((row) => row.source_ip === sourceIp) || devices.find((row) => !row.source_ip) || null;
-}
-
-async function findAppointmentForMpps(
-  client: Pool | PoolClient,
-  { accessionNumber, mppsSopInstanceUid }: FindAppointmentForMppsParams
-): Promise<MppsAppointmentRow | null> {
-  if (normalizeOptionalText(accessionNumber)) {
-    const { rows } = await client.query(
-      `
-        select *
-        from appointments
-        where accession_number = $1
-        limit 1
-      `,
-      [normalizeOptionalText(accessionNumber)]
-    );
-
-    const appointmentByAccession = rows[0] as MppsAppointmentRow | undefined;
-    if (appointmentByAccession) {
-      return appointmentByAccession;
-    }
-  }
-
-  if (normalizeOptionalText(mppsSopInstanceUid)) {
-    const { rows } = await client.query(
-      `
-        select *
-        from appointments
-        where mpps_sop_instance_uid = $1
-        limit 1
-      `,
-      [normalizeOptionalText(mppsSopInstanceUid)]
-    );
-
-    return (rows[0] as MppsAppointmentRow) || null;
-  }
-
-  return null;
-}
-
-// ---------------------------------------------------------------------------
-// MPPS update logic
-// ---------------------------------------------------------------------------
-
-async function updateAppointmentFromMpps(
-  client: Pool | PoolClient,
-  appointment: MppsAppointmentRow,
-  device: DicomDeviceRow,
-  payload: MppsPayload
-): Promise<MppsAppointmentRow> {
-  const mppsStatus = String(payload.mppsStatus || "").trim().toUpperCase();
-  const nowIso = new Date().toISOString();
-  const startedAt = payload.startedAt || nowIso;
-  const finishedAt = payload.finishedAt || nowIso;
-
-  if (mppsStatus === "IN PROGRESS") {
-    const currentStatus = appointment.status;
-    const nextStatus = currentStatus === APPOINTMENT_STATUS_COMPLETED ? APPOINTMENT_STATUS_COMPLETED : APPOINTMENT_STATUS_IN_PROGRESS;
-    const { rows } = await client.query(
-      `
-        update appointments
-        set
-          status = $2,
-          scan_started_at = coalesce(scan_started_at, $3::timestamptz),
-          scheduled_station_ae_title = coalesce(nullif(scheduled_station_ae_title, ''), $4),
-          mpps_sop_instance_uid = coalesce(nullif(mpps_sop_instance_uid, ''), $5),
-          updated_at = now()
-        where id = $1
-        returning *
-      `,
-      [appointment.id, nextStatus, startedAt, device?.scheduled_station_ae_title || null, payload.mppsSopInstanceUid || null]
-    );
-
-    await client.query(
-      `
-        update queue_entries
-        set queue_status = 'in-progress', updated_at = now()
-        where appointment_id = $1
-          and queue_status <> 'removed'
-      `,
-      [appointment.id]
-    );
-
-    if (currentStatus !== nextStatus) {
-      await client.query(
-        `
-          insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
-          values ($1, $2, $3, null, $4)
-        `,
-        [appointment.id, currentStatus, nextStatus, "MPPS IN PROGRESS received from modality"]
-      );
-    }
-
-    await logAuditEntry(
-      {
-        entityType: "integration",
-        entityId: appointment.id,
-        actionType: "mpps_start",
-        oldValues: appointment,
-        newValues: {
-          appointment_status: nextStatus,
-          mpps_status: mppsStatus,
-          mpps_sop_instance_uid: payload.mppsSopInstanceUid || null
-        },
-        changedByUserId: null
-      },
-      client
-    );
-
-    return requireRow(rows[0] as MppsAppointmentRow | undefined, "Failed to update appointment from MPPS.");
-  }
-
-  const nextStatus = mppsStatus === "COMPLETED" ? APPOINTMENT_STATUS_COMPLETED : APPOINTMENT_STATUS_DISCONTINUED;
-  const completedAt = mppsStatus === "COMPLETED" ? finishedAt : appointment.completed_at;
-
-  const { rows } = await client.query(
-    `
-      update appointments
-      set
-        status = $2,
-        completed_at = case when $2 = 'completed' then coalesce(completed_at, $3::timestamptz) else completed_at end,
-        scan_finished_at = coalesce(scan_finished_at, $4::timestamptz),
-        scheduled_station_ae_title = coalesce(nullif(scheduled_station_ae_title, ''), $5),
-        mpps_sop_instance_uid = coalesce(nullif(mpps_sop_instance_uid, ''), $6),
-        updated_at = now()
-      where id = $1
-      returning *
-    `,
-    [
-      appointment.id,
-      nextStatus,
-      completedAt || nowIso,
-      finishedAt,
-      device?.scheduled_station_ae_title || null,
-      payload.mppsSopInstanceUid || null
-    ]
-  );
-
-  await client.query(
-    `
-      update queue_entries
-      set queue_status = 'removed', updated_at = now()
-      where appointment_id = $1
-    `,
-    [appointment.id]
-  );
-
-  const currentStatus = String(appointment.status || "");
-
-  if (currentStatus !== nextStatus) {
-    await client.query(
-      `
-        insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
-        values ($1, $2, $3, null, $4)
-      `,
-      [appointment.id, currentStatus, nextStatus, `MPPS ${mppsStatus} received from modality`]
-    );
-  }
-
-  await logAuditEntry(
-    {
-      entityType: "integration",
-      entityId: appointment.id,
-      actionType: mppsStatus === "COMPLETED" ? "mpps_complete" : "mpps_discontinue",
-      oldValues: appointment,
-      newValues: {
-        appointment_status: nextStatus,
-        mpps_status: mppsStatus,
-        mpps_sop_instance_uid: payload.mppsSopInstanceUid || null
-      },
-      changedByUserId: null
-    },
-    client
-  );
-
-  return requireRow(rows[0] as MppsAppointmentRow | undefined, "Failed to update appointment timing.");
-}
-
-// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -948,13 +653,8 @@ export async function getDicomGatewaySettings(): Promise<GatewaySettings> {
     bindHost: resolved.bindHost,
     mwlAeTitle: resolved.mwlAeTitle,
     mwlPort: resolved.mwlPort,
-    mppsAeTitle: resolved.mppsAeTitle,
-    mppsPort: resolved.mppsPort,
     worklistOutputDir: resolved.worklistOutputDir,
     worklistSourceDir: resolved.worklistSourceDir,
-    mppsInboxDir: resolved.mppsInboxDir,
-    mppsProcessedDir: resolved.mppsProcessedDir,
-    mppsFailedDir: resolved.mppsFailedDir,
     callbackSecret: resolved.callbackSecret,
     rebuildBehavior: resolved.rebuildBehavior,
     dump2dcmCommand: resolved.dump2dcmCommand,
@@ -1008,7 +708,6 @@ export async function createDicomDevice(
   const stationLocation = normalizeOptionalText(payload.stationLocation);
   const sourceIp = normalizeIpAddress(payload.sourceIp, "sourceIp");
   const mwlEnabled = normalizeBooleanFlag(payload.mwlEnabled ?? "enabled", "mwlEnabled");
-  const mppsEnabled = normalizeBooleanFlag(payload.mppsEnabled ?? "enabled", "mppsEnabled");
   const isActive = normalizeBooleanFlag(payload.isActive ?? "enabled", "isActive");
 
   if (!deviceName) {
@@ -1038,12 +737,11 @@ export async function createDicomDevice(
           station_location,
           source_ip,
           mwl_enabled,
-          mpps_enabled,
           is_active,
           created_by_user_id,
           updated_by_user_id
         )
-        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, $8, $9, $10, $11, $11)
+        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7, $8, $9, $10, $10)
         returning *
       `,
       [
@@ -1055,7 +753,6 @@ export async function createDicomDevice(
         stationLocation,
         sourceIp,
         mwlEnabled,
-        mppsEnabled,
         isActive,
         currentUserId
       ]
@@ -1099,7 +796,6 @@ export async function updateDicomDevice(
   const stationLocation = normalizeOptionalText(payload.stationLocation);
   const sourceIp = normalizeIpAddress(payload.sourceIp, "sourceIp");
   const mwlEnabled = normalizeBooleanFlag(payload.mwlEnabled ?? "enabled", "mwlEnabled");
-  const mppsEnabled = normalizeBooleanFlag(payload.mppsEnabled ?? "enabled", "mppsEnabled");
   const isActive = normalizeBooleanFlag(payload.isActive ?? "enabled", "isActive");
   const client = await pool.connect();
 
@@ -1133,9 +829,8 @@ export async function updateDicomDevice(
           station_location = nullif($7, ''),
           source_ip = $8,
           mwl_enabled = $9,
-          mpps_enabled = $10,
-          is_active = $11,
-          updated_by_user_id = $12,
+          is_active = $10,
+          updated_by_user_id = $11,
           updated_at = now()
         where id = $1
         returning *
@@ -1150,7 +845,6 @@ export async function updateDicomDevice(
         stationLocation,
         sourceIp,
         mwlEnabled,
-        mppsEnabled,
         isActive,
         currentUserId
       ]
@@ -1310,97 +1004,6 @@ export async function resolveScanValueToAccession(
   return normalizeQrOrAccession(scanValue);
 }
 
-export async function ingestMppsEvent(payload: UnknownRecord | MppsEventPayload): Promise<MppsIngestResult> {
-  const mppsStatus = String(payload?.mppsStatus || "").trim().toUpperCase();
-
-  if (!MPPS_STATUSES.has(mppsStatus)) {
-    throw new HttpError(400, "mppsStatus must be IN PROGRESS, COMPLETED, or DISCONTINUED.");
-  }
-
-  const client = await pool.connect();
-
-  try {
-    await client.query("begin");
-    const { rows: logRows } = await client.query(
-      `
-        insert into dicom_message_log (
-          source_type,
-          source_path,
-          event_type,
-          source_ip,
-          remote_ae_title,
-          accession_number,
-          mpps_sop_instance_uid,
-          payload,
-          processing_status
-        )
-        values ('mpps', $1, $2, $3, $4, $5, $6, $7::jsonb, 'received')
-        returning *
-      `,
-      [
-        normalizeOptionalText(payload.sourcePath),
-        `mpps_${mppsStatus.toLowerCase().replaceAll(" ", "_")}`,
-        normalizeOptionalText(payload.sourceIp),
-        normalizeOptionalText(payload.remoteAeTitle).toUpperCase(),
-        normalizeOptionalText(payload.accessionNumber),
-        normalizeOptionalText(payload.mppsSopInstanceUid),
-        JSON.stringify(payload || {})
-      ]
-    );
-
-    const logEntry = logRows[0] as DicomMessageLogRow;
-    const device = await findDicomDevice(client, {
-      remoteAeTitle: String(payload.remoteAeTitle || ""),
-      performedStationAeTitle: String(payload.performedStationAeTitle || ""),
-      sourceIp: String(payload.sourceIp || "")
-    });
-
-    if (!device) {
-      await updateDicomMessageLog(client, logEntry.id, {
-        processingStatus: "failed",
-        errorMessage: "No active DICOM device mapping matched this MPPS event."
-      });
-      await client.query("commit");
-      return { ok: false, reason: "device_not_found" };
-    }
-
-    const appointment = await findAppointmentForMpps(client, {
-      accessionNumber: String(payload.accessionNumber || ""),
-      mppsSopInstanceUid: String(payload.mppsSopInstanceUid || "")
-    });
-
-    if (!appointment) {
-      await updateDicomMessageLog(client, logEntry.id, {
-        processingStatus: "failed",
-        deviceId: device.id,
-        errorMessage: "No appointment matched the accession number or MPPS SOP Instance UID."
-      });
-      await client.query("commit");
-      return { ok: false, reason: "appointment_not_found" };
-    }
-
-    const nextAppointment = await updateAppointmentFromMpps(client, appointment, device, {
-      ...payload,
-      mppsStatus
-    } as MppsPayload);
-
-    await updateDicomMessageLog(client, logEntry.id, {
-      processingStatus: "processed",
-      deviceId: device.id,
-      appointmentId: appointment.id
-    });
-
-    await client.query("commit");
-    scheduleWorklistSync(appointment.id);
-    return { ok: true, appointment: nextAppointment };
-  } catch (error) {
-    await client.query("rollback");
-    throw error;
-  } finally {
-    client.release();
-  }
-}
-
 export async function getDicomGatewayOverview(): Promise<DicomLogOverviewResult> {
   const [settings, devices, logSummary] = await Promise.all([
     getDicomGatewaySettings(),
@@ -1426,27 +1029,6 @@ export async function getDicomGatewayOverview(): Promise<DicomLogOverviewResult>
       failed_count: 0,
       total_count: 0
     }
-  };
-}
-
-export function parseMppsTimestamp(dateValue: string, timeValue: string): string | null {
-  return parseDicomTimestamp(dateValue, timeValue);
-}
-
-export function buildMppsEventPayload(input: MppsInput = {}): MppsEventPayload {
-  return {
-    sourcePath: normalizeOptionalText(input.sourcePath),
-    sourceIp: normalizeOptionalText(input.sourceIp),
-    remoteAeTitle: normalizeOptionalText(input.remoteAeTitle).toUpperCase(),
-    performedStationAeTitle: normalizeOptionalText(input.performedStationAeTitle).toUpperCase(),
-    accessionNumber: normalizeOptionalText(input.accessionNumber),
-    mppsSopInstanceUid: normalizeOptionalText(input.mppsSopInstanceUid || input.sopInstanceUid),
-    mppsStatus: String(input.mppsStatus || "").trim().toUpperCase(),
-    startedAt:
-      normalizeOptionalText(input.startedAt) || parseDicomTimestamp(input.startedDate || "", input.startedTime || ""),
-    finishedAt:
-      normalizeOptionalText(input.finishedAt) || parseDicomTimestamp(input.finishedDate || "", input.finishedTime || ""),
-    raw: input.raw || {}
   };
 }
 

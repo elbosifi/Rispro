@@ -14,7 +14,7 @@
 
 services:
   # -----------------------------------------------------------------------
-  # RISpro Application (embedded DICOM gateway: MWL + MPPS)
+  # RISpro Application (embedded DICOM gateway: MWL only)
   # -----------------------------------------------------------------------
   app:
     build:
@@ -28,7 +28,6 @@ services:
     ports:
       - "3000:3000"   # Web application
       - "11112:11112" # DICOM MWL SCP
-      - "11113:11113" # DICOM MPPS SCP
     volumes:
       - rispro-storage:/app/storage
     healthcheck:

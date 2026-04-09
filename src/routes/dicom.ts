@@ -9,8 +9,6 @@ import {
   getDicomGatewayOverview,
   rebuildAllDicomWorklistSources,
   syncAppointmentWorklistSources,
-  ingestMppsEvent,
-  buildMppsEventPayload,
   listDicomDevices
 } from "../services/dicom-service.js";
 import {
@@ -55,7 +53,6 @@ dicomRouter.get(
 
     const devices = await listDicomDevices();
     const devicesWithMwl = devices.filter((d) => d.mwl_enabled && d.is_active);
-    const devicesWithMpps = devices.filter((d) => d.mpps_enabled && d.is_active);
 
     res.json({
       settings: {
@@ -63,8 +60,6 @@ dicomRouter.get(
         bindHost: settings.bindHost,
         mwlAeTitle: settings.mwlAeTitle,
         mwlPort: settings.mwlPort,
-        mppsAeTitle: settings.mppsAeTitle,
-        mppsPort: settings.mppsPort,
         rebuildBehavior: settings.rebuildBehavior
       },
       status: {
@@ -77,8 +72,7 @@ dicomRouter.get(
         ),
         toolsDetected: tools.dump2dcm.detected && tools.dcmdump.detected,
         deviceCount: devices.length,
-        mwlEnabledDeviceCount: devicesWithMwl.length,
-        mppsEnabledDeviceCount: devicesWithMpps.length
+        mwlEnabledDeviceCount: devicesWithMwl.length
       },
       services: serviceStatuses,
       tools,
@@ -88,14 +82,12 @@ dicomRouter.get(
         total: devices.length,
         active: devices.filter((d) => d.is_active).length,
         mwlEnabled: devicesWithMwl.length,
-        mppsEnabled: devicesWithMpps.length,
         devices: devices.map((d) => ({
           id: d.id,
           modalityCode: d.modality_code,
           modalityNameEn: d.modality_name_en,
           deviceName: d.device_name,
           mwlEnabled: d.mwl_enabled,
-          mppsEnabled: d.mpps_enabled,
           isActive: d.is_active
         }))
       }
@@ -120,7 +112,7 @@ dicomRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const { serviceName } = req.params;
 
-    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+    if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
     }
 
@@ -143,7 +135,7 @@ dicomRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const { serviceName } = req.params;
 
-    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+    if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
     }
 
@@ -163,7 +155,7 @@ dicomRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const { serviceName } = req.params;
 
-    if (!["mwl", "mpps", "worklistBuilder", "mppsProcessor"].includes(serviceName)) {
+    if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
     }
 
@@ -274,34 +266,6 @@ dicomRouter.post(
 // ---------------------------------------------------------------------------
 
 dicomRouter.post(
-  "/test-mpps",
-  asyncRoute(async (req: Request, res: Response) => {
-    const body = asUnknownRecord(req.body);
-    const payload = buildMppsEventPayload({
-      sourcePath: "test-mpps-synthetic",
-      sourceIp: "127.0.0.1",
-      remoteAeTitle: String(body.remoteAeTitle || "TEST_MWL").toUpperCase(),
-      performedStationAeTitle: String(body.performedStationAeTitle || "TEST_STATION").toUpperCase(),
-      accessionNumber: normalizeOptionalText(body.accessionNumber),
-      mppsSopInstanceUid: normalizeOptionalText(body.mppsSopInstanceUid) || `1.2.840.10008.${Date.now()}.1`,
-      mppsStatus: String(body.mppsStatus || "IN PROGRESS").toUpperCase(),
-      startedAt: body.startedAt ? new Date(body.startedAt as string).toISOString() : new Date().toISOString(),
-      finishedAt: body.finishedAt ? new Date(body.finishedAt as string).toISOString() : null,
-      raw: body
-    });
-
-    const result = await ingestMppsEvent(payload);
-
-    if (!result.ok) {
-      res.status(202).json({ ok: false, reason: result.reason, message: "MPPS event processed but did not match any appointment." });
-      return;
-    }
-
-    res.json({ ok: true, message: "Test MPPS event processed successfully.", appointment: result.appointment });
-  })
-);
-
-dicomRouter.post(
   "/test-worklist/:appointmentId",
   asyncRoute(async (req: Request, res: Response) => {
     const appointmentId = parseInt(req.params.appointmentId, 10);
@@ -391,32 +355,22 @@ dicomRouter.post(
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    // Validate ports
+    // Validate MWL port
     const mwlPort = parseInt(String(body.mwl_port || ""), 10);
-    const mppsPort = parseInt(String(body.mpps_port || ""), 10);
 
     if (isNaN(mwlPort) || mwlPort < 1 || mwlPort > 65535) {
       errors.push("MWL port must be a number between 1 and 65535.");
     }
 
-    if (isNaN(mppsPort) || mppsPort < 1 || mppsPort > 65535) {
-      errors.push("MPPS port must be a number between 1 and 65535.");
-    }
-
-    // Validate AE titles
+    // Validate AE title
     const mwlAeTitle = String(body.mwl_ae_title || "").trim();
-    const mppsAeTitle = String(body.mpps_ae_title || "").trim();
 
     if (mwlAeTitle && (mwlAeTitle.length > 16 || !/^[A-Z0-9_]+$/.test(mwlAeTitle))) {
       errors.push("MWL AE title must be uppercase alphanumeric (max 16 characters).");
     }
 
-    if (mppsAeTitle && (mppsAeTitle.length > 16 || !/^[A-Z0-9_]+$/.test(mppsAeTitle))) {
-      errors.push("MPPS AE title must be uppercase alphanumeric (max 16 characters).");
-    }
-
     // Validate directories
-    const dirs = ["worklist_source_dir", "worklist_output_dir", "mpps_inbox_dir", "mpps_processed_dir", "mpps_failed_dir"];
+    const dirs = ["worklist_source_dir", "worklist_output_dir"];
 
     for (const dirKey of dirs) {
       const dirPath = String(body[dirKey] || "").trim();

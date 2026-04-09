@@ -33,7 +33,8 @@
       "Bash(chmod *)",
       "Bash(git checkout *)",
       "Bash(git merge *)",
-      "Bash(git stash)"
+      "Bash(git stash)",
+      "Bash(ls *)"
     ]
   },
   "$version": 3

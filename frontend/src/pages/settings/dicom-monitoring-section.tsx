@@ -190,8 +190,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
               statusType={deviceSummary.mwlEnabled > 0 ? "success" : "warning"}
               details={[
                 `Total: ${deviceSummary.total || 0}`,
-                `MWL Enabled: ${deviceSummary.mwlEnabled || 0}`,
-                `MPPS Enabled: ${deviceSummary.mppsEnabled || 0}`
+                `MWL Enabled: ${deviceSummary.mwlEnabled || 0}`
               ]}
             />
           </div>
@@ -199,25 +198,15 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
           {/* Service Status */}
           <div className="card-shell p-4">
             <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">Service Status</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <ServiceStatusCard
                 serviceName="MWL SCP Server"
                 service={services.mwl}
                 showControls={false}
               />
               <ServiceStatusCard
-                serviceName="MPPS SCP Server"
-                service={services.mpps}
-                showControls={false}
-              />
-              <ServiceStatusCard
                 serviceName="Worklist Builder"
                 service={services.worklistBuilder}
-                showControls={false}
-              />
-              <ServiceStatusCard
-                serviceName="MPPS Processor"
-                service={services.mppsProcessor}
                 showControls={false}
               />
             </div>
@@ -226,12 +215,9 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
           {/* File Health */}
           <div className="card-shell p-4 bg-stone-50 dark:bg-stone-800/50">
             <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">File System Health</h4>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
               <FileStat label="Source Files" count={fileHealth.sourceDir?.fileCount || 0} exists={fileHealth.sourceDir?.exists} />
               <FileStat label="Output Files" count={fileHealth.outputDir?.fileCount || 0} exists={fileHealth.outputDir?.exists} />
-              <FileStat label="MPPS Inbox" count={fileHealth.mppsInboxDir?.fileCount || 0} exists={fileHealth.mppsInboxDir?.exists} />
-              <FileStat label="MPPS Processed" count={fileHealth.mppsProcessedDir?.fileCount || 0} exists={fileHealth.mppsProcessedDir?.exists} />
-              <FileStat label="MPPS Failed" count={fileHealth.mppsFailedDir?.fileCount || 0} exists={fileHealth.mppsFailedDir?.exists} />
             </div>
             {(fileHealth.orphanedSourceFiles?.length > 0 || fileHealth.orphanedOutputFiles?.length > 0) && (
               <div className="mt-3 text-xs text-amber-700 dark:text-amber-400">

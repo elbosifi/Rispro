@@ -14,13 +14,8 @@ export const DICOM_GATEWAY_DEFAULTS: Record<string, unknown> = {
   bind_host: "127.0.0.1",
   mwl_ae_title: "RISPRO_MWL",
   mwl_port: "11112",
-  mpps_ae_title: "RISPRO_MPPS",
-  mpps_port: "11113",
   worklist_source_dir: "storage/dicom/worklist-source",
   worklist_output_dir: "storage/dicom/worklists",
-  mpps_inbox_dir: "storage/dicom/mpps/inbox",
-  mpps_processed_dir: "storage/dicom/mpps/processed",
-  mpps_failed_dir: "storage/dicom/mpps/failed",
   rebuild_behavior: "incremental_on_write",
   callback_secret: "", // auto-generated on first boot
   dump2dcm_command: "dump2dcm",
@@ -34,13 +29,8 @@ export interface ResolvedGatewaySettings {
   bindHost: string;
   mwlAeTitle: string;
   mwlPort: number;
-  mppsAeTitle: string;
-  mppsPort: number;
   worklistSourceDir: string;
   worklistOutputDir: string;
-  mppsInboxDir: string;
-  mppsProcessedDir: string;
-  mppsFailedDir: string;
   rebuildBehavior: string;
   callbackSecret: string;
   dump2dcmCommand: string;
@@ -63,9 +53,6 @@ export interface DirectoryHealthStatus {
 export interface FileHealthReport {
   sourceDir: DirectoryHealthStatus;
   outputDir: DirectoryHealthStatus;
-  mppsInboxDir: DirectoryHealthStatus;
-  mppsProcessedDir: DirectoryHealthStatus;
-  mppsFailedDir: DirectoryHealthStatus;
   orphanedSourceFiles: string[];
   orphanedOutputFiles: string[];
   totalStaleFiles: number;
@@ -154,22 +141,14 @@ export async function resolveGatewaySettings(): Promise<ResolvedGatewaySettings>
 
   const worklistSourceDir = resolveAbsolutePath(gw.worklist_source_dir, "storage/dicom/worklist-source");
   const worklistOutputDir = resolveAbsolutePath(gw.worklist_output_dir, "storage/dicom/worklists");
-  const mppsInboxDir = resolveAbsolutePath(gw.mpps_inbox_dir, "storage/dicom/mpps/inbox");
-  const mppsProcessedDir = resolveAbsolutePath(gw.mpps_processed_dir, "storage/dicom/mpps/processed");
-  const mppsFailedDir = resolveAbsolutePath(gw.mpps_failed_dir, "storage/dicom/mpps/failed");
 
   return {
     enabled: String(gw.enabled || "enabled").trim().toLowerCase() !== "disabled",
     bindHost: normalizeOptionalText(gw.bind_host) || "127.0.0.1",
     mwlAeTitle: normalizeOptionalText(gw.mwl_ae_title) || "RISPRO_MWL",
     mwlPort: parseInt(String(gw.mwl_port || "11112"), 10) || 11112,
-    mppsAeTitle: normalizeOptionalText(gw.mpps_ae_title) || "RISPRO_MPPS",
-    mppsPort: parseInt(String(gw.mpps_port || "11113"), 10) || 11113,
     worklistSourceDir,
     worklistOutputDir,
-    mppsInboxDir,
-    mppsProcessedDir,
-    mppsFailedDir,
     rebuildBehavior: normalizeOptionalText(gw.rebuild_behavior) || "incremental_on_write",
     callbackSecret: normalizeOptionalText(gw.callback_secret) || generateCallbackSecret(),
     dump2dcmCommand: normalizeOptionalText(gw.dump2dcm_command) || "dump2dcm",
@@ -196,10 +175,7 @@ function resolveAbsolutePath(value: string | undefined, fallback: string): strin
 export async function ensureDicomDirectoriesExist(settings: ResolvedGatewaySettings): Promise<void> {
   const directories = [
     settings.worklistSourceDir,
-    settings.worklistOutputDir,
-    settings.mppsInboxDir,
-    settings.mppsProcessedDir,
-    settings.mppsFailedDir
+    settings.worklistOutputDir
   ].filter((d): d is string => typeof d === "string" && d.length > 0);
 
   await Promise.all(
@@ -268,26 +244,20 @@ async function detectBinary(command: string): Promise<{ detected: boolean; path:
 // ---------------------------------------------------------------------------
 
 export async function checkDirectoryHealth(settings: ResolvedGatewaySettings): Promise<FileHealthReport> {
-  const [sourceDir, outputDir, mppsInboxDir, mppsProcessedDir, mppsFailedDir] = await Promise.all([
+  const [sourceDir, outputDir] = await Promise.all([
     checkDirectoryStatus(settings.worklistSourceDir),
-    checkDirectoryStatus(settings.worklistOutputDir),
-    checkDirectoryStatus(settings.mppsInboxDir),
-    checkDirectoryStatus(settings.mppsProcessedDir),
-    checkDirectoryStatus(settings.mppsFailedDir)
+    checkDirectoryStatus(settings.worklistOutputDir)
   ]);
 
   // Find orphaned files
   const orphanedSourceFiles = await findOrphanedSourceFiles(settings);
   const orphanedOutputFiles = await findOrphanedOutputFiles(settings);
 
-  const totalStaleFiles = sourceDir.staleFileCount + outputDir.staleFileCount + mppsInboxDir.staleFileCount;
+  const totalStaleFiles = sourceDir.staleFileCount + outputDir.staleFileCount;
 
   return {
     sourceDir,
     outputDir,
-    mppsInboxDir,
-    mppsProcessedDir,
-    mppsFailedDir,
     orphanedSourceFiles,
     orphanedOutputFiles,
     totalStaleFiles

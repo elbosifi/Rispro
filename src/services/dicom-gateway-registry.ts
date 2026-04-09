@@ -2,7 +2,7 @@ import type { DicomGatewayServer } from "./dicom-gateway-service.js";
 import type { ChildProcess } from "child_process";
 
 // ---------------------------------------------------------------------------
-// Service registry for managing DICOM gateway processes
+// Service registry for managing DICOM gateway processes (MWL only)
 // ---------------------------------------------------------------------------
 
 interface ServiceEntry {
@@ -16,17 +16,13 @@ interface ServiceEntry {
 
 interface ServiceRegistry {
   mwl: ServiceEntry;
-  mpps: ServiceEntry;
   worklistBuilder: ServiceEntry;
-  mppsProcessor: ServiceEntry;
 }
 
 // In-memory registry (will be populated from server.ts)
 const registry: ServiceRegistry = {
   mwl: { status: "stopped", process: null, server: null, pid: null, startedAt: null, lastError: null },
-  mpps: { status: "stopped", process: null, server: null, pid: null, startedAt: null, lastError: null },
-  worklistBuilder: { status: "stopped", process: null, server: null, pid: null, startedAt: null, lastError: null },
-  mppsProcessor: { status: "stopped", process: null, server: null, pid: null, startedAt: null, lastError: null }
+  worklistBuilder: { status: "stopped", process: null, server: null, pid: null, startedAt: null, lastError: null }
 };
 
 export function getServiceStatus(serviceName: keyof ServiceRegistry): ServiceEntry {
