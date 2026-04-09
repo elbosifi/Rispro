@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:frontend": "cd frontend && npx tsc --noEmit",
     "build:frontend": "cd frontend && npm run build",
+    "test": "node --import tsx --test src/**/*.test.ts",
     "check": "rg --files -g '*.ts' -g '*.mts' -0 | xargs -0 -I{} npx tsc --noEmit \"{}\"",
     "gateway:build-worklists": "node scripts/dicom-gateway/build-worklists.mjs",
     "gateway:rebuild-sources": "tsx scripts/dicom-gateway/rebuild-worklist-sources.mjs"

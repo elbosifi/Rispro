@@ -14,6 +14,7 @@ import {
   listAppointmentLookups,
   listAppointmentsForPrint,
   listAvailability,
+  listSuggestedAppointments,
   updateAppointment,
   updateAppointmentProtocol
 } from "../services/appointment-service.js";
@@ -60,8 +61,32 @@ appointmentsRouter.get(
     const query = req.query as UnknownRecord;
     const days = query.days ? Number(query.days) : 14;
     const offset = query.offset ? Number(query.offset) : 0;
-    const availability = await listAvailability(asOptionalString(query.modalityId), days, offset);
+    const availability = await listAvailability(asOptionalString(query.modalityId), days, offset, {
+      examTypeId: asOptionalString(query.examTypeId),
+      caseCategory: asOptionalString(query.caseCategory) || "non_oncology",
+      useSpecialQuota: String(query.useSpecialQuota || "").toLowerCase() === "true",
+      specialReasonCode: asOptionalString(query.specialReasonCode),
+      includeOverrideCandidates: String(query.includeOverrideCandidates || "").toLowerCase() === "true",
+      requestedByUserId: Number(query.requestedByUserId || 0) || undefined
+    });
     res.json({ availability });
+  })
+);
+
+appointmentsRouter.get(
+  "/suggestions",
+  asyncRoute(async (req: Request, res: Response) => {
+    const query = req.query as UnknownRecord;
+    const days = query.days ? Number(query.days) : 30;
+    const suggestions = await listSuggestedAppointments(asOptionalString(query.modalityId), days, {
+      examTypeId: asOptionalString(query.examTypeId),
+      caseCategory: asOptionalString(query.caseCategory) || "non_oncology",
+      useSpecialQuota: String(query.useSpecialQuota || "").toLowerCase() === "true",
+      specialReasonCode: asOptionalString(query.specialReasonCode),
+      includeOverrideCandidates: String(query.includeOverrideCandidates || "").toLowerCase() === "true",
+      requestedByUserId: Number(query.requestedByUserId || 0) || undefined
+    });
+    res.json({ suggestions });
   })
 );
 

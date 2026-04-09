@@ -208,6 +208,22 @@ async function getNoShowReviewTime(): Promise<string> {
   return typeof value === "string" && value ? value : DEFAULT_NO_SHOW_REVIEW_TIME;
 }
 
+async function isWalkInQueueEnabled(): Promise<boolean> {
+  const { rows } = await pool.query(
+    `
+      select setting_value
+      from system_settings
+      where category = 'queue_and_arrival'
+        and setting_key = 'walk_in_queue'
+      limit 1
+    `
+  );
+
+  const firstRow = rows[0] as SettingsRow | undefined;
+  const value = String(firstRow?.setting_value?.value ?? "enabled").trim().toLowerCase();
+  return ["enabled", "on", "true", "yes", "1"].includes(value);
+}
+
 async function getQueueEntries(queueDate: string): Promise<QueueEntryRow[]> {
   const { rows } = await pool.query(
     `
@@ -515,6 +531,11 @@ export async function createWalkInQueueEntry(
   currentUser: CurrentUser,
   options: QueueWalkInOptions = {}
 ): Promise<QueueScanResult & { createdAppointment: UnknownRecord }> {
+  const walkInEnabled = await isWalkInQueueEnabled();
+  if (!walkInEnabled) {
+    throw new HttpError(409, "Walk-in queue is disabled in settings.");
+  }
+
   const queueDate = getTripoliToday();
   const appointmentResult = await createAppointment(
     {

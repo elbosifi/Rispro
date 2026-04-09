@@ -26,6 +26,10 @@ import {
   updateNameDictionaryEntry,
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
+import {
+  getSchedulingEngineConfiguration,
+  saveSchedulingEngineConfiguration
+} from "../services/scheduling-settings-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -200,6 +204,23 @@ settingsRouter.delete(
     const request = req as SettingsRequest;
     const result = await deleteDicomDevice(asString(request.params?.deviceId), request.user.sub as UserId);
     res.json(result);
+  })
+);
+
+settingsRouter.get(
+  "/scheduling-engine-config",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const config = await getSchedulingEngineConfiguration();
+    res.json({ config });
+  })
+);
+
+settingsRouter.put(
+  "/scheduling-engine-config",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const config = await saveSchedulingEngineConfiguration(asUnknownRecord(request.body ?? {}), request.user.sub as UserId);
+    res.json({ config });
   })
 );
 

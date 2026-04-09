@@ -26,6 +26,16 @@ export interface Patient {
   id: number;
   mrn?: string | null;
   nationalId?: string | null;
+  identifierType?: string | null;
+  identifierValue?: string | null;
+  identifiers?: Array<{
+    id?: number;
+    typeId?: number;
+    typeCode?: string;
+    value: string;
+    normalizedValue?: string;
+    isPrimary: boolean;
+  }>;
   arabicFullName: string;
   englishFullName?: string | null;
   ageYears: number;
@@ -60,6 +70,10 @@ export interface Appointment {
   appointmentDate: string;
   status: AppointmentStatus;
   isWalkIn?: boolean;
+  caseCategory?: "oncology" | "non_oncology";
+  usesSpecialQuota?: boolean;
+  specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   notes?: string | null;
   arrivedAt?: string | null;
   completedAt?: string | null;

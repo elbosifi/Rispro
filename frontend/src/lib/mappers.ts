@@ -118,12 +118,21 @@ function normalizeIsoDate(rawValue: unknown): string {
 }
 
 export function mapPatient(raw: RawRecord): Patient {
+  const rawIdentifiers = rawArray(raw, "identifiers");
   return {
     id: num(raw, 'id'),
     mrn: strOrNull(raw, 'mrn') ?? strOrNull(raw, 'patient_mrn'),
     nationalId: strOrNull(raw, 'national_id') ?? strOrNull(raw, 'nationalId'),
     identifierType: (strOrNull(raw, 'identifier_type') ?? strOrNull(raw, 'identifierType')) as IdentifierType | null,
     identifierValue: strOrNull(raw, 'identifier_value') ?? strOrNull(raw, 'identifierValue'),
+    identifiers: rawIdentifiers.map((entry) => ({
+      id: num(entry, "id"),
+      typeId: num(entry, "type_id") || num(entry, "typeId"),
+      typeCode: (str(entry, "type_code") || str(entry, "typeCode") || "other") as IdentifierType,
+      value: str(entry, "value"),
+      normalizedValue: strOrUndefined(entry, "normalized_value") ?? strOrUndefined(entry, "normalizedValue"),
+      isPrimary: bool(entry, "is_primary", bool(entry, "isPrimary", false))
+    })),
     arabicFullName: str(raw, 'arabic_full_name') || str(raw, 'arabicFullName'),
     englishFullName: strOrNull(raw, 'english_full_name') ?? strOrNull(raw, 'englishFullName'),
     ageYears: num(raw, 'age_years') || num(raw, 'ageYears'),

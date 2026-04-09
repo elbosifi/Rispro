@@ -8,10 +8,12 @@ import { getTripoliToday, TRIPOLI_TIME_ZONE, validateIsoDate } from "../utils/da
 import { logAuditEntry } from "./audit-service.js";
 import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
+import { evaluateSchedulingCandidateWithDb } from "../domain/scheduling/service.js";
 import type { UnknownRecord, UserId, AuthenticatedUserContext } from "../types/http.js";
 import type { DbNumeric, NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
 import type { AppointmentStatus } from "../types/domain.js";
+import type { CaseCategory, SchedulingResult } from "../domain/scheduling/types.js";
 import {
   APPOINTMENT_NON_CANCELLABLE_STATUSES,
   APPOINTMENT_RECEPTION_ACTIVE_STATUSES,
@@ -43,6 +45,17 @@ export interface AvailabilitySlot {
   remaining_capacity: number;
   daily_capacity: number | null;
   is_full: boolean;
+  isAllowed?: boolean;
+  requiresSupervisorOverride?: boolean;
+  blockReasons?: string[];
+  matchedRuleIds?: number[];
+  remainingCategoryCapacity?: {
+    oncology: number | null;
+    nonOncology: number | null;
+  };
+  remainingSpecialQuota?: number | null;
+  suggestedBookingMode?: "standard" | "special" | "override" | null;
+  displayStatus?: "available" | "restricted" | "blocked";
 }
 
 export interface AppointmentFilters {
@@ -64,6 +77,12 @@ export interface AppointmentStatisticsFilters {
 export interface AppointmentUpdateOptions {
   supervisorUsername?: string;
   supervisorPassword?: string;
+}
+
+interface OverridePayload {
+  supervisorUsername?: unknown;
+  supervisorPassword?: unknown;
+  reason?: unknown;
 }
 
 interface SchedulingSettingRow {
@@ -104,6 +123,10 @@ export interface AppointmentDbRow {
   status: AppointmentStatus;
   notes: string | null;
   overbooking_reason: string | null;
+  case_category?: CaseCategory;
+  uses_special_quota?: boolean;
+  special_reason_code?: string | null;
+  special_reason_note?: string | null;
   is_walk_in?: boolean;
   is_overbooked?: boolean;
   cancel_reason?: string | null;
@@ -302,6 +325,157 @@ function normalizeIsoDate(value: unknown): string {
   return String(value || "").slice(0, 10);
 }
 
+function normalizeCaseCategory(value: unknown): CaseCategory {
+  const normalized = String(value || "non_oncology").trim().toLowerCase();
+  if (normalized === "oncology") return "oncology";
+  return "non_oncology";
+}
+
+function normalizeOverridePayload(payload: UnknownRecord, options: AppointmentUpdateOptions): {
+  username: string;
+  password: string;
+  reason: string;
+} {
+  const nested = (payload.override as OverridePayload | undefined) || {};
+  const username = String(nested.supervisorUsername ?? options.supervisorUsername ?? payload.supervisorUsername ?? "").trim();
+  const password = String(nested.supervisorPassword ?? options.supervisorPassword ?? payload.supervisorPassword ?? "").trim();
+  const reason = String(nested.reason ?? payload.overbookingReason ?? "").trim();
+  return { username, password, reason };
+}
+
+async function getSchedulingEngineFlags(client: DbExecutor = pool): Promise<{
+  enabled: boolean;
+  shadowMode: boolean;
+}> {
+  const { rows } = await client.query<SchedulingSettingRow>(
+    `
+      select setting_key, setting_value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key in ('scheduling_engine_enabled', 'scheduling_engine_shadow_mode')
+    `
+  );
+  const map = rows.reduce<Record<string, string>>((acc, row) => {
+    acc[row.setting_key] = String(row.setting_value?.value ?? "");
+    return acc;
+  }, {});
+  return {
+    enabled: normalizeSettingToggle(map.scheduling_engine_enabled, false),
+    shadowMode: normalizeSettingToggle(map.scheduling_engine_shadow_mode, true)
+  };
+}
+
+async function persistQuotaConsumption(
+  client: PoolClient,
+  appointment: AppointmentDbRow,
+  consumptionMode: SchedulingResult["consumedCapacityMode"],
+  currentUserId: UserId
+): Promise<void> {
+  if (!consumptionMode || consumptionMode === "standard") return;
+  await client.query(
+    `
+      insert into appointment_quota_consumptions (
+        appointment_id,
+        appointment_date,
+        modality_id,
+        exam_type_id,
+        case_category,
+        consumption_mode,
+        consumed_slots,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      values ($1, $2::date, $3, $4, $5, $6, 1, $7, $7)
+      on conflict (appointment_id, consumption_mode)
+      do update set
+        appointment_date = excluded.appointment_date,
+        modality_id = excluded.modality_id,
+        exam_type_id = excluded.exam_type_id,
+        case_category = excluded.case_category,
+        released_at = null,
+        updated_by_user_id = excluded.updated_by_user_id,
+        updated_at = now()
+    `,
+    [
+      appointment.id,
+      appointment.appointment_date,
+      appointment.modality_id,
+      appointment.exam_type_id,
+      appointment.case_category || "non_oncology",
+      consumptionMode,
+      currentUserId
+    ]
+  );
+}
+
+async function releaseQuotaConsumptions(client: PoolClient, appointmentId: number): Promise<void> {
+  await client.query(
+    `
+      update appointment_quota_consumptions
+      set released_at = coalesce(released_at, now()), updated_at = now()
+      where appointment_id = $1 and released_at is null
+    `,
+    [appointmentId]
+  );
+}
+
+async function logOverrideEvent(
+  client: DbExecutor,
+  {
+    appointmentId = null,
+    patientId = null,
+    modalityId = null,
+    examTypeId = null,
+    appointmentDate = null,
+    requestingUserId = null,
+    supervisorUserId = null,
+    overrideReason = "",
+    evaluationSnapshot = {},
+    outcome
+  }: {
+    appointmentId?: number | null;
+    patientId?: number | null;
+    modalityId?: number | null;
+    examTypeId?: number | null;
+    appointmentDate?: string | null;
+    requestingUserId?: number | null;
+    supervisorUserId?: number | null;
+    overrideReason?: string;
+    evaluationSnapshot?: unknown;
+    outcome: "approved_and_booked" | "approved_but_failed" | "denied" | "cancelled";
+  }
+): Promise<void> {
+  await client.query(
+    `
+      insert into scheduling_override_audit_events (
+        appointment_id,
+        patient_id,
+        modality_id,
+        exam_type_id,
+        appointment_date,
+        requesting_user_id,
+        supervisor_user_id,
+        override_reason,
+        evaluation_snapshot,
+        outcome
+      )
+      values ($1, $2, $3, $4, $5::date, $6, $7, nullif($8, ''), $9::jsonb, $10)
+    `,
+    [
+      appointmentId,
+      patientId,
+      modalityId,
+      examTypeId,
+      appointmentDate,
+      requestingUserId,
+      supervisorUserId,
+      overrideReason,
+      JSON.stringify(evaluationSnapshot || {}),
+      outcome
+    ]
+  );
+}
+
 function getTripoliWeekday(isoDate: string): string {
   const date = new Date(`${isoDate}T00:00:00Z`);
   const weekday = new Intl.DateTimeFormat("en-US", {
@@ -472,6 +646,40 @@ function normalizeDateOrToday(value: unknown): string {
   }
 
   return normalizeAppointmentDate(value);
+}
+
+function pgErrorCode(error: unknown): string {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "";
+  }
+  return String((error as { code?: unknown }).code || "");
+}
+
+export function toSchedulingConflictError(error: unknown): HttpError | null {
+  const code = pgErrorCode(error);
+  if (code === "40001") {
+    return new HttpError(409, "Scheduling conflict detected. Please retry booking.");
+  }
+  if (code === "55P03") {
+    return new HttpError(409, "Scheduling lock conflict. Please retry booking.");
+  }
+  if (code === "23505") {
+    return new HttpError(409, "A concurrent booking changed availability. Please retry.");
+  }
+  return null;
+}
+
+type OverrideFailureReason =
+  | "missing_username"
+  | "missing_password"
+  | "invalid_credentials"
+  | "missing_reason";
+
+export function overrideOutcomeForFailure(reason: OverrideFailureReason): "denied" | "cancelled" {
+  if (reason === "invalid_credentials") {
+    return "denied";
+  }
+  return "cancelled";
 }
 
 async function getPatientById(
@@ -980,20 +1188,33 @@ export async function getAppointmentPrintDetails(
 export async function listAvailability(
   modalityId: number | string | undefined,
   days = 14,
-  offset = 0
+  offset = 0,
+  options: {
+    examTypeId?: number | string | null;
+    caseCategory?: unknown;
+    useSpecialQuota?: boolean;
+    specialReasonCode?: string | null;
+    includeOverrideCandidates?: boolean;
+    requestedByUserId?: number | null;
+  } = {}
 ): Promise<AvailabilitySlot[]> {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   if (!cleanModalityId) {
     throw new HttpError(400, "modalityId is required.");
   }
+  const cleanExamTypeId = normalizePositiveInteger(options.examTypeId, "examTypeId", { required: false });
   const windowDays = Math.min(Math.max(Number(days) || 14, 1), 365);
   const dayOffset = Math.max(Number(offset) || 0, 0);
+  const caseCategory = normalizeCaseCategory(options.caseCategory);
+  const includeOverrideCandidates = Boolean(options.includeOverrideCandidates);
+  const requestedByUserId = Number(options.requestedByUserId || 0) || 0;
 
   // Fetch all required data in parallel
-  const [modality, daySettings, maxCasesPerModality] = await Promise.all([
+  const [modality, daySettings, maxCasesPerModality, flags] = await Promise.all([
     getModalityById(pool, cleanModalityId),
     getAppointmentDaySettings(pool),
-    getMaxCasesPerModality(pool)
+    getMaxCasesPerModality(pool),
+    getSchedulingEngineFlags(pool)
   ]);
 
   const { rows } = await pool.query(`
@@ -1020,7 +1241,7 @@ export async function listAvailability(
     order by calendar.appointment_date asc
   `, [cleanModalityId, dayOffset, windowDays]);
 
-  return rows
+  const baseRows = rows
     .filter((row) => {
       const isoDate = normalizeIsoDate(row.appointment_date);
       const weekday = getTripoliWeekday(isoDate);
@@ -1048,6 +1269,68 @@ export async function listAvailability(
         is_full: remaining <= 0
       };
     });
+
+  if (!flags.enabled) {
+    return baseRows;
+  }
+
+  const enhancedRows = await Promise.all(
+    baseRows.map(async (row) => {
+      const evaluation = await evaluateSchedulingCandidateWithDb(
+        {
+          patientId: null,
+          modalityId: cleanModalityId,
+          examTypeId: cleanExamTypeId ? Number(cleanExamTypeId) : null,
+          scheduledDate: normalizeIsoDate(row.appointment_date),
+          caseCategory,
+          requestedByUserId,
+          useSpecialQuota: Boolean(options.useSpecialQuota),
+          specialReasonCode: options.specialReasonCode || null,
+          specialReasonNote: null,
+          includeOverrideEvaluation: includeOverrideCandidates
+        },
+        pool
+      );
+
+      return {
+        ...row,
+        isAllowed: evaluation.isAllowed,
+        requiresSupervisorOverride: evaluation.requiresSupervisorOverride,
+        blockReasons: evaluation.blockReasons,
+        matchedRuleIds: evaluation.matchedRuleIds,
+        remainingCategoryCapacity: evaluation.remainingCategoryCapacity,
+        remainingSpecialQuota: evaluation.remainingSpecialQuota,
+        suggestedBookingMode: evaluation.suggestedBookingMode,
+        displayStatus: evaluation.displayStatus,
+        is_full: !evaluation.isAllowed || row.is_full
+      };
+    })
+  );
+
+  return enhancedRows;
+}
+
+export async function listSuggestedAppointments(
+  modalityId: number | string | undefined,
+  days = 30,
+  options: {
+    examTypeId?: number | string | null;
+    caseCategory?: unknown;
+    useSpecialQuota?: boolean;
+    specialReasonCode?: string | null;
+    includeOverrideCandidates?: boolean;
+    requestedByUserId?: number | null;
+  } = {}
+): Promise<AvailabilitySlot[]> {
+  const availability = await listAvailability(modalityId, days, 0, options);
+  return availability
+    .filter((slot) => {
+      if (options.includeOverrideCandidates) {
+        return slot.isAllowed || slot.requiresSupervisorOverride;
+      }
+      return slot.isAllowed === true;
+    })
+    .slice(0, 20);
 }
 
 export async function listModalitiesForSettings({
@@ -1129,7 +1412,8 @@ export async function createModality(
     return createdModality;
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    const mapped = toSchedulingConflictError(error);
+    throw mapped || error;
   } finally {
     client.release();
   }
@@ -1219,7 +1503,8 @@ export async function updateModality(
     return updatedModality;
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    const mapped = toSchedulingConflictError(error);
+    throw mapped || error;
   } finally {
     client.release();
   }
@@ -1506,8 +1791,8 @@ export async function createAppointment(
     throw new HttpError(401, "Authentication required.");
   }
 
-  const supervisorUsername = String(options.supervisorUsername || "").trim();
-  const supervisorPassword = String(options.supervisorPassword || "").trim();
+  const { username: supervisorUsername, password: supervisorPassword, reason: overrideReason } =
+    normalizeOverridePayload(payload, options);
   const patientId = normalizePositiveInteger(payload.patientId, "patientId") as number;
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId") as number;
   const examTypeId = normalizePositiveInteger(payload.examTypeId, "examTypeId", {
@@ -1518,8 +1803,22 @@ export async function createAppointment(
   });
   const appointmentDate = normalizeAppointmentDate(payload.appointmentDate);
   const notes = String(payload.notes || "").trim();
-  const overbookingReason = String(payload.overbookingReason || "").trim();
+  const caseCategory = normalizeCaseCategory(payload.caseCategory);
+  const useSpecialQuota = Boolean(payload.useSpecialQuota);
+  const specialReasonCode = String(payload.specialReasonCode || "").trim() || null;
+  const specialReasonNote = String(payload.specialReasonNote || "").trim() || null;
   const isWalkIn = Boolean(payload.isWalkIn);
+  let overrideFailureAuditContext: {
+    appointmentId: number | null;
+    patientId: number;
+    modalityId: number;
+    examTypeId: number | null;
+    appointmentDate: string;
+    requestingUserId: number;
+    supervisorUserId: number | null;
+    overrideReason: string;
+    evaluationSnapshot: unknown;
+  } | null = null;
   const client = await pool.connect();
 
   try {
@@ -1531,6 +1830,14 @@ export async function createAppointment(
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [
       `appointment-slot:${modalityId}:${appointmentDate}`
     ]);
+    await client.query("select pg_advisory_xact_lock(hashtext($1))", [
+      `appointment-category:${modalityId}:${appointmentDate}:${caseCategory}`
+    ]);
+    if (examTypeId) {
+      await client.query("select pg_advisory_xact_lock(hashtext($1))", [
+        `appointment-exam-quota:${modalityId}:${appointmentDate}:${examTypeId}`
+      ]);
+    }
 
     const patient = await getPatientById(client, patientId);
     const modality = await getModalityById(client, modalityId);
@@ -1540,6 +1847,10 @@ export async function createAppointment(
     const priority = reportingPriorityId
       ? await getPriorityById(client, reportingPriorityId)
       : null;
+    const flags = await getSchedulingEngineFlags(client);
+    const includeOverrideEvaluation = Boolean(supervisorUsername && supervisorPassword);
+    let evaluation: SchedulingResult | null = null;
+    let schedulingOverbooked = false;
 
     const bookingStats = await client.query(`
       select
@@ -1557,22 +1868,92 @@ export async function createAppointment(
       where appointment_date = $1::date
     `, [appointmentDate]);
 
-    const maxCasesPerModality = await getMaxCasesPerModality(client);
     const bookingStatsRow = bookingStats.rows[0] as BookingStatsRow | undefined;
     const globalStatsRow = globalStats.rows[0] as SequenceRow | undefined;
-    const bookedCount = Number(bookingStatsRow?.booked_count || 0);
     const nextSlotNumber = Number(bookingStatsRow?.last_slot_number || 0) + 1;
     const nextDailySequence = Number(globalStatsRow?.last_daily_sequence || 0) + 1;
+    const maxCasesPerModality = await getMaxCasesPerModality(client);
+    const bookedCount = Number(bookingStatsRow?.booked_count || 0);
     const capacity = resolveEffectiveCapacity(modality.daily_capacity, maxCasesPerModality);
-    const isOverbooked = capacity !== null && bookedCount >= capacity;
+    const legacyOverbooked = capacity !== null && bookedCount >= capacity;
 
-    // Handle overbooking approval
+    if (flags.enabled || flags.shadowMode) {
+      evaluation = await evaluateSchedulingCandidateWithDb(
+        {
+          patientId,
+          modalityId,
+          examTypeId: examType?.id || null,
+          scheduledDate: appointmentDate,
+          scheduledTime: null,
+          caseCategory,
+          requestedByUserId: Number(currentUser.sub),
+          useSpecialQuota,
+          specialReasonCode,
+          specialReasonNote,
+          includeOverrideEvaluation,
+          appointmentId: null
+        },
+        client
+      );
+
+      if (flags.shadowMode && !flags.enabled) {
+        await logAuditEntry(
+          {
+            entityType: "scheduling_shadow_evaluation",
+            entityId: null,
+            actionType: "evaluate_create",
+            oldValues: null,
+            newValues: evaluation.evaluationSnapshot,
+            changedByUserId: currentUser.sub
+          },
+          client
+        );
+      }
+    }
+
+    if (flags.enabled && evaluation && !evaluation.isAllowed) {
+      throw new HttpError(409, `Scheduling blocked: ${evaluation.blockReasons.join(", ") || "rule_violation"}`);
+    }
+
+    if (flags.enabled && evaluation?.requiresSupervisorOverride && !includeOverrideEvaluation) {
+      throw new HttpError(403, "Supervisor override credentials are required for this scheduling decision.");
+    }
+
+    // Handle supervisor approval (legacy overbooking and scheduling override).
     let approvingSupervisor: AuthUserRow | null = null;
-    if (isOverbooked) {
+    if ((flags.enabled && evaluation?.requiresSupervisorOverride) || (!flags.enabled && legacyOverbooked)) {
       if (!supervisorUsername) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: null,
+            patientId,
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_username")
+          });
+        }
         throw new HttpError(403, "Supervisor username is required before overbooking.");
       }
       if (!supervisorPassword) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: null,
+            patientId,
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_password")
+          });
+        }
         throw new HttpError(403, "Supervisor password is required before overbooking.");
       }
 
@@ -1585,15 +1966,62 @@ export async function createAppointment(
           throw new HttpError(403, "Only an active supervisor can approve overbooking.");
         }
       } catch (error) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: null,
+            patientId,
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("invalid_credentials")
+          });
+        }
         if (error instanceof HttpError) {
           throw error;
         }
         throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
 
-      if (!overbookingReason) {
-        throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      if (!overrideReason) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: null,
+            patientId,
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_reason")
+          });
+        }
+        throw new HttpError(400, "A supervisor reason is required for override/overbooking.");
       }
+      overrideFailureAuditContext = {
+        appointmentId: null,
+        patientId,
+        modalityId,
+        examTypeId: examType?.id || null,
+        appointmentDate,
+        requestingUserId: Number(currentUser.sub),
+        supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+        overrideReason,
+        evaluationSnapshot:
+          flags.enabled && evaluation
+            ? evaluation.evaluationSnapshot
+            : {
+                mode: "legacy_overbooking"
+              }
+      };
+      schedulingOverbooked = true;
+    } else {
+      schedulingOverbooked = Boolean(flags.enabled && evaluation?.consumedCapacityMode === "override");
     }
 
     const accessionNumber = buildAccessionNumber(appointmentDate, nextDailySequence);
@@ -1615,6 +2043,10 @@ export async function createAppointment(
           approved_by_name,
           approved_by_user_id,
           notes,
+          case_category,
+          uses_special_quota,
+          special_reason_code,
+          special_reason_note,
           created_by_user_id,
           updated_by_user_id
         )
@@ -1635,7 +2067,11 @@ export async function createAppointment(
           $13,
           nullif($14, ''),
           $15,
-          $15
+          $16,
+          nullif($17, ''),
+          nullif($18, ''),
+          $19,
+          $19
         )
         returning *
       `,
@@ -1649,11 +2085,15 @@ export async function createAppointment(
         nextDailySequence,
         nextSlotNumber,
         isWalkIn,
-        isOverbooked,
-        overbookingReason,
-        isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
-        isOverbooked && approvingSupervisor ? approvingSupervisor.id : null,
+        schedulingOverbooked,
+        overrideReason,
+        schedulingOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
+        schedulingOverbooked && approvingSupervisor ? approvingSupervisor.id : null,
         notes,
+        caseCategory,
+        useSpecialQuota,
+        specialReasonCode,
+        specialReasonNote,
         currentUser.sub
       ]
     );
@@ -1667,8 +2107,41 @@ export async function createAppointment(
         insert into appointment_status_history (appointment_id, old_status, new_status, changed_by_user_id, reason)
         values ($1, null, 'scheduled', $2, $3)
       `,
-      [createdAppointment.id, currentUser.sub, isOverbooked ? overbookingReason : null]
+      [createdAppointment.id, currentUser.sub, schedulingOverbooked ? overrideReason : null]
     );
+
+    if (flags.enabled && evaluation) {
+      await persistQuotaConsumption(client, createdAppointment, evaluation.consumedCapacityMode, Number(currentUser.sub));
+      if (evaluation.requiresSupervisorOverride || evaluation.consumedCapacityMode === "override") {
+        await logOverrideEvent(client, {
+          appointmentId: Number(createdAppointment.id),
+          patientId,
+          modalityId,
+          examTypeId: examType?.id || null,
+          appointmentDate,
+          requestingUserId: Number(currentUser.sub),
+          supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+          overrideReason,
+          evaluationSnapshot: evaluation.evaluationSnapshot,
+          outcome: "approved_and_booked"
+        });
+      }
+    } else if (!flags.enabled && legacyOverbooked) {
+      await logOverrideEvent(client, {
+        appointmentId: Number(createdAppointment.id),
+        patientId,
+        modalityId,
+        examTypeId: examType?.id || null,
+        appointmentDate,
+        requestingUserId: Number(currentUser.sub),
+        supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+        overrideReason,
+        evaluationSnapshot: {
+          mode: "legacy_overbooking"
+        },
+        outcome: "approved_and_booked"
+      });
+    }
 
     await logAuditEntry(
       {
@@ -1695,7 +2168,18 @@ export async function createAppointment(
     };
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    if (overrideFailureAuditContext) {
+      try {
+        await logOverrideEvent(pool, {
+          ...overrideFailureAuditContext,
+          outcome: "approved_but_failed"
+        });
+      } catch {
+        // Best-effort failure audit.
+      }
+    }
+    const mapped = toSchedulingConflictError(error);
+    throw mapped || error;
   } finally {
     client.release();
   }
@@ -1721,12 +2205,23 @@ export async function updateAppointment(
     throw new HttpError(401, "Authentication required.");
   }
 
-  const supervisorUsername = String(options.supervisorUsername || "").trim();
-  const supervisorPassword = String(options.supervisorPassword || "").trim();
+  const { username: supervisorUsername, password: supervisorPassword, reason: overrideReason } =
+    normalizeOverridePayload(payload, options);
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
   if (!cleanAppointmentId) {
     throw new HttpError(400, "appointmentId is required.");
   }
+  let overrideFailureAuditContext: {
+    appointmentId: number;
+    patientId: number;
+    modalityId: number;
+    examTypeId: number | null;
+    appointmentDate: string;
+    requestingUserId: number;
+    supervisorUserId: number | null;
+    overrideReason: string;
+    evaluationSnapshot: unknown;
+  } | null = null;
   const client = await pool.connect();
 
   try {
@@ -1769,12 +2264,22 @@ export async function updateAppointment(
         ? normalizeOptionalText(existingAppointment.notes)
         : normalizeOptionalText(payload.notes);
 
-    const overbookingReason =
-      payload.overbookingReason === undefined ||
-      payload.overbookingReason === null ||
-      payload.overbookingReason === ""
-        ? normalizeOptionalText(existingAppointment.overbooking_reason)
-        : normalizeOptionalText(payload.overbookingReason);
+    const caseCategory =
+      payload.caseCategory === undefined || payload.caseCategory === null || payload.caseCategory === ""
+        ? normalizeCaseCategory(existingAppointment.case_category)
+        : normalizeCaseCategory(payload.caseCategory);
+    const useSpecialQuota =
+      payload.useSpecialQuota === undefined
+        ? Boolean(existingAppointment.uses_special_quota)
+        : Boolean(payload.useSpecialQuota);
+    const specialReasonCode =
+      payload.specialReasonCode === undefined || payload.specialReasonCode === null || payload.specialReasonCode === ""
+        ? String(existingAppointment.special_reason_code || "").trim() || null
+        : String(payload.specialReasonCode || "").trim() || null;
+    const specialReasonNote =
+      payload.specialReasonNote === undefined || payload.specialReasonNote === null || payload.specialReasonNote === ""
+        ? String(existingAppointment.special_reason_note || "").trim() || null
+        : String(payload.specialReasonNote || "").trim() || null;
 
     const existingAppointmentDate = normalizeIsoDate(existingAppointment.appointment_date);
     if (existingAppointmentDate !== appointmentDate) {
@@ -1787,6 +2292,14 @@ export async function updateAppointment(
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [
       `appointment-slot:${modalityId}:${appointmentDate}`
     ]);
+    await client.query("select pg_advisory_xact_lock(hashtext($1))", [
+      `appointment-category:${modalityId}:${appointmentDate}:${caseCategory}`
+    ]);
+    if (examTypeId) {
+      await client.query("select pg_advisory_xact_lock(hashtext($1))", [
+        `appointment-exam-quota:${modalityId}:${appointmentDate}:${examTypeId}`
+      ]);
+    }
 
     const modality = await getModalityById(client, modalityId);
     const examType = examTypeId
@@ -1795,6 +2308,9 @@ export async function updateAppointment(
     const priority = reportingPriorityId
       ? await getPriorityById(client, reportingPriorityId)
       : null;
+    const flags = await getSchedulingEngineFlags(client);
+    const includeOverrideEvaluation = Boolean(supervisorUsername && supervisorPassword);
+    let evaluation: SchedulingResult | null = null;
     const slotStats = await nextModalitySlotNumber(
       client,
       modalityId,
@@ -1810,16 +2326,89 @@ export async function updateAppointment(
 
     // Only check overbooking when date or modality changes (treat as new appointment)
     // Editing fields on the same date/modality does not require supervisor approval
-    const isOverbooked =
+    const legacyOverbooked =
       modalityOrDateChanged && capacity !== null && slotStats.bookedCount >= capacity;
+
+    if (flags.enabled || flags.shadowMode) {
+      evaluation = await evaluateSchedulingCandidateWithDb(
+        {
+          patientId: Number(existingAppointment.patient_id),
+          modalityId,
+          examTypeId: examType?.id || null,
+          scheduledDate: appointmentDate,
+          scheduledTime: null,
+          caseCategory,
+          requestedByUserId: Number(currentUser.sub),
+          useSpecialQuota,
+          specialReasonCode,
+          specialReasonNote,
+          includeOverrideEvaluation,
+          appointmentId: Number(cleanAppointmentId)
+        },
+        client
+      );
+      if (flags.shadowMode && !flags.enabled) {
+        await logAuditEntry(
+          {
+            entityType: "scheduling_shadow_evaluation",
+            entityId: cleanAppointmentId,
+            actionType: "evaluate_update",
+            oldValues: null,
+            newValues: evaluation.evaluationSnapshot,
+            changedByUserId: currentUser.sub
+          },
+          client
+        );
+      }
+    }
+
+    if (flags.enabled && evaluation && !evaluation.isAllowed) {
+      throw new HttpError(409, `Scheduling blocked: ${evaluation.blockReasons.join(", ") || "rule_violation"}`);
+    }
+
+    if (flags.enabled && evaluation?.requiresSupervisorOverride && !includeOverrideEvaluation) {
+      throw new HttpError(403, "Supervisor override credentials are required for this scheduling decision.");
+    }
 
     // Handle overbooking approval
     let approvingSupervisor: AuthUserRow | null = null;
-    if (isOverbooked) {
+    const requiresApproval =
+      (flags.enabled && Boolean(evaluation?.requiresSupervisorOverride)) ||
+      (!flags.enabled && legacyOverbooked);
+
+    if (requiresApproval) {
       if (!supervisorUsername) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: Number(cleanAppointmentId),
+            patientId: Number(existingAppointment.patient_id),
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_username")
+          });
+        }
         throw new HttpError(403, "Supervisor username is required before overbooking.");
       }
       if (!supervisorPassword) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: Number(cleanAppointmentId),
+            patientId: Number(existingAppointment.patient_id),
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_password")
+          });
+        }
         throw new HttpError(403, "Supervisor password is required before overbooking.");
       }
 
@@ -1832,15 +2421,59 @@ export async function updateAppointment(
           throw new HttpError(403, "Only an active supervisor can approve overbooking.");
         }
       } catch (error) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: Number(cleanAppointmentId),
+            patientId: Number(existingAppointment.patient_id),
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("invalid_credentials")
+          });
+        }
         if (error instanceof HttpError) {
           throw error;
         }
         throw new HttpError(403, "Invalid supervisor credentials. Overbooking cancelled.");
       }
 
-      if (!overbookingReason) {
-        throw new HttpError(400, "overbookingReason is required when capacity is full.");
+      if (!overrideReason) {
+        if (flags.enabled && evaluation) {
+          await logOverrideEvent(client, {
+            appointmentId: Number(cleanAppointmentId),
+            patientId: Number(existingAppointment.patient_id),
+            modalityId,
+            examTypeId: examType?.id || null,
+            appointmentDate,
+            requestingUserId: Number(currentUser.sub),
+            supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+            overrideReason,
+            evaluationSnapshot: evaluation.evaluationSnapshot,
+            outcome: overrideOutcomeForFailure("missing_reason")
+          });
+        }
+        throw new HttpError(400, "A supervisor reason is required for override/overbooking.");
       }
+      overrideFailureAuditContext = {
+        appointmentId: Number(cleanAppointmentId),
+        patientId: Number(existingAppointment.patient_id),
+        modalityId,
+        examTypeId: examType?.id || null,
+        appointmentDate,
+        requestingUserId: Number(currentUser.sub),
+        supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+        overrideReason,
+        evaluationSnapshot:
+          flags.enabled && evaluation
+            ? evaluation.evaluationSnapshot
+            : {
+                mode: "legacy_overbooking_update"
+              }
+      };
     }
 
     const sequence =
@@ -1853,6 +2486,7 @@ export async function updateAppointment(
       : Number(existingAppointment.modality_slot_number);
 
     const accessionNumber = buildAccessionNumber(appointmentDate, sequence);
+    const isOverbooked = requiresApproval || Boolean(flags.enabled && evaluation?.consumedCapacityMode === "override");
 
     const approvedByUserId =
       isOverbooked && approvingSupervisor?.id != null
@@ -1879,7 +2513,11 @@ export async function updateAppointment(
           -- Explicit ::bigint casts prevent PostgreSQL type mismatch in CASE/update expressions
           approved_by_user_id = case when $9 then $12::bigint else null end,
           notes = nullif($13, ''),
-          updated_by_user_id = $14::bigint,
+          case_category = $14,
+          uses_special_quota = $15,
+          special_reason_code = nullif($16, ''),
+          special_reason_note = nullif($17, ''),
+          updated_by_user_id = $18::bigint,
           updated_at = now()
         where id = $1
         returning *
@@ -1894,10 +2532,14 @@ export async function updateAppointment(
         sequence,
         modalitySlotNumber,
         isOverbooked,
-        overbookingReason,
+        overrideReason,
         isOverbooked && approvingSupervisor ? approvingSupervisor.full_name : null,
         approvedByUserId,
         notes,
+        caseCategory,
+        useSpecialQuota,
+        specialReasonCode,
+        specialReasonNote,
         updatedByUserId
       ]
     );
@@ -1916,6 +2558,40 @@ export async function updateAppointment(
         `,
         [cleanAppointmentId, existingStatus, newStatus, currentUser.sub, "Appointment edited or rescheduled"]
       );
+    }
+
+    if (flags.enabled && evaluation) {
+      await releaseQuotaConsumptions(client, cleanAppointmentId);
+      await persistQuotaConsumption(client, updatedAppointment, evaluation.consumedCapacityMode, Number(currentUser.sub));
+      if (evaluation.requiresSupervisorOverride || evaluation.consumedCapacityMode === "override") {
+        await logOverrideEvent(client, {
+          appointmentId: Number(updatedAppointment.id),
+          patientId: Number(updatedAppointment.patient_id),
+          modalityId,
+          examTypeId: examType?.id || null,
+          appointmentDate,
+          requestingUserId: Number(currentUser.sub),
+          supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+          overrideReason,
+          evaluationSnapshot: evaluation.evaluationSnapshot,
+          outcome: "approved_and_booked"
+        });
+      }
+    } else if (!flags.enabled && legacyOverbooked) {
+      await logOverrideEvent(client, {
+        appointmentId: Number(updatedAppointment.id),
+        patientId: Number(updatedAppointment.patient_id),
+        modalityId,
+        examTypeId: examType?.id || null,
+        appointmentDate,
+        requestingUserId: Number(currentUser.sub),
+        supervisorUserId: approvingSupervisor ? Number(approvingSupervisor.id) : null,
+        overrideReason,
+        evaluationSnapshot: {
+          mode: "legacy_overbooking_update"
+        },
+        outcome: "approved_and_booked"
+      });
     }
 
     await logAuditEntry(
@@ -1940,7 +2616,18 @@ export async function updateAppointment(
       (error as Error).stack
     );
     await client.query("rollback");
-    throw error;
+    if (overrideFailureAuditContext) {
+      try {
+        await logOverrideEvent(pool, {
+          ...overrideFailureAuditContext,
+          outcome: "approved_but_failed"
+        });
+      } catch {
+        // Best-effort failure audit.
+      }
+    }
+    const mapped = toSchedulingConflictError(error);
+    throw mapped || error;
   } finally {
     client.release();
   }
@@ -2081,6 +2768,8 @@ export async function cancelAppointment(
       [cleanAppointmentId, appointmentStatus, currentUserId, cleanReason]
     );
 
+    await releaseQuotaConsumptions(client, cleanAppointmentId);
+
     await logAuditEntry(
       {
         entityType: "appointment",
@@ -2117,6 +2806,8 @@ export async function deleteAppointment(
   try {
     await client.query("begin");
     const appointment = await getAppointmentById(client, cleanAppointmentId);
+
+    await releaseQuotaConsumptions(client, cleanAppointmentId);
 
     await client.query(`delete from queue_entries where appointment_id = $1`, [
       cleanAppointmentId

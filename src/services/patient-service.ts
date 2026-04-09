@@ -11,9 +11,11 @@ import {
   deriveDobFromNationalId,
   calculateAgeFromDob
 } from "../utils/national-id.js";
+import { ensureIdentifierValue, normalizeIdentifierValue } from "../utils/identifier.js";
 import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
 import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
+import type { PoolClient } from "pg";
 
 export interface PatientRegistrationRules {
   nationalIdRule: string;
@@ -27,6 +29,14 @@ export interface PatientRow {
   national_id: string | null;
   identifier_type: string | null;
   identifier_value: string | null;
+  identifiers?: Array<{
+    id: number;
+    type_id: number;
+    type_code: string;
+    value: string;
+    normalized_value: string;
+    is_primary: boolean;
+  }>;
   arabic_full_name: string;
   english_full_name: string | null;
   age_years: number;
@@ -51,6 +61,7 @@ export interface PatientPayload {
   phone2?: unknown;
   address?: unknown;
   autoGenerateEnglish?: boolean;
+  identifiers?: unknown;
 }
 
 export interface MergePatientsPayload {
@@ -82,6 +93,18 @@ interface PatientSettingRow {
 interface PatientNoShowSummaryRow {
   no_show_count?: NullableDbNumeric;
   last_no_show_date?: string | null;
+}
+
+interface IdentifierTypeRow {
+  id: number;
+  code: string;
+}
+
+interface PatientIdentifierInput {
+  typeId?: unknown;
+  typeCode?: unknown;
+  value?: unknown;
+  isPrimary?: unknown;
 }
 
 export type PersistedPatientRow = PatientRow & { id: UserId };
@@ -357,7 +380,33 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const { rows } = await pool.query<PatientRow>(
     `
-      select id, mrn, national_id, identifier_type, identifier_value, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
+      select
+        id,
+        mrn,
+        national_id,
+        identifier_type,
+        identifier_value,
+        arabic_full_name,
+        english_full_name,
+        age_years,
+        sex,
+        phone_1,
+        phone_2,
+        address,
+        estimated_date_of_birth,
+        (
+          select coalesce(json_agg(json_build_object(
+            'id', pi.id,
+            'type_id', pit.id,
+            'type_code', pit.code,
+            'value', pi.value,
+            'normalized_value', pi.normalized_value,
+            'is_primary', pi.is_primary
+          ) order by pi.is_primary desc, pi.id asc), '[]'::json)
+          from patient_identifiers pi
+          join patient_identifier_types pit on pit.id = pi.identifier_type_id
+          where pi.patient_id = patients.id
+        ) as identifiers
       from patients
       where id = $1
       limit 1
@@ -419,13 +468,114 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
   return rows;
 }
 
+async function resolveIdentifierTypeMap(client: PoolClient): Promise<Map<string, number>> {
+  const { rows } = await client.query<IdentifierTypeRow>(
+    `
+      select id, code
+      from patient_identifier_types
+      where is_active = true
+    `
+  );
+
+  const map = new Map<string, number>();
+  for (const row of rows) {
+    map.set(String(row.code), Number(row.id));
+  }
+  return map;
+}
+
+function normalizeIdentifierInputs(
+  payload: PatientPayload,
+  validated: ValidatedPatientPayload
+): Array<{ typeCode: string; value: string; normalizedValue: string; isPrimary: boolean }> {
+  const raw = Array.isArray(payload.identifiers) ? (payload.identifiers as PatientIdentifierInput[]) : [];
+  const normalized = raw
+    .map((entry) => {
+      const typeCode = String(entry.typeCode || "").trim();
+      const value = String(entry.value || "").trim();
+      const normalizedValue = normalizeIdentifierValue(value);
+      return {
+        typeCode,
+        value,
+        normalizedValue,
+        isPrimary: Boolean(entry.isPrimary)
+      };
+    })
+    .filter((entry) => entry.typeCode && entry.value && entry.normalizedValue);
+
+  if (normalized.length === 0) {
+    if (validated.cleanIdentifierValue) {
+      return [
+        {
+          typeCode: validated.identifierType,
+          value: validated.cleanIdentifierValue,
+          normalizedValue: normalizeIdentifierValue(validated.cleanIdentifierValue),
+          isPrimary: true
+        }
+      ];
+    }
+    return [];
+  }
+
+  const primaryCount = normalized.filter((entry) => entry.isPrimary).length;
+  if (primaryCount === 0) {
+    normalized[0]!.isPrimary = true;
+  } else if (primaryCount > 1) {
+    throw new HttpError(400, "Only one primary identifier is allowed.");
+  }
+
+  return normalized;
+}
+
+async function replacePatientIdentifiers(
+  client: PoolClient,
+  patientId: number,
+  payload: PatientPayload,
+  validated: ValidatedPatientPayload,
+  actingUserId: OptionalUserId
+): Promise<void> {
+  const identifiers = normalizeIdentifierInputs(payload, validated);
+  await client.query(`delete from patient_identifiers where patient_id = $1`, [patientId]);
+  if (identifiers.length === 0) {
+    return;
+  }
+
+  const typeMap = await resolveIdentifierTypeMap(client);
+  for (const identifier of identifiers) {
+    const typeId = typeMap.get(identifier.typeCode);
+    if (!typeId) {
+      throw new HttpError(400, `Unknown identifier type: ${identifier.typeCode}`);
+    }
+
+    const normalizedValue = ensureIdentifierValue(identifier.normalizedValue, "identifier value");
+    await client.query(
+      `
+        insert into patient_identifiers (
+          patient_id,
+          identifier_type_id,
+          value,
+          normalized_value,
+          is_primary,
+          created_by_user_id,
+          updated_by_user_id
+        )
+        values ($1, $2, $3, $4, $5, $6, $6)
+      `,
+      [patientId, typeId, identifier.value, normalizedValue, identifier.isPrimary, actingUserId]
+    );
+  }
+}
+
 export async function createPatient(payload: PatientPayload, createdByUserId: OptionalUserId): Promise<PersistedPatientRow> {
   const rules = await loadPatientRegistrationSettings();
   const dictionary = await loadNameDictionary();
   const validated = await validatePatientPayload(payload, rules, dictionary);
 
   try {
-    const { rows } = await pool.query<PersistedPatientRow>(
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const { rows } = await client.query<PersistedPatientRow>(
       `
         insert into patients (
           national_id,
@@ -478,24 +628,34 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
       ]
     );
 
-    const createdPatient = rows[0];
+      const createdPatient = rows[0];
 
-    if (!createdPatient) {
-      throw new HttpError(500, "Failed to create patient.");
-    }
-
-    await logAuditEntry(
-      {
-        entityType: "patient",
-        entityId: createdPatient.id,
-        actionType: "create",
-        oldValues: null,
-        newValues: createdPatient,
-        changedByUserId: createdByUserId
+      if (!createdPatient) {
+        throw new HttpError(500, "Failed to create patient.");
       }
-    );
 
-    return createdPatient;
+      await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId);
+
+      await logAuditEntry(
+        {
+          entityType: "patient",
+          entityId: createdPatient.id,
+          actionType: "create",
+          oldValues: null,
+          newValues: createdPatient,
+          changedByUserId: createdByUserId
+        },
+        client
+      );
+
+      await client.query("commit");
+      return createdPatient;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     if (
       typeof error === "object" &&
@@ -518,7 +678,10 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
   const validated = await validatePatientPayload(payload, rules, dictionary);
 
   try {
-    const { rows } = await pool.query<PersistedPatientRow>(
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const { rows } = await client.query<PersistedPatientRow>(
       `
         update patients
         set
@@ -557,24 +720,34 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
       ]
     );
 
-    const updatedPatient = rows[0];
+      const updatedPatient = rows[0];
 
-    if (!updatedPatient) {
-      throw new HttpError(500, "Failed to update patient.");
-    }
-
-    await logAuditEntry(
-      {
-        entityType: "patient",
-        entityId: updatedPatient.id,
-        actionType: "update",
-        oldValues: previousPatient,
-        newValues: updatedPatient,
-        changedByUserId: updatedByUserId
+      if (!updatedPatient) {
+        throw new HttpError(500, "Failed to update patient.");
       }
-    );
 
-    return updatedPatient;
+      await replacePatientIdentifiers(client, Number(updatedPatient.id), payload, validated, updatedByUserId);
+
+      await logAuditEntry(
+        {
+          entityType: "patient",
+          entityId: updatedPatient.id,
+          actionType: "update",
+          oldValues: previousPatient,
+          newValues: updatedPatient,
+          changedByUserId: updatedByUserId
+        },
+        client
+      );
+
+      await client.query("commit");
+      return updatedPatient;
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
   } catch (error) {
     if (
       typeof error === "object" &&
