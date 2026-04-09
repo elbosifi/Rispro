@@ -28,7 +28,6 @@ const backupTables = [
   "dicom_devices",
   "dicom_message_log",
   "system_settings",
-  "backup_runs",
   "audit_log"
 ] as const;
 
