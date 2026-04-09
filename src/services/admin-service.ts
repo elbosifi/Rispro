@@ -32,6 +32,7 @@ const backupTables = [
 ] as const;
 
 type BackupTableName = (typeof backupTables)[number];
+const idSequenceTables = backupTables;
 
 interface BackupRow extends UnknownRecord {}
 
@@ -246,6 +247,30 @@ async function insertRows(
   }
 }
 
+async function reseedTableSequence(client: PoolClient, tableName: BackupTableName): Promise<void> {
+  const { rows } = await client.query<{ max_id: string }>(`select coalesce(max(id), 0) as max_id from ${tableName}`);
+  const maxId = BigInt(rows[0]?.max_id || "0");
+  const sequenceNameResult = await client.query<{ sequence_name: string | null }>(
+    `select pg_get_serial_sequence($1, 'id') as sequence_name`,
+    [tableName]
+  );
+  const sequenceName = sequenceNameResult.rows[0]?.sequence_name;
+
+  if (!sequenceName) {
+    throw new HttpError(500, `Missing sequence for table: ${tableName}`);
+  }
+
+  if (maxId === 0n) {
+    await client.query(`select setval($1::regclass, 1, false)`, [sequenceName]);
+    return;
+  }
+
+  await client.query(`select setval($1::regclass, $2::bigint, true)`, [
+    sequenceName,
+    maxId.toString()
+  ]);
+}
+
 async function userExists(client: PoolClient, userId: NullableUserId): Promise<boolean> {
   if (!userId) {
     return false;
@@ -291,6 +316,12 @@ export async function restoreBackupSnapshot(
 
     for (const tableName of backupTables) {
       await insertRows(client, tableName, backupPayload.tables[tableName] || []);
+    }
+
+    // Restored rows keep their original ids, so reseed every sequence before
+    // writing restore metadata that uses default primary keys.
+    for (const tableName of idSequenceTables) {
+      await reseedTableSequence(client, tableName);
     }
 
     await restoreDocumentFiles(
