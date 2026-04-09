@@ -142,16 +142,23 @@ export async function stopDicomGateway(): Promise<void> {
 
 async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath: string): Promise<ChildProcess | null> {
   try {
-    const mwlOutputDir = getWorklistAeOutputDir(settings.worklistOutputDir, settings.mwlAeTitle);
+    const aeSpecificDir = getWorklistAeOutputDir(settings.worklistOutputDir, settings.mwlAeTitle);
 
-    // wlmscpfs reads worklist files directly from the AE-specific output directory.
-    await ensureWorklistAeDirectory(mwlOutputDir);
+    // Create the AE-specific subdirectory with lockfile.
+    // wlmscpfs resolves the called AE title to this subdirectory inside the parent.
+    await ensureWorklistAeDirectory(aeSpecificDir);
 
-    // Start wlmscpfs from the AE-specific worklist directory.
-    const args = [String(settings.mwlPort)];
+    // wlmscpfs expects -dfp to point to the PARENT worklist directory containing
+    // AE-title subdirectories. It uses the Called AE Title from incoming associations
+    // to select the correct subdirectory (e.g., RISPRO_MWL/).
+    // Reference: DCMTK wlmsetup.txt
+    const args = ["-dfp", settings.worklistOutputDir, String(settings.mwlPort)];
+
+    console.log(`[DICOM MWL] Parent worklist dir: ${settings.worklistOutputDir}`);
+    console.log(`[DICOM MWL] MWL AE title: ${settings.mwlAeTitle}`);
+    console.log(`[DICOM MWL] AE-specific dir: ${aeSpecificDir}`);
 
     const proc = spawn(wlmscpfsPath, args, {
-      cwd: mwlOutputDir,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -315,4 +322,49 @@ async function stopManagedProcess(serviceName: ManagedServiceName): Promise<void
   });
 
   setServiceProcess(serviceName, null, null);
+}
+
+// ---------------------------------------------------------------------------
+// C-ECHO smoke test for MWL SCP
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs a DICOM C-ECHO against the local MWL SCP to verify it is responding.
+ * Returns true on success, false on failure.
+ */
+export async function verifyMwlScpWithEcho(
+  settings: ResolvedGatewaySettings,
+  maxRetries = 10,
+  retryDelayMs = 1000
+): Promise<boolean> {
+  const echoscuPath = await findBinary("echoscu");
+  if (!echoscuPath) {
+    console.log("[DICOM MWL] echoscu not found. Skipping C-ECHO verification.");
+    return false;
+  }
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const { exec } = await import("child_process");
+      const { promisify } = await import("util");
+      const execAsync = promisify(exec);
+
+      await execAsync(
+        `${echoscuPath} -v -aec ${settings.mwlAeTitle} ${settings.bindHost} ${settings.mwlPort}`,
+        { timeout: 5000 }
+      );
+      console.log(`[DICOM MWL] C-ECHO verification passed on attempt ${attempt}/${maxRetries}.`);
+      return true;
+    } catch (error) {
+      if (attempt < maxRetries) {
+        console.log(`[DICOM MWL] C-ECHO attempt ${attempt}/${maxRetries} failed, retrying in ${retryDelayMs}ms...`);
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      } else {
+        console.error("[DICOM MWL] C-ECHO verification failed after all retries. Modalities may not connect.");
+        console.error("[DICOM MWL] Check that wlmscpfs is running and the worklist directory structure is correct.");
+      }
+    }
+  }
+
+  return false;
 }

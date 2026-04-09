@@ -129,11 +129,11 @@ npm start         # Production mode
 # Build image
 docker build -t rispro-reception .
 
-# Run container
-docker run --env-file .env -p 3000:3000 rispro-reception
+# Run container (embedded MWL gateway starts automatically)
+docker run --env-file .env -p 3000:3000 -p 11112:11112 rispro-reception
 
-# Or with DICOM gateway
-docker compose -f docker-compose.dicom-gateway.yml up --build
+# Or use Docker Compose
+docker compose up -d --build
 ```
 
 ### Health Checks
@@ -278,6 +278,17 @@ const result = await api("/api/endpoint", {
 - DICOM device logic fixed (prefer matching source_ip)
 - Error handling improved (DICOM worklist sync warnings)
 
+**DICOM MWL Gateway Fix:**
+- Fixed `wlmscpfs` startup to use DCMTK's correct working-directory model.
+- `wlmscpfs` is now launched with `-dfp` pointing to the parent worklist directory
+  (e.g., `/app/storage/dicom/worklists`) instead of the AE-specific subdirectory.
+- DCMTK resolves the Called AE Title from incoming associations to select the
+  matching AE-specific subdirectory (e.g., `RISPRO_MWL/`).
+- Added C-ECHO smoke test that runs automatically after startup to verify
+  MWL SCP is responding before the app is considered healthy.
+- Added explicit logging: parent directory, AE title, and AE-specific directory path.
+- Removed MPPS support entirely (code, files, migrations, docs). MWL-only deployment.
+
 **Architecture:**
 - New caching utility: `src/utils/cache.ts`
 - Date validation centralized: `src/utils/date.ts::validateIsoDate()`
@@ -326,10 +337,19 @@ const result = await api("/api/endpoint", {
 - Verify `JWT_SECRET` matches
 - Check `COOKIE_SECURE` matches deployment (false for localhost)
 
-**DICOM Gateway:**
-- Ensure sidecar is running
-- Verify AE titles match
-- Check worklist directory permissions
+**DICOM Gateway (Embedded, MWL only):**
+- The embedded gateway starts automatically on container startup.
+- `wlmscpfs` is launched with `-dfp` pointing to the parent worklist directory
+  (e.g., `/app/storage/dicom/worklists`), which contains AE-specific subdirectories.
+- DCMTK resolves the Called AE Title from incoming associations to select the
+  correct subdirectory (e.g., `RISPRO_MWL/lockfile` and `RISPRO_MWL/*.wl`).
+- The worklist builder writes `.wl` files into AE-specific subdirectories.
+- A C-ECHO smoke test runs automatically after startup to verify MWL SCP is responding.
+- If C-ECHO fails, check:
+  - `wlmscpfs` binary is on PATH
+  - Worklist directory has correct permissions
+  - AE title in settings matches the called AE title
+  - No other process is using the MWL port (11112)
 
 ## Documentation References
 
@@ -339,6 +359,7 @@ const result = await api("/api/endpoint", {
 
 ## Qwen Added Memories
 - Full production deployment script: /Users/serajalsaifi/Nextcloud/RISpro/deploy.sh
-Usage: ENABLE_DICOM_GATEWAY=1 SERVICE_NAME=rispro ./deploy.sh
-Key env vars: ENABLE_DICOM_GATEWAY, SERVICE_NAME, RESTART_MODE, DEPLOY_BRANCH, HEALTHCHECK_URL
-The script handles: git pull, npm ci, migrations, DCMTK installation, systemd service provisioning, worklist rebuild, DICOM echo smoke test
+  Usage: ENABLE_DICOM_GATEWAY=1 SERVICE_NAME=rispro ./deploy.sh
+  Key env vars: ENABLE_DICOM_GATEWAY, SERVICE_NAME, RESTART_MODE, DEPLOY_BRANCH, HEALTHCHECK_URL
+  The script handles: git pull, npm ci, migrations, DCMTK installation, systemd service provisioning, worklist rebuild, DICOM echo smoke test
+  Note: DICOM gateway is now embedded (MWL only). No separate sidecar container needed.

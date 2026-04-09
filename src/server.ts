@@ -80,8 +80,16 @@ async function start(): Promise<void> {
       startupSummary.dicom_gateway = "disabled_by_env";
     } else {
       // Start DICOM gateway services (MWL SCP and MWL worklist builder)
-      const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
+      const { startDicomGateway, verifyMwlScpWithEcho } = await import("./services/dicom-gateway-service.js");
       dicomGateway = await startDicomGateway();
+
+      // Give wlmscpfs a moment to initialize, then verify with C-ECHO
+      if (dicomGateway) {
+        await new Promise((r) => setTimeout(r, 2000));
+        const { resolveGatewaySettings } = await import("./services/dicom-settings-resolver.js");
+        const settings = await resolveGatewaySettings();
+        await verifyMwlScpWithEcho(settings);
+      }
     }
   } catch (error) {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
