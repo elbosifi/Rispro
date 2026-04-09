@@ -3,8 +3,8 @@
  * Mirrors src/utils/national-id.js for use in React components.
  */
 
-const NATIONAL_ID_LENGTH = 11;
-const VALID_NATIONAL_ID_REGEX = /^\d{11}$/;
+const NATIONAL_ID_LENGTH = 12;
+const VALID_NATIONAL_ID_REGEX = /^\d{12}$/;
 
 export function isValidNationalId(value: unknown): boolean {
   const clean = String(value || '').replace(/\D/g, '');

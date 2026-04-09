@@ -103,7 +103,7 @@ integrationsRouter.post(
     const body = asUnknownRecord(request.body);
     const patientNationalId = String(asOptionalString(body.patientNationalId) || "").replace(/\D/g, "");
     if (!isValidNationalId(patientNationalId)) {
-      throw new HttpError(400, "National ID must contain exactly 11 digits.");
+      throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
     const studies = await runPacsCFind({
       patientNationalId,
@@ -120,7 +120,7 @@ integrationsRouter.post(
     const body = asUnknownRecord(request.body);
     const patientNationalId = String(asOptionalString(body.patientNationalId) || "").replace(/\D/g, "");
     if (!isValidNationalId(patientNationalId)) {
-      throw new HttpError(400, "National ID must contain exactly 11 digits.");
+      throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
     const studies = await searchPacsStudies({
       criteria: { ...body, patientNationalId, patientId: patientNationalId },

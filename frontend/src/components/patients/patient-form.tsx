@@ -377,12 +377,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Select label="Identifier Type" value={form.identifierType} onChange={(v) => setForm((f) => ({ ...f, identifierType: v as IdentifierType, nationalIdConfirmation: "" }))} options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]} />
           {isNationalId ? (
-            <Input label="National ID (11 digits)" value={form.identifierValue} onChange={handleIdentifierValueChange} maxLength={11} placeholder="1xxxxxxxxxx" />
+            <Input label="National ID (12 digits)" value={form.identifierValue} onChange={handleIdentifierValueChange} maxLength={12} placeholder="1xxxxxxxxxxx" />
           ) : (
             <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => ({ ...f, identifierValue: v }))} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
           )}
           {showConfirmation && (
-            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={11} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={nationalIdWasEdited} />
+            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={12} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={nationalIdWasEdited} />
           )}
         </div>
       </div>

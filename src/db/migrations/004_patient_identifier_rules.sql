@@ -7,7 +7,7 @@ begin
   ) then
     alter table patients
     add constraint patients_national_id_length_v1
-    check (char_length(national_id) = 11) not valid;
+    check (char_length(national_id) = 12) not valid;
   end if;
 end $$;
 

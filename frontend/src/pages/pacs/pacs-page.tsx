@@ -128,10 +128,10 @@ export default function PacsPage() {
             <input
               type="text"
               value={nationalId}
-              onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 11))}
+              onChange={(e) => setNationalId(e.target.value.replace(/\D/g, "").slice(0, 12))}
               placeholder={t(language, "pacs.placeholder")}
               inputMode="numeric"
-              maxLength={11}
+              maxLength={12}
               className="w-full px-4 py-2.5 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
             />
           </div>

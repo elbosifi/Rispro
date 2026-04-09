@@ -69,6 +69,9 @@ dicomRouter.get(
       },
       status: {
         gatewayEnabled: settings.enabled,
+        gatewayStatus: serviceStatuses.mwl?.status || (settings.enabled ? "starting" : "stopped"),
+        gatewayPid: serviceStatuses.mwl?.pid || null,
+        gatewayLastError: serviceStatuses.mwl?.lastError || null,
         directoriesReady: Object.values(fileHealth).every(
           (v) => typeof v === "object" && v !== null && "exists" in v ? v.exists : true
         ),

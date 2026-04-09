@@ -12,7 +12,7 @@ create table if not exists users (
 create table if not exists patients (
   id bigserial primary key,
   mrn text unique,
-  national_id varchar(13) not null unique,
+  national_id varchar(12) not null unique,
   arabic_full_name text not null,
   english_full_name text not null,
   normalized_arabic_name text not null,

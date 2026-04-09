@@ -104,8 +104,8 @@ function validateNationalIdField(
         return { nationalId: "", identifierValue: "" };
       }
 
-      if (cleanId.length !== 11) {
-        throw new HttpError(400, "National ID must contain exactly 11 digits.");
+      if (cleanId.length !== 12) {
+        throw new HttpError(400, "National ID must contain exactly 12 digits.");
       }
 
       if (cleanConfirmation && cleanId !== cleanConfirmation) {
@@ -115,8 +115,8 @@ function validateNationalIdField(
       return { nationalId: cleanId, identifierValue: cleanId };
     }
 
-    if (cleanId.length !== 11) {
-      throw new HttpError(400, "National ID must contain exactly 11 digits.");
+    if (cleanId.length !== 12) {
+      throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
 
     if (cleanConfirmation && cleanId !== cleanConfirmation) {

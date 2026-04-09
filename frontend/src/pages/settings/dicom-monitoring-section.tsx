@@ -155,12 +155,23 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatusCard
               title="Gateway Status"
-              status={status.gatewayEnabled ? "Ready" : "Disabled"}
-              statusType={status.gatewayEnabled ? "success" : "warning"}
+              status={formatGatewayStatus(services.mwl?.status || status.gatewayStatus, status.gatewayEnabled)}
+              statusType={statusToType(services.mwl?.status || status.gatewayStatus, status.gatewayEnabled)}
               details={[
                 `AE Title: ${settings.mwlAeTitle || "N/A"}`,
-                `Port: ${settings.mwlPort || "N/A"}`
+                `Port: ${settings.mwlPort || "N/A"}`,
+                `PID: ${services.mwl?.pid || status.gatewayPid || "N/A"}`,
+                services.mwl?.lastError || status.gatewayLastError ? `Last error: ${services.mwl?.lastError || status.gatewayLastError}` : `Mode: ${status.gatewayEnabled ? "Enabled" : "Disabled"}`
               ]}
+              actions={
+                status.gatewayEnabled
+                  ? [
+                      { label: "Start", onClick: () => serviceControlMutation.mutate({ serviceName: "mwl", action: "start" }), kind: "success", disabled: serviceControlMutation.isPending },
+                      { label: "Stop", onClick: () => serviceControlMutation.mutate({ serviceName: "mwl", action: "stop" }), kind: "danger", disabled: serviceControlMutation.isPending },
+                      { label: "Restart", onClick: () => serviceControlMutation.mutate({ serviceName: "mwl", action: "restart" }), kind: "warning", disabled: serviceControlMutation.isPending }
+                    ]
+                  : undefined
+              }
             />
 
             <StatusCard
@@ -192,10 +203,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
               <ServiceStatusCard
                 serviceName="MWL SCP Server"
                 service={services.mwl}
-                onStart={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "start" })}
-                onStop={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "stop" })}
-                onRestart={() => serviceControlMutation.mutate({ serviceName: "mwl", action: "restart" })}
-                isBusy={serviceControlMutation.isPending}
+                showControls={false}
               />
               <ServiceStatusCard
                 serviceName="MPPS SCP Server"
@@ -401,17 +409,25 @@ function StatusCard({
   title,
   status,
   statusType,
-  details
+  details,
+  actions
 }: {
   title: string;
   status: string;
   statusType: "success" | "warning" | "error";
   details: string[];
+  actions?: Array<{ label: string; onClick: () => void; kind: "success" | "warning" | "danger"; disabled?: boolean }>;
 }) {
   const colorMap = {
     success: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
     warning: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
     error: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+  };
+
+  const actionColorMap = {
+    success: "bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-400 text-white",
+    warning: "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white",
+    danger: "bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white"
   };
 
   return (
@@ -425,6 +441,20 @@ function StatusCard({
           <li key={idx}>{detail}</li>
         ))}
       </ul>
+      {actions && actions.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              onClick={action.onClick}
+              disabled={action.disabled}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${actionColorMap[action.kind]}`}
+            >
+              {action.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -518,4 +548,29 @@ function ServiceStatusCard({
       )}
     </div>
   );
+}
+
+function formatGatewayStatus(status: string | undefined, enabled: boolean): string {
+  if (!enabled) return "Disabled";
+  switch (status) {
+    case "running":
+      return "Running";
+    case "starting":
+      return "Starting";
+    case "stopping":
+      return "Stopping";
+    case "error":
+      return "Error";
+    case "stopped":
+      return "Stopped";
+    default:
+      return "Unknown";
+  }
+}
+
+function statusToType(status: string | undefined, enabled: boolean): "success" | "warning" | "error" {
+  if (!enabled) return "warning";
+  if (status === "running") return "success";
+  if (status === "error") return "error";
+  return "warning";
 }
