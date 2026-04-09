@@ -2,7 +2,7 @@
 # RISpro Reception - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
 # Stage 1: Build frontend assets
-# Stage 2: Build DCMTK 3.6.9 from Debian source infrastructure
+# Stage 2: Build DCMTK 3.6.9 from OFFIS release tarball
 # Stage 3: Production runtime (Node.js + copied DCMTK toolchain)
 # =============================================================================
 
@@ -19,7 +19,7 @@ COPY frontend/ .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 2: Build DCMTK 3.6.9 from Debian source infrastructure
+# Stage 2: Build DCMTK 3.6.9 from OFFIS release tarball
 # ---------------------------------------------------------------------------
 FROM debian:bookworm-slim AS dcmtk-builder
 
@@ -39,16 +39,16 @@ RUN set -eux; \
       libpng-dev \
       libtiff-dev \
       libsndfile1-dev \
-      xxd; \
+    xxd; \
     rm -rf /var/lib/apt/lists/*
 
 RUN set -eux; \
-    printf '%s\n' \
-      'deb-src http://deb.debian.org/debian trixie main' \
-      > /etc/apt/sources.list.d/trixie-src.list; \
-    apt-get update; \
-    apt-get source dcmtk=3.6.9-5; \
-    rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/trixie-src.list
+    dcmtk_url="https://support.dcmtk.org/redmine/attachments/download/214/dcmtk-3.6.9.tar.gz"; \
+    dcmtk_sha256="b93ff5561244916a6e1e7e3ecccf2e26e6932c4edb5961268401cea7d4ab9c16"; \
+    wget -O /tmp/dcmtk-3.6.9.tar.gz "$dcmtk_url"; \
+    echo "${dcmtk_sha256}  /tmp/dcmtk-3.6.9.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/dcmtk-3.6.9.tar.gz -C /tmp; \
+    rm -f /tmp/dcmtk-3.6.9.tar.gz
 
 RUN set -eux; \
     src_dir="$(find /tmp -maxdepth 1 -type d -name 'dcmtk-*' | sort | head -n 1)"; \
@@ -97,10 +97,12 @@ RUN set -eux; \
     done > /etc/ld.so.conf.d/dcmtk.conf; \
     ldconfig
 
-# Fail the build unless the required DCMTK tools are present and executable
+# Fail the build unless the required DCMTK tools are present and executable.
+# Print resolved paths to make build failures easier to diagnose.
 RUN set -eux; \
     for tool in wlmscpfs ppsscpfs dump2dcm dcmdump echoscu findscu; do \
       tool_path="$(command -v "$tool")"; \
+      echo "$tool: $tool_path"; \
       test -n "$tool_path"; \
       test -x "$tool_path"; \
     done

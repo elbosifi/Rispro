@@ -10,3 +10,14 @@ cd /opt/Rispro
 git pull
 docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --build
 docker compose logs -f app
+
+
+#complete wipe out
+cd /opt
+docker compose -f /opt/Rispro/docker-compose.yml -f /opt/Rispro/docker-compose.internal-db.yml down -v --remove-orphans || true
+docker system prune -af --volumes
+rm -rf /opt/Rispro
+git clone https://github.com/elbosifi/Rispro.git
+cd /opt/Rispro
+chmod +x scripts/setup-docker.sh scripts/update-docker.sh scripts/dicom-gateway/smoke-test.sh
+./scripts/setup-docker.sh

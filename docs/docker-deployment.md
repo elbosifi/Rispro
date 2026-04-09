@@ -81,7 +81,7 @@ docker compose -f docker-compose.yml up -d --build
 
 ### Embedded Gateway (Default Design)
 
-The RISpro app container includes a source-built DCMTK toolchain and runs all DICOM services internally:
+The RISpro app container includes a source-built DCMTK toolchain from the official OFFIS 3.6.9 release tarball, verified by SHA256 during image build, and runs all DICOM services internally:
 
 | Service | Binary | Purpose |
 |---------|--------|---------|
