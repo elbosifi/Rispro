@@ -24,7 +24,7 @@
   - Connection pooling with configurable limits
   
 - **Integrations**:
-  - DICOM gateway (MWL/MPPS support)
+  - DICOM gateway (MWL support)
   - PACS C-FIND for prior studies
   - Document upload/scanning
 
@@ -122,7 +122,6 @@ npm start         # Production mode
 | `npm run seed:supervisor` | Create initial supervisor user |
 | `npm run check` | Syntax validation |
 | `npm run gateway:build-worklists` | Build DICOM worklist files |
-| `npm run gateway:process-mpps` | Process MPPS inbox |
 
 ### Docker Deployment
 

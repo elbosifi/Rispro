@@ -16,7 +16,7 @@ After the script finishes:
 
 - **Web UI**: `http://localhost:3000`
 - **DICOM MWL**: `127.0.0.1:11112` (AE: `RISPRO_MWL`)
-- **DICOM MPPS**: intentionally disabled in the current build
+- **Note**: MPPS is not supported in this build (MWL only)
 
 The supervisor credentials are printed at the end of setup.
 
@@ -88,7 +88,7 @@ The RISpro app container includes a source-built DCMTK toolchain from the offici
 | **MWL SCP** | `wlmscpfs` | Serves modality worklist files to modalities |
 | **Worklist Builder** | Node.js worker | Generates `.wl` files from appointments |
 
-The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container. MPPS support is intentionally omitted for now and will be added in a later patch.
+The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container.
 
 **No separate gateway container is needed.** Everything runs inside the single `rispro-app` container.
 
@@ -127,7 +127,6 @@ The app then:
 - Rebuilds worklist sources
 - Starts embedded MWL SCP (`wlmscpfs`)
 - Starts the worklist builder worker
-- Leaves MPPS disabled by design for this build
 
 ### Startup Summary Output
 
@@ -141,9 +140,7 @@ The app then:
 
   DICOM Services:
     MWL SCP:        running (RISPRO_MWL @ 0.0.0.0:11112)
-    MPPS SCP:       disabled_by_design
     Worklist Bldr:  running
-    MPPS Processor: disabled_by_design
     Worklist Dir:   /app/storage/dicom/worklists
 ========================================
 ```
@@ -218,8 +215,6 @@ DICOM gateway settings are stored in the database and managed via the **Settings
 - AE title and port for MWL
 - Bind host
 - Worklist directories
-
-MPPS settings remain reserved for a future patch and are not used by the current build.
 
 ### Disabling Embedded Gateway
 
@@ -352,7 +347,6 @@ lsof -i :11112
 │  │  │  DICOM Gateway (embedded)          │   │   │
 │  │  │  :11112  MWL SCP (wlmscpfs)        │   │   │
 │  │  │  Workers: build-worklists           │   │   │
-│  │  │  MPPS: disabled_by_design           │   │   │
 │  │  └────────────────────────────────────┘   │   │
 │  │                                            │   │
 │  │  /app/storage/dicom/  (Docker volume)     │   │
@@ -371,10 +365,5 @@ lsof -i :11112
 
 ## Legacy: Separate DICOM Gateway Service
 
-The old `docker-compose.dicom-gateway.yml` with a separate gateway container is still available but **not recommended** for new deployments. Use the embedded gateway instead.
-In the current build, the legacy gateway path is MWL-only; MPPS remains disabled by design until a future patch.
-
-To use the legacy setup:
-```bash
-docker compose -f docker-compose.dicom-gateway.yml up -d
-```
+The old `docker-compose.dicom-gateway.yml` with a separate gateway container has been removed.
+The embedded MWL gateway is the only supported deployment model.

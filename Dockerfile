@@ -86,7 +86,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 # Copy the source-built DCMTK toolchain into the runtime image.
-# MPPS is intentionally omitted in this build; only MWL-required tools are verified.
+# Only MWL-required tools are verified at build time.
 COPY --from=dcmtk-builder /opt/dcmtk /opt/dcmtk
 ENV PATH="/opt/dcmtk/bin:/opt/dcmtk/sbin:${PATH}"
 
