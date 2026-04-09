@@ -236,17 +236,12 @@ async function insertRows(
     }
   }
 
-  // Build placeholders with ::jsonb casts for jsonb columns
-  const jsonbCols = JSONB_COLUMNS[tableName];
-  const basePlaceholders = columns.map((_, index) => {
-    if (jsonbCols?.has(columns[index])) return `$${index + 1}::jsonb`;
-    return `$${index + 1}`;
-  }).join(", ");
+  const placeholders = columns.map((_, index) => `$${index + 1}`).join(", ");
 
   for (const row of sanitizedRows) {
     const values: unknown[] = columns.map((column) => row[column]);
     await client.query(
-      `insert into ${tableName} (${columns.join(", ")}) values (${basePlaceholders})`,
+      `insert into ${tableName} (${columns.join(", ")}) values (${placeholders})`,
       values
     );
   }
