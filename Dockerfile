@@ -2,7 +2,8 @@
 # RISpro Reception - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
 # Stage 1: Build frontend assets
-# Stage 2: Production runtime (Debian bookworm with DCMTK from apt)
+# Stage 2: Build DCMTK 3.6.9 from Debian source infrastructure
+# Stage 3: Production runtime (Node.js + copied DCMTK toolchain)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -18,31 +19,91 @@ COPY frontend/ .
 RUN npm run build
 
 # ---------------------------------------------------------------------------
-# Stage 2: Production runtime (Debian bookworm + DCMTK from apt)
+# Stage 2: Build DCMTK 3.6.9 from Debian source infrastructure
+# ---------------------------------------------------------------------------
+FROM debian:bookworm-slim AS dcmtk-builder
+
+WORKDIR /tmp
+
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      build-essential \
+      cmake \
+      ca-certificates \
+      wget \
+      libssl-dev \
+      libxml2-dev \
+      zlib1g-dev \
+      libwrap0-dev \
+      libpng-dev \
+      libtiff-dev \
+      libsndfile1-dev \
+      xxd; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    printf '%s\n' \
+      'deb-src http://deb.debian.org/debian trixie main' \
+      > /etc/apt/sources.list.d/trixie-src.list; \
+    apt-get update; \
+    apt-get source dcmtk=3.6.9-5; \
+    rm -rf /var/lib/apt/lists/* /etc/apt/sources.list.d/trixie-src.list
+
+RUN set -eux; \
+    src_dir="$(find /tmp -maxdepth 1 -type d -name 'dcmtk-*' | sort | head -n 1)"; \
+    cmake -S "$src_dir" -B "$src_dir/build" \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=/opt/dcmtk \
+      -DDCMTK_WIDE_CHAR_FILE_IO_FUNCTIONS=ON \
+      -DDCMTK_ENABLE_STL=ON \
+      -DBUILD_SHARED_LIBS=ON; \
+    cmake --build "$src_dir/build" -j"$(nproc)"; \
+    cmake --install "$src_dir/build"
+
+# ---------------------------------------------------------------------------
+# Stage 3: Production runtime (Node.js + copied DCMTK toolchain)
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS production
 
-# Install runtime dependencies including DCMTK from Debian repos
+# Install runtime dependencies for the app and DCMTK shared libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     bash \
-    dcmtk \
+    libssl3 \
+    libxml2 \
+    zlib1g \
+    libwrap0 \
+    libpng16-16 \
+    libtiff6 \
+    libsndfile1 \
+    libjpeg62-turbo \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Verify all required DCMTK tools are present and executable
-RUN echo "Verifying DCMTK installation..." \
-    && wlmscpfs --version 2>&1 | head -1 \
-    && ppsscpfs --version 2>&1 | head -1 \
-    && dump2dcm --version 2>&1 | head -1 \
-    && dcmdump --version 2>&1 | head -1 \
-    && echoscu --version 2>&1 | head -1 \
-    && findscu --version 2>&1 | head -1 \
-    && echo "All DCMTK tools verified."
+# Copy the source-built DCMTK toolchain into the runtime image
+COPY --from=dcmtk-builder /opt/dcmtk /opt/dcmtk
+ENV PATH="/opt/dcmtk/bin:/opt/dcmtk/sbin:${PATH}"
+
+RUN set -eux; \
+    for libdir in /opt/dcmtk/lib /opt/dcmtk/lib64; do \
+      if [ -d "$libdir" ]; then \
+        echo "$libdir"; \
+      fi; \
+    done > /etc/ld.so.conf.d/dcmtk.conf; \
+    ldconfig
+
+# Fail the build unless the required DCMTK tools are present and executable
+RUN set -eux; \
+    for tool in wlmscpfs ppsscpfs dump2dcm dcmdump echoscu findscu; do \
+      tool_path="$(command -v "$tool")"; \
+      test -n "$tool_path"; \
+      test -x "$tool_path"; \
+    done
 
 # Install backend dependencies (include devDependencies for tsx)
 # NODE_ENV=development ensures tsx (in devDependencies) is installed.

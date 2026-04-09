@@ -56,7 +56,7 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 | `rispro-app` | RISpro app + embedded DICOM | 3000, 11112, 11113 | `rispro-storage` |
 | `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
-> **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` automatically.
+> **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` and `DATABASE_SSL_REJECT_UNAUTHORIZED=false` automatically.
 
 ### Mode 2: External PostgreSQL
 
@@ -81,7 +81,7 @@ docker compose -f docker-compose.yml up -d --build
 
 ### Embedded Gateway (Default Design)
 
-The RISpro app container includes the complete DCMTK toolchain and runs all DICOM services internally:
+The RISpro app container includes a source-built DCMTK toolchain and runs all DICOM services internally:
 
 | Service | Binary | Purpose |
 |---------|--------|---------|
@@ -89,6 +89,8 @@ The RISpro app container includes the complete DCMTK toolchain and runs all DICO
 | **MPPS SCP** | `ppsscpfs` | Receives MPPS objects from modalities |
 | **Worklist Builder** | Node.js worker | Generates `.wl` files from appointments |
 | **MPPS Processor** | Node.js worker | Processes received MPPS files and updates appointments |
+
+The final image bundles both DCMTK SCP binaries, so `wlmscpfs` and `ppsscpfs` are available without a separate gateway container.
 
 **No separate gateway container is needed.** Everything runs inside the single `rispro-app` container.
 
@@ -126,7 +128,7 @@ The app then:
 - Creates DICOM directories
 - Rebuilds worklist sources
 - Starts embedded MWL SCP (`wlmscpfs`)
-- Starts embedded MPPS SCP (`ppsscpfs`) if available
+- Starts embedded MPPS SCP (`ppsscpfs`)
 - Starts worklist builder and MPPS processor workers
 
 ### Startup Summary Output
