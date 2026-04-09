@@ -145,20 +145,17 @@ async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath
     const aeSpecificDir = getWorklistAeOutputDir(settings.worklistOutputDir, settings.mwlAeTitle);
 
     // Create the AE-specific subdirectory with lockfile.
-    // wlmscpfs resolves the called AE title to this subdirectory inside the parent.
     await ensureWorklistAeDirectory(aeSpecificDir);
 
-    // wlmscpfs expects -dfp to point to the PARENT worklist directory containing
-    // AE-title subdirectories. It uses the Called AE Title from incoming associations
-    // to select the correct subdirectory (e.g., RISPRO_MWL/).
-    // Reference: DCMTK wlmsetup.txt
-    const args = ["-dfp", settings.worklistOutputDir, String(settings.mwlPort)];
+    // The working host path starts wlmscpfs inside the AE-specific directory.
+    // The builder writes .wl files into that directory and wlmscpfs serves them directly.
+    const args = [String(settings.mwlPort)];
 
-    console.log(`[DICOM MWL] Parent worklist dir: ${settings.worklistOutputDir}`);
+    console.log(`[DICOM MWL] Worklist dir: ${aeSpecificDir}`);
     console.log(`[DICOM MWL] MWL AE title: ${settings.mwlAeTitle}`);
-    console.log(`[DICOM MWL] AE-specific dir: ${aeSpecificDir}`);
 
     const proc = spawn(wlmscpfsPath, args, {
+      cwd: aeSpecificDir,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
