@@ -32,6 +32,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: (userData) => {
       queryClient.setQueryData(["auth-session"], userData);
+    },
+    onSettled: () => {
       setIsTransitioning(false);
     }
   });
