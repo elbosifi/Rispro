@@ -147,15 +147,14 @@ async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath
     // Create the AE-specific subdirectory with lockfile.
     await ensureWorklistAeDirectory(aeSpecificDir);
 
-    // The working host path starts wlmscpfs inside the AE-specific directory.
-    // The builder writes .wl files into that directory and wlmscpfs serves them directly.
-    const args = [String(settings.mwlPort)];
+    // wlmscpfs serves the AE-specific subdirectory from the parent worklist directory.
+    // Keep the parent directory layout so the caller AE resolves to RISPRO_MWL/.
+    const args = ["-dfp", settings.worklistOutputDir, String(settings.mwlPort)];
 
-    console.log(`[DICOM MWL] Worklist dir: ${aeSpecificDir}`);
+    console.log(`[DICOM MWL] Parent worklist dir: ${settings.worklistOutputDir}`);
     console.log(`[DICOM MWL] MWL AE title: ${settings.mwlAeTitle}`);
 
     const proc = spawn(wlmscpfsPath, args, {
-      cwd: aeSpecificDir,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });

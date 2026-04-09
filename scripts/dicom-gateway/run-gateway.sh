@@ -35,5 +35,4 @@ cleanup() {
 
 trap cleanup INT TERM EXIT
 
-cd "$MWL_OUTPUT_DIR"
-exec wlmscpfs "$DICOM_MWL_PORT"
+exec wlmscpfs -dfp "$DICOM_WORKLIST_OUTPUT_DIR" "$DICOM_MWL_PORT"
