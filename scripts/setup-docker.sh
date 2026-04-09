@@ -353,7 +353,7 @@ main() {
   # Defaults
   _DEFAULT_DB_PASSWORD='QOYR0s1h/uI7wqZrzW0gjNfQY61VwA6ek0wXsUEx6So='
   _jwt_secret="$(random_hex)" || _jwt_secret="CHANGE_ME_TO_A_LONG_RANDOM_SECRET_MINIMUM_32_CHARS"
-  _supervisor_pwd="$(random_base64)" || _supervisor_pwd="ChangeThisPassword123!"
+  _supervisor_pwd="admin"
 
   if [ "$_db_mode" = "internal" ]; then
     # Internal PostgreSQL
