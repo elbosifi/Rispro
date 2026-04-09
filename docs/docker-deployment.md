@@ -16,7 +16,7 @@ After the script finishes:
 
 - **Web UI**: `http://localhost:3000`
 - **DICOM MWL**: `127.0.0.1:11112` (AE: `RISPRO_MWL`)
-- **DICOM MPPS**: `127.0.0.1:11113` (AE: `RISPRO_MPPS`)
+- **DICOM MPPS**: intentionally disabled in the current build
 
 The supervisor credentials are printed at the end of setup.
 
@@ -81,16 +81,14 @@ docker compose -f docker-compose.yml up -d --build
 
 ### Embedded Gateway (Default Design)
 
-The RISpro app container includes a source-built DCMTK toolchain from the official OFFIS 3.6.9 release tarball, verified by SHA256 during image build, and runs all DICOM services internally:
+The RISpro app container includes a source-built DCMTK toolchain from the official OFFIS 3.6.9 release tarball, verified by SHA256 during image build, and runs the MWL gateway internally:
 
 | Service | Binary | Purpose |
 |---------|--------|---------|
 | **MWL SCP** | `wlmscpfs` | Serves modality worklist files to modalities |
-| **MPPS SCP** | `ppsscpfs` | Receives MPPS objects from modalities |
 | **Worklist Builder** | Node.js worker | Generates `.wl` files from appointments |
-| **MPPS Processor** | Node.js worker | Processes received MPPS files and updates appointments |
 
-The final image bundles both DCMTK SCP binaries, so `wlmscpfs` and `ppsscpfs` are available without a separate gateway container.
+The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container. MPPS support is intentionally omitted for now and will be added in a later patch.
 
 **No separate gateway container is needed.** Everything runs inside the single `rispro-app` container.
 
@@ -109,7 +107,7 @@ The final image bundles both DCMTK SCP binaries, so `wlmscpfs` and `ppsscpfs` ar
 
 | Volume | Contents |
 |--------|----------|
-| `rispro-storage` | DICOM worklists, MPPS inbox, uploads |
+| `rispro-storage` | DICOM worklists, uploads |
 | `postgres-data` | PostgreSQL data (internal DB mode only). Never removed by update scripts. |
 
 ---
@@ -128,8 +126,8 @@ The app then:
 - Creates DICOM directories
 - Rebuilds worklist sources
 - Starts embedded MWL SCP (`wlmscpfs`)
-- Starts embedded MPPS SCP (`ppsscpfs`)
-- Starts worklist builder and MPPS processor workers
+- Starts the worklist builder worker
+- Leaves MPPS disabled by design for this build
 
 ### Startup Summary Output
 
@@ -143,9 +141,9 @@ The app then:
 
   DICOM Services:
     MWL SCP:        running (RISPRO_MWL @ 0.0.0.0:11112)
-    MPPS SCP:       running (RISPRO_MPPS @ 0.0.0.0:11113)
+    MPPS SCP:       disabled_by_design
     Worklist Bldr:  running
-    MPPS Processor: running
+    MPPS Processor: disabled_by_design
     Worklist Dir:   /app/storage/dicom/worklists
 ========================================
 ```
@@ -182,8 +180,8 @@ docker compose exec app sh /app/scripts/dicom-gateway/smoke-test.sh
 
 This validates:
 - Backend health and readiness
-- DICOM C-ECHO to MWL SCP and MPPS SCP
-- All 6 DCMTK tools availability
+- DICOM C-ECHO to the MWL SCP
+- Required MWL DCMTK tools availability
 - DICOM directory health
 
 ### Manual DICOM Verification
@@ -191,9 +189,6 @@ This validates:
 ```bash
 # Test MWL SCP
 docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
-
-# Test MPPS SCP
-docker compose exec app echoscu -v -aec RISPRO_MPPS 127.0.0.1 11113
 ```
 
 ---
@@ -220,10 +215,11 @@ docker compose exec app echoscu -v -aec RISPRO_MPPS 127.0.0.1 11113
 
 DICOM gateway settings are stored in the database and managed via the **Settings → DICOM Gateway** UI:
 
-- AE titles (MWL and MPPS)
-- Ports (default: 11112, 11113)
+- AE title and port for MWL
 - Bind host
 - Worklist directories
+
+MPPS settings remain reserved for a future patch and are not used by the current build.
 
 ### Disabling Embedded Gateway
 
@@ -311,7 +307,7 @@ For external DB:
 docker compose exec app wget -qO- http://127.0.0.1:3000/api/ready || echo "Not ready"
 ```
 
-### MWL/MPPS Not Responding
+### MWL Not Responding
 
 ```bash
 # Check DICOM service status in logs
@@ -321,7 +317,7 @@ docker compose logs app | grep "DICOM"
 docker compose exec app sh /app/scripts/dicom-gateway/smoke-test.sh
 
 # Verify processes are running
-docker compose exec app ps aux | grep -E "wlmscpfs|ppsscpfs"
+docker compose exec app ps aux | grep -E "wlmscpfs|build-worklists"
 ```
 
 ### Port Conflicts
@@ -355,9 +351,8 @@ lsof -i :11112
 │  │  ┌────────────────────────────────────┐   │   │
 │  │  │  DICOM Gateway (embedded)          │   │   │
 │  │  │  :11112  MWL SCP (wlmscpfs)        │   │   │
-│  │  │  :11113  MPPS SCP (ppsscpfs)       │   │   │
-│  │  │  Workers: build-worklists,         │   │   │
-│  │  │           process-mpps-inbox       │   │   │
+│  │  │  Workers: build-worklists           │   │   │
+│  │  │  MPPS: disabled_by_design           │   │   │
 │  │  └────────────────────────────────────┘   │   │
 │  │                                            │   │
 │  │  /app/storage/dicom/  (Docker volume)     │   │
@@ -377,6 +372,7 @@ lsof -i :11112
 ## Legacy: Separate DICOM Gateway Service
 
 The old `docker-compose.dicom-gateway.yml` with a separate gateway container is still available but **not recommended** for new deployments. Use the embedded gateway instead.
+In the current build, the legacy gateway path is MWL-only; MPPS remains disabled by design until a future patch.
 
 To use the legacy setup:
 ```bash

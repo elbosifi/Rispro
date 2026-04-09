@@ -2,8 +2,8 @@
 # RISpro Reception - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
 # Stage 1: Build frontend assets
-# Stage 2: Build DCMTK 3.6.9 from OFFIS release tarball
-# Stage 3: Production runtime (Node.js + copied DCMTK toolchain)
+# Stage 2: Build the MWL-only DCMTK 3.6.9 toolchain from the OFFIS release tarball
+# Stage 3: Production runtime (Node.js + copied MWL DCMTK toolchain)
 # =============================================================================
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,7 @@ RUN set -eux; \
     cmake --install "$src_dir/build"
 
 # ---------------------------------------------------------------------------
-# Stage 3: Production runtime (Node.js + copied DCMTK toolchain)
+# Stage 3: Production runtime (Node.js + copied MWL DCMTK toolchain)
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS production
 
@@ -85,7 +85,8 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 
-# Copy the source-built DCMTK toolchain into the runtime image
+# Copy the source-built DCMTK toolchain into the runtime image.
+# MPPS is intentionally omitted in this build; only MWL-required tools are verified.
 COPY --from=dcmtk-builder /opt/dcmtk /opt/dcmtk
 ENV PATH="/opt/dcmtk/bin:/opt/dcmtk/sbin:${PATH}"
 
@@ -97,10 +98,10 @@ RUN set -eux; \
     done > /etc/ld.so.conf.d/dcmtk.conf; \
     ldconfig
 
-# Fail the build unless the required DCMTK tools are present and executable.
+# Fail the build unless the MWL-required DCMTK tools are present and executable.
 # Print resolved paths to make build failures easier to diagnose.
 RUN set -eux; \
-    for tool in wlmscpfs ppsscpfs dump2dcm dcmdump echoscu findscu; do \
+    for tool in wlmscpfs dump2dcm dcmdump echoscu findscu; do \
       tool_path="$(command -v "$tool")"; \
       echo "$tool: $tool_path"; \
       test -n "$tool_path"; \

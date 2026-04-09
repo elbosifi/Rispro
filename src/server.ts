@@ -79,7 +79,7 @@ async function start(): Promise<void> {
       console.log("Embedded DICOM gateway disabled by environment. Skipping in-process gateway startup.");
       startupSummary.dicom_gateway = "disabled_by_env";
     } else {
-      // Start DICOM gateway services (MWL SCP, MPPS SCP, workers)
+      // Start DICOM gateway services (MWL SCP and MWL worklist builder)
       const { startDicomGateway } = await import("./services/dicom-gateway-service.js");
       dicomGateway = await startDicomGateway();
     }
@@ -115,15 +115,15 @@ async function start(): Promise<void> {
       console.log("    MPPS Processor: disabled_by_env");
     } else if (services.mwl?.status === "running") {
       console.log(`    MWL SCP:        running (${settings.mwlAeTitle} @ ${settings.bindHost}:${settings.mwlPort})`);
-      console.log(`    MPPS SCP:       ${services.mpps?.status === "running" ? `running (${settings.mppsAeTitle} @ ${settings.bindHost}:${settings.mppsPort})` : "disabled_missing_binary"}`);
+      console.log("    MPPS SCP:       disabled_by_design");
       console.log(`    Worklist Bldr:  ${services.worklistBuilder?.status === "running" ? "running" : "disabled_missing_tool"}`);
-      console.log(`    MPPS Processor: ${services.mppsProcessor?.status === "running" ? "running" : "disabled_missing_tool"}`);
+      console.log("    MPPS Processor: disabled_by_design");
       console.log(`    Worklist Dir:   ${settings.worklistOutputDir}`);
     } else {
       console.log("    MWL SCP:        disabled_or_failed");
-      console.log("    MPPS SCP:       disabled_or_failed");
+      console.log("    MPPS SCP:       disabled_by_design");
       console.log("    Worklist Bldr:  disabled_or_failed");
-      console.log("    MPPS Processor: disabled_or_failed");
+      console.log("    MPPS Processor: disabled_by_design");
     }
 
     console.log("========================================");

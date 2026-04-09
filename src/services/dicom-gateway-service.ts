@@ -68,11 +68,11 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
 
     if (!wlmscpfsPath) {
       console.log("[DICOM Gateway] wlmscpfs not found. MWL SCP server disabled.");
-      console.log("[DICOM Gateway] Install DCMTK: apt-get install -y dcmtk");
+      console.log("[DICOM Gateway] Ensure the source-built DCMTK toolchain is present in the image.");
       return null;
     }
 
-    // Start MWL SCP server using wlmscpfs
+    // Start MWL SCP server using wlmscpfs.
     const mwlProcess = await startMwlScpServer(settings, wlmscpfsPath);
 
     if (mwlProcess) {
@@ -81,17 +81,8 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       console.log(`[DICOM Gateway] Serving worklists from: ${settings.worklistOutputDir}`);
     }
 
-    const ppsscpfsPath = await findBinary("ppsscpfs");
-    if (ppsscpfsPath) {
-      const mppsProcess = await startMppsScpServer(settings, ppsscpfsPath);
-      if (mppsProcess) {
-        startedProcesses.push({ serviceName: "mpps", process: mppsProcess });
-        console.log(`[DICOM Gateway] MPPS SCP running on ${settings.bindHost}:${settings.mppsPort} (AE: ${settings.mppsAeTitle})`);
-        console.log(`[DICOM Gateway] Receiving MPPS objects in: ${settings.mppsInboxDir}`);
-      }
-    } else {
-      console.log("[DICOM Gateway] ppsscpfs not found. MPPS SCP server disabled.");
-    }
+    console.log("[DICOM Gateway] MPPS SCP: disabled_by_design");
+    console.log("[DICOM Gateway] MPPS Processor: disabled_by_design");
 
     if (tools.dump2dcm.detected && tools.dump2dcm.path) {
       const worklistBuilderProcess = await startNodeWorker("worklistBuilder", "build-worklists.mjs", {
@@ -103,18 +94,6 @@ export async function startDicomGateway(): Promise<DicomGatewayServer | null> {
       }
     } else {
       console.log("[DICOM Gateway] dump2dcm not detected. Worklist builder disabled.");
-    }
-
-    if (tools.dcmdump.detected && tools.dcmdump.path) {
-      const mppsProcessorProcess = await startNodeWorker("mppsProcessor", "process-mpps-inbox.mjs", {
-        RISPRO_BASE_URL: baseUrl
-      });
-      if (mppsProcessorProcess) {
-        startedProcesses.push({ serviceName: "mppsProcessor", process: mppsProcessorProcess });
-        console.log("[DICOM Gateway] MPPS processor started.");
-      }
-    } else {
-      console.log("[DICOM Gateway] dcmdump not detected. MPPS processor disabled.");
     }
 
     // Register the server object so shutdown can stop all child processes.
@@ -177,10 +156,11 @@ async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath
     // wlmscpfs reads worklist files directly from the AE-specific output directory.
     await ensureWorklistAeDirectory(mwlOutputDir);
 
-    // Start wlmscpfs against the AE-specific worklist directory.
-    const args = ["-dfp", mwlOutputDir, String(settings.mwlPort)];
+    // Start wlmscpfs from the AE-specific worklist directory.
+    const args = [String(settings.mwlPort)];
 
     const proc = spawn(wlmscpfsPath, args, {
+      cwd: mwlOutputDir,
       env: { ...process.env },
       stdio: ["ignore", "pipe", "pipe"]
     });
@@ -210,53 +190,6 @@ async function startMwlScpServer(settings: ResolvedGatewaySettings, wlmscpfsPath
     return proc;
   } catch (error) {
     console.error("[DICOM MWL] Failed to start wlmscpfs:", error);
-    return null;
-  }
-}
-
-async function startMppsScpServer(settings: ResolvedGatewaySettings, ppsscpfsPath: string): Promise<ChildProcess | null> {
-  try {
-    await fs.mkdir(settings.mppsInboxDir, { recursive: true });
-
-    const args = ["-aet", settings.mppsAeTitle, "--output-directory", settings.mppsInboxDir, String(settings.mppsPort)];
-
-    const proc = spawn(ppsscpfsPath, args, {
-      env: { ...process.env },
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-
-    proc.stdout?.on("data", (data: Buffer) => {
-      const line = data.toString().trim();
-      if (line) {
-        console.log(`[DICOM MPPS] ${line}`);
-      }
-    });
-
-    proc.stderr?.on("data", (data: Buffer) => {
-      const line = data.toString().trim();
-      if (line) {
-        console.error(`[DICOM MPPS] ${line}`);
-      }
-    });
-
-    proc.on("error", (error) => {
-      console.error("[DICOM MPPS] Process error:", error.message);
-    });
-
-    proc.on("exit", (code, signal) => {
-      console.log(`[DICOM MPPS] Process exited with code ${code} (signal: ${signal})`);
-      if (getServiceStatus("mpps").status !== "stopping") {
-        if (code === 0 || signal === "SIGTERM" || signal === "SIGKILL") {
-          setServiceStatus("mpps", "stopped");
-        } else {
-          setServiceError("mpps", `Exited with code ${code} (signal: ${signal})`);
-        }
-      }
-    });
-
-    return proc;
-  } catch (error) {
-    console.error("[DICOM MPPS] Failed to start ppsscpfs:", error);
     return null;
   }
 }
