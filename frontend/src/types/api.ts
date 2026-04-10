@@ -34,22 +34,12 @@ export interface AuthSession {
 
 export type IdentifierType = 'national_id' | 'passport' | 'other';
 
-export interface PatientIdentifier {
-  id?: number;
-  typeId?: number;
-  typeCode: IdentifierType;
-  value: string;
-  normalizedValue?: string;
-  isPrimary: boolean;
-}
-
 export interface Patient {
   id: number;
   mrn?: string | null;
   nationalId?: string | null;
   identifierType?: IdentifierType | null;
   identifierValue?: string | null;
-  identifiers?: PatientIdentifier[];
   arabicFullName: string;
   englishFullName?: string | null;
   ageYears: number;

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useImperativeHandle, forwardRef } from "react";
+import { useState, useRef, useImperativeHandle, forwardRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchUsers,
@@ -19,9 +19,7 @@ import {
   createExamType,
   updateExamType,
   deleteExamType,
-  saveSettings,
-  fetchSchedulingEngineConfig,
-  saveSchedulingEngineConfig
+  saveSettings
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -38,7 +36,6 @@ type SettingsSection =
   | "patient_registration"
   | "scheduling_and_capacity"
   | "queue_and_arrival"
-  | "scheduling_engine_config"
   | "pacs_connection"
   | "dicom_gateway_config"
   | "dicom_gateway_devices"
@@ -54,7 +51,6 @@ const SECTION_KEYS: SettingsSection[] = [
   "patient_registration",
   "scheduling_and_capacity",
   "queue_and_arrival",
-  "scheduling_engine_config",
   "pacs_connection",
   "dicom_gateway_config",
   "dicom_gateway_devices",
@@ -137,7 +133,6 @@ export default function SettingsPage() {
             {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" onReAuthRequired={requestReAuth} />}
             {section === "scheduling_and_capacity" && <SimpleSettingsSection category="scheduling_and_capacity" onReAuthRequired={requestReAuth} />}
             {section === "queue_and_arrival" && <SimpleSettingsSection category="queue_and_arrival" onReAuthRequired={requestReAuth} />}
-            {section === "scheduling_engine_config" && <SchedulingEngineConfigSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_config" && <DicomGatewaySettingsSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
@@ -1069,82 +1064,6 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     </div>
   );
   });
-
-function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
-  const queryClient = useQueryClient();
-  const [draft, setDraft] = useState<string>("");
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["scheduling-engine-config"],
-    queryFn: fetchSchedulingEngineConfig
-  });
-
-  useEffect(() => {
-    if (data) {
-      setDraft(JSON.stringify(data, null, 2));
-    }
-  }, [data]);
-
-  const saveMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) => saveSchedulingEngineConfig(payload),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["scheduling-engine-config"] });
-    }
-  });
-
-  if (error) {
-    const msg = (error as Error).message;
-    if (msg?.includes("re-authentication") || msg?.includes("403")) {
-      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["scheduling-engine-config"])} />;
-    }
-    return <QueryError message={msg} />;
-  }
-
-  if (isLoading) {
-    return <p className="description-center">Loading scheduling configuration…</p>;
-  }
-
-  return (
-    <div className="space-y-3">
-      <p className="text-sm description-center">
-        This configuration powers blocked rules, exam restrictions, category limits, special quota, and identifier types.
-      </p>
-      <textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        rows={22}
-        className="w-full rounded-lg border bg-stone-50 dark:bg-stone-800 border-stone-300 dark:border-stone-600 px-3 py-2 font-mono text-xs text-stone-900 dark:text-stone-100"
-      />
-      <div className="flex gap-2">
-        <button
-          type="button"
-          className="btn-secondary text-xs"
-          onClick={() => setDraft(JSON.stringify(data || {}, null, 2))}
-          disabled={saveMutation.isPending}
-        >
-          Reset
-        </button>
-        <button
-          type="button"
-          className="btn-primary text-xs"
-          disabled={saveMutation.isPending}
-          onClick={() => {
-            try {
-              const parsed = JSON.parse(draft);
-              saveMutation.mutate(parsed as Record<string, unknown>);
-            } catch {
-              alert("Invalid JSON");
-            }
-          }}
-        >
-          {saveMutation.isPending ? "Saving..." : "Save Scheduling Config"}
-        </button>
-      </div>
-      {saveMutation.error && (
-        <p className="text-xs text-red-600 dark:text-red-400">{(saveMutation.error as Error).message}</p>
-      )}
-    </div>
-  );
-}
 
 function QueryError({ message }: { message: string }) {
   const { t } = useLanguage();

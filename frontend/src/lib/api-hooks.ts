@@ -113,50 +113,11 @@ export async function fetchPatientNoShowHistory(patientId: number) {
 }
 
 // -- Appointments --
-export async function getAppointmentAvailability(
-  modalityId: number,
-  days = 14,
-  offset = 0,
-  options: {
-    examTypeId?: number;
-    caseCategory?: string;
-    useSpecialQuota?: boolean;
-    specialReasonCode?: string;
-    includeOverrideCandidates?: boolean;
-  } = {}
-) {
-  const params = new URLSearchParams();
-  params.set("modalityId", String(modalityId));
-  params.set("days", String(days));
-  params.set("offset", String(offset));
-  if (options.examTypeId) params.set("examTypeId", String(options.examTypeId));
-  if (options.caseCategory) params.set("caseCategory", options.caseCategory);
-  if (options.useSpecialQuota) params.set("useSpecialQuota", "true");
-  if (options.specialReasonCode) params.set("specialReasonCode", options.specialReasonCode);
-  if (options.includeOverrideCandidates) params.set("includeOverrideCandidates", "true");
-  const raw = await api<{ availability: RawRecord[] }>(`/appointments/availability?${params.toString()}`);
+export async function getAppointmentAvailability(modalityId: number, days = 14, offset = 0) {
+  const raw = await api<{ availability: RawRecord[] }>(
+    `/appointments/availability?modalityId=${modalityId}&days=${days}&offset=${offset}`
+  );
   return raw.availability;
-}
-
-export async function getAppointmentSuggestions(params: {
-  modalityId: number;
-  examTypeId?: number | null;
-  caseCategory?: string;
-  useSpecialQuota?: boolean;
-  specialReasonCode?: string | null;
-  includeOverrideCandidates?: boolean;
-  days?: number;
-}) {
-  const query = new URLSearchParams();
-  query.set("modalityId", String(params.modalityId));
-  query.set("days", String(params.days || 30));
-  if (params.examTypeId) query.set("examTypeId", String(params.examTypeId));
-  if (params.caseCategory) query.set("caseCategory", params.caseCategory);
-  if (params.useSpecialQuota) query.set("useSpecialQuota", "true");
-  if (params.specialReasonCode) query.set("specialReasonCode", params.specialReasonCode);
-  if (params.includeOverrideCandidates) query.set("includeOverrideCandidates", "true");
-  const raw = await api<{ suggestions: RawRecord[] }>(`/appointments/suggestions?${query.toString()}`);
-  return raw.suggestions;
 }
 
 export async function createAppointment(payload: RawRecord) {
@@ -283,19 +244,6 @@ export async function saveSettings(category: string, payload: Record<string, unk
 export async function fetchSettingsCatalog() {
   const raw = await api<{ settings: Record<string, unknown[]> }>("/settings/");
   return raw.settings ?? {};
-}
-
-export async function fetchSchedulingEngineConfig() {
-  const raw = await api<{ config: RawRecord }>("/settings/scheduling-engine-config");
-  return raw.config;
-}
-
-export async function saveSchedulingEngineConfig(payload: RawRecord) {
-  const raw = await api<{ config: RawRecord }>("/settings/scheduling-engine-config", {
-    method: "PUT",
-    body: JSON.stringify(payload)
-  });
-  return raw.config;
 }
 
 export async function fetchUsers(): Promise<{ users: User[] }> {
