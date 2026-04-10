@@ -451,7 +451,7 @@ export default function AppointmentsPage() {
     <>
       <div className="max-w-7xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-        Create Appointment
+        Create Appointment TEST
       </h2>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
