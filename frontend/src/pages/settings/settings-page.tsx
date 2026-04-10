@@ -360,7 +360,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["exam-types"], queryFn: fetchExamTypes });
-  const { data: modalityData } = useQuery({ queryKey: ["modalities"], queryFn: fetchModalitiesSettings });
+  const { data: modalityData } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -402,7 +402,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 
   const modalityOptions = ((modalityData as any)?.modalities ?? []).map((m: any) => ({
     value: m.id,
-    label: chooseLocalized(language, m.name_ar, m.name_en)
+    label: chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`
   }));
 
   const startEdit = (et: any) => {
@@ -479,7 +479,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["modalities"], queryFn: fetchModalitiesSettings });
+  const { data, isLoading, error } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -571,6 +571,9 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
           <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
+      <p className="text-sm description-center">
+        Showing all configured modalities, including inactive ones.
+      </p>
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
         <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Modality"}</button>
@@ -601,6 +604,11 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
         </div>
       )}
 
+      {((data as any)?.modalities?.length ?? 0) === 0 ? (
+        <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 p-4 text-sm text-stone-500 dark:text-stone-400">
+          No modalities are configured yet.
+        </div>
+      ) : (
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
         {(data as any)?.modalities?.map((m: any) => (
           <li key={m.id} className="py-3">
@@ -634,7 +642,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
             ) : (
               <div className="flex items-center justify-between">
                 <div className="text-start">
-                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, m.name_ar, m.name_en)}</p>
+                  <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`}</p>
                   <p className="text-sm description-center">{t("settings.capacity")}: {m.daily_capacity ?? "-"}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -649,6 +657,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
           </li>
         ))}
       </ul>
+      )}
     </div>
   );
 }
@@ -1166,7 +1175,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
   // Lookup data for dropdowns
   const { data: modalityLookup } = useQuery({
     queryKey: ["modalities-settings"],
-    queryFn: fetchModalitiesSettings,
+    queryFn: () => fetchModalitiesSettings(true),
     staleTime: 1000 * 60 * 10
   });
   const { data: examTypeLookup } = useQuery({

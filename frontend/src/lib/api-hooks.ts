@@ -351,8 +351,9 @@ export async function fetchExamTypes(): Promise<{ examTypes: RawRecord[] }> {
   return raw;
 }
 
-export async function fetchModalitiesSettings(): Promise<{ modalities: RawRecord[] }> {
-  const raw = await api<{ modalities: RawRecord[] }>("/settings/modalities");
+export async function fetchModalitiesSettings(includeInactive = false): Promise<{ modalities: RawRecord[] }> {
+  const query = includeInactive ? "?includeInactive=true" : "";
+  const raw = await api<{ modalities: RawRecord[] }>(`/settings/modalities${query}`);
   return raw;
 }
 
