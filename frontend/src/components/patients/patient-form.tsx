@@ -56,18 +56,35 @@ const DEFAULT_FORM: PatientFormState = {
 };
 
 function patientToForm(p: Patient): PatientFormState {
-  // Slice DOB to YYYY-MM-DD (backend may return full ISO datetime)
   const dob = p.estimatedDateOfBirth
     ? (p.estimatedDateOfBirth.includes("T") ? p.estimatedDateOfBirth.slice(0, 10) : p.estimatedDateOfBirth)
     : "";
-  // Normalize sex to M/F (old registrations may have stored "male"/"female")
+
   const rawSex = p.sex || "";
   const sex = rawSex === "male" ? "M" : rawSex === "female" ? "F" : rawSex;
+
+  const identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }> =
+    Array.isArray((p as any).identifiers) && (p as any).identifiers.length > 0
+      ? (p as any).identifiers.map((entry: Record<string, unknown>) => ({
+          typeCode: ((entry.typeCode ?? entry.type_code ?? p.identifierType ?? "national_id") as IdentifierType),
+          value: String(entry.value ?? ""),
+          isPrimary: Boolean(entry.isPrimary ?? entry.is_primary)
+        }))
+      : [
+          {
+            typeCode: ((p.identifierType as IdentifierType) || "national_id"),
+            value: p.identifierValue || p.nationalId || "",
+            isPrimary: true
+          }
+        ];
+
+  const primary = identifiers.find((entry) => entry.isPrimary) || identifiers[0];
+
   return {
     arabicFullName: p.arabicFullName || "",
     englishFullName: p.englishFullName || "",
-    identifierType: (p.identifierType as IdentifierType) || "national_id",
-    identifierValue: p.identifierValue || p.nationalId || "",
+    identifierType: primary?.typeCode || "national_id",
+    identifierValue: primary?.value || "",
     nationalIdConfirmation: "",
     sex,
     estimatedDateOfBirth: dob,
@@ -75,13 +92,7 @@ function patientToForm(p: Patient): PatientFormState {
     phone1: p.phone1 || "",
     phone2: p.phone2 || "",
     address: p.address || "",
-    identifiers: [
-      {
-        typeCode: ((p.identifierType as IdentifierType) || "national_id"),
-        value: p.identifierValue || p.nationalId || "",
-        isPrimary: true
-      }
-    ]
+    identifiers
   };
 }
 
@@ -489,12 +500,19 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     type="radio"
                     checked={entry.isPrimary}
                     onChange={() =>
-                      setForm((f) => ({
-                        ...f,
-                        identifiers: f.identifiers.map((item, itemIdx) => ({ ...item, isPrimary: itemIdx === idx })),
-                        identifierType: idx === 0 ? f.identifierType : (f.identifiers[idx]?.typeCode || f.identifierType),
-                        identifierValue: idx === 0 ? f.identifierValue : (f.identifiers[idx]?.value || f.identifierValue)
-                      }))
+                      setForm((f) => {
+                        const nextIdentifiers = f.identifiers.map((item, itemIdx) => ({
+                          ...item,
+                          isPrimary: itemIdx === idx
+                        }));
+                        const primary = nextIdentifiers[idx] || nextIdentifiers[0];
+                        return {
+                          ...f,
+                          identifiers: nextIdentifiers,
+                          identifierType: (primary?.typeCode || f.identifierType) as IdentifierType,
+                          identifierValue: primary?.value || ""
+                        };
+                      })
                     }
                   />
                   Primary

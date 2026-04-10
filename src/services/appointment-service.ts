@@ -45,6 +45,7 @@ export interface AvailabilitySlot {
   remaining_capacity: number;
   daily_capacity: number | null;
   is_full: boolean;
+  is_bookable?: boolean;
   isAllowed?: boolean;
   requiresSupervisorOverride?: boolean;
   blockReasons?: string[];
@@ -1302,7 +1303,8 @@ export async function listAvailability(
         remainingSpecialQuota: evaluation.remainingSpecialQuota,
         suggestedBookingMode: evaluation.suggestedBookingMode,
         displayStatus: evaluation.displayStatus,
-        is_full: !evaluation.isAllowed || row.is_full
+        is_full: row.is_full,
+        is_bookable: evaluation.isAllowed
       };
     })
   );
