@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
   getAppointmentAvailability,
+  getAppointmentSuggestions,
   searchPatients,
   createAppointment,
   fetchPatientById,
@@ -27,6 +28,13 @@ interface AppointmentForm {
   appointmentDate: string;
   notes: string;
   isWalkIn: boolean;
+  caseCategory: "oncology" | "non_oncology";
+  useSpecialQuota: boolean;
+  specialReasonCode: string;
+  specialReasonNote: string;
+  includeOverrideCandidates: boolean;
+  supervisorUsername: string;
+  supervisorPassword: string;
 }
 
 const DEFAULT_FORM: AppointmentForm = {
@@ -37,7 +45,14 @@ const DEFAULT_FORM: AppointmentForm = {
   reportingPriorityId: "",
   appointmentDate: "",
   notes: "",
-  isWalkIn: false
+  isWalkIn: false,
+  caseCategory: "non_oncology",
+  useSpecialQuota: false,
+  specialReasonCode: "",
+  specialReasonNote: "",
+  includeOverrideCandidates: false,
+  supervisorUsername: "",
+  supervisorPassword: ""
 };
 
 export default function AppointmentsPage() {
@@ -99,8 +114,25 @@ export default function AppointmentsPage() {
 
   // Load availability for selected modality
   const { data: availability } = useQuery({
-    queryKey: ["availability", form.modalityId, pageDays, availOffset],
-    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), pageDays, availOffset),
+    queryKey: [
+      "availability",
+      form.modalityId,
+      form.examTypeId,
+      form.caseCategory,
+      form.useSpecialQuota,
+      form.specialReasonCode,
+      form.includeOverrideCandidates,
+      pageDays,
+      availOffset
+    ],
+    queryFn: () =>
+      getAppointmentAvailability(parseInt(form.modalityId, 10), pageDays, availOffset, {
+        examTypeId: form.examTypeId ? parseInt(form.examTypeId, 10) : undefined,
+        caseCategory: form.caseCategory,
+        useSpecialQuota: form.useSpecialQuota,
+        specialReasonCode: form.specialReasonCode || undefined,
+        includeOverrideCandidates: form.includeOverrideCandidates
+      }),
     enabled: !!form.modalityId,
     staleTime: 1000 * 30
   });
@@ -109,8 +141,25 @@ export default function AppointmentsPage() {
 
   // Next open slot suggestion after selecting patient + modality
   const { data: suggestionAvailability } = useQuery({
-    queryKey: ["availability-next-open", form.modalityId],
-    queryFn: () => getAppointmentAvailability(parseInt(form.modalityId, 10), 180, 0),
+    queryKey: [
+      "availability-next-open",
+      form.modalityId,
+      form.examTypeId,
+      form.caseCategory,
+      form.useSpecialQuota,
+      form.specialReasonCode,
+      form.includeOverrideCandidates
+    ],
+    queryFn: () =>
+      getAppointmentSuggestions({
+        modalityId: parseInt(form.modalityId, 10),
+        examTypeId: form.examTypeId ? parseInt(form.examTypeId, 10) : undefined,
+        caseCategory: form.caseCategory,
+        useSpecialQuota: form.useSpecialQuota,
+        specialReasonCode: form.specialReasonCode || undefined,
+        includeOverrideCandidates: form.includeOverrideCandidates,
+        days: 180
+      }),
     enabled: !!form.patientId && !!form.modalityId,
     staleTime: 1000 * 30
   });
@@ -225,7 +274,18 @@ export default function AppointmentsPage() {
             : undefined,
           appointmentDate: form.appointmentDate,
           notes: form.notes || undefined,
-          isWalkIn: form.isWalkIn
+          isWalkIn: form.isWalkIn,
+          caseCategory: form.caseCategory,
+          useSpecialQuota: form.useSpecialQuota,
+          specialReasonCode: form.specialReasonCode || undefined,
+          specialReasonNote: form.specialReasonNote || undefined,
+          supervisorUsername: form.supervisorUsername || undefined,
+          supervisorPassword: form.supervisorPassword || undefined,
+          override: {
+            supervisorUsername: form.supervisorUsername || undefined,
+            supervisorPassword: form.supervisorPassword || undefined,
+            reason: form.specialReasonNote || form.notes || "Scheduling override"
+          }
         };
         setPendingAppointment(payload);
         setShowReAuthModal(true);
@@ -261,7 +321,18 @@ export default function AppointmentsPage() {
         : undefined,
       appointmentDate: form.appointmentDate,
       notes: form.notes || undefined,
-      isWalkIn: form.isWalkIn
+      isWalkIn: form.isWalkIn,
+      caseCategory: form.caseCategory,
+      useSpecialQuota: form.useSpecialQuota,
+      specialReasonCode: form.specialReasonCode || undefined,
+      specialReasonNote: form.specialReasonNote || undefined,
+      supervisorUsername: form.supervisorUsername || undefined,
+      supervisorPassword: form.supervisorPassword || undefined,
+      override: {
+        supervisorUsername: form.supervisorUsername || undefined,
+        supervisorPassword: form.supervisorPassword || undefined,
+        reason: form.specialReasonNote || form.notes || "Scheduling override"
+      }
     });
   };
 
@@ -405,6 +476,56 @@ export default function AppointmentsPage() {
                     }))
                   ]}
                 />
+                <Select
+                  label="Case Category"
+                  value={form.caseCategory}
+                  onChange={(v) => setForm((f) => ({ ...f, caseCategory: (v as "oncology" | "non_oncology") || "non_oncology" }))}
+                  options={[
+                    { value: "non_oncology", label: "Non-oncology" },
+                    { value: "oncology", label: "Oncology" }
+                  ]}
+                />
+                <div className="md:col-span-2 p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/40 space-y-2">
+                  <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+                    <input
+                      type="checkbox"
+                      checked={form.useSpecialQuota}
+                      onChange={(e) => setForm((f) => ({ ...f, useSpecialQuota: e.target.checked }))}
+                    />
+                    Use special quota
+                  </label>
+                  {form.useSpecialQuota && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      <input
+                        value={form.specialReasonCode}
+                        onChange={(e) => setForm((f) => ({ ...f, specialReasonCode: e.target.value }))}
+                        placeholder="Special reason code"
+                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
+                      />
+                      <input
+                        value={form.specialReasonNote}
+                        onChange={(e) => setForm((f) => ({ ...f, specialReasonNote: e.target.value }))}
+                        placeholder="Special reason note (optional)"
+                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
+                      />
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                    <input
+                      value={form.supervisorUsername}
+                      onChange={(e) => setForm((f) => ({ ...f, supervisorUsername: e.target.value }))}
+                      placeholder="Supervisor username (only if override needed)"
+                      className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                    />
+                    <input
+                      type="password"
+                      value={form.supervisorPassword}
+                      onChange={(e) => setForm((f) => ({ ...f, supervisorPassword: e.target.value }))}
+                      placeholder="Supervisor password (only if override needed)"
+                      className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                    />
+                  </div>
+                </div>
                 <div className="md:col-span-2">
                   <DateInput
                     label="Appointment Date"
@@ -517,6 +638,14 @@ export default function AppointmentsPage() {
                 >
                   {showAllDays ? "Hide fully booked days" : "Show all days"}
                 </button>
+                <label className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
+                  <input
+                    type="checkbox"
+                    checked={form.includeOverrideCandidates}
+                    onChange={(e) => setForm((f) => ({ ...f, includeOverrideCandidates: e.target.checked }))}
+                  />
+                  Include override-required candidates
+                </label>
 
                 <ul className="space-y-1.5">
                   {displayRows.map((day: any, idx: number) => {
@@ -538,6 +667,7 @@ export default function AppointmentsPage() {
                     const dateFormatted = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
                     const isSelected = form.appointmentDate === dateStr;
                     const showWeekHeader = idx === 0 || dateObj.getUTCDay() === 0;
+                    const statusText = day.displayStatus || (day.is_full ? "blocked" : "available");
 
                     return (
                       <li key={dateStr} className="space-y-1">
@@ -562,6 +692,10 @@ export default function AppointmentsPage() {
                             <span className={`tabular-nums ${day.is_full ? "text-red-600 dark:text-red-400 font-semibold" : "text-stone-500 dark:text-stone-400"}`}>
                               {day.remaining_capacity}/{day.daily_capacity}
                             </span>
+                          </div>
+                          <div className="text-[10px] uppercase tracking-wide mt-1 text-stone-500 dark:text-stone-400">
+                            {statusText}
+                            {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 ? ` • ${day.blockReasons[0]}` : ""}
                           </div>
                           <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
                             <div

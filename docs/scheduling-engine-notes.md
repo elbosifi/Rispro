@@ -13,7 +13,6 @@
 - Final create/update requires supervisor credentials payload.
 - Every override attempt is appended to `scheduling_override_audit_events`.
 - If supervisor approval succeeds but booking/update fails before commit, an `approved_but_failed` event is appended as a best-effort post-rollback audit record.
-- If supervisor approval succeeds but booking/update fails later, an `approved_but_failed` event is appended (best-effort) after transaction rollback.
 
 ## Concurrency Strategy
 - Booking create/update runs inside a DB transaction.

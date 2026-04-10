@@ -17,7 +17,6 @@ import PrintPage from "@/pages/print/print-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
-import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -37,7 +36,6 @@ const ROUTE_PATHS: Record<string, string> = {
   statistics: "/statistics",
   search: "/search",
   pacs: "/pacs",
-  "legacy-viewer": "/legacy-viewer",
   settings: "/settings"
 };
 
@@ -135,7 +133,6 @@ function AppContent() {
             <Route path="/statistics" element={<StatisticsPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/pacs" element={<PacsPage />} />
-            <Route path="/legacy-viewer" element={<LegacyAccessViewerPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             
             <Route path="*" element={<Navigate to="/" replace />} />

@@ -37,6 +37,7 @@ interface PatientFormState {
   phone1: string;
   phone2: string;
   address: string;
+  identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>;
 }
 
 const DEFAULT_FORM: PatientFormState = {
@@ -50,7 +51,8 @@ const DEFAULT_FORM: PatientFormState = {
   ageYears: "",
   phone1: "",
   phone2: "",
-  address: "benghazi"
+  address: "benghazi",
+  identifiers: [{ typeCode: "national_id", value: "", isPrimary: true }]
 };
 
 function patientToForm(p: Patient): PatientFormState {
@@ -72,7 +74,14 @@ function patientToForm(p: Patient): PatientFormState {
     ageYears: p.ageYears ? String(p.ageYears) : "",
     phone1: p.phone1 || "",
     phone2: p.phone2 || "",
-    address: p.address || ""
+    address: p.address || "",
+    identifiers: [
+      {
+        typeCode: ((p.identifierType as IdentifierType) || "national_id"),
+        value: p.identifierValue || p.nationalId || "",
+        isPrimary: true
+      }
+    ]
   };
 }
 
@@ -259,7 +268,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleIdentifierValueChange = (value: string) => {
     const cv = value.replace(/\D/g, "");
     setForm((f) => {
-      const u: Partial<PatientFormState> = { identifierValue: cv };
+      const nextIdentifiers = [...f.identifiers];
+      if (nextIdentifiers.length === 0) {
+        nextIdentifiers.push({ typeCode: f.identifierType, value: cv, isPrimary: true });
+      } else {
+        nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: cv, isPrimary: true };
+      }
+
+      const u: Partial<PatientFormState> = { identifierValue: cv, identifiers: nextIdentifiers };
       if (f.identifierType === "national_id" && isValidNationalId(cv)) {
         const d = deriveDemographicsFromNationalId(cv);
         if (d.sex) u.sex = d.sex;
@@ -283,6 +299,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    const primaryCount = form.identifiers.filter((entry) => entry.isPrimary).length;
+    if (primaryCount !== 1) {
+      showToast("Exactly one primary identifier is required.", "error");
+      return;
+    }
     const isNat = form.identifierType === "national_id";
     const isNationalIdComplete = isValidNationalId(form.identifierValue);
     const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
@@ -306,7 +327,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       phone1: form.phone1,
       phone2: form.phone2 || undefined,
       address: form.address || undefined,
-      autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName
+      autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName,
+      identifiers: form.identifiers
+        .map((entry) => ({
+          typeCode: entry.typeCode,
+          value: entry.value.trim(),
+          isPrimary: entry.isPrimary
+        }))
+        .filter((entry) => entry.value)
     };
     mutation.mutate(payload);
   };
@@ -375,15 +403,122 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Select label="Identifier Type" value={form.identifierType} onChange={(v) => setForm((f) => ({ ...f, identifierType: v as IdentifierType, nationalIdConfirmation: "" }))} options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]} />
+          <Select label="Identifier Type" value={form.identifierType} onChange={(v) => setForm((f) => {
+            const nextIdentifiers = [...f.identifiers];
+            if (nextIdentifiers.length === 0) {
+              nextIdentifiers.push({ typeCode: v as IdentifierType, value: f.identifierValue, isPrimary: true });
+            } else {
+              nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: v as IdentifierType, isPrimary: true };
+            }
+            return { ...f, identifierType: v as IdentifierType, identifiers: nextIdentifiers, nationalIdConfirmation: "" };
+          })} options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]} />
           {isNationalId ? (
             <Input label="National ID (12 digits)" value={form.identifierValue} onChange={handleIdentifierValueChange} maxLength={12} placeholder="1xxxxxxxxxxx" />
           ) : (
-            <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => ({ ...f, identifierValue: v }))} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
+            <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => {
+              const nextIdentifiers = [...f.identifiers];
+              if (nextIdentifiers.length === 0) {
+                nextIdentifiers.push({ typeCode: f.identifierType, value: v, isPrimary: true });
+              } else {
+                nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: v, isPrimary: true };
+              }
+              return { ...f, identifierValue: v, identifiers: nextIdentifiers };
+            })} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
           )}
           {showConfirmation && (
             <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={12} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={nationalIdWasEdited} />
           )}
+        </div>
+        <div className="space-y-2 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-stone-700 dark:text-stone-300">Additional Identifiers</p>
+            <button
+              type="button"
+              className="text-xs text-teal-600 dark:text-teal-300 underline"
+              onClick={() =>
+                setForm((f) => ({
+                  ...f,
+                  identifiers: [
+                    ...f.identifiers,
+                    { typeCode: "other", value: "", isPrimary: false }
+                  ]
+                }))
+              }
+            >
+              Add identifier
+            </button>
+          </div>
+          {form.identifiers.map((entry, idx) => (
+            <div key={`identifier-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+              <select
+                value={entry.typeCode}
+                onChange={(e) =>
+                  setForm((f) => {
+                    const next = [...f.identifiers];
+                    next[idx] = { ...next[idx], typeCode: e.target.value as IdentifierType };
+                    if (idx === 0) {
+                      return { ...f, identifiers: next, identifierType: e.target.value as IdentifierType };
+                    }
+                    return { ...f, identifiers: next };
+                  })
+                }
+                className="px-2 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+              >
+                <option value="national_id">National ID</option>
+                <option value="passport">Passport</option>
+                <option value="other">Other</option>
+              </select>
+              <input
+                value={entry.value}
+                onChange={(e) =>
+                  setForm((f) => {
+                    const next = [...f.identifiers];
+                    next[idx] = { ...next[idx], value: e.target.value };
+                    if (idx === 0) {
+                      return { ...f, identifiers: next, identifierValue: e.target.value };
+                    }
+                    return { ...f, identifiers: next };
+                  })
+                }
+                placeholder="Identifier value"
+                className="md:col-span-2 px-2 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+              />
+              <div className="flex items-center gap-2">
+                <label className="inline-flex items-center gap-1 text-xs text-stone-600 dark:text-stone-300">
+                  <input
+                    type="radio"
+                    checked={entry.isPrimary}
+                    onChange={() =>
+                      setForm((f) => ({
+                        ...f,
+                        identifiers: f.identifiers.map((item, itemIdx) => ({ ...item, isPrimary: itemIdx === idx })),
+                        identifierType: idx === 0 ? f.identifierType : (f.identifiers[idx]?.typeCode || f.identifierType),
+                        identifierValue: idx === 0 ? f.identifierValue : (f.identifiers[idx]?.value || f.identifierValue)
+                      }))
+                    }
+                  />
+                  Primary
+                </label>
+                {idx > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs text-red-600 dark:text-red-400 underline"
+                    onClick={() =>
+                      setForm((f) => {
+                        const next = f.identifiers.filter((_, itemIdx) => itemIdx !== idx);
+                        if (next.length > 0 && !next.some((x) => x.isPrimary)) {
+                          next[0] = { ...next[0], isPrimary: true };
+                        }
+                        return { ...f, identifiers: next };
+                      })
+                    }
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

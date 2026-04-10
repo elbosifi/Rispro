@@ -41,7 +41,6 @@ const en = {
   "nav.search": "Search patients",
   "nav.pacs": "PACS",
   "nav.settings": "Settings",
-  "nav.legacyViewer": "Malaf منظومة الاستقبال القديمة",
 
   "dashboard.welcome": "Welcome, {name}",
   "dashboard.subtitle": "Reception operations overview for today",
@@ -511,7 +510,6 @@ const ar = {
   "nav.search": "بحث المرضى",
   "nav.pacs": "أرشيف الصور",
   "nav.settings": "الإعدادات",
-  "nav.legacyViewer": "Malaf منظومة الاستقبال القديمة",
 
   "dashboard.welcome": "مرحباً، {name}",
   "dashboard.subtitle": "نظرة تشغيلية سريعة لعمليات الاستقبال اليوم",
