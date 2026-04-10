@@ -448,23 +448,47 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
   const term = searchTerm.trim();
   const pattern = `%${term}%`;
   const normalizedPattern = `%${normalizeArabicName(term)}%`;
+  const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
+
   const query = `
-    select id, mrn, national_id, identifier_type, identifier_value, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
-    from patients
+    select distinct
+      p.id,
+      p.mrn,
+      p.national_id,
+      p.identifier_type,
+      p.identifier_value,
+      p.arabic_full_name,
+      p.english_full_name,
+      p.age_years,
+      p.sex,
+      p.phone_1,
+      p.phone_2,
+      p.address,
+      p.estimated_date_of_birth
+    from patients p
+    left join patient_identifiers pi on pi.patient_id = p.id
     where
       $1 = ''
-      or mrn ilike $2
-      or national_id ilike $2
-      or identifier_value ilike $2
-      or phone_1 ilike $2
-      or phone_2 ilike $2
-      or arabic_full_name ilike $2
-      or normalized_arabic_name ilike $3
-      or english_full_name ilike $2
-    order by created_at desc
+      or p.mrn ilike $2
+      or p.national_id ilike $2
+      or p.identifier_value ilike $2
+      or pi.value ilike $2
+      or pi.normalized_value ilike $4
+      or p.phone_1 ilike $2
+      or p.phone_2 ilike $2
+      or p.arabic_full_name ilike $2
+      or p.normalized_arabic_name ilike $3
+      or p.english_full_name ilike $2
+    order by p.id desc
     limit 25
   `;
-  const { rows } = await pool.query<PatientRow>(query, [term, pattern, normalizedPattern]);
+
+  const { rows } = await pool.query<PatientRow>(query, [
+    term,
+    pattern,
+    normalizedPattern,
+    normalizedIdentifierPattern
+  ]);
   return rows;
 }
 
@@ -473,7 +497,7 @@ async function resolveIdentifierTypeMap(client: PoolClient): Promise<Map<string,
     `
       select id, code
       from patient_identifier_types
-      where is_active = true
+      where true
     `
   );
 
@@ -788,6 +812,7 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
     }
 
     await client.query(`delete from patient_custom_values where patient_id = $1`, [cleanPatientId]);
+    await client.query(`delete from patient_identifiers where patient_id = $1`, [cleanPatientId]);
     await client.query(`delete from patients where id = $1`, [cleanPatientId]);
 
     await logAuditEntry(
@@ -810,6 +835,78 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
   } finally {
     client.release();
   }
+}
+
+async function mergePatientIdentifiers(
+  client: PoolClient,
+  targetPatientId: number,
+  sourcePatientId: number,
+  actingUserId: OptionalUserId
+): Promise<void> {
+  await client.query(
+    `
+      insert into patient_identifiers (
+        patient_id,
+        identifier_type_id,
+        value,
+        normalized_value,
+        is_primary,
+        created_by_user_id,
+        updated_by_user_id
+      )
+      select
+        $1,
+        pi.identifier_type_id,
+        pi.value,
+        pi.normalized_value,
+        false,
+        pi.created_by_user_id,
+        $3
+      from patient_identifiers pi
+      where pi.patient_id = $2
+      on conflict do nothing
+    `,
+    [targetPatientId, sourcePatientId, actingUserId]
+  );
+
+  const primaryRows = await client.query<{ id: number }>(
+    `
+      select id
+      from patient_identifiers
+      where patient_id = $1 and is_primary = true
+      order by id asc
+    `,
+    [targetPatientId]
+  );
+
+  if (primaryRows.rows.length === 0) {
+    await client.query(
+      `
+        update patient_identifiers
+        set is_primary = true, updated_by_user_id = $2, updated_at = now()
+        where id = (
+          select id
+          from patient_identifiers
+          where patient_id = $1
+          order by id asc
+          limit 1
+        )
+      `,
+      [targetPatientId, actingUserId]
+    );
+  } else if (primaryRows.rows.length > 1) {
+    const keepId = Number(primaryRows.rows[0]!.id);
+    await client.query(
+      `
+        update patient_identifiers
+        set is_primary = (id = $2), updated_by_user_id = $3, updated_at = now()
+        where patient_id = $1
+      `,
+      [targetPatientId, keepId, actingUserId]
+    );
+  }
+
+  await client.query(`delete from patient_identifiers where patient_id = $1`, [sourcePatientId]);
 }
 
 export async function mergePatients(payload: MergePatientsPayload, updatedByUserId: OptionalUserId): Promise<PatientRow> {
@@ -851,6 +948,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
     ]);
     await client.query(`update documents set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
     await client.query(`delete from patient_custom_values where patient_id = $1`, [sourcePatientId]);
+    await mergePatientIdentifiers(client, targetPatientId, sourcePatientId, updatedByUserId);
     await client.query(`delete from patients where id = $1`, [sourcePatientId]);
 
     const targetPatient = await client.query<PatientRow>(
