@@ -40,7 +40,11 @@
       "Bash(nvm *)",
       "Bash(which *)",
       "Bash(mkdir *)",
-      "Bash(git revert *)"
+      "Bash(git revert *)",
+      "Bash(cat *)",
+      "Bash(bash)",
+      "Bash(. *)",
+      "Bash(npm ci)"
     ]
   },
   "$version": 3
