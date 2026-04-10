@@ -82,7 +82,7 @@ const SECTION_TITLES: Record<string, string> = {
   identifierTypes: "Patient Identifier Types"
 };
 
-const ACTION_LABELS: Record<string, string> = {
+const ACTION_LABELS = {
   add: {
     categoryLimits: "Add Limit",
     blockedRules: "Add Rule",
@@ -98,23 +98,26 @@ const ACTION_LABELS: Record<string, string> = {
   save: "Save Scheduling Config",
   reset: "Reset to Server Values",
   saving: "Saving…"
-};
+} as const;
 
-function friendlyRuleType(value: string): string {
+function _friendlyRuleType(value: string): string {
   return RULE_TYPE_LABELS[value] || value;
 }
 
-function friendlyEffectMode(value: string): string {
+function _friendlyEffectMode(value: string): string {
   return EFFECT_MODE_LABELS[value] || value;
 }
 
-function friendlyWeekday(value: string): string {
+function _friendlyWeekday(value: string): string {
   return WEEKDAY_LABELS[value] || value;
 }
 
-function friendlyCaseCategory(value: string): string {
+function _friendlyCaseCategory(value: string): string {
   return CASE_CATEGORY_LABELS[value] || value;
 }
+
+// Export for testing
+export { _friendlyRuleType as friendlyRuleType, _friendlyEffectMode as friendlyEffectMode, _friendlyWeekday as friendlyWeekday, _friendlyCaseCategory as friendlyCaseCategory };
 
 type SettingsSection =
   | "menu"
@@ -1699,6 +1702,29 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           Configuration saved successfully.
         </div>
       )}
+    </div>
+  );
+}
+
+function QueryError({ message }: { message: string }) {
+  const { t } = useLanguage();
+  return (
+    <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+      <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("settings.failedLoad")}</p>
+      <p className="text-xs text-red-600 dark:text-red-500 mt-1 font-mono break-all">{message}</p>
+    </div>
+  );
+}
+
+function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
+  const { t } = useLanguage();
+  return (
+    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
+      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{t("settings.reauthRequired")}</p>
+      <p className="text-xs text-amber-600 dark:text-amber-400">{t("settings.reauthHelp")}</p>
+      <button onClick={onReAuthRequired} className="btn-primary text-sm">
+        {t("common.reAuthenticate")}
+      </button>
     </div>
   );
 }

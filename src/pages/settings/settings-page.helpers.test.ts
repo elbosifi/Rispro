@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 
 // ---------------------------------------------------------------------------
 // Unit tests for the label/friendly helper functions in settings-page.tsx.
-// These test the pure mapping logic without needing a DOM or React renderer.
+// These test the pure mapping logic. The same constants are defined in the
+// frontend component; this file duplicates them for isolated verification.
 // ---------------------------------------------------------------------------
 
 const RULE_TYPE_LABELS: Record<string, string> = {
