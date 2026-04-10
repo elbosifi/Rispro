@@ -128,7 +128,8 @@ COPY --from=frontend-builder /app/dist-frontend ./dist-frontend/
 RUN mkdir -p \
     storage/dicom/worklist-source \
     storage/dicom/worklists \
-    storage/uploads
+    storage/uploads \
+    storage/legacy-viewer
 
 # Copy entrypoint script
 COPY docker/rispro/entrypoint.sh /usr/local/bin/entrypoint.sh

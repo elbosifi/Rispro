@@ -2,6 +2,7 @@
  * Legacy Access Viewer Router
  *
  * API endpoints for the read-only legacy Access appointment viewer.
+ * Requires normal authentication (not supervisor-only).
  * Fully isolated from PostgreSQL and existing RISPro workflows.
  */
 
@@ -19,55 +20,47 @@ import {
 
 export const legacyAccessViewerRouter = express.Router();
 
-// All endpoints require authentication
+// Normal authentication — same as every other route in the app.
 legacyAccessViewerRouter.use(requireAuth);
 
 /**
  * POST /api/legacy-access-viewer/upload
- *
- * Upload and activate an MDB file.  The file content is base64-encoded
- * in the JSON body.  Only one file is active at a time (process-scoped).
  */
 legacyAccessViewerRouter.post(
   "/upload",
-  asyncRoute(async (req: Request, res: Response) => {
-    const body = asUnknownRecord(req.body || {});
+  asyncRoute(async (_req: Request, res: Response) => {
+    const body = asUnknownRecord(_req.body || {});
     const fileContent = String(body.fileContentBase64 || "");
     const fileName = String(body.fileName || "database.mdb");
 
     if (!fileContent) {
-      res.status(400).json({ error: "لم يتم إرسال محتوى الملف" }); // "No file content sent"
+      res.status(400).json({ error: "لم يتم إرسال محتوى الملف" });
       return;
     }
 
-    const status = loadMdbFile(fileContent, fileName);
+    const status = await loadMdbFile(fileContent, fileName);
     res.status(200).json({ status });
   })
 );
 
 /**
  * GET /api/legacy-access-viewer/status
- *
- * Check whether an MDB file is currently active.
  */
 legacyAccessViewerRouter.get(
   "/status",
-  asyncRoute(async (req: Request, res: Response) => {
-    const status = getMdbStatus();
+  asyncRoute(async (_req: Request, res: Response) => {
+    const status = await getMdbStatus();
     res.json({ status });
   })
 );
 
 /**
  * GET /api/legacy-access-viewer/appointments
- *
- * Query legacy appointments with optional filters.
- * Query params: fromDate, toDate, patientName, modality, exam
  */
 legacyAccessViewerRouter.get(
   "/appointments",
-  asyncRoute(async (req: Request, res: Response) => {
-    const query = asUnknownRecord(req.query || {});
+  asyncRoute(async (_req: Request, res: Response) => {
+    const query = asUnknownRecord(_req.query || {});
 
     const filters: LegacyAppointmentFilters = {};
     if (typeof query.fromDate === "string" && query.fromDate) filters.fromDate = query.fromDate;
@@ -76,20 +69,18 @@ legacyAccessViewerRouter.get(
     if (typeof query.modality === "string" && query.modality) filters.modality = query.modality;
     if (typeof query.exam === "string" && query.exam) filters.exam = query.exam;
 
-    const appointments = queryLegacyAppointments(filters);
+    const appointments = await queryLegacyAppointments(filters);
     res.json({ appointments });
   })
 );
 
 /**
  * GET /api/legacy-access-viewer/summary
- *
- * Get summary counters (today, tomorrow, this week).
  */
 legacyAccessViewerRouter.get(
   "/summary",
-  asyncRoute(async (req: Request, res: Response) => {
-    const summary = computeSummaryCounters();
+  asyncRoute(async (_req: Request, res: Response) => {
+    const summary = await computeSummaryCounters();
     res.json({ summary });
   })
 );

@@ -8,49 +8,40 @@
  * IMPORTANT: This module never writes to the MDB, never writes to PostgreSQL,
  * and never mutates any existing RISPro data.
  *
- * DEPENDENCY NOTE:
- *   This service requires the optional "mdb-reader" npm package.
- *   Install it with: npm install mdb-reader
- *   Until then, all endpoints return a clear 501 error.
+ * Storage:
+ *   The active MDB file is persisted to disk at storage/legacy-viewer/active.mdb
+ *   so it survives server restarts.  Only one file is kept at a time.
  */
 
+import fs from "fs/promises";
+import path from "path";
+import { fileURLToPath } from "url";
+import MDBReader from "mdb-reader";
 import { HttpError } from "../utils/http-error.js";
 
-// Lazy-load mdb-reader only when actually needed.
-// This keeps the server startable when the package is not installed.
-let MdbReaderClass: typeof import("mdb-reader").default | null = null;
-let loadError: Error | null = null;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = path.resolve(__dirname, "..", "..");
 
-function getMdbReader(): typeof import("mdb-reader").default {
-  if (MdbReaderClass) return MdbReaderClass;
-  if (loadError) {
-    throw new HttpError(501, "عارض المواعيد القديمة غير مفعّل — حزمة mdb-reader غير مثبتة");
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    MdbReaderClass = require("mdb-reader").default;
-    return MdbReaderClass;
-  } catch (err: unknown) {
-    loadError = err instanceof Error ? err : new Error(String(err));
-    throw new HttpError(501, "عارض المواعيد القديمة غير مفعّل — يرجى تشغيل: npm install mdb-reader");
-  }
-}
+const LEGACY_DIR = path.join(rootDir, "storage", "legacy-viewer");
+const ACTIVE_FILE = path.join(LEGACY_DIR, "active.mdb");
+const META_FILE = path.join(LEGACY_DIR, "meta.json");
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 export interface LegacyAppointmentRow {
-  appointmentId: number | null;       // Pointments.Seno
-  date: string | null;                // Pointments.DtDate  (ISO date string)
-  time: string | null;                // Pointments.DtTime
-  patientName: string | null;         // Pointments.PationNm
-  age: number | null;                 // Pointments.PationAge
-  sex: string | null;                 // Pointments.Gnm
-  modality: string;                   // resolved: Kname || KindPic.kpnm || ""
-  exam: string;                       // resolved: PlName  || PlCheck.plNm  || ""
-  source: string;                     // resolved: NatNm   || Places.pnm    || ""
-  groupNo: number | null;             // Pointments.Gno (metadata)
+  appointmentId: number | null;
+  date: string | null;
+  time: string | null;
+  patientName: string | null;
+  age: number | null;
+  sex: string | null;
+  modality: string;
+  exam: string;
+  source: string;
+  groupNo: number | null;
 }
 
 export interface LegacySummaryCounters {
@@ -60,43 +51,111 @@ export interface LegacySummaryCounters {
 }
 
 export interface LegacyAppointmentFilters {
-  fromDate?: string;   // ISO date, inclusive
-  toDate?: string;     // ISO date, inclusive
-  patientName?: string; // partial match
-  modality?: string;    // partial match
-  exam?: string;        // partial match
+  fromDate?: string;
+  toDate?: string;
+  patientName?: string;
+  modality?: string;
+  exam?: string;
 }
 
 export interface LegacyMdbStatus {
   hasActiveFile: boolean;
   fileName: string | null;
-  loadedAt: string | null; // ISO datetime
+  loadedAt: string | null;
+}
+
+interface MetaInfo {
+  fileName: string;
+  loadedAt: string;
 }
 
 // ---------------------------------------------------------------------------
-// Sentinel / quality constants
+// Sentinel constants
 // ---------------------------------------------------------------------------
 
 const SENTINEL_DATE = "9999-12-31";
 
 // ---------------------------------------------------------------------------
-// In-memory active MDB buffer (one file at a time, process-scoped)
+// Disk-backed active file state
 // ---------------------------------------------------------------------------
 
-let activeMdbBuffer: Buffer | null = null;
-let activeMdbFileName: string | null = null;
-let activeMdbLoadedAt: string | null = null;
+/** Ensure the storage directory exists. */
+async function ensureDir(): Promise<void> {
+  await fs.mkdir(LEGACY_DIR, { recursive: true });
+}
+
+/** Read metadata from disk (non-blocking). */
+async function readMeta(): Promise<MetaInfo | null> {
+  try {
+    const raw = await fs.readFile(META_FILE, "utf-8");
+    return JSON.parse(raw) as MetaInfo;
+  } catch {
+    return null;
+  }
+}
+
+/** Write metadata to disk. */
+async function writeMeta(meta: MetaInfo): Promise<void> {
+  await fs.writeFile(META_FILE, JSON.stringify(meta, null, 2), "utf-8");
+}
+
+/** Check whether the persisted MDB file exists. */
+async function hasActiveFileOnDisk(): Promise<boolean> {
+  try {
+    await fs.access(ACTIVE_FILE);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Read the persisted MDB file into a Buffer. */
+async function readActiveFile(): Promise<Buffer | null> {
+  try {
+    return await fs.readFile(ACTIVE_FILE);
+  } catch {
+    return null;
+  }
+}
+
+/** Create an MDBReader from either the in-memory buffer or the disk file. */
+async function createReader(): Promise<MDBReader | null> {
+  // Prefer in-memory if available (from a fresh upload in this process)
+  if (inMemoryBuffer) {
+    return new MDBReader(inMemoryBuffer);
+  }
+  // Fall back to disk
+  const diskBuffer = await readActiveFile();
+  if (diskBuffer) {
+    return new MDBReader(diskBuffer);
+  }
+  return null;
+}
+
+// In-memory cache (avoids re-reading disk on every request within one process)
+let inMemoryBuffer: Buffer | null = null;
+let inMemoryMeta: MetaInfo | null = null;
+
+/**
+ * Load in-memory state from disk at startup.
+ * Called once when the module is imported.
+ */
+(async function initFromDisk() {
+  try {
+    const meta = await readMeta();
+    const hasFile = await hasActiveFileOnDisk();
+    if (meta && hasFile) {
+      inMemoryMeta = meta;
+      inMemoryBuffer = await readActiveFile();
+    }
+  } catch {
+    // Silently ignore — no persisted file yet
+  }
+})();
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-function requireActiveReader(): any {
-  if (!activeMdbBuffer) {
-    throw new HttpError(400, "لا يوجد ملف MDB نشط"); // "No active MDB file"
-  }
-  return new (getMdbReader())(activeMdbBuffer);
-}
 
 /**
  * Try to parse an Access date value into an ISO date string.
@@ -109,7 +168,6 @@ function parseDate(value: unknown): string | null {
   if (value instanceof Date) {
     d = value;
   } else if (typeof value === "number") {
-    // Access stores dates as OLE Automation dates (days since 1899-12-30)
     d = oleAutoToDate(value);
   } else if (typeof value === "string") {
     const parsed = new Date(value);
@@ -128,37 +186,27 @@ function parseDate(value: unknown): string | null {
 }
 
 /**
- * Convert an OLE Automation date (number of days since 1899-12-30) to a JS Date.
+ * Convert an OLE Automation date (days since 1899-12-30) to a JS Date.
  */
 function oleAutoToDate(oleDate: number): Date {
-  const base = new Date(1899, 11, 30); // 1899-12-30
+  const base = new Date(1899, 11, 30);
   const ms = base.getTime() + oleDate * 86400000;
   return new Date(ms);
 }
 
-/**
- * Safely extract a string value, trimming whitespace.
- */
 function safeString(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
 }
 
-/**
- * Safely extract a numeric value.
- */
 function safeNumber(value: unknown): number | null {
   if (value === null || value === undefined) return null;
   const n = Number(value);
   return isNaN(n) ? null : n;
 }
 
-/**
- * Build a lookup map from a table's data.
- * Returns Map<keyValue, displayValue>.
- */
 function buildLookupMap(
-  reader: any,
+  reader: MDBReader,
   tableName: string,
   keyCol: string,
   valueCol: string
@@ -175,16 +223,11 @@ function buildLookupMap(
       }
     }
   } catch {
-    // Table may not exist in this MDB – silently skip
+    // Table may not exist in this MDB
   }
   return map;
 }
 
-/**
- * Build the combined modality lookup:
- *   primary = Pointments.Kname (already on the row)
- *   fallback = KindPic.kpnm via kNom
- */
 function resolveModality(
   row: Record<string, unknown>,
   kindPicMap: Map<unknown, string>
@@ -195,11 +238,6 @@ function resolveModality(
   return fallback ?? "";
 }
 
-/**
- * Build the combined exam lookup:
- *   primary = Pointments.PlName
- *   fallback = PlCheck.plNm via PlNom
- */
 function resolveExam(
   row: Record<string, unknown>,
   plCheckMap: Map<unknown, string>
@@ -210,11 +248,6 @@ function resolveExam(
   return fallback ?? "";
 }
 
-/**
- * Build the combined source lookup:
- *   primary = Pointments.NatNm
- *   fallback = Places.pnm via PNom
- */
 function resolveSource(
   row: Record<string, unknown>,
   placesMap: Map<unknown, string>
@@ -225,13 +258,8 @@ function resolveSource(
   return fallback ?? "";
 }
 
-/**
- * Check if an ISO date string is >= today (Tripoli/GMT+2).
- * Uses UTC-based comparison for simplicity since we only care about date boundary.
- */
 function isTodayOrLater(isoDate: string): boolean {
-  const today = new Date();
-  const todayStr = today.toISOString().slice(0, 10);
+  const todayStr = new Date().toISOString().slice(0, 10);
   return isoDate >= todayStr;
 }
 
@@ -245,13 +273,9 @@ function isTomorrow(isoDate: string): boolean {
   return isoDate === tomorrow;
 }
 
-/**
- * Get the start-of-week (Sunday) and end-of-week (Saturday) for today.
- * Returns [startISO, endISO] inclusive.
- */
 function getWeekRange(): [string, string] {
   const now = new Date();
-  const dayOfWeek = now.getDay(); // 0=Sun ... 6=Sat
+  const dayOfWeek = now.getDay(); // 0=Sun
   const start = new Date(now);
   start.setDate(now.getDate() - dayOfWeek);
   const end = new Date(now);
@@ -259,9 +283,6 @@ function getWeekRange(): [string, string] {
   return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
 }
 
-/**
- * Check if an ISO date is within this week (Sunday-Saturday) AND >= today.
- */
 function isInCurrentWeek(isoDate: string): boolean {
   const [weekStart, weekEnd] = getWeekRange();
   const today = new Date().toISOString().slice(0, 10);
@@ -273,68 +294,83 @@ function isInCurrentWeek(isoDate: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Load an MDB file from a base64-encoded payload.
- * The file is stored in memory (process-scoped, one at a time).
- * Returns the MDB file info.
+ * Upload and persist an MDB file.  Replaces any previously stored file.
  */
-export function loadMdbFile(
+export async function loadMdbFile(
   base64Content: string,
   fileName: string
-): LegacyMdbStatus {
-  // Strip potential data URI prefix
+): Promise<LegacyMdbStatus> {
   const base64Data = base64Content.includes(",")
     ? base64Content.split(",").pop() ?? ""
     : base64Content;
 
   const buffer = Buffer.from(base64Data, "base64");
 
-  // Validate it's a readable MDB by trying to open it
+  // Validate
   try {
-    const reader = new (getMdbReader())(buffer);
-    reader.getTableNames(); // will throw on invalid format
+    const reader = new MDBReader(buffer);
+    reader.getTableNames();
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     throw new HttpError(400, `الملف المحدد غير صالح: ${msg}`);
   }
 
-  activeMdbBuffer = buffer;
-  activeMdbFileName = fileName;
-  activeMdbLoadedAt = new Date().toISOString();
+  // Persist to disk
+  await ensureDir();
+  await fs.writeFile(ACTIVE_FILE, buffer);
+
+  const meta: MetaInfo = { fileName, loadedAt: new Date().toISOString() };
+  await writeMeta(meta);
+
+  // Update in-memory cache
+  inMemoryBuffer = buffer;
+  inMemoryMeta = meta;
 
   return {
     hasActiveFile: true,
     fileName,
-    loadedAt: activeMdbLoadedAt
+    loadedAt: meta.loadedAt
   };
 }
 
 /**
- * Get the current active MDB file status.
+ * Get current active file status (from in-memory cache or disk metadata).
  */
-export function getMdbStatus(): LegacyMdbStatus {
-  return {
-    hasActiveFile: activeMdbBuffer !== null,
-    fileName: activeMdbFileName,
-    loadedAt: activeMdbLoadedAt
-  };
+export async function getMdbStatus(): Promise<LegacyMdbStatus> {
+  if (inMemoryMeta) {
+    return {
+      hasActiveFile: true,
+      fileName: inMemoryMeta.fileName,
+      loadedAt: inMemoryMeta.loadedAt
+    };
+  }
+  // Fall back to disk metadata
+  const meta = await readMeta();
+  if (meta) {
+    return {
+      hasActiveFile: true,
+      fileName: meta.fileName,
+      loadedAt: meta.loadedAt
+    };
+  }
+  return { hasActiveFile: false, fileName: null, loadedAt: null };
 }
 
 /**
  * Query legacy appointments from the active MDB file.
- * Applies date and text filters.  Only returns appointments from today onward
- * by default (unless explicit from/to dates are provided).
  */
-export function queryLegacyAppointments(
+export async function queryLegacyAppointments(
   filters: LegacyAppointmentFilters = {}
-): LegacyAppointmentRow[] {
-  const reader = requireActiveReader();
+): Promise<LegacyAppointmentRow[]> {
+  const reader = await createReader();
+  if (!reader) {
+    throw new HttpError(400, "لا يوجد ملف MDB نشط");
+  }
 
-  // Build lookup maps
   const kindPicMap = buildLookupMap(reader, "KindPic", "kpno", "kpnm");
   const plCheckMap = buildLookupMap(reader, "PlCheck", "plNo", "plNm");
   const placesMap = buildLookupMap(reader, "Places", "pno", "pnm");
 
-  // Read Pointments
   let pointmentsData: Record<string, unknown>[];
   try {
     const table = reader.getTable("Pointments");
@@ -347,24 +383,19 @@ export function queryLegacyAppointments(
   const results: LegacyAppointmentRow[] = [];
 
   for (const row of pointmentsData) {
-    // Parse and validate date
     const dateStr = parseDate(row["DtDate"]);
     if (!dateStr) continue;
-
-    // Default: only today or future
     if (!isTodayOrLater(dateStr)) continue;
 
-    // Apply explicit date range filters
     if (filters.fromDate && dateStr < filters.fromDate) continue;
     if (filters.toDate && dateStr > filters.toDate) continue;
 
-    // Resolve display fields
     const modality = resolveModality(row, kindPicMap);
     const exam = resolveExam(row, plCheckMap);
     const source = resolveSource(row, placesMap);
     const patientName = safeString(row["PationNm"]);
 
-    // Apply text filters
+    // Text filters (case-insensitive partial match)
     if (filters.patientName) {
       const q = filters.patientName.toLowerCase();
       if (!patientName.toLowerCase().includes(q)) continue;
@@ -381,7 +412,6 @@ export function queryLegacyAppointments(
     const timeValue = row["DtTime"];
     let timeStr: string | null = null;
     if (timeValue instanceof Date) {
-      // Access time stored as OLE date with fractional day
       const hours = timeValue.getUTCHours().toString().padStart(2, "0");
       const minutes = timeValue.getUTCMinutes().toString().padStart(2, "0");
       timeStr = `${hours}:${minutes}`;
@@ -408,10 +438,9 @@ export function queryLegacyAppointments(
     });
   }
 
-  // Sort: date ASC, then time ASC
   results.sort((a, b) => {
-    const dateCompare = (a.date ?? "").localeCompare(b.date ?? "");
-    if (dateCompare !== 0) return dateCompare;
+    const dc = (a.date ?? "").localeCompare(b.date ?? "");
+    if (dc !== 0) return dc;
     return (a.time ?? "").localeCompare(b.time ?? "");
   });
 
@@ -420,10 +449,12 @@ export function queryLegacyAppointments(
 
 /**
  * Compute summary counters from the active MDB file.
- * Counters are computed from the raw future appointments (no text filters).
  */
-export function computeSummaryCounters(): LegacySummaryCounters {
-  const reader = requireActiveReader();
+export async function computeSummaryCounters(): Promise<LegacySummaryCounters> {
+  const reader = await createReader();
+  if (!reader) {
+    return { todayCount: 0, tomorrowCount: 0, weekCount: 0 };
+  }
 
   let pointmentsData: Record<string, unknown>[];
   try {
