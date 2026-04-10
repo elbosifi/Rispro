@@ -162,3 +162,120 @@ test("allows override mode only when includeOverrideEvaluation is true", () => {
   assert.equal(withOverride.requiresSupervisorOverride, true);
   assert.equal(withOverride.consumedCapacityMode, "override");
 });
+
+// ---------------------------------------------------------------------------
+// displayStatus regression tests
+// ---------------------------------------------------------------------------
+
+test("blocked candidate => displayStatus === 'blocked'", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({
+      blockedRules: [
+        {
+          id: 1,
+          ruleType: "specific_date",
+          specificDate: "2026-04-15",
+          startDate: null, endDate: null,
+          recurStartMonth: null, recurStartDay: null,
+          recurEndMonth: null, recurEndDay: null,
+          isOverridable: false
+        }
+      ]
+    })
+  );
+  assert.equal(result.isAllowed, false);
+  assert.equal(result.requiresSupervisorOverride, false);
+  assert.equal(result.displayStatus, "blocked");
+});
+
+test("ordinary allowed candidate => displayStatus === 'available'", () => {
+  const result = evaluateSchedulingCandidate(baseInput(), baseContext());
+  assert.equal(result.isAllowed, true);
+  assert.equal(result.requiresSupervisorOverride, false);
+  assert.equal(result.displayStatus, "available");
+});
+
+test("override-eligible candidate => displayStatus === 'restricted'", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput({ includeOverrideEvaluation: true }),
+    baseContext({
+      blockedRules: [
+        {
+          id: 5,
+          ruleType: "date_range",
+          specificDate: null,
+          startDate: "2026-04-15",
+          endDate: "2026-04-15",
+          recurStartMonth: null, recurStartDay: null,
+          recurEndMonth: null, recurEndDay: null,
+          isOverridable: true
+        }
+      ]
+    })
+  );
+  // The override is allowed to book, but the slot must show as restricted.
+  assert.equal(result.isAllowed, true);
+  assert.equal(result.requiresSupervisorOverride, true);
+  assert.equal(result.displayStatus, "restricted");
+});
+
+// ---------------------------------------------------------------------------
+// Integrity failure tests — all must be non-overridable blocked
+// ---------------------------------------------------------------------------
+
+function assertIntegrityBlocked(
+  result: ReturnType<typeof evaluateSchedulingCandidate>,
+  expectedReason: string
+) {
+  assert.equal(result.isAllowed, false, `isAllowed should be false for ${expectedReason}`);
+  assert.equal(result.requiresSupervisorOverride, false, `requiresSupervisorOverride should be false for ${expectedReason}`);
+  assert.equal(result.displayStatus, "blocked", `displayStatus should be 'blocked' for ${expectedReason}`);
+  assert.ok(result.blockReasons.includes(expectedReason), `blockReasons should include '${expectedReason}'`);
+}
+
+test("integrity: modality missing => blocked", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({ integrity: { modalityExists: false, examTypeExists: true, examTypeBelongsToModality: true, malformedRuleConfig: false } })
+  );
+  assertIntegrityBlocked(result, "modality_not_found");
+});
+
+test("integrity: exam type missing => blocked", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({ integrity: { modalityExists: true, examTypeExists: false, examTypeBelongsToModality: true, malformedRuleConfig: false } })
+  );
+  assertIntegrityBlocked(result, "exam_type_not_found");
+});
+
+test("integrity: exam type / modality mismatch => blocked", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({ integrity: { modalityExists: true, examTypeExists: true, examTypeBelongsToModality: false, malformedRuleConfig: false } })
+  );
+  assertIntegrityBlocked(result, "exam_type_modality_mismatch");
+});
+
+test("integrity: malformed rule configuration => blocked", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({ integrity: { modalityExists: true, examTypeExists: true, examTypeBelongsToModality: true, malformedRuleConfig: true } })
+  );
+  assertIntegrityBlocked(result, "malformed_rule_configuration");
+});
+
+test("integrity: multiple failures => all reasons collected, still blocked", () => {
+  const result = evaluateSchedulingCandidate(
+    baseInput(),
+    baseContext({ integrity: { modalityExists: false, examTypeExists: false, examTypeBelongsToModality: false, malformedRuleConfig: true } })
+  );
+  assert.equal(result.isAllowed, false);
+  assert.equal(result.requiresSupervisorOverride, false);
+  assert.equal(result.displayStatus, "blocked");
+  assert.ok(result.blockReasons.includes("modality_not_found"));
+  assert.ok(result.blockReasons.includes("exam_type_not_found"));
+  assert.ok(result.blockReasons.includes("exam_type_modality_mismatch"));
+  assert.ok(result.blockReasons.includes("malformed_rule_configuration"));
+});

@@ -100,9 +100,57 @@ function matchesExamRestrictionRule(rule: ExamTypeScheduleRule, isoDate: string)
 }
 
 function buildDisplayStatus(isAllowed: boolean, requiresOverride: boolean): SchedulingResult["displayStatus"] {
-  if (isAllowed) return "available";
+  // Override-eligible slots must be shown as "restricted" even when the
+  // supervisor is allowed to book them — otherwise the UI hides the lock icon.
   if (requiresOverride) return "restricted";
+  if (isAllowed) return "available";
   return "blocked";
+}
+
+/** Build a full result object so repeated fields stay consistent. */
+function buildResult(
+  input: SchedulingCandidateInput,
+  context: SchedulingDecisionContext,
+  reasons: string[],
+  matchedRuleIds: number[],
+  isAllowed: boolean,
+  requiresSupervisorOverride: boolean,
+  consumedCapacityMode: SchedulingResult["consumedCapacityMode"],
+  suggestedBookingMode: SchedulingResult["suggestedBookingMode"],
+  precedenceStage: string
+): SchedulingResult {
+  const remainingCategoryCapacity = {
+    oncology:
+      context.capacity.categoryLimits.oncology === null
+        ? null
+        : Math.max(context.capacity.categoryLimits.oncology - context.capacity.bookedTotals.oncology, 0),
+    nonOncology:
+      context.capacity.categoryLimits.nonOncology === null
+        ? null
+        : Math.max(context.capacity.categoryLimits.nonOncology - context.capacity.bookedTotals.nonOncology, 0)
+  };
+  const remainingSpecialQuota =
+    context.capacity.specialQuotaLimit === null
+      ? null
+      : Math.max(context.capacity.specialQuotaLimit - context.capacity.specialQuotaConsumed, 0);
+
+  return {
+    isAllowed,
+    requiresSupervisorOverride,
+    blockReasons: Array.from(new Set(reasons)),
+    matchedRuleIds,
+    remainingCategoryCapacity,
+    remainingSpecialQuota,
+    consumedCapacityMode,
+    suggestedBookingMode,
+    displayStatus: buildDisplayStatus(isAllowed, requiresSupervisorOverride),
+    evaluationSnapshot: {
+      precedenceStage,
+      input,
+      reasons: Array.from(new Set(reasons)),
+      contextSummary: context
+    }
+  };
 }
 
 export function evaluateSchedulingCandidate(
@@ -129,38 +177,27 @@ export function evaluateSchedulingCandidate(
     reasons.push("malformed_rule_configuration");
   }
 
+  // Integrity failures are non-overridable and must short-circuit immediately.
+  if (reasons.length > 0) {
+    return buildResult(
+      input, context, reasons, [],
+      false, false, null, null,
+      "integrity_checks"
+    );
+  }
+
   // 2) Hard blocks by modality/date.
   for (const blockedRule of context.blockedRules) {
     if (!matchesBlockedRule(blockedRule, input.scheduledDate)) continue;
     matchedRuleIds.add(blockedRule.id);
     reasons.push("modality_blocked_rule_match");
     if (!blockedRule.isOverridable) {
-      return {
-        isAllowed: false,
-        requiresSupervisorOverride: false,
-        blockReasons: Array.from(new Set(reasons)),
-        matchedRuleIds: Array.from(matchedRuleIds),
-        remainingCategoryCapacity: {
-          oncology: context.capacity.categoryLimits.oncology === null
-            ? null
-            : Math.max(context.capacity.categoryLimits.oncology - context.capacity.bookedTotals.oncology, 0),
-          nonOncology: context.capacity.categoryLimits.nonOncology === null
-            ? null
-            : Math.max(context.capacity.categoryLimits.nonOncology - context.capacity.bookedTotals.nonOncology, 0)
-        },
-        remainingSpecialQuota:
-          context.capacity.specialQuotaLimit === null
-            ? null
-            : Math.max(context.capacity.specialQuotaLimit - context.capacity.specialQuotaConsumed, 0),
-        consumedCapacityMode: null,
-        suggestedBookingMode: null,
-        displayStatus: "blocked",
-        evaluationSnapshot: {
-          precedenceStage: "hard_blocks",
-          input,
-          contextSummary: context
-        }
-      };
+      return buildResult(
+        input, context, reasons,
+        Array.from(matchedRuleIds),
+        false, false, null, null,
+        "hard_blocks"
+      );
     }
 
     reasons.push("modality_blocked_overridable");
@@ -184,32 +221,12 @@ export function evaluateSchedulingCandidate(
       reasons.push("exam_type_not_allowed_for_rule");
       const hasHardRule = matchedExamRules.some((rule) => rule.effectMode === "hard_restriction");
       if (hasHardRule) {
-        return {
-          isAllowed: false,
-          requiresSupervisorOverride: false,
-          blockReasons: Array.from(new Set(reasons)),
-          matchedRuleIds: Array.from(matchedRuleIds),
-          remainingCategoryCapacity: {
-            oncology: context.capacity.categoryLimits.oncology === null
-              ? null
-              : Math.max(context.capacity.categoryLimits.oncology - context.capacity.bookedTotals.oncology, 0),
-            nonOncology: context.capacity.categoryLimits.nonOncology === null
-              ? null
-              : Math.max(context.capacity.categoryLimits.nonOncology - context.capacity.bookedTotals.nonOncology, 0)
-          },
-          remainingSpecialQuota:
-            context.capacity.specialQuotaLimit === null
-              ? null
-              : Math.max(context.capacity.specialQuotaLimit - context.capacity.specialQuotaConsumed, 0),
-          consumedCapacityMode: null,
-          suggestedBookingMode: null,
-          displayStatus: "blocked",
-          evaluationSnapshot: {
-            precedenceStage: "exam_type_restrictions",
-            input,
-            contextSummary: context
-          }
-        };
+        return buildResult(
+          input, context, reasons,
+          Array.from(matchedRuleIds),
+          false, false, null, null,
+          "exam_type_restrictions"
+        );
       }
       requiresSupervisorOverride = true;
     }
@@ -271,28 +288,11 @@ export function evaluateSchedulingCandidate(
     suggestedBookingMode = "override";
   }
 
-  return {
-    isAllowed,
-    requiresSupervisorOverride,
-    blockReasons: Array.from(new Set(reasons)),
-    matchedRuleIds: Array.from(matchedRuleIds),
-    remainingCategoryCapacity,
-    remainingSpecialQuota,
-    consumedCapacityMode,
-    suggestedBookingMode,
-    displayStatus: buildDisplayStatus(isAllowed, requiresSupervisorOverride),
-    evaluationSnapshot: {
-      precedence: [
-        "integrity_checks",
-        "hard_blocks",
-        "exam_type_restrictions",
-        "capacity_checks",
-        "override_eligibility"
-      ],
-      input,
-      reasons: Array.from(new Set(reasons)),
-      matchedRuleIds: Array.from(matchedRuleIds),
-      contextSummary: context
-    }
-  };
+  return buildResult(
+    input, context, reasons,
+    Array.from(matchedRuleIds),
+    isAllowed, requiresSupervisorOverride,
+    consumedCapacityMode, suggestedBookingMode,
+    "override_eligibility"
+  );
 }
