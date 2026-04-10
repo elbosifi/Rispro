@@ -13,7 +13,16 @@ import {
   mapNameDictionary,
   mapAuditEntries
 } from "@/lib/mappers";
-import type { Patient, AppointmentLookups, QueueSnapshot, User, AppointmentStatistics, DicomDevice, AuditEntry } from "@/types/api";
+import type {
+  Patient,
+  AppointmentLookups,
+  QueueSnapshot,
+  User,
+  AppointmentStatistics,
+  DicomDevice,
+  AuditEntry,
+  SchedulingEngineConfig
+} from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
 // Generic raw response type for API responses that are passed through mappers
@@ -285,13 +294,13 @@ export async function fetchSettingsCatalog() {
   return raw.settings ?? {};
 }
 
-export async function fetchSchedulingEngineConfig() {
-  const raw = await api<{ config: RawRecord }>("/settings/scheduling-engine-config");
+export async function fetchSchedulingEngineConfig(): Promise<SchedulingEngineConfig> {
+  const raw = await api<{ config: SchedulingEngineConfig }>("/settings/scheduling-engine-config");
   return raw.config;
 }
 
-export async function saveSchedulingEngineConfig(payload: RawRecord) {
-  const raw = await api<{ config: RawRecord }>("/settings/scheduling-engine-config", {
+export async function saveSchedulingEngineConfig(payload: SchedulingEngineConfig) {
+  const raw = await api<{ config: SchedulingEngineConfig }>("/settings/scheduling-engine-config", {
     method: "PUT",
     body: JSON.stringify(payload)
   });

@@ -249,3 +249,110 @@ export interface ApiResponse<T> {
     details?: unknown;
   };
 }
+
+export interface SchedulingCategoryLimit {
+  id?: number;
+  modality_id?: number;
+  modalityId?: number;
+  case_category?: "oncology" | "non_oncology";
+  caseCategory?: "oncology" | "non_oncology";
+  daily_limit?: number;
+  dailyLimit?: number;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
+export interface SchedulingBlockedRule {
+  id?: number;
+  modality_id?: number;
+  modalityId?: number;
+  rule_type?: "specific_date" | "date_range" | "yearly_recurrence";
+  ruleType?: "specific_date" | "date_range" | "yearly_recurrence";
+  specific_date?: string | null;
+  specificDate?: string | null;
+  start_date?: string | null;
+  startDate?: string | null;
+  end_date?: string | null;
+  endDate?: string | null;
+  recur_start_month?: number | null;
+  recurStartMonth?: number | null;
+  recur_start_day?: number | null;
+  recurStartDay?: number | null;
+  recur_end_month?: number | null;
+  recurEndMonth?: number | null;
+  recur_end_day?: number | null;
+  recurEndDay?: number | null;
+  is_overridable?: boolean;
+  isOverridable?: boolean;
+  is_active?: boolean;
+  isActive?: boolean;
+  title?: string;
+  notes?: string;
+}
+
+export interface SchedulingExamRule {
+  id?: number;
+  modality_id?: number;
+  modalityId?: number;
+  rule_type?: "specific_date" | "date_range" | "weekly_recurrence";
+  ruleType?: "specific_date" | "date_range" | "weekly_recurrence";
+  effect_mode?: "hard_restriction" | "restriction_overridable";
+  effectMode?: "hard_restriction" | "restriction_overridable";
+  specific_date?: string | null;
+  specificDate?: string | null;
+  start_date?: string | null;
+  startDate?: string | null;
+  end_date?: string | null;
+  endDate?: string | null;
+  weekday?: number | null;
+  alternate_weeks?: boolean;
+  alternateWeeks?: boolean;
+  recurrence_anchor_date?: string | null;
+  recurrenceAnchorDate?: string | null;
+  exam_type_ids?: number[];
+  examTypeIds?: number[];
+  is_active?: boolean;
+  isActive?: boolean;
+  title?: string;
+  notes?: string;
+}
+
+export interface SchedulingSpecialQuota {
+  id?: number;
+  exam_type_id?: number;
+  examTypeId?: number;
+  daily_extra_slots?: number;
+  dailyExtraSlots?: number;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
+export interface SchedulingSpecialReason {
+  code: string;
+  label_en?: string;
+  labelEn?: string;
+  label_ar?: string;
+  labelAr?: string;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
+export interface SchedulingIdentifierType {
+  id?: number;
+  code: string;
+  label_en?: string;
+  labelEn?: string;
+  label_ar?: string;
+  labelAr?: string;
+  is_active?: boolean;
+  isActive?: boolean;
+}
+
+export interface SchedulingEngineConfig {
+  categoryLimits: SchedulingCategoryLimit[];
+  blockedRules: SchedulingBlockedRule[];
+  examRules: SchedulingExamRule[];
+  specialQuotas: SchedulingSpecialQuota[];
+  specialReasons: SchedulingSpecialReason[];
+  identifierTypes: SchedulingIdentifierType[];
+}
