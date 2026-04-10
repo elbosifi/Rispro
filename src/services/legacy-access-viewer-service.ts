@@ -11,7 +11,6 @@
 
 import MDBReader from "mdb-reader";
 import { HttpError } from "../utils/http-error.js";
-import { arabicIncludes } from "../utils/arabic-normalize.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -341,10 +340,19 @@ export function queryLegacyAppointments(
     const source = resolveSource(row, placesMap);
     const patientName = safeString(row["PationNm"]);
 
-    // Apply text filters (Arabic-aware normalization)
-    if (filters.patientName && !arabicIncludes(patientName, filters.patientName)) continue;
-    if (filters.modality && !arabicIncludes(modality, filters.modality)) continue;
-    if (filters.exam && !arabicIncludes(exam, filters.exam)) continue;
+    // Apply text filters
+    if (filters.patientName) {
+      const q = filters.patientName.toLowerCase();
+      if (!patientName.toLowerCase().includes(q)) continue;
+    }
+    if (filters.modality) {
+      const q = filters.modality.toLowerCase();
+      if (!modality.toLowerCase().includes(q)) continue;
+    }
+    if (filters.exam) {
+      const q = filters.exam.toLowerCase();
+      if (!exam.toLowerCase().includes(q)) continue;
+    }
 
     const timeValue = row["DtTime"];
     let timeStr: string | null = null;

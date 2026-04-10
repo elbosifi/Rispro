@@ -6,6 +6,7 @@
  */
 
 import express, { Request, Response } from "express";
+import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
@@ -18,7 +19,8 @@ import {
 
 export const legacyAccessViewerRouter = express.Router();
 
-// No authentication — this module is intentionally open and isolated.
+// All endpoints require authentication
+legacyAccessViewerRouter.use(requireAuth);
 
 /**
  * POST /api/legacy-access-viewer/upload
