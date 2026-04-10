@@ -7,10 +7,34 @@
  *
  * IMPORTANT: This module never writes to the MDB, never writes to PostgreSQL,
  * and never mutates any existing RISPro data.
+ *
+ * DEPENDENCY NOTE:
+ *   This service requires the optional "mdb-reader" npm package.
+ *   Install it with: npm install mdb-reader
+ *   Until then, all endpoints return a clear 501 error.
  */
 
-import MDBReader from "mdb-reader";
 import { HttpError } from "../utils/http-error.js";
+
+// Lazy-load mdb-reader only when actually needed.
+// This keeps the server startable when the package is not installed.
+let MdbReaderClass: typeof import("mdb-reader").default | null = null;
+let loadError: Error | null = null;
+
+function getMdbReader(): typeof import("mdb-reader").default {
+  if (MdbReaderClass) return MdbReaderClass;
+  if (loadError) {
+    throw new HttpError(501, "عارض المواعيد القديمة غير مفعّل — حزمة mdb-reader غير مثبتة");
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    MdbReaderClass = require("mdb-reader").default;
+    return MdbReaderClass;
+  } catch (err: unknown) {
+    loadError = err instanceof Error ? err : new Error(String(err));
+    throw new HttpError(501, "عارض المواعيد القديمة غير مفعّل — يرجى تشغيل: npm install mdb-reader");
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -67,11 +91,11 @@ let activeMdbLoadedAt: string | null = null;
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function requireActiveReader(): MDBReader {
+function requireActiveReader(): any {
   if (!activeMdbBuffer) {
     throw new HttpError(400, "لا يوجد ملف MDB نشط"); // "No active MDB file"
   }
-  return new MDBReader(activeMdbBuffer);
+  return new (getMdbReader())(activeMdbBuffer);
 }
 
 /**
@@ -134,7 +158,7 @@ function safeNumber(value: unknown): number | null {
  * Returns Map<keyValue, displayValue>.
  */
 function buildLookupMap(
-  reader: MDBReader,
+  reader: any,
   tableName: string,
   keyCol: string,
   valueCol: string
@@ -266,7 +290,7 @@ export function loadMdbFile(
 
   // Validate it's a readable MDB by trying to open it
   try {
-    const reader = new MDBReader(buffer);
+    const reader = new (getMdbReader())(buffer);
     reader.getTableNames(); // will throw on invalid format
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
