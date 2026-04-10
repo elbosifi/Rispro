@@ -41,10 +41,11 @@ async function parseErrorResponse(response: Response): Promise<ApiError> {
 
 export async function api<T>(
   path: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  timeoutMs = API_TIMEOUT_MS
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(`/api${path}`, {

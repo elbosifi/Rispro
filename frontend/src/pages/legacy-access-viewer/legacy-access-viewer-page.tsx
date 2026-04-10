@@ -46,7 +46,7 @@ async function uploadMdbFile(fileContentBase64: string, fileName: string): Promi
   return api("/legacy-access-viewer/upload", {
     method: "POST",
     body: JSON.stringify({ fileContentBase64, fileName })
-  });
+  }, 120_000); // 2 minutes — MDB files can be large
 }
 
 async function fetchMdbStatus(): Promise<{ status: MdbStatus }> {
