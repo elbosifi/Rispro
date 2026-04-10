@@ -162,6 +162,8 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      {/* Public route: legacy Access viewer requires no authentication */}
+      <Route path="/legacy-viewer" element={<LegacyAccessViewerPage />} />
       <Route
         path="/*"
         element={

@@ -8,6 +8,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import { api } from "@/lib/api-client";
+import { normalizeArabic } from "@/lib/arabic-normalize";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -351,9 +352,13 @@ export default function LegacyAccessViewerPage() {
       const params: Record<string, string> = {};
       if (fromDate) params.fromDate = fromDate;
       if (toDate) params.toDate = toDate;
-      if (patientName) params.patientName = patientName;
-      if (modality) params.modality = modality;
-      if (exam) params.exam = exam;
+      // Normalize Arabic text before sending to backend for consistent matching
+      const normPatientName = normalizeArabic(patientName);
+      const normModality = normalizeArabic(modality);
+      const normExam = normalizeArabic(exam);
+      if (normPatientName) params.patientName = normPatientName;
+      if (normModality) params.modality = normModality;
+      if (normExam) params.exam = normExam;
 
       const res = await fetchLegacyAppointments(params);
       setAppointments(res.appointments);
