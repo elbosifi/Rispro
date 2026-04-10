@@ -34,7 +34,12 @@
       "Bash(git checkout *)",
       "Bash(git merge *)",
       "Bash(git stash)",
-      "Bash(ls *)"
+      "Bash(ls *)",
+      "Bash(true)",
+      "Bash(command *)",
+      "Bash(nvm *)",
+      "Bash(which *)",
+      "Bash(mkdir *)"
     ]
   },
   "$version": 3
