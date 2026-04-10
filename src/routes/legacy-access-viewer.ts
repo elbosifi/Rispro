@@ -25,8 +25,10 @@ legacyAccessViewerRouter.use(requireAuth);
 
 /**
  * POST /api/legacy-access-viewer/upload
- * MDB files can be large (10-50 MB); base64 inflates by ~33%.
- * Use a dedicated body parser with a 100 MB limit for this route only.
+ *
+ * This endpoint uses its own 100 MB JSON parser.  The global parser in
+ * src/app.ts explicitly skips this path so the two never conflict.
+ * See the "Conditional JSON parser" comment in app.ts for the full flow.
  */
 legacyAccessViewerRouter.post(
   "/upload",

@@ -45,7 +45,34 @@ export function createApp(): Application {
   app.set("trust proxy", env.trustProxy);
 
   app.use(securityHeaders);
-  app.use(express.json({ limit: env.requestBodyLimit }));
+
+  // ---- Conditional JSON parser ------------------------------------------
+  // The Legacy Access viewer upload endpoint accepts base64-encoded MDB files
+  // that can easily exceed the default 8 MB body limit (a 30 MB .mdb file
+  // becomes ~40 MB as base64).  We skip the global parser for that single
+  // endpoint and let the route itself apply its own 100 MB parser.
+  //
+  // Middleware flow for /api/legacy-access-viewer/upload:
+  //   1. securityHeaders          → applied
+  //   2. global json parser       → SKIPPED (path excluded)
+  //   3. cookieParser             → applied (needed for auth)
+  //   4. legacyAccessViewerRouter → matched
+  //   5. requireAuth              → reads cookie, validates JWT
+  //   6. express.json({100mb})    → route-specific parser (applies here)
+  //   7. handler                  → receives parsed body
+  //
+  // All other routes go through the normal global parser.
+  // -----------------------------------------------------------------------
+  const LEGACY_UPLOAD_PATH = "/api/legacy-access-viewer/upload";
+  app.use((req: Request, _res: Response, next: NextFunction) => {
+    if (req.path === LEGACY_UPLOAD_PATH) {
+      // Let the route's own body parser handle it.
+      return next();
+    }
+    // Normal global parser for everything else.
+    express.json({ limit: env.requestBodyLimit })(req, _res, next);
+  });
+
   app.use(cookieParser());
   app.use("/assets", express.static(path.join(rootDir, "assets")));
 
