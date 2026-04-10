@@ -28,33 +28,46 @@ function describeSchedulingReason(reason: string): string {
     case "standard_capacity_exhausted":
       return "Daily capacity reached";
     case "special_quota_exhausted":
-      return "Special quota exhausted";
+      return "Special quota reached";
     case "modality_blocked_rule_match":
-      return "This date is blocked for the modality";
+      return "Blocked for this modality";
     case "modality_blocked_overridable":
-      return "Blocked unless supervisor approves";
+      return "Needs supervisor approval";
     case "exam_type_not_allowed_for_rule":
-      return "Exam type is not allowed on this date";
+      return "Exam type not allowed";
     case "malformed_rule_configuration":
-      return "Scheduling rule needs administrator review";
+      return "Rule needs review";
     case "modality_not_found":
     case "exam_type_not_found":
     case "exam_type_modality_mismatch":
-      return "Scheduling configuration error";
+      return "Scheduling configuration issue";
     default:
       return "Scheduling restriction";
   }
 }
 
-function getAvailabilityText(availability: Array<Record<string, unknown>>, date: string): string {
-  const day = availability.find((d) => normalizeDateKey(d.appointment_date) === date);
-  if (!day) return "No data for this date";
+function getAvailabilityLabel(day: Record<string, unknown>): string {
   const status = String(day.displayStatus || "");
-  if (status === "blocked") return `Not available on ${formatDateLy(date)}`;
-  if (status === "restricted") return `Available only with supervisor override on ${formatDateLy(date)}`;
-  if (day.is_bookable === true) return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
-  if (day.is_full) return `Fully booked on ${formatDateLy(date)}`;
-  return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
+  if (status === "restricted") return "Needs supervisor approval";
+  if (status === "blocked") return "Not available";
+  if (day.is_bookable === true) return "Available";
+  return "Not available";
+}
+
+function getAvailabilityNote(day: Record<string, unknown>): string {
+  const status = String(day.displayStatus || "");
+  const remaining = Number(day.remaining_capacity);
+  if (status === "restricted" || status === "blocked") {
+    const reason = Array.isArray(day.blockReasons) && day.blockReasons.length > 0
+      ? describeSchedulingReason(String(day.blockReasons[0]))
+      : "";
+    return reason || getAvailabilityLabel(day);
+  }
+  if (day.is_bookable === true) {
+    return Number.isFinite(remaining) ? `${remaining} slots left` : "Available";
+  }
+  if (day.is_full) return "Fully booked";
+  return "Not available";
 }
 
 interface AppointmentForm {
@@ -141,7 +154,7 @@ export default function AppointmentsPage() {
 
   // Availability pagination: setting value is days per page
   const [availPage, setAvailPage] = useState(0);
-  const [showAllDays, setShowAllDays] = useState(false);
+  const [showBlockedDates, setShowBlockedDates] = useState(false);
   const schedulingSettingsRecord = schedulingSettings as Record<string, string> | undefined;
   const pageDays = parseInt(schedulingSettingsRecord?.calendar_window_days ?? "14", 10) || 14;
   const availOffset = availPage * pageDays;
@@ -175,7 +188,7 @@ export default function AppointmentsPage() {
     staleTime: 1000 * 30
   });
   const availabilityRows = availability ?? [];
-  const displayRows = showAllDays ? availabilityRows : availabilityRows.filter((day: any) => day.displayStatus !== "blocked");
+  const displayRows = showBlockedDates ? availabilityRows : availabilityRows.filter((day: any) => day.displayStatus !== "blocked");
 
   // Track the selected date's scheduling status for banner/override visibility
   const selectedDateStatus = useMemo(() => {
@@ -188,6 +201,15 @@ export default function AppointmentsPage() {
       blockReasons: Array.isArray(day.blockReasons) ? day.blockReasons : []
     };
   }, [form.appointmentDate, availability]);
+
+  useEffect(() => {
+    if (!selectedDateStatus?.requiresSupervisorOverride) {
+      setForm((f) => {
+        if (!f.supervisorUsername && !f.supervisorPassword) return f;
+        return { ...f, supervisorUsername: "", supervisorPassword: "" };
+      });
+    }
+  }, [selectedDateStatus?.requiresSupervisorOverride]);
 
   // Next open slot suggestion after selecting patient + modality
   const { data: suggestionAvailability } = useQuery({
@@ -213,7 +235,7 @@ export default function AppointmentsPage() {
     enabled: !!form.patientId && !!form.modalityId,
     staleTime: 1000 * 30
   });
-  const nextOpenSlotDate = useMemo(() => {
+  const suggestionInfo = useMemo(() => {
     const rows = suggestionAvailability ?? [];
     const tripoliHour = Number(
       new Intl.DateTimeFormat("en-GB", {
@@ -231,7 +253,12 @@ export default function AppointmentsPage() {
       if (isAfterTwoPmTripoli && dayKey === today) return false;
       return true;
     });
-    if (bookable) return normalizeDateKey(bookable.appointment_date);
+    if (bookable) {
+      return {
+        label: "Suggested next available date",
+        date: normalizeDateKey(bookable.appointment_date)
+      };
+    }
     // Fall back to override-required day only when includeOverrideCandidates is on.
     if (form.includeOverrideCandidates) {
       const overrideDay = rows.find((day: any) => {
@@ -240,9 +267,14 @@ export default function AppointmentsPage() {
         if (isAfterTwoPmTripoli && dayKey === today) return false;
         return true;
       });
-      if (overrideDay) return normalizeDateKey(overrideDay.appointment_date);
+      if (overrideDay) {
+        return {
+          label: "Earliest date with supervisor override",
+          date: normalizeDateKey(overrideDay.appointment_date)
+        };
+      }
     }
-    return "";
+    return null;
   }, [suggestionAvailability, form.includeOverrideCandidates]);
 
   // Debounced patient search
@@ -282,7 +314,7 @@ export default function AppointmentsPage() {
     setForm((f) => ({ ...f, examTypeId: "", appointmentDate: "" }));
     setSafetyAcknowledged(false);
     setAvailPage(0);
-    setShowAllDays(false);
+    setShowBlockedDates(false);
   }, [form.modalityId]);
 
   // Cleanup debounce timer on unmount
@@ -527,7 +559,7 @@ export default function AppointmentsPage() {
                   </div>
                 )}
                 <Select
-                  label="Exam Type (Optional)"
+                  label="Exam type"
                   value={form.examTypeId}
                   onChange={(v) => setForm((f) => ({ ...f, examTypeId: v }))}
                   options={[
@@ -547,75 +579,91 @@ export default function AppointmentsPage() {
                     { value: "oncology", label: "Oncology" }
                   ]}
                 />
-                <div className="md:col-span-2 p-3 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/40 space-y-2">
-                  <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
-                    <input
-                      type="checkbox"
-                      checked={form.useSpecialQuota}
-                      onChange={(e) => setForm((f) => ({ ...f, useSpecialQuota: e.target.checked }))}
-                    />
-                    Use special quota
-                  </label>
-                  {form.useSpecialQuota && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <input
-                        value={form.specialReasonCode}
-                        onChange={(e) => setForm((f) => ({ ...f, specialReasonCode: e.target.value }))}
-                        placeholder="Special reason code"
-                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
-                      />
-                      <input
-                        value={form.specialReasonNote}
-                        onChange={(e) => setForm((f) => ({ ...f, specialReasonNote: e.target.value }))}
-                        placeholder="Special reason note (optional)"
-                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
-                      />
+                <div className="md:col-span-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30">
+                  <details className="group p-3">
+                    <summary className="cursor-pointer list-none text-sm font-medium text-stone-700 dark:text-stone-300 flex items-center justify-between gap-3">
+                      <span>Advanced scheduling options</span>
+                      <span className="text-xs text-stone-500 dark:text-stone-400 group-open:hidden">Show</span>
+                      <span className="text-xs text-stone-500 dark:text-stone-400 hidden group-open:inline">Hide</span>
+                    </summary>
+                    <div className="mt-3 space-y-3">
+                      <p className="text-xs text-stone-500 dark:text-stone-400">
+                        Use these only when a booking needs an exception.
+                      </p>
+                      <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+                        <input
+                          type="checkbox"
+                          checked={form.useSpecialQuota}
+                          onChange={(e) => setForm((f) => ({ ...f, useSpecialQuota: e.target.checked }))}
+                        />
+                        Use special quota
+                      </label>
+                      {form.useSpecialQuota && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                          <input
+                            value={form.specialReasonCode}
+                            onChange={(e) => setForm((f) => ({ ...f, specialReasonCode: e.target.value }))}
+                            placeholder="Reason code"
+                            className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
+                          />
+                          <input
+                            value={form.specialReasonNote}
+                            onChange={(e) => setForm((f) => ({ ...f, specialReasonNote: e.target.value }))}
+                            placeholder="Short note (optional)"
+                            className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
+                          />
+                        </div>
+                      )}
+                      <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+                        <input
+                          type="checkbox"
+                          checked={form.includeOverrideCandidates}
+                          onChange={(e) => setForm((f) => ({ ...f, includeOverrideCandidates: e.target.checked }))}
+                        />
+                        Show dates needing supervisor approval
+                      </label>
                     </div>
-                  )}
-                  {/* Supervisor credentials — hidden by default, shown when restricted date selected or user has typed */}
-                  {(selectedDateStatus?.requiresSupervisorOverride || form.supervisorUsername || form.supervisorPassword) && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
-                      <input
-                        value={form.supervisorUsername}
-                        onChange={(e) => setForm((f) => ({ ...f, supervisorUsername: e.target.value }))}
-                        placeholder="Supervisor username"
-                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
-                      />
-                      <input
-                        type="password"
-                        value={form.supervisorPassword}
-                        onChange={(e) => setForm((f) => ({ ...f, supervisorPassword: e.target.value }))}
-                        placeholder="Supervisor password"
-                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
-                      />
-                    </div>
-                  )}
+                  </details>
                 </div>
                 <div className="md:col-span-2">
                   <DateInput
-                    label="Appointment Date"
+                    label="Appointment date"
                     value={form.appointmentDate}
                     onChange={(v) => setForm((f) => ({ ...f, appointmentDate: v }))}
                   />
-                  {/* Restricted date banner */}
                   {selectedDateStatus?.requiresSupervisorOverride && (
-                    <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
-                      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
-                        This date can only be booked with supervisor override.
+                    <div className="mt-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
+                      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                        This date needs supervisor approval.
                       </p>
                       {selectedDateStatus.blockReasons.length > 0 && (
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
                           {describeSchedulingReason(selectedDateStatus.blockReasons[0])}
                         </p>
                       )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <input
+                          value={form.supervisorUsername}
+                          onChange={(e) => setForm((f) => ({ ...f, supervisorUsername: e.target.value }))}
+                          placeholder="Supervisor username"
+                          className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                        />
+                        <input
+                          type="password"
+                          value={form.supervisorPassword}
+                          onChange={(e) => setForm((f) => ({ ...f, supervisorPassword: e.target.value }))}
+                          placeholder="Supervisor password"
+                          className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                        />
+                      </div>
                     </div>
                   )}
-                  {!!form.patientId && !!form.modalityId && !!nextOpenSlotDate && (
+                  {!!form.patientId && !!form.modalityId && suggestionInfo && (
                     <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
-                      Suggested next open slot: {formatDateLy(nextOpenSlotDate)}
+                      {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
                       <button
                         type="button"
-                        onClick={() => setForm((f) => ({ ...f, appointmentDate: nextOpenSlotDate }))}
+                        onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
                         className="ml-2 underline underline-offset-2"
                       >
                         Use this date
@@ -624,7 +672,11 @@ export default function AppointmentsPage() {
                   )}
                   {availability && form.appointmentDate && (
                     <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-                      {getAvailabilityText(availability, form.appointmentDate)}
+                      {(() => {
+                        const day = availability.find((d: any) => normalizeDateKey(d.appointment_date) === form.appointmentDate);
+                        if (!day) return "No data for this date";
+                        return `${getAvailabilityLabel(day)} · ${getAvailabilityNote(day)}`;
+                      })()}
                     </p>
                   )}
                 </div>
@@ -711,19 +763,11 @@ export default function AppointmentsPage() {
                 </p>
                 <button
                   type="button"
-                  onClick={() => setShowAllDays((v) => !v)}
+                  onClick={() => setShowBlockedDates((v) => !v)}
                   className="text-xs text-teal-700 dark:text-teal-300 underline underline-offset-2"
                 >
-                  {showAllDays ? "Hide fully booked days" : "Show all days"}
+                  {showBlockedDates ? "Hide blocked dates" : "Show blocked dates"}
                 </button>
-                <label className="flex items-center gap-2 text-xs text-stone-600 dark:text-stone-300">
-                  <input
-                    type="checkbox"
-                    checked={form.includeOverrideCandidates}
-                    onChange={(e) => setForm((f) => ({ ...f, includeOverrideCandidates: e.target.checked }))}
-                  />
-                  Include override-required candidates
-                </label>
 
                 <ul className="space-y-1.5">
                   {displayRows.map((day: any, idx: number) => {
@@ -748,6 +792,8 @@ export default function AppointmentsPage() {
                     const displayStatus = String(day.displayStatus || "");
                     const isBlocked = displayStatus === "blocked";
                     const isRestricted = displayStatus === "restricted";
+                    const statusLabel = getAvailabilityLabel(day);
+                    const statusNote = getAvailabilityNote(day);
 
                     // Blocked rows: not clickable, reduced opacity, not-allowed cursor
                     if (isBlocked) {
@@ -767,9 +813,13 @@ export default function AppointmentsPage() {
                                 {day.remaining_capacity}/{day.daily_capacity}
                               </span>
                             </div>
-                            <div className="text-[10px] mt-1 text-red-600 dark:text-red-400 font-medium">
-                              Not available
-                              {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 ? ` — ${describeSchedulingReason(day.blockReasons[0])}` : ""}
+                            <div className="mt-1">
+                              <div className="text-[10px] uppercase tracking-wide text-red-600 dark:text-red-400 font-medium">
+                                {statusLabel}
+                              </div>
+                              <div className="text-[10px] text-stone-500 dark:text-stone-400">
+                                {statusNote}
+                              </div>
                             </div>
                             <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
                               <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
@@ -806,13 +856,11 @@ export default function AppointmentsPage() {
                             </div>
                             <div className="mt-1">
                               <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
-                                Needs supervisor override
+                                {statusLabel}
                               </span>
-                              {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 && (
-                                <span className="text-[10px] ml-1 text-stone-500 dark:text-stone-400">
-                                  — {describeSchedulingReason(day.blockReasons[0])}
-                                </span>
-                              )}
+                              <div className="text-[10px] text-stone-500 dark:text-stone-400 mt-1">
+                                {statusNote}
+                              </div>
                             </div>
                             <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
                               <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
@@ -846,8 +894,13 @@ export default function AppointmentsPage() {
                               {day.remaining_capacity}/{day.daily_capacity}
                             </span>
                           </div>
-                          <div className="text-[10px] uppercase tracking-wide mt-1 text-stone-500 dark:text-stone-400">
-                            {day.is_full ? "Fully booked" : "Available"}
+                          <div className="mt-1">
+                            <div className="text-[10px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400 font-medium">
+                              {statusLabel}
+                            </div>
+                            <div className="text-[10px] text-stone-500 dark:text-stone-400">
+                              {statusNote}
+                            </div>
                           </div>
                           <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
                             <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
@@ -857,9 +910,9 @@ export default function AppointmentsPage() {
                     );
                   })}
                 </ul>
-                {!showAllDays && displayRows.length === 0 && (
+                {!showBlockedDates && displayRows.length === 0 && (
                   <p className="text-xs text-stone-500 dark:text-stone-400">
-                    No open days on this page. Click "Show all days" or go to Later.
+                    No available dates on this page. Click "Show blocked dates" or go to Later.
                   </p>
                 )}
               </div>

@@ -40,13 +40,13 @@ import type { User, SchedulingEngineConfig } from "@/types/api";
 const RULE_TYPE_LABELS: Record<string, string> = {
   specific_date: "Specific date",
   date_range: "Date range",
-  yearly_recurrence: "Yearly recurring period",
-  weekly_recurrence: "Weekly recurring pattern"
+  yearly_recurrence: "Yearly recurrence",
+  weekly_recurrence: "Weekly recurrence"
 };
 
 const EFFECT_MODE_LABELS: Record<string, string> = {
   restriction_overridable: "Restricted unless supervisor approves",
-  hard_restriction: "Hard restriction (cannot override)"
+  hard_restriction: "Hard restriction"
 };
 
 const CASE_CATEGORY_LABELS: Record<string, string> = {
@@ -65,18 +65,18 @@ const WEEKDAY_LABELS: Record<string, string> = {
 };
 
 const SECTION_HELPERS: Record<string, string> = {
-  categoryLimits: "Limit how many oncology or non-oncology appointments each modality can accept per day.",
-  blockedRules: "Block entire dates or date ranges for a modality.",
-  examRules: "Restrict specific exam types to certain dates or recurring patterns.",
-  specialQuotas: "Allow extra daily slots for selected exam types.",
-  specialReasons: "Codes staff can choose when using special quotas.",
-  identifierTypes: "Extra identifier types available during registration."
+  categoryLimits: "Set the daily limit for oncology and non-oncology cases.",
+  blockedRules: "Block full dates or date ranges for a modality.",
+  examRules: "Control when specific exam types can be booked.",
+  specialQuotas: "Add a few extra slots for selected exam types.",
+  specialReasons: "Reasons staff can choose when using a special quota.",
+  identifierTypes: "Extra patient ID types available during registration."
 };
 
 const SECTION_TITLES: Record<string, string> = {
   categoryLimits: "Category Daily Limits",
-  blockedRules: "Modality Blocked Rules",
-  examRules: "Exam Schedule Restriction Rules",
+  blockedRules: "Blocked Dates",
+  examRules: "Exam Date Rules",
   specialQuotas: "Special Quotas",
   specialReasons: "Special Reason Codes",
   identifierTypes: "Patient Identifier Types"
@@ -402,7 +402,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 
   const modalityOptions = ((modalityData as any)?.modalities ?? []).map((m: any) => ({
     value: m.id,
-    label: `${m.name_en} (${m.name_ar})`
+    label: chooseLocalized(language, m.name_ar, m.name_en)
   }));
 
   const startEdit = (et: any) => {
@@ -430,11 +430,11 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
             <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             {modalityOptions.length > 0 ? (
               <select value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
-                <option value="">Select modality…</option>
+                <option value="">{t("settings.selectModality")}</option>
                 {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             ) : (
-              <input value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} placeholder="Modality ID" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+              <input value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} placeholder={t("settings.selectModality")} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             )}
           </div>
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
@@ -459,7 +459,9 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
               <div className="flex items-center justify-between">
                 <div className="text-start">
                   <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, et.name_ar, et.name_en)}</p>
-                  <p className="description-center text-sm">Modality ID: {et.modality_id ?? "—"}</p>
+                  <p className="description-center text-sm">
+                    Modality: {modalityOptions.find((o: any) => String(o.value) === String(et.modality_id))?.label ?? "Not assigned"}
+                  </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
@@ -1158,6 +1160,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
 
 
 function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
 
   // Lookup data for dropdowns
@@ -1459,13 +1462,13 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
   }
 
   if (isLoading) {
-    return <p className="description-center">Loading scheduling configuration…</p>;
+    return <p className="description-center">{t("settings.loading")}</p>;
   }
 
   // ---- Small reusable field components ----
   const ModalitySelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <select className="input-field text-xs" value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Select modality…</option>
+      <option value="">{t("settings.selectModality")}</option>
       {modalityOptions.map((opt: { value: string; label: string }) => (
         <option key={opt.value} value={opt.value}>{opt.label}</option>
       ))}
@@ -1494,7 +1497,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
 
   const WeekdaySelect = ({ value, onChange }: { value: string; onChange: (v: string) => void }) => (
     <select className="input-field text-xs" value={value} onChange={(e) => onChange(e.target.value)}>
-      <option value="">Select day…</option>
+      <option value="">Select weekday…</option>
       {Object.entries(WEEKDAY_LABELS).map(([k, v]) => (
         <option key={k} value={k}>{v}</option>
       ))}
@@ -1527,7 +1530,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
   return (
     <div className="space-y-4">
       <p className="text-sm description-center">
-        Manage rule limits and scheduling policies with structured fields. Changes are saved for all users.
+        Set the booking rules staff use every day. Each section controls one part of appointment access.
       </p>
 
       {/* A. Category Daily Limits */}
@@ -1596,16 +1599,16 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           <div key={`er-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
             <ModalitySelect value={row.modalityId as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, modalityId: v } : r) }))} />
             <select className="input-field text-xs" value={row.ruleType as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, ruleType: e.target.value as ExamRuleRow["ruleType"] } : r) }))}>
-              <option value="specific_date">Specific date</option>
-              <option value="date_range">Date range</option>
-              <option value="weekly_recurrence">Weekly recurring pattern</option>
+              <option value="specific_date">{RULE_TYPE_LABELS.specific_date}</option>
+              <option value="date_range">{RULE_TYPE_LABELS.date_range}</option>
+              <option value="weekly_recurrence">{RULE_TYPE_LABELS.weekly_recurrence}</option>
             </select>
             <select className="input-field text-xs" value={row.effectMode as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, effectMode: e.target.value as ExamRuleRow["effectMode"] } : r) }))}>
-              <option value="restriction_overridable">Restricted unless supervisor approves</option>
-              <option value="hard_restriction">Hard restriction (cannot override)</option>
+              <option value="restriction_overridable">{EFFECT_MODE_LABELS.restriction_overridable}</option>
+              <option value="hard_restriction">{EFFECT_MODE_LABELS.hard_restriction}</option>
             </select>
             <div className="md:col-span-1">
-              <p className="text-[10px] text-stone-500 mb-1">Applies to exam types:</p>
+              <p className="text-[10px] text-stone-500 mb-1">Choose the exam types this rule applies to.</p>
               <ExamTypeMultiSelect
                 values={(row.examTypeIds as number[]) || []}
                 onChange={(ids) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, examTypeIds: ids } : r) }))}
@@ -1614,7 +1617,10 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
             <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
             <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
-            <WeekdaySelect value={row.weekday as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, weekday: v } : r) }))} />
+            <div className="space-y-1">
+              <p className="text-[10px] text-stone-500">Weekday</p>
+              <WeekdaySelect value={row.weekday as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, weekday: v } : r) }))} />
+            </div>
             <input className="input-field text-xs" type="date" placeholder="Recurrence anchor date" value={row.recurrenceAnchorDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, recurrenceAnchorDate: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
