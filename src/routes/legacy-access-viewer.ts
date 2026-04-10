@@ -25,11 +25,14 @@ legacyAccessViewerRouter.use(requireAuth);
 
 /**
  * POST /api/legacy-access-viewer/upload
+ * MDB files can be large (10-50 MB); base64 inflates by ~33%.
+ * Use a dedicated body parser with a 100 MB limit for this route only.
  */
 legacyAccessViewerRouter.post(
   "/upload",
-  asyncRoute(async (_req: Request, res: Response) => {
-    const body = asUnknownRecord(_req.body || {});
+  express.json({ limit: "100mb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body || {});
     const fileContent = String(body.fileContentBase64 || "");
     const fileName = String(body.fileName || "database.mdb");
 
