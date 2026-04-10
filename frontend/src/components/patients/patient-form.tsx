@@ -320,9 +320,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
     if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
+      showToast("Please confirm the national ID.", "error");
+      nationalIdConfirmationRef.current?.focus();
       return;
     }
     if (requiresNationalIdConfirmation && form.identifierValue !== form.nationalIdConfirmation) {
+      showToast("National ID confirmation does not match.", "error");
+      nationalIdConfirmationRef.current?.focus();
       return;
     }
     const payload = {
@@ -527,7 +531,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                         if (next.length > 0 && !next.some((x) => x.isPrimary)) {
                           next[0] = { ...next[0], isPrimary: true };
                         }
-                        return { ...f, identifiers: next };
+                        const primary = next.find((x) => x.isPrimary) || next[0];
+                        return {
+                          ...f,
+                          identifiers: next,
+                          identifierType: (primary?.typeCode || "national_id") as IdentifierType,
+                          identifierValue: primary?.value || ""
+                        };
                       })
                     }
                   >

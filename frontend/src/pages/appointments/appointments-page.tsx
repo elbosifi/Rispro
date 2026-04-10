@@ -19,6 +19,44 @@ import { pushToast } from "@/lib/toast";
 import { printAppointmentSlip } from "@/lib/print-utils";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function describeSchedulingReason(reason: string): string {
+  switch (reason) {
+    case "standard_capacity_exhausted":
+      return "Daily capacity reached";
+    case "special_quota_exhausted":
+      return "Special quota exhausted";
+    case "modality_blocked_rule_match":
+      return "This date is blocked for the modality";
+    case "modality_blocked_overridable":
+      return "Blocked unless supervisor approves";
+    case "exam_type_not_allowed_for_rule":
+      return "Exam type is not allowed on this date";
+    case "malformed_rule_configuration":
+      return "Scheduling rule needs administrator review";
+    case "modality_not_found":
+    case "exam_type_not_found":
+    case "exam_type_modality_mismatch":
+      return "Scheduling configuration error";
+    default:
+      return "Scheduling restriction";
+  }
+}
+
+function getAvailabilityText(availability: Array<Record<string, unknown>>, date: string): string {
+  const day = availability.find((d) => normalizeDateKey(d.appointment_date) === date);
+  if (!day) return "No data for this date";
+  const status = String(day.displayStatus || "");
+  if (status === "blocked") return `Not available on ${formatDateLy(date)}`;
+  if (status === "restricted") return `Available only with supervisor override on ${formatDateLy(date)}`;
+  if (day.is_bookable === true) return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
+  if (day.is_full) return `Fully booked on ${formatDateLy(date)}`;
+  return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
+}
+
 interface AppointmentForm {
   patientId: string;
   patientSearch: string;
@@ -137,7 +175,19 @@ export default function AppointmentsPage() {
     staleTime: 1000 * 30
   });
   const availabilityRows = availability ?? [];
-  const displayRows = showAllDays ? availabilityRows : availabilityRows.filter((day: any) => !day.is_full);
+  const displayRows = showAllDays ? availabilityRows : availabilityRows.filter((day: any) => day.displayStatus !== "blocked");
+
+  // Track the selected date's scheduling status for banner/override visibility
+  const selectedDateStatus = useMemo(() => {
+    if (!form.appointmentDate || !availability) return null;
+    const day = availability.find((d: any) => normalizeDateKey(d.appointment_date) === form.appointmentDate);
+    if (!day) return null;
+    return {
+      displayStatus: String(day.displayStatus || ""),
+      requiresSupervisorOverride: Boolean(day.requiresSupervisorOverride),
+      blockReasons: Array.isArray(day.blockReasons) ? day.blockReasons : []
+    };
+  }, [form.appointmentDate, availability]);
 
   // Next open slot suggestion after selecting patient + modality
   const { data: suggestionAvailability } = useQuery({
@@ -174,14 +224,26 @@ export default function AppointmentsPage() {
     );
     const isAfterTwoPmTripoli = tripoliHour >= 14;
     const today = todayIsoDateLy();
-    const next = rows.find((day: any) => {
-      if (day.is_full) return false;
+    // Prefer a truly bookable day first.
+    const bookable = rows.find((day: any) => {
+      if (day.is_bookable !== true) return false;
       const dayKey = normalizeDateKey(day.appointment_date);
       if (isAfterTwoPmTripoli && dayKey === today) return false;
       return true;
     });
-    return next ? normalizeDateKey(next.appointment_date) : "";
-  }, [suggestionAvailability]);
+    if (bookable) return normalizeDateKey(bookable.appointment_date);
+    // Fall back to override-required day only when includeOverrideCandidates is on.
+    if (form.includeOverrideCandidates) {
+      const overrideDay = rows.find((day: any) => {
+        if (!day.requiresSupervisorOverride) return false;
+        const dayKey = normalizeDateKey(day.appointment_date);
+        if (isAfterTwoPmTripoli && dayKey === today) return false;
+        return true;
+      });
+      if (overrideDay) return normalizeDateKey(overrideDay.appointment_date);
+    }
+    return "";
+  }, [suggestionAvailability, form.includeOverrideCandidates]);
 
   // Debounced patient search
   const handlePatientSearch = useCallback((query: string) => {
@@ -510,21 +572,24 @@ export default function AppointmentsPage() {
                       />
                     </div>
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
-                    <input
-                      value={form.supervisorUsername}
-                      onChange={(e) => setForm((f) => ({ ...f, supervisorUsername: e.target.value }))}
-                      placeholder="Supervisor username (only if override needed)"
-                      className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
-                    />
-                    <input
-                      type="password"
-                      value={form.supervisorPassword}
-                      onChange={(e) => setForm((f) => ({ ...f, supervisorPassword: e.target.value }))}
-                      placeholder="Supervisor password (only if override needed)"
-                      className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
-                    />
-                  </div>
+                  {/* Supervisor credentials — hidden by default, shown when restricted date selected or user has typed */}
+                  {(selectedDateStatus?.requiresSupervisorOverride || form.supervisorUsername || form.supervisorPassword) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                      <input
+                        value={form.supervisorUsername}
+                        onChange={(e) => setForm((f) => ({ ...f, supervisorUsername: e.target.value }))}
+                        placeholder="Supervisor username"
+                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                      />
+                      <input
+                        type="password"
+                        value={form.supervisorPassword}
+                        onChange={(e) => setForm((f) => ({ ...f, supervisorPassword: e.target.value }))}
+                        placeholder="Supervisor password"
+                        className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                      />
+                    </div>
+                  )}
                 </div>
                 <div className="md:col-span-2">
                   <DateInput
@@ -532,6 +597,19 @@ export default function AppointmentsPage() {
                     value={form.appointmentDate}
                     onChange={(v) => setForm((f) => ({ ...f, appointmentDate: v }))}
                   />
+                  {/* Restricted date banner */}
+                  {selectedDateStatus?.requiresSupervisorOverride && (
+                    <div className="mt-2 p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+                      <p className="text-xs font-medium text-amber-700 dark:text-amber-300">
+                        This date can only be booked with supervisor override.
+                      </p>
+                      {selectedDateStatus.blockReasons.length > 0 && (
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                          {describeSchedulingReason(selectedDateStatus.blockReasons[0])}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {!!form.patientId && !!form.modalityId && !!nextOpenSlotDate && (
                     <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
                       Suggested next open slot: {formatDateLy(nextOpenSlotDate)}
@@ -667,16 +745,91 @@ export default function AppointmentsPage() {
                     const dateFormatted = dateObj.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
                     const isSelected = form.appointmentDate === dateStr;
                     const showWeekHeader = idx === 0 || dateObj.getUTCDay() === 0;
-                    const statusText = day.displayStatus || (day.is_full ? "blocked" : "available");
+                    const displayStatus = String(day.displayStatus || "");
+                    const isBlocked = displayStatus === "blocked";
+                    const isRestricted = displayStatus === "restricted";
 
+                    // Blocked rows: not clickable, reduced opacity, not-allowed cursor
+                    if (isBlocked) {
+                      return (
+                        <li key={dateStr} className="space-y-1">
+                          {showWeekHeader && (
+                            <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold border-t border-stone-200 dark:border-stone-700 mt-3 pt-2">
+                              Week of {dateFormatted}
+                            </div>
+                          )}
+                          <div className="rounded p-1.5 opacity-50 cursor-not-allowed border border-transparent">
+                            <div className="flex justify-between items-center text-xs">
+                              <span className="font-medium text-stone-400 dark:text-stone-500">
+                                {weekday} {dateFormatted}
+                              </span>
+                              <span className="tabular-nums text-stone-400 dark:text-stone-500">
+                                {day.remaining_capacity}/{day.daily_capacity}
+                              </span>
+                            </div>
+                            <div className="text-[10px] mt-1 text-red-600 dark:text-red-400 font-medium">
+                              Not available
+                              {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 ? ` — ${describeSchedulingReason(day.blockReasons[0])}` : ""}
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
+                              <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    }
+
+                    // Restricted rows: show override messaging
+                    if (isRestricted) {
+                      return (
+                        <li key={dateStr} className="space-y-1">
+                          {showWeekHeader && (
+                            <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold border-t border-stone-200 dark:border-stone-700 mt-3 pt-2">
+                              Week of {dateFormatted}
+                            </div>
+                          )}
+                          <div
+                            onClick={() => setForm((f) => ({ ...f, appointmentDate: dateStr }))}
+                            className={`cursor-pointer rounded p-1.5 transition-colors border ${
+                              isSelected
+                                ? "bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700"
+                                : "hover:bg-amber-50 dark:hover:bg-amber-900/10 border-amber-200 dark:border-amber-800"
+                            }`}
+                          >
+                            <div className="flex justify-between items-center text-xs">
+                              <span className={`font-medium ${isSelected ? "text-amber-700 dark:text-amber-300" : "text-stone-700 dark:text-stone-300"}`}>
+                                {weekday} {dateFormatted}
+                              </span>
+                              <span className="tabular-nums text-amber-600 dark:text-amber-400 font-semibold">
+                                {day.remaining_capacity}/{day.daily_capacity}
+                              </span>
+                            </div>
+                            <div className="mt-1">
+                              <span className="inline-block text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">
+                                Needs supervisor override
+                              </span>
+                              {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 && (
+                                <span className="text-[10px] ml-1 text-stone-500 dark:text-stone-400">
+                                  — {describeSchedulingReason(day.blockReasons[0])}
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
+                              <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
+                            </div>
+                          </div>
+                        </li>
+                      );
+                    }
+
+                    // Available rows: normal click behavior
                     return (
                       <li key={dateStr} className="space-y-1">
-                      {/* Week separator: show header when a new week starts */}
-                      {showWeekHeader && (
-                        <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold border-t border-stone-200 dark:border-stone-700 mt-3 pt-2">
-                          Week of {dateFormatted}
-                        </div>
-                      )}
+                        {showWeekHeader && (
+                          <div className="text-[10px] uppercase tracking-wider text-stone-400 dark:text-stone-500 font-semibold border-t border-stone-200 dark:border-stone-700 mt-3 pt-2">
+                            Week of {dateFormatted}
+                          </div>
+                        )}
                         <div
                           onClick={() => setForm((f) => ({ ...f, appointmentDate: dateStr }))}
                           className={`cursor-pointer rounded p-1.5 transition-colors ${
@@ -694,14 +847,10 @@ export default function AppointmentsPage() {
                             </span>
                           </div>
                           <div className="text-[10px] uppercase tracking-wide mt-1 text-stone-500 dark:text-stone-400">
-                            {statusText}
-                            {Array.isArray(day.blockReasons) && day.blockReasons.length > 0 ? ` • ${day.blockReasons[0]}` : ""}
+                            {day.is_full ? "Fully booked" : "Available"}
                           </div>
                           <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
-                            <div
-                              className={`h-full rounded-full transition-all ${barColor}`}
-                              style={{ width: `${occupancyPct}%` }}
-                            />
+                            <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
                           </div>
                         </div>
                       </li>
@@ -824,11 +973,4 @@ function toUtcDateFromIsoDay(isoDay: string): Date {
   const m = parseInt(mStr, 10);
   const d = parseInt(dStr, 10);
   return new Date(Date.UTC(y, m - 1, d));
-}
-
-function getAvailabilityText(availability: any[], date: string): string {
-  const day = availability.find((d) => normalizeDateKey(d.appointment_date) === date);
-  if (!day) return "No data for this date";
-  if (day.is_full) return `Fully booked on ${formatDateLy(date)}`;
-  return `${day.remaining_capacity} slots available on ${formatDateLy(date)}`;
 }
