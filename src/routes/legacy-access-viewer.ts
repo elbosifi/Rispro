@@ -15,6 +15,7 @@ import {
   getMdbStatus,
   queryLegacyAppointments,
   computeSummaryCounters,
+  getFilterOptions,
   type LegacyAppointmentFilters
 } from "../services/legacy-access-viewer-service.js";
 
@@ -87,5 +88,19 @@ legacyAccessViewerRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const summary = await computeSummaryCounters();
     res.json({ summary });
+  })
+);
+
+/**
+ * GET /api/legacy-access-viewer/filter-options
+ *
+ * Returns distinct, sorted values for modality, exam, source, and sex
+ * from the active MDB file.  Returns empty arrays if no file is loaded.
+ */
+legacyAccessViewerRouter.get(
+  "/filter-options",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const options = await getFilterOptions();
+    res.json({ options });
   })
 );

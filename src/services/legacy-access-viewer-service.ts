@@ -64,6 +64,13 @@ export interface LegacyMdbStatus {
   loadedAt: string | null;
 }
 
+export interface LegacyFilterOptions {
+  modalities: string[];
+  exams: string[];
+  sources: string[];
+  sexes: string[];
+}
+
 interface MetaInfo {
   fileName: string;
   loadedAt: string;
@@ -479,4 +486,58 @@ export async function computeSummaryCounters(): Promise<LegacySummaryCounters> {
   }
 
   return { todayCount, tomorrowCount, weekCount };
+}
+
+/**
+ * Extract distinct, sorted filter option values from the active MDB file.
+ * Returns empty arrays if no file is loaded.
+ */
+export async function getFilterOptions(): Promise<LegacyFilterOptions> {
+  const reader = await createReader();
+  if (!reader) {
+    return { modalities: [], exams: [], sources: [], sexes: [] };
+  }
+
+  const kindPicMap = buildLookupMap(reader, "KindPic", "kpno", "kpnm");
+  const plCheckMap = buildLookupMap(reader, "PlCheck", "plNo", "plNm");
+  const placesMap = buildLookupMap(reader, "Places", "pno", "pnm");
+
+  let pointmentsData: Record<string, unknown>[];
+  try {
+    const table = reader.getTable("Pointments");
+    pointmentsData = table.getData();
+  } catch {
+    return { modalities: [], exams: [], sources: [], sexes: [] };
+  }
+
+  const modalitySet = new Set<string>();
+  const examSet = new Set<string>();
+  const sourceSet = new Set<string>();
+  const sexSet = new Set<string>();
+
+  for (const row of pointmentsData) {
+    const dateStr = parseDate(row["DtDate"]);
+    if (!dateStr) continue;
+    // Only include future appointments (consistent with the query endpoint)
+    if (!isTodayOrLater(dateStr)) continue;
+
+    const modality = resolveModality(row, kindPicMap);
+    if (modality) modalitySet.add(modality);
+
+    const exam = resolveExam(row, plCheckMap);
+    if (exam) examSet.add(exam);
+
+    const source = resolveSource(row, placesMap);
+    if (source) sourceSet.add(source);
+
+    const sex = safeString(row["Gnm"]);
+    if (sex) sexSet.add(sex);
+  }
+
+  return {
+    modalities: [...modalitySet].sort((a, b) => a.localeCompare(b, "ar")),
+    exams: [...examSet].sort((a, b) => a.localeCompare(b, "ar")),
+    sources: [...sourceSet].sort((a, b) => a.localeCompare(b, "ar")),
+    sexes: [...sexSet].sort((a, b) => a.localeCompare(b, "ar"))
+  };
 }
