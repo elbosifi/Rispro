@@ -118,6 +118,12 @@ RUN NODE_ENV=development npm ci
 COPY src/ ./src/
 COPY tsconfig.json ./
 
+# Copy legacy frontend files served by existing /legacy routes
+COPY index.html ./index.html
+COPY app.js ./app.js
+COPY styles.css ./styles.css
+COPY assets/ ./assets/
+
 # Copy DICOM gateway scripts
 COPY scripts/dicom-gateway/ ./scripts/dicom-gateway/
 
