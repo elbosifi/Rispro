@@ -17,6 +17,7 @@ import PrintPage from "@/pages/print/print-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
+import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -36,7 +37,8 @@ const ROUTE_PATHS: Record<string, string> = {
   statistics: "/statistics",
   search: "/search",
   pacs: "/pacs",
-  settings: "/settings"
+  settings: "/settings",
+  legacy: "/legacy-access-viewer"
 };
 
 const PATH_TO_ROUTE = Object.fromEntries(
@@ -64,10 +66,6 @@ function AppContent() {
 
   const handleNavigate = useCallback(
     (route: string) => {
-      if (route === "legacy") {
-        window.location.assign("/legacy");
-        return;
-      }
       const path = ROUTE_PATHS[route];
       if (path) {
         localStorage.setItem("rispro-route", route);
@@ -138,7 +136,8 @@ function AppContent() {
             <Route path="/search" element={<SearchPage />} />
             <Route path="/pacs" element={<PacsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            
+            <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
+
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>
