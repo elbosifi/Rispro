@@ -232,7 +232,7 @@ export default function AppointmentsPage() {
         includeOverrideCandidates: form.includeOverrideCandidates,
         days: 180
       }),
-    enabled: !!form.patientId && !!form.modalityId,
+    enabled: !!form.modalityId,
     staleTime: 1000 * 30
   });
   const suggestionInfo = useMemo(() => {
@@ -658,16 +658,24 @@ export default function AppointmentsPage() {
                       </div>
                     </div>
                   )}
-                  {!!form.patientId && !!form.modalityId && suggestionInfo && (
-                    <div className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
-                      {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
-                      <button
-                        type="button"
-                        onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
-                        className="ml-2 underline underline-offset-2"
-                      >
-                        Use this date
-                      </button>
+                  {form.modalityId && (
+                    <div className="mt-2 text-xs">
+                      {suggestionInfo ? (
+                        <div className="text-emerald-700 dark:text-emerald-400">
+                          {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
+                          <button
+                            type="button"
+                            onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
+                            className="ml-2 underline underline-offset-2"
+                          >
+                            Use this date
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-stone-500 dark:text-stone-400">
+                          No suggestion available yet.
+                        </p>
+                      )}
                     </div>
                   )}
                   {availability && form.appointmentDate && (
