@@ -212,7 +212,7 @@ export default function AppointmentsPage() {
   }, [selectedDateStatus?.requiresSupervisorOverride]);
 
   // Next open slot suggestion after selecting patient + modality
-  const { data: suggestionAvailability } = useQuery({
+  const { data: suggestionAvailability, isFetching: isSuggestionLoading } = useQuery({
     queryKey: [
       "availability-next-open",
       form.modalityId,
@@ -631,6 +631,33 @@ export default function AppointmentsPage() {
                     value={form.appointmentDate}
                     onChange={(v) => setForm((f) => ({ ...f, appointmentDate: v }))}
                   />
+                  <div className="mt-2 rounded-xl border border-emerald-200/70 dark:border-emerald-800/70 bg-emerald-50/60 dark:bg-emerald-900/10 p-3">
+                    <p className="text-[11px] uppercase tracking-wide text-emerald-700 dark:text-emerald-300 font-semibold">
+                      Suggested next available date
+                    </p>
+                    <div className="mt-1 text-xs">
+                      {!form.modalityId ? (
+                        <p className="text-stone-500 dark:text-stone-400">
+                          Select a modality to see a suggestion.
+                        </p>
+                      ) : suggestionInfo ? (
+                        <div className="text-emerald-800 dark:text-emerald-300">
+                          {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
+                          <button
+                            type="button"
+                            onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
+                            className="ml-2 underline underline-offset-2"
+                          >
+                            Use this date
+                          </button>
+                        </div>
+                      ) : isSuggestionLoading ? (
+                        <p className="text-stone-500 dark:text-stone-400">Finding the next date…</p>
+                      ) : (
+                        <p className="text-stone-500 dark:text-stone-400">No suggestion available yet.</p>
+                      )}
+                    </div>
+                  </div>
                   {selectedDateStatus?.requiresSupervisorOverride && (
                     <div className="mt-2 p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
                       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
@@ -656,26 +683,6 @@ export default function AppointmentsPage() {
                           className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
                         />
                       </div>
-                    </div>
-                  )}
-                  {form.modalityId && (
-                    <div className="mt-2 text-xs">
-                      {suggestionInfo ? (
-                        <div className="text-emerald-700 dark:text-emerald-400">
-                          {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
-                          <button
-                            type="button"
-                            onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
-                            className="ml-2 underline underline-offset-2"
-                          >
-                            Use this date
-                          </button>
-                        </div>
-                      ) : (
-                        <p className="text-stone-500 dark:text-stone-400">
-                          No suggestion available yet.
-                        </p>
-                      )}
                     </div>
                   )}
                   {availability && form.appointmentDate && (
