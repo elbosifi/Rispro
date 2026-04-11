@@ -64,6 +64,10 @@ function AppContent() {
 
   const handleNavigate = useCallback(
     (route: string) => {
+      if (route === "legacy") {
+        window.location.assign("/legacy");
+        return;
+      }
       const path = ROUTE_PATHS[route];
       if (path) {
         localStorage.setItem("rispro-route", route);

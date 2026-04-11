@@ -13,7 +13,8 @@ type NavIcon =
   | "print"
   | "statistics"
   | "pacs"
-  | "settings";
+  | "settings"
+  | "legacy";
 
 interface NavItemConfig {
   route: string;
@@ -29,7 +30,8 @@ interface NavItemConfig {
     | "nav.print"
     | "nav.statistics"
     | "nav.pacs"
-    | "nav.settings";
+    | "nav.settings"
+    | "nav.legacyReception";
   icon: NavIcon;
   roles?: string[];
 }
@@ -46,6 +48,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "print", labelKey: "nav.print", icon: "print" },
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
+  { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
   { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor"] }
 ];
 
@@ -82,6 +85,8 @@ function NavIconGlyph({ icon }: { icon: NavIcon }) {
       return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm3-7h8" /></svg>;
     case "settings":
       return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M10.3 3.9l.4-1.4h2.6l.4 1.4a1 1 0 00.9.7l1.5.1 1.3-1 1.8 1.8-1 1.3.1 1.5a1 1 0 00.7.9l1.4.4v2.6l-1.4.4a1 1 0 00-.7.9l-.1 1.5 1 1.3-1.8 1.8-1.3-1-1.5.1a1 1 0 00-.9.7l-.4 1.4h-2.6l-.4-1.4a1 1 0 00-.9-.7l-1.5-.1-1.3 1-1.8-1.8 1-1.3-.1-1.5a1 1 0 00-.7-.9l-1.4-.4V10l1.4-.4a1 1 0 00.7-.9l.1-1.5-1-1.3 1.8-1.8 1.3 1 1.5-.1a1 1 0 00.9-.7zM12 15.5A3.5 3.5 0 1012 8a3.5 3.5 0 000 7.5z" /></svg>;
+    case "legacy":
+      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 6v12m10-12v12M4 18h16M9 10h2m4 0h2m-8 4h2m4 0h2" /></svg>;
   }
 }
 
