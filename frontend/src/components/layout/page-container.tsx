@@ -1,19 +1,14 @@
 import { type ReactNode, Suspense } from "react";
 import { useLanguage } from "@/providers/language-provider";
+import { AlertTriangle } from "lucide-react";
 
 function LoadingSpinner() {
   const { t } = useLanguage();
   return (
     <div className="flex items-center justify-center min-h-[200px]">
-      <div className="flex flex-col items-center gap-3">
-        <div
-          className="w-10 h-10 border-4 rounded-full animate-spin"
-          style={{
-            borderColor: "var(--line)",
-            borderTopColor: "var(--teal)"
-          }}
-        />
-        <p className="text-sm" style={{ color: "var(--muted)" }}>
+      <div className="flex flex-col items-center gap-4">
+        <div className="spinner-industrial h-10 w-10" />
+        <p className="text-xs uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
           {t("common.loading")}
         </p>
       </div>
@@ -33,19 +28,21 @@ function ErrorBoundary({
 
   return (
     <div className="flex items-center justify-center min-h-[200px]">
-      <div className="text-center space-y-3 max-w-md">
-        <div className="text-4xl">⚠️</div>
-        <h3 className="text-lg font-semibold" style={{ color: "var(--red)" }}>
-          {error.name || "Error"}
-        </h3>
-        <p className="text-sm" style={{ color: "var(--muted)" }}>
-          {error.message}
-        </p>
-        <button
-          className="px-4 py-2 text-sm font-medium rounded-lg text-white transition-opacity hover:opacity-80"
-          style={{ backgroundColor: "var(--teal)" }}
-          onClick={onRetry}
-        >
+      <div className="card-shell text-center space-y-4 max-w-md">
+        <div className="flex justify-center">
+          <div className="icon-housing icon-housing--md" style={{ color: "var(--accent)" }}>
+            <AlertTriangle size={28} />
+          </div>
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--accent)" }}>
+            {error.name || "Error"}
+          </h3>
+          <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
+            {error.message}
+          </p>
+        </div>
+        <button className="btn-primary" onClick={onRetry}>
           {t("common.tryAgain")}
         </button>
       </div>
@@ -65,14 +62,16 @@ export function PageContainer({
   onRetry?: () => void;
 }) {
   return (
-    <div className="flex-1 overflow-y-auto p-4 lg:p-6" style={{ backgroundColor: "var(--bg)" }}>
-      {loading ? (
-        <LoadingSpinner />
-      ) : error ? (
-        <ErrorBoundary error={error} onRetry={onRetry ?? (() => window.location.reload())} />
-      ) : (
-        <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>
-      )}
+    <div className="flex-1 overflow-y-auto p-4 lg:p-6" style={{ backgroundColor: "var(--background)" }}>
+      <div className="max-w-7xl mx-auto">
+        {loading ? (
+          <LoadingSpinner />
+        ) : error ? (
+          <ErrorBoundary error={error} onRetry={onRetry ?? (() => window.location.reload())} />
+        ) : (
+          <Suspense fallback={<LoadingSpinner />}>{children}</Suspense>
+        )}
+      </div>
     </div>
   );
 }

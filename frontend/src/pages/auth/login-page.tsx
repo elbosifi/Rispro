@@ -3,6 +3,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { Lock, User, Power, Shield } from "lucide-react";
 
 export function LoginPage() {
   const { language } = useLanguage();
@@ -27,62 +28,135 @@ export function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-stone-50 dark:bg-stone-900 p-4">
-      <div className="w-full max-w-md bg-white dark:bg-stone-800 rounded-2xl shadow-xl border border-stone-200 dark:border-stone-700 p-8 space-y-6">
-        <div className="text-center space-y-2">
-          <h1 className="text-3xl font-bold text-teal-700 dark:text-teal-500">
-            {t(language, "login.heading")}
-          </h1>
-          <p className="text-stone-500 dark:text-stone-400 text-sm">
-            {t(language, "login.description")}
-          </p>
+    <div
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{ backgroundColor: "var(--background)" }}
+    >
+      {/* Background decorative elements */}
+      <div className="absolute top-0 left-0 w-96 h-96 rounded-full opacity-5" style={{ background: "radial-gradient(circle, var(--accent), transparent 70%)", transform: "translate(-50%, -50%)" }} />
+      <div className="absolute bottom-0 right-0 w-64 h-64 rounded-full opacity-5" style={{ background: "radial-gradient(circle, var(--blue), transparent 70%)", transform: "translate(50%, 50%)" }} />
+
+      <div className="w-full max-w-md relative z-10">
+        {/* Main login card */}
+        <div className="card-shell p-8 relative">
+          {/* Corner screws */}
+          <div className="absolute top-3 left-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
+          <div className="absolute top-3 right-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
+          <div className="absolute bottom-3 left-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
+          <div className="absolute bottom-3 right-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
+
+          {/* Header */}
+          <div className="text-center space-y-3 mb-8">
+            {/* Logo badge */}
+            <div
+              className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl text-white relative"
+              style={{
+                background: "linear-gradient(135deg, var(--accent), #c0392b)",
+                boxShadow: "4px 4px 8px rgba(166, 50, 60, 0.4), -4px -4px 8px rgba(255, 100, 110, 0.3)"
+              }}
+            >
+              <Shield size={28} strokeWidth={1.5} />
+              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-extrabold text-embossed" style={{ color: "var(--accent)" }}>
+                {t(language, "login.heading")}
+              </h1>
+              <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+                {t(language, "login.description")}
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Username */}
+            <div>
+              <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5" style={{ color: "var(--text-muted)" }}>
+                {t(language, "login.username")}
+              </label>
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center" style={{ color: "var(--text-muted)" }}>
+                  <User size={16} strokeWidth={1.5} />
+                </div>
+                <input
+                  type="text"
+                  className="input-premium pl-10"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoComplete="username"
+                  required
+                  disabled={isLoading}
+                  dir={language === "ar" ? "rtl" : "ltr"}
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div>
+              <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5" style={{ color: "var(--text-muted)" }}>
+                {t(language, "login.password")}
+              </label>
+              <div className="relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center" style={{ color: "var(--text-muted)" }}>
+                  <Lock size={16} strokeWidth={1.5} />
+                </div>
+                <input
+                  type="password"
+                  className="input-premium pl-10"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div
+                className="rounded-lg p-3 text-xs font-mono-data flex items-center gap-2 border"
+                style={{
+                  backgroundColor: "rgba(255, 71, 87, 0.08)",
+                  borderColor: "rgba(255, 71, 87, 0.3)",
+                  color: "var(--accent)"
+                }}
+              >
+                <Power size={14} />
+                {error}
+              </div>
+            )}
+
+            {/* Submit */}
+            <button
+              type="submit"
+              disabled={isLoading || !username || !password}
+              className="btn-primary w-full"
+            >
+              {isLoading ? (
+                <>
+                  <div className="spinner-industrial h-4 w-4 border-2" />
+                  {t(language, "login.signingIn")}
+                </>
+              ) : (
+                <>
+                  <Power size={16} />
+                  {t(language, "login.signIn")}
+                </>
+              )}
+            </button>
+          </form>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-              {t(language, "login.username")}
-            </label>
-            <input
-              type="text"
-              className="w-full px-4 py-3 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoComplete="username"
-              required
-              disabled={isLoading}
-            />
+        {/* Footer status */}
+        <div className="mt-4 text-center">
+          <div className="inline-flex items-center gap-1.5">
+            <span className="led-dot led-dot--online" />
+            <span className="text-[10px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+              RISpro Reception v2.0
+            </span>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
-              {t(language, "login.password")}
-            </label>
-            <input
-              type="password"
-              className="w-full px-4 py-3 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 focus:border-transparent outline-none transition-all"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-              disabled={isLoading}
-            />
-          </div>
-
-          {error && (
-            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-              <p className="text-sm text-red-700 dark:text-red-400">{error}</p>
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={isLoading || !username || !password}
-            className="w-full py-3 px-4 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500"
-          >
-            {isLoading ? t(language, "login.signingIn") : t(language, "login.signIn")}
-          </button>
-        </form>
+        </div>
       </div>
     </div>
   );

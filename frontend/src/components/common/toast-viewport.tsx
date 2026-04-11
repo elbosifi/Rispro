@@ -1,6 +1,7 @@
 import { removeToast, useToastStore } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { CheckCircle2, AlertCircle, X } from "lucide-react";
 
 export function ToastViewport() {
   const toasts = useToastStore();
@@ -10,44 +11,67 @@ export function ToastViewport() {
 
   return (
     <div className="fixed bottom-4 right-4 z-[70] flex w-[min(92vw,24rem)] flex-col gap-3 pointer-events-none">
-      {toasts.map((toast) => (
-        <div
-          key={toast.id}
-          className={`pointer-events-auto rounded-2xl border px-4 py-3 shadow-2xl backdrop-blur-xl ${
-            toast.type === "error"
-              ? "border-red-200 bg-red-50/95 text-red-900 dark:border-red-900/60 dark:bg-red-950/95 dark:text-red-100"
-              : toast.type === "success"
-              ? "border-emerald-200 bg-emerald-50/95 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/95 dark:text-emerald-100"
-              : "border-stone-200 bg-white/95 text-stone-900 dark:border-stone-700 dark:bg-stone-900/95 dark:text-stone-100"
-          }`}
-        >
-          <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">{toast.title}</p>
-              <p className="mt-1 text-sm opacity-90 leading-relaxed">{toast.message}</p>
-              {toast.action && (
+      {toasts.map((toast) => {
+        const isSuccess = toast.type === "success";
+        const isError = toast.type === "error";
+        const accentColor = isSuccess ? "var(--green)" : isError ? "var(--accent)" : "var(--blue)";
+        const accentBorder = isSuccess ? "rgba(34,197,94,0.3)" : isError ? "rgba(255,71,87,0.3)" : "rgba(59,130,246,0.3)";
+        const Icon = isSuccess ? CheckCircle2 : isError ? AlertCircle : AlertCircle;
+
+        return (
+          <div
+            key={toast.id}
+            className="pointer-events-auto rounded-lg border shadow-lg animate-slide-in relative overflow-hidden"
+            style={{
+              backgroundColor: "var(--background)",
+              borderColor: accentBorder,
+              boxShadow: "var(--shadow-card)"
+            }}
+          >
+            {/* Left accent stripe */}
+            <div
+              className="absolute left-0 top-0 bottom-0 w-1"
+              style={{ backgroundColor: accentColor }}
+            />
+
+            <div className="p-4 pl-5">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 mt-0.5" style={{ color: accentColor }}>
+                  <Icon size={18} strokeWidth={1.5} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-bold" style={{ color: "var(--text)" }}>{toast.title}</p>
+                  {toast.message && (
+                    <p className="mt-0.5 text-xs" style={{ color: "var(--text-muted)" }}>{toast.message}</p>
+                  )}
+                  {toast.action && (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs font-semibold transition-colors duration-150 hover:underline"
+                      style={{ color: accentColor }}
+                      onClick={() => {
+                        toast.action?.onClick();
+                        removeToast(toast.id);
+                      }}
+                    >
+                      {toast.action.label}
+                    </button>
+                  )}
+                </div>
                 <button
                   type="button"
-                  className="mt-3 inline-flex items-center rounded-lg bg-black/5 px-3 py-1.5 text-xs font-semibold hover:bg-black/10 dark:bg-white/10 dark:hover:bg-white/15"
-                  onClick={() => {
-                    toast.action?.onClick();
-                    removeToast(toast.id);
-                  }}
+                  className="flex-shrink-0 p-1 rounded-md transition-all duration-150"
+                  style={{ color: "var(--text-muted)" }}
+                  onClick={() => removeToast(toast.id)}
+                  aria-label={t(language, "toast.close")}
                 >
-                  {toast.action.label}
+                  <X size={14} strokeWidth={2} />
                 </button>
-              )}
+              </div>
             </div>
-            <button
-              type="button"
-              className="text-xs font-semibold uppercase tracking-[0.16em] opacity-60 hover:opacity-100"
-              onClick={() => removeToast(toast.id)}
-            >
-              {t(language, "toast.close")}
-            </button>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import { updatePatient } from "@/lib/api-hooks";
 import type { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { Search, User, Save, Trash2, X, Pencil } from "lucide-react";
 
 export default function SearchPage() {
   const { language } = useLanguage();
@@ -55,24 +56,41 @@ export default function SearchPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "search.title")}</h2>
+      {/* Page Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
+          <Search className="w-5 h-5 text-white" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+            {t(language, "search.title")}
+          </h2>
+          <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+            {t(language, "search.placeholder")}
+          </p>
+        </div>
       </div>
 
       {/* Search Input */}
-      <div className="bg-white dark:bg-stone-800 p-4 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm">
+      <div className="card-shell relative p-4">
+        {/* Corner screws */}
+        <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+        <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+        <div className="absolute bottom-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+        <div className="absolute bottom-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            // Trigger refetch manually or just rely on state change if we used a button
-            // For now, let's use a button to trigger the query
+            setSearchQuery(inputValue);
           }}
           className="flex gap-4"
         >
           <input
             type="text"
             placeholder={t(language, "search.placeholder")}
-            className="flex-1 px-4 py-3 rounded-xl border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+            className="input-premium flex-1 px-4 py-3 rounded-lg outline-none font-mono-data"
+            style={{ color: "var(--text)" }}
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={(e) => {
@@ -84,8 +102,9 @@ export default function SearchPage() {
           />
           <button
             type="submit"
-            className="px-6 py-3 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-xl transition-colors"
+            className="btn-primary px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-all"
           >
+            <Search className="w-4 h-4" />
             {t(language, "search.searchBtn")}
           </button>
         </form>
@@ -93,41 +112,54 @@ export default function SearchPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Results List */}
-        <div className="lg:col-span-1 bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden h-[600px] flex flex-col">
-          <div className="p-4 border-b border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/50">
-            <h3 className="font-semibold text-stone-900 dark:text-white">
+        <div className="lg:col-span-1 card-shell overflow-hidden h-[600px] flex flex-col">
+          <div className="p-4 flex items-center justify-between" style={{ borderBottom: "1px solid var(--border)", background: "var(--foreground)" }}>
+            <h3 className="text-sm font-semibold text-embossed" style={{ color: "var(--text)" }}>
               {t(language, "search.results", { count: isLoading ? "..." : patients.length })}
             </h3>
             {searchQuery && (
-              <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+              <span className="text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
                 {t(language, "search.searchTerm", { q: searchQuery })}
-              </p>
+              </span>
             )}
           </div>
           <div className="overflow-y-auto flex-1">
             {isLoading ? (
-              <div className="p-4 text-center text-stone-500">{t(language, "search.searching")}</div>
+              <div className="p-4 text-center font-mono-data" style={{ color: "var(--text-muted)" }}>{t(language, "search.searching")}</div>
             ) : patients.length === 0 ? (
-              <div className="p-4 text-center text-stone-500">{t(language, "search.empty")}</div>
+              <div className="p-4 text-center font-mono-data" style={{ color: "var(--text-muted)" }}>{t(language, "search.empty")}</div>
             ) : (
-              <ul className="divide-y divide-stone-200 dark:divide-stone-700">
+              <ul className="divide-y" >
                 {patients.map((p) => (
                   <li key={p.id}>
                     <button
                       onClick={() => handleSelect(p)}
-                      className={`w-full text-right p-4 transition-colors hover:bg-stone-50 dark:hover:bg-stone-700/50 ${
+                      className={`w-full text-right p-4 transition-colors ${
                         selectedPatient?.id === p.id
-                          ? "bg-teal-50 dark:bg-teal-900/20"
+                          ? ""
                           : ""
                       }`}
+                      style={{
+                        background: selectedPatient?.id === p.id ? "var(--foreground)" : "transparent",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (selectedPatient?.id !== p.id) {
+                          (e.currentTarget as HTMLElement).style.background = "var(--foreground)";
+                        }
+                      }}
+                      onMouseLeave={(e) => {
+                        if (selectedPatient?.id !== p.id) {
+                          (e.currentTarget as HTMLElement).style.background = "transparent";
+                        }
+                      }}
                     >
-                      <p className="font-medium text-stone-900 dark:text-white">
+                      <p className="font-medium" style={{ color: "var(--text)" }}>
                         {p.arabicFullName}
                       </p>
-                      <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
+                      <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
                         {p.englishFullName || "—"}
                       </p>
-                      <div className="flex items-center gap-2 mt-2 text-xs text-stone-400 dark:text-stone-500">
+                      <div className="flex items-center gap-2 mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)", opacity: 0.7 }}>
                         <span>ID: {p.nationalId || "—"}</span>
                         <span>•</span>
                         <span>MRN: {p.mrn || "—"}</span>
@@ -159,13 +191,15 @@ export default function SearchPage() {
               />
             )
           ) : (
-            <div className="h-full flex items-center justify-center bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-8">
+            <div className="h-full card-shell flex items-center justify-center p-8">
               <div className="text-center">
-                <div className="text-4xl mb-4">👤</div>
-                <h3 className="text-lg font-medium text-stone-900 dark:text-white">
+                <div className="w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center" style={{ background: "var(--shadow-recessed)" }}>
+                  <User className="w-8 h-8" style={{ color: "var(--text-muted)" }} />
+                </div>
+                <h3 className="text-lg font-semibold text-embossed" style={{ color: "var(--text)" }}>
                   {t(language, "search.selectPatient")}
                 </h3>
-                <p className="text-stone-500 dark:text-stone-400 mt-1">
+                <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
                   {t(language, "search.selectPrompt")}
                 </p>
               </div>
@@ -180,13 +214,14 @@ export default function SearchPage() {
 function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void }) {
   const { language } = useLanguage();
   return (
-    <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm">
-      <div className="p-6 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-        <h3 className="text-xl font-bold text-stone-900 dark:text-white">{t(language, "search.detailsHeading")}</h3>
+    <div className="card-shell">
+      <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
+        <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "search.detailsHeading")}</h3>
         <button
           onClick={onEdit}
-          className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+          className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
         >
+          <Pencil className="w-3.5 h-3.5" />
           {t(language, "search.editBtn")}
         </button>
       </div>
@@ -246,10 +281,10 @@ function EditPatientForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm"
+      className="card-shell"
     >
-      <div className="p-6 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-        <h3 className="text-xl font-bold text-stone-900 dark:text-white">{t(language, "patients.editTitle")}</h3>
+      <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
+        <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "patients.editTitle")}</h3>
         <div className="flex gap-2">
           <button
             type="button"
@@ -259,22 +294,26 @@ function EditPatientForm({
               }
             }}
             disabled={isDeleting}
-            className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium rounded-lg transition-colors"
+            className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
+            style={{ background: "var(--accent)", color: "#fff" }}
           >
+            <Trash2 className="w-3.5 h-3.5" />
             {isDeleting ? t(language, "search.deleting") : t(language, "search.deleteBtn")}
           </button>
           <button
             type="button"
             onClick={onCancel}
-            className="px-4 py-2 text-stone-700 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-lg transition-colors"
+            className="btn-ghost px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all"
           >
+            <X className="w-3.5 h-3.5" />
             Cancel
           </button>
           <button
             type="submit"
             disabled={isSaving}
-            className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm font-medium rounded-lg transition-colors"
+            className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
           >
+            <Save className="w-3.5 h-3.5" />
             {isSaving ? t(language, "search.saving") : t(language, "search.saveBtn")}
           </button>
         </div>
@@ -339,8 +378,8 @@ function EditPatientForm({
 function Field({ label, value }: { label: string; value: any }) {
   return (
     <div>
-      <p className="text-sm font-medium text-stone-500 dark:text-stone-400">{label}</p>
-      <p className="mt-1 text-stone-900 dark:text-white font-medium">
+      <p className="text-xs font-mono-data uppercase tracking-[0.06em]" style={{ color: "var(--text-muted)" }}>{label}</p>
+      <p className="mt-1 font-mono-data" style={{ color: "var(--text)" }}>
         {value ?? "—"}
       </p>
     </div>
@@ -366,7 +405,7 @@ function InputField({
 }) {
   return (
     <div className={className}>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
+      <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
         {label}
       </label>
       <input
@@ -375,7 +414,8 @@ function InputField({
         onChange={(e) => onChange(e.target.value)}
         required={required}
         dir={dir}
-        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+        className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
+        style={{ color: "var(--text)" }}
       />
     </div>
   );
@@ -394,13 +434,14 @@ function SelectField({
 }) {
   return (
     <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">
+      <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
         {label}
       </label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-4 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white focus:ring-2 focus:ring-teal-500 outline-none"
+        className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
+        style={{ color: "var(--text)" }}
       >
         {options.map((opt) => (
           <option key={opt.value} value={opt.value}>

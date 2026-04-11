@@ -1,5 +1,25 @@
 import type { User } from "@/types/api";
 import { t, type Language } from "@/lib/i18n";
+import {
+  LayoutGrid,
+  Users,
+  CalendarDays,
+  ClipboardList,
+  ListOrdered,
+  Monitor,
+  UserCheck,
+  Printer,
+  BarChart3,
+  Database,
+  Settings,
+  History,
+  Menu,
+  X,
+  Undo2,
+  Redo2,
+  Languages,
+  LogOut
+} from "lucide-react";
 
 type NavIcon =
   | "dashboard"
@@ -58,49 +78,56 @@ function canAccess(item: NavItemConfig, user: User | null): boolean {
   return item.roles.includes(user.role);
 }
 
-function NavIconGlyph({ icon }: { icon: NavIcon }) {
-  const common = { className: "w-5 h-5", fill: "none", stroke: "currentColor", viewBox: "0 0 24 24" };
-  switch (icon) {
-    case "dashboard":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 13h8V3H3v10zm10 8h8V3h-8v18zM3 21h8v-6H3v6z" /></svg>;
-    case "patients":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M16 14a4 4 0 10-8 0m8 0a4 4 0 11-8 0m8 0H8m10 7a6 6 0 00-12 0" /></svg>;
-    case "appointments":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>;
-    case "calendar":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M7 3v3m10-3v3M4 10h16M5 21h14a1 1 0 001-1V7a1 1 0 00-1-1H5a1 1 0 00-1 1v13a1 1 0 001 1z" /></svg>;
-    case "registrations":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6M9 8h6M5 3h14a2 2 0 012 2v14l-4-2-4 2-4-2-4 2V5a2 2 0 012-2z" /></svg>;
-    case "queue":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M9 11h6m-6 4h6M4 7h16M6 19h12a2 2 0 002-2V7a2 2 0 00-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>;
-    case "modality":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M4 6h16v10H4V6zm2 14h12M9 16v4m6-4v4" /></svg>;
-    case "doctor":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m6-6H6m13-7H5a2 2 0 00-2 2v10a2 2 0 002 2h14a2 2 0 002-2V7a2 2 0 00-2-2z" /></svg>;
-    case "print":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M6 9V4h12v5M6 18h12v2H6v-2zm-2-7h16a2 2 0 012 2v3H2v-3a2 2 0 012-2z" /></svg>;
-    case "statistics":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M7 20V10m5 10V6m5 14v-4" /></svg>;
-    case "pacs":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M3 7h18M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2zm3-7h8" /></svg>;
-    case "settings":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M10.3 3.9l.4-1.4h2.6l.4 1.4a1 1 0 00.9.7l1.5.1 1.3-1 1.8 1.8-1 1.3.1 1.5a1 1 0 00.7.9l1.4.4v2.6l-1.4.4a1 1 0 00-.7.9l-.1 1.5 1 1.3-1.8 1.8-1.3-1-1.5.1a1 1 0 00-.9.7l-.4 1.4h-2.6l-.4-1.4a1 1 0 00-.9-.7l-1.5-.1-1.3 1-1.8-1.8 1-1.3-.1-1.5a1 1 0 00-.7-.9l-1.4-.4V10l1.4-.4a1 1 0 00.7-.9l.1-1.5-1-1.3 1.8-1.8 1.3 1 1.5-.1a1 1 0 00.9-.7zM12 15.5A3.5 3.5 0 1012 8a3.5 3.5 0 000 7.5z" /></svg>;
-    case "legacy":
-      return <svg {...common}><path strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M7 6v12m10-12v12M4 18h16M9 10h2m4 0h2m-8 4h2m4 0h2" /></svg>;
-  }
+const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
+  dashboard: LayoutGrid,
+  patients: Users,
+  appointments: CalendarDays,
+  calendar: ClipboardList,
+  registrations: ListOrdered,
+  queue: ListOrdered,
+  modality: Monitor,
+  doctor: UserCheck,
+  print: Printer,
+  statistics: BarChart3,
+  pacs: Database,
+  settings: Settings,
+  legacy: History
+};
+
+function NavIconGlyph({ icon, size = 20 }: { icon: NavIcon; size?: number }) {
+  const LucideIcon = ICON_MAP[icon];
+  return <LucideIcon size={size} strokeWidth={1.5} />;
+}
+
+function VentSlots() {
+  return (
+    <div className="hidden lg:flex items-center gap-0.5" aria-hidden="true">
+      <div className="vent-slot" />
+      <div className="vent-slot" />
+      <div className="vent-slot" />
+    </div>
+  );
 }
 
 function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
   return (
     <div
-      className={`rounded-3xl p-4 text-white shadow-sm ${isRtl ? "text-center" : ""}`}
-      style={{ background: "linear-gradient(135deg, var(--teal), var(--teal-strong))" }}
+      className={`rounded-xl p-4 text-white relative overflow-hidden ${isRtl ? "text-center" : ""}`}
+      style={{
+        background: "linear-gradient(135deg, var(--accent), #c0392b)",
+        boxShadow: "4px 4px 8px rgba(166, 50, 60, 0.3), -2px -2px 4px rgba(255, 100, 110, 0.2)"
+      }}
     >
-      <p className="text-[11px] uppercase tracking-[0.2em] opacity-80">{t(language, "shell.menu")}</p>
-      <p className="mt-1 text-lg font-bold">{t(language, "shell.reception")}</p>
-      <p className="mt-2 text-xs opacity-80 leading-relaxed">
-        {t(language, language === "ar" ? "navPanel.titleAr" : "navPanel.titleEn")}
-      </p>
+      {/* Corner screws */}
+      <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4), rgba(0,0,0,0.2))" }} />
+      <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4), rgba(0,0,0,0.2))" }} />
+
+      <p className="text-[10px] uppercase tracking-[0.2em] opacity-80 font-mono-data">{t(language, "shell.menu")}</p>
+      <p className="mt-1 text-lg font-bold text-embossed">{t(language, "shell.reception")}</p>
+      <div className="flex items-center justify-center gap-1.5 mt-2">
+        <span className="led-dot led-dot--online" />
+        <span className="text-[10px] uppercase tracking-[0.15em] opacity-80 font-mono-data">SYSTEM ONLINE</span>
+      </div>
     </div>
   );
 }
@@ -120,21 +147,32 @@ function NavButton({
 }) {
   return (
     <button
-      className={`group w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-sm font-medium transition-all border ${
+      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
         isRtl ? "flex-row-reverse text-end" : ""
-      } ${isActive ? "shadow-sm scale-[1.01]" : "hover:shadow-sm hover:-translate-y-[1px]"}`}
+      }`}
       style={{
-        backgroundColor: isActive ? "var(--teal)" : "var(--surface-strong)",
+        backgroundColor: isActive ? "var(--accent)" : "var(--background)",
         color: isActive ? "white" : "var(--text)",
-        borderColor: isActive ? "transparent" : "var(--line)"
+        boxShadow: isActive
+          ? "4px 4px 8px rgba(166, 50, 60, 0.4), -4px -4px 8px rgba(255, 100, 110, 0.4)"
+          : "var(--shadow-card)",
+        border: isActive ? "1px solid rgba(255,255,255,0.15)" : "1px solid var(--border)"
       }}
       onClick={onClick}
     >
-      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${isActive ? "bg-white/15" : "bg-stone-100 dark:bg-stone-700/60"}`}>
-        <NavIconGlyph icon={item.icon} />
+      <span
+        className="flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 group-hover:scale-105"
+        style={{
+          backgroundColor: isActive ? "rgba(255,255,255,0.15)" : "var(--foreground)",
+          color: isActive ? "white" : "var(--text-muted)"
+        }}
+      >
+        <NavIconGlyph icon={item.icon} size={18} />
       </span>
-      <span className={`flex-1 leading-tight ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
-      {isActive && <span className="h-2 w-2 rounded-full bg-white/90" />}
+      <span className={`flex-1 leading-tight text-xs uppercase tracking-[0.04em] ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
+      {isActive && (
+        <span className="h-2 w-2 rounded-full bg-white/90 shadow-[0_0_6px_rgba(255,255,255,0.6)]" />
+      )}
     </button>
   );
 }
@@ -146,7 +184,6 @@ export function TopBar({
   onUndo,
   onRedo,
   onToggleLanguage,
-  onToggleTheme,
   onLogout,
   onMobileNavToggle
 }: {
@@ -156,102 +193,125 @@ export function TopBar({
   onUndo: () => void;
   onRedo: () => void;
   onToggleLanguage: () => void;
-  onToggleTheme: () => void;
   onLogout: () => void;
   onMobileNavToggle: () => void;
 }) {
   return (
-    <header className="sticky top-0 z-50 border-b backdrop-blur-xl shadow-sm" style={{ backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}>
-      <div className={`flex items-center justify-between h-18 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
+    <header
+      className="sticky top-0 z-50 border-b"
+      style={{
+        backgroundColor: "var(--foreground)",
+        borderColor: "var(--border)",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.06)"
+      }}
+    >
+      <div className={`flex items-center justify-between h-16 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
+        {/* Mobile menu button */}
         <button
-          className="lg:hidden p-2.5 rounded-xl border hover:opacity-90"
-          style={{ color: "var(--text)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
+          className="lg:hidden p-2.5 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
+          style={{
+            color: "var(--text)",
+            backgroundColor: "var(--background)",
+            borderColor: "var(--border)",
+            boxShadow: "var(--shadow-card)"
+          }}
           onClick={onMobileNavToggle}
           aria-label={t(language, "shell.toggleNav")}
         >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
+          <Menu className="w-5 h-5" />
         </button>
 
+        {/* Brand */}
         <div className={`flex items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
-          <div className="hidden sm:flex h-11 w-11 items-center justify-center rounded-2xl text-white shadow-sm" style={{ background: "linear-gradient(180deg, var(--teal), var(--teal-strong))" }}>
-            <span className="text-sm font-bold">R</span>
+          <div
+            className="hidden sm:flex h-10 w-10 items-center justify-center rounded-lg text-white relative"
+            style={{
+              background: "linear-gradient(135deg, var(--accent), #c0392b)",
+              boxShadow: "3px 3px 6px rgba(166, 50, 60, 0.3), -3px -3px 6px rgba(255, 100, 110, 0.2)"
+            }}
+          >
+            {/* Power LED */}
+            <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
+            <span className="text-xs font-bold">R</span>
           </div>
           <div>
-            <h1 className="text-xl lg:text-2xl font-extrabold tracking-tight" style={{ color: "var(--teal)" }}>
+            <h1 className="text-lg lg:text-xl font-extrabold tracking-tight text-embossed" style={{ color: "var(--accent)" }}>
               {t(language, "shell.reception")}
             </h1>
-            <p className="text-[11px] lg:text-xs uppercase tracking-[0.24em]" style={{ color: "var(--muted)" }}>
+            <p className="text-[10px] uppercase tracking-[0.2em] font-mono-data" style={{ color: "var(--text-muted)" }}>
               {t(language, "navPanel.subtitle")}
             </p>
           </div>
         </div>
 
+        {/* Actions */}
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
+          <VentSlots />
+
+          {/* Undo */}
           <button
-            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
-            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
+            className="btn-ghost"
             onClick={onUndo}
             aria-label={t(language, "navPanel.undo")}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l-4-4 4-4m-4 4h8a6 6 0 110 12h-2" />
-            </svg>
+            <Undo2 className="w-4 h-4" />
           </button>
 
+          {/* Redo */}
           <button
-            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
-            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
+            className="btn-ghost"
             onClick={onRedo}
             aria-label={t(language, "navPanel.redo")}
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 14l4-4-4-4m4 4H11a6 6 0 100 12h2" />
-            </svg>
+            <Redo2 className="w-4 h-4" />
           </button>
 
+          {/* Language toggle */}
           <button
-            className="px-3 py-2 text-sm rounded-xl transition-all hover:opacity-90 border"
-            style={{ backgroundColor: "var(--bg-soft)", color: "var(--muted)", borderColor: "var(--line)" }}
+            className="btn-ghost text-xs font-mono-data"
             onClick={onToggleLanguage}
           >
+            <Languages className="w-4 h-4" />
             {isRtl ? "EN" : "عربي"}
           </button>
 
-          <button
-            className="p-2.5 rounded-xl transition-all hover:opacity-90 border"
-            style={{ color: "var(--muted)", backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}
-            onClick={onToggleTheme}
-            aria-label={t(language, "shell.toggleTheme")}
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-            </svg>
-          </button>
-
+          {/* User badge */}
           {user && (
-            <div className="hidden md:flex items-center gap-3 px-4 py-2 rounded-2xl border" style={{ backgroundColor: "var(--bg-soft)", borderColor: "var(--line)" }}>
-              <div className="flex h-9 w-9 items-center justify-center rounded-full text-white text-sm font-bold" style={{ background: "linear-gradient(180deg, var(--teal), var(--teal-strong))" }}>
+            <div
+              className="hidden md:flex items-center gap-2.5 px-3 py-2 rounded-lg border"
+              style={{
+                backgroundColor: "var(--background)",
+                borderColor: "var(--border)",
+                boxShadow: "var(--shadow-recessed)"
+              }}
+            >
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-md text-white text-xs font-bold relative"
+                style={{
+                  background: "linear-gradient(135deg, var(--accent), #c0392b)",
+                  boxShadow: "2px 2px 4px rgba(166, 50, 60, 0.3)"
+                }}
+              >
                 {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="leading-tight">
-                <span className="block text-sm font-semibold" style={{ color: "var(--text)" }}>
+                <span className="block text-xs font-semibold" style={{ color: "var(--text)" }}>
                   {user.fullName}
                 </span>
-                <span className="block text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--muted)" }}>
+                <span className="block text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
                   {user.role}
                 </span>
               </div>
             </div>
           )}
 
+          {/* Logout */}
           <button
-            className="px-4 py-2 text-sm rounded-xl transition-all hover:opacity-90 shadow-sm"
-            style={{ background: "linear-gradient(180deg, var(--red), #991b1b)", color: "white" }}
+            className="btn-ghost text-xs"
+            style={{ color: "var(--accent)" }}
             onClick={onLogout}
           >
-            {t(language, "common.signOut")}
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -275,12 +335,22 @@ export function SideNav({
   const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
 
   return (
-    <nav className="hidden lg:flex flex-col w-72 min-h-full border-e overflow-y-auto" style={{ backgroundColor: "var(--surface)", borderColor: "var(--line)" }} dir={isRtl ? "rtl" : "ltr"}>
-      <div className="p-4 border-b" style={{ borderColor: "var(--line)" }}>
+    <nav
+      className="hidden lg:flex flex-col w-64 min-h-full overflow-y-auto"
+      style={{
+        backgroundColor: "var(--background)",
+        borderRight: isRtl ? "none" : "1px solid var(--border)",
+        borderLeft: isRtl ? "1px solid var(--border)" : "none"
+      }}
+      dir={isRtl ? "rtl" : "ltr"}
+    >
+      {/* Header panel */}
+      <div className="p-3" style={{ borderBottom: "1px solid var(--border)" }}>
         <PanelHeader language={language} isRtl={isRtl} />
       </div>
 
-      <div className="p-3 space-y-2">
+      {/* Navigation items */}
+      <div className="p-2.5 space-y-1.5 flex-1">
         {visibleItems.map((item) => (
           <NavButton
             key={item.route}
@@ -291,6 +361,22 @@ export function SideNav({
             onClick={() => onNavigate(item.route)}
           />
         ))}
+      </div>
+
+      {/* Footer status */}
+      <div
+        className="p-2.5 text-center border-t"
+        style={{
+          borderColor: "var(--border)",
+          backgroundColor: "var(--foreground)"
+        }}
+      >
+        <div className="flex items-center justify-center gap-1.5">
+          <span className="led-dot led-dot--online" />
+          <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+            MWL ACTIVE
+          </span>
+        </div>
       </div>
     </nav>
   );
@@ -318,27 +404,39 @@ export function MobileDrawer({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 lg:hidden">
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+    <div className="fixed inset-0 z-50 lg:hidden" role="dialog" aria-modal="true">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+
+      {/* Drawer panel */}
       <div
-        className={`absolute top-0 bottom-0 w-80 overflow-y-auto shadow-2xl ${isRtl ? "right-0" : "left-0"}`}
-        style={{ backgroundColor: "var(--surface-strong)" }}
+        className={`absolute top-0 bottom-0 w-72 overflow-y-auto shadow-2xl ${isRtl ? "right-0" : "left-0"}`}
+        style={{
+          backgroundColor: "var(--background)",
+          boxShadow: "12px 0 40px rgba(0,0,0,0.15)"
+        }}
         dir={isRtl ? "rtl" : "ltr"}
       >
-        <div className="p-4 border-b relative" style={{ borderColor: "var(--line)" }}>
+        {/* Header with close button */}
+        <div className="p-3 relative" style={{ borderBottom: "1px solid var(--border)" }}>
           <PanelHeader language={language} isRtl={isRtl} />
           <button
-            className={`absolute top-4 p-2.5 rounded-xl hover:opacity-90 border ${isRtl ? "left-4" : "right-4"}`}
-            style={{ color: "var(--muted)", backgroundColor: "var(--surface-strong)", borderColor: "var(--line)" }}
+            className={`absolute top-3 p-2 rounded-lg border transition-all duration-150 ${isRtl ? "left-3" : "right-3"}`}
+            style={{
+              color: "var(--text-muted)",
+              backgroundColor: "var(--background)",
+              borderColor: "var(--border)",
+              boxShadow: "var(--shadow-card)"
+            }}
             onClick={onClose}
+            aria-label="Close navigation"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="p-3 space-y-2">
+        {/* Navigation items */}
+        <div className="p-2.5 space-y-1.5">
           {visibleItems.map((item) => (
             <NavButton
               key={item.route}
@@ -352,6 +450,19 @@ export function MobileDrawer({
               }}
             />
           ))}
+        </div>
+
+        {/* Footer */}
+        <div
+          className="p-3 text-center border-t mt-2"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <div className="flex items-center justify-center gap-1.5">
+            <span className="led-dot led-dot--online" />
+            <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+              SYSTEM OPERATIONAL
+            </span>
+          </div>
         </div>
       </div>
     </div>

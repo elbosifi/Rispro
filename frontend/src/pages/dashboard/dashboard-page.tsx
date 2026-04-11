@@ -8,7 +8,41 @@ import { PageContainer } from "@/components/layout/page-container";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
+import {
+  Activity,
+  Users,
+  CheckCircle2,
+  UserX,
+  Footprints,
+  Settings2,
+  RefreshCw,
+  ArrowRight,
+  Clock,
+  AlertTriangle
+} from "lucide-react";
 
+/* --- Corner screws for cards --- */
+function CornerScrews() {
+  return (
+    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
+      <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+      <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
+    </div>
+  );
+}
+
+/* --- Vent slots (top-right) --- */
+function VentSlots() {
+  return (
+    <div className="absolute top-3 right-3 hidden md:flex items-center gap-0.5" aria-hidden="true">
+      <div className="vent-slot" />
+      <div className="vent-slot" />
+      <div className="vent-slot" />
+    </div>
+  );
+}
+
+/* --- Stat Card (neumorphic with LED) --- */
 function StatCard({
   label,
   value,
@@ -22,29 +56,24 @@ function StatCard({
   icon: React.ReactNode;
   tone?: DashboardTone;
 }) {
-  const toneStyles = {
-    default: "card-shell",
-    good: "rounded-2xl p-5 border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 shadow-sm",
-    warn: "rounded-2xl p-5 border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 shadow-sm",
-    alert: "rounded-2xl p-5 border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 shadow-sm"
-  };
-
-  const valueColors = {
-    default: "text-stone-900 dark:text-white",
-    good: "text-emerald-700 dark:text-emerald-400",
-    warn: "text-amber-700 dark:text-amber-400",
-    alert: "text-red-700 dark:text-red-400"
-  };
+  const ledColor = tone === "good" ? "led-dot--online" : tone === "warn" ? "led-dot--warning" : tone === "alert" ? "led-dot--alert" : null;
+  const valueColor = tone === "good" ? "text-green-700" : tone === "warn" ? "text-amber-700" : tone === "alert" ? "text-red-700" : "";
 
   return (
-    <div className={toneStyles[tone]}>
+    <div className="card-shell card-elevated p-4 relative">
+      <CornerScrews />
       <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium text-stone-500 dark:text-stone-400">{label}</p>
-          <p className={`mt-2 text-3xl font-bold ${valueColors[tone]}`}>{value}</p>
-          {subValue && <p className="mt-1 text-xs description-center">{subValue}</p>}
+        <div className="flex-1">
+          <div className="flex items-center gap-1.5 mb-1">
+            {ledColor && <span className={`led-dot ${ledColor}`} />}
+            <p className="text-[10px] uppercase tracking-[0.12em] font-mono-data" style={{ color: "var(--text-muted)" }}>{label}</p>
+          </div>
+          <p className={`text-2xl font-bold text-embossed ${valueColor}`}>{value}</p>
+          {subValue && (
+            <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>{subValue}</p>
+          )}
         </div>
-        <div className="p-2 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-300">
+        <div className="icon-housing icon-housing--sm text-[var(--text-muted)]">
           {icon}
         </div>
       </div>
@@ -52,6 +81,7 @@ function StatCard({
   );
 }
 
+/* --- Widget Module (bolted panel) --- */
 function WidgetShell({
   title,
   stale,
@@ -64,11 +94,13 @@ function WidgetShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="card-shell overflow-hidden">
-      <div className="p-4 border-b border-stone-200 dark:border-stone-700 flex items-center justify-between">
-        <h3 className="font-semibold text-stone-900 dark:text-white">{title}</h3>
+    <div className="card-shell relative overflow-hidden">
+      <CornerScrews />
+      <VentSlots />
+      <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
+        <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-embossed" style={{ color: "var(--text)" }}>{title}</h3>
         {stale && (
-          <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+          <span className="pill-soft text-[9px]" style={{ backgroundColor: "rgba(245, 158, 11, 0.15)", color: "var(--amber)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
             {staleLabel}
           </span>
         )}
@@ -78,8 +110,46 @@ function WidgetShell({
   );
 }
 
+/* --- Skeleton Block --- */
 function SkeletonBlock({ className }: { className: string }) {
-  return <div className={`animate-pulse rounded-lg bg-stone-200 dark:bg-stone-700 ${className}`} />;
+  return <div className={`animate-pulse rounded-md ${className}`} style={{ backgroundColor: "var(--muted)" }} />;
+}
+
+/* --- Action Link (neumorphic button) --- */
+function ActionLink({
+  to,
+  label,
+  tone
+}: {
+  to: string;
+  label: string;
+  tone: DashboardTone;
+}) {
+  const iconMap: Record<DashboardTone, typeof Activity> = {
+    default: ArrowRight,
+    good: CheckCircle2,
+    warn: AlertTriangle,
+    alert: AlertTriangle
+  };
+  const Icon = iconMap[tone];
+  const accentBorder = tone === "good" ? "rgba(34,197,94,0.3)" : tone === "warn" ? "rgba(245,158,11,0.3)" : tone === "alert" ? "rgba(255,71,87,0.3)" : "var(--border)";
+  const accentBg = tone === "good" ? "rgba(34,197,94,0.08)" : tone === "warn" ? "rgba(245,158,11,0.08)" : tone === "alert" ? "rgba(255,71,87,0.08)" : "transparent";
+
+  return (
+    <Link
+      to={to}
+      className="w-full px-4 py-3 rounded-lg text-center text-sm font-semibold tracking-wide transition-all duration-150 flex items-center justify-between group border"
+      style={{
+        backgroundColor: accentBg,
+        borderColor: accentBorder,
+        boxShadow: "var(--shadow-card)",
+        color: "var(--text)"
+      }}
+    >
+      <span>{label}</span>
+      <Icon className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-1" style={{ color: "var(--text-muted)" }} />
+    </Link>
+  );
 }
 
 export function DashboardPage() {
@@ -148,19 +218,29 @@ export function DashboardPage() {
 
   return (
     <PageContainer>
-      <div className="max-w-7xl mx-auto space-y-6">
+      <div className="space-y-6">
+        {/* Header */}
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
+            <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--text)" }}>
               {t("dashboard.welcome", { name: user?.fullName ?? "" })}
             </h2>
-            <p className="description-center mt-1">{t("dashboard.subtitle")}</p>
+            <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>{t("dashboard.subtitle")}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="pill-soft text-xs">
+            <span className="pill-soft text-[10px] font-mono-data">
+              <Clock className="w-3 h-3" />
               {t("dashboard.tripoliTime", { time: formatDateTimeLy(now) })}
             </span>
-            <span className="px-3 py-1.5 rounded-lg bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 text-xs font-medium text-teal-700 dark:text-teal-300">
+            <span
+              className="pill-soft text-[10px]"
+              style={{
+                backgroundColor: user?.role === "supervisor" ? "rgba(255,71,87,0.1)" : "rgba(34,197,94,0.1)",
+                color: user?.role === "supervisor" ? "var(--accent)" : "var(--green)",
+                borderColor: user?.role === "supervisor" ? "rgba(255,71,87,0.3)" : "rgba(34,197,94,0.3)"
+              }}
+            >
+              <span className="led-dot led-dot--online" />
               {user?.role === "supervisor" ? t("shell.supervisorMode") : t("shell.receptionMode")}
             </span>
             <button
@@ -168,92 +248,106 @@ export function DashboardPage() {
               disabled={isRefreshing}
               className="btn-primary text-xs"
             >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
               {isRefreshing ? t("common.refreshing") : t("common.refreshNow")}
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-          <div className="card-shell p-3">
-            <span className="description-center">{t("dashboard.queueUpdated")}</span>{" "}
-            <span className="text-stone-900 dark:text-white font-medium">
-              {queueQuery.dataUpdatedAt ? formatDateTimeLy(new Date(queueQuery.dataUpdatedAt)) : t("common.na")}
-            </span>
-          </div>
-          <div className="card-shell p-3">
-            <span className="description-center">{t("dashboard.statsUpdated")}</span>{" "}
-            <span className="text-stone-900 dark:text-white font-medium">
-              {statisticsQuery.dataUpdatedAt ? formatDateTimeLy(new Date(statisticsQuery.dataUpdatedAt)) : t("common.na")}
-            </span>
-          </div>
-          <div className="card-shell p-3">
-            <span className="description-center">{t("dashboard.lookupsUpdated")}</span>{" "}
-            <span className="text-stone-900 dark:text-white font-medium">
-              {lookupsQuery.dataUpdatedAt ? formatDateTimeLy(new Date(lookupsQuery.dataUpdatedAt)) : t("common.na")}
-            </span>
-          </div>
-        </div>
-
+        {/* Stale data warning */}
         {(queueStale || statisticsStale || lookupsStale) && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-300 description-center">
+          <div className="rounded-lg border p-3 text-xs font-mono-data flex items-center gap-2" style={{
+            backgroundColor: "rgba(245, 158, 11, 0.08)",
+            borderColor: "rgba(245, 158, 11, 0.3)",
+            color: "var(--amber)"
+          }}>
+            <AlertTriangle className="w-4 h-4 flex-shrink-0" />
             {t("dashboard.staleData")}
           </div>
         )}
 
+        {/* No-show review notice */}
         {!queueQuery.data?.reviewActive && queueQuery.data?.reviewTime && (
-          <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 p-3 text-sm text-blue-800 dark:text-blue-300 description-center">
+          <div className="rounded-lg border p-3 text-xs font-mono-data text-center" style={{
+            backgroundColor: "rgba(59, 130, 246, 0.08)",
+            borderColor: "rgba(59, 130, 246, 0.3)",
+            color: "var(--blue)"
+          }}>
             {t("dashboard.noShowOpens", { time: queueQuery.data.reviewTime })}
           </div>
         )}
 
+        {/* Data freshness strip */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-[10px] font-mono-data">
+          {[
+            { label: t("dashboard.queueUpdated"), updatedAt: queueQuery.dataUpdatedAt },
+            { label: t("dashboard.statsUpdated"), updatedAt: statisticsQuery.dataUpdatedAt },
+            { label: t("dashboard.lookupsUpdated"), updatedAt: lookupsQuery.dataUpdatedAt }
+          ].map((item, i) => (
+            <div key={i} className="card-shell p-3 flex items-center justify-between">
+              <span style={{ color: "var(--text-muted)" }}>{item.label}</span>
+              <span className="font-semibold">{item.updatedAt ? formatDateTimeLy(new Date(item.updatedAt)) : t("common.na")}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Stat Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
           <StatCard
             label={t("dashboard.totalAppointments")}
             value={statisticsQuery.isLoading && !statisticsQuery.data ? "..." : viewModel.kpis.totalAppointments}
-            icon={<span className="font-semibold">T</span>}
+            icon={<Settings2 size={18} />}
             tone="default"
           />
           <StatCard
             label={t("dashboard.arrivedInQueue")}
             value={`${viewModel.kpis.arrivedCount} / ${viewModel.kpis.inQueueCount}`}
-            icon={<span className="font-semibold">Q</span>}
+            icon={<Users size={18} />}
             subValue={t("dashboard.waiting", { count: viewModel.kpis.waitingCount })}
             tone={viewModel.tones.inQueue}
           />
           <StatCard
             label={t("dashboard.completedToday")}
             value={viewModel.kpis.completedCount}
-            icon={<span className="font-semibold">C</span>}
+            icon={<CheckCircle2 size={18} />}
             subValue={completionRatioLabel}
             tone={viewModel.tones.completion}
           />
           <StatCard
             label={t("dashboard.noShowCount")}
             value={viewModel.kpis.noShowCount}
-            icon={<span className="font-semibold">N</span>}
+            icon={<UserX size={18} />}
             tone={viewModel.tones.noShow}
           />
           <StatCard
             label={t("dashboard.walkInCount")}
             value={viewModel.kpis.walkInCount}
-            icon={<span className="font-semibold">W</span>}
+            icon={<Footprints size={18} />}
             tone="default"
           />
           <StatCard
             label={t("dashboard.activeModalities")}
             value={lookupsQuery.isLoading && !lookupsQuery.data ? "..." : viewModel.kpis.activeModalities}
-            icon={<span className="font-semibold">M</span>}
+            icon={<Activity size={18} />}
             tone="default"
           />
         </div>
 
+        {/* Error state */}
         {!hasAnyData && (queueQuery.isError || statisticsQuery.isError || lookupsQuery.isError) && (
-          <div className="rounded-xl border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-400 description-center">
+          <div className="rounded-lg border p-4 text-xs font-mono-data text-center flex items-center gap-2 justify-center" style={{
+            backgroundColor: "rgba(255, 71, 87, 0.08)",
+            borderColor: "rgba(255, 71, 87, 0.3)",
+            color: "var(--accent)"
+          }}>
+            <AlertTriangle className="w-4 h-4" />
             {t("dashboard.unableAll")}
           </div>
         )}
 
+        {/* Widget Row */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {/* Status Distribution */}
           <WidgetShell title={t("dashboard.statusDistribution")} stale={statisticsStale} staleLabel={t("common.staleData")}>
             {statisticsQuery.isLoading && !statisticsQuery.data ? (
               <div className="space-y-2">
@@ -262,19 +356,20 @@ export function DashboardPage() {
                 ))}
               </div>
             ) : statisticsQuery.isError && !statisticsQuery.data ? (
-              <p className="text-sm text-red-600 dark:text-red-400 description-center">{t("dashboard.unableStatus")}</p>
+              <p className="text-xs font-mono-data text-center" style={{ color: "var(--accent)" }}>{t("dashboard.unableStatus")}</p>
             ) : (
               <ul className="space-y-2">
                 {viewModel.statuses.map((row) => (
-                  <li key={row.status} className="flex items-center justify-between text-sm">
-                    <span className="text-stone-600 dark:text-stone-300">{statusLabel(language, row.status)}</span>
-                    <span className="font-semibold text-stone-900 dark:text-white">{row.count}</span>
+                  <li key={row.status} className="flex items-center justify-between text-xs font-mono-data">
+                    <span style={{ color: "var(--text-muted)" }}>{statusLabel(language, row.status)}</span>
+                    <span className="font-bold">{row.count}</span>
                   </li>
                 ))}
               </ul>
             )}
           </WidgetShell>
 
+          {/* Queue Health */}
           <WidgetShell title={t("dashboard.queueHealth")} stale={queueStale} staleLabel={t("common.staleData")}>
             {queueQuery.isLoading && !queueQuery.data ? (
               <div className="space-y-2">
@@ -283,27 +378,28 @@ export function DashboardPage() {
                 <SkeletonBlock className="h-7" />
               </div>
             ) : queueQuery.isError && !queueQuery.data ? (
-              <p className="text-sm text-red-600 dark:text-red-400 description-center">{t("dashboard.unableQueue")}</p>
+              <p className="text-xs font-mono-data text-center" style={{ color: "var(--accent)" }}>{t("dashboard.unableQueue")}</p>
             ) : (
-              <div className="space-y-3 text-sm">
+              <div className="space-y-3 text-xs font-mono-data">
                 <div className="flex justify-between">
-                  <span className="description-center">{statusLabel(language, "waiting")}</span>
-                  <span className="font-semibold text-stone-900 dark:text-white">{viewModel.kpis.waitingCount}</span>
+                  <span style={{ color: "var(--text-muted)" }}>{statusLabel(language, "waiting")}</span>
+                  <span className="font-bold">{viewModel.kpis.waitingCount}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="description-center">{t("dashboard.noShow")}</span>
-                  <span className={`font-semibold ${viewModel.queueHealth.reviewActive ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}>
+                  <span style={{ color: "var(--text-muted)" }}>{t("dashboard.noShow")}</span>
+                  <span className={`font-bold ${viewModel.queueHealth.reviewActive ? "text-green-700" : "text-amber-700"}`}>
                     {viewModel.queueHealth.reviewActive ? t("dashboard.reviewActive") : t("dashboard.reviewOpens", { time: viewModel.queueHealth.reviewTime })}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="description-center">{t("dashboard.candidates")}</span>
-                  <span className="font-semibold text-stone-900 dark:text-white">{viewModel.queueHealth.noShowCandidates}</span>
+                  <span style={{ color: "var(--text-muted)" }}>{t("dashboard.candidates")}</span>
+                  <span className="font-bold">{viewModel.queueHealth.noShowCandidates}</span>
                 </div>
               </div>
             )}
           </WidgetShell>
 
+          {/* Action Hub */}
           <WidgetShell title={t("dashboard.actionHub")} stale={false} staleLabel={t("common.staleData")}>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-1 gap-2">
               <ActionLink to="/patients" label={t("dashboard.registerPatient")} tone="default" />
@@ -321,6 +417,7 @@ export function DashboardPage() {
           </WidgetShell>
         </div>
 
+        {/* Modality Throughput */}
         <WidgetShell title={t("dashboard.modalityThroughput")} stale={statisticsStale} staleLabel={t("common.staleData")}>
           {statisticsQuery.isLoading && !statisticsQuery.data ? (
             <div className="space-y-2">
@@ -329,36 +426,36 @@ export function DashboardPage() {
               ))}
             </div>
           ) : statisticsQuery.isError && !statisticsQuery.data ? (
-            <p className="text-sm text-red-600 dark:text-red-400 description-center">{t("dashboard.unableThroughput")}</p>
+            <p className="text-xs font-mono-data text-center" style={{ color: "var(--accent)" }}>{t("dashboard.unableThroughput")}</p>
           ) : viewModel.modalities.length === 0 ? (
-            <div className="text-sm description-center">
+            <div className="text-xs font-mono-data text-center">
               {t("dashboard.noAppointmentsYet")}{" "}
-              <Link to="/appointments" className="text-teal-600 dark:text-teal-400 hover:underline">
+              <Link to="/appointments" className="font-semibold hover:underline" style={{ color: "var(--accent)" }}>
                 {t("dashboard.createFirstAppointment")}
               </Link>
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-stone-500 dark:text-stone-400">
-                  <tr>
-                    <th className="text-start py-2">{t("dashboard.modality")}</th>
-                    <th className="text-start py-2">{t("dashboard.total")}</th>
-                    <th className="text-start py-2">{t("dashboard.inQueue")}</th>
-                    <th className="text-start py-2">{t("dashboard.completed")}</th>
-                    <th className="text-start py-2">{t("dashboard.noShow")}</th>
+              <table className="w-full text-xs font-mono-data">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "var(--border)" }}>
+                    <th className="text-start py-2 font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>{t("dashboard.modality")}</th>
+                    <th className="text-start py-2 font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>{t("dashboard.total")}</th>
+                    <th className="text-start py-2 font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>{t("dashboard.inQueue")}</th>
+                    <th className="text-start py-2 font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>{t("dashboard.completed")}</th>
+                    <th className="text-start py-2 font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>{t("dashboard.noShow")}</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-stone-200 dark:divide-stone-700">
+                <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
                   {viewModel.modalities.map((row) => (
                     <tr key={row.modalityId}>
-                      <td className="py-2 text-stone-900 dark:text-white font-medium">
+                      <td className="py-2 font-semibold">
                         {chooseLocalized(language, row.modalityNameAr, row.modalityNameEn)}
                       </td>
-                      <td className="py-2 text-stone-700 dark:text-stone-300">{row.totalCount}</td>
-                      <td className="py-2 text-stone-700 dark:text-stone-300">{row.inQueueCount}</td>
-                      <td className="py-2 text-stone-700 dark:text-stone-300">{row.completedCount}</td>
-                      <td className="py-2 text-stone-700 dark:text-stone-300">{row.noShowCount}</td>
+                      <td className="py-2">{row.totalCount}</td>
+                      <td className="py-2">{row.inQueueCount}</td>
+                      <td className="py-2">{row.completedCount}</td>
+                      <td className="py-2">{row.noShowCount}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -368,31 +465,5 @@ export function DashboardPage() {
         </WidgetShell>
       </div>
     </PageContainer>
-  );
-}
-
-function ActionLink({
-  to,
-  label,
-  tone
-}: {
-  to: string;
-  label: string;
-  tone: DashboardTone;
-}) {
-  const styles: Record<DashboardTone, string> = {
-    default: "bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-600",
-    good: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-900/50",
-    warn: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 hover:bg-amber-200 dark:hover:bg-amber-900/50",
-    alert: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50"
-  };
-
-  return (
-    <Link
-      to={to}
-      className={`w-full px-4 py-3 rounded-xl text-center text-base font-semibold tracking-wide transition-colors ${styles[tone]}`}
-    >
-      {label}
-    </Link>
   );
 }

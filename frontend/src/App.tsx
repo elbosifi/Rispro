@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { LoginPage } from "@/pages/auth/login-page";
@@ -45,10 +45,6 @@ const PATH_TO_ROUTE = Object.fromEntries(
   Object.entries(ROUTE_PATHS).map(([k, v]) => [v === "/" ? "/" : v.slice(1), k])
 );
 
-function getStoredTheme(): "light" | "dark" {
-  return (localStorage.getItem("rispro-theme") as "light" | "dark") || "light";
-}
-
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -56,13 +52,6 @@ function AppContent() {
   const { language, toggleLanguage } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [theme, setTheme] = useState<"light" | "dark">(getStoredTheme);
-
-  // Apply theme
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("rispro-theme", theme);
-  }, [theme]);
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -75,7 +64,6 @@ function AppContent() {
     [navigate]
   );
 
-  // Determine current route key for sidebar highlighting
   const currentRoute = (() => {
     const pathname = location.pathname;
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
@@ -83,20 +71,18 @@ function AppContent() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen bg-stone-50 dark:bg-stone-900">
-        <div className="animate-spin rounded-full h-12 w-12 border-4 border-stone-300 border-t-teal-600" />
+      <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: "var(--background)" }}>
+        <div className="spinner-industrial h-12 w-12" />
       </div>
     );
   }
 
-  // If not authenticated, the Routes component handles redirecting to /login
-  // If we are here, user is authenticated (or loading)
   if (!user) {
-    return null; // Let router handle redirect
+    return null;
   }
 
   return (
-    <div className="flex flex-col min-h-screen bg-stone-50 dark:bg-stone-900" dir={isArabic ? "rtl" : "ltr"}>
+    <div className="flex flex-col min-h-screen" style={{ backgroundColor: "var(--background)" }} dir={isArabic ? "rtl" : "ltr"}>
       <TopBar
         user={user}
         language={language}
@@ -104,7 +90,6 @@ function AppContent() {
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}
-        onToggleTheme={() => setTheme((t) => (t === "light" ? "dark" : "light"))}
         onLogout={logout}
         onMobileNavToggle={() => setMobileNavOpen(true)}
       />
