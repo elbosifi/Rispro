@@ -18,6 +18,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
+import { AppointmentsV2Page } from "@/v2/appointments";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -38,7 +39,8 @@ const ROUTE_PATHS: Record<string, string> = {
   search: "/search",
   pacs: "/pacs",
   settings: "/settings",
-  legacy: "/legacy-access-viewer"
+  legacy: "/legacy-access-viewer",
+  "v2.appointments": "/v2/appointments",
 };
 
 const PATH_TO_ROUTE = Object.fromEntries(
@@ -122,6 +124,7 @@ function AppContent() {
             <Route path="/pacs" element={<PacsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
+            <Route path="/v2/appointments" element={<AppointmentsV2Page />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

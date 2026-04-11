@@ -55,7 +55,8 @@
       "Bash(})",
       "Bash(t)",
       "Bash(endoffunctions)",
-      "Bash(git rm *)"
+      "Bash(git rm *)",
+      "WebFetch(github.com)"
     ]
   },
   "$version": 3

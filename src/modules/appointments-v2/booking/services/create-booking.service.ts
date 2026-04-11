@@ -1,0 +1,231 @@
+/**
+ * Appointments V2 — Create booking service.
+ *
+ * Transactional booking with lock → re-evaluate → write pattern.
+ * Follows D008 precedence and D012 (row-level locking via bucket_mutex).
+ */
+
+import type { PoolClient } from "pg";
+import { withTransaction } from "../../shared/utils/transactions.js";
+import { SchedulingError } from "../../shared/errors/scheduling-error.js";
+import { pureEvaluate } from "../../rules/services/pure-evaluate.js";
+import type { PureEvaluateInput, RuleEvaluationContext } from "../../rules/models/rule-evaluation-context.js";
+import type { Booking, CreateBookingPayload } from "../models/booking.js";
+import { findPublishedPolicyVersion } from "../../rules/repositories/policy-version.repo.js";
+import {
+  loadModalityBlockedRules,
+  loadExamTypeRules,
+  loadCategoryDailyLimits,
+  loadExamTypeSpecialQuotas,
+} from "../../rules/repositories/policy-rules.repo.js";
+import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
+import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
+import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
+import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
+import { insertBooking } from "../repositories/booking.repo.js";
+import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
+import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
+import { pool } from "../../../../db/pool.js";
+
+export interface CreateBookingResult {
+  booking: Booking;
+  decisionSnapshot: unknown;
+  wasOverride: boolean;
+}
+
+export async function createBooking(
+  payload: CreateBookingPayload,
+  userId: number,
+  policySetKey: string = "default"
+): Promise<CreateBookingResult> {
+  return withTransaction(async (client) => {
+    return createBookingInternal(client, payload, userId, policySetKey);
+  });
+}
+
+async function createBookingInternal(
+  client: PoolClient,
+  payload: CreateBookingPayload,
+  userId: number,
+  policySetKey: string
+): Promise<CreateBookingResult> {
+  // 1. Load the published policy
+  const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
+  if (!publishedVersion) {
+    throw new SchedulingError(
+      400,
+      "No scheduling policy has been published.",
+      ["no_published_policy"]
+    );
+  }
+
+  // 2. Integrity: check modality exists
+  const modality = await findModalityById(client, payload.modalityId);
+  if (!modality) {
+    throw new SchedulingError(
+      400,
+      `Modality ${payload.modalityId} not found.`,
+      ["modality_not_found"]
+    );
+  }
+
+  // 3. Integrity: check exam type if provided
+  let examTypeExists = true;
+  let examTypeBelongsToModality = true;
+  if (payload.examTypeId != null) {
+    const examType = await findExamTypeById(client, payload.examTypeId);
+    if (!examType) {
+      throw new SchedulingError(
+        400,
+        `Exam type ${payload.examTypeId} not found.`,
+        ["exam_type_not_found"]
+      );
+    }
+    examTypeBelongsToModality = examType.modalityId === payload.modalityId;
+    if (!examTypeBelongsToModality) {
+      throw new SchedulingError(
+        400,
+        `Exam type ${payload.examTypeId} does not belong to modality ${payload.modalityId}.`,
+        ["exam_type_modality_mismatch"]
+      );
+    }
+  }
+
+  // 4. Acquire bucket lock (D012: row-level locking)
+  await acquireBucketLock(
+    client,
+    payload.modalityId,
+    payload.bookingDate,
+    payload.caseCategory
+  );
+
+  // 5. Load all rules for re-evaluation inside the transaction
+  const blockedRules = await loadModalityBlockedRules(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
+  const examTypeRules = await loadExamTypeRules(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
+  const categoryLimits = await loadCategoryDailyLimits(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
+  const specialQuotas = await loadExamTypeSpecialQuotas(
+    client,
+    publishedVersion.id
+  );
+
+  // 6. Load current booked count (after lock, so this is consistent)
+  const currentBookedCount = await getBookedCountForDate(
+    client,
+    payload.modalityId,
+    payload.bookingDate,
+    payload.caseCategory
+  );
+
+  // 7. Build context and evaluate
+  const context: RuleEvaluationContext = {
+    policyVersionId: publishedVersion.id,
+    policySetKey,
+    policyVersionNo: publishedVersion.versionNo,
+    policyConfigHash: publishedVersion.configHash,
+    modalityExists: true,
+    examTypeExists,
+    examTypeBelongsToModality,
+    blockedRules,
+    examTypeRules,
+    examTypeRuleItemExamTypeIds: [],
+    categoryLimits,
+    specialQuotas,
+    currentBookedCount,
+  };
+
+  const pureInput: PureEvaluateInput = {
+    patientId: payload.patientId,
+    modalityId: payload.modalityId,
+    examTypeId: payload.examTypeId ?? null,
+    scheduledDate: payload.bookingDate,
+    caseCategory: payload.caseCategory,
+    useSpecialQuota: false,
+    specialReasonCode: null,
+    includeOverrideEvaluation: payload.override != null,
+    context,
+  };
+
+  const decision = await pureEvaluate(pureInput);
+
+  // 8. Check if booking is allowed or requires override
+  let wasOverride = false;
+  let supervisorUserId: number | null = null;
+
+  if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
+    // Hard block — cannot book even with override
+    throw new SchedulingError(
+      409,
+      "Booking is not allowed for this date/category.",
+      decision.reasons.map((r) => r.code),
+      { decision }
+    );
+  }
+
+  if (decision.requiresSupervisorOverride) {
+    // Override required — validate supervisor credentials
+    if (!payload.override) {
+      throw new SchedulingError(
+        403,
+        "Supervisor override is required for this booking. Please provide supervisor credentials.",
+        ["override_required"]
+      );
+    }
+
+    const supervisor = await authenticateSupervisor(
+      client,
+      payload.override.supervisorUsername,
+      payload.override.supervisorPassword
+    );
+    supervisorUserId = supervisor.id;
+    wasOverride = true;
+  }
+
+  // 9. Insert the booking
+  const booking = await insertBooking(client, {
+    patientId: payload.patientId,
+    modalityId: payload.modalityId,
+    examTypeId: payload.examTypeId ?? null,
+    reportingPriorityId: payload.reportingPriorityId ?? null,
+    bookingDate: payload.bookingDate,
+    bookingTime: payload.bookingTime ?? null,
+    caseCategory: payload.caseCategory,
+    status: "scheduled",
+    notes: payload.notes ?? null,
+    policyVersionId: publishedVersion.id,
+    userId,
+  });
+
+  // 10. Record override audit if applicable
+  if (wasOverride && supervisorUserId != null) {
+    await recordOverrideAudit(client, {
+      bookingId: booking.id,
+      patientId: payload.patientId,
+      modalityId: payload.modalityId,
+      examTypeId: payload.examTypeId ?? null,
+      bookingDate: payload.bookingDate,
+      requestingUserId: userId,
+      supervisorUserId,
+      overrideReason: payload.override?.reason ?? null,
+      decisionSnapshot: decision,
+      outcome: "approved_and_booked",
+    });
+  }
+
+  return {
+    booking,
+    decisionSnapshot: decision,
+    wasOverride,
+  };
+}
