@@ -9,38 +9,6 @@ import type {
   SchedulingResult
 } from "./types.js";
 
-// ---------------------------------------------------------------------------
-// Malformed-rule detection
-// ---------------------------------------------------------------------------
-
-function hasValue<T>(value: T | null | undefined): value is T {
-  return value !== null && value !== undefined;
-}
-
-function isMalformedBlockedRule(row: BlockedRuleRow): boolean {
-  if (row.rule_type === "specific_date") return !row.specific_date;
-  if (row.rule_type === "date_range") return !row.start_date || !row.end_date || row.start_date > row.end_date;
-  if (row.rule_type === "yearly_recurrence") {
-    return !hasValue(row.recur_start_month)
-      || !hasValue(row.recur_start_day)
-      || !hasValue(row.recur_end_month)
-      || !hasValue(row.recur_end_day);
-  }
-  return true; // unknown rule_type is malformed
-}
-
-function isMalformedExamRule(row: ExamRuleRow): boolean {
-  if (row.rule_type === "specific_date") return !row.specific_date;
-  if (row.rule_type === "date_range") return !row.start_date || !row.end_date || row.start_date > row.end_date;
-  if (row.rule_type === "weekly_recurrence") {
-    if (!row.start_date || !row.end_date || row.start_date > row.end_date) return true;
-    if (!hasValue(row.weekday)) return true;
-    if (row.alternate_weeks && !row.recurrence_anchor_date && !row.start_date) return true;
-    return false;
-  }
-  return true; // unknown rule_type is malformed
-}
-
 interface CountRow {
   total_count: number | string | null;
   oncology_count: number | string | null;
@@ -227,10 +195,10 @@ export async function evaluateSchedulingCandidateWithDb(
   const specialConsumedRow = specialQuotaConsumedResult.rows?.[0] as { consumed_slots?: number | string } | undefined;
   const modalityCapacityRow = globalCapacityResult.rows?.[0] as { daily_capacity?: number | string } | undefined;
 
-  // Detect malformed rule rows — these must block scheduling entirely.
-  const malformedRuleConfig =
-    blockedResult.rows.some(isMalformedBlockedRule) ||
-    examRulesResult.rows.some(isMalformedExamRule);
+  // Malformed rules simply won't match any dates (matchesBlockedRule returns false
+  // for null dates; isDateWithinRange returns false for null start/end). There is
+  // no need to block the entire modality for a single malformed rule.
+  const malformedRuleConfig = false;
 
   const context: SchedulingDecisionContext = {
     integrity: {
