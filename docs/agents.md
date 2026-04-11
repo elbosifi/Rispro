@@ -1,52 +1,40 @@
 # AGENTS.md
 
-This repository is actively building **Appointments V2**.
-
-Read these first before doing any Appointments V2 task:
-- `docs/appointments-v2/PROJECT_BRIEF.md`
-- `docs/appointments-v2/ARCHITECTURE.md`
-- `docs/appointments-v2/STAGES.md`
+Read these first before any Appointments V2 task:
+- docs/appointments-v2/PROJECT_BRIEF.md
+- docs/appointments-v2/ARCHITECTURE.md
+- docs/appointments-v2/DECISIONS.md
+- docs/appointments-v2/TASK_LEDGER.md
+- docs/appointments-v2/STAGES.md
 
 ## Core rules
 
-1. Treat the existing appointments/scheduling implementation as **legacy**.
-2. Do **not** extend legacy scheduling logic unless the task explicitly says to patch legacy code.
-3. All new scheduling and booking work must go into **Appointments V2** only.
-4. Prefer **small, staged changes** over broad rewrites.
-5. Keep backend and frontend V2 work modular and separated from legacy code.
-6. For booking logic, prefer:
-   - explicit rule precedence
-   - side-effect-free decision functions
-   - transactional booking writes
-   - test coverage for rule evaluation and booking flows
-7. Do not infer availability state in the frontend from missing fields. The backend must return explicit booking state.
-8. Configuration saves in V2 must be **authoritative**. Omitted rules must not remain silently active.
-9. Keep naming explicit. Use `appointments-v2` / `appointment_v2_*` conventions for new code and tables unless the task specifies otherwise.
-10. Keep code compiling and avoid unnecessary refactors outside task scope.
+1. Legacy appointments and scheduling code is frozen.
+2. Do not add new scheduling features to legacy code.
+3. All new scheduling and booking work must go into Appointments V2.
+4. Appointments V2 lives in:
+   - backend: src/modules/appointments-v2/
+   - frontend: frontend/src/v2/appointments/
+5. Do not use ad hoc scheduling logic.
+6. Scheduling decisions must come from explicit backend rule evaluation.
+7. Frontend must not infer scheduling truth from missing fields.
+8. Configuration saves in V2 must be authoritative.
+9. Booking must re-check decision and capacity inside the transaction before commit.
+10. Keep tasks small and stage-based.
+
+## Multi-agent rules
+
+- One primary implementer agent per stage or sub-scope.
+- One secondary reviewer / bug-fix agent per stage.
+- Do not edit files outside your assigned scope.
+- Shared files should have one owner for the current stage.
+- Do not mix frontend and backend implementation in one task unless explicitly requested.
 
 ## Legacy freeze policy
 
-The legacy appointments module remains temporarily available only for:
-- reference
-- comparison
-- bug containment if explicitly requested
+Legacy appointments code may only receive:
+- critical bug containment
+- temporary compatibility fixes explicitly requested
+- reference-only maintenance
 
 It is not the target architecture.
-
-## Preferred V2 principles
-
-- Backend-first implementation
-- Pure decision service before write-path logic
-- Slot-aware scheduling model
-- Explicit override workflow
-- Clear audit trail
-- Strong tests around rules, capacity, rescheduling, and cancellation
-
-## Expected task style
-
-When implementing Appointments V2:
-- read the V2 docs first
-- implement only the requested stage
-- keep the diff focused
-- include tests where logic changes
-- avoid hidden behavior changes in legacy code

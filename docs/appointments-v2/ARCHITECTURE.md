@@ -1,34 +1,118 @@
 # Appointments V2 Architecture
 
-## Architectural intent
+## Purpose
 
-Appointments V2 replaces the legacy monolithic appointments/scheduling implementation with a modular backend-first architecture.
+Appointments V2 replaces the current legacy appointments and scheduling implementation with a modular, backend-first system designed for safe parallel work by multiple AI coding agents.
 
-The design separates:
-1. canonical scheduling data
-2. rule evaluation
-3. transactional booking writes
-4. admin configuration
-5. frontend-specific response shaping
+The old appointments module remains frozen and reference-only.
 
-## Design principles
+## Core architectural decisions
 
-- explicit over implicit
-- backend owns booking truth
-- frontend consumes explicit states
-- configuration is authoritative
-- side-effect-free evaluation before transactional writes
-- modular internal structure
-- test critical logic directly
+1. Legacy appointments and scheduling code is frozen.
+2. Appointments V2 is built in parallel inside the same repository.
+3. Backend comes first.
+4. Scheduling decisions are explicit and backend-owned.
+5. No ad hoc scheduling logic is allowed in UI or random service branches.
+6. Configuration saves are authoritative.
+7. Booking re-checks eligibility and capacity inside the transaction before commit.
+8. Frontend renders explicit states only and must not infer booking truth from missing fields.
 
-## Proposed module structure
+## Module root
+
+All new backend work goes under:
+
+`src/modules/appointments-v2/`
+
+All new frontend work goes under:
+
+`frontend/src/v2/appointments/`
+
+## Backend folder structure
 
 ```text
 src/modules/appointments-v2/
+  index.ts
+
   api/
-  booking/
-  rules/
-  scheduler/
+    routes/
+      appointments-v2-routes.ts
+      scheduling-v2-routes.ts
+      admin-scheduling-v2-routes.ts
+    dto/
+      appointment.dto.ts
+      scheduling.dto.ts
+      admin-scheduling.dto.ts
+    mappers/
+      appointment.mapper.ts
+      scheduling.mapper.ts
+
   catalog/
+    services/
+      modality-catalog.service.ts
+      exam-type-catalog.service.ts
+    repositories/
+      modality-catalog.repo.ts
+      exam-type-catalog.repo.ts
+
+  scheduler/
+    services/
+      availability.service.ts
+      suggestion.service.ts
+      slot-generation.service.ts
+    repositories/
+      schedule.repo.ts
+      slot.repo.ts
+      capacity.repo.ts
+    models/
+      schedule.ts
+      slot.ts
+
+  rules/
+    services/
+      evaluate-booking-decision.ts
+      compile-policy.ts
+      validate-policy.ts
+    repositories/
+      policy-version.repo.ts
+      policy-rules.repo.ts
+    models/
+      booking-decision.ts
+      rule-types.ts
+      policy-snapshot.ts
+
+  booking/
+    services/
+      create-booking.service.ts
+      reschedule-booking.service.ts
+      cancel-booking.service.ts
+      release-capacity.service.ts
+      override-audit.service.ts
+    repositories/
+      booking.repo.ts
+      bucket-mutex.repo.ts
+      override-audit.repo.ts
+    models/
+      booking.ts
+
   admin/
+    services/
+      create-policy-draft.service.ts
+      save-policy-draft.service.ts
+      publish-policy.service.ts
+      preview-policy-impact.service.ts
+    repositories/
+      admin-policy.repo.ts
+
   shared/
+    errors/
+      scheduling-error.ts
+    types/
+      common.ts
+    utils/
+      dates.ts
+      hashing.ts
+      transactions.ts
+
+  tests/
+    unit/
+    integration/
