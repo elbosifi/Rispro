@@ -42,12 +42,8 @@ Current release:
    - Patient merge functionality
 
 2. **Appointment Scheduling**
-   - Modality-based scheduling (CT, MRI, X-ray, etc.)
-   - Daily capacity management
-   - Accession number generation (`YYYYMMDD-XXX` format)
-   - Supervisor overbooking with password confirmation
-   - Walk-in patient support
-
+   - Read docs/appointments-v2/QWEN_TASK_PREAMBLE.md and follow it for this task.
+   
 3. **Queue Management**
    - Barcode scanning for patient arrival
    - Walk-in queue entries

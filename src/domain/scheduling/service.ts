@@ -1,3 +1,14 @@
+/*
+ * LEGACY APPOINTMENTS / SCHEDULING MODULE
+ * This file belongs to the legacy scheduling system.
+ * Do not add new scheduling features here.
+ * New scheduling and booking work must go into Appointments V2.
+ * Legacy code may only receive:
+ * - critical bug containment
+ * - temporary compatibility fixes explicitly requested
+ * - reference-only maintenance
+ */
+
 import type { DbExecutor } from "../../types/db.js";
 import { pool } from "../../db/pool.js";
 import { evaluateSchedulingCandidate } from "./evaluator.js";

@@ -1,3 +1,8 @@
+-- LEGACY APPOINTMENTS / SCHEDULING MODULE
+-- This file belongs to the legacy scheduling system.
+-- Do not add new scheduling features here.
+-- New scheduling and booking work must go into Appointments V2.
+
 insert into system_settings (category, setting_key, setting_value)
 values
   ('general_system', 'site_name', '{"value":"RISpro Reception"}'::jsonb),

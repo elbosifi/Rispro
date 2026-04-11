@@ -1,3 +1,8 @@
+-- LEGACY APPOINTMENTS / SCHEDULING MODULE
+-- This file belongs to the legacy scheduling system.
+-- Do not add new scheduling features here.
+-- New scheduling and booking work must go into Appointments V2.
+
 -- Phase 1: additive schema for scheduling engine and patient multi-identifiers.
 -- Backward compatible: existing flows keep working when new data is absent.
 

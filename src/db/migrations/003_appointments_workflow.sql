@@ -1,3 +1,8 @@
+-- LEGACY APPOINTMENTS / SCHEDULING MODULE
+-- This file belongs to the legacy scheduling system.
+-- Do not add new scheduling features here.
+-- New scheduling and booking work must go into Appointments V2.
+
 alter table appointments
 add column if not exists modality_slot_number integer;
 

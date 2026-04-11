@@ -1,3 +1,14 @@
+/*
+ * LEGACY APPOINTMENTS / SCHEDULING MODULE
+ * This file belongs to the legacy scheduling system.
+ * Do not add new scheduling features here.
+ * New scheduling and booking work must go into Appointments V2.
+ * Legacy code may only receive:
+ * - critical bug containment
+ * - temporary compatibility fixes explicitly requested
+ * - reference-only maintenance
+ */
+
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import type { UnknownRecord, UserId } from "../types/http.js";
