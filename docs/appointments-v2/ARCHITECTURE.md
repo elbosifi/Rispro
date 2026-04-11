@@ -1,13 +1,34 @@
-You are working on Appointments V2 only.
+# Appointments V2 Architecture
 
-Read first:
-- docs/appointments-v2/PROJECT_BRIEF.md
-- docs/appointments-v2/ARCHITECTURE.md
-- docs/appointments-v2/STAGES.md
+## Architectural intent
 
-Constraints:
-- Do not modify legacy appointments unless explicitly instructed.
-- Implement only the requested stage.
-- Keep modules small and separated.
-- Prefer backend-first work for V2.
-- Add or update tests for any rule-engine or booking logic.
+Appointments V2 replaces the legacy monolithic appointments/scheduling implementation with a modular backend-first architecture.
+
+The design separates:
+1. canonical scheduling data
+2. rule evaluation
+3. transactional booking writes
+4. admin configuration
+5. frontend-specific response shaping
+
+## Design principles
+
+- explicit over implicit
+- backend owns booking truth
+- frontend consumes explicit states
+- configuration is authoritative
+- side-effect-free evaluation before transactional writes
+- modular internal structure
+- test critical logic directly
+
+## Proposed module structure
+
+```text
+src/modules/appointments-v2/
+  api/
+  booking/
+  rules/
+  scheduler/
+  catalog/
+  admin/
+  shared/
