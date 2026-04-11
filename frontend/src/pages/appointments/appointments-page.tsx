@@ -237,6 +237,7 @@ export default function AppointmentsPage() {
   });
   const suggestionInfo = useMemo(() => {
     const rows = suggestionAvailability ?? [];
+    const availRows = availability ?? [];
     const tripoliHour = Number(
       new Intl.DateTimeFormat("en-GB", {
         timeZone: "Africa/Tripoli",
@@ -246,9 +247,26 @@ export default function AppointmentsPage() {
     );
     const isAfterTwoPmTripoli = tripoliHour >= 14;
     const today = todayIsoDateLy();
-    // Prefer a truly bookable day first.
-    const bookable = rows.find((day: any) => {
-      if (day.is_bookable !== true) return false;
+    // Merge suggestions with availability data so we have full evaluation fields.
+    const availMap = new Map<string, Record<string, unknown>>();
+    for (const row of availRows) {
+      const key = normalizeDateKey(row.appointment_date);
+      availMap.set(key, row as Record<string, unknown>);
+    }
+    const merged = rows.map((day: any) => {
+      const key = normalizeDateKey(day.appointment_date);
+      const avail = availMap.get(key);
+      return {
+        ...day,
+        is_bookable: day.is_bookable ?? (avail?.is_bookable ?? false),
+        isAllowed: day.isAllowed ?? (avail?.isAllowed ?? false),
+        requiresSupervisorOverride: day.requiresSupervisorOverride ?? (avail?.requiresSupervisorOverride ?? false),
+        displayStatus: day.displayStatus ?? (avail?.displayStatus ?? "")
+      };
+    });
+    // Prefer a truly bookable day first (not today after 2pm Tripoli).
+    const bookable = merged.find((day: any) => {
+      if (!day.is_bookable && day.isAllowed !== true) return false;
       const dayKey = normalizeDateKey(day.appointment_date);
       if (isAfterTwoPmTripoli && dayKey === today) return false;
       return true;
@@ -261,8 +279,8 @@ export default function AppointmentsPage() {
     }
     // Fall back to override-required day only when includeOverrideCandidates is on.
     if (form.includeOverrideCandidates) {
-      const overrideDay = rows.find((day: any) => {
-        if (!day.requiresSupervisorOverride) return false;
+      const overrideDay = merged.find((day: any) => {
+        if (!day.requiresSupervisorOverride && day.displayStatus !== "restricted") return false;
         const dayKey = normalizeDateKey(day.appointment_date);
         if (isAfterTwoPmTripoli && dayKey === today) return false;
         return true;
@@ -275,7 +293,7 @@ export default function AppointmentsPage() {
       }
     }
     return null;
-  }, [suggestionAvailability, form.includeOverrideCandidates]);
+  }, [suggestionAvailability, availability, form.includeOverrideCandidates]);
 
   // Debounced patient search
   const handlePatientSearch = useCallback((query: string) => {

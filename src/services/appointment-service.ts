@@ -1327,11 +1327,20 @@ export async function listSuggestedAppointments(
   const availability = await listAvailability(modalityId, days, 0, options);
   return availability
     .filter((slot) => {
-      if (options.includeOverrideCandidates) {
-        return slot.isAllowed || slot.requiresSupervisorOverride;
+      // When scheduling engine is enabled, use its evaluation.
+      if ("isAllowed" in slot) {
+        if (options.includeOverrideCandidates) {
+          return slot.isAllowed || slot.requiresSupervisorOverride;
+        }
+        return slot.isAllowed === true;
       }
-      return slot.isAllowed === true;
+      // Fallback: when engine is disabled, suggest based on capacity.
+      return !slot.is_full;
     })
+    .map((slot) => ({
+      ...slot,
+      is_bookable: "isAllowed" in slot ? slot.isAllowed : !slot.is_full
+    }))
     .slice(0, 20);
 }
 
