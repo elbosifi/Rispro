@@ -18,7 +18,6 @@ import type {
   ModalityDto,
   ExamTypeDto,
   ListBookingsResponse,
-  BookingWithPatientInfo,
   RescheduleBookingRequest,
   RescheduleBookingResponse,
 } from "./types";

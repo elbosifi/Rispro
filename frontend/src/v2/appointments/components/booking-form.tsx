@@ -6,7 +6,7 @@
  * Uses the existing `useV2CreateBooking` mutation and `evaluateV2Scheduling` for pre-check.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Calendar, Plus, Loader2 } from "lucide-react";
 import { pushToast } from "@/lib/toast";
 import { useV2CreateBooking, evaluateV2Scheduling } from "../api";
@@ -16,7 +16,6 @@ import type {
   AvailabilityDayDto,
   CreateBookingRequest,
   ModalityDto,
-  ExamTypeDto,
   SchedulingDecisionDto,
 } from "../types";
 
@@ -31,7 +30,6 @@ interface Patient {
 
 interface BookingFormProps {
   modalities: ModalityDto[];
-  examTypes: ExamTypeDto[];
   availability: AvailabilityDayDto[];
   selectedModalityId: number | null;
   selectedExamTypeId: number | null;
@@ -41,7 +39,6 @@ interface BookingFormProps {
 
 export function BookingForm({
   modalities,
-  examTypes,
   availability,
   selectedModalityId,
   selectedExamTypeId,

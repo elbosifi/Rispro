@@ -9,7 +9,7 @@
 import { useState } from "react";
 import { pushToast } from "@/lib/toast";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking } from "./api";
-import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, BookingStatus } from "./types";
+import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
 import { StatusBadge } from "./components/status-badge";
 import { BookingForm } from "./components/booking-form";
@@ -262,7 +262,6 @@ export function AppointmentsV2Page() {
           <div style={{ marginTop: 32 }}>
             <BookingForm
               modalities={lookups.data?.modalities ?? []}
-              examTypes={examTypes.data ?? []}
               availability={availability.data?.items ?? []}
               selectedModalityId={modalityId}
               selectedExamTypeId={examTypeId}
@@ -449,7 +448,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
     }
     setRescheduleError(null);
     try {
-      const result = await rescheduleMutation.mutateAsync({
+      await rescheduleMutation.mutateAsync({
         bookingId: rescheduleTarget.id,
         input: {
           bookingDate: newDate,

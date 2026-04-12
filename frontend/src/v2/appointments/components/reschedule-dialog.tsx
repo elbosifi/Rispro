@@ -129,7 +129,6 @@ export function RescheduleDialog({
 
   const isDateAvailable = availableDates.length > 0;
   const isBlocked = decision?.displayStatus === "blocked";
-  const isRestricted = decision?.requiresSupervisorOverride;
 
   return (
     <div
