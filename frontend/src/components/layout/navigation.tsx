@@ -25,6 +25,7 @@ type NavIcon =
   | "dashboard"
   | "patients"
   | "appointments"
+  | "appointmentsV2"
   | "calendar"
   | "registrations"
   | "queue"
@@ -42,6 +43,7 @@ interface NavItemConfig {
     | "nav.dashboard"
     | "nav.patients"
     | "nav.appointments"
+    | "nav.appointmentsV2"
     | "nav.calendar"
     | "nav.registrations"
     | "nav.queue"
@@ -60,6 +62,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
   { route: "patients", labelKey: "nav.patients", icon: "patients" },
   { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
+  { route: "v2.appointments", labelKey: "nav.appointmentsV2", icon: "appointmentsV2" },
   { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
   { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
   { route: "queue", labelKey: "nav.queue", icon: "queue" },
@@ -82,6 +85,7 @@ const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   dashboard: LayoutGrid,
   patients: Users,
   appointments: CalendarDays,
+  appointmentsV2: CalendarDays,
   calendar: ClipboardList,
   registrations: ListOrdered,
   queue: ListOrdered,
