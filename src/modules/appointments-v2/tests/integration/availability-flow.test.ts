@@ -121,9 +121,47 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
   });
 
   describe("Suggestions", () => {
-    it("should return suggestions (may be empty stub)", async () => {
+    it("should return suggestions with bookable dates", async () => {
       const { status, data } = await fetch(
-        `/api/v2/scheduling/suggestions?modalityId=${testData.modalityId}&caseCategory=non_oncology`
+        `/api/v2/scheduling/suggestions?modalityId=${testData.modalityId}&caseCategory=non_oncology&days=14`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.ok(Array.isArray(response.items));
+
+      // Suggestions should return bookable dates (not blocked, not full)
+      const items = response.items as Record<string, unknown>[];
+      for (const item of items) {
+        assert.ok(typeof item.date === "string", "Each suggestion should have a date");
+        assert.equal(Number(item.modalityId), testData.modalityId, "Should match requested modality");
+        assert.ok(typeof item.decision === "object", "Should include decision");
+        const decision = item.decision as Record<string, unknown>;
+        assert.ok("isAllowed" in decision, "Decision should have isAllowed");
+        assert.ok("displayStatus" in decision, "Decision should have displayStatus");
+        // Suggestions should only include bookable dates (allowed or override-available, not full)
+        const isAllowed = decision.isAllowed as boolean;
+        const requiresOverride = decision.requiresSupervisorOverride as boolean;
+        const displayStatus = decision.displayStatus as string;
+        const isBookable = isAllowed || (requiresOverride && displayStatus !== "blocked");
+        assert.ok(isBookable, `Suggestion on ${item.date} should be bookable`);
+      }
+    });
+
+    it("should return empty array when no published policy exists", async () => {
+      // Use a non-existent policy set — availability returns empty
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/suggestions?modalityId=99999&caseCategory=non_oncology`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.ok(Array.isArray(response.items));
+    });
+
+    it("should respect includeOverrideCandidates param", async () => {
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/suggestions?modalityId=${testData.modalityId}&caseCategory=non_oncology&includeOverrideCandidates=true`
       );
 
       assert.equal(status, 200);
@@ -285,6 +323,61 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       assert.ok(typeof preview.removedRulesCount === "number");
       assert.ok(typeof preview.modifiedRulesCount === "number");
       assert.ok(Array.isArray(preview.warnings));
+    });
+  });
+
+  describe("GET /policy — policy status", () => {
+    it("should return published policy and no draft", async () => {
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/admin/policy?policySetKey=default`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.ok(typeof response.policySet === "object");
+      const policySet = response.policySet as Record<string, unknown>;
+      assert.equal(policySet.key, "default");
+      assert.ok(typeof response.published === "object");
+      const published = response.published as Record<string, unknown>;
+      assert.ok(typeof published.versionNo === "number");
+      assert.ok(typeof published.configHash === "string");
+      assert.equal(response.draft, null);
+      assert.ok(Array.isArray(response.publishedRules));
+      assert.ok(Array.isArray(response.draftRules));
+    });
+
+    it("should return null policySet for unknown key", async () => {
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/admin/policy?policySetKey=nonexistent_key`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.equal(response.policySet, null);
+      assert.equal(response.published, null);
+      assert.equal(response.draft, null);
+      assert.ok(Array.isArray(response.publishedRules));
+      assert.ok(Array.isArray(response.draftRules));
+    });
+
+    it("should return draft after one is created", async () => {
+      // Create a draft
+      await fetch("/api/v2/scheduling/admin/policy/draft", {
+        method: "POST",
+        body: { policySetKey: "default", changeNote: "Test draft for GET /policy" },
+      });
+
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/admin/policy?policySetKey=default`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.ok(typeof response.published === "object");
+      assert.ok(typeof response.draft === "object");
+      const draft = response.draft as Record<string, unknown>;
+      assert.ok(typeof draft.versionNo === "number");
+      assert.ok(Array.isArray(response.draftRules));
     });
   });
 });

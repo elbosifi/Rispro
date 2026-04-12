@@ -97,12 +97,19 @@ router.get(
     const days = req.query.days ? Number(req.query.days) : 14;
     const examTypeId = req.query.examTypeId ? Number(req.query.examTypeId) : null;
     const caseCategory = req.query.caseCategory as "oncology" | "non_oncology" | undefined;
+    const includeOverrideCandidates = req.query.includeOverrideCandidates === "true";
 
     if (!modalityId) {
       throw new SchedulingError(400, "modalityId is required");
     }
 
-    const suggestions = await getSuggestions(modalityId, days, examTypeId, caseCategory);
+    const suggestions = await getSuggestions({
+      modalityId,
+      days,
+      examTypeId,
+      caseCategory,
+      includeOverrideCandidates,
+    });
     res.json({ items: suggestions });
   })
 );

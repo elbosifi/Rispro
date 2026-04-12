@@ -13,6 +13,7 @@ import { createPolicyDraft } from "../../admin/services/create-policy-draft.serv
 import { savePolicyDraft } from "../../admin/services/save-policy-draft.service.js";
 import { publishPolicy } from "../../admin/services/publish-policy.service.js";
 import { previewPolicyImpact } from "../../admin/services/preview-policy-impact.service.js";
+import { getPolicyStatus } from "../../admin/services/get-policy-status.service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 
 const router = Router();
@@ -25,15 +26,22 @@ interface AuthenticatedRequest extends Request {
 
 /**
  * GET /api/v2/scheduling/admin/policy
- * Return the current published policy and any active draft.
+ * Return the current published policy and any active draft for a policy set.
+ * Query params: policySetKey (default: "default")
  */
 router.get(
   "/policy",
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
-    // TODO: Implement full policy retrieval (list policy sets, published, drafts)
-    // For now, return a placeholder
+    const policySetKey = (req.query.policySetKey as string) ?? "default";
+
+    const result = await getPolicyStatus(policySetKey);
+
     res.json({
-      message: "Policy retrieval endpoint — full implementation pending",
+      policySet: result.policySet,
+      published: result.published,
+      draft: result.draft,
+      publishedRules: result.publishedRules,
+      draftRules: result.draftRules,
     });
   })
 );
