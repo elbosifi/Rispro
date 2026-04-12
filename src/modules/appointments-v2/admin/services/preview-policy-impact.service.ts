@@ -51,9 +51,6 @@ async function previewPolicyImpactInternal(
   }
 
   // 2. Find the published version for the same policy set
-  // We need the policy set key — we'll look it up via the policy set id
-  // For now, find any published version for the same policy set id
-  // TODO: Add a findPublishedVersionByPolicySetId query
   const published = await findPublishedVersionByPolicySetId(client, draft.policySetId);
 
   // 3. Load rules for both versions

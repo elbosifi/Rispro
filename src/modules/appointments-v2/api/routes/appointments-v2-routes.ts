@@ -136,9 +136,10 @@ router.put(
 
     const userId = Number(req.user?.sub ?? 0);
 
+    // If no date change provided, keep the existing booking date (time-only reschedule)
     const result = await rescheduleBooking(
       bookingId,
-      body.bookingDate ?? "", // TODO: if no date change, use existing booking date
+      body.bookingDate ?? null,
       body.bookingTime ?? null,
       userId,
       body.override

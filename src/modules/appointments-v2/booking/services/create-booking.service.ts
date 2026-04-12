@@ -26,7 +26,6 @@ import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
-import { pool } from "../../../../db/pool.js";
 
 export interface CreateBookingResult {
   booking: Booking;

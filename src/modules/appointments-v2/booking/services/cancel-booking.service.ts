@@ -11,7 +11,6 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { findBookingById, updateBookingStatus } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import type { Booking } from "../models/booking.js";
-import { pool } from "../../../../db/pool.js";
 import { CANCELLABLE_STATUSES } from "../../shared/types/common.js";
 
 export interface CancelBookingResult {

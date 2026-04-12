@@ -2,7 +2,9 @@
  * Appointments V2 — Scheduling routes.
  *
  * Mounts under /api/v2/scheduling
- * TODO (Stage 4/5): Implement decision and availability endpoints.
+ * - POST /evaluate — booking decision evaluation
+ * - GET /availability — date range availability with explicit status
+ * - GET /suggestions — next available appointment suggestions
  */
 
 import { Router, Request, Response } from "express";
@@ -69,9 +71,14 @@ router.get(
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",
     };
 
-    const modality = await findModalityById(pool, modalityId);
-    if (!modality) {
-      throw new SchedulingError(400, `Modality ${modalityId} not found`);
+    const client = await pool.connect();
+    try {
+      const modality = await findModalityById(client, modalityId);
+      if (!modality) {
+        throw new SchedulingError(400, `Modality ${modalityId} not found`);
+      }
+    } finally {
+      client.release();
     }
 
     const availability = await getAvailability(params);

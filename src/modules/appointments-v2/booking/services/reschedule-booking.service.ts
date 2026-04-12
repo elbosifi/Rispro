@@ -25,7 +25,6 @@ import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
-import { pool } from "../../../../db/pool.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 
 export interface RescheduleBookingResult {
@@ -37,7 +36,7 @@ export interface RescheduleBookingResult {
 
 export async function rescheduleBooking(
   bookingId: number,
-  newDate: string,
+  newDate: string | null,
   newTime: string | null,
   userId: number,
   override?: CreateBookingPayload["override"],
@@ -51,7 +50,7 @@ export async function rescheduleBooking(
 async function rescheduleBookingInternal(
   client: PoolClient,
   bookingId: number,
-  newDate: string,
+  newDate: string | null,
   newTime: string | null,
   userId: number,
   override: CreateBookingPayload["override"] | undefined,
@@ -82,8 +81,8 @@ async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
 
-  // If the date hasn't changed, just update the time — no re-evaluation needed
-  if (previousDate === newDate) {
+  // If the date hasn't changed (or no new date provided), just update the time — no re-evaluation needed
+  if (!newDate || previousDate === newDate) {
     return rescheduleTimeOnly(client, bookingId, newTime, userId, previousDate);
   }
 
