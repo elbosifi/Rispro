@@ -37,7 +37,9 @@ export function createTestAuthCookie(userId: number, role: string = "supervisor"
   return `${env.cookieName}=${token}`;
 }
 
-export async function setupTestDatabase(): Promise<{ cleanup: () => Promise<void>; schemaName: string }> {
+export async function setupTestDatabase(
+  dataPrefix: string = "TEST_"
+): Promise<{ cleanup: () => Promise<void>; schemaName: string }> {
   if (!isDatabaseAvailable()) {
     throw new Error("Database not available. Set DATABASE_URL or TEST_DATABASE_URL.");
   }
@@ -50,22 +52,7 @@ export async function setupTestDatabase(): Promise<{ cleanup: () => Promise<void
   }
 
   const cleanup = async () => {
-    // Delete ALL V2 data in FK-safe order (leaf tables first)
-    await pool.query(`delete from appointments_v2.override_audit_events`);
-    await pool.query(`delete from appointments_v2.bookings`);
-    await pool.query(`delete from appointments_v2.category_daily_limits`);
-    await pool.query(`delete from appointments_v2.exam_type_rule_items`);
-    await pool.query(`delete from appointments_v2.exam_type_rules`);
-    await pool.query(`delete from appointments_v2.exam_type_special_quotas`);
-    await pool.query(`delete from appointments_v2.modality_blocked_rules`);
-    await pool.query(`delete from appointments_v2.policy_versions`);
-    await pool.query(`delete from appointments_v2.policy_sets`);
-    // Clean up legacy test data — NULL out FK references first
-    await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id in (select id from users where username like 'test_%')`);
-    await pool.query(`delete from users where username like 'test_%'`);
-    await pool.query(`delete from modalities where code like 'TEST_%'`);
-    await pool.query(`delete from exam_types where name_en = 'Test CT Head'`);
-    await pool.query(`delete from patients where english_full_name = 'Test Patient'`);
+    await cleanupTestData(dataPrefix);
   };
 
   return { cleanup, schemaName: "appointments_v2" };
@@ -81,45 +68,51 @@ export interface TestData {
   schemaName: string;
 }
 
-export async function seedTestData(_schemaName: string): Promise<TestData> {
+export async function seedTestData(
+  _schemaName: string,
+  dataPrefix: string = "TEST_"
+): Promise<TestData> {
   const s = (table: string) => `appointments_v2.${table}`;
 
-  // Clean up any stale V2 test data from previous runs
+  // Clean up any stale V2 test data from previous runs (prefix-aware)
   await pool.query(`delete from ${s("override_audit_events")}`);
   await pool.query(`delete from ${s("bookings")}`);
   await pool.query(`delete from ${s("category_daily_limits")}`);
   await pool.query(`delete from ${s("policy_versions")} where status = 'draft'`);
-  await pool.query(`delete from ${s("policy_sets")} where key = 'default'`);
+  await pool.query(`delete from ${s("policy_sets")} where key like '${dataPrefix.toLowerCase()}%' or key = 'default'`);
 
-  // Create test supervisor user
+  // Create test supervisor user (unique per prefix to avoid conflicts)
   const bcryptHash = "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
+  const username = `${dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "")}supervisor`;
   const userResult = await pool.query(
     `insert into users (username, password_hash, full_name, role, is_active)
      values ($1, $2, $3, 'supervisor', true)
      on conflict (username) do update set role = 'supervisor', is_active = true
      returning id`,
-    ["test_supervisor", bcryptHash, "Test Supervisor"]
+    [username, bcryptHash, `${dataPrefix}Supervisor`]
   );
   const userId = Number(userResult.rows[0].id);
 
-  // Create test modality
+  // Create test modality (unique per prefix)
+  const modalityCode = `${dataPrefix}CT`;
   const modalityResult = await pool.query(
     `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
      values ($1, $2, $3, 10, true)
      on conflict (code) do update set is_active = true
      returning id`,
-    ["اشعة مقطعية", "Test CT", "TEST_CT"]
+    [`${dataPrefix}اشعة مقطعية`, `${dataPrefix}CT`, modalityCode]
   );
   const modalityId = Number(modalityResult.rows[0].id);
 
-  // Create test exam type
-  await pool.query(`delete from appointments_v2.bookings where exam_type_id in (select id from exam_types where name_en = 'Test CT Head')`);
-  await pool.query(`delete from exam_types where name_en = 'Test CT Head'`);
+  // Create test exam type (unique per prefix)
+  const examTypeName = `${dataPrefix}CT Head`;
+  await pool.query(`delete from appointments_v2.bookings where exam_type_id in (select id from exam_types where name_en = $1)`, [examTypeName]);
+  await pool.query(`delete from exam_types where name_en = $1`, [examTypeName]);
   const examTypeResult = await pool.query(
     `insert into exam_types (modality_id, name_ar, name_en, is_active)
      values ($1, $2, $3, true)
      returning id`,
-    [modalityId, "اشعة راس", "Test CT Head"]
+    [modalityId, `${dataPrefix}اشعة راس`, examTypeName]
   );
   const examTypeId = Number(examTypeResult.rows[0].id);
 
@@ -129,29 +122,45 @@ export async function seedTestData(_schemaName: string): Promise<TestData> {
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
      values ($1, $2, $3, $4, 'M', 30, 'national_id', $5)
      returning id`,
-    ["مريض اختبار", "Test Patient", uniqueNationalId, "مريضاختبار", uniqueNationalId]
+    [`${dataPrefix}مريض اختبار`, `${dataPrefix}Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
   );
   const patientId = Number(patientResult.rows[0].id);
 
-  // Create a published policy
+  // Create a published policy (use "default" key for all - policy is read-only in tests)
+  // Clean up any existing default policy from previous runs of THIS suite only
+  const policyKey = "default";
   const policySetResult = await pool.query(
     `insert into ${s("policy_sets")} (key, name, created_by_user_id)
      values ($1, $2, $3)
+     on conflict (key) do nothing
      returning id`,
-    ["default", "Default Policy", userId]
+    [policyKey, `${dataPrefix}Policy`, userId]
   );
-  const policySetId = Number(policySetResult.rows[0].id);
+  
+  // If the policy already exists, use it
+  let policySetId = policySetResult.rows[0]?.id;
+  if (!policySetId) {
+    const existing = await pool.query(`select id from ${s("policy_sets")} where key = $1`, [policyKey]);
+    policySetId = Number(existing.rows[0].id);
+  }
 
-  // Create published policy version (version_no = 1, since this is a fresh policy_set)
-  const configHash = "test_hash_1";
+  // Create published policy version (version_no = 1)
+  const configHash = `${dataPrefix.toLowerCase()}_hash_1`;
+  
   const policyVersionResult = await pool.query(
     `insert into ${s("policy_versions")}
        (policy_set_id, version_no, status, config_hash, created_by_user_id, published_at, published_by_user_id)
      values ($1, 1, 'published', $2, $3, now(), $3)
+     on conflict (policy_set_id, version_no) do nothing
      returning id`,
     [policySetId, configHash, userId]
   );
-  const policyVersionId = Number(policyVersionResult.rows[0].id);
+  
+  let policyVersionId = policyVersionResult.rows[0]?.id;
+  if (!policyVersionId) {
+    const existing = await pool.query(`select id from ${s("policy_versions")} where policy_set_id = $1 and version_no = 1`, [policySetId]);
+    policyVersionId = Number(existing.rows[0].id);
+  }
 
   // Add category daily limit
   await pool.query(
@@ -163,6 +172,28 @@ export async function seedTestData(_schemaName: string): Promise<TestData> {
   );
 
   return { userId, modalityId, examTypeId, patientId, policySetId, policyVersionId, schemaName: "appointments_v2" };
+}
+
+export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<void> {
+  const prefixLower = dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "");
+  
+  // Delete V2 test data (all, since it's all prefixed the same)
+  await pool.query(`delete from appointments_v2.override_audit_events`);
+  await pool.query(`delete from appointments_v2.bookings`);
+  await pool.query(`delete from appointments_v2.category_daily_limits`);
+  await pool.query(`delete from appointments_v2.exam_type_rule_items`);
+  await pool.query(`delete from appointments_v2.exam_type_rules`);
+  await pool.query(`delete from appointments_v2.exam_type_special_quotas`);
+  await pool.query(`delete from appointments_v2.modality_blocked_rules`);
+  await pool.query(`delete from appointments_v2.policy_versions`);
+  await pool.query(`delete from appointments_v2.policy_sets where key like '${prefixLower}%' or key = 'default'`);
+  
+  // Clean up legacy test data (prefix-aware)
+  await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id in (select id from users where username like '${prefixLower}%')`);
+  await pool.query(`delete from users where username like '${prefixLower}%'`);
+  await pool.query(`delete from modalities where code like '${dataPrefix}%'`);
+  await pool.query(`delete from exam_types where name_en like '${dataPrefix}%'`);
+  await pool.query(`delete from patients where english_full_name like '${dataPrefix}%'`);
 }
 
 export async function createTestApp(): Promise<{

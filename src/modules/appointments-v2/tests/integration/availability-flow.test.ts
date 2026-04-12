@@ -24,6 +24,7 @@ import {
 } from "./helpers.js";
 
 const runTests = isDatabaseAvailable();
+const TEST_PREFIX = "AVAILABILITY_";
 
 describe("Availability and policy flow — integration tests", { skip: !runTests ? "Database URL not set" : false }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
@@ -38,8 +39,8 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       console.warn("WARNING: Database is not reachable. Skipping availability flow integration tests.");
       return;
     }
-    testDb = await setupTestDatabase();
-    testData = await seedTestData(testDb.schemaName);
+    testDb = await setupTestDatabase(TEST_PREFIX);
+    testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     app = await createTestApp();
     authCookie = createTestAuthCookie(testData.userId, "supervisor");
   });

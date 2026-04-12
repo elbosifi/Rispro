@@ -85,8 +85,7 @@ src/modules/appointments-v2/
       create-booking.service.ts
       reschedule-booking.service.ts
       cancel-booking.service.ts
-      release-capacity.service.ts
-      override-audit.service.ts
+      list-bookings.service.ts
     repositories/
       booking.repo.ts
       bucket-mutex.repo.ts

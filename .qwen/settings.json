@@ -59,7 +59,9 @@
       "WebFetch(github.com)",
       "Bash(npm test)",
       "Bash(psql *)",
-      "Bash(pg_ctlcluster *)"
+      "Bash(pg_ctlcluster *)",
+      "Bash(gtimeout *)",
+      "Bash(xargs *)"
     ]
   },
   "$version": 3

@@ -27,6 +27,7 @@ import {
 
 // Synchronous skip check at module load time
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
+const TEST_PREFIX = "BOOKING_";
 
 describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
@@ -39,8 +40,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       console.warn("WARNING: Database is not reachable. Skipping booking flow integration tests.");
       return;
     }
-    testDb = await setupTestDatabase();
-    testData = await seedTestData(testDb.schemaName);
+    testDb = await setupTestDatabase(TEST_PREFIX);
+    testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     app = await createTestApp();
     authCookie = createTestAuthCookie(testData.userId, "supervisor");
   });
@@ -348,6 +349,59 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       await pool.query(`update appointments_v2.bookings set status = 'completed' where id = $1`, [completedBookingId]);
 
       const { status } = await fetch(`/api/v2/appointments/${completedBookingId}/cancel`, { method: "POST" });
+      assert.equal(status, 409);
+    });
+
+    it("should reject cancelling a no-show booking", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-05-30",
+          caseCategory: "non_oncology",
+        },
+      });
+
+      const noShowBookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+      const { pool } = await import("../../../../db/pool.js");
+      await pool.query(`update appointments_v2.bookings set status = 'no-show' where id = $1`, [noShowBookingId]);
+
+      const { status } = await fetch(`/api/v2/appointments/${noShowBookingId}/cancel`, { method: "POST" });
+      assert.equal(status, 409);
+    });
+  });
+
+  describe("Reschedule status guards", () => {
+    it("should reject rescheduling a no-show booking", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-05-31",
+          caseCategory: "non_oncology",
+        },
+      });
+
+      const noShowBookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+      const { pool } = await import("../../../../db/pool.js");
+      await pool.query(`update appointments_v2.bookings set status = 'no-show' where id = $1`, [noShowBookingId]);
+
+      const { status } = await fetch(`/api/v2/appointments/${noShowBookingId}`, {
+        method: "PUT",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-06-01",
+          caseCategory: "non_oncology",
+        },
+      });
       assert.equal(status, 409);
     });
   });
