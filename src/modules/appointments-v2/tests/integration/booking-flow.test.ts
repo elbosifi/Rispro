@@ -80,7 +80,9 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const response = data as Record<string, unknown>;
       assert.ok(typeof response.booking === "object");
       const booking = response.booking as Record<string, unknown>;
-      assert.equal(typeof booking.id, "number");
+      // pg returns bigint as string — accept either
+      const bookingId = Number(booking.id);
+      assert.ok(!isNaN(bookingId), "booking.id should be numeric");
       assert.equal(Number(booking.patientId), testData.patientId);
       assert.equal(Number(booking.modalityId), testData.modalityId);
       assert.equal(booking.bookingDate, "2026-05-01");
@@ -142,7 +144,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.ok((response.bookings as unknown[]).length > 0);
 
       const booking = (response.bookings as Record<string, unknown>[])[0];
-      assert.equal(booking.modalityId, testData.modalityId);
+      assert.equal(Number(booking.modalityId), testData.modalityId);
       assert.ok(["scheduled", "arrived", "waiting", "completed", "no-show"].includes(booking.status as string));
     });
 
@@ -222,9 +224,11 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(status, 200);
       const result = data as Record<string, unknown>;
       const newBooking = result.booking as Record<string, unknown>;
-      assert.equal(typeof newBooking.id, "number");
-      assert.notEqual(newBooking.id, bookingId);
-      assert.equal(newBooking.bookingDate, "2026-05-25");
+      // pg returns bigint as string — accept either number or string
+      const newId = Number(newBooking.id);
+      assert.ok(!isNaN(newId), "booking.id should be numeric");
+      assert.notEqual(newId, bookingId);
+      assert.equal(String(newBooking.bookingDate), "2026-05-25");
       assert.equal(newBooking.status, "scheduled");
       assert.equal(result.previousDate, "2026-05-20");
     });
@@ -351,6 +355,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   describe("Capacity management", () => {
     it("should respect daily capacity limits", async () => {
       guard();
+      // Use a unique date based on timestamp to avoid conflicts between test runs
+      const capDate = `2027-01-${String(Date.now() % 28 + 1).padStart(2, '0')}`;
       for (let i = 1; i <= 5; i++) {
         const { status } = await fetch("/api/v2/appointments", {
           method: "POST",
@@ -358,7 +364,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
             patientId: testData.patientId,
             modalityId: testData.modalityId,
             examTypeId: testData.examTypeId,
-            bookingDate: "2026-06-01",
+            bookingDate: capDate,
             caseCategory: "non_oncology",
             notes: `Capacity test booking ${i}`,
           },
@@ -372,7 +378,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
           patientId: testData.patientId,
           modalityId: testData.modalityId,
           examTypeId: testData.examTypeId,
-          bookingDate: "2026-06-01",
+          bookingDate: capDate,
           caseCategory: "non_oncology",
           notes: "Capacity test booking 6 (should fail)",
         },
@@ -382,7 +388,8 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
 
     it("should free capacity when a booking is cancelled", async () => {
       guard();
-      // Create 5 bookings on a fresh date
+      // Use a unique date to avoid conflicts between test runs
+      const capDate = `2027-02-${String(Date.now() % 28 + 1).padStart(2, '0')}`;
       const ids: number[] = [];
       for (let i = 1; i <= 5; i++) {
         const { data } = await fetch("/api/v2/appointments", {
@@ -391,7 +398,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
             patientId: testData.patientId,
             modalityId: testData.modalityId,
             examTypeId: testData.examTypeId,
-            bookingDate: "2026-06-15",
+            bookingDate: capDate,
             caseCategory: "non_oncology",
             notes: `Free capacity booking ${i}`,
           },

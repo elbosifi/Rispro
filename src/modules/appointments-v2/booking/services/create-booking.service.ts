@@ -82,7 +82,7 @@ async function createBookingInternal(
         ["exam_type_not_found"]
       );
     }
-    examTypeBelongsToModality = examType.modalityId === payload.modalityId;
+    examTypeBelongsToModality = Number(examType.modalityId) === payload.modalityId;
     if (!examTypeBelongsToModality) {
       throw new SchedulingError(
         400,

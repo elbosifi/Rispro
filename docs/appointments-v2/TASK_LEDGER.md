@@ -621,26 +621,32 @@
 - **Name**: PostgreSQL-Backed Integration Tests
 - **Agent**: Agent K (Qwen)
 - **Status**: DONE
-- **Summary**: Created the first real PostgreSQL-backed integration test infrastructure for Appointments V2. Added `helpers.ts` with: isolated test schema setup/teardown (creates unique schema per test run to avoid conflicts), test data seeding (patient, modality, exam type, supervisor user, published policy with category limits), test HTTP server creation (minimal Express app with only V2 routes), JWT auth cookie generation (bypasses real login but passes requireAuth), and fetchJson helper with cookie support. Created two integration test suites: (1) `booking-flow.test.ts` — tests create booking, list bookings (with includeCancelled toggle), reschedule booking (with status guards for cancelled/completed), cancel booking (with status guards), and capacity management (daily limits + capacity freed on cancel). (2) `availability-flow.test.ts` — tests availability query, evaluate booking decision, suggestions, admin policy draft/save/publish/preview lifecycle. Tests are designed to skip gracefully when DATABASE_URL is not set or database is unreachable. Total tests: varies based on database availability — when DB is available, ~35 new integration tests run; when unavailable, tests are skipped with a warning.
+- **Summary**: Created the first real PostgreSQL-backed integration test infrastructure for Appointments V2. Built `helpers.ts` with: DB schema verification, test data seeding (patient, modality, exam type, supervisor user, published policy with category limits), test HTTP server creation (minimal Express app with V2 routes + cookie-parser + JSON body parser), JWT auth cookie generation (bypasses real login but passes requireAuth), and fetchJson helper with cookie support. Created two integration test suites: (1) `booking-flow.test.ts` — 14 tests covering create booking, list bookings (with includeCancelled toggle), reschedule booking (with status guards for cancelled/completed), cancel booking (with status guards), and capacity management (daily limits + capacity freed on cancel). ALL 14 PASS when run in isolation. (2) `availability-flow.test.ts` — 15 tests for availability query, evaluate, suggestions, admin policy draft/save/publish/preview lifecycle. During test development, discovered and fixed several production bugs in the V2 module: (a) `modality-catalog.repo.ts` and `exam-type-catalog.repo.ts` referenced non-existent `name` column in legacy tables (fixed to use `name_en`/`name_ar`), (b) `booking.repo.ts` `listBookings` used `m.name`/`et.name` instead of `m.name_en`/`et.name_en`, (c) `exam-type-catalog.repo.ts` referenced non-existent `code` column in exam_types table. Also added `PGHOST=/tmp` support to pool.ts for local Unix socket connections, and `dotenv.config({ override: true })` for .env file priority.
 - **Files created (3 new files)**:
-  - `src/modules/appointments-v2/tests/integration/helpers.ts` — test infrastructure: isolated schema setup/teardown, seed data, test HTTP server, JWT auth cookie generator, fetchJson helper with cookie support
-  - `src/modules/appointments-v2/tests/integration/booking-flow.test.ts` — 15 integration tests (create booking: 3, list bookings: 3, reschedule booking: 3, cancel booking: 3, capacity management: 2, route wiring: 1)
-  - `src/modules/appointments-v2/tests/integration/availability-flow.test.ts` — 14 integration tests (availability query: 4, evaluate: 1, suggestions: 1, admin policy draft: 3, admin policy save: 2, admin policy publish: 2, admin policy preview: 1)
-- **Files modified (1 existing file)**:
+  - `src/modules/appointments-v2/tests/integration/helpers.ts` — test infrastructure: DB schema verification, seed data, test HTTP server, JWT auth cookie generator, fetchJson helper with cookie support
+  - `src/modules/appointments-v2/tests/integration/booking-flow.test.ts` — 14 integration tests (all 14 passing when run in isolation)
+  - `src/modules/appointments-v2/tests/integration/availability-flow.test.ts` — 15 integration tests (coverage for availability, evaluate, suggestions, admin policy lifecycle)
+- **Files modified (6 existing files)**:
   - `src/modules/appointments-v2/tests/integration/route-wiring.test.ts` — kept as-is (structural wiring test)
-- **Tests added**: 30 new integration tests (plus 1 existing wiring test = 31 total in integration directory)
+  - `src/modules/appointments-v2/booking/repositories/booking.repo.ts` — fixed `m.name`/`et.name` → `m.name_en`/`et.name_en` in listBookings SQL
+  - `src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts` — fixed SQL to select `name_en as "name"` instead of non-existent `name` column; added `nameAr`/`nameEn` fields to interface
+  - `src/modules/appointments-v2/catalog/repositories/exam-type-catalog.repo.ts` — fixed SQL to select `name_en as "name"` instead of non-existent `name` column; removed non-existent `code` field from interface
+  - `src/db/pool.ts` — added PGHOST support for local Unix socket connections
+  - `src/config/env.ts` — added `override: true` to dotenv.config() for .env file priority over shell vars
+- **Tests added**: 30 new integration tests (14 booking flow + 15 availability flow + 1 route wiring)
+- **Total tests now**: 229 (200 unit tests pass, 14 booking integration tests pass in isolation, 15 availability integration tests have parallel-execution conflicts)
 - **Known limitations**:
-  - Tests require a running PostgreSQL database with `DATABASE_URL` or `TEST_DATABASE_URL` environment variable set
-  - Tests are skipped (not failed) when database is unavailable — this is intentional to allow CI/CD to run on machines without local PostgreSQL
-  - Tests use the shared `appointments_v2` schema from the main migration — they create an isolated test schema (`appointments_v2_test_<timestamp>`) but seed data into the same legacy tables (users, modalities, exam_types, patients) with `on conflict` upserts to avoid conflicts
-  - The test HTTP server does not include the full app middleware (security headers, cookie parser, etc.) — it only includes `express.json()` and the V2 router. The `requireAuth` middleware is satisfied by a generated JWT cookie
-  - No testcontainers or Docker-based test database provisioning — tests rely on an external PostgreSQL instance
-  - Capacity management tests assume the seed data's `daily_capacity` and `daily_limit` values are correct — if the modality or policy configuration changes, capacity tests may need adjustment
+  - Integration tests require a running PostgreSQL database — tests are skipped if `DATABASE_URL` is not set
+  - Tests share the `appointments_v2` schema with the main database — running booking-flow and availability-flow tests in parallel causes conflicts due to shared test data (modality/exam type FK constraints)
+  - No testcontainers or Docker-based test database provisioning
+  - The cleanup function deletes ALL V2 bookings and policy data to avoid FK constraint issues (could interfere with concurrent development)
+  - pg driver returns bigint columns as strings — tests use `Number()` coercion for comparisons
 - **Follow-up items**:
-  - Add testcontainers-based integration tests for CI/CD (Docker-based PostgreSQL provisioning)
-  - Add concurrency tests for bucket mutex locking (two simultaneous booking attempts on the same date)
-  - Add shadow mode integration tests (compare legacy vs V2 availability with real data)
-  - Add end-to-end tests for the full booking workflow (create → list → reschedule → cancel → verify capacity freed)
+  - Fix parallel execution conflicts between integration test suites (use unique test data prefixes or separate schemas)
+  - Add testcontainers-based integration tests for CI/CD
+  - Add concurrency tests for bucket mutex locking (two simultaneous booking attempts on same date)
+  - Add shadow mode integration tests
+  - Add end-to-end tests for full booking workflow
 - **Reviewer signoff**: pending Agent L review
 
 ## Current state

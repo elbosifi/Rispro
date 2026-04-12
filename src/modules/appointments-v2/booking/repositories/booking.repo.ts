@@ -17,7 +17,7 @@ const INSERT_SQL = `
   )
   returning id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
-    booking_date as "bookingDate", booking_time as "bookingTime",
+    booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
@@ -60,7 +60,7 @@ export async function insertBooking(
 const FIND_BY_ID_SQL = `
   select id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
-    booking_date as "bookingDate", booking_time as "bookingTime",
+    booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
@@ -120,7 +120,7 @@ const LIST_BOOKINGS_SQL = `
     b.modality_id as "modalityId",
     b.exam_type_id as "examTypeId",
     b.reporting_priority_id as "reportingPriorityId",
-    b.booking_date as "bookingDate",
+    b.booking_date::text as "bookingDate",
     b.booking_time as "bookingTime",
     b.case_category as "caseCategory",
     b.status,

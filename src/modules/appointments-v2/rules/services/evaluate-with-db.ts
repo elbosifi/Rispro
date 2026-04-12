@@ -82,7 +82,7 @@ export async function evaluateWithDb(
     const examType = await findExamTypeById(client, params.examTypeId);
     examTypeExists = examType !== null;
     if (examType && examType.modalityId != null) {
-      examTypeBelongsToModality = examType.modalityId === params.modalityId;
+      examTypeBelongsToModality = Number(examType.modalityId) === params.modalityId;
     } else {
       examTypeBelongsToModality = false;
     }
