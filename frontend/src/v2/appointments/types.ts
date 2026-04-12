@@ -14,6 +14,32 @@ export type BookingStatus =
   | "no-show"
   | "cancelled";
 
+/**
+ * Booking statuses that allow rescheduling.
+ *
+ * Mirrors the backend `RESCHEDULABLE_STATUSES` from
+ * `src/modules/appointments-v2/shared/types/common.ts`.
+ * Keep in sync — a unit test verifies both copies match.
+ */
+export const RESCHEDULABLE_STATUSES: readonly BookingStatus[] = [
+  "scheduled",
+  "arrived",
+  "waiting",
+];
+
+/**
+ * Booking statuses that allow cancellation.
+ *
+ * Mirrors the backend `CANCELLABLE_STATUSES` from
+ * `src/modules/appointments-v2/shared/types/common.ts`.
+ * Keep in sync — a unit test verifies both copies match.
+ */
+export const CANCELLABLE_STATUSES: readonly BookingStatus[] = [
+  "scheduled",
+  "arrived",
+  "waiting",
+];
+
 export interface DecisionReason {
   code: string;
   severity: "error" | "warning";
@@ -130,4 +156,71 @@ export interface ExamTypeDto {
 export interface LookupsResponse {
   modalities: ModalityDto[];
   examTypes: ExamTypeDto[];
+}
+
+export interface BookingWithPatientInfo {
+  id: number;
+  patientId: number;
+  modalityId: number;
+  examTypeId: number | null;
+  reportingPriorityId: number | null;
+  bookingDate: string;
+  bookingTime: string | null;
+  caseCategory: CaseCategory;
+  status: BookingStatus;
+  notes: string | null;
+  policyVersionId: number;
+  createdAt: string;
+  createdByUserId: number | null;
+  updatedAt: string;
+  updatedByUserId: number | null;
+  patientArabicName: string | null;
+  patientEnglishName: string | null;
+  patientNationalId: string | null;
+  modalityName: string | null;
+  examTypeName: string | null;
+}
+
+export interface ListBookingsResponse {
+  bookings: BookingWithPatientInfo[];
+}
+
+export interface ListBookingsParams {
+  modalityId: number;
+  dateFrom: string;
+  dateTo: string;
+  limit?: number;
+  offset?: number;
+  includeCancelled?: boolean;
+}
+
+export interface RescheduleBookingRequest {
+  bookingDate: string;
+  bookingTime: string | null;
+  override?: {
+    supervisorUsername: string;
+    supervisorPassword: string;
+    reason: string;
+  };
+}
+
+export interface RescheduleBookingResponse {
+  booking: {
+    id: number;
+    patientId: number;
+    modalityId: number;
+    examTypeId: number | null;
+    reportingPriorityId: number | null;
+    bookingDate: string;
+    bookingTime: string | null;
+    caseCategory: CaseCategory;
+    status: BookingStatus;
+    notes: string | null;
+    policyVersionId: number;
+    createdAt: string;
+    updatedAt: string;
+  };
+  decision: unknown;
+  wasOverride: boolean;
+  previousDate: string;
 }

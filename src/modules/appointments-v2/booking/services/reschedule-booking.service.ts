@@ -16,17 +16,17 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadExamTypeRuleItemExamTypeIds,
 } from "../../rules/repositories/policy-rules.repo.js";
-import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
-import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
-import { findBookingById, updateBookingStatus } from "../repositories/booking.repo.js";
+import { findBookingById, updateBookingStatus, updateBookingDateTime, insertBooking } from "../repositories/booking.repo.js";
 import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
 import { pool } from "../../../../db/pool.js";
+import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -71,14 +71,20 @@ async function rescheduleBookingInternal(
     );
   }
 
+  // Validate that the booking is in a reschedulable status
+  if (!RESCHEDULABLE_STATUSES.includes(booking.status as typeof RESCHEDULABLE_STATUSES[number])) {
+    throw new SchedulingError(
+      409,
+      `Booking ${bookingId} has status "${booking.status}" and cannot be rescheduled.`,
+      ["booking_not_reschedulable"]
+    );
+  }
+
   const previousDate = booking.bookingDate;
 
-  // If the date hasn't changed, just update the time
+  // If the date hasn't changed, just update the time — no re-evaluation needed
   if (previousDate === newDate) {
-    // Update time only — no re-evaluation needed for time-only changes
-    // In a full implementation, you'd have an updateTime-only query.
-    // For now, we still do a full update but skip the re-evaluation.
-    // TODO: Add updateTime SQL query for time-only changes
+    return rescheduleTimeOnly(client, bookingId, newTime, userId, previousDate);
   }
 
   // 2. Acquire the NEW bucket lock (for the new date)
@@ -120,6 +126,12 @@ async function rescheduleBookingInternal(
     publishedVersion.id
   );
 
+  const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
+    client,
+    publishedVersion.id,
+    booking.modalityId
+  );
+
   // 5. Load current booked count for the NEW date (after lock)
   // Note: the old booking is still counted here because it hasn't been updated yet
   const currentBookedCount = await getBookedCountForDate(
@@ -140,7 +152,7 @@ async function rescheduleBookingInternal(
     examTypeBelongsToModality: true, // Was already validated at creation
     blockedRules,
     examTypeRules,
-    examTypeRuleItemExamTypeIds: [],
+    examTypeRuleItemExamTypeIds,
     categoryLimits,
     specialQuotas,
     currentBookedCount, // Includes this booking if newDate === oldDate
@@ -191,26 +203,28 @@ async function rescheduleBookingInternal(
     wasOverride = true;
   }
 
-  // 8. Update the booking — set status to cancelled on old date, then insert new
-  // For simplicity, we update the date/time in place. The bucket_mutex on the
-  // old date is NOT locked — since we're removing a booking from it, capacity
-  // increases, which is always safe.
-  // TODO: For a full implementation, you might want to:
-  //   a) DELETE the old booking and INSERT a new one, or
-  //   b) UPDATE the old booking and adjust capacity counters
-
-  // For now: update in place (simplest approach)
-  // A proper implementation would DELETE + INSERT to maintain audit trail
+  // 8. Cancel the old booking and insert a new one on the new date
+  // This maintains a clean audit trail: old booking stays as "cancelled",
+  // new booking is "scheduled" with its own ID.
   await updateBookingStatus(client, bookingId, "cancelled", userId);
-  // Then re-insert as a new booking on the new date
-  // For this Stage 6 implementation, we just update the status and return.
-  // A full reschedule with proper capacity management belongs in a follow-up.
 
-  const updatedBooking = await findBookingById(client, bookingId);
+  const newBooking = await insertBooking(client, {
+    patientId: booking.patientId,
+    modalityId: booking.modalityId,
+    examTypeId: booking.examTypeId,
+    reportingPriorityId: booking.reportingPriorityId,
+    bookingDate: newDate,
+    bookingTime: newTime,
+    caseCategory: booking.caseCategory,
+    status: "scheduled",
+    notes: booking.notes,
+    policyVersionId: publishedVersion.id,
+    userId,
+  });
 
   if (wasOverride && supervisorUserId != null) {
     await recordOverrideAudit(client, {
-      bookingId: bookingId,
+      bookingId: newBooking.id,
       patientId: booking.patientId,
       modalityId: booking.modalityId,
       examTypeId: booking.examTypeId,
@@ -224,9 +238,35 @@ async function rescheduleBookingInternal(
   }
 
   return {
-    booking: updatedBooking!,
+    booking: newBooking,
     decisionSnapshot: decision,
     wasOverride,
+    previousDate,
+  };
+}
+
+/**
+ * Reschedule a booking on the same date (time-only change).
+ * No re-evaluation needed — just update the booking_time.
+ */
+async function rescheduleTimeOnly(
+  client: PoolClient,
+  bookingId: number,
+  newTime: string | null,
+  userId: number,
+  previousDate: string
+): Promise<RescheduleBookingResult> {
+  await updateBookingDateTime(client, bookingId, previousDate, newTime, userId);
+
+  const updatedBooking = await findBookingById(client, bookingId);
+  if (!updatedBooking) {
+    throw new SchedulingError(500, "Booking disappeared after update.", ["internal_error"]);
+  }
+
+  return {
+    booking: updatedBooking,
+    decisionSnapshot: null,
+    wasOverride: false,
     previousDate,
   };
 }

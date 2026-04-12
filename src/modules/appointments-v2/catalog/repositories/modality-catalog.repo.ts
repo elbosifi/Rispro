@@ -9,21 +9,24 @@ import type { PoolClient } from "pg";
 export interface ModalityRow {
   id: number;
   name: string;
+  nameAr: string;
+  nameEn: string;
   code: string;
+  dailyCapacity: number;
   isActive: boolean;
 }
 
 const FIND_BY_ID_SQL = `
-  select id, name, code, is_active as "isActive"
+  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", code, daily_capacity as "dailyCapacity", is_active as "isActive"
   from modalities
   where id = $1
 `;
 
 const LIST_ACTIVE_SQL = `
-  select id, name, code, is_active as "isActive"
+  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", code, daily_capacity as "dailyCapacity", is_active as "isActive"
   from modalities
   where is_active = true
-  order by name
+  order by name_en
 `;
 
 export async function findModalityById(

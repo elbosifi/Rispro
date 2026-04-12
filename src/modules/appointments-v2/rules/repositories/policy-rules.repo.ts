@@ -125,3 +125,53 @@ export async function loadExamTypeSpecialQuotas(
   ]);
   return result.rows;
 }
+
+// ---------------------------------------------------------------------------
+// Exam type rule items (many-to-many join between exam_type_rules and exam_types)
+// ---------------------------------------------------------------------------
+
+const LOAD_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL = `
+  select etri.exam_type_id as "examTypeId"
+  from appointments_v2.exam_type_rule_items etri
+  inner join appointments_v2.exam_type_rules etr
+    on etri.rule_id = etr.id
+  where etr.policy_version_id = $1
+    and etr.modality_id = $2
+    and etr.is_active = true
+`;
+
+export async function loadExamTypeRuleItemExamTypeIds(
+  client: PoolClient,
+  policyVersionId: number,
+  modalityId: number
+): Promise<number[]> {
+  const result = await client.query<{ examTypeId: number }>(
+    LOAD_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL,
+    [policyVersionId, modalityId]
+  );
+  return result.rows.map((row) => row.examTypeId);
+}
+
+/**
+ * Load all exam type rule item IDs for a policy version (all modalities).
+ * Used by compilePolicy for admin/audit purposes.
+ */
+const LOAD_ALL_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL = `
+  select distinct etri.exam_type_id as "examTypeId"
+  from appointments_v2.exam_type_rule_items etri
+  inner join appointments_v2.exam_type_rules etr
+    on etri.rule_id = etr.id
+  where etr.policy_version_id = $1
+    and etr.is_active = true
+`;
+
+export async function loadAllExamTypeRuleItemExamTypeIds(
+  client: PoolClient,
+  policyVersionId: number
+): Promise<number[]> {
+  const result = await client.query<{ examTypeId: number }>(
+    LOAD_ALL_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL,
+    [policyVersionId]
+  );
+  return result.rows.map((row) => row.examTypeId);
+}

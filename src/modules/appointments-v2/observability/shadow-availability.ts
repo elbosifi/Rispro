@@ -18,6 +18,7 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadExamTypeRuleItemExamTypeIds,
 } from "../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../catalog/repositories/exam-type-catalog.repo.js";
@@ -137,6 +138,12 @@ async function computeShadowDiffsInternal(
     publishedVersion.id
   );
 
+  const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
+
   const diffs: ShadowDiffEntry[] = [];
 
   // Compare each date
@@ -160,7 +167,7 @@ async function computeShadowDiffsInternal(
       examTypeBelongsToModality,
       blockedRules,
       examTypeRules,
-      examTypeRuleItemExamTypeIds: [],
+      examTypeRuleItemExamTypeIds,
       categoryLimits,
       specialQuotas,
       currentBookedCount,

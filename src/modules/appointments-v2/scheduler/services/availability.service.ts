@@ -18,6 +18,7 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadExamTypeRuleItemExamTypeIds,
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
@@ -74,11 +75,6 @@ async function getAvailabilityInternal(
     return [];
   }
 
-  // Daily capacity: default to a reasonable value if no explicit limit
-  // In a full implementation, this would be part of modality configuration.
-  // For now, derive from the category limits or use a default.
-  const defaultDailyCapacity = 20;
-
   // 3. Load integrity checks
   let examTypeExists = true;
   let examTypeBelongsToModality = true;
@@ -113,11 +109,17 @@ async function getAvailabilityInternal(
     publishedVersion.id
   );
 
+  const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
+
   // Find the applicable category limit
   const categoryLimit = categoryLimits.find(
     (l) => l.caseCategory === params.caseCategory && l.isActive
   );
-  const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : defaultDailyCapacity;
+  const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
 
   // 5. Generate dates
   const startDate = todayIso();
@@ -148,7 +150,7 @@ async function getAvailabilityInternal(
       examTypeBelongsToModality,
       blockedRules,
       examTypeRules,
-      examTypeRuleItemExamTypeIds: [],
+      examTypeRuleItemExamTypeIds,
       categoryLimits,
       specialQuotas,
       currentBookedCount: bookedCount,

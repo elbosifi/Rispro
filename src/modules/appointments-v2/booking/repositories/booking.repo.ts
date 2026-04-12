@@ -92,3 +92,90 @@ export async function updateBookingStatus(
 ): Promise<void> {
   await client.query(UPDATE_STATUS_SQL, [status, userId, bookingId]);
 }
+
+const UPDATE_DATE_TIME_SQL = `
+  update appointments_v2.bookings
+  set booking_date = $1, booking_time = $2, updated_at = now(), updated_by_user_id = $3
+  where id = $4
+`;
+
+export async function updateBookingDateTime(
+  client: PoolClient,
+  bookingId: number,
+  newDate: string,
+  newTime: string | null,
+  userId: number
+): Promise<void> {
+  await client.query(UPDATE_DATE_TIME_SQL, [newDate, newTime, userId, bookingId]);
+}
+
+// ---------------------------------------------------------------------------
+// List bookings (read-only — uses pool, not transaction)
+// ---------------------------------------------------------------------------
+
+const LIST_BOOKINGS_SQL = `
+  select
+    b.id,
+    b.patient_id as "patientId",
+    b.modality_id as "modalityId",
+    b.exam_type_id as "examTypeId",
+    b.reporting_priority_id as "reportingPriorityId",
+    b.booking_date as "bookingDate",
+    b.booking_time as "bookingTime",
+    b.case_category as "caseCategory",
+    b.status,
+    b.notes,
+    b.policy_version_id as "policyVersionId",
+    b.created_at as "createdAt",
+    b.created_by_user_id as "createdByUserId",
+    b.updated_at as "updatedAt",
+    b.updated_by_user_id as "updatedByUserId",
+    p.arabic_full_name as "patientArabicName",
+    p.english_full_name as "patientEnglishName",
+    p.national_id as "patientNationalId",
+    m.name_en as "modalityName",
+    et.name_en as "examTypeName"
+  from appointments_v2.bookings b
+  left join patients p on p.id = b.patient_id
+  left join modalities m on m.id = b.modality_id
+  left join exam_types et on et.id = b.exam_type_id
+  where b.modality_id = $1
+    and b.booking_date >= $2
+    and b.booking_date <= $3
+    and ($4 = true or b.status <> 'cancelled')
+  order by b.booking_date asc, b.booking_time asc nulls first, b.created_at desc
+  limit $5
+  offset $6
+`;
+
+export interface ListBookingsParams {
+  modalityId: number;
+  dateFrom: string; // ISO yyyy-mm-dd
+  dateTo: string;   // ISO yyyy-mm-dd
+  limit: number;
+  offset: number;
+  includeCancelled: boolean;
+}
+
+export interface BookingWithPatientInfo extends Booking {
+  patientArabicName: string | null;
+  patientEnglishName: string | null;
+  patientNationalId: string | null;
+  modalityName: string | null;
+  examTypeName: string | null;
+}
+
+export async function listBookings(
+  pool: import("pg").Pool,
+  params: ListBookingsParams
+): Promise<BookingWithPatientInfo[]> {
+  const result = await pool.query<BookingWithPatientInfo>(LIST_BOOKINGS_SQL, [
+    params.modalityId,
+    params.dateFrom,
+    params.dateTo,
+    params.includeCancelled,
+    params.limit,
+    params.offset,
+  ]);
+  return result.rows;
+}

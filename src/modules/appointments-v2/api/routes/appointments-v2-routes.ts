@@ -11,6 +11,7 @@ import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { rescheduleBooking } from "../../booking/services/reschedule-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
+import { listBookingsService } from "../../booking/services/list-bookings.service.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 
@@ -21,6 +22,51 @@ router.use(requireAuth);
 interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
+
+/**
+ * GET /api/v2/appointments
+ * List existing bookings for a modality within a date range.
+ *
+ * Query params:
+ * - modalityId (required)
+ * - dateFrom (required) — ISO yyyy-mm-dd
+ * - dateTo (required) — ISO yyyy-mm-dd
+ * - limit (optional, default 50)
+ * - offset (optional, default 0)
+ * - includeCancelled (optional, default false) — include cancelled bookings in results
+ */
+router.get(
+  "/",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const modalityId = parseInt(String(req.query.modalityId), 10);
+    const dateFrom = String(req.query.dateFrom ?? "");
+    const dateTo = String(req.query.dateTo ?? "");
+    const limit = parseInt(String(req.query.limit ?? "50"), 10);
+    const offset = parseInt(String(req.query.offset ?? "0"), 10);
+    const includeCancelled = String(req.query.includeCancelled).toLowerCase() === "true";
+
+    if (!modalityId || isNaN(modalityId)) {
+      res.status(400).json({ error: "modalityId is required" });
+      return;
+    }
+
+    if (!dateFrom || !dateTo) {
+      res.status(400).json({ error: "dateFrom and dateTo are required (ISO yyyy-mm-dd)" });
+      return;
+    }
+
+    const bookings = await listBookingsService({
+      modalityId,
+      dateFrom,
+      dateTo,
+      limit: isNaN(limit) ? 50 : limit,
+      offset: isNaN(offset) ? 0 : offset,
+      includeCancelled,
+    });
+
+    res.json({ bookings });
+  })
+);
 
 /**
  * POST /api/v2/appointments

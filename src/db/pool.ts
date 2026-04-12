@@ -8,6 +8,11 @@ const poolConfig: pg.PoolConfig = {
   max: env.dbPoolMax
 };
 
+// Support local Unix socket connections for development
+if (process.env.PGHOST) {
+  poolConfig.host = process.env.PGHOST;
+}
+
 if (env.databaseSsl) {
   poolConfig.ssl = {
     rejectUnauthorized: env.databaseSslRejectUnauthorized

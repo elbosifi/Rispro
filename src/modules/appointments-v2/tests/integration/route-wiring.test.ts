@@ -1,8 +1,8 @@
 /**
  * Appointments V2 — Route wiring integration test.
  *
- * Verifies that the V2 module router mounts correctly and
- * returns 501 Not Implemented for stubbed endpoints.
+ * Verifies that the V2 module router can be instantiated and
+ * that the test HTTP server can mount it without errors.
  */
 
 import { describe, it } from "node:test";

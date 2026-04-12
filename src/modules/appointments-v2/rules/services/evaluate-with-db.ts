@@ -21,6 +21,7 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadExamTypeRuleItemExamTypeIds,
 } from "../repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
@@ -111,6 +112,12 @@ export async function evaluateWithDb(
     publishedVersion.id
   );
 
+  const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
+
   // 4. Load current booking count for the bucket
   const currentBookedCount = await getBookedCountForDate(
     client,
@@ -130,7 +137,7 @@ export async function evaluateWithDb(
     examTypeBelongsToModality,
     blockedRules,
     examTypeRules,
-    examTypeRuleItemExamTypeIds: [], // TODO: load from exam_type_rule_items
+    examTypeRuleItemExamTypeIds,
     categoryLimits,
     specialQuotas,
     currentBookedCount,

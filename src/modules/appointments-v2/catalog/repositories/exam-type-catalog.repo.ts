@@ -9,23 +9,24 @@ import type { PoolClient } from "pg";
 export interface ExamTypeRow {
   id: number;
   name: string;
-  code: string;
+  nameAr: string;
+  nameEn: string;
   modalityId: number | null;
   isActive: boolean;
 }
 
 const FIND_BY_ID_SQL = `
-  select id, name, code, modality_id as "modalityId", is_active as "isActive"
+  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", modality_id as "modalityId", is_active as "isActive"
   from exam_types
   where id = $1
 `;
 
 const LIST_FOR_MODALITY_SQL = `
-  select id, name, code, modality_id as "modalityId", is_active as "isActive"
+  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", modality_id as "modalityId", is_active as "isActive"
   from exam_types
   where modality_id = $1
     and is_active = true
-  order by name
+  order by name_en
 `;
 
 export async function findExamTypeById(

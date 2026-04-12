@@ -16,6 +16,7 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadAllExamTypeRuleItemExamTypeIds,
 } from "../repositories/policy-rules.repo.js";
 
 export interface CompiledPolicyContext {
@@ -55,6 +56,7 @@ export async function compilePolicy(
   const examTypeRules = await loadExamTypeRules(client, policyVersionId, 0); // 0 = all modalities
   const categoryLimits = await loadCategoryDailyLimits(client, policyVersionId, 0); // 0 = all modalities
   const specialQuotas = await loadExamTypeSpecialQuotas(client, policyVersionId);
+  const examTypeRuleItemExamTypeIds = await loadAllExamTypeRuleItemExamTypeIds(client, policyVersionId);
 
   return {
     policySetKey,
@@ -71,7 +73,7 @@ export async function compilePolicy(
       examTypeRules,
       categoryLimits,
       specialQuotas,
-      examTypeRuleItemExamTypeIds: [], // TODO: load from exam_type_rule_items
+      examTypeRuleItemExamTypeIds,
     },
   };
 }

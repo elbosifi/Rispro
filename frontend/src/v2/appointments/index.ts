@@ -21,7 +21,13 @@ export type {
   ModalityDto,
   ExamTypeDto,
   LookupsResponse,
+  BookingWithPatientInfo,
+  ListBookingsResponse,
+  RescheduleBookingRequest,
+  RescheduleBookingResponse,
 } from "./types";
+
+export { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
 
 // API hooks
 export {
@@ -33,6 +39,8 @@ export {
   fetchV2Lookups,
   createV2Booking,
   cancelV2Booking,
+  rescheduleV2Booking,
+  listV2Bookings,
   useV2Availability,
   useV2Suggestions,
   useV2Evaluate,
@@ -40,6 +48,8 @@ export {
   useV2ExamTypes,
   useV2CreateBooking,
   useV2CancelBooking,
+  useV2ListBookings,
+  useV2RescheduleBooking,
 } from "./api";
 
 // Pages
@@ -47,3 +57,8 @@ export { AppointmentsV2Page } from "./page";
 
 // Components
 export { StatusBadge } from "./components/status-badge";
+export { PatientSearch } from "./components/patient-search";
+export { OverrideDialog } from "./components/override-dialog";
+export { BookingForm } from "./components/booking-form";
+export { CancelConfirmDialog } from "./components/cancel-confirm-dialog";
+export { RescheduleDialog } from "./components/reschedule-dialog";

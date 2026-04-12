@@ -12,6 +12,7 @@ import { findBookingById, updateBookingStatus } from "../repositories/booking.re
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import type { Booking } from "../models/booking.js";
 import { pool } from "../../../../db/pool.js";
+import { CANCELLABLE_STATUSES } from "../../shared/types/common.js";
 
 export interface CancelBookingResult {
   booking: Booking;
@@ -43,6 +44,15 @@ async function cancelBookingInternal(
       409,
       `Booking ${bookingId} is already cancelled.`,
       ["booking_already_cancelled"]
+    );
+  }
+
+  // Validate that the booking is in a cancellable status
+  if (!CANCELLABLE_STATUSES.includes(booking.status as typeof CANCELLABLE_STATUSES[number])) {
+    throw new SchedulingError(
+      409,
+      `Booking ${bookingId} has status "${booking.status}" and cannot be cancelled.`,
+      ["booking_not_cancellable"]
     );
   }
 

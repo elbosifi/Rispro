@@ -17,6 +17,7 @@ import {
   loadExamTypeRules,
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
+  loadExamTypeRuleItemExamTypeIds,
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
@@ -120,6 +121,12 @@ async function createBookingInternal(
     publishedVersion.id
   );
 
+  const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
+
   // 6. Load current booked count (after lock, so this is consistent)
   const currentBookedCount = await getBookedCountForDate(
     client,
@@ -139,7 +146,7 @@ async function createBookingInternal(
     examTypeBelongsToModality,
     blockedRules,
     examTypeRules,
-    examTypeRuleItemExamTypeIds: [],
+    examTypeRuleItemExamTypeIds,
     categoryLimits,
     specialQuotas,
     currentBookedCount,

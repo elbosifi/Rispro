@@ -17,6 +17,10 @@ import type {
   LookupsResponse,
   ModalityDto,
   ExamTypeDto,
+  ListBookingsResponse,
+  BookingWithPatientInfo,
+  RescheduleBookingRequest,
+  RescheduleBookingResponse,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -111,6 +115,37 @@ export async function cancelV2Booking(bookingId: number): Promise<{ booking: unk
   });
 }
 
+export async function rescheduleV2Booking(
+  bookingId: number,
+  input: RescheduleBookingRequest
+): Promise<RescheduleBookingResponse> {
+  return api<RescheduleBookingResponse>(`/v2/appointments/${bookingId}`, {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listV2Bookings(params: {
+  modalityId: number;
+  dateFrom: string;
+  dateTo: string;
+  limit?: number;
+  offset?: number;
+  includeCancelled?: boolean;
+}): Promise<ListBookingsResponse> {
+  const searchParams = new URLSearchParams({
+    modalityId: String(params.modalityId),
+    dateFrom: params.dateFrom,
+    dateTo: params.dateTo,
+  });
+
+  if (params.limit != null) searchParams.set("limit", String(params.limit));
+  if (params.offset != null) searchParams.set("offset", String(params.offset));
+  if (params.includeCancelled) searchParams.set("includeCancelled", "true");
+
+  return api<ListBookingsResponse>(`/v2/appointments?${searchParams.toString()}`);
+}
+
 // ---------------------------------------------------------------------------
 // TanStack Query hooks
 // ---------------------------------------------------------------------------
@@ -173,6 +208,30 @@ export function useV2CancelBooking() {
     mutationFn: cancelV2Booking,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
+    },
+  });
+}
+
+export function useV2ListBookings(params: Parameters<typeof listV2Bookings>[0] | null) {
+  return useQuery({
+    queryKey: ["v2-bookings", params] as const,
+    queryFn: () => (params != null ? listV2Bookings(params) : { bookings: [] }),
+    enabled: params != null,
+    staleTime: 10_000, // 10 seconds — bookings change when user creates/cancels
+  });
+}
+
+export function useV2RescheduleBooking() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ bookingId, input }: { bookingId: number; input: RescheduleBookingRequest }) =>
+      rescheduleV2Booking(bookingId, input),
+    onSuccess: () => {
+      // Invalidate availability and bookings cache after reschedule
+      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
     },
   });
 }

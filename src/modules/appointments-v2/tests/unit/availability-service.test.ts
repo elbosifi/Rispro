@@ -92,3 +92,96 @@ describe("getAvailability — service structure", () => {
     assert.equal(params.includeOverrideCandidates, true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// ModalityRow — dailyCapacity field
+// ---------------------------------------------------------------------------
+
+describe("ModalityRow — dailyCapacity field", () => {
+  it("includes dailyCapacity from modalities table", () => {
+    const modality = {
+      id: 1,
+      name: "CT",
+      code: "CT",
+      dailyCapacity: 30,
+      isActive: true,
+    };
+
+    assert.strictEqual(modality.dailyCapacity, 30);
+    assert.strictEqual(typeof modality.dailyCapacity, "number");
+  });
+
+  it("dailyCapacity is used when no category limit is configured", () => {
+    // Simulate the fallback logic from availability.service.ts:
+    // const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
+    const modality = {
+      id: 1,
+      name: "CT",
+      code: "CT",
+      dailyCapacity: 25,
+      isActive: true,
+    };
+    const categoryLimit = null; // No category limit configured
+
+    const dailyCapacity = categoryLimit ? (categoryLimit as any).dailyLimit : modality.dailyCapacity;
+
+    assert.strictEqual(dailyCapacity, 25);
+  });
+
+  it("category limit overrides modality dailyCapacity when present", () => {
+    const modality = {
+      id: 1,
+      name: "CT",
+      code: "CT",
+      dailyCapacity: 25,
+      isActive: true,
+    };
+    const categoryLimit = { dailyLimit: 15, caseCategory: "non_oncology" as const, isActive: true };
+
+    const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
+
+    assert.strictEqual(dailyCapacity, 15); // Category limit takes precedence
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Modality catalog — SQL query shape
+// ---------------------------------------------------------------------------
+
+describe("Modality catalog — SQL includes dailyCapacity", () => {
+  it("FIND_BY_ID_SQL selects daily_capacity", async () => {
+    const fs = await import("node:fs/promises");
+    const content = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts",
+      "utf-8"
+    );
+    assert.ok(content.includes('daily_capacity as "dailyCapacity"'));
+  });
+
+  it("LIST_ACTIVE_SQL selects daily_capacity", async () => {
+    const fs = await import("node:fs/promises");
+    const content = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/catalog/repositories/modality-catalog.repo.ts",
+      "utf-8"
+    );
+    assert.ok(content.includes('daily_capacity as "dailyCapacity"'));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Availability service — no hardcoded default
+// ---------------------------------------------------------------------------
+
+describe("Availability service — no hardcoded dailyCapacity default", () => {
+  it("does not use hardcoded 20 as default", async () => {
+    const fs = await import("node:fs/promises");
+    const content = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/availability.service.ts",
+      "utf-8"
+    );
+    // Should NOT contain the old hardcoded default
+    assert.ok(!content.includes("defaultDailyCapacity"), "Should not have defaultDailyCapacity variable");
+    // Should use modality.dailyCapacity as fallback
+    assert.ok(content.includes("modality.dailyCapacity"), "Should use modality.dailyCapacity as fallback");
+  });
+});

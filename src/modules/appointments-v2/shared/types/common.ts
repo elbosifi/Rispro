@@ -36,3 +36,29 @@ export interface PaginatedResult<T> {
   offset: number;
   limit: number;
 }
+
+/**
+ * Booking statuses that allow rescheduling.
+ *
+ * Used by both backend (reschedule service validation) and frontend
+ * (reschedule button disabled state). Single source of truth — do not
+ * duplicate this list elsewhere.
+ */
+export const RESCHEDULABLE_STATUSES: readonly BookingStatus[] = [
+  "scheduled",
+  "arrived",
+  "waiting",
+];
+
+/**
+ * Booking statuses that allow cancellation.
+ *
+ * Completed and no-show bookings represent past events and should not be
+ * cancellable. Used by both backend (cancel service validation) and
+ * frontend (cancel button disabled state).
+ */
+export const CANCELLABLE_STATUSES: readonly BookingStatus[] = [
+  "scheduled",
+  "arrived",
+  "waiting",
+];

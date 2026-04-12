@@ -56,7 +56,10 @@
       "Bash(t)",
       "Bash(endoffunctions)",
       "Bash(git rm *)",
-      "WebFetch(github.com)"
+      "WebFetch(github.com)",
+      "Bash(npm test)",
+      "Bash(psql *)",
+      "Bash(pg_ctlcluster *)"
     ]
   },
   "$version": 3

@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 
-dotenv.config();
+dotenv.config({ override: true });
 
 function requireEnv(name: string, fallback = ""): string {
   const value = process.env[name] ?? fallback;

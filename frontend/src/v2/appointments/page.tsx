@@ -7,9 +7,14 @@
  */
 
 import { useState } from "react";
-import { useV2Lookups, useV2ExamTypes, useV2Availability } from "./api";
-import type { CaseCategory, DecisionStatus, AvailabilityDayDto } from "./types";
+import { pushToast } from "@/lib/toast";
+import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking } from "./api";
+import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, BookingStatus } from "./types";
+import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
 import { StatusBadge } from "./components/status-badge";
+import { BookingForm } from "./components/booking-form";
+import { CancelConfirmDialog } from "./components/cancel-confirm-dialog";
+import { RescheduleDialog } from "./components/reschedule-dialog";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,6 +66,17 @@ export function AppointmentsV2Page() {
           includeOverrideCandidates: false,
         }
       : undefined as unknown as Parameters<typeof useV2Availability>[0]
+  );
+
+  // Bookings: use date range from availability query
+  const bookings = useV2ListBookings(
+    modalityId != null && availability.data?.items
+      ? {
+          modalityId,
+          dateFrom: availability.data.items[0]?.date ?? "",
+          dateTo: availability.data.items[availability.data.items.length - 1]?.date ?? "",
+        }
+      : null
   );
 
   const disabled = modalityId == null;
@@ -239,7 +255,40 @@ export function AppointmentsV2Page() {
           No availability data found for the selected criteria.
         </p>
       ) : (
-        <AvailabilityTable items={availability.data?.items ?? []} />
+        <>
+          <AvailabilityTable items={availability.data?.items ?? []} />
+
+          {/* Booking Form */}
+          <div style={{ marginTop: 32 }}>
+            <BookingForm
+              modalities={lookups.data?.modalities ?? []}
+              examTypes={examTypes.data ?? []}
+              availability={availability.data?.items ?? []}
+              selectedModalityId={modalityId}
+              selectedExamTypeId={examTypeId}
+              caseCategory={caseCategory}
+              onBookingSuccess={() => {
+                // Refetch availability and bookings after booking
+                availability.refetch();
+                bookings.refetch();
+              }}
+            />
+          </div>
+
+          {/* Recent Bookings */}
+          {modalityId != null && (
+            <div style={{ marginTop: 32 }}>
+              <BookingsList
+                modalityId={modalityId}
+                availabilityItems={availability.data?.items ?? []}
+                onBookingCancelled={() => {
+                  availability.refetch();
+                  bookings.refetch();
+                }}
+              />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -328,5 +377,334 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
         </tbody>
       </table>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Bookings List Component
+// ---------------------------------------------------------------------------
+
+interface BookingsListProps {
+  modalityId: number;
+  availabilityItems: AvailabilityDayDto[];
+  onBookingCancelled: () => void;
+}
+
+function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: BookingsListProps) {
+  const cancelMutation = useV2CancelBooking();
+  const rescheduleMutation = useV2RescheduleBooking();
+  const [cancelTarget, setCancelTarget] = useState<{
+    id: number;
+    patientName: string;
+    date: string;
+  } | null>(null);
+  const [rescheduleTarget, setRescheduleTarget] = useState<BookingWithPatientInfo | null>(null);
+  const [rescheduleError, setRescheduleError] = useState<string | null>(null);
+  const [includeCancelled, setIncludeCancelled] = useState(false);
+
+  // Compute date range from availability data
+  const dateFrom = availabilityItems[0]?.date ?? "";
+  const dateTo = availabilityItems[availabilityItems.length - 1]?.date ?? "";
+
+  const bookings = useV2ListBookings(
+    modalityId && dateFrom && dateTo
+      ? { modalityId, dateFrom, dateTo, includeCancelled }
+      : null
+  );
+
+  const handleCancelConfirm = async () => {
+    if (!cancelTarget) return;
+    try {
+      await cancelMutation.mutateAsync(cancelTarget.id);
+      pushToast({
+        type: "success",
+        title: "Booking Cancelled",
+        message: `${cancelTarget.patientName} — ${cancelTarget.date}`,
+      });
+      setCancelTarget(null);
+      onBookingCancelled();
+    } catch (err) {
+      pushToast({
+        type: "error",
+        title: "Cancel Failed",
+        message: err instanceof Error ? err.message : "Unknown error",
+      });
+    }
+  };
+
+  const handleCancelCancel = () => {
+    setCancelTarget(null);
+  };
+
+  const handleReschedule = async (
+    newDate: string,
+    _newTime: string | null,
+    override?: { supervisorUsername: string; supervisorPassword: string; reason: string }
+  ) => {
+    if (!rescheduleTarget) return;
+    if (!RESCHEDULABLE_STATUSES.includes(rescheduleTarget.status)) {
+      const msg = `Cannot reschedule a booking with status "${rescheduleTarget.status}"`;
+      setRescheduleError(msg);
+      return;
+    }
+    setRescheduleError(null);
+    try {
+      const result = await rescheduleMutation.mutateAsync({
+        bookingId: rescheduleTarget.id,
+        input: {
+          bookingDate: newDate,
+          bookingTime: _newTime,
+          ...(override ? { override } : {}),
+        },
+      });
+      pushToast({
+        type: "success",
+        title: "Booking Rescheduled",
+        message: `${rescheduleTarget.patientEnglishName ?? `Patient #${rescheduleTarget.patientId}`} — ${rescheduleTarget.bookingDate} → ${newDate}`,
+      });
+      setRescheduleTarget(null);
+      onBookingCancelled();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setRescheduleError(msg);
+      throw err; // Re-throw so the dialog can show it
+    }
+  };
+
+  const handleRescheduleCancel = () => {
+    setRescheduleTarget(null);
+    setRescheduleError(null);
+  };
+
+  const bookingsList = bookings.data?.bookings ?? [];
+  const availableDates = availabilityItems.map((item) => item.date);
+
+  return (
+    <div
+      style={{
+        padding: 16,
+        borderRadius: 8,
+        backgroundColor: "var(--bg-surface, #f8fafc)",
+        border: "1px solid var(--border-color, #e2e8f0)",
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
+          Recent Bookings
+        </h2>
+
+        {/* Include cancelled toggle */}
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            color: "var(--text-muted, #64748b)",
+            cursor: "pointer",
+            userSelect: "none",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={includeCancelled}
+            onChange={(e) => setIncludeCancelled(e.target.checked)}
+            style={{
+              width: 16,
+              height: 16,
+              accentColor: "var(--color-primary, #3b82f6)",
+              cursor: "pointer",
+            }}
+          />
+          Include cancelled
+        </label>
+      </div>
+
+      {bookings.isLoading ? (
+        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+          Loading bookings…
+        </p>
+      ) : bookings.isError ? (
+        <p style={{ color: "var(--color-error, #ef4444)" }}>
+          Error loading bookings: {(bookings.error as Error).message}
+        </p>
+      ) : bookingsList.length === 0 ? (
+        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+          No bookings found for the selected date range.
+        </p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table
+            style={{
+              width: "100%",
+              borderCollapse: "collapse",
+              fontSize: 14,
+            }}
+          >
+            <thead>
+              <tr style={{ borderBottom: "2px solid var(--border-color, #e2e8f0)" }}>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                  Patient
+                </th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                  Date
+                </th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                  Category
+                </th>
+                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                  Status
+                </th>
+                <th style={{ textAlign: "right", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {bookingsList.map((booking) => (
+                <tr
+                  key={booking.id}
+                  style={{
+                    borderBottom: "1px solid var(--border-color, #e2e8f0)",
+                    opacity: booking.status === "cancelled" ? 0.6 : 1,
+                  }}
+                >
+                  <td style={{ padding: "10px 12px" }}>
+                    <div style={{ fontWeight: 500 }}>{booking.patientEnglishName}</div>
+                    {booking.patientNationalId && (
+                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
+                        {booking.patientNationalId}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                    {booking.bookingDate}
+                    {booking.bookingTime ? ` ${booking.bookingTime}` : ""}
+                  </td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <span style={{ fontSize: 12 }}>
+                      {booking.caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
+                    </span>
+                  </td>
+                  <td style={{ padding: "10px 12px" }}>
+                    <BookingStatusBadge status={booking.status} />
+                  </td>
+                  <td style={{ padding: "10px 12px", textAlign: "right" }}>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        onClick={() => setRescheduleTarget(booking)}
+                        disabled={!RESCHEDULABLE_STATUSES.includes(booking.status)}
+                        title={
+                          RESCHEDULABLE_STATUSES.includes(booking.status)
+                            ? "Reschedule this booking"
+                            : `Cannot reschedule a booking with status "${booking.status}"`
+                        }
+                        style={{
+                          padding: "4px 12px",
+                          borderRadius: 4,
+                          border: `1px solid ${RESCHEDULABLE_STATUSES.includes(booking.status) ? "var(--color-info, #3b82f6)" : "var(--border-color, #e2e8f0)"}`,
+                          backgroundColor: "transparent",
+                          color: RESCHEDULABLE_STATUSES.includes(booking.status) ? "var(--color-info, #3b82f6)" : "var(--text-muted, #94a3b8)",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          cursor: RESCHEDULABLE_STATUSES.includes(booking.status) ? "pointer" : "not-allowed",
+                          opacity: RESCHEDULABLE_STATUSES.includes(booking.status) ? 1 : 0.5,
+                        }}
+                      >
+                        Reschedule
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCancelTarget({
+                            id: booking.id,
+                            patientName: booking.patientEnglishName ?? `Patient #${booking.patientId}`,
+                            date: booking.bookingDate,
+                          })
+                        }
+                        disabled={!CANCELLABLE_STATUSES.includes(booking.status)}
+                        title={
+                          CANCELLABLE_STATUSES.includes(booking.status)
+                            ? "Cancel this booking"
+                            : `Cannot cancel a booking with status "${booking.status}"`
+                        }
+                        style={{
+                          padding: "4px 12px",
+                          borderRadius: 4,
+                          border: `1px solid ${CANCELLABLE_STATUSES.includes(booking.status) ? "var(--color-error, #ef4444)" : "var(--border-color, #e2e8f0)"}`,
+                          backgroundColor: "transparent",
+                          color: CANCELLABLE_STATUSES.includes(booking.status) ? "var(--color-error, #ef4444)" : "var(--text-muted, #94a3b8)",
+                          fontSize: 12,
+                          fontWeight: 500,
+                          cursor: CANCELLABLE_STATUSES.includes(booking.status) ? "pointer" : "not-allowed",
+                          opacity: CANCELLABLE_STATUSES.includes(booking.status) ? 1 : 0.5,
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Cancel confirmation dialog */}
+      {cancelTarget && (
+        <CancelConfirmDialog
+          booking={cancelTarget}
+          onConfirm={handleCancelConfirm}
+          onCancel={handleCancelCancel}
+        />
+      )}
+
+      {/* Reschedule dialog */}
+      {rescheduleTarget && (
+        <RescheduleDialog
+          booking={rescheduleTarget}
+          availableDates={availableDates}
+          caseCategory={rescheduleTarget.caseCategory}
+          examTypeId={rescheduleTarget.examTypeId}
+          onReschedule={handleReschedule}
+          onCancel={handleRescheduleCancel}
+          error={rescheduleError}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Booking Status Badge Component
+// ---------------------------------------------------------------------------
+
+function BookingStatusBadge({ status }: { status: string }) {
+  const config: Record<string, { label: string; color: string; bg: string }> = {
+    scheduled: { label: "Scheduled", color: "#15803d", bg: "#dcfce7" },
+    arrived: { label: "Arrived", color: "#1d4ed8", bg: "#dbeafe" },
+    waiting: { label: "Waiting", color: "#a16207", bg: "#fef9c3" },
+    completed: { label: "Completed", color: "#6b7280", bg: "#f3f4f6" },
+    "no-show": { label: "No-Show", color: "#991b1b", bg: "#fee2e2" },
+  };
+
+  const c = config[status] ?? { label: status, color: "#6b7280", bg: "#f3f4f6" };
+
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "2px 8px",
+        borderRadius: 4,
+        fontSize: 11,
+        fontWeight: 600,
+        color: c.color,
+        backgroundColor: c.bg,
+      }}
+    >
+      {c.label}
+    </span>
   );
 }
