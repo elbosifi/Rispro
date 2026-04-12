@@ -88,17 +88,29 @@ export async function evaluateV2Scheduling(input: EvaluateRequest): Promise<Sche
 }
 
 export async function fetchV2Modalities(): Promise<ModalityDto[]> {
-  return api<ModalityDto[]>("/modality");
+  // Reuse the proven legacy lookups endpoint that works for reception users
+  const lookups = await api<{ modalities: ModalityDto[]; examTypes: unknown[]; priorities: unknown[] }>(
+    "/appointments/lookups"
+  );
+  return lookups.modalities;
 }
 
 export async function fetchV2ExamTypes(modalityId: number): Promise<ExamTypeDto[]> {
-  return api<ExamTypeDto[]>(`/modality/${modalityId}/exam-types`);
+  // Reuse the proven legacy lookups endpoint and filter client-side
+  const lookups = await api<{ modalities: unknown[]; examTypes: ExamTypeDto[]; priorities: unknown[] }>(
+    "/appointments/lookups"
+  );
+  return lookups.examTypes.filter(
+    (et) => (et as { modalityId?: number | null }).modalityId === modalityId
+  );
 }
 
 export async function fetchV2Lookups(): Promise<LookupsResponse> {
-  const [modalities] = await Promise.all([fetchV2Modalities()]);
-  // Exam types are fetched per modality on demand
-  return { modalities, examTypes: [] };
+  // Use the single proven endpoint that returns modalities + examTypes + priorities
+  const lookups = await api<{ modalities: ModalityDto[]; examTypes: ExamTypeDto[]; priorities: unknown[] }>(
+    "/appointments/lookups"
+  );
+  return { modalities: lookups.modalities, examTypes: lookups.examTypes };
 }
 
 export async function createV2Booking(input: CreateBookingRequest): Promise<BookingResponse> {

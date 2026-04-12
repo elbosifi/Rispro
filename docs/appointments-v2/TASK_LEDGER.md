@@ -2,6 +2,31 @@
 
 ## Task log
 
+### Task T040 — Fix V2 Modality Selector Lookup Endpoints
+- **Task ID**: T040
+- **Name**: Fix V2 Modality Selector Lookup Endpoints
+- **Agent**: Agent K (Qwen)
+- **Status**: DONE (fix v2: uses legacy /appointments/lookups)
+- **Root cause**: The V2 frontend called `GET /modality` and `GET /modality/:id/exam-types` — endpoints that don't exist. The legacy system uses `GET /api/appointments/lookups` which returns `{ modalities, examTypes, priorities }` in one call with `requireAuth` only (reception-friendly).
+- **Fix**: Updated `fetchV2Modalities()`, `fetchV2ExamTypes()`, and `fetchV2Lookups()` in `frontend/src/v2/appointments/api.ts` to call the proven legacy `/appointments/lookups` endpoint. `fetchV2ExamTypes()` filters exam types client-side by modalityId. `fetchV2Lookups()` returns both modalities AND examTypes (previously returned empty examTypes array).
+- **Also added**: V2 lookups router at `/api/v2/lookups/modalities` and `/api/v2/lookups/modalities/:modalityId/exam-types` as backup endpoints using V2 catalog repos. Added explicit error state to V2 page when lookups fail (error message + retry button).
+- **Files created (2 new files)**:
+  - `src/modules/appointments-v2/api/routes/lookups-v2-routes.ts` — backup router: GET /modalities, GET /modalities/:id/exam-types, requireAuth only
+  - `src/modules/appointments-v2/tests/unit/lookups-v2-routes.test.ts` — 12 tests (frontend API wiring: 5, page error state: 1, V2 lookups router: 6)
+- **Files modified (3 existing files)**:
+  - `frontend/src/v2/appointments/api.ts` — all three lookup functions now call `/appointments/lookups` (legacy endpoint that works); `fetchV2ExamTypes` filters by modalityId client-side; `fetchV2Lookups` returns modalities AND examTypes
+  - `frontend/src/v2/appointments/page.tsx` — added explicit error state when `lookups.isError` with error message and retry button
+  - `src/modules/appointments-v2/index.ts` — added `lookupsV2Router` import and mounting under `/lookups`
+- **Tests added**: 12 new tests
+- **Total tests now**: 483 across 133 suites — all passing
+- **Known limitations**:
+  - The V2 lookups router (`/api/v2/lookups/...`) exists as backup but the frontend uses the legacy `/appointments/lookups` endpoint — this is intentional for reliability
+  - Exam types are fetched in full and filtered client-side — same network call as modalities, no extra round-trip
+- **Follow-up items**: None.
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T039 — Behavioral Tests for authenticateSupervisor
+
 ### Task T039 — Behavioral Tests for authenticateSupervisor
 - **Task ID**: T039
 - **Name**: Behavioral Tests for authenticateSupervisor

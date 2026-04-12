@@ -52,6 +52,35 @@ export function AppointmentsV2Page() {
   const [caseCategory, setCaseCategory] = useState<CaseCategory>("non_oncology");
   const [days, setDays] = useState(14);
 
+  // Show explicit error if lookups fail
+  if (lookups.isError) {
+    return (
+      <div style={{ padding: 32, textAlign: "center" }}>
+        <p style={{ fontSize: 18, fontWeight: 600, color: "var(--color-error, #ef4444)", marginBottom: 8 }}>
+          Failed to load modality list
+        </p>
+        <p style={{ fontSize: 14, color: "var(--text-muted, #64748b)" }}>
+          {(lookups.error as Error)?.message ?? "Unknown error"}
+        </p>
+        <button
+          onClick={() => lookups.refetch()}
+          style={{
+            marginTop: 16,
+            padding: "8px 20px",
+            borderRadius: 6,
+            border: "none",
+            background: "var(--color-primary, #3b82f6)",
+            color: "#fff",
+            fontSize: 14,
+            cursor: "pointer",
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   const examTypes = useV2ExamTypes(modalityId);
   const availability = useV2Availability(
     modalityId != null
