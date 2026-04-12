@@ -110,6 +110,101 @@
 - **Follow-up items**: None — status guard integration test coverage is now complete.
 - **Reviewer signoff**: ⏳ pending Agent L review
 
+### Task T046 — Behavioral Tests for policy-rules Repository
+- **Task ID**: T046
+- **Name**: Behavioral Tests for policy-rules Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: IN PROGRESS
+- **Analysis**: The `policy-rules.repo.ts` repository has 6 query functions but zero dedicated tests. It's only verified indirectly via wiring tests in evaluate-with-db.test.ts, create-booking.test.ts, and compile-policy.test.ts. This repository is the core rule-loading layer for the decision engine — it loads blocked rules, exam type rules, category limits, special quotas, and exam type rule item IDs. Tests should verify: (1) all 6 function exports; (2) SQL query verification for each function (correct tables, columns, WHERE clauses); (3) parameter passing verification.
+- **Files expected to touch**:
+  - `src/modules/appointments-v2/tests/unit/policy-rules-repo.test.ts` (new file)
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T046 — Behavioral Tests for policy-rules Repository
+- **Task ID**: T046
+- **Name**: Behavioral Tests for policy-rules Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: IN PROGRESS
+- **Analysis**: The `policy-rules.repo.ts` repository has 6 query functions but zero dedicated tests. It's only verified indirectly via wiring tests in evaluate-with-db.test.ts, create-booking.test.ts, and compile-policy.test.ts. This repository is the core rule-loading layer for the decision engine — it loads blocked rules, exam type rules, category limits, special quotas, and exam type rule item IDs. Tests should verify: (1) all 6 function exports; (2) SQL query verification for each function (correct tables, columns, WHERE clauses); (3) parameter passing verification.
+- **Files expected to touch**:
+  - `src/modules/appointments-v2/tests/unit/policy-rules-repo.test.ts` (new file)
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T046 — Behavioral Tests for policy-rules Repository
+- **Task ID**: T046
+- **Name**: Behavioral Tests for policy-rules Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: DONE
+- **Summary**: Added 30 dedicated unit tests for the `policy-rules.repo.ts` repository, the core rule-loading layer for the decision engine. Previously had zero dedicated tests — only verified indirectly via wiring tests. Tests cover all 6 query functions: (1) loadModalityBlockedRules (5 tests — export, SQL table, columns, WHERE clause, parameters); (2) loadExamTypeRules (5 tests — export, SQL table, columns, WHERE clause, parameters); (3) loadCategoryDailyLimits (5 tests — export, SQL table, columns, WHERE clause, parameters); (4) loadExamTypeSpecialQuotas (5 tests — export, SQL table, columns, no-modality-filter verification, parameter count); (5) loadExamTypeRuleItemExamTypeIds (5 tests — export, SQL tables, JOIN verification, WHERE clause, parameters); (6) loadAllExamTypeRuleItemExamTypeIds (5 tests — export, SQL tables, no-modality-filter verification, DISTINCT verification, parameter count).
+- **Files created (1 new file)**:
+  - `src/modules/appointments-v2/tests/unit/policy-rules-repo.test.ts` — 30 tests (6 functions × 5 tests each)
+- **Files modified (0 existing files)**.
+- **Tests added**: 30 new policy-rules repository tests
+- **Total tests now**: 531 across 143 suites — all passing, 0 TypeScript errors
+- **Known limitations**: None.
+- **Follow-up items**: None.
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T047 — Behavioral Tests for capacity Repository
+- **Task ID**: T047
+- **Name**: Behavioral Tests for capacity Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: IN PROGRESS
+- **Analysis**: The `capacity.repo.ts` repository has 1 function (`getBookedCountForDate`) with zero dedicated tests. This is a critical function — every availability check and booking creation calls it to count existing bookings. Tests should verify: (1) function export and async nature; (2) SQL table, columns, WHERE clause including `status <> 'cancelled'` filter; (3) parameter passing; (4) return value mapping.
+- **Files expected to touch**:
+  - `src/modules/appointments-v2/tests/unit/capacity-repo.test.ts` (new file)
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T047 — Behavioral Tests for capacity Repository
+- **Task ID**: T047
+- **Name**: Behavioral Tests for capacity Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: IN PROGRESS
+- **Analysis**: The `capacity.repo.ts` repository has 1 function (`getBookedCountForDate`) with zero dedicated tests. This is a critical function — every availability check and booking creation calls it to count existing bookings. Tests should verify: (1) function export and async nature; (2) SQL table, columns, WHERE clause including `status <> 'cancelled'` filter; (3) parameter passing; (4) return value mapping.
+- **Files expected to touch**:
+  - `src/modules/appointments-v2/tests/unit/capacity-repo.test.ts` (new file)
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T047 — Behavioral Tests for capacity Repository
+- **Task ID**: T047
+- **Name**: Behavioral Tests for capacity Repository
+- **Agent**: Agent K (Qwen)
+- **Status**: DONE
+- **Summary**: Added 12 dedicated unit tests for the `capacity.repo.ts` repository, the critical function that counts existing bookings per date/modality/category. Previously had zero dedicated tests. Tests cover: (1) function export and async nature (2 tests); (2) SQL table verification (1 test); (3) WHERE clause — modality_id, booking_date, case_category filters plus cancelled exclusion (4 tests); (4) return value cast and fallback (2 tests); (5) parameter passing (1 test); (6) integration wiring — imported by availability and create-booking services (2 tests).
+- **Files created (1 new file)**:
+  - `src/modules/appointments-v2/tests/unit/capacity-repo.test.ts` — 12 tests (structure: 2, SQL: 7, integration wiring: 2, fallback: 1)
+- **Files modified (0 existing files)**.
+- **Tests added**: 12 new capacity repository tests
+- **Total tests now**: 543 across 146 suites — all passing, 0 TypeScript errors
+- **Known limitations**: None.
+- **Follow-up items**: None.
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T048 — Behavioral Tests for Catalog Repositories
+- **Task ID**: T048
+- **Name**: Behavioral Tests for Catalog Repositories
+- **Agent**: Agent K (Qwen)
+- **Status**: IN PROGRESS
+- **Analysis**: The `modality-catalog.repo.ts` and `exam-type-catalog.repo.ts` repositories have 2 functions each (findModalityById, listActiveModalities, findExamTypeById, listExamTypesForModality) with zero dedicated tests. These are the V2 catalog access layer for modalities and exam types. Tests should verify SQL queries, column aliases, WHERE clauses, and parameter passing for all 4 functions.
+- **Files expected to touch**:
+  - `src/modules/appointments-v2/tests/unit/catalog-repos.test.ts` (new file)
+- **Reviewer signoff**: ⏳ pending Agent L review
+
+### Task T048 — Behavioral Tests for Catalog Repositories
+- **Task ID**: T048
+- **Name**: Behavioral Tests for Catalog Repositories
+- **Agent**: Agent K (Qwen)
+- **Status**: DONE
+- **Summary**: Added 20 dedicated unit tests for the catalog repositories (modality-catalog.repo.ts and exam-type-catalog.repo.ts). Previously had zero dedicated tests. Tests cover all 4 functions: (1) findModalityById — export, SQL table, column aliases, WHERE clause, parameters (5 tests); (2) listActiveModalities — export, SQL table, ORDER BY clause, is_active filter (4 tests); (3) findExamTypeById — export, SQL table, column aliases, WHERE clause, parameters (5 tests); (4) listExamTypesForModality — export, SQL table, WHERE clause, ORDER BY clause, parameters (5 tests); (5) ModalityRow and ExamTypeRow type interfaces verified (1 test).
+- **Files created (1 new file)**:
+  - `src/modules/appointments-v2/tests/unit/catalog-repos.test.ts` — 20 tests (modality: 9, exam-type: 10, types: 1)
+- **Files modified (0 existing files)**.
+- **Tests added**: 20 new catalog repository tests
+- **Total tests now**: 563 across 147 suites — all passing, 0 TypeScript errors
+- **Known limitations**: None.
+- **Follow-up items**: None.
+- **Reviewer signoff**: ⏳ pending Agent L review
+
 ### Task T039 — Behavioral Tests for authenticateSupervisor
 
 ### Task T039 — Behavioral Tests for authenticateSupervisor

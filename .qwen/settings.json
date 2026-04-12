@@ -61,7 +61,9 @@
       "Bash(psql *)",
       "Bash(pg_ctlcluster *)",
       "Bash(gtimeout *)",
-      "Bash(xargs *)"
+      "Bash(xargs *)",
+      "Bash(do *)",
+      "Bash(done)"
     ]
   },
   "$version": 3
