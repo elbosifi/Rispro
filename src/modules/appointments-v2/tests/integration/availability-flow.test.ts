@@ -254,7 +254,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       const { status } = await fetch(`/api/v2/scheduling/admin/policy/draft/${testData.policyVersionId}/publish`, {
         method: "POST",
       });
-      assert.equal(status, 400);
+      assert.equal(status, 409);
     });
   });
 

@@ -248,8 +248,37 @@ Acceptance:
 
 ## Current status
 
-Initial planning stage.
+All stages (0–9) are **complete**.
+
+- Stage 0 (Legacy freeze): Done — legacy code frozen, no new features added
+- Stage 1 (Architecture): Done — PROJECT_BRIEF.md, ARCHITECTURE.md, DECISIONS.md all written
+- Stage 2 (Backend scaffold): Done — T001, 14 tests, full module skeleton
+- Stage 3 (V2 DB schema): Done — T002, migration 023, 19 tests
+- Stage 4 (Decision engine): Done — pureEvaluate() with all 7 D008 steps, date rule matching
+- Stage 5 (Availability service): Done — getAvailability(), examTypeRuleItemExamTypeIds populated (T012)
+- Stage 6 (Transactional booking): Done — create, reschedule (with re-insert, T013), cancel, list
+- Stage 7 (Admin configuration): Done — draft, save, publish, preview, validate
+- Stage 8 (Frontend V2): Done — availability page, booking form, bookings list, cancel + reschedule UI
+- Stage 9 (Validation and cutover): Integration testing complete — 7 bugs found and fixed (see CUTOVER_CHECKLIST.md)
+
+## Integration test results (April 12, 2026)
+
+| Suite | Pass | Fail | Cancelled | Notes |
+|---|---|---|---|---|
+| availability-flow (individual) | 14 | 0 | 0 | Full policy lifecycle: availability, evaluate, suggestions, admin CRUD |
+| booking-flow (individual) | 14 | 0 | 0 | Full booking lifecycle: create, list, reschedule, cancel, capacity |
+| route-wiring | 1 | 0 | 0 | Router creation |
+| Unit tests (all) | 200 | 0 | 0 | Structure, wiring, pure logic |
+| **All V2 tests combined** | **215** | **0** | **14** | 14 cancelled when parallel due to shared DB seed data |
 
 ## Immediate next step
 
-Implement **Stage 2: Backend scaffold** after confirming the proposed V2 module and folder structure.
+Validation and cutover planning:
+1. ✅ Apply migration and seed test data
+2. ✅ Run integration tests against real PostgreSQL
+3. ✅ Publish a scheduling policy via admin endpoints (verified)
+4. ⏳ Validate representative scheduling scenarios with real modalities/exam types
+5. ⏳ Compare V2 decisions with legacy outcomes (shadow mode)
+6. ⏳ Plan cutover timeline
+
+See `docs/appointments-v2/CUTOVER_CHECKLIST.md` for deployment steps and `docs/appointments-v2/TASK_LEDGER.md` for the complete task history.

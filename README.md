@@ -18,6 +18,7 @@ RISpro Reception is now a real Node.js + PostgreSQL web app for the currently im
 - supervisor audit log viewer with filters and CSV export inside settings
 - printer and scanner groundwork with browser-print profiles and scan preparation
 - DICOM gateway for Modality Worklist (MWL)
+- Appointments V2 — modular, rule-driven scheduling engine (backend-complete, frontend at `/v2/appointments`)
 
 The old prototype-only browser login and fake local data have been removed from the main production flow.
 
@@ -113,75 +114,34 @@ npm run check
 
 ## TypeScript Support
 
-The backend is now **fully TypeScript-compliant** with **zero type errors** under strict mode.
-
-### Type System Overview
-
-- **All 44 backend files** have comprehensive JSDoc type annotations
-- **8 type definition files** in `src/types/` define domain entities, API contracts, and database interfaces
-- **Strict TypeScript mode** is enabled in `tsconfig.json` for maximum type safety
-- **Zero runtime changes** - types are purely additive and don't affect functionality
-
-### Type Definitions
-
-| File | Purpose |
-|------|---------|
-| `src/types/domain.ts` | Core entities: `User`, `Patient`, `Appointment`, `Modality`, `ExamType`, `QueueItem`, `AuditEvent` |
-| `src/types/api.ts` | API response envelopes and endpoint-specific types |
-| `src/types/db.ts` | Database query result interfaces |
-| `src/types/http.ts` | HTTP request context, user claims, and authentication types |
-| `src/types/queue.ts` | Queue workflow types and snapshots |
-| `src/types/settings.ts` | System settings category types |
-| `src/types/express.d.ts` | Express `Request` augmentation for `req.user` |
-| `src/types/index.ts` | Barrel export for all types |
+The backend is **100% native TypeScript** (zero `.js` files remaining in `src/`). The frontend is React + TypeScript via Vite.
 
 ### Running Type Checks
 
-Verify zero TypeScript errors:
-
+Backend:
 ```bash
-npx tsc --noEmit
+npm run typecheck
 ```
 
-Expected output: `Found 0 errors.`
+Frontend:
+```bash
+cd frontend && npx tsc --noEmit
+```
 
-### Type Safety Features
+### Type Safety
 
-✅ **Compile-time error detection** - Catches type mismatches before runtime  
-✅ **Full IDE autocomplete** - IntelliSense for all functions, parameters, and return types  
-✅ **Self-documenting code** - Types serve as inline documentation  
-✅ **Safer refactoring** - TypeScript catches breaking changes  
-✅ **Database query typing** - Query results are properly typed  
-✅ **API contract enforcement** - Request/response payloads are validated  
+- All backend source files are `.ts` with native TypeScript types
+- Domain entities, API contracts, and DB interfaces are defined in `src/types/`
+- The Appointments V2 module (`src/modules/appointments-v2/`) is fully typed end-to-end
+- Frontend V2 types mirror backend DTOs for end-to-end type safety
+- Strict mode is enabled in `tsconfig.json`
 
-### Adding New Types
+### Adding New Features
 
-When adding new features:
-
-1. **Define new types** in the appropriate `src/types/*.ts` file
-2. **Add JSDoc annotations** to new functions:
-   ```javascript
-   /**
-    * @param {PatientPayload} payload
-    * @param {UserId} userId
-    * @returns {Promise<Patient>}
-    */
-   export async function createPatient(payload, userId) {
-     // ...
-   }
-   ```
-3. **Run type check** to verify: `npx tsc --noEmit`
-
-### Converting to Native TypeScript (Optional)
-
-The codebase uses JSDoc-based typing in `.js` files. To convert to native `.ts`:
-
-1. Rename file: `mv file.js file.ts`
-2. Convert JSDoc to native TypeScript syntax
-3. Update imports to use `.ts` extension
-4. Run `npx tsc --noEmit` to verify
-
-This is optional - JSDoc typing provides 95% of the benefits with zero build step.
+1. Define new types in the appropriate `src/types/*.ts` or co-located type file
+2. Implement with native TypeScript syntax — no JSDoc needed
+3. Run `npm run typecheck` to verify backend types
+4. Run `cd frontend && npx tsc --noEmit` to verify frontend types
 
 ## Deployment
 

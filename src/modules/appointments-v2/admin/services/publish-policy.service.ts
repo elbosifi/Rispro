@@ -75,7 +75,11 @@ async function publishPolicyInternal(
   // 4. Load rules for counting (for the response)
   const rules = await loadAllRulesForVersion(client, versionId);
 
-  // 5. Publish the version
+  // 5. Archive old published versions FIRST (D007: only one published per set)
+  //    This must happen BEFORE publishing to avoid unique constraint violation.
+  await archiveOldPublishedVersions(client, version.policySetId, versionId);
+
+  // 6. Publish the version
   const published = await publishVersion(client, versionId, userId);
   if (!published) {
     throw new SchedulingError(
@@ -84,9 +88,6 @@ async function publishPolicyInternal(
       ["publish_concurrent"]
     );
   }
-
-  // 6. Archive old published versions (D007: only one published per set)
-  await archiveOldPublishedVersions(client, version.policySetId, versionId);
 
   // 7. Get the refreshed version
   const refreshed = await findVersionById(client, versionId);

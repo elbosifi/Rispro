@@ -7,6 +7,7 @@
 
 import pg from "pg";
 import jwt from "jsonwebtoken";
+import { randomUUID } from "crypto";
 import { pool } from "../../../../db/pool.js";
 import { env } from "../../../../config/env.js";
 
@@ -49,13 +50,18 @@ export async function setupTestDatabase(): Promise<{ cleanup: () => Promise<void
   }
 
   const cleanup = async () => {
-    // Delete ALL V2 bookings first (before users are deleted, to avoid FK issues)
+    // Delete ALL V2 data in FK-safe order (leaf tables first)
     await pool.query(`delete from appointments_v2.override_audit_events`);
     await pool.query(`delete from appointments_v2.bookings`);
     await pool.query(`delete from appointments_v2.category_daily_limits`);
+    await pool.query(`delete from appointments_v2.exam_type_rule_items`);
+    await pool.query(`delete from appointments_v2.exam_type_rules`);
+    await pool.query(`delete from appointments_v2.exam_type_special_quotas`);
+    await pool.query(`delete from appointments_v2.modality_blocked_rules`);
     await pool.query(`delete from appointments_v2.policy_versions`);
     await pool.query(`delete from appointments_v2.policy_sets`);
-    // Now safe to delete legacy test data
+    // Clean up legacy test data — NULL out FK references first
+    await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id in (select id from users where username like 'test_%')`);
     await pool.query(`delete from users where username like 'test_%'`);
     await pool.query(`delete from modalities where code like 'TEST_%'`);
     await pool.query(`delete from exam_types where name_en = 'Test CT Head'`);
@@ -77,6 +83,13 @@ export interface TestData {
 
 export async function seedTestData(_schemaName: string): Promise<TestData> {
   const s = (table: string) => `appointments_v2.${table}`;
+
+  // Clean up any stale V2 test data from previous runs
+  await pool.query(`delete from ${s("override_audit_events")}`);
+  await pool.query(`delete from ${s("bookings")}`);
+  await pool.query(`delete from ${s("category_daily_limits")}`);
+  await pool.query(`delete from ${s("policy_versions")} where status = 'draft'`);
+  await pool.query(`delete from ${s("policy_sets")} where key = 'default'`);
 
   // Create test supervisor user
   const bcryptHash = "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
@@ -100,7 +113,8 @@ export async function seedTestData(_schemaName: string): Promise<TestData> {
   const modalityId = Number(modalityResult.rows[0].id);
 
   // Create test exam type
-  await pool.query(`delete from appointments_v2.bookings where exam_type_id in (select id from exam_types where name_en = 'Test CT Head'); delete from exam_types where name_en = 'Test CT Head'`);
+  await pool.query(`delete from appointments_v2.bookings where exam_type_id in (select id from exam_types where name_en = 'Test CT Head')`);
+  await pool.query(`delete from exam_types where name_en = 'Test CT Head'`);
   const examTypeResult = await pool.query(
     `insert into exam_types (modality_id, name_ar, name_en, is_active)
      values ($1, $2, $3, true)
@@ -109,8 +123,8 @@ export async function seedTestData(_schemaName: string): Promise<TestData> {
   );
   const examTypeId = Number(examTypeResult.rows[0].id);
 
-  // Create test patient
-  const uniqueNationalId = `1${String(Date.now()).slice(-10)}1`.padEnd(12, "0").slice(0, 12);
+  // Create test patient with truly unique national ID (must be exactly 12 digits)
+  const uniqueNationalId = `1${randomUUID().replace(/-/g, "").slice(0, 11)}`;
   const patientResult = await pool.query(
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
      values ($1, $2, $3, $4, 'M', 30, 'national_id', $5)
@@ -123,39 +137,19 @@ export async function seedTestData(_schemaName: string): Promise<TestData> {
   const policySetResult = await pool.query(
     `insert into ${s("policy_sets")} (key, name, created_by_user_id)
      values ($1, $2, $3)
-     on conflict (key) do update set name = $2
      returning id`,
     ["default", "Default Policy", userId]
   );
   const policySetId = Number(policySetResult.rows[0].id);
 
-  // Archive old published versions
-  await pool.query(
-    `update ${s("policy_versions")} set status = 'archived' where policy_set_id = $1 and status = 'published'`,
-    [policySetId]
-  );
-
-  // Get next version number
-  const nextVersionResult = await pool.query(
-    `select coalesce(max(version_no), 0) + 1 as next_version from ${s("policy_versions")} where policy_set_id = $1`,
-    [policySetId]
-  );
-  const nextVersion = Number(nextVersionResult.rows[0].next_version);
-
-  // Clear drafts
-  await pool.query(
-    `delete from ${s("policy_versions")} where policy_set_id = $1 and status = 'draft'`,
-    [policySetId]
-  );
-
-  // Create published policy version
-  const configHash = `test_hash_${nextVersion}`;
+  // Create published policy version (version_no = 1, since this is a fresh policy_set)
+  const configHash = "test_hash_1";
   const policyVersionResult = await pool.query(
     `insert into ${s("policy_versions")}
        (policy_set_id, version_no, status, config_hash, created_by_user_id, published_at, published_by_user_id)
-     values ($1, $2, 'published', $3, $4, now(), $4)
+     values ($1, 1, 'published', $2, $3, now(), $3)
      returning id`,
-    [policySetId, nextVersion, configHash, userId]
+    [policySetId, configHash, userId]
   );
   const policyVersionId = Number(policyVersionResult.rows[0].id);
 

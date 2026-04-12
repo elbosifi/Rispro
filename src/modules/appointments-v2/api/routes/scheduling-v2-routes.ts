@@ -12,6 +12,8 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { evaluateBookingDecision } from "../../rules/services/evaluate-booking-decision.js";
 import { getAvailability, type GetAvailabilityParams } from "../../scheduler/services/availability.service.js";
 import { getSuggestions } from "../../scheduler/services/suggestion.service.js";
+import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
+import { pool } from "../../../../db/pool.js";
 
 const router = Router();
 
@@ -66,6 +68,11 @@ router.get(
       specialReasonCode: req.query.specialReasonCode ? String(req.query.specialReasonCode) : null,
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",
     };
+
+    const modality = await findModalityById(pool, modalityId);
+    if (!modality) {
+      throw new SchedulingError(400, `Modality ${modalityId} not found`);
+    }
 
     const availability = await getAvailability(params);
     res.json({ items: availability });

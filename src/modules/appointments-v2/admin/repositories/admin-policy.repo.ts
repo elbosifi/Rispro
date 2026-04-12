@@ -60,7 +60,7 @@ const FIND_VERSION_BY_ID_SQL = `
 `;
 
 const GET_NEXT_VERSION_NO_SQL = `
-  select coalesce(max(version_no), 0) + 1 as next_version
+  select coalesce(max(version_no), 0) + 1 as "nextVersion"
   from appointments_v2.policy_versions
   where policy_set_id = $1
 `;
