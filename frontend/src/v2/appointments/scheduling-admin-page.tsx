@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
 import {
@@ -16,6 +17,7 @@ import type { PolicySnapshotDto } from "./types";
 
 export function SchedulingAdminV2Page() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [showPublish, setShowPublish] = useState(false);
   const status = useV2PolicyStatus("default");
   const createDraft = useV2CreatePolicyDraft();
@@ -56,7 +58,7 @@ export function SchedulingAdminV2Page() {
           onClick={async () => {
             try {
               await createDraft.mutateAsync({ policySetKey: "default" });
-              pushToast({ type: "success", title: "Draft Created", message: "New draft created from published policy." });
+              pushToast({ type: "success", title: "Draft Created", message: "New working draft created from published policy." });
             } catch (error) {
               pushToast({
                 type: "error",
@@ -76,8 +78,9 @@ export function SchedulingAdminV2Page() {
           onClick={() => setShowPublish(true)}
           disabled={!draftVersionId || publishDraft.isPending}
           style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid #e2e8f0" }}
+          title="Publish the working draft to make it live"
         >
-          Publish Draft
+          Publish Draft (Make Live)
         </button>
       </div>
 
@@ -90,7 +93,16 @@ export function SchedulingAdminV2Page() {
             return;
           }
           await saveDraft.mutateAsync({ versionId: draftVersionId, policySnapshot: nextSnapshot, changeNote });
-          pushToast({ type: "success", title: "Draft Saved", message: "Draft snapshot saved successfully." });
+          // Refresh both status and preview caches to show updated draft count
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] }),
+            queryClient.invalidateQueries({ queryKey: ["v2-policy-preview", draftVersionId] }),
+          ]);
+          pushToast({
+            type: "success",
+            title: "Draft Saved",
+            message: "Working draft snapshot saved successfully. This is your working copy — use 'Publish Draft' to make it live.",
+          });
         }}
       />
 
