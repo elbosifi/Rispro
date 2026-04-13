@@ -1579,21 +1579,23 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     addRow: () => void,
     renderRow: (row: Record<string, unknown>, index: number) => React.ReactNode
   ) => (
-    <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2" open>
-      <summary className="cursor-pointer list-none">
-        <div className="flex items-center justify-between gap-3">
-          <h4 className="font-medium text-sm">{title}</h4>
-          <button type="button" className="btn-secondary text-xs" onClick={addRow}>
-            {ACTION_LABELS.add[key]}
-          </button>
-        </div>
-      </summary>
-      <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-2">{helper}</p>
-      {draft[key].map((row, index) => renderRow(row as Record<string, unknown>, index))}
-      {draft[key].length === 0 && (
-        <p className="text-[11px] text-stone-400 dark:text-stone-500 italic">No rows configured yet.</p>
-      )}
-    </details>
+    <section className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <h4 className="font-medium text-sm">{title}</h4>
+        <button type="button" className="btn-secondary text-xs" onClick={addRow}>
+          {ACTION_LABELS.add[key]}
+        </button>
+      </div>
+      <details className="space-y-2" open>
+        <summary className="cursor-pointer list-none text-[11px] text-stone-500 dark:text-stone-400">
+          {helper}
+        </summary>
+        {draft[key].map((row, index) => renderRow(row as Record<string, unknown>, index))}
+        {draft[key].length === 0 && (
+          <p className="text-[11px] text-stone-400 dark:text-stone-500 italic">No rows configured yet.</p>
+        )}
+      </details>
+    </section>
   );
 
   return (

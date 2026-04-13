@@ -70,6 +70,14 @@ function getAvailabilityNote(day: Record<string, unknown>): string {
   return "Not available";
 }
 
+function dayOffsetFromToday(targetDate: string): number {
+  const today = todayIsoDateLy();
+  const current = new Date(`${today}T00:00:00Z`);
+  const target = new Date(`${targetDate}T00:00:00Z`);
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.floor((target.getTime() - current.getTime()) / msPerDay);
+}
+
 interface AppointmentForm {
   patientId: string;
   patientSearch: string;
@@ -426,7 +434,7 @@ export default function AppointmentsPage() {
     }
   });
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setTypedDateError(null);
 
@@ -445,10 +453,34 @@ export default function AppointmentsPage() {
     }
 
     if (availabilityRows.length > 0) {
-      const selectedDay = availabilityRows.find((d: any) => normalizeDateKey(d.appointment_date) === form.appointmentDate);
+      let selectedDay = availabilityRows.find((d: any) => normalizeDateKey(d.appointment_date) === form.appointmentDate);
       if (!selectedDay) {
-        setTypedDateError("Selected date is outside the currently loaded availability window. Choose a visible date.");
-        return;
+        // Fallback validation for typed/suggested dates outside the current page window.
+        try {
+          const modalityId = parseInt(form.modalityId, 10);
+          const targetOffset = dayOffsetFromToday(form.appointmentDate);
+          if (targetOffset < 0) {
+            setTypedDateError("Selected date is outside the currently loaded availability window. Choose a visible date.");
+            return;
+          }
+          const singleDay = await getAppointmentAvailability(modalityId, 1, targetOffset, {
+            examTypeId: form.examTypeId ? parseInt(form.examTypeId, 10) : undefined,
+            caseCategory: form.caseCategory,
+            useSpecialQuota: form.useSpecialQuota,
+            specialReasonCode: form.specialReasonCode || undefined,
+            includeOverrideCandidates: form.includeOverrideCandidates
+          });
+          selectedDay = singleDay.find((d: any) => normalizeDateKey(d.appointment_date) === form.appointmentDate);
+          if (!selectedDay) {
+            setTypedDateError("Selected date is outside the currently loaded availability window. Choose a visible date.");
+            return;
+          }
+          // Keep sidebar availability page in sync with the selected date.
+          setAvailPage(Math.floor(targetOffset / pageDays));
+        } catch {
+          setTypedDateError("Could not validate the selected date right now. Try again.");
+          return;
+        }
       }
       if (String(selectedDay.displayStatus || "") === "blocked") {
         setTypedDateError("Selected date is blocked and cannot be booked.");
@@ -658,76 +690,77 @@ export default function AppointmentsPage() {
                     { value: "oncology", label: "Oncology" }
                   ]}
                 />
-                <div className="md:col-span-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30">
-                  <details className="group p-3">
-                    <summary className="cursor-pointer list-none text-sm font-medium text-stone-700 dark:text-stone-300 flex items-center justify-between gap-3">
-                      <span>Advanced scheduling options</span>
-                      <span className="text-xs text-stone-500 dark:text-stone-400 group-open:hidden">Show</span>
-                      <span className="text-xs text-stone-500 dark:text-stone-400 hidden group-open:inline">Hide</span>
-                    </summary>
-                    <div className="mt-3 space-y-3">
-                      {!schedulingEngineEnabled ? (
+                {schedulingEngineEnabled ? (
+                  <div className="md:col-span-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30">
+                    <details className="group p-3">
+                      <summary className="cursor-pointer list-none text-sm font-medium text-stone-700 dark:text-stone-300 flex items-center justify-between gap-3">
+                        <span>Advanced scheduling options</span>
+                        <span className="text-xs text-stone-500 dark:text-stone-400 group-open:hidden">Show</span>
+                        <span className="text-xs text-stone-500 dark:text-stone-400 hidden group-open:inline">Hide</span>
+                      </summary>
+                      <div className="mt-3 space-y-3">
                         <p className="text-xs text-stone-500 dark:text-stone-400">
-                          Advanced scheduling controls are disabled because the scheduling engine is off.
+                          Use these controls only when a booking needs scheduling exceptions.
                         </p>
-                      ) : (
-                        <>
-                          <p className="text-xs text-stone-500 dark:text-stone-400">
-                            Use these controls only when a booking needs scheduling exceptions.
-                          </p>
-                          <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
-                            <input
-                              type="checkbox"
-                              checked={form.useSpecialQuota}
-                              onChange={(e) => setForm((f) => ({ ...f, useSpecialQuota: e.target.checked }))}
-                            />
-                            Use special quota
-                          </label>
-                          {form.useSpecialQuota && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                              <div className="space-y-1">
-                                <select
-                                  value={form.specialReasonCode}
-                                  onChange={(e) => setForm((f) => ({ ...f, specialReasonCode: e.target.value }))}
-                                  disabled={specialReasons.filter((reason: any) => reason?.isActive !== false).length === 0}
-                                  className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white disabled:opacity-60"
-                                >
-                                  <option value="">Select special reason…</option>
-                                  {specialReasons
-                                    .filter((reason: any) => reason?.isActive !== false)
-                                    .map((reason: any) => (
-                                      <option key={reason.code} value={reason.code}>
-                                        {reason.labelEn || reason.label_en || reason.code}
-                                      </option>
-                                    ))}
-                                </select>
-                                {specialReasons.filter((reason: any) => reason?.isActive !== false).length === 0 && (
-                                  <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                                    No active special reasons are configured.
-                                  </p>
-                                )}
-                              </div>
-                              <input
-                                value={form.specialReasonNote}
-                                onChange={(e) => setForm((f) => ({ ...f, specialReasonNote: e.target.value }))}
-                                placeholder="Special quota note (optional)"
-                                className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
-                              />
+                        <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+                          <input
+                            type="checkbox"
+                            checked={form.useSpecialQuota}
+                            onChange={(e) => setForm((f) => ({ ...f, useSpecialQuota: e.target.checked }))}
+                          />
+                          Use special quota
+                        </label>
+                        {form.useSpecialQuota && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div className="space-y-1">
+                              <select
+                                value={form.specialReasonCode}
+                                onChange={(e) => setForm((f) => ({ ...f, specialReasonCode: e.target.value }))}
+                                disabled={specialReasons.filter((reason: any) => reason?.isActive !== false).length === 0}
+                                className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white disabled:opacity-60"
+                              >
+                                <option value="">Select special reason…</option>
+                                {specialReasons
+                                  .filter((reason: any) => reason?.isActive !== false)
+                                  .map((reason: any) => (
+                                    <option key={reason.code} value={reason.code}>
+                                      {reason.labelEn || reason.label_en || reason.code}
+                                    </option>
+                                  ))}
+                              </select>
+                              {specialReasons.filter((reason: any) => reason?.isActive !== false).length === 0 && (
+                                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                                  No active special reasons are configured.
+                                </p>
+                              )}
                             </div>
-                          )}
-                          <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
                             <input
-                              type="checkbox"
-                              checked={form.includeOverrideCandidates}
-                              onChange={(e) => setForm((f) => ({ ...f, includeOverrideCandidates: e.target.checked }))}
+                              value={form.specialReasonNote}
+                              onChange={(e) => setForm((f) => ({ ...f, specialReasonNote: e.target.value }))}
+                              placeholder="Special quota note (optional)"
+                              className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white"
                             />
-                            Include dates needing supervisor approval
-                          </label>
-                        </>
-                      )}
-                    </div>
-                  </details>
-                </div>
+                          </div>
+                        )}
+                        <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+                          <input
+                            type="checkbox"
+                            checked={form.includeOverrideCandidates}
+                            onChange={(e) => setForm((f) => ({ ...f, includeOverrideCandidates: e.target.checked }))}
+                          />
+                          Include dates needing supervisor approval
+                        </label>
+                      </div>
+                    </details>
+                  </div>
+                ) : (
+                  <div className="md:col-span-2 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30 p-3">
+                    <p className="text-sm font-medium text-stone-700 dark:text-stone-300">Advanced scheduling options</p>
+                    <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                      Unavailable because the scheduling engine is currently disabled.
+                    </p>
+                  </div>
+                )}
                 <div className="md:col-span-2">
                   <DateInput
                     label="Appointment date"
@@ -748,7 +781,12 @@ export default function AppointmentsPage() {
                           {suggestionInfo.label}: {formatDateLy(suggestionInfo.date)}
                           <button
                             type="button"
-                            onClick={() => setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }))}
+                            onClick={() => {
+                              const offset = Math.max(0, dayOffsetFromToday(suggestionInfo.date));
+                              setAvailPage(Math.floor(offset / pageDays));
+                              setTypedDateError(null);
+                              setForm((f) => ({ ...f, appointmentDate: suggestionInfo.date }));
+                            }}
                             className="ml-2 underline underline-offset-2"
                           >
                             Use this date

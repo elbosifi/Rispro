@@ -12,8 +12,9 @@ test("scheduling config uses lookup object arrays for modalities and exam types"
 
 test("scheduling config renders accordion sections", async () => {
   const content = await readFile(filePath, "utf-8");
-  assert.ok(content.includes("<details className=\"rounded-lg border"));
-  assert.ok(content.includes("<summary className=\"cursor-pointer list-none\""));
+  assert.ok(content.includes("<section className=\"rounded-lg border"));
+  assert.ok(content.includes("<details className=\"space-y-2\""));
+  assert.ok(content.includes("<summary className=\"cursor-pointer list-none text-[11px]"));
 });
 
 test("scheduling config has rule-type-aware field visibility", async () => {
