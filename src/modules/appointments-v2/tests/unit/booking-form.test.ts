@@ -148,6 +148,23 @@ describe("BookingForm — component structure", () => {
   });
 });
 
+describe("BookingForm — special reason source", () => {
+  const bookingFormPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/booking-form.tsx";
+
+  it("loads special reasons from V2 API hook", async () => {
+    const content = await readFile(bookingFormPath, "utf-8");
+    assert.ok(content.includes("useV2SpecialReasonCodes"));
+    assert.ok(content.includes("specialReasons.data?.map"));
+  });
+
+  it("does not hardcode legacy special reason options", async () => {
+    const content = await readFile(bookingFormPath, "utf-8");
+    assert.ok(!content.includes('value="urgent_oncology"'));
+    assert.ok(!content.includes('value="medical_priority"'));
+    assert.ok(!content.includes('value="equipment_window"'));
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Test: Barrel exports verification (type-level only — runtime requires DOM)
 // ---------------------------------------------------------------------------

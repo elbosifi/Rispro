@@ -118,6 +118,7 @@ export function AppointmentsV2Page() {
   );
 
   const disabled = modalityId == null;
+  const noPublishedPolicy = availability.data?.meta?.noPublishedPolicy === true;
 
   return (
     <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
@@ -305,13 +306,41 @@ export function AppointmentsV2Page() {
         <p style={{ color: "var(--color-error, #ef4444)" }}>
           Error loading availability: {(availability.error as Error).message}
         </p>
+      ) : noPublishedPolicy ? (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 8,
+            border: "1px solid var(--border-color, #e2e8f0)",
+            background: "var(--bg-surface, #f8fafc)",
+          }}
+        >
+          <p style={{ color: "var(--text-primary, #1e293b)", fontWeight: 600, marginBottom: 6 }}>
+            No scheduling policy has been published yet.
+          </p>
+          <p style={{ color: "var(--text-muted, #64748b)", marginBottom: user?.role === "supervisor" ? 12 : 0 }}>
+            Availability is currently empty because the V2 policy is not published.
+          </p>
+          {user?.role === "supervisor" && (
+            <button
+              type="button"
+              onClick={() => navigate("/v2/appointments/admin")}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: "1px solid var(--border-color, #e2e8f0)",
+                background: "var(--bg-page, #fff)",
+                cursor: "pointer",
+              }}
+            >
+              Open V2 Policy Admin
+            </button>
+          )}
+        </div>
       ) : availability.data?.items.length === 0 ? (
         <div>
           <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
             No availability data found for the selected criteria.
-          </p>
-          <p style={{ color: "var(--text-muted, #64748b)", fontSize: 13 }}>
-            If no policy is published, supervisors can publish one from V2 Policy Admin.
           </p>
         </div>
       ) : (

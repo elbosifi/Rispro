@@ -9,7 +9,7 @@
 import { useState, useEffect } from "react";
 import { Calendar, Plus, Loader2 } from "lucide-react";
 import { pushToast } from "@/lib/toast";
-import { useV2CreateBooking, evaluateV2Scheduling } from "../api";
+import { useV2CreateBooking, evaluateV2Scheduling, useV2SpecialReasonCodes } from "../api";
 import { PatientSearch } from "./patient-search";
 import { OverrideDialog } from "./override-dialog";
 import type {
@@ -57,6 +57,7 @@ export function BookingForm({
   const [pendingBooking, setPendingBooking] = useState<CreateBookingRequest | null>(null);
 
   const createBooking = useV2CreateBooking();
+  const specialReasons = useV2SpecialReasonCodes();
 
   const modality = modalities.find((m) => m.id === selectedModalityId);
 
@@ -380,9 +381,12 @@ export function BookingForm({
                   }}
                 >
                   <option value="">Select special reason…</option>
-                  <option value="urgent_oncology">Urgent oncology case</option>
-                  <option value="medical_priority">Medical priority</option>
-                  <option value="equipment_window">Special equipment window</option>
+                  {specialReasons.isLoading && <option value="">Loading…</option>}
+                  {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
+                    <option key={reason.code} value={reason.code}>
+                      {reason.labelEn || reason.code}
+                    </option>
+                  ))}
                 </select>
               )}
             </div>

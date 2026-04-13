@@ -216,3 +216,36 @@ describe("Shadow mode — isShadowModeEnabled", () => {
     assert.equal(isShadowModeEnabled(), false);
   });
 });
+
+describe("Shadow mode — availability path wiring", () => {
+  it("availability route invokes runAvailabilityWithShadow", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/scheduling-v2-routes.ts",
+      "utf-8"
+    );
+    assert.ok(source.includes("runAvailabilityWithShadow("));
+  });
+
+  it("shadow flag path includes appointments_v2_shadow_mode_enabled", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/observability/shadow-availability.ts",
+      "utf-8"
+    );
+    assert.ok(source.includes("appointments_v2_shadow_mode_enabled"));
+  });
+});
+
+describe("Shadow mode — failure safety", () => {
+  it("keeps shadow errors non-blocking and returns legacy results", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/observability/shadow-availability.ts",
+      "utf-8"
+    );
+    assert.ok(source.includes("try {"));
+    assert.ok(source.includes("Shadow mode comparison failed"));
+    assert.ok(source.includes("return legacyResults;"));
+  });
+});

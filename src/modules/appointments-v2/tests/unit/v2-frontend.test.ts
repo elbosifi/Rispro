@@ -159,6 +159,36 @@ describe("V2 Frontend — types shape validation", () => {
     assert.equal(typeof day.decision.displayStatus, "string");
     assert.ok(["available", "restricted", "blocked"].includes(day.decision.displayStatus));
   });
+
+  it("AvailabilityResponse supports optional noPublishedPolicy meta", () => {
+    const response = {
+      items: [],
+      meta: {
+        noPublishedPolicy: true,
+      },
+    };
+
+    assert.ok(Array.isArray(response.items));
+    assert.equal(response.meta?.noPublishedPolicy, true);
+  });
+});
+
+describe("V2 Frontend — no published policy state", () => {
+  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+
+  it("renders explicit no-policy message", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes("No scheduling policy has been published yet."));
+    assert.ok(source.includes("noPublishedPolicy"));
+  });
+
+  it("shows supervisor CTA to /v2/appointments/admin", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes('navigate("/v2/appointments/admin")'));
+    assert.ok(source.includes('user?.role === "supervisor"'));
+  });
 });
 
 // ---------------------------------------------------------------------------

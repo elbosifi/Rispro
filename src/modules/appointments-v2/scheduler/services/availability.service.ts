@@ -46,10 +46,23 @@ export interface GetAvailabilityParams {
   includeOverrideCandidates?: boolean;
 }
 
+export interface AvailabilityQueryResult {
+  items: AvailabilityDayDto[];
+  noPublishedPolicy: boolean;
+}
+
 export async function getAvailability(
   params: GetAvailabilityParams,
   policySetKey: string = "default"
 ): Promise<AvailabilityDayDto[]> {
+  const result = await getAvailabilityWithMeta(params, policySetKey);
+  return result.items;
+}
+
+export async function getAvailabilityWithMeta(
+  params: GetAvailabilityParams,
+  policySetKey: string = "default"
+): Promise<AvailabilityQueryResult> {
   const client = await pool.connect();
   try {
     return getAvailabilityInternal(client, params, policySetKey);
@@ -62,17 +75,17 @@ async function getAvailabilityInternal(
   client: PoolClient,
   params: GetAvailabilityParams,
   policySetKey: string
-): Promise<AvailabilityDayDto[]> {
+): Promise<AvailabilityQueryResult> {
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
-    return [];
+    return { items: [], noPublishedPolicy: true };
   }
 
   // 2. Load modality for daily capacity
   const modality = await findModalityById(client, params.modalityId);
   if (!modality) {
-    return [];
+    return { items: [], noPublishedPolicy: false };
   }
 
   // 3. Load integrity checks
@@ -180,5 +193,5 @@ async function getAvailabilityInternal(
     });
   }
 
-  return results;
+  return { items: results, noPublishedPolicy: false };
 }

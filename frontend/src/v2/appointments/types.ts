@@ -79,6 +79,9 @@ export interface AvailabilityDayDto {
 
 export interface AvailabilityResponse {
   items: AvailabilityDayDto[];
+  meta?: {
+    noPublishedPolicy?: boolean;
+  };
 }
 
 export interface SuggestionDto {
@@ -158,6 +161,13 @@ export interface ExamTypeDto {
 export interface LookupsResponse {
   modalities: ModalityDto[];
   examTypes: ExamTypeDto[];
+}
+
+export interface SpecialReasonCodeDto {
+  code: string;
+  labelAr: string;
+  labelEn: string;
+  isActive: boolean;
 }
 
 export interface BookingWithPatientInfo {

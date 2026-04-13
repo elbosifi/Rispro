@@ -4,6 +4,7 @@
  * Mounts under /api/v2/lookups
  * - GET /modalities — list active modalities
  * - GET /modalities/:modalityId/exam-types — list active exam types for a modality
+ * - GET /special-reason-codes — list active special reason codes
  *
  * These endpoints serve the V2 frontend's modality/exam-type selectors.
  * They use the V2 catalog repositories and require only authentication
@@ -82,6 +83,40 @@ router.get(
           isActive: e.isActive,
         })),
       });
+    } finally {
+      client.release();
+    }
+  })
+);
+
+/**
+ * GET /api/v2/lookups/special-reason-codes
+ * Return active special reason codes used by V2 special quota booking.
+ */
+router.get(
+  "/special-reason-codes",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const client = await pool.connect();
+    try {
+      const result = await client.query<{
+        code: string;
+        labelAr: string;
+        labelEn: string;
+        isActive: boolean;
+      }>(
+        `
+          select
+            code,
+            label_ar as "labelAr",
+            label_en as "labelEn",
+            is_active as "isActive"
+          from appointments_v2.special_reason_codes
+          where is_active = true
+          order by code asc
+        `
+      );
+
+      res.json({ items: result.rows });
     } finally {
       client.release();
     }

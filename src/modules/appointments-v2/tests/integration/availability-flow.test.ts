@@ -94,10 +94,74 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
     });
 
     it("should reject availability for non-existent modality", async () => {
-      const { status } = await fetch(
+      const { status, data } = await fetch(
         "/api/v2/scheduling/availability?modalityId=99999&days=7&caseCategory=non_oncology"
       );
       assert.equal(status, 400);
+      const response = data as Record<string, unknown>;
+      assert.equal(
+        (response.meta as { noPublishedPolicy?: boolean } | undefined)?.noPublishedPolicy,
+        undefined
+      );
+    });
+
+    it("should set meta.noPublishedPolicy only when no published policy exists", async () => {
+      const { pool } = await import("../../../../db/pool.js");
+      const publishedResult = await pool.query<{ id: number }>(
+        `select id
+         from appointments_v2.policy_versions
+         where policy_set_id = $1 and status = 'published'`,
+        [testData.policySetId]
+      );
+      const publishedIds = publishedResult.rows.map((r) => Number(r.id));
+
+      try {
+        if (publishedIds.length > 0) {
+          await pool.query(
+            `update appointments_v2.policy_versions
+             set status = 'archived'
+             where id = any($1::bigint[])`,
+            [publishedIds]
+          );
+        }
+
+        const { status, data } = await fetch(
+          `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=7&caseCategory=non_oncology`
+        );
+        assert.equal(status, 200);
+
+        const response = data as Record<string, unknown>;
+        assert.deepEqual(response.items, []);
+        assert.equal(
+          (response.meta as { noPublishedPolicy?: boolean } | undefined)?.noPublishedPolicy,
+          true
+        );
+      } finally {
+        if (publishedIds.length > 0) {
+          await pool.query(
+            `update appointments_v2.policy_versions
+             set status = 'published',
+                 published_at = coalesce(published_at, now()),
+                 published_by_user_id = coalesce(published_by_user_id, created_by_user_id)
+             where id = any($1::bigint[])`,
+            [publishedIds]
+          );
+        }
+      }
+    });
+
+    it("should not set noPublishedPolicy for other empty-result scenarios", async () => {
+      const { status, data } = await fetch(
+        `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=0&caseCategory=non_oncology`
+      );
+
+      assert.equal(status, 200);
+      const response = data as Record<string, unknown>;
+      assert.deepEqual(response.items, []);
+      assert.equal(
+        (response.meta as { noPublishedPolicy?: boolean } | undefined)?.noPublishedPolicy,
+        undefined
+      );
     });
   });
 

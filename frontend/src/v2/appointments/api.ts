@@ -23,6 +23,7 @@ import type {
   PolicyStatusDto,
   PolicySnapshotDto,
   PolicyPreviewDto,
+  SpecialReasonCodeDto,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -108,6 +109,11 @@ export async function fetchV2ExamTypes(modalityId: number): Promise<ExamTypeDto[
 export async function fetchV2Lookups(): Promise<LookupsResponse> {
   const modalities = await fetchV2Modalities();
   return { modalities, examTypes: [] };
+}
+
+export async function fetchV2SpecialReasonCodes(): Promise<SpecialReasonCodeDto[]> {
+  const response = await api<{ items: SpecialReasonCodeDto[] }>("/v2/lookups/special-reason-codes");
+  return response.items;
 }
 
 export async function createV2Booking(input: CreateBookingRequest): Promise<BookingResponse> {
@@ -242,6 +248,14 @@ export function useV2ExamTypes(modalityId: number | null) {
     queryKey: ["v2-exam-types", modalityId] as const,
     queryFn: () => (modalityId != null ? fetchV2ExamTypes(modalityId) : []),
     enabled: modalityId != null,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useV2SpecialReasonCodes() {
+  return useQuery({
+    queryKey: ["v2-special-reason-codes"] as const,
+    queryFn: fetchV2SpecialReasonCodes,
     staleTime: 5 * 60_000,
   });
 }
