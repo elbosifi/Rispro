@@ -121,6 +121,7 @@ export interface AppointmentLookups {
   modalities: Modality[];
   examTypes: ExamType[];
   priorities: ReportingPriority[];
+  specialReasons?: SchedulingSpecialReason[];
 }
 
 export interface QueueSummary {

@@ -191,6 +191,13 @@ interface ReportingPriorityRow {
   name_en: string;
 }
 
+interface SpecialReasonCodeRow {
+  code: string;
+  label_ar: string;
+  label_en: string;
+  is_active: boolean;
+}
+
 export interface AppointmentCreateResult {
   appointment: AppointmentDbRow;
   patient: PatientLookupRow;
@@ -351,7 +358,7 @@ function normalizeOverridePayload(payload: UnknownRecord, options: AppointmentUp
   const nested = (payload.override as OverridePayload | undefined) || {};
   const username = String(nested.supervisorUsername ?? options.supervisorUsername ?? payload.supervisorUsername ?? "").trim();
   const password = String(nested.supervisorPassword ?? options.supervisorPassword ?? payload.supervisorPassword ?? "").trim();
-  const reason = String(nested.reason ?? payload.overbookingReason ?? "").trim();
+  const reason = String(nested.reason ?? payload.overrideReason ?? payload.overbookingReason ?? "").trim();
   return { username, password, reason };
 }
 
@@ -804,8 +811,9 @@ export async function listAppointmentLookups(): Promise<{
   modalities: ModalityRow[];
   examTypes: ExamTypeRow[];
   priorities: ReportingPriorityRow[];
+  specialReasons: SpecialReasonCodeRow[];
 }> {
-  const [modalitiesResult, examTypesResult, prioritiesResult] = await Promise.all([
+  const [modalitiesResult, examTypesResult, prioritiesResult, specialReasonsResult] = await Promise.all([
     pool.query(`
       select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, safety_warning_ar, safety_warning_en, safety_warning_enabled
       from modalities
@@ -822,13 +830,20 @@ export async function listAppointmentLookups(): Promise<{
       select id, code, name_ar, name_en, sort_order
       from reporting_priorities
       order by sort_order asc, name_en asc
+    `),
+    pool.query(`
+      select code, label_ar, label_en, is_active
+      from special_reason_codes
+      where is_active = true
+      order by code asc
     `)
   ]);
 
   return {
     modalities: modalitiesResult.rows as unknown as ModalityRow[],
     examTypes: examTypesResult.rows as unknown as ExamTypeRow[],
-    priorities: prioritiesResult.rows as unknown as ReportingPriorityRow[]
+    priorities: prioritiesResult.rows as unknown as ReportingPriorityRow[],
+    specialReasons: specialReasonsResult.rows as unknown as SpecialReasonCodeRow[]
   };
 }
 

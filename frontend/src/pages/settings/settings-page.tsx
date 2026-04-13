@@ -1284,7 +1284,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
 
   // Build modality options for dropdowns
   const modalityOptions = useMemo(() => {
-    const rows = Array.isArray(modalityLookup) ? modalityLookup : [];
+    const rows = Array.isArray(modalityLookup?.modalities) ? modalityLookup.modalities : [];
     return rows
       .filter((m: any) => m.isActive !== false)
       .map((m: any) => ({ value: String(m.id), label: m.nameEn || m.name_en || `Modality ${m.id}` }));
@@ -1292,7 +1292,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
 
   // Build exam type options for dropdowns
   const examTypeOptions = useMemo(() => {
-    const rows = Array.isArray(examTypeLookup) ? examTypeLookup : [];
+    const rows = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
     return rows
       .filter((et: any) => et.isActive !== false)
       .map((et: any) => ({ value: String(et.id), label: et.nameEn || et.name_en || `Exam ${et.id}` }));
@@ -1461,6 +1461,64 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
       queryClient.invalidateQueries({ queryKey: ["scheduling-engine-config"] });
     }
   });
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const validateDraft = (value: SchedulingDraft): string[] => {
+    const errors: string[] = [];
+
+    value.categoryLimits.forEach((row, index) => {
+      if (!row.modalityId.trim()) errors.push(`Daily category limits row ${index + 1}: modality is required.`);
+      if (!row.dailyLimit.trim()) errors.push(`Daily category limits row ${index + 1}: daily limit is required.`);
+    });
+
+    value.blockedRules.forEach((row, index) => {
+      if (!row.modalityId.trim()) errors.push(`Blocked dates row ${index + 1}: modality is required.`);
+      if (row.ruleType === "specific_date" && !row.specificDate) {
+        errors.push(`Blocked dates row ${index + 1}: specific date is required.`);
+      }
+      if (row.ruleType === "date_range" && (!row.startDate || !row.endDate)) {
+        errors.push(`Blocked dates row ${index + 1}: start and end dates are required.`);
+      }
+      if (row.ruleType === "yearly_recurrence") {
+        if (!row.recurStartMonth || !row.recurStartDay) {
+          errors.push(`Blocked dates row ${index + 1}: recurrence start month/day is required.`);
+        }
+      }
+    });
+
+    value.examRules.forEach((row, index) => {
+      if (!row.modalityId.trim()) errors.push(`Exam date rules row ${index + 1}: modality is required.`);
+      if (!row.effectMode) errors.push(`Exam date rules row ${index + 1}: effect mode is required.`);
+      if ((row.examTypeIds || []).length === 0) errors.push(`Exam date rules row ${index + 1}: select at least one exam type.`);
+      if (row.ruleType === "specific_date" && !row.specificDate) {
+        errors.push(`Exam date rules row ${index + 1}: specific date is required.`);
+      }
+      if (row.ruleType === "date_range" && (!row.startDate || !row.endDate)) {
+        errors.push(`Exam date rules row ${index + 1}: start and end dates are required.`);
+      }
+      if (row.ruleType === "weekly_recurrence" && !row.weekday) {
+        errors.push(`Exam date rules row ${index + 1}: weekday is required.`);
+      }
+    });
+
+    value.specialQuotas.forEach((row, index) => {
+      if (!row.examTypeId.trim()) errors.push(`Special quotas row ${index + 1}: exam type is required.`);
+      if (!row.dailyExtraSlots.trim()) errors.push(`Special quotas row ${index + 1}: extra slots is required.`);
+    });
+
+    value.specialReasons.forEach((row, index) => {
+      if (!row.code.trim()) errors.push(`Special reason codes row ${index + 1}: code is required.`);
+      if (!row.labelEn.trim()) errors.push(`Special reason codes row ${index + 1}: English label is required.`);
+      if (!row.labelAr.trim()) errors.push(`Special reason codes row ${index + 1}: Arabic label is required.`);
+    });
+
+    value.identifierTypes.forEach((row, index) => {
+      if (!row.code.trim()) errors.push(`Patient identifier types row ${index + 1}: code is required.`);
+      if (!row.labelEn.trim()) errors.push(`Patient identifier types row ${index + 1}: English label is required.`);
+      if (!row.labelAr.trim()) errors.push(`Patient identifier types row ${index + 1}: Arabic label is required.`);
+    });
+
+    return errors;
+  };
 
   if (error) {
     const msg = (error as Error).message;
@@ -1521,19 +1579,21 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     addRow: () => void,
     renderRow: (row: Record<string, unknown>, index: number) => React.ReactNode
   ) => (
-    <section className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <h4 className="font-medium text-sm">{title}</h4>
-        <button type="button" className="btn-secondary text-xs" onClick={addRow}>
-          {ACTION_LABELS.add[key]}
-        </button>
-      </div>
-      <p className="text-[11px] text-stone-500 dark:text-stone-400">{helper}</p>
+    <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2" open>
+      <summary className="cursor-pointer list-none">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="font-medium text-sm">{title}</h4>
+          <button type="button" className="btn-secondary text-xs" onClick={addRow}>
+            {ACTION_LABELS.add[key]}
+          </button>
+        </div>
+      </summary>
+      <p className="text-[11px] text-stone-500 dark:text-stone-400 mt-2">{helper}</p>
       {draft[key].map((row, index) => renderRow(row as Record<string, unknown>, index))}
       {draft[key].length === 0 && (
         <p className="text-[11px] text-stone-400 dark:text-stone-500 italic">No rows configured yet.</p>
       )}
-    </section>
+    </details>
   );
 
   return (
@@ -1576,19 +1636,29 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
                 <option key={k} value={k}>{v}</option>
               ))}
             </select>
-            <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
-            <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
-            <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
-            <div className="flex gap-2">
-              <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurStartMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartMonth: e.target.value } : r) }))} />
-              <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurStartDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartDay: e.target.value } : r) }))} />
-              <span className="text-[10px] text-stone-400 self-center">Recur start</span>
-            </div>
-            <div className="flex gap-2">
-              <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurEndMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndMonth: e.target.value } : r) }))} />
-              <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurEndDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndDay: e.target.value } : r) }))} />
-              <span className="text-[10px] text-stone-400 self-center">Recur end</span>
-            </div>
+            {row.ruleType === "specific_date" && (
+              <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
+            )}
+            {row.ruleType === "date_range" && (
+              <>
+                <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
+              </>
+            )}
+            {row.ruleType === "yearly_recurrence" && (
+              <>
+                <div className="flex gap-2">
+                  <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurStartMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartMonth: e.target.value } : r) }))} />
+                  <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurStartDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartDay: e.target.value } : r) }))} />
+                  <span className="text-[10px] text-stone-400 self-center">Recur start</span>
+                </div>
+                <div className="flex gap-2">
+                  <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurEndMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndMonth: e.target.value } : r) }))} />
+                  <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurEndDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndDay: e.target.value } : r) }))} />
+                  <span className="text-[10px] text-stone-400 self-center">Recur end</span>
+                </div>
+              </>
+            )}
             <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isOverridable as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, isOverridable: e.target.checked } : r) }))} /> {ACTION_LABELS.overridable}</label>
@@ -1623,17 +1693,27 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
                 onChange={(ids) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, examTypeIds: ids } : r) }))}
               />
             </div>
-            <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
-            <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
-            <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
-            <div className="space-y-1">
-              <p className="text-[10px] text-stone-500">Weekday</p>
-              <WeekdaySelect value={row.weekday as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, weekday: v } : r) }))} />
-            </div>
-            <input className="input-field text-xs" type="date" placeholder="Recurrence anchor date" value={row.recurrenceAnchorDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, recurrenceAnchorDate: e.target.value } : r) }))} />
+            {row.ruleType === "specific_date" && (
+              <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
+            )}
+            {row.ruleType === "date_range" && (
+              <>
+                <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
+              </>
+            )}
+            {row.ruleType === "weekly_recurrence" && (
+              <>
+                <div className="space-y-1">
+                  <p className="text-[10px] text-stone-500">Weekday</p>
+                  <WeekdaySelect value={row.weekday as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, weekday: v } : r) }))} />
+                </div>
+                <input className="input-field text-xs" type="date" placeholder="Recurrence anchor date" value={row.recurrenceAnchorDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, recurrenceAnchorDate: e.target.value } : r) }))} />
+                <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.alternateWeeks as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, alternateWeeks: e.target.checked } : r) }))} /> {ACTION_LABELS.alternateWeeks}</label>
+              </>
+            )}
             <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
-            <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.alternateWeeks as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, alternateWeeks: e.target.checked } : r) }))} /> {ACTION_LABELS.alternateWeeks}</label>
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
             <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, examRules: prev.examRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
@@ -1701,11 +1781,25 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           type="button"
           disabled={saveMutation.isPending}
           className="px-6 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors text-sm"
-          onClick={() => saveMutation.mutate(serializeDraft(draft))}
+          onClick={() => {
+            const errors = validateDraft(draft);
+            setValidationErrors(errors);
+            if (errors.length > 0) return;
+            saveMutation.mutate(serializeDraft(draft));
+          }}
         >
           {saveMutation.isPending ? ACTION_LABELS.saving : ACTION_LABELS.save}
         </button>
       </div>
+
+      {validationErrors.length > 0 && (
+        <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-sm">
+          {validationErrors.slice(0, 8).map((error, index) => (
+            <p key={`validation-${index}`}>{error}</p>
+          ))}
+          {validationErrors.length > 8 && <p>...and {validationErrors.length - 8} more.</p>}
+        </div>
+      )}
 
       {saveMutation.isError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">

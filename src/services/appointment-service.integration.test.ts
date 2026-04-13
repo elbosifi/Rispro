@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import {
   createAppointment,
+  listAppointmentLookups,
   listAvailability,
   listSuggestedAppointments,
   updateAppointment
@@ -849,5 +850,39 @@ test("integration: approved_but_failed is audited when post-approval update fail
   } finally {
     await fx.cleanup();
     await pool.query(`delete from users where id = $1`, [supervisorId]);
+  }
+});
+
+test("integration: appointment lookups include active special reasons only (sorted by code)", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const activeCodeA = `A_${suffix}`;
+  const activeCodeB = `B_${suffix}`;
+  const inactiveCode = `Z_${suffix}`;
+
+  try {
+    await pool.query(
+      `
+        insert into special_reason_codes (code, label_ar, label_en, is_active)
+        values
+          ($1, 'سبب أ', 'Reason A', true),
+          ($2, 'سبب ب', 'Reason B', true),
+          ($3, 'سبب غير نشط', 'Inactive Reason', false)
+        on conflict (code) do update
+        set label_ar = excluded.label_ar, label_en = excluded.label_en, is_active = excluded.is_active, updated_at = now()
+      `,
+      [activeCodeA, activeCodeB, inactiveCode]
+    );
+
+    const lookups = await listAppointmentLookups();
+    const codes = (lookups.specialReasons ?? []).map((reason) => reason.code);
+    assert.ok(codes.includes(activeCodeA), "Active special reason A should be included");
+    assert.ok(codes.includes(activeCodeB), "Active special reason B should be included");
+    assert.ok(!codes.includes(inactiveCode), "Inactive special reason should be excluded");
+
+    const filteredCodes = codes.filter((code) => code === activeCodeA || code === activeCodeB);
+    assert.deepEqual(filteredCodes, [activeCodeA, activeCodeB], "Special reasons should be sorted by code asc");
+  } finally {
+    await pool.query(`delete from special_reason_codes where code = any($1::text[])`, [[activeCodeA, activeCodeB, inactiveCode]]);
   }
 });

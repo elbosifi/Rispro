@@ -37,82 +37,17 @@ function asRecordArray(value: unknown): UnknownRecord[] {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers for idempotent upserts
+// Helpers for authoritative section saves
 // ---------------------------------------------------------------------------
 
-/**
- * For a given table, find which existing row ids are NOT present in the
- * incoming payload.  Returns an array of ids that should be soft-disabled.
- */
-async function findOmittedRowIds(
+async function deactivateAllRows(
   client: PoolClient,
   table: string,
-  payloadIds: number[]
-): Promise<number[]> {
-  if (payloadIds.length === 0) return [];
-  const { rows } = await client.query<{ id: number }>(
-    `select id from ${table} where id = any($1::bigint[])`,
-    [payloadIds]
-  );
-  const present = new Set(rows.map((r: { id: number }) => Number(r.id)));
-  // We need the inverse: rows that exist in DB but NOT in payload.
-  // Fetch all current ids first.
-  const allRows = await client.query<{ id: number }>(
-    `select id from ${table} order by id asc`
-  );
-  return allRows.rows
-    .map((r: { id: number }) => Number(r.id))
-    .filter((id: number) => !present.has(id));
-}
-
-/**
- * Soft-disable rows that exist in the database but were omitted from the
- * payload.  Uses the provided scope column to limit which rows are affected.
- */
-async function softDisableOmittedRows(
-  client: PoolClient,
-  table: string,
-  scopeColumn: string | null,
-  scopeValue: unknown,
-  omittedIds: number[],
   actingUserId: UserId
 ): Promise<void> {
-  if (omittedIds.length === 0) return;
-  const placeholders = omittedIds.map((_, i) => `$${i + 3}`).join(",");
-  let sql = `update ${table} set is_active = false, updated_by_user_id = $1, updated_at = now() where id in (${placeholders})`;
-  const params: unknown[] = [actingUserId, ...omittedIds];
-
-  // If the save is scoped to a specific modality (or similar), only
-  // soft-disable rows that belong to that scope AND are omitted.
-  if (scopeColumn && scopeValue !== undefined && scopeValue !== null) {
-    const scopeNum = normalizePositiveInteger(scopeValue, scopeColumn) as number;
-    sql = `update ${table} set is_active = false, updated_by_user_id = $1, updated_at = now() where ${scopeColumn} = $2 and id in (${placeholders})`;
-    params.splice(1, 0, scopeNum);
-  }
-
-  await client.query(sql, params);
-}
-
-/**
- * Soft-disable exam rules for a modality that were omitted from payload.
- */
-async function softDisableOmittedExamRules(
-  client: PoolClient,
-  modalityId: number,
-  payloadRuleIds: number[],
-  actingUserId: UserId
-): Promise<void> {
-  if (payloadRuleIds.length === 0) {
-    return;
-  }
   await client.query(
-    `
-      update exam_type_schedule_rules
-      set is_active = false, updated_by_user_id = $1, updated_at = now()
-      where modality_id = $2
-        and id <> all($3::bigint[])
-    `,
-    [actingUserId as number, modalityId, payloadRuleIds]
+    `update ${table} set is_active = false, updated_by_user_id = $1, updated_at = now() where is_active = true`,
+    [actingUserId]
   );
 }
 
@@ -125,7 +60,12 @@ async function syncCategoryLimits(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    await deactivateAllRows(client, "modality_category_daily_limits", actingUserId);
+    return;
+  }
+
+  const keepIds: number[] = [];
 
   for (const row of rows) {
     const modalityId = normalizePositiveInteger(row.modalityId ?? row.modality_id, "modalityId") as number;
@@ -138,17 +78,19 @@ async function syncCategoryLimits(
     const existingId = normalizePositiveInteger(row.id, "id") as number | null;
 
     if (existingId) {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           update modality_category_daily_limits
           set modality_id = $2, case_category = $3, daily_limit = $4,
               is_active = $5, updated_by_user_id = $6, updated_at = now()
           where id = $1
+          returning id
         `,
         [existingId, modalityId, category, Math.max(0, Math.floor(limit)), toBool(row.isActive ?? row.is_active, true), actingUserId]
       );
+      keepIds.push(Number(result.rows[0]?.id || existingId));
     } else {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           insert into modality_category_daily_limits (
             modality_id, case_category, daily_limit, is_active, created_by_user_id, updated_by_user_id
@@ -156,11 +98,22 @@ async function syncCategoryLimits(
           on conflict (modality_id, case_category)
           do update set daily_limit = excluded.daily_limit, is_active = excluded.is_active,
                         updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+          returning id
         `,
         [modalityId, category, Math.max(0, Math.floor(limit)), toBool(row.isActive ?? row.is_active, true), actingUserId]
       );
+      keepIds.push(Number(result.rows[0]?.id));
     }
   }
+
+  await client.query(
+    `
+      update modality_category_daily_limits
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where id <> all($2::bigint[])
+    `,
+    [actingUserId, keepIds]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +125,12 @@ async function syncBlockedRules(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    await deactivateAllRows(client, "modality_blocked_rules", actingUserId);
+    return;
+  }
+
+  const keepIds: number[] = [];
 
   for (const row of rows) {
     const modalityId = normalizePositiveInteger(row.modalityId ?? row.modality_id, "modalityId") as number;
@@ -180,7 +138,7 @@ async function syncBlockedRules(
     const existingId = normalizePositiveInteger(row.id, "id") as number | null;
 
     if (existingId) {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           update modality_blocked_rules
           set modality_id = $2, rule_type = $3,
@@ -189,6 +147,7 @@ async function syncBlockedRules(
               is_overridable = $11, is_active = $12, title = nullif($13, ''), notes = nullif($14, ''),
               updated_by_user_id = $15, updated_at = now()
           where id = $1
+          returning id
         `,
         [
           existingId, modalityId, ruleType,
@@ -206,8 +165,9 @@ async function syncBlockedRules(
           actingUserId
         ]
       );
+      keepIds.push(Number(result.rows[0]?.id || existingId));
     } else {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           insert into modality_blocked_rules (
             modality_id, rule_type, specific_date, start_date, end_date,
@@ -215,6 +175,7 @@ async function syncBlockedRules(
             is_overridable, is_active, title, notes, created_by_user_id, updated_by_user_id
           )
           values ($1, $2, $3::date, $4::date, $5::date, $6, $7, $8, $9, $10, $11, nullif($12, ''), nullif($13, ''), $14, $14)
+          returning id
         `,
         [
           modalityId, ruleType,
@@ -232,8 +193,18 @@ async function syncBlockedRules(
           actingUserId
         ]
       );
+      keepIds.push(Number(result.rows[0]?.id));
     }
   }
+
+  await client.query(
+    `
+      update modality_blocked_rules
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where id <> all($2::bigint[])
+    `,
+    [actingUserId, keepIds]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -245,10 +216,12 @@ async function syncExamRules(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    await deactivateAllRows(client, "exam_type_schedule_rules", actingUserId);
+    return;
+  }
 
-  // Group rules by modality for soft-disable of omitted rules.
-  const rulesByModality = new Map<number, number[]>();
+  const keepRuleIds: number[] = [];
 
   for (const row of rows) {
     const modalityId = normalizePositiveInteger(row.modalityId ?? row.modality_id, "modalityId") as number;
@@ -258,7 +231,7 @@ async function syncExamRules(
     let ruleId: number;
 
     if (existingId) {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           update exam_type_schedule_rules
           set modality_id = $2, rule_type = $3, effect_mode = $4,
@@ -267,6 +240,7 @@ async function syncExamRules(
               title = nullif($11, ''), notes = nullif($12, ''), is_active = $13,
               updated_by_user_id = $14, updated_at = now()
           where id = $1
+          returning id
         `,
         [
           existingId, modalityId, ruleType,
@@ -283,7 +257,7 @@ async function syncExamRules(
           actingUserId
         ]
       );
-      ruleId = existingId;
+      ruleId = Number(result.rows[0]?.id || existingId);
     } else {
       const result = await client.query<{ id: number }>(
         `
@@ -312,9 +286,7 @@ async function syncExamRules(
       );
       ruleId = Number(result.rows[0]?.id);
     }
-
-    if (!rulesByModality.has(modalityId)) rulesByModality.set(modalityId, []);
-    rulesByModality.get(modalityId)!.push(ruleId);
+    keepRuleIds.push(ruleId);
 
     // Replace only this rule's items.
     const examTypeIdsRaw = Array.isArray(row.examTypeIds) ? row.examTypeIds : Array.isArray(row.exam_type_ids) ? row.exam_type_ids : [];
@@ -331,10 +303,14 @@ async function syncExamRules(
     }
   }
 
-  // Soft-disable exam rules for each modality that were omitted from payload.
-  for (const [modalityId, payloadIds] of rulesByModality) {
-    await softDisableOmittedExamRules(client, modalityId, payloadIds, actingUserId);
-  }
+  await client.query(
+    `
+      update exam_type_schedule_rules
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where id <> all($2::bigint[])
+    `,
+    [actingUserId, keepRuleIds]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -346,7 +322,12 @@ async function syncSpecialQuotas(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    await deactivateAllRows(client, "exam_type_special_quotas", actingUserId);
+    return;
+  }
+
+  const keepIds: number[] = [];
 
   for (const row of rows) {
     const examTypeId = normalizePositiveInteger(row.examTypeId ?? row.exam_type_id, "examTypeId") as number;
@@ -354,17 +335,19 @@ async function syncSpecialQuotas(
     const existingId = normalizePositiveInteger(row.id, "id") as number | null;
 
     if (existingId) {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           update exam_type_special_quotas
           set exam_type_id = $2, daily_extra_slots = $3, is_active = $4,
               updated_by_user_id = $5, updated_at = now()
           where id = $1
+          returning id
         `,
         [existingId, examTypeId, dailyExtraSlots, toBool(row.isActive ?? row.is_active, true), actingUserId]
       );
+      keepIds.push(Number(result.rows[0]?.id || existingId));
     } else {
-      await client.query(
+      const result = await client.query<{ id: number }>(
         `
           insert into exam_type_special_quotas (
             exam_type_id, daily_extra_slots, is_active, created_by_user_id, updated_by_user_id
@@ -372,11 +355,22 @@ async function syncSpecialQuotas(
           on conflict (exam_type_id)
           do update set daily_extra_slots = excluded.daily_extra_slots, is_active = excluded.is_active,
                         updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+          returning id
         `,
         [examTypeId, dailyExtraSlots, toBool(row.isActive ?? row.is_active, true), actingUserId]
       );
+      keepIds.push(Number(result.rows[0]?.id));
     }
   }
+
+  await client.query(
+    `
+      update exam_type_special_quotas
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where id <> all($2::bigint[])
+    `,
+    [actingUserId, keepIds]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -388,13 +382,19 @@ async function syncSpecialReasons(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    await deactivateAllRows(client, "special_reason_codes", actingUserId);
+    return;
+  }
+
+  const payloadCodes: string[] = [];
 
   for (const row of rows) {
     const code = String(row.code ?? "").trim();
     if (!code) {
       throw new HttpError(400, "Special reason code is required.");
     }
+    payloadCodes.push(code);
     await client.query(
       `
         insert into special_reason_codes (
@@ -411,6 +411,15 @@ async function syncSpecialReasons(
       [code, String(row.labelAr ?? row.label_ar ?? ""), String(row.labelEn ?? row.label_en ?? ""), toBool(row.isActive ?? row.is_active, true), actingUserId]
     );
   }
+
+  await client.query(
+    `
+      update special_reason_codes
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where code <> all($2::text[])
+    `,
+    [actingUserId, payloadCodes]
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -422,7 +431,18 @@ async function syncIdentifierTypes(
   rows: UnknownRecord[],
   actingUserId: UserId
 ): Promise<void> {
-  if (rows.length === 0) return;
+  const builtinCodes = ["national_id", "passport", "other"];
+  if (rows.length === 0) {
+    await client.query(
+      `
+        update patient_identifier_types
+        set is_active = false, updated_by_user_id = $1, updated_at = now()
+        where code <> all($2::text[])
+      `,
+      [actingUserId, builtinCodes]
+    );
+    return;
+  }
 
   const payloadCodes = new Set<string>();
   for (const row of rows) {
@@ -449,22 +469,15 @@ async function syncIdentifierTypes(
     );
   }
 
-  // Soft-disable custom (non-builtin) identifier types not in the payload.
-  // Built-ins: national_id, passport, other — never disable these.
-  const builtinCodes = ["national_id", "passport", "other"];
-  const omittedCustomCodes = [...payloadCodes].length > 0
-    ? await client.query<{ code: string }>(
-        `select code from patient_identifier_types where code <> all($1::text[]) and is_active = true`,
-        [builtinCodes]
-      )
-    : { rows: [] };
-
-  const customCodesToCheck = omittedCustomCodes.rows.map((r) => r.code);
-  if (customCodesToCheck.length > 0) {
-    // These are all custom codes currently active. We don't disable them
-    // unless the payload explicitly includes them with is_active=false.
-    // This preserves user-created types that might not be sent in every save.
-  }
+  const keepCodes = [...payloadCodes, ...builtinCodes];
+  await client.query(
+    `
+      update patient_identifier_types
+      set is_active = false, updated_by_user_id = $1, updated_at = now()
+      where code <> all($2::text[])
+    `,
+    [actingUserId, keepCodes]
+  );
 }
 
 // ---------------------------------------------------------------------------

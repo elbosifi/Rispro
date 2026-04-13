@@ -82,6 +82,9 @@ async function createFixture(): Promise<SettingsFixture> {
     await pool.query(`delete from exam_type_special_quotas where exam_type_id = $1`, [examTypeId]);
     await pool.query(`delete from exam_types where id = $1`, [examTypeId]);
     await pool.query(`delete from modalities where id = $1`, [modalityId]);
+    await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id = $1`, [userId]);
+    await pool.query(`update patient_identifier_types set created_by_user_id = null, updated_by_user_id = null where created_by_user_id = $1 or updated_by_user_id = $1`, [userId]);
+    await pool.query(`update special_reason_codes set created_by_user_id = null, updated_by_user_id = null where created_by_user_id = $1 or updated_by_user_id = $1`, [userId]);
     await pool.query(`delete from users where id = $1`, [userId]);
   };
 
@@ -263,6 +266,90 @@ test("integration: scheduling settings save rolls back on invalid payload", asyn
       [fx.modalityId]
     );
     assert.equal(Number(row.rows[0]?.daily_limit || 0), 9);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("integration: authoritative save clears sections when empty arrays are sent", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const blocked = await pool.query<{ id: number }>(
+    `
+      insert into modality_blocked_rules (
+        modality_id, rule_type, specific_date, is_overridable, is_active, title, created_by_user_id, updated_by_user_id
+      ) values ($1, 'specific_date', '2035-01-01', false, true, 'Clear test rule', $2, $2)
+      returning id
+    `,
+    [fx.modalityId, fx.userId]
+  );
+  const blockedId = Number(blocked.rows[0]?.id);
+
+  try {
+    await saveSchedulingEngineConfiguration(
+      {
+        categoryLimits: [],
+        blockedRules: [],
+        examRules: [],
+        specialQuotas: [],
+        specialReasons: [],
+        identifierTypes: []
+      },
+      fx.userId
+    );
+
+    const blockedRow = await pool.query<{ is_active: boolean }>(
+      `select is_active from modality_blocked_rules where id = $1`,
+      [blockedId]
+    );
+    assert.equal(blockedRow.rows[0]?.is_active, false, "Blocked rule should be deactivated by empty section save");
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("integration: authoritative save keeps built-in identifier types active", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+
+  try {
+    await pool.query(
+      `
+        insert into patient_identifier_types (code, label_ar, label_en, is_active, created_by_user_id, updated_by_user_id)
+        values
+          ('national_id', 'الرقم الوطني', 'National ID', true, $1, $1),
+          ('passport', 'جواز السفر', 'Passport', true, $1, $1),
+          ('other', 'أخرى', 'Other', true, $1, $1)
+        on conflict (code) do update set is_active = true, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+      `,
+      [fx.userId]
+    );
+
+    await saveSchedulingEngineConfiguration(
+      {
+        categoryLimits: [],
+        blockedRules: [],
+        examRules: [],
+        specialQuotas: [],
+        specialReasons: [],
+        identifierTypes: []
+      },
+      fx.userId
+    );
+
+    const builtins = await pool.query<{ code: string; is_active: boolean }>(
+      `
+        select code, is_active
+        from patient_identifier_types
+        where code = any($1::text[])
+        order by code asc
+      `,
+      [["national_id", "passport", "other"]]
+    );
+    assert.equal(builtins.rows.length, 3, "Expected all built-in identifier types");
+    for (const row of builtins.rows) {
+      assert.equal(row.is_active, true, `Built-in identifier type ${row.code} should remain active`);
+    }
   } finally {
     await fx.cleanup();
   }

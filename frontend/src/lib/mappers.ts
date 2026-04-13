@@ -352,11 +352,17 @@ export function mapUser(raw: RawRecord): User {
 }
 
 // -- Appointment Lookups Mapping --
-export function mapAppointmentLookups(raw: RawRecord): { modalities: Modality[]; examTypes: ExamType[]; priorities: ReportingPriority[] } {
+export function mapAppointmentLookups(raw: RawRecord): { modalities: Modality[]; examTypes: ExamType[]; priorities: ReportingPriority[]; specialReasons: Array<{ code: string; labelEn: string; labelAr: string; isActive: boolean }> } {
   return {
     modalities: rawArray(raw, 'modalities').map(mapModality),
     examTypes: rawArray(raw, 'exam_types').length > 0 ? rawArray(raw, 'exam_types').map(mapExamType) : rawArray(raw, 'examTypes').map(mapExamType),
-    priorities: rawArray(raw, 'priorities').map(mapPriority)
+    priorities: rawArray(raw, 'priorities').map(mapPriority),
+    specialReasons: (rawArray(raw, "special_reasons").length > 0 ? rawArray(raw, "special_reasons") : rawArray(raw, "specialReasons")).map((reason: RawRecord) => ({
+      code: str(reason, "code"),
+      labelEn: str(reason, "label_en") || str(reason, "labelEn"),
+      labelAr: str(reason, "label_ar") || str(reason, "labelAr"),
+      isActive: bool(reason, "is_active", bool(reason, "isActive", true))
+    }))
   };
 }
 
