@@ -32,7 +32,7 @@ export function SchedulingAdminV2Page() {
   if (user?.role !== "supervisor") {
     return (
       <div style={{ padding: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Scheduling Policy Admin</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>Scheduling Policies</h1>
         <p style={{ color: "var(--color-error, #ef4444)" }}>Supervisor access required.</p>
       </div>
     );
@@ -40,7 +40,7 @@ export function SchedulingAdminV2Page() {
 
   return (
     <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto", display: "grid", gap: 16 }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700 }}>Appointments V2 Policy Admin</h1>
+      <h1 style={{ fontSize: 20, fontWeight: 700 }}>Scheduling Policies (V2)</h1>
 
       {status.isError && (
         <div style={{ color: "var(--color-error, #ef4444)" }}>
@@ -113,4 +113,3 @@ export function SchedulingAdminV2Page() {
     </div>
   );
 }
-

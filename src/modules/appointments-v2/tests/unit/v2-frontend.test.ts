@@ -119,6 +119,31 @@ describe("V2 Frontend — API query key structure", () => {
   });
 });
 
+describe("V2 Frontend — policy admin structured editor", () => {
+  const editorPath =
+    "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/policy-draft-editor.tsx";
+
+  it("uses structured section-based editor headings instead of JSON-first workflow", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(editorPath, "utf-8");
+    assert.ok(source.includes("Daily category limits"));
+    assert.ok(source.includes("Blocked dates"));
+    assert.ok(source.includes("Exam date rules"));
+    assert.ok(source.includes("Special quotas"));
+    assert.ok(source.includes("Special reason codes"));
+    assert.ok(source.includes("Patient identifier types"));
+    assert.ok(!source.includes("Edit the V2 `PolicySnapshotDto` JSON directly"));
+  });
+
+  it("keeps raw JSON hidden behind an explicit advanced panel", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(editorPath, "utf-8");
+    assert.ok(source.includes("Advanced / Raw JSON"));
+    assert.ok(source.includes("Debug panel only. Raw JSON is hidden by default."));
+    assert.ok(source.includes("Apply JSON to form"));
+  });
+});
+
 describe("V2 Frontend — types shape validation", () => {
   it("AvailabilityDayDto has all required fields", () => {
     const day = {

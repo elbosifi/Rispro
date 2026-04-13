@@ -106,6 +106,14 @@ export async function fetchV2ExamTypes(modalityId: number): Promise<ExamTypeDto[
   }));
 }
 
+export async function fetchV2ExamTypeCatalog(): Promise<ExamTypeDto[]> {
+  const modalities = await fetchV2Modalities();
+  const examTypesByModality = await Promise.all(
+    modalities.map((modality) => fetchV2ExamTypes(modality.id))
+  );
+  return examTypesByModality.flat();
+}
+
 export async function fetchV2Lookups(): Promise<LookupsResponse> {
   const modalities = await fetchV2Modalities();
   return { modalities, examTypes: [] };
@@ -248,6 +256,14 @@ export function useV2ExamTypes(modalityId: number | null) {
     queryKey: ["v2-exam-types", modalityId] as const,
     queryFn: () => (modalityId != null ? fetchV2ExamTypes(modalityId) : []),
     enabled: modalityId != null,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useV2ExamTypeCatalog() {
+  return useQuery({
+    queryKey: ["v2-exam-type-catalog"] as const,
+    queryFn: fetchV2ExamTypeCatalog,
     staleTime: 5 * 60_000,
   });
 }
