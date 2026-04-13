@@ -507,6 +507,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
   const [rescheduleTarget, setRescheduleTarget] = useState<BookingWithPatientInfo | null>(null);
   const [rescheduleError, setRescheduleError] = useState<string | null>(null);
   const [includeCancelled, setIncludeCancelled] = useState(false);
+  const [cancelPendingBookingId, setCancelPendingBookingId] = useState<number | null>(null);
+  const [reschedulePendingBookingId, setReschedulePendingBookingId] = useState<number | null>(null);
 
   // Compute date range from availability data
   const dateFrom = availabilityItems[0]?.date ?? "";
@@ -520,6 +522,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
 
   const handleCancelConfirm = async () => {
     if (!cancelTarget) return;
+    const pendingId = cancelTarget.id;
+    setCancelPendingBookingId(pendingId);
     try {
       await cancelMutation.mutateAsync(cancelTarget.id);
       pushToast({
@@ -535,6 +539,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
         title: "Cancel Failed",
         message: err instanceof Error ? err.message : "Unknown error",
       });
+    } finally {
+      setCancelPendingBookingId(null);
     }
   };
 
@@ -553,6 +559,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       setRescheduleError(msg);
       return;
     }
+    setReschedulePendingBookingId(rescheduleTarget.id);
     setRescheduleError(null);
     try {
       await rescheduleMutation.mutateAsync({
@@ -574,6 +581,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       const msg = err instanceof Error ? err.message : "Unknown error";
       setRescheduleError(msg);
       throw err; // Re-throw so the dialog can show it
+    } finally {
+      setReschedulePendingBookingId(null);
     }
   };
 
@@ -667,14 +676,19 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
               </tr>
             </thead>
             <tbody>
-              {bookingsList.map((booking) => (
-                <tr
-                  key={booking.id}
-                  style={{
-                    borderBottom: "1px solid var(--border-color, #e2e8f0)",
-                    opacity: booking.status === "cancelled" ? 0.6 : 1,
-                  }}
-                >
+              {bookingsList.map((booking) => {
+                // Keep pending disable state scoped to the affected booking row only.
+                const cancelPendingForRow = cancelPendingBookingId === booking.id;
+                const reschedulePendingForRow = reschedulePendingBookingId === booking.id;
+
+                return (
+                  <tr
+                    key={booking.id}
+                    style={{
+                      borderBottom: "1px solid var(--border-color, #e2e8f0)",
+                      opacity: booking.status === "cancelled" ? 0.6 : 1,
+                    }}
+                  >
                   <td style={{ padding: "10px 12px" }}>
                     <div style={{ fontWeight: 500 }}>{booking.patientEnglishName}</div>
                     {booking.patientNationalId && (
@@ -700,10 +714,10 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                       <button
                         type="button"
                         onClick={() => setRescheduleTarget(booking)}
-                        disabled={!RESCHEDULABLE_STATUSES.includes(booking.status)}
+                        disabled={!RESCHEDULABLE_STATUSES.includes(booking.status) || reschedulePendingForRow}
                         title={
                           RESCHEDULABLE_STATUSES.includes(booking.status)
-                            ? "Reschedule this booking"
+                            ? (reschedulePendingForRow ? "Rescheduling in progress" : "Reschedule this booking")
                             : `Cannot reschedule a booking with status "${booking.status}"`
                         }
                         style={{
@@ -714,11 +728,11 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                           color: RESCHEDULABLE_STATUSES.includes(booking.status) ? "var(--color-info, #3b82f6)" : "var(--text-muted, #94a3b8)",
                           fontSize: 12,
                           fontWeight: 500,
-                          cursor: RESCHEDULABLE_STATUSES.includes(booking.status) ? "pointer" : "not-allowed",
-                          opacity: RESCHEDULABLE_STATUSES.includes(booking.status) ? 1 : 0.5,
+                          cursor: RESCHEDULABLE_STATUSES.includes(booking.status) && !reschedulePendingForRow ? "pointer" : "not-allowed",
+                          opacity: RESCHEDULABLE_STATUSES.includes(booking.status) && !reschedulePendingForRow ? 1 : 0.5,
                         }}
                       >
-                        Reschedule
+                        {reschedulePendingForRow ? "Rescheduling…" : "Reschedule"}
                       </button>
                       <button
                         type="button"
@@ -729,10 +743,10 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                             date: booking.bookingDate,
                           })
                         }
-                        disabled={!CANCELLABLE_STATUSES.includes(booking.status)}
+                        disabled={!CANCELLABLE_STATUSES.includes(booking.status) || cancelPendingForRow}
                         title={
                           CANCELLABLE_STATUSES.includes(booking.status)
-                            ? "Cancel this booking"
+                            ? (cancelPendingForRow ? "Cancellation in progress" : "Cancel this booking")
                             : `Cannot cancel a booking with status "${booking.status}"`
                         }
                         style={{
@@ -743,16 +757,17 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                           color: CANCELLABLE_STATUSES.includes(booking.status) ? "var(--color-error, #ef4444)" : "var(--text-muted, #94a3b8)",
                           fontSize: 12,
                           fontWeight: 500,
-                          cursor: CANCELLABLE_STATUSES.includes(booking.status) ? "pointer" : "not-allowed",
-                          opacity: CANCELLABLE_STATUSES.includes(booking.status) ? 1 : 0.5,
+                          cursor: CANCELLABLE_STATUSES.includes(booking.status) && !cancelPendingForRow ? "pointer" : "not-allowed",
+                          opacity: CANCELLABLE_STATUSES.includes(booking.status) && !cancelPendingForRow ? 1 : 0.5,
                         }}
                       >
-                        Cancel
+                        {cancelPendingForRow ? "Cancelling…" : "Cancel"}
                       </button>
                     </div>
                   </td>
-                </tr>
-              ))}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

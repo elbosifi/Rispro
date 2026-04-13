@@ -73,6 +73,9 @@ export function BookingForm({
   const availableDates = availability
     .filter((d) => d.decision.displayStatus === "available" || d.decision.displayStatus === "restricted")
     .map((d) => d.date);
+  const hasSpecialReasons = (specialReasons.data?.length ?? 0) > 0;
+  const specialReasonsUnavailable = useSpecialQuota && !specialReasons.isLoading && !specialReasons.isError && !hasSpecialReasons;
+  const missingSpecialReasonSelection = useSpecialQuota && !specialReasonCode;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,6 +85,33 @@ export function BookingForm({
         type: "error",
         title: "Validation Error",
         message: "Please select a patient, modality, and date.",
+      });
+      return;
+    }
+
+    if (useSpecialQuota && specialReasons.isError) {
+      pushToast({
+        type: "error",
+        title: "Special Quota Unavailable",
+        message: "Special reason codes could not be loaded. Try again before submitting.",
+      });
+      return;
+    }
+
+    if (specialReasonsUnavailable) {
+      pushToast({
+        type: "error",
+        title: "Special Quota Unavailable",
+        message: "No active special reason codes are configured. Contact a supervisor.",
+      });
+      return;
+    }
+
+    if (missingSpecialReasonSelection) {
+      pushToast({
+        type: "error",
+        title: "Validation Error",
+        message: "Select a special reason before using special quota.",
       });
       return;
     }
@@ -141,10 +171,11 @@ export function BookingForm({
       resetForm();
       onBookingSuccess();
     } catch (err) {
+      const fallbackName = selectedPatient.englishFullName || selectedPatient.arabicFullName || `Patient #${selectedPatient.id}`;
       pushToast({
         type: "error",
         title: "Booking Failed",
-        message: err instanceof Error ? err.message : "Unknown error occurred",
+        message: err instanceof Error ? `${fallbackName}: ${err.message}` : `${fallbackName}: Unknown error occurred`,
       });
     }
   };
@@ -174,7 +205,8 @@ export function BookingForm({
       resetForm();
       onBookingSuccess();
     } catch (err) {
-      setOverrideError(err instanceof Error ? err.message : "Authentication failed");
+      const message = err instanceof Error ? err.message : "Authentication failed";
+      setOverrideError(`Override failed: ${message}`);
     }
   };
 
@@ -369,25 +401,44 @@ export function BookingForm({
                 Use special quota
               </label>
               {useSpecialQuota && (
-                <select
-                  value={specialReasonCode}
-                  onChange={(e) => setSpecialReasonCode(e.target.value)}
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-color, #e2e8f0)",
-                    fontSize: 13,
-                    minWidth: 230,
-                  }}
-                >
-                  <option value="">Select special reason…</option>
-                  {specialReasons.isLoading && <option value="">Loading…</option>}
-                  {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
-                    <option key={reason.code} value={reason.code}>
-                      {reason.labelEn || reason.code}
-                    </option>
-                  ))}
-                </select>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <select
+                    value={specialReasonCode}
+                    onChange={(e) => setSpecialReasonCode(e.target.value)}
+                    disabled={specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons}
+                    style={{
+                      padding: "8px 10px",
+                      borderRadius: 6,
+                      border: "1px solid var(--border-color, #e2e8f0)",
+                      fontSize: 13,
+                      minWidth: 230,
+                      opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
+                    }}
+                  >
+                    <option value="">Select special reason…</option>
+                    {specialReasons.isLoading && <option value="">Loading…</option>}
+                    {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
+                      <option key={reason.code} value={reason.code}>
+                        {reason.labelEn || reason.code}
+                      </option>
+                    ))}
+                  </select>
+                  {specialReasons.isLoading && (
+                    <span style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+                      Loading special reasons…
+                    </span>
+                  )}
+                  {specialReasons.isError && (
+                    <span style={{ fontSize: 12, color: "var(--color-error, #ef4444)" }}>
+                      Could not load special reasons.
+                    </span>
+                  )}
+                  {specialReasonsUnavailable && (
+                    <span style={{ fontSize: 12, color: "var(--color-warning, #b45309)" }}>
+                      No active special reasons configured.
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
@@ -395,7 +446,14 @@ export function BookingForm({
             <div style={{ display: "flex", justifyContent: "flex-end" }}>
               <button
                 type="submit"
-                disabled={!selectedPatient || !selectedDate || createBooking.isPending}
+                disabled={
+                  !selectedPatient ||
+                  !selectedDate ||
+                  createBooking.isPending ||
+                  missingSpecialReasonSelection ||
+                  specialReasonsUnavailable ||
+                  (useSpecialQuota && specialReasons.isError)
+                }
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -403,12 +461,34 @@ export function BookingForm({
                   padding: "10px 24px",
                   borderRadius: 6,
                   border: "none",
-                  backgroundColor: !selectedPatient || !selectedDate ? "var(--border-color, #e2e8f0)" : "var(--color-primary, #3b82f6)",
+                  backgroundColor:
+                    !selectedPatient ||
+                    !selectedDate ||
+                    missingSpecialReasonSelection ||
+                    specialReasonsUnavailable ||
+                    (useSpecialQuota && specialReasons.isError)
+                      ? "var(--border-color, #e2e8f0)"
+                      : "var(--color-primary, #3b82f6)",
                   color: "#fff",
                   fontSize: 14,
                   fontWeight: 600,
-                  cursor: !selectedPatient || !selectedDate || createBooking.isPending ? "not-allowed" : "pointer",
-                  opacity: !selectedPatient || !selectedDate ? 0.6 : 1,
+                  cursor:
+                    !selectedPatient ||
+                    !selectedDate ||
+                    createBooking.isPending ||
+                    missingSpecialReasonSelection ||
+                    specialReasonsUnavailable ||
+                    (useSpecialQuota && specialReasons.isError)
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity:
+                    !selectedPatient ||
+                    !selectedDate ||
+                    missingSpecialReasonSelection ||
+                    specialReasonsUnavailable ||
+                    (useSpecialQuota && specialReasons.isError)
+                      ? 0.6
+                      : 1,
                 }}
               >
                 {createBooking.isPending ? (

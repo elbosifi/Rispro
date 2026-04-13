@@ -191,6 +191,24 @@ describe("V2 Frontend — no published policy state", () => {
   });
 });
 
+describe("V2 Frontend — bookings action pending state", () => {
+  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+
+  it("tracks cancel pending by booking ID (not globally)", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes("cancelPendingBookingId"));
+    assert.ok(source.includes("cancelPendingBookingId === booking.id"));
+  });
+
+  it("tracks reschedule pending by booking ID (not globally)", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes("reschedulePendingBookingId"));
+    assert.ok(source.includes("reschedulePendingBookingId === booking.id"));
+  });
+});
+
 // ---------------------------------------------------------------------------
 // V2 Frontend — Reschedule hook
 // ---------------------------------------------------------------------------

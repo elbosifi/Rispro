@@ -29,6 +29,7 @@ const ROUTE_PATHS: Record<string, string> = {
   patients: "/patients",
   "patients.new": "/patients/new",
   appointments: "/appointments",
+  "appointments.legacy": "/appointments/legacy",
   calendar: "/calendar",
   registrations: "/registrations",
   queue: "/queue",
@@ -113,7 +114,13 @@ function AppContent() {
             <Route path="/patients" element={<PatientsPage />} />
             <Route path="/patients/new" element={<PatientsPage />} />
             <Route path="/patients/:id/edit" element={<EditPatientPage />} />
-            <Route path="/appointments" element={<AppointmentsPage />} />
+            {/* V2 is now the default appointments UI. Legacy is supervisor-only fallback at /appointments/legacy.
+                Rollback path: remap /appointments back to <AppointmentsPage /> if needed. */}
+            <Route path="/appointments" element={<AppointmentsV2Page />} />
+            <Route
+              path="/appointments/legacy"
+              element={user.role === "supervisor" ? <AppointmentsPage /> : <Navigate to="/appointments" replace />}
+            />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/registrations" element={<RegistrationsPage />} />
             <Route path="/queue" element={<QueuePage />} />

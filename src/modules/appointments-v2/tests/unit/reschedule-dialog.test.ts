@@ -230,6 +230,24 @@ describe("RescheduleDialog — component file", () => {
     );
     assert.ok(content.includes("e.target === e.currentTarget"));
   });
+
+  it("surfaces backend evaluation failures clearly", async () => {
+    const content = await readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      "utf-8"
+    );
+    assert.ok(content.includes("setEvaluationError"));
+    assert.ok(content.includes("Could not evaluate this date"));
+  });
+
+  it("surfaces backend submit failures clearly", async () => {
+    const content = await readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/reschedule-dialog.tsx",
+      "utf-8"
+    );
+    assert.ok(content.includes("setSubmitError"));
+    assert.ok(content.includes("Reschedule failed"));
+  });
 });
 
 // ---------------------------------------------------------------------------

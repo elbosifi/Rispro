@@ -163,6 +163,19 @@ describe("BookingForm — special reason source", () => {
     assert.ok(!content.includes('value="medical_priority"'));
     assert.ok(!content.includes('value="equipment_window"'));
   });
+
+  it("requires special reason when special quota is enabled", async () => {
+    const content = await readFile(bookingFormPath, "utf-8");
+    assert.ok(content.includes("missingSpecialReasonSelection"));
+    assert.ok(content.includes("Select a special reason before using special quota."));
+  });
+
+  it("shows loading, empty, and error states for special reasons", async () => {
+    const content = await readFile(bookingFormPath, "utf-8");
+    assert.ok(content.includes("Loading special reasons…"));
+    assert.ok(content.includes("No active special reasons configured."));
+    assert.ok(content.includes("Could not load special reasons."));
+  });
 });
 
 // ---------------------------------------------------------------------------

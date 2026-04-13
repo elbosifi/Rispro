@@ -42,6 +42,8 @@ export function RescheduleDialog({
 }: RescheduleDialogProps) {
   const [newDate, setNewDate] = useState("");
   const [decision, setDecision] = useState<SchedulingDecisionDto | null>(null);
+  const [evaluationError, setEvaluationError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -68,11 +70,13 @@ export function RescheduleDialog({
   useEffect(() => {
     if (!newDate) {
       setDecision(null);
+      setEvaluationError(null);
       return;
     }
 
     setEvaluating(true);
     setDecision(null);
+    setEvaluationError(null);
     setShowOverride(false);
 
     evaluateV2Scheduling({
@@ -91,8 +95,9 @@ export function RescheduleDialog({
           setShowOverride(true);
         }
       })
-      .catch(() => {
+      .catch((err) => {
         setDecision(null);
+        setEvaluationError(err instanceof Error ? err.message : "Could not evaluate this date");
       })
       .finally(() => {
         setEvaluating(false);
@@ -111,6 +116,7 @@ export function RescheduleDialog({
       }
     }
 
+    setSubmitError(null);
     setSubmitting(true);
     try {
       const override = decision?.requiresSupervisorOverride
@@ -122,6 +128,8 @@ export function RescheduleDialog({
         : undefined;
 
       await onReschedule(newDate, null, override);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Reschedule failed");
     } finally {
       setSubmitting(false);
     }
@@ -193,6 +201,21 @@ export function RescheduleDialog({
             }}
           >
             {error}
+          </div>
+        )}
+        {!error && (submitError || evaluationError) && (
+          <div
+            style={{
+              padding: "8px 12px",
+              marginBottom: 16,
+              borderRadius: 6,
+              backgroundColor: "var(--bg-error, #fef2f2)",
+              border: "1px solid var(--border-error, #fecaca)",
+              fontSize: 13,
+              color: "var(--color-error, #ef4444)",
+            }}
+          >
+            {submitError ?? evaluationError}
           </div>
         )}
 
@@ -406,6 +429,7 @@ export function RescheduleDialog({
               disabled={
                 !newDate ||
                 isBlocked ||
+                !!evaluationError ||
                 evaluating ||
                 submitting ||
                 (showOverride &&
@@ -420,10 +444,10 @@ export function RescheduleDialog({
                 fontSize: 14,
                 fontWeight: 600,
                 cursor:
-                  !newDate || isBlocked || evaluating || submitting
+                  !newDate || isBlocked || !!evaluationError || evaluating || submitting
                     ? "not-allowed"
                     : "pointer",
-                opacity: !newDate || isBlocked || evaluating || submitting ? 0.6 : 1,
+                opacity: !newDate || isBlocked || !!evaluationError || evaluating || submitting ? 0.6 : 1,
               }}
             >
               {submitting ? "Rescheduling…" : "Reschedule"}
