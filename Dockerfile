@@ -32,6 +32,7 @@ RUN set -eux; \
       cmake \
       ca-certificates \
       wget \
+      curl \
       libssl-dev \
       libxml2-dev \
       zlib1g-dev \
@@ -45,7 +46,10 @@ RUN set -eux; \
 RUN set -eux; \
     dcmtk_url="https://support.dcmtk.org/redmine/attachments/download/214/dcmtk-3.6.9.tar.gz"; \
     dcmtk_sha256="b93ff5561244916a6e1e7e3ecccf2e26e6932c4edb5961268401cea7d4ab9c16"; \
-    wget -O /tmp/dcmtk-3.6.9.tar.gz "$dcmtk_url"; \
+    echo "Downloading DCMTK 3.6.9 from ${dcmtk_url}"; \
+    (wget --tries=3 --timeout=30 --waitretry=5 -O /tmp/dcmtk-3.6.9.tar.gz "$dcmtk_url" || \
+     curl --retry 3 --retry-delay 5 --location --fail --output /tmp/dcmtk-3.6.9.tar.gz "$dcmtk_url"); \
+    echo "Validating DCMTK checksum..."; \
     echo "${dcmtk_sha256}  /tmp/dcmtk-3.6.9.tar.gz" | sha256sum -c -; \
     tar -xzf /tmp/dcmtk-3.6.9.tar.gz -C /tmp; \
     rm -f /tmp/dcmtk-3.6.9.tar.gz

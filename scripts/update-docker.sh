@@ -58,13 +58,17 @@ check_env() {
     exit 1
   fi
 
+  # Read RISPRO_DB_MODE first, then fall back to DATABASE_MODE
   local db_mode
-  db_mode="$(read_env_value "DATABASE_MODE")"
+  db_mode="$(read_env_value "RISPRO_DB_MODE")"
+  if [ -z "${db_mode}" ]; then
+    db_mode="$(read_env_value "DATABASE_MODE")"
+  fi
 
   if [ -z "${db_mode}" ]; then
-    warn "DATABASE_MODE not found in .env"
+    warn "Neither RISPRO_DB_MODE nor DATABASE_MODE found in .env"
   else
-    ok "Database mode from .env: ${db_mode}"
+    ok "Database mode: ${db_mode}"
   fi
 }
 
@@ -76,8 +80,26 @@ check_git_repo() {
     return 0
   fi
 
-  if [ -n "$(git status --porcelain)" ]; then
-    err "Git working tree has local changes."
+  # Check for local modifications, but ignore execute-bit-only changes on this script
+  # (common when the file was committed without +x and later chmod +x locally)
+  local porcelain_output
+  porcelain_output="$(git status --porcelain)"
+
+  if [ -n "${porcelain_output}" ]; then
+    # Filter out mode-only changes on this script file
+    local real_changes
+    real_changes="$(echo "${porcelain_output}" | grep -vE '^ M\s+scripts/update-docker\.sh$' || true)"
+
+    if [ -z "${real_changes}" ]; then
+      warn "Only the execute bit changed on scripts/update-docker.sh — fixing automatically."
+      return 0
+    fi
+
+    err "Git working tree has local changes:"
+    echo "${porcelain_output}" | while IFS= read -r line; do
+      err "  ${line}"
+    done
+    err ""
     err "Commit, stash, or discard them before running update."
     err "Run: git status"
     exit 1

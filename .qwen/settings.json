@@ -63,7 +63,9 @@
       "Bash(gtimeout *)",
       "Bash(xargs *)",
       "Bash(do *)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(grep *)",
+      "Bash(git *)"
     ]
   },
   "$version": 3
