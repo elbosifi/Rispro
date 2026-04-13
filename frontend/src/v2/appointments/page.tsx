@@ -138,7 +138,7 @@ export function AppointmentsV2Page() {
               cursor: "pointer",
             }}
           >
-            Open V2 Policy Admin
+            Open Scheduling Policy Admin
           </button>
         </div>
       )}
@@ -304,7 +304,7 @@ export function AppointmentsV2Page() {
         <p style={{ color: "var(--text-muted, #64748b)" }}>Loading availability…</p>
       ) : availability.isError ? (
         <p style={{ color: "var(--color-error, #ef4444)" }}>
-          Error loading availability: {(availability.error as Error).message}
+          Could not load availability. {(availability.error as Error).message}
         </p>
       ) : noPublishedPolicy ? (
         <div
@@ -319,8 +319,13 @@ export function AppointmentsV2Page() {
             No scheduling policy has been published yet.
           </p>
           <p style={{ color: "var(--text-muted, #64748b)", marginBottom: user?.role === "supervisor" ? 12 : 0 }}>
-            Availability is currently empty because the V2 policy is not published.
+            Availability is empty because no published policy exists for V2 scheduling.
           </p>
+          {user?.role !== "supervisor" && (
+            <p style={{ color: "var(--text-muted, #64748b)" }}>
+              Ask a supervisor to publish a policy before booking.
+            </p>
+          )}
           {user?.role === "supervisor" && (
             <button
               type="button"
@@ -333,14 +338,14 @@ export function AppointmentsV2Page() {
                 cursor: "pointer",
               }}
             >
-              Open V2 Policy Admin
+              Publish or Update Policy
             </button>
           )}
         </div>
       ) : availability.data?.items.length === 0 ? (
         <div>
           <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
-            No availability data found for the selected criteria.
+            No availability found for the selected filters.
           </p>
         </div>
       ) : (
@@ -351,17 +356,23 @@ export function AppointmentsV2Page() {
           <div style={{ marginTop: 24 }}>
             <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Suggestions</h2>
             {suggestions.isLoading ? (
-              <p style={{ color: "var(--text-muted, #64748b)" }}>Loading suggestions…</p>
+              <p style={{ color: "var(--text-muted, #64748b)" }}>Loading next available suggestions…</p>
+            ) : suggestions.isError ? (
+              <p style={{ color: "var(--color-error, #ef4444)" }}>
+                Could not load suggestions. {(suggestions.error as Error).message}
+              </p>
             ) : suggestions.data?.items.length ? (
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {suggestions.data.items.slice(0, 5).map((s) => (
                   <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4 }}>
-                    {s.date} - {s.decision.displayStatus}
+                    {s.date} — {s.decision.displayStatus}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p style={{ color: "var(--text-muted, #64748b)" }}>No suggestions available.</p>
+              <p style={{ color: "var(--text-muted, #64748b)" }}>
+                No better dates found in the selected window.
+              </p>
             )}
           </div>
 
@@ -641,7 +652,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
         </p>
       ) : bookings.isError ? (
         <p style={{ color: "var(--color-error, #ef4444)" }}>
-          Error loading bookings: {(bookings.error as Error).message}
+          Could not load bookings. {(bookings.error as Error).message}
         </p>
       ) : bookingsList.length === 0 ? (
         <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>

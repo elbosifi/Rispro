@@ -25,7 +25,6 @@ type NavIcon =
   | "dashboard"
   | "patients"
   | "appointments"
-  | "appointmentsV2"
   | "appointmentsV2Admin"
   | "calendar"
   | "registrations"
@@ -45,7 +44,6 @@ interface NavItemConfig {
     | "nav.patients"
     | "nav.appointments"
     | "nav.appointmentsLegacy"
-    | "nav.appointmentsV2"
     | "nav.appointmentsV2Admin"
     | "nav.calendar"
     | "nav.registrations"
@@ -66,7 +64,6 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "patients", labelKey: "nav.patients", icon: "patients" },
   { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
   { route: "appointments.legacy", labelKey: "nav.appointmentsLegacy", icon: "legacy", roles: ["supervisor"] },
-  { route: "v2.appointments", labelKey: "nav.appointmentsV2", icon: "appointmentsV2" },
   { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor"] },
   { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
   { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
@@ -90,7 +87,6 @@ const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   dashboard: LayoutGrid,
   patients: Users,
   appointments: CalendarDays,
-  appointmentsV2: CalendarDays,
   appointmentsV2Admin: Settings,
   calendar: ClipboardList,
   registrations: ListOrdered,

@@ -97,7 +97,8 @@ export function RescheduleDialog({
       })
       .catch((err) => {
         setDecision(null);
-        setEvaluationError(err instanceof Error ? err.message : "Could not evaluate this date");
+        const message = err instanceof Error ? err.message : "Could not evaluate this date";
+        setEvaluationError(`Could not evaluate selected date: ${message}`);
       })
       .finally(() => {
         setEvaluating(false);
@@ -129,7 +130,8 @@ export function RescheduleDialog({
 
       await onReschedule(newDate, null, override);
     } catch (err) {
-      setSubmitError(err instanceof Error ? err.message : "Reschedule failed");
+      const message = err instanceof Error ? err.message : "Reschedule failed";
+      setSubmitError(`Could not reschedule booking: ${message}`);
     } finally {
       setSubmitting(false);
     }
@@ -264,7 +266,9 @@ export function RescheduleDialog({
 
             {/* Decision Status */}
             {evaluating && (
-              <div style={{ fontSize: 13, color: "var(--text-muted, #64748b)" }}>Evaluating availability…</div>
+              <div style={{ fontSize: 13, color: "var(--text-muted, #64748b)" }}>
+                Evaluating selected date…
+              </div>
             )}
 
             {decision && !evaluating && (
@@ -300,10 +304,10 @@ export function RescheduleDialog({
                   </span>
                 )}
                 {decision.displayStatus === "restricted" && decision.requiresSupervisorOverride && (
-                  <span>⚠️ Supervisor approval required</span>
+                  <span>⚠️ Supervisor approval is required for this date.</span>
                 )}
                 {decision.displayStatus === "blocked" && (
-                  <span>❌ Date is blocked for this modality</span>
+                  <span>❌ Date is blocked for this modality.</span>
                 )}
                 {decision.reasons.length > 0 && (
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>

@@ -189,6 +189,33 @@ describe("V2 Frontend — no published policy state", () => {
     assert.ok(source.includes('navigate("/v2/appointments/admin")'));
     assert.ok(source.includes('user?.role === "supervisor"'));
   });
+
+  it("keeps non-supervisor informational message for no-policy branch", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes('user?.role !== "supervisor"'));
+    assert.ok(source.includes("Ask a supervisor to publish a policy before booking."));
+  });
+});
+
+describe("V2 Frontend — page key states remain explicit", () => {
+  const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
+
+  it("contains explicit availability loading, error, and empty state messages", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes("Loading availability…"));
+    assert.ok(source.includes("Could not load availability."));
+    assert.ok(source.includes("No availability found for the selected filters."));
+  });
+
+  it("contains explicit suggestions loading, error, and empty state messages", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(pagePath, "utf-8");
+    assert.ok(source.includes("Loading next available suggestions…"));
+    assert.ok(source.includes("Could not load suggestions."));
+    assert.ok(source.includes("No better dates found in the selected window."));
+  });
 });
 
 describe("V2 Frontend — bookings action pending state", () => {

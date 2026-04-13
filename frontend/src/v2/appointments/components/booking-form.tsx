@@ -50,6 +50,7 @@ export function BookingForm({
   const [notes, setNotes] = useState("");
   const [useSpecialQuota, setUseSpecialQuota] = useState(false);
   const [specialReasonCode, setSpecialReasonCode] = useState<string>("");
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   // Override state
   const [showOverride, setShowOverride] = useState(false);
@@ -79,6 +80,7 @@ export function BookingForm({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitAttempted(true);
 
     if (!selectedPatient || !selectedModalityId || !selectedDate) {
       pushToast({
@@ -111,7 +113,7 @@ export function BookingForm({
       pushToast({
         type: "error",
         title: "Validation Error",
-        message: "Select a special reason before using special quota.",
+        message: "Select a special reason before creating a special quota booking.",
       });
       return;
     }
@@ -166,7 +168,7 @@ export function BookingForm({
       pushToast({
         type: "success",
         title: "Booking Created",
-        message: `${selectedPatient.englishFullName} booked for ${selectedDate}`,
+        message: `${selectedPatient.englishFullName} was booked for ${selectedDate}.`,
       });
       resetForm();
       onBookingSuccess();
@@ -175,7 +177,7 @@ export function BookingForm({
       pushToast({
         type: "error",
         title: "Booking Failed",
-        message: err instanceof Error ? `${fallbackName}: ${err.message}` : `${fallbackName}: Unknown error occurred`,
+        message: err instanceof Error ? `${fallbackName}: ${err.message}` : `${fallbackName}: Unable to create booking.`,
       });
     }
   };
@@ -197,7 +199,7 @@ export function BookingForm({
       pushToast({
         type: "success",
         title: "Booking Created (Override)",
-        message: `${selectedPatient?.englishFullName ?? selectedPatient?.arabicFullName ?? "Patient"} booked for ${pendingBooking.bookingDate}`,
+        message: `${selectedPatient?.englishFullName ?? selectedPatient?.arabicFullName ?? "Patient"} was booked for ${pendingBooking.bookingDate} with supervisor override.`,
       });
       setShowOverride(false);
       setPendingBooking(null);
@@ -216,6 +218,7 @@ export function BookingForm({
     setNotes("");
     setUseSpecialQuota(false);
     setSpecialReasonCode("");
+    setSubmitAttempted(false);
   };
 
   const handleClearPatient = () => {
@@ -396,7 +399,12 @@ export function BookingForm({
                 <input
                   type="checkbox"
                   checked={useSpecialQuota}
-                  onChange={(e) => setUseSpecialQuota(e.target.checked)}
+                  onChange={(e) => {
+                    setUseSpecialQuota(e.target.checked);
+                    if (!e.target.checked) {
+                      setSpecialReasonCode("");
+                    }
+                  }}
                 />
                 Use special quota
               </label>
@@ -436,6 +444,11 @@ export function BookingForm({
                   {specialReasonsUnavailable && (
                     <span style={{ fontSize: 12, color: "var(--color-warning, #b45309)" }}>
                       No active special reasons configured.
+                    </span>
+                  )}
+                  {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
+                    <span style={{ fontSize: 12, color: "var(--color-error, #ef4444)" }}>
+                      Please select a special reason to continue.
                     </span>
                   )}
                 </div>

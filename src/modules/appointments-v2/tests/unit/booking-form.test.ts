@@ -167,7 +167,8 @@ describe("BookingForm — special reason source", () => {
   it("requires special reason when special quota is enabled", async () => {
     const content = await readFile(bookingFormPath, "utf-8");
     assert.ok(content.includes("missingSpecialReasonSelection"));
-    assert.ok(content.includes("Select a special reason before using special quota."));
+    assert.ok(content.includes("Select a special reason before creating a special quota booking."));
+    assert.ok(content.includes("Please select a special reason to continue."));
   });
 
   it("shows loading, empty, and error states for special reasons", async () => {
