@@ -322,11 +322,15 @@ export function BookingForm({
                   <option value="">Select date…</option>
                   {availableDates.map((date) => {
                     const day = availability.find((d) => d.date === date);
-                    const remaining = day?.remainingCapacity ?? 0;
+                    const standard = Math.max(0, day?.decision.remainingStandardCapacity ?? day?.remainingCapacity ?? 0);
+                    const special = Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
                     const isRestricted = day?.decision.displayStatus === "restricted";
+                    const label = special > 0
+                      ? `${date} (${standard} standard, ${special} special)`
+                      : `${date} (${standard} standard)`;
                     return (
                       <option key={date} value={date}>
-                        {date} ({remaining} remaining){isRestricted ? " ⚠️" : ""}
+                        {label}{isRestricted ? " ⚠️" : ""}
                       </option>
                     );
                   })}

@@ -10,7 +10,8 @@ import type { DecisionStatus, DecisionReason } from "../types";
 interface StatusBadgeProps {
   status: DecisionStatus;
   reasons: DecisionReason[];
-  remainingCapacity: number | null;
+  remainingStandardCapacity: number | null;
+  remainingSpecialQuota: number | null;
 }
 
 const STATUS_CONFIG: Record<DecisionStatus, { label: string; color: string; bg: string }> = {
@@ -31,8 +32,16 @@ const STATUS_CONFIG: Record<DecisionStatus, { label: string; color: string; bg: 
   },
 };
 
-export function StatusBadge({ status, reasons, remainingCapacity }: StatusBadgeProps) {
+function clampToZero(val: number | null | undefined): number {
+  const n = val ?? 0;
+  return n < 0 ? 0 : n;
+}
+
+export function StatusBadge({ status, reasons, remainingStandardCapacity, remainingSpecialQuota }: StatusBadgeProps) {
   const config = STATUS_CONFIG[status];
+  const standard = clampToZero(remainingStandardCapacity);
+  const special = clampToZero(remainingSpecialQuota);
+  const hasSpecial = special > 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -50,11 +59,11 @@ export function StatusBadge({ status, reasons, remainingCapacity }: StatusBadgeP
       >
         {config.label}
       </span>
-      {remainingCapacity != null && (
-        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-          {remainingCapacity} slot{remainingCapacity !== 1 ? "s" : ""} remaining
-        </span>
-      )}
+      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+        {hasSpecial
+          ? `Standard: ${standard} · Special quota: ${special}`
+          : `Standard: ${standard}`}
+      </span>
       {reasons.length > 0 && (
         <ul style={{ margin: 0, padding: "0 0 0 12px", fontSize: 10, color: "var(--text-muted)" }}>
           {reasons.map((r, i) => (

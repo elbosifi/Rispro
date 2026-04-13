@@ -445,7 +445,7 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
               Booked
             </th>
             <th style={{ textAlign: "center", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Remaining
+              Availability
             </th>
             <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
               Status
@@ -453,7 +453,10 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
           </tr>
         </thead>
         <tbody>
-          {items.map((day) => (
+          {items.map((day) => {
+            const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
+            const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
+            return (
             <tr
               key={day.date}
               style={{
@@ -467,17 +470,14 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
               <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.dailyCapacity}</td>
               <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.bookedCount}</td>
               <td style={{ textAlign: "center", padding: "10px 12px" }}>
-                <span
-                  style={{
-                    fontWeight: day.remainingCapacity <= 0 ? 700 : 400,
-                    color:
-                      day.remainingCapacity <= 0
-                        ? "var(--color-error, #ef4444)"
-                        : "var(--text-primary, #1e293b)",
-                  }}
-                >
-                  {day.remainingCapacity}
-                </span>
+                <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
+                  {standard} std
+                </div>
+                {special > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
+                    + {special} special
+                  </div>
+                )}
               </td>
               <td style={{ padding: "10px 12px" }}>
                 <StatusBadge
@@ -486,11 +486,13 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
                     ...r,
                     message: describeReason(r.code),
                   }))}
-                  remainingCapacity={day.decision.remainingStandardCapacity}
+                  remainingStandardCapacity={day.decision.remainingStandardCapacity}
+                  remainingSpecialQuota={day.decision.remainingSpecialQuota}
                 />
               </td>
             </tr>
-          ))}
+            );
+          })}
         </tbody>
       </table>
     </div>
