@@ -1,157 +1,146 @@
-#!/bin/sh
-# =============================================================================
-# RISpro Docker Update - Pull latest code and restart
-# =============================================================================
-# Reuses existing .env. Does not prompt. Preserves volumes.
-# Reads RISPRO_DB_MODE from .env to choose compose files.
-# =============================================================================
+#!/usr/bin/env bash
+set -Eeuo pipefail
 
-set -e
+APP_NAME="RISpro Reception"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_FILE="${PROJECT_ROOT}/.env"
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)"
-APP_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd -P)"
-ENV_FILE="$APP_DIR/.env"
+log()  { printf '[INFO] %s\n' "$*"; }
+ok()   { printf '[OK]   %s\n' "$*"; }
+warn() { printf '[WARN] %s\n' "$*"; }
+err()  { printf '[ERROR] %s\n' "$*" >&2; }
 
-# ---------------------------------------------------------------------------
-# Output helpers
-# ---------------------------------------------------------------------------
-info()  { printf '\n[INFO] %s\n' "$1"; }
-ok()    { printf '[OK]   %s\n' "$1"; }
-warn()  { printf '[WARN] %s\n' "$1"; }
-err()   { printf '[ERROR] %s\n' "$1" >&2; }
+cleanup() {
+  local exit_code=$?
+  if [ "$exit_code" -ne 0 ]; then
+    err "Update failed with exit code ${exit_code}."
+  fi
+}
+trap cleanup EXIT
 
-# ---------------------------------------------------------------------------
-# Compose detection
-# ---------------------------------------------------------------------------
+print_header() {
+  printf '\n===================================================\n'
+  printf '  %s - Docker Update\n' "${APP_NAME}"
+  printf '===================================================\n\n'
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    err "Required command not found: $1"
+    exit 1
+  }
+}
+
 detect_compose() {
   if docker compose version >/dev/null 2>&1; then
-    COMPOSE_CMD="docker compose"
-  elif docker-compose version >/dev/null 2>&1; then
-    COMPOSE_CMD="docker-compose"
+    COMPOSE_CMD=(docker compose)
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_CMD=(docker-compose)
   else
-    err "Docker Compose is not installed or not in PATH."
+    err "Docker Compose not found. Install 'docker compose' plugin or 'docker-compose'."
     exit 1
   fi
 }
 
-# ---------------------------------------------------------------------------
-# HTTP check
-# ---------------------------------------------------------------------------
-check_http() {
-  _url="$1"
-  if curl -fsS "$_url" >/dev/null 2>&1; then
-    return 0
-  elif wget -qO- "$_url" >/dev/null 2>&1; then
-    return 0
+read_env_value() {
+  local key="$1"
+  local value=""
+  if [ -f "${ENV_FILE}" ]; then
+    value="$(grep -E "^${key}=" "${ENV_FILE}" | tail -n1 | cut -d '=' -f2- || true)"
+  fi
+  printf '%s' "${value}"
+}
+
+check_env() {
+  if [ ! -f "${ENV_FILE}" ]; then
+    err "Missing .env file at ${ENV_FILE}"
+    exit 1
+  fi
+
+  local db_mode
+  db_mode="$(read_env_value "DATABASE_MODE")"
+
+  if [ -z "${db_mode}" ]; then
+    warn "DATABASE_MODE not found in .env"
   else
-    return 1
+    ok "Database mode from .env: ${db_mode}"
   fi
 }
 
-# ---------------------------------------------------------------------------
-# Read RISPRO_DB_MODE from .env
-# ---------------------------------------------------------------------------
-read_db_mode() {
-  if [ ! -f "$ENV_FILE" ]; then
-    err ".env file not found at: $ENV_FILE"
-    err "Run ./scripts/setup-docker.sh first to configure."
+check_git_repo() {
+  cd "${PROJECT_ROOT}"
+
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    warn "Not a git repository. Skipping git update."
+    return 0
+  fi
+
+  if [ -n "$(git status --porcelain)" ]; then
+    err "Git working tree has local changes."
+    err "Commit, stash, or discard them before running update."
+    err "Run: git status"
     exit 1
   fi
 
-  DB_MODE=""
-  if grep -q '^RISPRO_DB_MODE=' "$ENV_FILE" 2>/dev/null; then
-    DB_MODE="$(grep '^RISPRO_DB_MODE=' "$ENV_FILE" | head -1 | cut -d= -f2)"
-  fi
+  local current_branch
+  current_branch="$(git branch --show-current)"
 
-  if [ -z "$DB_MODE" ]; then
-    err "RISPRO_DB_MODE is missing from $ENV_FILE"
-    err "The .env file may be from an older setup. Please rerun:"
-    err "  ./scripts/setup-docker.sh"
+  if [ -z "${current_branch}" ]; then
+    err "Could not determine current git branch."
     exit 1
   fi
 
-  case "$DB_MODE" in
-    internal|external) ;;
-    *)
-      err "Invalid RISPRO_DB_MODE='$DB_MODE' in .env (expected 'internal' or 'external')."
-      exit 1
-      ;;
-  esac
+  log "Fetching latest code from origin/${current_branch}..."
+  git fetch origin "${current_branch}"
+
+  local local_sha remote_sha
+  local_sha="$(git rev-parse HEAD)"
+  remote_sha="$(git rev-parse "origin/${current_branch}")"
+
+  if [ "${local_sha}" = "${remote_sha}" ]; then
+    ok "Already up to date on ${current_branch}."
+    return 0
+  fi
+
+  log "Pulling latest code..."
+  git pull --rebase origin "${current_branch}"
+  ok "Git update completed."
 }
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+build_and_restart() {
+  cd "${PROJECT_ROOT}"
+
+  log "Building and restarting containers..."
+  "${COMPOSE_CMD[@]}" up -d --build --remove-orphans
+  ok "Containers rebuilt and restarted."
+}
+
+show_status() {
+  cd "${PROJECT_ROOT}"
+
+  printf '\n'
+  log "Container status:"
+  "${COMPOSE_CMD[@]}" ps || true
+
+  printf '\n'
+  log "Recent container logs:"
+  "${COMPOSE_CMD[@]}" logs --tail=50 || true
+}
+
 main() {
-  echo ""
-  echo "==================================================="
-  echo "  RISpro Reception - Docker Update"
-  echo "==================================================="
-  echo ""
+  print_header
 
+  require_cmd git
+  require_cmd docker
   detect_compose
-  read_db_mode
+  check_env
+  check_git_repo
+  build_and_restart
+  show_status
 
-  ok "Database mode from .env: $DB_MODE"
-
-  cd "$APP_DIR"
-
-  # Pull latest code (non-blocking)
-  info "Fetching latest code from git..."
-  if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    git pull --rebase 2>&1 || warn "Git pull failed. Continuing with local changes."
-  else
-    warn "Not a git repository. Skipping git pull."
-  fi
-
-  # Choose compose files
-  case "$DB_MODE" in
-    internal)
-      _cf="-f docker-compose.yml -f docker-compose.internal-db.yml"
-      ;;
-    external)
-      _cf="-f docker-compose.yml"
-      ;;
-  esac
-
-  # Rebuild and restart (volumes preserved automatically)
-  info "Building and restarting containers..."
-  # shellcheck disable=SC2086
-  $COMPOSE_CMD $_cf up -d --build
-
-  echo ""
-  info "Waiting for application to become healthy..."
-  _attempt=0
-  _max=45
-  while [ "$_attempt" -lt "$_max" ]; do
-    _attempt=$(( _attempt + 1 ))
-    if check_http "http://127.0.0.1:3000/api/health"; then
-      ok "Application is healthy!"
-      break
-    fi
-    printf '  Waiting... (%d/%d)\n' "$_attempt" "$_max"
-    sleep 2
-  done
-
-  if [ "$_attempt" -ge "$_max" ]; then
-    err "Application did not become healthy within expected time."
-    err "Check logs: $COMPOSE_CMD logs -f app"
-    exit 1
-  fi
-
-  echo ""
-  echo "==================================================="
-  ok "Update complete!"
-  echo "==================================================="
-  echo ""
-  echo "  Web UI:     http://localhost:3000"
-  echo "  DICOM MWL:   127.0.0.1:11112 (AE: RISPRO_MWL)"
-  echo ""
-  echo "  Useful commands:"
-  echo "    $COMPOSE_CMD logs -f app         # View application logs"
-  echo "    $COMPOSE_CMD ps                   # List running containers"
-  echo "    $COMPOSE_CMD down                 # Stop all containers"
-  echo ""
+  printf '\n'
+  ok "Update complete."
 }
 
 main "$@"
