@@ -14,6 +14,7 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { evaluateBookingDecision } from "../../rules/services/evaluate-booking-decision.js";
 import { getAvailability, type GetAvailabilityParams } from "../../scheduler/services/availability.service.js";
 import { getSuggestions } from "../../scheduler/services/suggestion.service.js";
+import { runAvailabilityWithShadow } from "../../observability/shadow-availability.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { pool } from "../../../../db/pool.js";
 
@@ -82,7 +83,8 @@ router.get(
     }
 
     const availability = await getAvailability(params);
-    res.json({ items: availability });
+    const responseItems = await runAvailabilityWithShadow(availability, params);
+    res.json({ items: responseItems });
   })
 );
 

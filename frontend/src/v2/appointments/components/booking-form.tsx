@@ -48,6 +48,8 @@ export function BookingForm({
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [notes, setNotes] = useState("");
+  const [useSpecialQuota, setUseSpecialQuota] = useState(false);
+  const [specialReasonCode, setSpecialReasonCode] = useState<string>("");
 
   // Override state
   const [showOverride, setShowOverride] = useState(false);
@@ -63,6 +65,8 @@ export function BookingForm({
     setSelectedDate("");
     setSelectedPatient(null);
     setNotes("");
+    setUseSpecialQuota(false);
+    setSpecialReasonCode("");
   }, [selectedModalityId]);
 
   const availableDates = availability
@@ -89,6 +93,8 @@ export function BookingForm({
       bookingDate: selectedDate,
       bookingTime: null,
       caseCategory,
+      useSpecialQuota,
+      specialReasonCode: useSpecialQuota ? specialReasonCode || null : null,
       notes: notes.trim() || null,
     };
 
@@ -100,8 +106,8 @@ export function BookingForm({
         examTypeId: selectedExamTypeId ?? null,
         scheduledDate: selectedDate,
         caseCategory,
-        useSpecialQuota: false,
-        specialReasonCode: null,
+        useSpecialQuota,
+        specialReasonCode: useSpecialQuota ? specialReasonCode || null : null,
         includeOverrideEvaluation: false,
       });
 
@@ -110,6 +116,11 @@ export function BookingForm({
         setPendingBooking(request);
         setShowOverride(true);
         setOverrideError(null);
+        pushToast({
+          type: "error",
+          title: "Supervisor Override Required",
+          message: "This booking needs supervisor approval before it can be saved.",
+        });
         return;
       }
 
@@ -154,7 +165,7 @@ export function BookingForm({
       pushToast({
         type: "success",
         title: "Booking Created (Override)",
-        message: `${pendingBooking.patientId} → ${pendingBooking.bookingDate}`,
+        message: `${selectedPatient?.englishFullName ?? selectedPatient?.arabicFullName ?? "Patient"} booked for ${pendingBooking.bookingDate}`,
       });
       setShowOverride(false);
       setPendingBooking(null);
@@ -170,6 +181,8 @@ export function BookingForm({
     setSelectedPatient(null);
     setSelectedDate("");
     setNotes("");
+    setUseSpecialQuota(false);
+    setSpecialReasonCode("");
   };
 
   const handleClearPatient = () => {
@@ -343,6 +356,35 @@ export function BookingForm({
                   }}
                 />
               </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                <input
+                  type="checkbox"
+                  checked={useSpecialQuota}
+                  onChange={(e) => setUseSpecialQuota(e.target.checked)}
+                />
+                Use special quota
+              </label>
+              {useSpecialQuota && (
+                <select
+                  value={specialReasonCode}
+                  onChange={(e) => setSpecialReasonCode(e.target.value)}
+                  style={{
+                    padding: "8px 10px",
+                    borderRadius: 6,
+                    border: "1px solid var(--border-color, #e2e8f0)",
+                    fontSize: 13,
+                    minWidth: 230,
+                  }}
+                >
+                  <option value="">Select special reason…</option>
+                  <option value="urgent_oncology">Urgent oncology case</option>
+                  <option value="medical_priority">Medical priority</option>
+                  <option value="equipment_window">Special equipment window</option>
+                </select>
+              )}
             </div>
 
             {/* Submit button */}

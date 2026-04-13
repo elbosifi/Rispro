@@ -18,18 +18,19 @@ describe("Admin policy — DTO shapes", () => {
     assert.equal(typeof dto.changeNote, "string");
   });
 
-  it("SavePolicyDraftDto has configSnapshot", () => {
+  it("SavePolicyDraftDto has policySnapshot", () => {
     const dto = {
-      configSnapshot: {
-        categoryLimits: [{ modalityId: 10, caseCategory: "non_oncology", dailyLimit: 15 }],
-        blockedRules: [],
+      policySnapshot: {
+        categoryDailyLimits: [{ id: 1, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 15, isActive: true }],
+        modalityBlockedRules: [],
         examTypeRules: [],
-        specialQuotas: [],
+        examTypeSpecialQuotas: [],
+        specialReasonCodes: [],
       },
       changeNote: "Updated limits",
     };
-    assert.ok(dto.configSnapshot);
-    assert.ok(Array.isArray(dto.configSnapshot.categoryLimits));
+    assert.ok(dto.policySnapshot);
+    assert.ok(Array.isArray(dto.policySnapshot.categoryDailyLimits));
   });
 
   it("PublishPolicyDto has changeNote", () => {
@@ -39,10 +40,10 @@ describe("Admin policy — DTO shapes", () => {
     assert.equal(typeof dto.changeNote, "string");
   });
 
-  it("PolicyVersionResponseDto has all required fields", () => {
+  it("PolicyVersionDto has all required fields", () => {
     const dto = {
       id: 1,
-      policySetKey: "default",
+      policySetId: 1,
       versionNo: 2,
       status: "published" as const,
       configHash: "abc123",
@@ -51,7 +52,7 @@ describe("Admin policy — DTO shapes", () => {
       publishedAt: "2026-04-11T10:00:00Z",
     };
     assert.equal(typeof dto.id, "number");
-    assert.equal(typeof dto.policySetKey, "string");
+    assert.equal(typeof dto.policySetId, "number");
     assert.equal(typeof dto.versionNo, "number");
     assert.ok(["draft", "published", "archived"].includes(dto.status));
     assert.equal(typeof dto.configHash, "string");

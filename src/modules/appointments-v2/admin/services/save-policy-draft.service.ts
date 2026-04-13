@@ -17,6 +17,7 @@ import {
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import { pool } from "../../../../db/pool.js";
+import type { PolicySnapshotDto } from "../../api/dto/admin-scheduling.dto.js";
 
 export interface SavePolicyDraftResult {
   version: PolicyVersionRow;
@@ -25,19 +26,19 @@ export interface SavePolicyDraftResult {
 
 export async function savePolicyDraft(
   versionId: number,
-  configSnapshot: unknown,
+  policySnapshot: PolicySnapshotDto,
   userId: number,
   changeNote: string | null = null
 ): Promise<SavePolicyDraftResult> {
   return withTransaction(async (client) => {
-    return savePolicyDraftInternal(client, versionId, configSnapshot, userId, changeNote);
+    return savePolicyDraftInternal(client, versionId, policySnapshot, userId, changeNote);
   });
 }
 
 async function savePolicyDraftInternal(
   client: PoolClient,
   versionId: number,
-  configSnapshot: unknown,
+  policySnapshot: PolicySnapshotDto,
   userId: number,
   changeNote: string | null
 ): Promise<SavePolicyDraftResult> {
@@ -61,7 +62,7 @@ async function savePolicyDraftInternal(
   }
 
   // 3. Compute the config hash
-  const configHash = hashConfigSnapshot(configSnapshot);
+  const configHash = hashConfigSnapshot(policySnapshot);
 
   // 4. Update the draft
   const updated = await updateDraftConfig(client, versionId, configHash, changeNote);

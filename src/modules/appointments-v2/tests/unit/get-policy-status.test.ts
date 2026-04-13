@@ -42,15 +42,15 @@ describe("PolicyStatusResult — shape", () => {
       policySet: null,
       published: null,
       draft: null,
-      publishedRules: [],
-      draftRules: [],
+      publishedSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
+      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
     };
 
     assert.strictEqual(result.policySet, null);
     assert.strictEqual(result.published, null);
     assert.strictEqual(result.draft, null);
-    assert.ok(Array.isArray(result.publishedRules));
-    assert.ok(Array.isArray(result.draftRules));
+    assert.ok(Array.isArray(result.publishedSnapshot.categoryDailyLimits));
+    assert.ok(Array.isArray(result.draftSnapshot.categoryDailyLimits));
   });
 
   it("has all required fields for populated result", () => {
@@ -70,18 +70,16 @@ describe("PolicyStatusResult — shape", () => {
         changeNote: "Draft changes",
         createdAt: "2026-04-10T00:00:00Z",
       },
-      publishedRules: [
-        { ruleType: "category_daily_limit", id: 1, modalityId: 1, caseCategory: "non_oncology", dailyLimit: 20, isActive: true },
-      ],
-      draftRules: [],
+      publishedSnapshot: { categoryDailyLimits: [{ id: 1, modalityId: 1, caseCategory: "non_oncology", dailyLimit: 20, isActive: true }], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
+      draftSnapshot: { categoryDailyLimits: [], modalityBlockedRules: [], examTypeRules: [], examTypeSpecialQuotas: [], specialReasonCodes: [] },
     };
 
     assert.strictEqual(result.policySet?.id, 1);
     assert.strictEqual(result.policySet?.key, "default");
     assert.strictEqual(result.published?.versionNo, 3);
     assert.strictEqual(result.draft?.versionNo, 4);
-    assert.strictEqual(result.publishedRules.length, 1);
-    assert.strictEqual(result.draftRules.length, 0);
+    assert.strictEqual(result.publishedSnapshot.categoryDailyLimits.length, 1);
+    assert.strictEqual(result.draftSnapshot.categoryDailyLimits.length, 0);
   });
 });
 
@@ -112,19 +110,15 @@ describe("getPolicyStatus — source verification", () => {
     assert.ok(source.includes("findDraftVersion"), "Should call findDraftVersion");
   });
 
-  it("loads rules for published version", () => {
-    assert.ok(source.includes("loadAllRulesForVersion"), "Should call loadAllRulesForVersion for published");
-  });
-
-  it("loads rules for draft version", () => {
-    const count = (source.match(/loadAllRulesForVersion/g) || []).length;
-    assert.ok(count >= 2, "Should call loadAllRulesForVersion at least twice (published + draft)");
+  it("loads typed snapshots for published and draft versions", () => {
+    const count = (source.match(/loadPolicySnapshot/g) || []).length;
+    assert.ok(count >= 2, "Should call loadPolicySnapshot for published + draft");
   });
 
   it("returns null result when policy set not found", () => {
     assert.ok(source.includes("policySet: null"), "Should return null policySet when not found");
-    assert.ok(source.includes("publishedRules: []"), "Should return empty publishedRules");
-    assert.ok(source.includes("draftRules: []"), "Should return empty draftRules");
+    assert.ok(source.includes("publishedSnapshot"), "Should return empty publishedSnapshot");
+    assert.ok(source.includes("draftSnapshot"), "Should return empty draftSnapshot");
   });
 
   it("maps published version fields to result shape", () => {
@@ -137,13 +131,6 @@ describe("getPolicyStatus — source verification", () => {
     assert.ok(source.includes("id: draftVersion.id"), "Should map draft.id");
     assert.ok(source.includes("versionNo: draftVersion.versionNo"), "Should map draft.versionNo");
     assert.ok(source.includes("createdAt: draftVersion.createdAt"), "Should map draft.createdAt");
-  });
-
-  it("maps rule fields for published rules", () => {
-    assert.ok(source.includes("ruleType: r.ruleType"), "Should map ruleType");
-    assert.ok(source.includes("modalityId: r.modalityId"), "Should map modalityId");
-    assert.ok(source.includes("dailyLimit: r.dailyLimit"), "Should map dailyLimit");
-    assert.ok(source.includes("isActive: r.isActive"), "Should map isActive");
   });
 
   it("releases DB client in finally block", () => {
@@ -183,17 +170,13 @@ describe("GET /policy — route wiring", () => {
     assert.ok(source.includes("policySetKey"), "Should extract policySetKey from query");
   });
 
-  it("returns policySet, published, draft, publishedRules, draftRules in response", async () => {
+  it("returns typed policy status response in route", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
       "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
-    assert.ok(source.includes("policySet: result.policySet"), "Should return policySet");
-    assert.ok(source.includes("published: result.published"), "Should return published");
-    assert.ok(source.includes("draft: result.draft"), "Should return draft");
-    assert.ok(source.includes("publishedRules: result.publishedRules"), "Should return publishedRules");
-    assert.ok(source.includes("draftRules: result.draftRules"), "Should return draftRules");
+    assert.ok(source.includes("res.json(result)"), "Should return typed service result");
   });
 
   it("no longer returns placeholder message", async () => {

@@ -100,6 +100,8 @@ router.post(
         bookingDate: body.bookingDate,
         bookingTime: body.bookingTime ?? null,
         caseCategory: body.caseCategory,
+        useSpecialQuota: body.useSpecialQuota === true,
+        specialReasonCode: body.specialReasonCode ?? null,
         notes: body.notes ?? null,
         override: body.override,
       },
@@ -130,9 +132,7 @@ router.put(
       return;
     }
 
-    const body = req.body as UpdateAppointmentDto & {
-      override?: { supervisorUsername: string; supervisorPassword: string; reason: string };
-    };
+    const body = req.body as UpdateAppointmentDto;
 
     const userId = Number(req.user?.sub ?? 0);
 
@@ -142,7 +142,10 @@ router.put(
       body.bookingDate ?? null,
       body.bookingTime ?? null,
       userId,
-      body.override
+      body.override,
+      body.useSpecialQuota === true,
+      body.specialReasonCode ?? null,
+      body.rescheduleReason ?? null
     );
 
     res.json({

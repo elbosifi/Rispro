@@ -70,6 +70,10 @@ export type {
   CreatePolicyDraftDto,
   SavePolicyDraftDto,
   PublishPolicyDto,
-  PolicyVersionResponseDto,
-  PolicyConfigSnapshotDto,
+  FieldValidationErrorDto,
+  PolicySnapshotDto,
+  PolicyStatusDto,
+  PolicyPreviewDto,
+  PolicyVersionDto,
+  PolicySetDto,
 } from "./api/dto/admin-scheduling.dto.js";

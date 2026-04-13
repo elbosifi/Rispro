@@ -30,6 +30,8 @@ export interface CreateBookingPayload {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory: CaseCategory;
+  useSpecialQuota?: boolean;
+  specialReasonCode?: string | null;
   notes?: string | null;
   override?: {
     supervisorUsername: string;

@@ -20,6 +20,9 @@ import type {
   ListBookingsResponse,
   RescheduleBookingRequest,
   RescheduleBookingResponse,
+  PolicyStatusDto,
+  PolicySnapshotDto,
+  PolicyPreviewDto,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -151,6 +154,55 @@ export async function listV2Bookings(params: {
   return api<ListBookingsResponse>(`/v2/appointments?${searchParams.toString()}`);
 }
 
+export async function fetchV2PolicyStatus(policySetKey: string = "default"): Promise<PolicyStatusDto> {
+  const searchParams = new URLSearchParams({ policySetKey });
+  return api<PolicyStatusDto>(`/v2/scheduling/admin/policy?${searchParams.toString()}`);
+}
+
+export async function createV2PolicyDraft(params: { policySetKey?: string; changeNote?: string | null }) {
+  return api<{ draft: { id: number; versionNo: number; status: string }; basedOnVersionId: number }>(
+    "/v2/scheduling/admin/policy/draft",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        policySetKey: params.policySetKey ?? "default",
+        changeNote: params.changeNote ?? null,
+      }),
+    }
+  );
+}
+
+export async function saveV2PolicyDraft(params: {
+  versionId: number;
+  policySnapshot: PolicySnapshotDto;
+  changeNote?: string | null;
+}) {
+  return api<{ version: { id: number; versionNo: number; status: string }; configHash: string }>(
+    `/v2/scheduling/admin/policy/draft/${params.versionId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        policySnapshot: params.policySnapshot,
+        changeNote: params.changeNote ?? null,
+      }),
+    }
+  );
+}
+
+export async function fetchV2PolicyPreview(versionId: number): Promise<PolicyPreviewDto> {
+  return api<PolicyPreviewDto>(`/v2/scheduling/admin/policy/draft/${versionId}/preview`);
+}
+
+export async function publishV2PolicyDraft(params: { versionId: number; changeNote?: string | null }) {
+  return api<{ published: { id: number; versionNo: number; status: string }; ruleCount: number }>(
+    `/v2/scheduling/admin/policy/draft/${params.versionId}/publish`,
+    {
+      method: "POST",
+      body: JSON.stringify({ changeNote: params.changeNote ?? null }),
+    }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // TanStack Query hooks
 // ---------------------------------------------------------------------------
@@ -237,6 +289,54 @@ export function useV2RescheduleBooking() {
       // Invalidate availability and bookings cache after reschedule
       queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
       queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
+    },
+  });
+}
+
+export function useV2PolicyStatus(policySetKey: string = "default") {
+  return useQuery({
+    queryKey: ["v2-policy-status", policySetKey] as const,
+    queryFn: () => fetchV2PolicyStatus(policySetKey),
+    staleTime: 30_000,
+  });
+}
+
+export function useV2CreatePolicyDraft() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createV2PolicyDraft,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] });
+    },
+  });
+}
+
+export function useV2SavePolicyDraft() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: saveV2PolicyDraft,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] });
+    },
+  });
+}
+
+export function useV2PolicyPreview(versionId: number | null) {
+  return useQuery({
+    queryKey: ["v2-policy-preview", versionId] as const,
+    queryFn: () => (versionId != null ? fetchV2PolicyPreview(versionId) : null),
+    enabled: versionId != null,
+    staleTime: 10_000,
+  });
+}
+
+export function useV2PublishPolicyDraft() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: publishV2PolicyDraft,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-policy-status"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
     },
   });
 }

@@ -12,6 +12,8 @@ export interface CreateAppointmentDto {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory: CaseCategory;
+  useSpecialQuota?: boolean;
+  specialReasonCode?: string | null;
   notes?: string | null;
   override?: {
     supervisorUsername: string;
@@ -27,6 +29,14 @@ export interface UpdateAppointmentDto {
   reportingPriorityId?: number | null;
   notes?: string | null;
   caseCategory?: CaseCategory;
+  useSpecialQuota?: boolean;
+  specialReasonCode?: string | null;
+  rescheduleReason?: string | null;
+  override?: {
+    supervisorUsername: string;
+    supervisorPassword: string;
+    reason: string;
+  };
 }
 
 export interface AppointmentResponseDto {

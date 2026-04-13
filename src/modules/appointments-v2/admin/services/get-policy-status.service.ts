@@ -10,32 +10,13 @@ import {
   findPolicySetByKey,
   findPublishedVersion,
   findDraftVersion,
-  loadAllRulesForVersion,
 } from "../repositories/admin-policy.repo.js";
-
-export interface PolicyStatusResult {
-  policySet: { id: number; key: string; name: string } | null;
-  published: {
-    id: number;
-    versionNo: number;
-    configHash: string;
-    changeNote: string | null;
-    publishedAt: string | null;
-  } | null;
-  draft: {
-    id: number;
-    versionNo: number;
-    configHash: string;
-    changeNote: string | null;
-    createdAt: string;
-  } | null;
-  publishedRules: Array<Record<string, unknown>>;
-  draftRules: Array<Record<string, unknown>>;
-}
+import { loadPolicySnapshot } from "./policy-snapshot.service.js";
+import type { PolicyStatusDto, PolicyVersionDto } from "../../api/dto/admin-scheduling.dto.js";
 
 export async function getPolicyStatus(
   policySetKey: string = "default"
-): Promise<PolicyStatusResult> {
+): Promise<PolicyStatusDto> {
   const client = await pool.connect();
   try {
     // 1. Load the policy set
@@ -45,62 +26,61 @@ export async function getPolicyStatus(
         policySet: null,
         published: null,
         draft: null,
-        publishedRules: [],
-        draftRules: [],
+        publishedSnapshot: {
+          categoryDailyLimits: [],
+          modalityBlockedRules: [],
+          examTypeRules: [],
+          examTypeSpecialQuotas: [],
+          specialReasonCodes: [],
+        },
+        draftSnapshot: {
+          categoryDailyLimits: [],
+          modalityBlockedRules: [],
+          examTypeRules: [],
+          examTypeSpecialQuotas: [],
+          specialReasonCodes: [],
+        },
       };
     }
 
     // 2. Load published version
     const publishedVersion = await findPublishedVersion(client, policySetKey);
-    let published: PolicyStatusResult["published"] = null;
-    let publishedRules: Array<Record<string, unknown>> = [];
+    let published: PolicyVersionDto | null = null;
 
     if (publishedVersion) {
       published = {
         id: publishedVersion.id,
+        policySetId: publishedVersion.policySetId,
         versionNo: publishedVersion.versionNo,
+        status: publishedVersion.status,
         configHash: publishedVersion.configHash,
         changeNote: publishedVersion.changeNote,
+        createdAt: publishedVersion.createdAt,
         publishedAt: publishedVersion.publishedAt,
       };
-
-      // Load rules for published version
-      const rules = await loadAllRulesForVersion(client, publishedVersion.id);
-      publishedRules = rules.map((r) => ({
-        ruleType: r.ruleType,
-        id: r.id,
-        modalityId: r.modalityId,
-        caseCategory: r.caseCategory,
-        dailyLimit: r.dailyLimit,
-        isActive: r.isActive,
-      }));
     }
 
     // 3. Load draft version
     const draftVersion = await findDraftVersion(client, policySetKey);
-    let draft: PolicyStatusResult["draft"] = null;
-    let draftRules: Array<Record<string, unknown>> = [];
+    let draft: PolicyVersionDto | null = null;
 
     if (draftVersion) {
       draft = {
         id: draftVersion.id,
+        policySetId: draftVersion.policySetId,
         versionNo: draftVersion.versionNo,
+        status: draftVersion.status,
         configHash: draftVersion.configHash,
         changeNote: draftVersion.changeNote,
         createdAt: draftVersion.createdAt,
+        publishedAt: draftVersion.publishedAt,
       };
-
-      // Load rules for draft version
-      const rules = await loadAllRulesForVersion(client, draftVersion.id);
-      draftRules = rules.map((r) => ({
-        ruleType: r.ruleType,
-        id: r.id,
-        modalityId: r.modalityId,
-        caseCategory: r.caseCategory,
-        dailyLimit: r.dailyLimit,
-        isActive: r.isActive,
-      }));
     }
+
+    const [publishedSnapshot, draftSnapshot] = await Promise.all([
+      loadPolicySnapshot(client, published?.id ?? null),
+      loadPolicySnapshot(client, draft?.id ?? null),
+    ]);
 
     return {
       policySet: {
@@ -110,8 +90,8 @@ export async function getPolicyStatus(
       },
       published,
       draft,
-      publishedRules,
-      draftRules,
+      publishedSnapshot,
+      draftSnapshot,
     };
   } finally {
     client.release();

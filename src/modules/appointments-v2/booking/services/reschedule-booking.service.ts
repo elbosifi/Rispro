@@ -1,8 +1,9 @@
 /**
  * Appointments V2 — Reschedule booking service.
  *
- * Transactional: finds booking → releases old bucket → acquires new bucket lock
- * → re-evaluates → updates booking → records override audit if applicable.
+ * Transactional: finds booking → acquires new bucket lock (if date changed)
+ * → re-evaluates → updates existing booking row (stable ID)
+ * → records override + reschedule audit events.
  */
 
 import type { PoolClient } from "pg";
@@ -19,10 +20,11 @@ import {
   loadExamTypeRuleItemExamTypeIds,
 } from "../../rules/repositories/policy-rules.repo.js";
 import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
-import { findBookingById, updateBookingStatus, updateBookingDateTime, insertBooking } from "../repositories/booking.repo.js";
+import { findBookingById, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
 import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
+import { recordRescheduleAudit } from "../repositories/reschedule-audit.repo.js";
 import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
@@ -40,10 +42,27 @@ export async function rescheduleBooking(
   newTime: string | null,
   userId: number,
   override?: CreateBookingPayload["override"],
+  useSpecialQuota: boolean = false,
+  specialReasonCode: string | null = null,
+  rescheduleReason: string | null = null,
   policySetKey: string = "default"
 ): Promise<RescheduleBookingResult> {
   return withTransaction(async (client) => {
-    return rescheduleBookingInternal(client, bookingId, newDate, newTime, userId, override, policySetKey);
+    return rescheduleBookingInternal(
+      client,
+      bookingId,
+      newDate,
+      newTime,
+      userId,
+      override,
+      useSpecialQuota,
+      specialReasonCode,
+      rescheduleReason,
+      policySetKey
+    );
+  }, {
+    isolationLevel: "serializable",
+    operationName: "reschedule_booking",
   });
 }
 
@@ -54,6 +73,9 @@ async function rescheduleBookingInternal(
   newTime: string | null,
   userId: number,
   override: CreateBookingPayload["override"] | undefined,
+  useSpecialQuota: boolean,
+  specialReasonCode: string | null,
+  rescheduleReason: string | null,
   policySetKey: string
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
@@ -80,10 +102,20 @@ async function rescheduleBookingInternal(
   }
 
   const previousDate = booking.bookingDate;
+  const previousTime = booking.bookingTime;
 
   // If the date hasn't changed (or no new date provided), just update the time — no re-evaluation needed
   if (!newDate || previousDate === newDate) {
-    return rescheduleTimeOnly(client, bookingId, newTime, userId, previousDate);
+    return rescheduleTimeOnly(
+      client,
+      bookingId,
+      newTime,
+      userId,
+      previousDate,
+      previousTime,
+      override,
+      rescheduleReason
+    );
   }
 
   // 2. Acquire the NEW bucket lock (for the new date)
@@ -163,13 +195,25 @@ async function rescheduleBookingInternal(
     examTypeId: booking.examTypeId,
     scheduledDate: newDate,
     caseCategory: booking.caseCategory,
-    useSpecialQuota: false,
-    specialReasonCode: null,
+    useSpecialQuota,
+    specialReasonCode,
     includeOverrideEvaluation: override != null,
     context,
   };
 
   const decision = await pureEvaluate(pureInput);
+  console.info(JSON.stringify({
+    type: "appointments_v2_reschedule_decision",
+    bookingId,
+    modalityId: booking.modalityId,
+    previousDate,
+    newDate,
+    caseCategory: booking.caseCategory,
+    displayStatus: decision.displayStatus,
+    requiresSupervisorOverride: decision.requiresSupervisorOverride,
+    isAllowed: decision.isAllowed,
+    reasonCodes: decision.reasons.map((r) => r.code),
+  }));
 
   // 7. Check if reschedule is allowed or requires override
   let wasOverride = false;
@@ -198,32 +242,28 @@ async function rescheduleBookingInternal(
       override.supervisorUsername,
       override.supervisorPassword
     );
+    console.info(JSON.stringify({
+      type: "appointments_v2_reschedule_override",
+      bookingId,
+      requestingUserId: userId,
+      supervisorUserId: supervisor.id,
+    }));
     supervisorUserId = supervisor.id;
     wasOverride = true;
   }
 
-  // 8. Cancel the old booking and insert a new one on the new date
-  // This maintains a clean audit trail: old booking stays as "cancelled",
-  // new booking is "scheduled" with its own ID.
-  await updateBookingStatus(client, bookingId, "cancelled", userId);
-
-  const newBooking = await insertBooking(client, {
-    patientId: booking.patientId,
-    modalityId: booking.modalityId,
-    examTypeId: booking.examTypeId,
-    reportingPriorityId: booking.reportingPriorityId,
-    bookingDate: newDate,
-    bookingTime: newTime,
-    caseCategory: booking.caseCategory,
-    status: "scheduled",
-    notes: booking.notes,
-    policyVersionId: publishedVersion.id,
-    userId,
-  });
+  await updateBookingForReschedule(
+    client,
+    bookingId,
+    newDate,
+    newTime,
+    publishedVersion.id,
+    userId
+  );
 
   if (wasOverride && supervisorUserId != null) {
     await recordOverrideAudit(client, {
-      bookingId: newBooking.id,
+      bookingId,
       patientId: booking.patientId,
       modalityId: booking.modalityId,
       examTypeId: booking.examTypeId,
@@ -236,8 +276,25 @@ async function rescheduleBookingInternal(
     });
   }
 
+  await recordRescheduleAudit(client, {
+    bookingId,
+    previousDate,
+    previousTime,
+    newDate,
+    newTime,
+    changedByUserId: userId,
+    overrideUsed: wasOverride,
+    supervisorUserId,
+    reason: rescheduleReason ?? override?.reason ?? null,
+  });
+
+  const updatedBooking = await findBookingById(client, bookingId);
+  if (!updatedBooking) {
+    throw new SchedulingError(500, "Booking disappeared after reschedule.", ["internal_error"]);
+  }
+
   return {
-    booking: newBooking,
+    booking: updatedBooking,
     decisionSnapshot: decision,
     wasOverride,
     previousDate,
@@ -253,9 +310,24 @@ async function rescheduleTimeOnly(
   bookingId: number,
   newTime: string | null,
   userId: number,
-  previousDate: string
+  previousDate: string,
+  previousTime: string | null,
+  override: CreateBookingPayload["override"] | undefined,
+  rescheduleReason: string | null
 ): Promise<RescheduleBookingResult> {
   await updateBookingDateTime(client, bookingId, previousDate, newTime, userId);
+
+  await recordRescheduleAudit(client, {
+    bookingId,
+    previousDate,
+    previousTime,
+    newDate: previousDate,
+    newTime,
+    changedByUserId: userId,
+    overrideUsed: false,
+    supervisorUserId: null,
+    reason: rescheduleReason ?? override?.reason ?? null,
+  });
 
   const updatedBooking = await findBookingById(client, bookingId);
   if (!updatedBooking) {

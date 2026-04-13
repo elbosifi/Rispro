@@ -11,23 +11,17 @@ import {
   findVersionById,
   findPublishedVersion,
   loadAllRulesForVersion,
+  type PolicyRuleRow,
 } from "../repositories/admin-policy.repo.js";
 import { pool } from "../../../../db/pool.js";
+import type { PolicyPreviewDto, PolicyRuleDiffDto } from "../../api/dto/admin-scheduling.dto.js";
 
-export interface PolicyImpactDiff {
-  draftVersionId: number;
-  publishedVersionId: number | null;
-  addedRules: unknown[];
-  removedRules: unknown[];
-  modifiedRules: unknown[];
-  ruleCountDraft: number;
-  ruleCountPublished: number;
-  warnings: string[];
-}
+// Backward-compatible alias used by legacy unit tests.
+export type PolicyImpactDiff = PolicyPreviewDto;
 
 export async function previewPolicyImpact(
   draftVersionId: number
-): Promise<PolicyImpactDiff> {
+): Promise<PolicyPreviewDto> {
   const client = await pool.connect();
   try {
     return previewPolicyImpactInternal(client, draftVersionId);
@@ -39,7 +33,7 @@ export async function previewPolicyImpact(
 async function previewPolicyImpactInternal(
   client: PoolClient,
   draftVersionId: number
-): Promise<PolicyImpactDiff> {
+): Promise<PolicyPreviewDto> {
   // 1. Find the draft version
   const draft = await findVersionById(client, draftVersionId);
   if (!draft) {
@@ -63,16 +57,16 @@ async function previewPolicyImpactInternal(
   const draftRuleIds = new Set(draftRules.map((r) => r.id));
   const publishedRuleIds = new Set(publishedRules.map((r) => r.id));
 
-  const addedRules = draftRules.filter((r) => !publishedRuleIds.has(r.id));
-  const removedRules = publishedRules.filter((r) => !draftRuleIds.has(r.id));
-  const modifiedRules: unknown[] = [];
+  const addedRules = draftRules.filter((r) => !publishedRuleIds.has(r.id)).map(toRuleDiffDto);
+  const removedRules = publishedRules.filter((r) => !draftRuleIds.has(r.id)).map(toRuleDiffDto);
+  const modifiedRules: Array<{ draft: PolicyRuleDiffDto; published: PolicyRuleDiffDto }> = [];
 
   // Check for rules in both that may have been modified
   for (const draftRule of draftRules) {
     if (publishedRuleIds.has(draftRule.id)) {
       const pubRule = publishedRules.find((r) => r.id === draftRule.id);
       if (pubRule && JSON.stringify(draftRule) !== JSON.stringify(pubRule)) {
-        modifiedRules.push({ id: draftRule.id, draft: draftRule, published: pubRule });
+        modifiedRules.push({ draft: toRuleDiffDto(draftRule), published: toRuleDiffDto(pubRule) });
       }
     }
   }
@@ -90,12 +84,24 @@ async function previewPolicyImpactInternal(
   return {
     draftVersionId,
     publishedVersionId: published?.id ?? null,
+    addedRulesCount: addedRules.length,
+    removedRulesCount: removedRules.length,
+    modifiedRulesCount: modifiedRules.length,
     addedRules,
     removedRules,
     modifiedRules,
-    ruleCountDraft: draftRules.length,
-    ruleCountPublished: publishedRules.length,
     warnings,
+  };
+}
+
+function toRuleDiffDto(row: PolicyRuleRow): PolicyRuleDiffDto {
+  return {
+    id: row.id,
+    ruleType: row.ruleType,
+    modalityId: row.modalityId,
+    caseCategory: row.caseCategory,
+    dailyLimit: row.dailyLimit,
+    isActive: row.isActive,
   };
 }
 

@@ -109,6 +109,27 @@ export async function updateBookingDateTime(
   await client.query(UPDATE_DATE_TIME_SQL, [newDate, newTime, userId, bookingId]);
 }
 
+const UPDATE_RESCHEDULE_SQL = `
+  update appointments_v2.bookings
+  set booking_date = $1,
+      booking_time = $2,
+      policy_version_id = $3,
+      updated_at = now(),
+      updated_by_user_id = $4
+  where id = $5
+`;
+
+export async function updateBookingForReschedule(
+  client: PoolClient,
+  bookingId: number,
+  newDate: string,
+  newTime: string | null,
+  policyVersionId: number,
+  userId: number
+): Promise<void> {
+  await client.query(UPDATE_RESCHEDULE_SQL, [newDate, newTime, policyVersionId, userId, bookingId]);
+}
+
 // ---------------------------------------------------------------------------
 // List bookings (read-only — uses pool, not transaction)
 // ---------------------------------------------------------------------------

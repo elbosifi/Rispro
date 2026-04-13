@@ -217,14 +217,14 @@ describe("PUT /policy/draft/:versionId — route wiring", () => {
     assert.ok(source.includes("Invalid version ID"), "Should validate version ID");
   });
 
-  it("extracts configSnapshot from request body", async () => {
+  it("extracts policySnapshot from request body", async () => {
     const fs = await import("node:fs/promises");
     const source = await fs.readFile(
       "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/admin-scheduling-v2-routes.ts",
       "utf-8"
     );
-    assert.ok(source.includes("body.configSnapshot"), "Should extract configSnapshot from body");
-    assert.ok(source.includes("configSnapshot is required"), "Should validate configSnapshot presence");
+    assert.ok(source.includes("body.policySnapshot"), "Should extract policySnapshot from body");
+    assert.ok(source.includes("policySnapshot is required"), "Should validate policySnapshot presence");
   });
 
   it("extracts optional changeNote from request body", async () => {

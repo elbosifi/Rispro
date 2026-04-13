@@ -226,11 +226,12 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       const { status, data } = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
         body: {
-          configSnapshot: {
+          policySnapshot: {
             categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10 }],
             modalityBlockedRules: [],
             examTypeRules: [],
-            specialQuotas: [],
+            examTypeSpecialQuotas: [],
+            specialReasonCodes: [],
           },
           changeNote: "Updated daily limit to 10",
         },
@@ -244,7 +245,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
     it("should reject saving a non-draft version", async () => {
       const { status } = await fetch(`/api/v2/scheduling/admin/policy/draft/${testData.policyVersionId}`, {
         method: "PUT",
-        body: { configSnapshot: {}, changeNote: "Should fail" },
+        body: { policySnapshot: {}, changeNote: "Should fail" },
       });
       assert.equal(status, 409);
     });

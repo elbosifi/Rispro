@@ -40,6 +40,9 @@ export async function createBooking(
 ): Promise<CreateBookingResult> {
   return withTransaction(async (client) => {
     return createBookingInternal(client, payload, userId, policySetKey);
+  }, {
+    isolationLevel: "serializable",
+    operationName: "create_booking",
   });
 }
 
@@ -157,13 +160,24 @@ async function createBookingInternal(
     examTypeId: payload.examTypeId ?? null,
     scheduledDate: payload.bookingDate,
     caseCategory: payload.caseCategory,
-    useSpecialQuota: false,
-    specialReasonCode: null,
+    useSpecialQuota: payload.useSpecialQuota === true,
+    specialReasonCode: payload.specialReasonCode ?? null,
     includeOverrideEvaluation: payload.override != null,
     context,
   };
 
   const decision = await pureEvaluate(pureInput);
+  console.info(JSON.stringify({
+    type: "appointments_v2_booking_decision",
+    modalityId: payload.modalityId,
+    bookingDate: payload.bookingDate,
+    caseCategory: payload.caseCategory,
+    examTypeId: payload.examTypeId ?? null,
+    displayStatus: decision.displayStatus,
+    requiresSupervisorOverride: decision.requiresSupervisorOverride,
+    isAllowed: decision.isAllowed,
+    reasonCodes: decision.reasons.map((r) => r.code),
+  }));
 
   // 8. Check if booking is allowed or requires override
   let wasOverride = false;
@@ -194,6 +208,13 @@ async function createBookingInternal(
       payload.override.supervisorUsername,
       payload.override.supervisorPassword
     );
+    console.info(JSON.stringify({
+      type: "appointments_v2_booking_override",
+      modalityId: payload.modalityId,
+      bookingDate: payload.bookingDate,
+      requestingUserId: userId,
+      supervisorUserId: supervisor.id,
+    }));
     supervisorUserId = supervisor.id;
     wasOverride = true;
   }

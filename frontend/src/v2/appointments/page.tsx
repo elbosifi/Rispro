@@ -7,8 +7,10 @@
  */
 
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking } from "./api";
+import { useAuth } from "@/providers/auth-provider";
+import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
 import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
 import { StatusBadge } from "./components/status-badge";
@@ -46,6 +48,8 @@ function formatDate(dateStr: string): string {
 // ---------------------------------------------------------------------------
 
 export function AppointmentsV2Page() {
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const lookups = useV2Lookups();
   const [modalityId, setModalityId] = useState<number | null>(null);
   const [examTypeId, setExamTypeId] = useState<number | null>(null);
@@ -96,6 +100,11 @@ export function AppointmentsV2Page() {
         }
       : undefined as unknown as Parameters<typeof useV2Availability>[0]
   );
+  const suggestions = useV2Suggestions(
+    modalityId != null
+      ? { modalityId, days, examTypeId, caseCategory }
+      : undefined as unknown as Parameters<typeof useV2Suggestions>[0]
+  );
 
   // Bookings: use date range from availability query
   const bookings = useV2ListBookings(
@@ -115,6 +124,23 @@ export function AppointmentsV2Page() {
       <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>
         Appointments V2
       </h1>
+      {user?.role === "supervisor" && (
+        <div style={{ marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => navigate("/v2/appointments/admin")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 6,
+              border: "1px solid var(--border-color, #e2e8f0)",
+              background: "var(--bg-surface, #f8fafc)",
+              cursor: "pointer",
+            }}
+          >
+            Open V2 Policy Admin
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div
@@ -280,12 +306,35 @@ export function AppointmentsV2Page() {
           Error loading availability: {(availability.error as Error).message}
         </p>
       ) : availability.data?.items.length === 0 ? (
-        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
-          No availability data found for the selected criteria.
-        </p>
+        <div>
+          <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+            No availability data found for the selected criteria.
+          </p>
+          <p style={{ color: "var(--text-muted, #64748b)", fontSize: 13 }}>
+            If no policy is published, supervisors can publish one from V2 Policy Admin.
+          </p>
+        </div>
       ) : (
         <>
           <AvailabilityTable items={availability.data?.items ?? []} />
+
+          {/* Suggestions */}
+          <div style={{ marginTop: 24 }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Suggestions</h2>
+            {suggestions.isLoading ? (
+              <p style={{ color: "var(--text-muted, #64748b)" }}>Loading suggestions…</p>
+            ) : suggestions.data?.items.length ? (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {suggestions.data.items.slice(0, 5).map((s) => (
+                  <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4 }}>
+                    {s.date} - {s.decision.displayStatus}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: "var(--text-muted, #64748b)" }}>No suggestions available.</p>
+            )}
+          </div>
 
           {/* Booking Form */}
           <div style={{ marginTop: 32 }}>

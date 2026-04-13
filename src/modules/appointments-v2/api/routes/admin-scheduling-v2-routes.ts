@@ -6,7 +6,7 @@
  */
 
 import { Router, Request, Response } from "express";
-import { requireAuth } from "../../../../middleware/auth.js";
+import { requireAuth, requireSupervisor } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { createPolicyDraft } from "../../admin/services/create-policy-draft.service.js";
@@ -15,10 +15,17 @@ import { publishPolicy } from "../../admin/services/publish-policy.service.js";
 import { previewPolicyImpact } from "../../admin/services/preview-policy-impact.service.js";
 import { getPolicyStatus } from "../../admin/services/get-policy-status.service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
+import type {
+  CreatePolicyDraftDto,
+  FieldValidationErrorDto,
+  PublishPolicyDto,
+  SavePolicyDraftDto,
+} from "../dto/admin-scheduling.dto.js";
 
 const router = Router();
 
 router.use(requireAuth);
+router.use(requireSupervisor);
 
 interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUserContext;
@@ -33,16 +40,8 @@ router.get(
   "/policy",
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const policySetKey = (req.query.policySetKey as string) ?? "default";
-
     const result = await getPolicyStatus(policySetKey);
-
-    res.json({
-      policySet: result.policySet,
-      published: result.published,
-      draft: result.draft,
-      publishedRules: result.publishedRules,
-      draftRules: result.draftRules,
-    });
+    res.json(result);
   })
 );
 
@@ -55,13 +54,14 @@ router.get(
 router.post(
   "/policy/draft",
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
-    const body = req.body as Record<string, unknown>;
+    const body = req.body as CreatePolicyDraftDto;
     const policySetKey = String(body.policySetKey ?? "default").trim();
     const changeNote = body.changeNote ? String(body.changeNote) : null;
 
     if (!policySetKey) {
-      res.status(400).json({ error: "policySetKey is required" });
-      return;
+      throwValidationError([
+        { field: "policySetKey", code: "required", message: "policySetKey is required" },
+      ]);
     }
 
     const userId = Number(req.user?.sub ?? 0);
@@ -79,29 +79,27 @@ router.post(
  * PUT /api/v2/scheduling/admin/policy/draft/:versionId
  * Authoritatively replace a draft snapshot (D006).
  *
- * Body: { configSnapshot: object, changeNote?: string }
+ * Body: { policySnapshot: PolicySnapshotDto, changeNote?: string }
  */
 router.put(
   "/policy/draft/:versionId",
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const versionId = parseInt(String(req.params.versionId), 10);
     if (isNaN(versionId)) {
-      res.status(400).json({ error: "Invalid version ID" });
-      return;
+      throwValidationError([
+        { field: "versionId", code: "invalid_number", message: "Invalid version ID" },
+      ]);
     }
 
-    const body = req.body as Record<string, unknown>;
-    const configSnapshot = body.configSnapshot ?? null;
+    const body = req.body as SavePolicyDraftDto;
+    const policySnapshot = body.policySnapshot ?? null;
     const changeNote = body.changeNote ? String(body.changeNote) : null;
 
-    if (configSnapshot == null) {
-      res.status(400).json({ error: "configSnapshot is required" });
-      return;
-    }
+    validatePolicySnapshotBody(policySnapshot);
 
     const userId = Number(req.user?.sub ?? 0);
 
-    const result = await savePolicyDraft(versionId, configSnapshot, userId, changeNote);
+    const result = await savePolicyDraft(versionId, policySnapshot, userId, changeNote);
 
     res.json({
       version: result.version,
@@ -121,11 +119,12 @@ router.post(
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const versionId = parseInt(String(req.params.versionId), 10);
     if (isNaN(versionId)) {
-      res.status(400).json({ error: "Invalid version ID" });
-      return;
+      throwValidationError([
+        { field: "versionId", code: "invalid_number", message: "Invalid version ID" },
+      ]);
     }
 
-    const body = req.body as Record<string, unknown>;
+    const body = req.body as PublishPolicyDto;
     const changeNote = body.changeNote ? String(body.changeNote) : null;
 
     const userId = Number(req.user?.sub ?? 0);
@@ -148,21 +147,59 @@ router.get(
   asyncRoute(async (_req: AuthenticatedRequest, res: Response) => {
     const versionId = parseInt(String(_req.params.versionId), 10);
     if (isNaN(versionId)) {
-      res.status(400).json({ error: "Invalid version ID" });
-      return;
+      throwValidationError([
+        { field: "versionId", code: "invalid_number", message: "Invalid version ID" },
+      ]);
     }
 
     const diff = await previewPolicyImpact(versionId);
-
-    res.json({
-      draftVersionId: diff.draftVersionId,
-      publishedVersionId: diff.publishedVersionId,
-      addedRulesCount: diff.addedRules.length,
-      removedRulesCount: diff.removedRules.length,
-      modifiedRulesCount: diff.modifiedRules.length,
-      warnings: diff.warnings,
-    });
+    res.json(diff);
   })
 );
+
+function validatePolicySnapshotBody(policySnapshot: unknown): void {
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  const snapshot = policySnapshot as Record<string, unknown> | null;
+  if (!snapshot || typeof snapshot !== "object") {
+    throwValidationError([
+      {
+        field: "policySnapshot",
+        code: "required",
+        message: "policySnapshot is required",
+      },
+    ]);
+  }
+
+  const requiredArrays = [
+    "categoryDailyLimits",
+    "modalityBlockedRules",
+    "examTypeRules",
+    "examTypeSpecialQuotas",
+    "specialReasonCodes",
+  ];
+
+  for (const key of requiredArrays) {
+    if (!Array.isArray(snapshot[key])) {
+      fieldErrors.push({
+        field: `policySnapshot.${key}`,
+        code: "invalid_type",
+        message: `${key} must be an array`,
+      });
+    }
+  }
+
+  if (fieldErrors.length > 0) {
+    throwValidationError(fieldErrors);
+  }
+}
+
+function throwValidationError(fieldErrors: FieldValidationErrorDto[]): never {
+  throw new SchedulingError(
+    400,
+    "Validation failed",
+    ["validation_failed"],
+    { fieldErrors }
+  );
+}
 
 export { router as adminSchedulingV2Router };

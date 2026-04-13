@@ -34,10 +34,47 @@ import {
 
 /**
  * Check if shadow mode is enabled.
- * Uses environment variable SHADOW_MODE_ENABLED (default: false).
+ * Supports:
+ * - APPOINTMENTS_V2_SHADOW_MODE_ENABLED=true
+ * - SHADOW_MODE_ENABLED=true (legacy fallback)
  */
 export function isShadowModeEnabled(): boolean {
-  return process.env.SHADOW_MODE_ENABLED === "true";
+  const primary = String(process.env.APPOINTMENTS_V2_SHADOW_MODE_ENABLED ?? "").toLowerCase();
+  if (primary) {
+    return ["1", "true", "yes", "enabled", "on"].includes(primary);
+  }
+  return String(process.env.SHADOW_MODE_ENABLED ?? "").toLowerCase() === "true";
+}
+
+let cachedShadowFlag: { value: boolean; expiresAt: number } | null = null;
+
+async function isShadowModeEnabledForRequest(): Promise<boolean> {
+  const now = Date.now();
+  if (cachedShadowFlag && cachedShadowFlag.expiresAt > now) {
+    return cachedShadowFlag.value;
+  }
+
+  let enabled = isShadowModeEnabled();
+  try {
+    const result = await pool.query<{ value: unknown }>(
+      `
+        select setting_value->>'value' as value
+        from system_settings
+        where category = 'scheduling_and_capacity'
+          and setting_key = 'appointments_v2_shadow_mode_enabled'
+        limit 1
+      `
+    );
+    const raw = String(result.rows[0]?.value ?? "").trim().toLowerCase();
+    if (raw) {
+      enabled = ["1", "true", "yes", "enabled", "on"].includes(raw);
+    }
+  } catch {
+    // Fall back to env-based value only; failures must not block request paths.
+  }
+
+  cachedShadowFlag = { value: enabled, expiresAt: now + 30_000 };
+  return enabled;
 }
 
 /**
@@ -56,7 +93,7 @@ export async function runAvailabilityWithShadow(
   policySetKey: string = "default"
 ): Promise<AvailabilityDayDto[]> {
   // If shadow mode is not enabled, just return the legacy results as-is
-  if (!isShadowModeEnabled()) {
+  if (!(await isShadowModeEnabledForRequest())) {
     return legacyResults;
   }
 
