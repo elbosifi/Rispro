@@ -260,7 +260,7 @@ describe("previewPolicyImpact — no differences", () => {
 describe("previewPolicyImpact — rule counts", () => {
   afterEach(() => mock.restoreAll());
 
-  it("returns correct ruleCountDraft and ruleCountPublished", async () => {
+  it("returns correct rule counts in draft and published", async () => {
     const result = await runPreviewWithMocks(
       10,
       DRAFT_VERSION,
@@ -269,8 +269,14 @@ describe("previewPolicyImpact — rule counts", () => {
       [makeRule(1, "modality_blocked", 10, null)]
     );
 
-    assert.equal(result.ruleCountDraft, 2);
-    assert.equal(result.ruleCountPublished, 1);
+    // Draft has 2 rules, published has 1 rule
+    // Diff should show: 1 added (rule 2), 0 removed, 0 modified
+    assert.equal(result.addedRulesCount, 1);
+    assert.equal(result.removedRulesCount, 0);
+    assert.equal(result.modifiedRulesCount, 0);
+    assert.equal((result.addedRules as unknown[]).length, 1);
+    assert.equal((result.removedRules as unknown[]).length, 0);
+    assert.equal((result.modifiedRules as unknown[]).length, 0);
   });
 });
 
@@ -284,14 +290,18 @@ describe("previewPolicyImpact — function structure", () => {
     const diff = {
       draftVersionId: 10,
       publishedVersionId: 5,
+      addedRulesCount: 1,
+      removedRulesCount: 0,
+      modifiedRulesCount: 0,
       addedRules: [] as unknown[],
       removedRules: [] as unknown[],
       modifiedRules: [] as unknown[],
-      ruleCountDraft: 2,
-      ruleCountPublished: 1,
       warnings: [] as string[],
     };
     assert.equal(typeof diff.draftVersionId, "number");
+    assert.equal(typeof diff.addedRulesCount, "number");
+    assert.equal(typeof diff.removedRulesCount, "number");
+    assert.equal(typeof diff.modifiedRulesCount, "number");
     assert.ok(Array.isArray(diff.addedRules));
     assert.ok(Array.isArray(diff.removedRules));
     assert.ok(Array.isArray(diff.modifiedRules));

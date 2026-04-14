@@ -67,7 +67,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       // Step 1: Create a draft from current published policy
       const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
-        body: JSON.stringify({ policySetKey: "default" }),
+        body: { policySetKey: "default" },
       });
       const createData = createResult.data as any;
       assert.ok(createData.draft?.id, "Draft should have an ID");
@@ -127,7 +127,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (!draftVersionId) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         const createData = createResult.data as any;
         draftVersionId = createData.draft.id;
@@ -173,7 +173,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       // Save the draft
       const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: JSON.stringify({ policySnapshot: testSnapshot, changeNote: "Test save" }),
+        body: { policySnapshot: testSnapshot, changeNote: "Test save" },
       });
       const saveData = saveResult.data as any;
       assert.ok(saveData.version, "Save should return version");
@@ -240,7 +240,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (!draftVersionId) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         const createData = createResult.data as any;
         draftVersionId = createData.draft.id;
@@ -271,13 +271,13 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
 
       await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: JSON.stringify({ policySnapshot: publishTestSnapshot, changeNote: "Test publish" }),
+        body: { policySnapshot: publishTestSnapshot, changeNote: "Test publish" },
       });
 
       // Publish the draft
       const publishResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}/publish`, {
         method: "POST",
-        body: JSON.stringify({ changeNote: "Test publish note" }),
+        body: { changeNote: "Test publish note" },
       });
       const publishData = publishResult.data as any;
       assert.ok(publishData.published, "Publish should return published version");
@@ -334,7 +334,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (!draftVersionId) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         const createData = createResult.data as any;
         draftVersionId = createData.draft.id;
@@ -355,7 +355,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
 
       await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: JSON.stringify({ policySnapshot: snapshotWithFakeCodes, changeNote: "Isolation test" }),
+        body: { policySnapshot: snapshotWithFakeCodes, changeNote: "Isolation test" },
       });
 
       // Check that global special reason codes are UNCHANGED
@@ -392,7 +392,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (!draftVersionId) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         const createData = createResult.data as any;
         draftVersionId = createData.draft.id;
@@ -420,7 +420,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
 
       const saveResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: JSON.stringify({ policySnapshot: testSnapshot, changeNote: "Hash test" }),
+        body: { policySnapshot: testSnapshot, changeNote: "Hash test" },
       });
       const saveData = saveResult.data as any;
       const returnedHash = saveData.configHash;
@@ -452,7 +452,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (dataBefore?.draft?.id) {
         await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
           method: "POST",
-          body: JSON.stringify({ changeNote: "Pre-test publish" }),
+          body: { changeNote: "Pre-test publish" },
         });
       }
 
@@ -492,7 +492,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (!draftVersionId) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         draftVersionId = (createResult.data as any).draft.id;
       }
@@ -501,7 +501,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       const modalityId = testData.modalityId;
       await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
         method: "PUT",
-        body: JSON.stringify({
+        body: {
           policySnapshot: {
             categoryDailyLimits: [{ id: 100, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 5, isActive: true }],
             modalityBlockedRules: [],
@@ -510,7 +510,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
             specialReasonCodes: [],
           },
           changeNote: "Test empty codes",
-        }),
+        },
       });
 
       // Verify global codes are UNCHANGED
@@ -541,7 +541,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       if (dataBefore?.draft?.id) {
         await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
           method: "POST",
-          body: JSON.stringify({ changeNote: "Pre-test publish" }),
+          body: { changeNote: "Pre-test publish" },
         });
       }
 
@@ -550,7 +550,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       // Create a draft with a custom change note
       const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
-        body: JSON.stringify({ policySetKey: "default", changeNote: customNote }),
+        body: { policySetKey: "default", changeNote: customNote },
       });
       const createData = createResult.data as any;
       assert.ok(createData.draft?.id, "Draft should have an ID");

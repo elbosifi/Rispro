@@ -131,13 +131,13 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       if (dataBefore?.published?.id) {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         draftVersionId = (createResult.data as any).draft.id;
       } else {
         const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: JSON.stringify({ policySetKey: "default" }),
+          body: { policySetKey: "default" },
         });
         draftVersionId = (createResult.data as any).draft.id;
       }
@@ -159,12 +159,12 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
 
     await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
       method: "PUT",
-      body: JSON.stringify({ policySnapshot: snapshot, changeNote: "Rule enforcement test" }),
+      body: { policySnapshot: snapshot, changeNote: "Rule enforcement test" },
     });
 
     await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}/publish`, {
       method: "POST",
-      body: JSON.stringify({ changeNote: "Publish for test" }),
+      body: { changeNote: "Publish for test" },
     });
   }
 
