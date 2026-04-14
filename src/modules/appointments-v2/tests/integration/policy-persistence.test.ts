@@ -527,4 +527,45 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 8: Create draft preserves changeNote after hash recalculation
+  // ---------------------------------------------------------------------------
+  describe("Create Draft — preserves changeNote", () => {
+    it("returned draft.changeNote is preserved after hash recalculation", async () => {
+      guard();
+
+      // First, publish any existing draft to start clean
+      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const dataBefore = statusBefore.data as any;
+      if (dataBefore?.draft?.id) {
+        await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
+          method: "POST",
+          body: JSON.stringify({ changeNote: "Pre-test publish" }),
+        });
+      }
+
+      const customNote = "Custom test change note — must be preserved";
+
+      // Create a draft with a custom change note
+      const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
+        method: "POST",
+        body: JSON.stringify({ policySetKey: "default", changeNote: customNote }),
+      });
+      const createData = createResult.data as any;
+      assert.ok(createData.draft?.id, "Draft should have an ID");
+
+      // Fetch status to get the persisted draft
+      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const statusAfterData = statusAfter.data as any;
+      const draftVersion = statusAfterData.draft;
+
+      assert.ok(draftVersion, "Should have a draft version");
+      assert.strictEqual(
+        draftVersion.changeNote,
+        customNote,
+        "Draft changeNote should be preserved after hash recalculation"
+      );
+    });
+  });
 });

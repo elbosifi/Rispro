@@ -79,6 +79,7 @@ async function createPolicyDraftInternal(
   if (!published) {
     // No published version — create a draft with empty config
     const nextVersion = await getNextVersionNumber(client, policySet.id);
+    const resolvedNote = changeNote ?? "Initial draft (no published version)";
     // Use a temporary hash; will be replaced with authoritative hash below
     const draft = await createDraftVersion(
       client,
@@ -86,7 +87,7 @@ async function createPolicyDraftInternal(
       nextVersion,
       "empty", // temporary; recalculated after loadPolicySnapshot
       userId,
-      changeNote ?? "Initial draft (no published version)"
+      resolvedNote
     );
 
     // Reload the authoritative empty snapshot from DB.
@@ -94,7 +95,7 @@ async function createPolicyDraftInternal(
     // specialReasonCodes, so the hash matches what the UI would see.
     const emptySnapshot = await loadPolicySnapshot(client, draft.id);
     const configHash = hashConfigSnapshot(emptySnapshot);
-    await updateDraftConfig(client, draft.id, configHash, null);
+    await updateDraftConfig(client, draft.id, configHash, resolvedNote);
 
     const refreshedDraft = await findVersionById(client, draft.id);
     if (!refreshedDraft) {
@@ -112,13 +113,14 @@ async function createPolicyDraftInternal(
 
   // 5. Create the draft version row
   const nextVersion = await getNextVersionNumber(client, policySet.id);
+  const resolvedNote = changeNote ?? `Draft based on published version ${published.versionNo}`;
   const draft = await createDraftVersion(
     client,
     policySet.id,
     nextVersion,
     published.configHash, // temporary hash; will be recalculated below
     userId,
-    changeNote ?? `Draft based on published version ${published.versionNo}`
+    resolvedNote
   );
 
   // 6. Copy all versioned rule rows from the published snapshot into the draft version
@@ -129,7 +131,7 @@ async function createPolicyDraftInternal(
 
   // 8. Recalculate hash from the reloaded DB snapshot (authoritative)
   const configHash = hashConfigSnapshot(persistedSnapshot);
-  await updateDraftConfig(client, draft.id, configHash, null);
+  await updateDraftConfig(client, draft.id, configHash, resolvedNote);
 
   // 9. Refresh and return
   const refreshedDraft = await findVersionById(client, draft.id);
