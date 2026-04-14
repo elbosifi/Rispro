@@ -15,11 +15,12 @@ import type {
   CaseCategory,
   CreateBookingRequest,
   BookingWithPatientInfo,
+  AvailabilityDayDto,
 } from "../types";
 
 interface RescheduleDialogProps {
   booking: BookingWithPatientInfo;
-  availableDates: string[];
+  availabilityItems: AvailabilityDayDto[];
   caseCategory: CaseCategory;
   examTypeId: number | null;
   onReschedule: (
@@ -33,7 +34,7 @@ interface RescheduleDialogProps {
 
 export function RescheduleDialog({
   booking,
-  availableDates,
+  availabilityItems,
   caseCategory,
   examTypeId,
   onReschedule,
@@ -137,8 +138,16 @@ export function RescheduleDialog({
     }
   };
 
-  const isDateAvailable = availableDates.length > 0;
+  const isDateAvailable = availabilityItems.length > 0;
   const isBlocked = decision?.displayStatus === "blocked";
+
+  // Derive selectable dates from availability items:
+  // - Exclude blocked dates
+  // - Exclude the current booking date
+  // - Keep restricted dates (override possible) and available dates
+  const selectableDates = availabilityItems
+    .filter((item) => item.decision.displayStatus !== "blocked")
+    .filter((item) => item.date !== booking.bookingDate);
 
   return (
     <div
@@ -249,13 +258,17 @@ export function RescheduleDialog({
                   }}
                 >
                   <option value="">Select a date…</option>
-                  {availableDates
-                    .filter((d) => d !== booking.bookingDate)
-                    .map((d) => (
-                      <option key={d} value={d}>
-                        {d}
+                  {selectableDates.map((item) => {
+                    const isRestricted = item.decision.displayStatus === "restricted";
+                    const label = isRestricted
+                      ? `${item.date} — Restricted (override required)`
+                      : item.date;
+                    return (
+                      <option key={item.date} value={item.date}>
+                        {label}
                       </option>
-                    ))}
+                    );
+                  })}
                 </select>
               ) : (
                 <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>

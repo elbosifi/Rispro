@@ -615,7 +615,6 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
   };
 
   const bookingsList = bookings.data?.bookings ?? [];
-  const availableDates = availabilityItems.map((item) => item.date);
 
   return (
     <div
@@ -809,7 +808,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       {rescheduleTarget && (
         <RescheduleDialog
           booking={rescheduleTarget}
-          availableDates={availableDates}
+          availabilityItems={availabilityItems}
           caseCategory={rescheduleTarget.caseCategory}
           examTypeId={rescheduleTarget.examTypeId}
           onReschedule={handleReschedule}
