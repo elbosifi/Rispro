@@ -42,6 +42,8 @@ export function StatusBadge({ status, reasons, remainingStandardCapacity, remain
   const standard = clampToZero(remainingStandardCapacity);
   const special = clampToZero(remainingSpecialQuota);
   const hasSpecial = special > 0;
+  const isBlocked = status === "blocked";
+  const isRestricted = status === "restricted";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -59,11 +61,23 @@ export function StatusBadge({ status, reasons, remainingStandardCapacity, remain
       >
         {config.label}
       </span>
-      <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-        {hasSpecial
-          ? `Standard: ${standard} · Special quota: ${special}`
-          : `Standard: ${standard}`}
-      </span>
+      {!isBlocked && !isRestricted && (
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          {hasSpecial
+            ? `Standard: ${standard} · Special quota: ${special}`
+            : `Standard: ${standard}`}
+        </span>
+      )}
+      {isBlocked && (
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Not bookable
+        </span>
+      )}
+      {isRestricted && (
+        <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+          Needs supervisor approval
+        </span>
+      )}
       {reasons.length > 0 && (
         <ul style={{ margin: 0, padding: "0 0 0 12px", fontSize: 10, color: "var(--text-muted)" }}>
           {reasons.map((r, i) => (

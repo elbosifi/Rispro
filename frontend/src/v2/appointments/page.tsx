@@ -454,8 +454,11 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
         </thead>
         <tbody>
           {items.map((day) => {
-            const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
-            const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
+            const status = day.decision.displayStatus as DecisionStatus;
+            const isBlocked = status === "blocked";
+            const isRestricted = status === "restricted";
+            const standard = isBlocked ? null : Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
+            const special = isBlocked ? null : Math.max(0, day.decision.remainingSpecialQuota ?? 0);
             return (
             <tr
               key={day.date}
@@ -470,24 +473,32 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
               <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.dailyCapacity}</td>
               <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.bookedCount}</td>
               <td style={{ textAlign: "center", padding: "10px 12px" }}>
-                <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
-                  {standard} std
-                </div>
-                {special > 0 && (
-                  <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
-                    + {special} special
-                  </div>
+                {isBlocked ? (
+                  <span style={{ fontWeight: 700, color: "var(--color-error, #ef4444)" }}>
+                    Blocked
+                  </span>
+                ) : (
+                  <>
+                    <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
+                      {standard} std
+                    </div>
+                    {special != null && special > 0 && (
+                      <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
+                        + {special} special
+                      </div>
+                    )}
+                  </>
                 )}
               </td>
               <td style={{ padding: "10px 12px" }}>
                 <StatusBadge
-                  status={day.decision.displayStatus as DecisionStatus}
+                  status={status}
                   reasons={day.decision.reasons.map((r: { code: string; severity: "error" | "warning"; message: string }) => ({
                     ...r,
                     message: describeReason(r.code),
                   }))}
-                  remainingStandardCapacity={day.decision.remainingStandardCapacity}
-                  remainingSpecialQuota={day.decision.remainingSpecialQuota}
+                  remainingStandardCapacity={isBlocked ? null : day.decision.remainingStandardCapacity}
+                  remainingSpecialQuota={isBlocked ? null : day.decision.remainingSpecialQuota}
                 />
               </td>
             </tr>

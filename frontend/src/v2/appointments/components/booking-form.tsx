@@ -322,12 +322,20 @@ export function BookingForm({
                   <option value="">Select date…</option>
                   {availableDates.map((date) => {
                     const day = availability.find((d) => d.date === date);
-                    const standard = Math.max(0, day?.decision.remainingStandardCapacity ?? day?.remainingCapacity ?? 0);
-                    const special = Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
-                    const isRestricted = day?.decision.displayStatus === "restricted";
-                    const label = special > 0
-                      ? `${date} (${standard} standard, ${special} special)`
-                      : `${date} (${standard} standard)`;
+                    const dayStatus = day?.decision.displayStatus;
+                    const isBlocked = dayStatus === "blocked";
+                    const isRestricted = dayStatus === "restricted";
+                    const standard = isBlocked ? null : Math.max(0, day?.decision.remainingStandardCapacity ?? day?.remainingCapacity ?? 0);
+                    const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
+                    const specialVal = special ?? 0;
+                    let label: string;
+                    if (isBlocked) {
+                      label = `${date} (Blocked)`;
+                    } else if (specialVal > 0) {
+                      label = `${date} (${standard} standard, ${specialVal} special)`;
+                    } else {
+                      label = `${date} (${standard} standard)`;
+                    }
                     return (
                       <option key={date} value={date}>
                         {label}{isRestricted ? " ⚠️" : ""}
