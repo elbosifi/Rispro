@@ -65,45 +65,11 @@ function checkIntegrity(
     }
   }
 
-  // Check for malformed rule configuration (e.g., blocked rules with missing dates)
-  for (const rule of ctx.blockedRules) {
-    if (rule.ruleType === "specific_date" && !rule.specificDate) {
-      reasons.push(
-        reason(
-          "malformed_rule_configuration",
-          "error",
-          `Blocked rule #${rule.id} (specific_date) is missing a specific_date.`,
-          { type: "modality_blocked_rule", id: rule.id }
-        )
-      );
-    }
-    if (rule.ruleType === "date_range" && (!rule.startDate || !rule.endDate)) {
-      reasons.push(
-        reason(
-          "malformed_rule_configuration",
-          "error",
-          `Blocked rule #${rule.id} (date_range) is missing start or end date.`,
-          { type: "modality_blocked_rule", id: rule.id }
-        )
-      );
-    }
-    if (
-      rule.ruleType === "yearly_recurrence" &&
-      (rule.recurStartMonth == null ||
-        rule.recurStartDay == null ||
-        rule.recurEndMonth == null ||
-        rule.recurEndDay == null)
-    ) {
-      reasons.push(
-        reason(
-          "malformed_rule_configuration",
-          "error",
-          `Blocked rule #${rule.id} (yearly_recurrence) has incomplete recurrence params.`,
-          { type: "modality_blocked_rule", id: rule.id }
-        )
-      );
-    }
-  }
+  // Note: We do NOT check for malformed blocked rules here.
+  // Incomplete rules (missing dates) are harmless — blockedRuleMatchesDate()
+  // already returns false for them, so they never match any date. Failing
+  // the entire evaluation with a malformed_rule_configuration error would
+  // incorrectly block ALL dates when a draft has an incomplete rule row.
 
   if (reasons.length > 0) {
     return { ok: false, reasons };

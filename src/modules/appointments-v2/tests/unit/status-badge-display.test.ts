@@ -261,8 +261,13 @@ describe("Availability table — blocked date behavior", () => {
 
   it("restricted date still shows capacity (needs approval is clear in badge)", async () => {
     const content = await readFile(pagePath, "utf-8");
-    // Restricted dates should still show numeric capacity
-    assert.ok(content.includes("isRestricted"), "Should check isRestricted");
+    // Restricted dates show numeric capacity; blocked dates show "Blocked".
+    // The StatusBadge component handles the restricted status display separately.
+    assert.ok(content.includes("isBlocked"), "Should check isBlocked status");
+    // Restricted status is handled by StatusBadge component, not the table cell
+    const badgePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/components/status-badge.tsx";
+    const badgeContent = await readFile(badgePath, "utf-8");
+    assert.ok(badgeContent.includes("isRestricted"), "StatusBadge should check isRestricted");
   });
 });
 

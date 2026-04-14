@@ -89,7 +89,10 @@ describe("pureEvaluate — integrity checks (D008 step 1)", () => {
     assert.ok(decision.reasons.some((r) => r.code === "exam_type_modality_mismatch"));
   });
 
-  it("blocks when blocked rule has malformed config (missing specific_date)", async () => {
+  it("does NOT block all dates when blocked rule has incomplete config (missing specific_date)", async () => {
+    // Incomplete blocked rules are silently ignored — they don't match any date.
+    // This prevents draft rows with empty date fields from poisoning the entire
+    // evaluation and making ALL dates appear blocked.
     const decision = await pureEvaluate(
       makeInput({
         context: makeContext({
@@ -115,8 +118,9 @@ describe("pureEvaluate — integrity checks (D008 step 1)", () => {
         }),
       })
     );
-    assert.equal(decision.displayStatus, "blocked");
-    assert.ok(decision.reasons.some((r) => r.code === "malformed_rule_configuration"));
+    // The incomplete rule doesn't match any date, so evaluation proceeds normally
+    assert.equal(decision.displayStatus, "available");
+    assert.ok(!decision.reasons.some((r) => r.code === "malformed_rule_configuration"));
   });
 });
 
