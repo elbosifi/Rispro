@@ -6,7 +6,6 @@ import type {
   PolicyExamTypeSpecialQuotaDto,
   PolicyModalityBlockedRuleDto,
   PolicySnapshotDto,
-  PolicySpecialReasonCodeDto,
 } from "../types";
 
 function emptySnapshot(): PolicySnapshotDto {
