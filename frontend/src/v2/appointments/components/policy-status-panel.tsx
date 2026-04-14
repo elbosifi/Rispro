@@ -1,17 +1,28 @@
 import type { PolicyStatusDto, PolicySnapshotDto } from "../types";
 
 function countRules(snapshot: PolicySnapshotDto): number {
+  // specialReasonCodes are global/live config — not part of versioned rule counts.
   return (
     (snapshot.categoryDailyLimits.length ?? 0) +
     (snapshot.modalityBlockedRules.length ?? 0) +
     (snapshot.examTypeRules.length ?? 0) +
-    (snapshot.examTypeSpecialQuotas.length ?? 0) +
-    (snapshot.specialReasonCodes.length ?? 0)
+    (snapshot.examTypeSpecialQuotas.length ?? 0)
   );
 }
 
+function versionedRulesOnly(snapshot: PolicySnapshotDto): Omit<PolicySnapshotDto, "specialReasonCodes"> {
+  return {
+    categoryDailyLimits: snapshot.categoryDailyLimits,
+    modalityBlockedRules: snapshot.modalityBlockedRules,
+    examTypeRules: snapshot.examTypeRules,
+    examTypeSpecialQuotas: snapshot.examTypeSpecialQuotas,
+  };
+}
+
 function snapshotsDiffer(published: PolicySnapshotDto, draft: PolicySnapshotDto): boolean {
-  return JSON.stringify(published) !== JSON.stringify(draft);
+  // Compare only versioned sections. specialReasonCodes are global and should
+  // not trigger "unpublished changes" indicators.
+  return JSON.stringify(versionedRulesOnly(published)) !== JSON.stringify(versionedRulesOnly(draft));
 }
 
 export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefined }) {

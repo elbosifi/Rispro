@@ -79,16 +79,32 @@ async function createPolicyDraftInternal(
   if (!published) {
     // No published version — create a draft with empty config
     const nextVersion = await getNextVersionNumber(client, policySet.id);
-    const emptyConfigHash = hashConfigSnapshot({});
+    // Use a temporary hash; will be replaced with authoritative hash below
     const draft = await createDraftVersion(
       client,
       policySet.id,
       nextVersion,
-      emptyConfigHash,
+      "empty", // temporary; recalculated after loadPolicySnapshot
       userId,
       changeNote ?? "Initial draft (no published version)"
     );
-    return { draft, basedOnVersionId: 0 };
+
+    // Reload the authoritative empty snapshot from DB.
+    // loadPolicySnapshot returns the canonical shape including global
+    // specialReasonCodes, so the hash matches what the UI would see.
+    const emptySnapshot = await loadPolicySnapshot(client, draft.id);
+    const configHash = hashConfigSnapshot(emptySnapshot);
+    await updateDraftConfig(client, draft.id, configHash, null);
+
+    const refreshedDraft = await findVersionById(client, draft.id);
+    if (!refreshedDraft) {
+      throw new SchedulingError(
+        500,
+        "Failed to retrieve created draft.",
+        ["draft_retrieve_failed"]
+      );
+    }
+    return { draft: refreshedDraft, basedOnVersionId: 0 };
   }
 
   // 4. Load the published snapshot (rule rows from DB)

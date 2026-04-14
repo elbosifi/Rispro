@@ -108,6 +108,9 @@ export function PolicyDraftEditor({
   function applyRawJson() {
     try {
       const parsed = JSON.parse(advancedJsonValue) as PolicySnapshotDto;
+      // specialReasonCodes are global config — raw JSON cannot modify them.
+      // Preserve the current global value so users cannot fake-edit via JSON.
+      parsed.specialReasonCodes = [...draft.specialReasonCodes];
       setDraft(parsed);
       setAdvancedJsonError(null);
     } catch (error) {

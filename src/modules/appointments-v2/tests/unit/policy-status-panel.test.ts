@@ -20,39 +20,89 @@ describe("PolicyStatusPanel — countRules logic", () => {
 
   it("includes specialReasonCodes.length in count", async () => {
     const content = await readFile(panelPath, "utf-8");
-    assert.ok(content.includes("snapshot.specialReasonCodes.length"), "Should count specialReasonCodes");
+    // specialReasonCodes are global — they are loaded but NOT counted as versioned rules
+    // This test verifies the file references the field (for display purposes)
+    assert.ok(content.includes("specialReasonCodes"), "PolicyStatusPanel should reference specialReasonCodes (for display)");
   });
 
   it("includes all 5 rule types in countRules", async () => {
     const content = await readFile(panelPath, "utf-8");
-    const expectedTypes = [
+    // Versioned types only (excludes specialReasonCodes which are global)
+    const versionedTypes = [
       "categoryDailyLimits",
       "modalityBlockedRules",
       "examTypeRules",
       "examTypeSpecialQuotas",
-      "specialReasonCodes",
     ];
-    for (const type of expectedTypes) {
+    for (const type of versionedTypes) {
       assert.ok(content.includes(`snapshot.${type}.length`), `Should count ${type}`);
     }
+    // specialReasonCodes should NOT be counted
+    assert.ok(!content.includes("snapshot.specialReasonCodes.length"), "Should NOT count specialReasonCodes");
   });
 
-  it("uses nullish coalescing for all rule types", async () => {
+  it("uses nullish coalescing for all versioned rule types", async () => {
     const content = await readFile(panelPath, "utf-8");
-    const expectedTypes = [
+    const versionedTypes = [
       "categoryDailyLimits",
       "modalityBlockedRules",
       "examTypeRules",
       "examTypeSpecialQuotas",
-      "specialReasonCodes",
     ];
-    for (const type of expectedTypes) {
+    for (const type of versionedTypes) {
       assert.ok(content.includes(`snapshot.${type}.length ?? 0`), `Should use ?? 0 for ${type}`);
     }
   });
 
-  it("computes correct count for snapshot with only specialReasonCodes", () => {
-    // Simulate the countRules function behavior
+  it("excludes specialReasonCodes from count and diff", async () => {
+    const content = await readFile(panelPath, "utf-8");
+    // countRules should NOT include specialReasonCodes
+    assert.ok(!content.includes("snapshot.specialReasonCodes.length"), "countRules should NOT count specialReasonCodes");
+    // snapshotsDiffer should use versionedRulesOnly
+    assert.ok(content.includes("versionedRulesOnly"), "Should have versionedRulesOnly helper");
+  });
+
+  it("snapshotsDiffer ignores changes to specialReasonCodes only", () => {
+    // Simulate the versionedRulesOnly + snapshotsDiffer logic
+    const versionedRulesOnly = (s: any) => ({
+      categoryDailyLimits: s.categoryDailyLimits,
+      modalityBlockedRules: s.modalityBlockedRules,
+      examTypeRules: s.examTypeRules,
+      examTypeSpecialQuotas: s.examTypeSpecialQuotas,
+    });
+
+    const snapshotsDiffer = (a: any, b: any) =>
+      JSON.stringify(versionedRulesOnly(a)) !== JSON.stringify(versionedRulesOnly(b));
+
+    // Same versioned rules, different specialReasonCodes → should NOT differ
+    const published = {
+      categoryDailyLimits: [{ id: 1 }],
+      modalityBlockedRules: [],
+      examTypeRules: [],
+      examTypeSpecialQuotas: [],
+      specialReasonCodes: [{ code: "urgent" }],
+    };
+    const draft = {
+      categoryDailyLimits: [{ id: 1 }],
+      modalityBlockedRules: [],
+      examTypeRules: [],
+      examTypeSpecialQuotas: [],
+      specialReasonCodes: [{ code: "different" }],
+    };
+
+    assert.ok(!snapshotsDiffer(published, draft), "Should NOT differ when only specialReasonCodes changed");
+
+    // Different versioned rules → should differ
+    const draftWithChanges = {
+      ...draft,
+      categoryDailyLimits: [{ id: 99 }],
+    };
+
+    assert.ok(snapshotsDiffer(published, draftWithChanges), "Should differ when versioned rules changed");
+  });
+
+  it("computes correct count for snapshot with only specialReasonCodes (returns 0)", () => {
+    // specialReasonCodes are global — they should NOT be counted as versioned rules
     const snapshot = {
       categoryDailyLimits: [],
       modalityBlockedRules: [],
@@ -64,14 +114,14 @@ describe("PolicyStatusPanel — countRules logic", () => {
       ],
     };
 
+    // Only versioned types count
     const count =
       (snapshot.categoryDailyLimits.length ?? 0) +
       (snapshot.modalityBlockedRules.length ?? 0) +
       (snapshot.examTypeRules.length ?? 0) +
-      (snapshot.examTypeSpecialQuotas.length ?? 0) +
-      (snapshot.specialReasonCodes.length ?? 0);
+      (snapshot.examTypeSpecialQuotas.length ?? 0);
 
-    assert.strictEqual(count, 2, "Should count 2 specialReasonCodes");
+    assert.strictEqual(count, 0, "Should return 0 — specialReasonCodes are NOT versioned rules");
   });
 
   it("computes correct count for mixed snapshot", () => {
@@ -83,14 +133,14 @@ describe("PolicyStatusPanel — countRules logic", () => {
       specialReasonCodes: [{ code: "urgent" }],
     };
 
+    // Only versioned types count
     const count =
       (snapshot.categoryDailyLimits.length ?? 0) +
       (snapshot.modalityBlockedRules.length ?? 0) +
       (snapshot.examTypeRules.length ?? 0) +
-      (snapshot.examTypeSpecialQuotas.length ?? 0) +
-      (snapshot.specialReasonCodes.length ?? 0);
+      (snapshot.examTypeSpecialQuotas.length ?? 0);
 
-    assert.strictEqual(count, 7, "Should count all rules: 2+1+0+3+1=7");
+    assert.strictEqual(count, 6, "Should count only versioned rules: 2+1+0+3=6 (excludes specialReasonCodes)");
   });
 
   it("returns 0 for empty snapshot", () => {

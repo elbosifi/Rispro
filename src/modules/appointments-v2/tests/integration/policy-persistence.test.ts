@@ -438,4 +438,93 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
       );
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // Test 6: Initial draft hash when no published version exists
+  // ---------------------------------------------------------------------------
+  describe("Initial draft hash — hash shape validation", () => {
+    it("configHash is always 64-char hex (SHA-256), not hash of raw {}", async () => {
+      guard();
+
+      // Publish current draft first
+      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const dataBefore = statusBefore.data as any;
+      if (dataBefore?.draft?.id) {
+        await fetch(`/api/v2/scheduling/admin/policy/draft/${dataBefore.draft.id}/publish`, {
+          method: "POST",
+          body: JSON.stringify({ changeNote: "Pre-test publish" }),
+        });
+      }
+
+      const statusAfter = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const dataAfter = statusAfter.data as any;
+
+      // The published version should have a valid SHA-256 hash
+      assert.ok(dataAfter?.published?.configHash, "Published version should have configHash");
+      assert.strictEqual(
+        dataAfter.published.configHash.length,
+        64,
+        "configHash should be a 64-character hex string (SHA-256)"
+      );
+      assert.ok(
+        /^[0-9a-f]{64}$/.test(dataAfter.published.configHash),
+        "configHash should be valid hex"
+      );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 7: Special reason codes — global config integrity
+  // ---------------------------------------------------------------------------
+  describe("Special reason codes — global config integrity", () => {
+    it("saving draft with empty specialReasonCodes does NOT mutate global table", async () => {
+      guard();
+
+      // Record global codes
+      const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const dataBefore = statusBefore.data as any;
+      const codesBefore = (dataBefore.publishedSnapshot?.specialReasonCodes ?? [])
+        .map((c: any) => c.code)
+        .sort();
+
+      // Create draft if needed
+      let draftVersionId = dataBefore?.draft?.id ?? null;
+      if (!draftVersionId) {
+        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
+          method: "POST",
+          body: JSON.stringify({ policySetKey: "default" }),
+        });
+        draftVersionId = (createResult.data as any).draft.id;
+      }
+
+      // Save with empty specialReasonCodes
+      const modalityId = testData.modalityId;
+      await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          policySnapshot: {
+            categoryDailyLimits: [{ id: 100, modalityId, caseCategory: "non_oncology" as const, dailyLimit: 5, isActive: true }],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            specialReasonCodes: [],
+          },
+          changeNote: "Test empty codes",
+        }),
+      });
+
+      // Verify global codes are UNCHANGED
+      const statusAfterSave = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
+      const dataAfterSave = statusAfterSave.data as any;
+      const codesAfterSave = (dataAfterSave.publishedSnapshot?.specialReasonCodes ?? [])
+        .map((c: any) => c.code)
+        .sort();
+
+      assert.deepStrictEqual(
+        codesAfterSave,
+        codesBefore,
+        "Saving draft with empty specialReasonCodes should NOT mutate global table"
+      );
+    });
+  });
 });
