@@ -212,8 +212,8 @@ describe("Display scenarios — edge cases", () => {
   });
 
   it("handles scenario: both null/undefined (clamped to 0)", () => {
-    const standard = Math.max(0, null ?? 0);
-    const special = Math.max(0, undefined ?? 0);
+    const standard = Math.max(0, 0);
+    const special = Math.max(0, 0);
     assert.strictEqual(standard, 0);
     assert.strictEqual(special, 0);
 

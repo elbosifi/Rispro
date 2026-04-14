@@ -1451,13 +1451,33 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
 
   useEffect(() => {
     if (data) {
+      isSettingFromServer.current = true;
       setDraft(normalizeConfig(data));
     }
   }, [data]);
 
+  const [saveNotice, setSaveNotice] = useState<"saved" | null>(null);
+  const isSettingFromServer = useRef(false);
+
+  // Clear save notice on any user edit (but not on server-set drafts)
+  useEffect(() => {
+    if (isSettingFromServer.current) {
+      isSettingFromServer.current = false;
+      return;
+    }
+    if (saveNotice !== null) {
+      setSaveNotice(null);
+    }
+  }, [draft, saveNotice]);
+
   const saveMutation = useMutation({
     mutationFn: (payload: SchedulingEngineConfig) => saveSchedulingEngineConfig(payload),
-    onSuccess: () => {
+    onSuccess: (returnedConfig) => {
+      // Immediately replace local draft with the authoritative server response
+      isSettingFromServer.current = true;
+      setDraft(normalizeConfig(returnedConfig));
+      setValidationErrors([]);
+      setSaveNotice("saved");
       queryClient.invalidateQueries({ queryKey: ["scheduling-engine-config"] });
     }
   });
@@ -1808,7 +1828,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           {(saveMutation.error as Error)?.message || "Save failed"}
         </div>
       )}
-      {saveMutation.isSuccess && (
+      {saveNotice === "saved" && (
         <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 text-sm">
           Configuration saved successfully.
         </div>

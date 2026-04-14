@@ -256,3 +256,292 @@ export async function loadAllRulesForVersion(
   ]);
   return result.rows;
 }
+
+// ---------------------------------------------------------------------------
+// Rule persistence (authoritative replace)
+// ---------------------------------------------------------------------------
+
+const DELETE_EXAM_TYPE_RULE_ITEMS_SQL = `
+  delete from appointments_v2.exam_type_rule_items
+  where rule_id in (
+    select id from appointments_v2.exam_type_rules where policy_version_id = $1
+  )
+`;
+
+const DELETE_EXAM_TYPE_RULES_SQL = `
+  delete from appointments_v2.exam_type_rules
+  where policy_version_id = $1
+`;
+
+const DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL = `
+  delete from appointments_v2.exam_type_special_quotas
+  where policy_version_id = $1
+`;
+
+const DELETE_MODALITY_BLOCKED_RULES_SQL = `
+  delete from appointments_v2.modality_blocked_rules
+  where policy_version_id = $1
+`;
+
+const DELETE_CATEGORY_DAILY_LIMITS_SQL = `
+  delete from appointments_v2.category_daily_limits
+  where policy_version_id = $1
+`;
+
+const INSERT_CATEGORY_DAILY_LIMIT_SQL = `
+  insert into appointments_v2.category_daily_limits (
+    policy_version_id, modality_id, case_category, daily_limit, is_active
+  ) values ($1, $2, $3, $4, $5)
+  returning id, modality_id as "modalityId", case_category as "caseCategory",
+    daily_limit as "dailyLimit", is_active as "isActive"
+`;
+
+const INSERT_MODALITY_BLOCKED_RULE_SQL = `
+  insert into appointments_v2.modality_blocked_rules (
+    policy_version_id, modality_id, rule_type, specific_date, start_date, end_date,
+    recur_start_month, recur_start_day, recur_end_month, recur_end_day,
+    is_overridable, is_active, title, notes
+  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+  returning id, modality_id as "modalityId", rule_type as "ruleType",
+    specific_date::text as "specificDate", start_date::text as "startDate",
+    end_date::text as "endDate", recur_start_month as "recurStartMonth",
+    recur_start_day as "recurStartDay", recur_end_month as "recurEndMonth",
+    recur_end_day as "recurEndDay", is_overridable as "isOverridable",
+    is_active as "isActive", title, notes
+`;
+
+const INSERT_EXAM_TYPE_RULE_SQL = `
+  insert into appointments_v2.exam_type_rules (
+    policy_version_id, modality_id, rule_type, effect_mode, specific_date,
+    start_date, end_date, weekday, alternate_weeks, recurrence_anchor_date,
+    title, notes, is_active
+  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+  returning id, modality_id as "modalityId", rule_type as "ruleType",
+    effect_mode as "effectMode", specific_date::text as "specificDate",
+    start_date::text as "startDate", end_date::text as "endDate",
+    weekday, alternate_weeks as "alternateWeeks",
+    recurrence_anchor_date::text as "recurrenceAnchorDate",
+    title, notes, is_active as "isActive"
+`;
+
+const INSERT_EXAM_TYPE_RULE_ITEM_SQL = `
+  insert into appointments_v2.exam_type_rule_items (rule_id, exam_type_id)
+  values ($1, $2)
+`;
+
+const INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL = `
+  insert into appointments_v2.exam_type_special_quotas (
+    policy_version_id, exam_type_id, daily_extra_slots, is_active
+  ) values ($1, $2, $3, $4)
+  returning id, exam_type_id as "examTypeId", daily_extra_slots as "dailyExtraSlots",
+    is_active as "isActive"
+`;
+
+const UPSERT_SPECIAL_REASON_CODE_SQL = `
+  insert into appointments_v2.special_reason_codes (code, label_ar, label_en, is_active, updated_at, updated_by_user_id)
+  values ($1, $2, $3, $4, now(), $5)
+  on conflict (code) do update set
+    label_ar = excluded.label_ar,
+    label_en = excluded.label_en,
+    is_active = excluded.is_active,
+    updated_at = now(),
+    updated_by_user_id = excluded.updated_by_user_id
+`;
+
+const DELETE_UNUSED_SPECIAL_REASON_CODES_SQL = `
+  delete from appointments_v2.special_reason_codes
+  where code <> all($1::text[])
+`;
+
+export async function deleteAllRulesForVersion(
+  client: PoolClient,
+  policyVersionId: number
+): Promise<void> {
+  // Delete in FK order: children first, then parents
+  await client.query(DELETE_EXAM_TYPE_RULE_ITEMS_SQL, [policyVersionId]);
+  await client.query(DELETE_EXAM_TYPE_RULES_SQL, [policyVersionId]);
+  await client.query(DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL, [policyVersionId]);
+  await client.query(DELETE_MODALITY_BLOCKED_RULES_SQL, [policyVersionId]);
+  await client.query(DELETE_CATEGORY_DAILY_LIMITS_SQL, [policyVersionId]);
+}
+
+export interface InsertedCategoryDailyLimit {
+  id: number;
+  modalityId: number;
+  caseCategory: string;
+  dailyLimit: number;
+  isActive: boolean;
+}
+
+export async function insertCategoryDailyLimit(
+  client: PoolClient,
+  policyVersionId: number,
+  rule: { modalityId: number; caseCategory: string; dailyLimit: number; isActive: boolean }
+): Promise<InsertedCategoryDailyLimit> {
+  const result = await client.query<InsertedCategoryDailyLimit>(INSERT_CATEGORY_DAILY_LIMIT_SQL, [
+    policyVersionId,
+    rule.modalityId,
+    rule.caseCategory,
+    rule.dailyLimit,
+    rule.isActive,
+  ]);
+  return result.rows[0];
+}
+
+export interface InsertedModalityBlockedRule {
+  id: number;
+  modalityId: number;
+  ruleType: string;
+  specificDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  recurStartMonth: number | null;
+  recurStartDay: number | null;
+  recurEndMonth: number | null;
+  recurEndDay: number | null;
+  isOverridable: boolean;
+  isActive: boolean;
+  title: string | null;
+  notes: string | null;
+}
+
+export async function insertModalityBlockedRule(
+  client: PoolClient,
+  policyVersionId: number,
+  rule: {
+    modalityId: number;
+    ruleType: string;
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    recurStartMonth: number | null;
+    recurStartDay: number | null;
+    recurEndMonth: number | null;
+    recurEndDay: number | null;
+    isOverridable: boolean;
+    isActive: boolean;
+    title: string | null;
+    notes: string | null;
+  }
+): Promise<InsertedModalityBlockedRule> {
+  const result = await client.query<InsertedModalityBlockedRule>(INSERT_MODALITY_BLOCKED_RULE_SQL, [
+    policyVersionId,
+    rule.modalityId,
+    rule.ruleType,
+    rule.specificDate || null,
+    rule.startDate || null,
+    rule.endDate || null,
+    rule.recurStartMonth,
+    rule.recurStartDay,
+    rule.recurEndMonth,
+    rule.recurEndDay,
+    rule.isOverridable,
+    rule.isActive,
+    rule.title || null,
+    rule.notes || null,
+  ]);
+  return result.rows[0];
+}
+
+export interface InsertedExamTypeRule {
+  id: number;
+  modalityId: number;
+  ruleType: string;
+  effectMode: string;
+  specificDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  weekday: number | null;
+  alternateWeeks: boolean;
+  recurrenceAnchorDate: string | null;
+  title: string | null;
+  notes: string | null;
+  isActive: boolean;
+}
+
+export async function insertExamTypeRule(
+  client: PoolClient,
+  policyVersionId: number,
+  rule: {
+    modalityId: number;
+    ruleType: string;
+    effectMode: string;
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+    alternateWeeks: boolean;
+    recurrenceAnchorDate: string | null;
+    title: string | null;
+    notes: string | null;
+    isActive: boolean;
+    examTypeIds: number[];
+  }
+): Promise<InsertedExamTypeRule> {
+  const result = await client.query<InsertedExamTypeRule>(INSERT_EXAM_TYPE_RULE_SQL, [
+    policyVersionId,
+    rule.modalityId,
+    rule.ruleType,
+    rule.effectMode,
+    rule.specificDate || null,
+    rule.startDate || null,
+    rule.endDate || null,
+    rule.weekday,
+    rule.alternateWeeks,
+    rule.recurrenceAnchorDate || null,
+    rule.title || null,
+    rule.notes || null,
+    rule.isActive,
+  ]);
+  const insertedRule = result.rows[0];
+
+  // Insert exam type rule items
+  for (const examTypeId of rule.examTypeIds) {
+    await client.query(INSERT_EXAM_TYPE_RULE_ITEM_SQL, [insertedRule.id, examTypeId]);
+  }
+
+  return insertedRule;
+}
+
+export interface InsertedExamTypeSpecialQuota {
+  id: number;
+  examTypeId: number;
+  dailyExtraSlots: number;
+  isActive: boolean;
+}
+
+export async function insertExamTypeSpecialQuota(
+  client: PoolClient,
+  policyVersionId: number,
+  rule: { examTypeId: number; dailyExtraSlots: number; isActive: boolean }
+): Promise<InsertedExamTypeSpecialQuota> {
+  const result = await client.query<InsertedExamTypeSpecialQuota>(INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL, [
+    policyVersionId,
+    rule.examTypeId,
+    rule.dailyExtraSlots,
+    rule.isActive,
+  ]);
+  return result.rows[0];
+}
+
+export async function upsertSpecialReasonCodes(
+  client: PoolClient,
+  codes: Array<{ code: string; labelAr: string; labelEn: string; isActive: boolean }>,
+  userId: number
+): Promise<void> {
+  for (const c of codes) {
+    await client.query(UPSERT_SPECIAL_REASON_CODE_SQL, [
+      c.code,
+      c.labelAr,
+      c.labelEn,
+      c.isActive,
+      userId,
+    ]);
+  }
+
+  // Remove codes no longer in the snapshot
+  const codeList = codes.map((c) => c.code);
+  if (codeList.length > 0) {
+    await client.query(DELETE_UNUSED_SPECIAL_REASON_CODES_SQL, [codeList]);
+  }
+}
