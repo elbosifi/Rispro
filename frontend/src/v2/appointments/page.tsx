@@ -456,9 +456,8 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
           {items.map((day) => {
             const status = day.decision.displayStatus as DecisionStatus;
             const isBlocked = status === "blocked";
-            const isRestricted = status === "restricted";
-            const standard = isBlocked ? null : Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
-            const special = isBlocked ? null : Math.max(0, day.decision.remainingSpecialQuota ?? 0);
+            const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
+            const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
             return (
             <tr
               key={day.date}
@@ -482,7 +481,7 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
                     <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
                       {standard} std
                     </div>
-                    {special != null && special > 0 && (
+                    {special > 0 && (
                       <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
                         + {special} special
                       </div>
