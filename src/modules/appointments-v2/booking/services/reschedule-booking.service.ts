@@ -211,6 +211,8 @@ async function rescheduleBookingInternal(
     scheduledDate: newDate,
     caseCategory: booking.caseCategory,
     useSpecialQuota,
+    // `specialReasonCode` remains metadata/audit justification only and does
+    // not create independent scheduling policy behavior.
     specialReasonCode,
     includeOverrideEvaluation: override != null,
     context,

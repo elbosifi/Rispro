@@ -35,6 +35,7 @@ export interface AvailabilityDayDto {
   bookedCount: number;
   remainingCapacity: number;
   isFull: boolean;
+  rowDisplayStatus: "available" | "restricted" | "blocked" | "full";
   decision: BookingDecision;
 }
 
@@ -204,6 +205,11 @@ async function getAvailabilityInternal(
       bookedCount,
       remainingCapacity,
       isFull,
+      rowDisplayStatus:
+        decision.displayStatus === "blocked" &&
+        decision.reasons.some((r) => r.code === "standard_capacity_exhausted")
+          ? "full"
+          : decision.displayStatus,
       decision,
     });
   }

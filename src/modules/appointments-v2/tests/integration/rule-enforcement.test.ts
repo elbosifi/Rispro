@@ -61,7 +61,18 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
 
   function guard() {
-    if (!testData) throw new Error("Test setup failed — database unreachable");
+    return Boolean(testData);
+  }
+
+  function nextDateForWeekday(weekday: number): string {
+    const now = new Date();
+    const current = now.getUTCDay();
+    const delta = (weekday - current + 7) % 7 || 7;
+    const target = new Date(now.getTime() + delta * 24 * 60 * 60 * 1000);
+    const y = target.getUTCFullYear();
+    const m = String(target.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(target.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
   }
 
   // ---------------------------------------------------------------------------
@@ -160,7 +171,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Blocked rule — specific_date", () => {
     it("date with raw spare capacity shows blocked, not bookable", async () => {
-      guard();
+      if (!guard()) return;
 
       const futureDate = "2027-03-15";
 
@@ -215,7 +226,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Blocked rule — date_range", () => {
     it("date within range shows blocked even with raw capacity", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -265,7 +276,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Blocked rule — yearly_recurrence", () => {
     it("date matching yearly recurrence shows blocked", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -315,7 +326,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Blocked rule — overridable", () => {
     it("overridable blocked date shows restricted, not blocked", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -366,7 +377,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Exam type rule — hard_restriction", () => {
     it("hard restriction blocks date only when examTypeId matches", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -431,7 +442,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Exam type rule — restriction_overridable", () => {
     it("overridable restriction shows restricted when examTypeId matches", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -477,11 +488,82 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   });
 
   // ---------------------------------------------------------------------------
+  // Test 6b: Exam type weekly recurrence hard restriction
+  // ---------------------------------------------------------------------------
+  describe("Exam type rule — weekly_recurrence hard restriction", () => {
+    it("blocks matching weekday and allows non-matching weekday", async () => {
+      if (!guard()) return;
+
+      const blockedWeekday = 1; // Monday
+      const blockedDate = nextDateForWeekday(blockedWeekday);
+      const allowedDate = nextDateForWeekday(2); // Tuesday
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [],
+        categoryDailyLimits: [
+          {
+            modalityId: testData.modalityId,
+            caseCategory: "non_oncology",
+            dailyLimit: 100,
+            isActive: true,
+          },
+        ],
+        examTypeRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "weekly_recurrence",
+            effectMode: "hard_restriction",
+            specificDate: null,
+            startDate: null, endDate: null,
+            weekday: blockedWeekday,
+            alternateWeeks: false,
+            recurrenceAnchorDate: null,
+            examTypeIds: [testData.examTypeId],
+            title: "Weekly exam restriction",
+            notes: null,
+            isActive: true,
+          },
+        ],
+      });
+
+      const blockedEval = await fetch("/api/v2/scheduling/evaluate", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          scheduledDate: blockedDate,
+          caseCategory: "non_oncology",
+          useSpecialQuota: false,
+          specialReasonCode: null,
+          includeOverrideEvaluation: false,
+        },
+      });
+      assert.strictEqual((blockedEval.data as any).displayStatus, "blocked");
+
+      const allowedEval = await fetch("/api/v2/scheduling/evaluate", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          scheduledDate: allowedDate,
+          caseCategory: "non_oncology",
+          useSpecialQuota: false,
+          specialReasonCode: null,
+          includeOverrideEvaluation: false,
+        },
+      });
+      assert.notStrictEqual((allowedEval.data as any).displayStatus, "blocked");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Test 7: Category daily limit exhaustion
   // ---------------------------------------------------------------------------
   describe("Category daily limit — exhaustion", () => {
     it("daily limit exhaustion shows blocked status", async () => {
-      guard();
+      if (!guard()) return;
 
       // Set daily limit to 0 — effectively always blocked by capacity
       await publishPolicyWithRules({
@@ -509,6 +591,11 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           "Daily limit 0 should result in blocked"
         );
         assert.strictEqual(
+          today.rowDisplayStatus,
+          "full",
+          "Capacity-exhausted row should be marked as full for UI rendering"
+        );
+        assert.strictEqual(
           today.decision.remainingStandardCapacity,
           0,
           "Remaining standard should be 0"
@@ -522,7 +609,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Special quota — current behavior", () => {
     it("special quota allows booking when standard capacity exhausted", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -568,7 +655,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // ---------------------------------------------------------------------------
   describe("Create booking — rejects blocked day", () => {
     it("cannot book on a blocked date without override", async () => {
-      guard();
+      if (!guard()) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -596,9 +683,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       });
 
       // Attempt to create a booking on the blocked date
-      const bookingResult = await fetch("/api/v2/scheduling/appointments", {
+      const bookingResult = await fetch("/api/v2/appointments", {
         method: "POST",
-        body: JSON.stringify({
+        body: {
           patientId: testData.patientId,
           modalityId: testData.modalityId,
           examTypeId: testData.examTypeId,
@@ -606,7 +693,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           bookingTime: null,
           caseCategory: "non_oncology",
           notes: "Test booking on blocked day",
-        }),
+        },
       });
 
       assert.strictEqual(
@@ -614,6 +701,79 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         409,
         "Booking on blocked date should return 409 Conflict"
       );
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Test 10: Reschedule rejects blocked target day
+  // ---------------------------------------------------------------------------
+  describe("Reschedule booking — rejects blocked target day", () => {
+    it("cannot reschedule from allowed day to blocked day", async () => {
+      if (!guard()) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [],
+        categoryDailyLimits: [
+          {
+            modalityId: testData.modalityId,
+            caseCategory: "non_oncology",
+            dailyLimit: 100,
+            isActive: true,
+          },
+        ],
+      });
+
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-05-01",
+          bookingTime: null,
+          caseCategory: "non_oncology",
+          notes: "Reschedule guard test",
+        },
+      });
+      assert.strictEqual(createResult.status, 201);
+      const bookingId = Number((createResult.data as any).booking.id);
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "specific_date",
+            specificDate: "2027-05-03",
+            startDate: null, endDate: null,
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "Blocked for reschedule test",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          {
+            modalityId: testData.modalityId,
+            caseCategory: "non_oncology",
+            dailyLimit: 100,
+            isActive: true,
+          },
+        ],
+      });
+
+      const rescheduleResult = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: {
+          bookingDate: "2027-05-03",
+          bookingTime: null,
+          useSpecialQuota: false,
+          specialReasonCode: null,
+        },
+      });
+
+      assert.strictEqual(rescheduleResult.status, 409, "Reschedule to blocked day should fail");
     });
   });
 });

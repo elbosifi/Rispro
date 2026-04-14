@@ -176,6 +176,8 @@ async function createBookingInternal(
     scheduledDate: payload.bookingDate,
     caseCategory: payload.caseCategory,
     useSpecialQuota: payload.useSpecialQuota === true,
+    // `specialReasonCode` is metadata/audit justification and is not a
+    // standalone scheduling rule input at this stage.
     specialReasonCode: payload.specialReasonCode ?? null,
     includeOverrideEvaluation: payload.override != null,
     context,

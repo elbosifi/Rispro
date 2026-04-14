@@ -221,10 +221,11 @@ export async function publishV2PolicyDraft(params: { versionId: number; changeNo
 // TanStack Query hooks
 // ---------------------------------------------------------------------------
 
-export function useV2Availability(params: Parameters<typeof fetchV2Availability>[0]) {
+export function useV2Availability(params: Parameters<typeof fetchV2Availability>[0] | undefined) {
   return useQuery({
     queryKey: ["v2-availability", params] as const,
-    queryFn: () => fetchV2Availability(params),
+    queryFn: () => fetchV2Availability(params as Parameters<typeof fetchV2Availability>[0]),
+    enabled: params != null,
     staleTime: 30_000,
   });
 }

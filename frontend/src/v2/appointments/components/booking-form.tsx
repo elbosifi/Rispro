@@ -22,10 +22,10 @@ import type {
 interface Patient {
   id: number;
   arabicFullName: string;
-  englishFullName: string;
-  nationalId: string | null;
-  medicalRecordNo: string | null;
-  phone: string | null;
+  englishFullName?: string | null;
+  nationalId?: string | null;
+  medicalRecordNo?: string | null;
+  phone?: string | null;
 }
 
 interface BookingFormProps {

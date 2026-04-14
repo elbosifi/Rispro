@@ -12,10 +12,14 @@ import { searchPatients } from "@/lib/api-hooks";
 interface Patient {
   id: number;
   arabicFullName: string;
-  englishFullName: string;
-  nationalId: string | null;
-  medicalRecordNo: string | null;
-  phone: string | null;
+  englishFullName?: string | null;
+  nationalId?: string | null;
+  mrn?: string | null;
+  medicalRecordNo?: string | null;
+  phone?: string | null;
+  phone1?: string | null;
+  sex?: string | null;
+  ageYears?: number | null;
 }
 
 interface PatientSearchProps {
@@ -86,7 +90,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
             {selectedPatient.englishFullName}
             {selectedPatient.nationalId ? ` · ${selectedPatient.nationalId}` : ""}
-            {selectedPatient.medicalRecordNo ? ` · MRN: ${selectedPatient.medicalRecordNo}` : ""}
+            {(selectedPatient.mrn || selectedPatient.medicalRecordNo)
+              ? ` · MRN: ${selectedPatient.mrn || selectedPatient.medicalRecordNo}`
+              : ""}
           </div>
         </div>
         <button

@@ -72,6 +72,9 @@ export interface AvailabilityDayDto {
   bookedCount: number;
   remainingCapacity: number;
   isFull: boolean;
+  // UI-only row status for create/reschedule panels. Decision logic remains
+  // authoritative in `decision.displayStatus`.
+  rowDisplayStatus?: "available" | "restricted" | "blocked" | "full";
   decision: SchedulingDecisionDto;
 }
 

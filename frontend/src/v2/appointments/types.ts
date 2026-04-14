@@ -74,6 +74,7 @@ export interface AvailabilityDayDto {
   bookedCount: number;
   remainingCapacity: number;
   isFull: boolean;
+  rowDisplayStatus?: "available" | "restricted" | "blocked" | "full";
   decision: SchedulingDecisionDto;
 }
 

@@ -98,7 +98,7 @@ export function AppointmentsV2Page() {
           specialReasonCode: null,
           includeOverrideCandidates: false,
         }
-      : undefined as unknown as Parameters<typeof useV2Availability>[0]
+      : undefined
   );
   const suggestions = useV2Suggestions(
     modalityId != null
