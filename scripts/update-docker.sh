@@ -6,8 +6,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
-IGNORE_PATHS_REGEX='^( [MTARCUD?!]|[MTARCUD?!] |[MTARCUD?!][MTARCUD?!]) scripts/(update-docker|setup-docker)\.sh$'
-
 log()  { printf '[INFO] %s\n' "$*"; }
 ok()   { printf '[OK]   %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
@@ -40,7 +38,7 @@ detect_compose() {
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
   else
-    err "Docker Compose not found. Install docker compose or docker-compose."
+    err "Docker Compose not found. Install 'docker compose' plugin or 'docker-compose'."
     exit 1
   fi
 }
@@ -60,25 +58,17 @@ check_env() {
     exit 1
   fi
 
-  local db_mode=""
+  local db_mode
   db_mode="$(read_env_value "RISPRO_DB_MODE")"
-
   if [ -z "${db_mode}" ]; then
     db_mode="$(read_env_value "DATABASE_MODE")"
   fi
 
   if [ -z "${db_mode}" ]; then
-    warn "Neither RISPRO_DB_MODE nor DATABASE_MODE was found in .env"
+    warn "Neither RISPRO_DB_MODE nor DATABASE_MODE found in .env"
   else
-    ok "Database mode from .env: ${db_mode}"
+    ok "Database mode: ${db_mode}"
   fi
-}
-
-ensure_scripts_executable() {
-  cd "${PROJECT_ROOT}"
-
-  [ -f "scripts/update-docker.sh" ] && chmod +x "scripts/update-docker.sh" || true
-  [ -f "scripts/setup-docker.sh" ] && chmod +x "scripts/setup-docker.sh" || true
 }
 
 check_git_repo() {
@@ -97,14 +87,10 @@ check_git_repo() {
     exit 1
   fi
 
-  local dirty
-  dirty="$(git status --porcelain | grep -vE "${IGNORE_PATHS_REGEX}" || true)"
-
-  if [ -n "${dirty}" ]; then
-    err "Git working tree has local changes:"
-    printf '%s\n' "${dirty}" >&2
-    err "Commit, stash, or discard them before running update."
-    exit 1
+  if [ -n "$(git status --porcelain)" ]; then
+    warn "Discarding all local tracked and untracked changes before update..."
+    git reset --hard HEAD
+    git clean -fd
   fi
 
   log "Fetching latest code from origin/${current_branch}..."
@@ -116,12 +102,11 @@ check_git_repo() {
 
   if [ "${local_sha}" = "${remote_sha}" ]; then
     ok "Already up to date on ${current_branch}."
-    return 0
+  else
+    log "Pulling latest code..."
+    git pull --rebase origin "${current_branch}"
+    ok "Git update completed."
   fi
-
-  log "Pulling latest code..."
-  git pull --rebase origin "${current_branch}"
-  ok "Git update completed."
 }
 
 build_and_restart() {
@@ -191,7 +176,6 @@ main() {
   require_cmd docker
   detect_compose
   check_env
-  ensure_scripts_executable
   check_git_repo
   build_and_restart
   wait_for_health
