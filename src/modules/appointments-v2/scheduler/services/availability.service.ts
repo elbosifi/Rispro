@@ -22,7 +22,10 @@ import {
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
-import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
+import {
+  getBookedCountForDate,
+  getSpecialQuotaBookedCount,
+} from "../../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../../shared/utils/dates.js";
 import { pool } from "../../../../db/pool.js";
 
@@ -149,10 +152,21 @@ async function getAvailabilityInternal(
       params.caseCategory
     );
 
+    // 7. Load special quota booked count (only when examTypeId is provided)
+    let currentSpecialQuotaBookedCount = 0;
+    if (params.examTypeId != null) {
+      currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+        modalityId: params.modalityId,
+        bookingDate: date,
+        caseCategory: params.caseCategory,
+        examTypeId: params.examTypeId,
+      });
+    }
+
     const remainingCapacity = Math.max(0, dailyCapacity - bookedCount);
     const isFull = remainingCapacity <= 0;
 
-    // 7. Evaluate the decision for this date
+    // 8. Evaluate the decision for this date
     const context: RuleEvaluationContext = {
       policyVersionId: publishedVersion.id,
       policySetKey,
@@ -167,6 +181,7 @@ async function getAvailabilityInternal(
       categoryLimits,
       specialQuotas,
       currentBookedCount: bookedCount,
+      currentSpecialQuotaBookedCount,
     };
 
     const pureInput: PureEvaluateInput = {

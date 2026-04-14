@@ -31,6 +31,7 @@ function makeContext(
     categoryLimits: [],
     specialQuotas: [],
     currentBookedCount: 0,
+    currentSpecialQuotaBookedCount: 0,
     ...overrides,
   };
 }

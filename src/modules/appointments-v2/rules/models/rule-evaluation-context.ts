@@ -47,8 +47,14 @@ export interface RuleEvaluationContext {
   /** Special quotas for exam types */
   specialQuotas: ExamTypeSpecialQuotaRow[];
 
-  /** Current booked count for this bucket */
+  /** Current booked count for this bucket (standard capacity) */
   currentBookedCount: number;
+
+  /**
+   * Current special quota booked count for this date/exam type.
+   * Only non-zero when examTypeId is provided and special quota rules apply.
+   */
+  currentSpecialQuotaBookedCount: number;
 
   /**
    * Any reason codes accumulated by earlier stages.

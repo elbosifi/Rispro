@@ -11,15 +11,16 @@ const INSERT_SQL = `
   insert into appointments_v2.bookings (
     patient_id, modality_id, exam_type_id, reporting_priority_id,
     booking_date, booking_time, case_category, status, notes,
-    policy_version_id, created_by_user_id, updated_by_user_id
+    policy_version_id, uses_special_quota, created_by_user_id, updated_by_user_id
   ) values (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
   )
   returning id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
     booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
+    uses_special_quota as "usesSpecialQuota",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
     updated_at as "updatedAt", updated_by_user_id as "updatedByUserId"
 `;
@@ -37,6 +38,7 @@ export async function insertBooking(
     status: string;
     notes: string | null;
     policyVersionId: number;
+    usesSpecialQuota: boolean;
     userId: number;
   }
 ): Promise<Booking> {
@@ -51,6 +53,7 @@ export async function insertBooking(
     booking.status,
     booking.notes,
     booking.policyVersionId,
+    booking.usesSpecialQuota,
     booking.userId,
     booking.userId,
   ]);
@@ -63,6 +66,7 @@ const FIND_BY_ID_SQL = `
     booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
+    uses_special_quota as "usesSpecialQuota",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
     updated_at as "updatedAt", updated_by_user_id as "updatedByUserId"
   from appointments_v2.bookings
@@ -114,9 +118,10 @@ const UPDATE_RESCHEDULE_SQL = `
   set booking_date = $1,
       booking_time = $2,
       policy_version_id = $3,
+      uses_special_quota = $4,
       updated_at = now(),
-      updated_by_user_id = $4
-  where id = $5
+      updated_by_user_id = $5
+  where id = $6
 `;
 
 export async function updateBookingForReschedule(
@@ -125,9 +130,10 @@ export async function updateBookingForReschedule(
   newDate: string,
   newTime: string | null,
   policyVersionId: number,
-  userId: number
+  userId: number,
+  usesSpecialQuota: boolean
 ): Promise<void> {
-  await client.query(UPDATE_RESCHEDULE_SQL, [newDate, newTime, policyVersionId, userId, bookingId]);
+  await client.query(UPDATE_RESCHEDULE_SQL, [newDate, newTime, policyVersionId, usesSpecialQuota, userId, bookingId]);
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +153,7 @@ const LIST_BOOKINGS_SQL = `
     b.status,
     b.notes,
     b.policy_version_id as "policyVersionId",
+    b.uses_special_quota as "usesSpecialQuota",
     b.created_at as "createdAt",
     b.created_by_user_id as "createdByUserId",
     b.updated_at as "updatedAt",

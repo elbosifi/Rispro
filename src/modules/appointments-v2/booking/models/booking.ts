@@ -16,6 +16,7 @@ export interface Booking {
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
+  usesSpecialQuota: boolean;
   createdAt: string;
   createdByUserId: number | null;
   updatedAt: string;

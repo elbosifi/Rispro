@@ -25,7 +25,10 @@ import {
 } from "../repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
-import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
+import {
+  getBookedCountForDate,
+  getSpecialQuotaBookedCount,
+} from "../../scheduler/repositories/capacity.repo.js";
 
 export interface EvaluateWithDbParams extends BookingDecisionInput {}
 
@@ -126,7 +129,18 @@ export async function evaluateWithDb(
     params.caseCategory
   );
 
-  // 5. Build the context
+  // 5. Load special quota booked count (only when examTypeId is provided)
+  let currentSpecialQuotaBookedCount = 0;
+  if (params.examTypeId != null) {
+    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+      modalityId: params.modalityId,
+      bookingDate: params.scheduledDate,
+      caseCategory: params.caseCategory,
+      examTypeId: params.examTypeId,
+    });
+  }
+
+  // 6. Build the context
   const context: RuleEvaluationContext = {
     policyVersionId: publishedVersion.id,
     policySetKey: publishedVersion.policySetId.toString(),
@@ -141,6 +155,7 @@ export async function evaluateWithDb(
     categoryLimits,
     specialQuotas,
     currentBookedCount,
+    currentSpecialQuotaBookedCount,
   };
 
   // 6. Evaluate

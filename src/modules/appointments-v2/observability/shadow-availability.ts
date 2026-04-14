@@ -22,7 +22,10 @@ import {
 } from "../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../catalog/repositories/exam-type-catalog.repo.js";
-import { getBookedCountForDate } from "../scheduler/repositories/capacity.repo.js";
+import {
+  getBookedCountForDate,
+  getSpecialQuotaBookedCount,
+} from "../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../shared/utils/dates.js";
 import { pool } from "../../../db/pool.js";
 import type { AvailabilityDayDto, GetAvailabilityParams } from "../scheduler/services/availability.service.js";
@@ -193,6 +196,17 @@ async function computeShadowDiffsInternal(
       params.caseCategory
     );
 
+    // Load special quota booked count (only when examTypeId is provided)
+    let currentSpecialQuotaBookedCount = 0;
+    if (params.examTypeId != null) {
+      currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+        modalityId: params.modalityId,
+        bookingDate: legacyDay.date,
+        caseCategory: params.caseCategory,
+        examTypeId: params.examTypeId,
+      });
+    }
+
     // Build context
     const context: RuleEvaluationContext = {
       policyVersionId: publishedVersion.id,
@@ -208,6 +222,7 @@ async function computeShadowDiffsInternal(
       categoryLimits,
       specialQuotas,
       currentBookedCount,
+      currentSpecialQuotaBookedCount,
     };
 
     // Build pure evaluate input

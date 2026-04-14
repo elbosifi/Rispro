@@ -19,7 +19,10 @@ import {
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
 } from "../../rules/repositories/policy-rules.repo.js";
-import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
+import {
+  getBookedCountForDate,
+  getSpecialQuotaBookedCount,
+} from "../../scheduler/repositories/capacity.repo.js";
 import { findBookingById, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
 import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
@@ -172,7 +175,18 @@ async function rescheduleBookingInternal(
     booking.caseCategory
   );
 
-  // 6. Build context and re-evaluate
+  // 6. Load special quota booked count for the NEW date (only when examTypeId is provided)
+  let currentSpecialQuotaBookedCount = 0;
+  if (booking.examTypeId != null) {
+    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+      modalityId: booking.modalityId,
+      bookingDate: newDate,
+      caseCategory: booking.caseCategory,
+      examTypeId: booking.examTypeId,
+    });
+  }
+
+  // 7. Build context and re-evaluate
   const context: RuleEvaluationContext = {
     policyVersionId: publishedVersion.id,
     policySetKey,
@@ -187,6 +201,7 @@ async function rescheduleBookingInternal(
     categoryLimits,
     specialQuotas,
     currentBookedCount, // Includes this booking if newDate === oldDate
+    currentSpecialQuotaBookedCount,
   };
 
   const pureInput: PureEvaluateInput = {
@@ -258,7 +273,9 @@ async function rescheduleBookingInternal(
     newDate,
     newTime,
     publishedVersion.id,
-    userId
+    userId,
+    // Recompute uses_special_quota for the new booking state
+    decision.consumedCapacityMode === "special"
   );
 
   if (wasOverride && supervisorUserId != null) {

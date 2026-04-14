@@ -74,8 +74,9 @@ describe("createPolicyDraft — source verification", () => {
   });
 
   it("handles case with no published version (empty config)", () => {
-    assert.ok(source.includes("emptyConfigHash") || source.includes("hashConfigSnapshot({})"),
-      "Should hash empty config when no published version");
+    // After fix: no-published path uses loadPolicySnapshot for authoritative hash
+    assert.ok(source.includes("loadPolicySnapshot") && source.includes("emptySnapshot"),
+      "Should load authoritative empty snapshot when no published version");
     assert.ok(source.includes("Initial draft"), "Should use 'Initial draft' change note");
     assert.ok(source.includes("basedOnVersionId: 0"), "Should return basedOnVersionId: 0");
   });

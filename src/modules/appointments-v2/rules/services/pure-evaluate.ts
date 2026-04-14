@@ -266,14 +266,17 @@ function checkCapacity(
     );
 
     if (quota && quota.dailyExtraSlots > 0) {
-      // TODO: In a full implementation, we'd track quota consumption separately.
-      // For now, if a quota exists and has slots, we allow via special quota.
-      return {
-        status: "available",
-        remainingStandardCapacity: 0,
-        remainingSpecialQuota: quota.dailyExtraSlots,
-        reasons: [],
-      };
+      // Compute remaining special quota by subtracting already-consumed bookings
+      const remainingSpecialQuota = quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount;
+
+      if (remainingSpecialQuota > 0) {
+        return {
+          status: "available",
+          remainingStandardCapacity: 0,
+          remainingSpecialQuota,
+          reasons: [],
+        };
+      }
     }
   }
 

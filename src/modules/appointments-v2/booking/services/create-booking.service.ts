@@ -21,7 +21,10 @@ import {
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
-import { getBookedCountForDate } from "../../scheduler/repositories/capacity.repo.js";
+import {
+  getBookedCountForDate,
+  getSpecialQuotaBookedCount,
+} from "../../scheduler/repositories/capacity.repo.js";
 import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
@@ -137,7 +140,18 @@ async function createBookingInternal(
     payload.caseCategory
   );
 
-  // 7. Build context and evaluate
+  // 7. Load special quota booked count (only when examTypeId is provided)
+  let currentSpecialQuotaBookedCount = 0;
+  if (payload.examTypeId != null) {
+    currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
+      modalityId: payload.modalityId,
+      bookingDate: payload.bookingDate,
+      caseCategory: payload.caseCategory,
+      examTypeId: payload.examTypeId,
+    });
+  }
+
+  // 8. Build context and evaluate
   const context: RuleEvaluationContext = {
     policyVersionId: publishedVersion.id,
     policySetKey,
@@ -152,6 +166,7 @@ async function createBookingInternal(
     categoryLimits,
     specialQuotas,
     currentBookedCount,
+    currentSpecialQuotaBookedCount,
   };
 
   const pureInput: PureEvaluateInput = {
@@ -219,7 +234,10 @@ async function createBookingInternal(
     wasOverride = true;
   }
 
-  // 9. Insert the booking
+  // 9. Determine whether special quota was consumed
+  const consumedSpecialQuota = decision.consumedCapacityMode === "special";
+
+  // 10. Insert the booking
   const booking = await insertBooking(client, {
     patientId: payload.patientId,
     modalityId: payload.modalityId,
@@ -231,6 +249,7 @@ async function createBookingInternal(
     status: "scheduled",
     notes: payload.notes ?? null,
     policyVersionId: publishedVersion.id,
+    usesSpecialQuota: consumedSpecialQuota,
     userId,
   });
 
