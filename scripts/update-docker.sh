@@ -6,6 +6,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 
+IGNORE_PATHS_REGEX='^( [MTARCUD?!]|[MTARCUD?!] |[MTARCUD?!][MTARCUD?!]) scripts/(update-docker|setup-docker)\.sh$'
+
 log()  { printf '[INFO] %s\n' "$*"; }
 ok()   { printf '[OK]   %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
@@ -38,7 +40,7 @@ detect_compose() {
   elif command -v docker-compose >/dev/null 2>&1; then
     COMPOSE_CMD=(docker-compose)
   else
-    err "Docker Compose not found. Install 'docker compose' plugin or 'docker-compose'."
+    err "Docker Compose not found. Install docker compose or docker-compose."
     exit 1
   fi
 }
@@ -58,18 +60,25 @@ check_env() {
     exit 1
   fi
 
-  # Read RISPRO_DB_MODE first, then fall back to DATABASE_MODE
-  local db_mode
+  local db_mode=""
   db_mode="$(read_env_value "RISPRO_DB_MODE")"
+
   if [ -z "${db_mode}" ]; then
     db_mode="$(read_env_value "DATABASE_MODE")"
   fi
 
   if [ -z "${db_mode}" ]; then
-    warn "Neither RISPRO_DB_MODE nor DATABASE_MODE found in .env"
+    warn "Neither RISPRO_DB_MODE nor DATABASE_MODE was found in .env"
   else
-    ok "Database mode: ${db_mode}"
+    ok "Database mode from .env: ${db_mode}"
   fi
+}
+
+ensure_scripts_executable() {
+  cd "${PROJECT_ROOT}"
+
+  [ -f "scripts/update-docker.sh" ] && chmod +x "scripts/update-docker.sh" || true
+  [ -f "scripts/setup-docker.sh" ] && chmod +x "scripts/setup-docker.sh" || true
 }
 
 check_git_repo() {
@@ -80,36 +89,21 @@ check_git_repo() {
     return 0
   fi
 
-  # Check for local modifications, but ignore execute-bit-only changes on this script
-  # (common when the file was committed without +x and later chmod +x locally)
-  local porcelain_output
-  porcelain_output="$(git status --porcelain)"
-
-  if [ -n "${porcelain_output}" ]; then
-    # Filter out mode-only changes on this script file
-    local real_changes
-    real_changes="$(echo "${porcelain_output}" | grep -vE '^ M\s+scripts/update-docker\.sh$' || true)"
-
-    if [ -z "${real_changes}" ]; then
-      warn "Only the execute bit changed on scripts/update-docker.sh — fixing automatically."
-      return 0
-    fi
-
-    err "Git working tree has local changes:"
-    echo "${porcelain_output}" | while IFS= read -r line; do
-      err "  ${line}"
-    done
-    err ""
-    err "Commit, stash, or discard them before running update."
-    err "Run: git status"
-    exit 1
-  fi
-
   local current_branch
   current_branch="$(git branch --show-current)"
 
   if [ -z "${current_branch}" ]; then
     err "Could not determine current git branch."
+    exit 1
+  fi
+
+  local dirty
+  dirty="$(git status --porcelain | grep -vE "${IGNORE_PATHS_REGEX}" || true)"
+
+  if [ -n "${dirty}" ]; then
+    err "Git working tree has local changes:"
+    printf '%s\n' "${dirty}" >&2
+    err "Commit, stash, or discard them before running update."
     exit 1
   fi
 
@@ -138,31 +132,70 @@ build_and_restart() {
   ok "Containers rebuilt and restarted."
 }
 
-show_status() {
+wait_for_health() {
   cd "${PROJECT_ROOT}"
 
-  printf '\n'
-  log "Container status:"
-  "${COMPOSE_CMD[@]}" ps || true
+  log "Waiting for application to become healthy..."
 
-  printf '\n'
-  log "Recent container logs:"
-  "${COMPOSE_CMD[@]}" logs --tail=50 || true
+  local container_id=""
+  local attempts=30
+  local i=1
+
+  container_id="$("${COMPOSE_CMD[@]}" ps -q app 2>/dev/null || true)"
+
+  if [ -z "${container_id}" ]; then
+    warn "Could not find app container to check health. Skipping health wait."
+    return 0
+  fi
+
+  while [ "$i" -le "$attempts" ]; do
+    local status=""
+    status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || true)"
+
+    case "${status}" in
+      healthy|running)
+        ok "Application is healthy!"
+        return 0
+        ;;
+      unhealthy|exited|dead)
+        err "Application failed health check with status: ${status}"
+        "${COMPOSE_CMD[@]}" logs --tail=100 app || true
+        exit 1
+        ;;
+    esac
+
+    sleep 2
+    i=$((i + 1))
+  done
+
+  err "Timed out waiting for application health."
+  "${COMPOSE_CMD[@]}" logs --tail=100 app || true
+  exit 1
+}
+
+show_summary() {
+  printf '\n===================================================\n'
+  ok "Update complete!"
+  printf '===================================================\n\n'
+  printf '  Web UI:     http://localhost:3000\n'
+  printf '  DICOM MWL:  127.0.0.1:11112 (AE: RISPRO_MWL)\n\n'
+  printf '  Useful commands:\n'
+  printf '    docker compose logs -f app         # View application logs\n'
+  printf '    docker compose ps                  # List running containers\n'
+  printf '    docker compose down                # Stop all containers\n\n'
 }
 
 main() {
   print_header
-
   require_cmd git
   require_cmd docker
   detect_compose
   check_env
+  ensure_scripts_executable
   check_git_repo
   build_and_restart
-  show_status
-
-  printf '\n'
-  ok "Update complete."
+  wait_for_health
+  show_summary
 }
 
 main "$@"

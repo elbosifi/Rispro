@@ -10,6 +10,7 @@ import {
   useV2PublishPolicyDraft,
 } from "./api";
 import { PolicyStatusPanel } from "./components/policy-status-panel";
+import { LivePolicyPanel } from "./components/live-policy-panel";
 import { PolicyDraftEditor } from "./components/policy-draft-editor";
 import { PolicyPreviewPanel } from "./components/policy-preview-panel";
 import { PublishPolicyDialog } from "./components/publish-policy-dialog";
@@ -51,6 +52,23 @@ export function SchedulingAdminV2Page() {
       )}
 
       <PolicyStatusPanel status={status.data} />
+
+      {status.data?.publishedSnapshot ? (
+        <LivePolicyPanel snapshot={status.data.publishedSnapshot} />
+      ) : (
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 8,
+            border: "1px solid var(--border-color, #e2e8f0)",
+            backgroundColor: "var(--bg-surface, #f8fafc)",
+            textAlign: "center",
+            color: "var(--text-muted, #64748b)",
+          }}
+        >
+          No live policy published yet.
+        </div>
+      )}
 
       <div style={{ display: "flex", gap: 8 }}>
         <button
