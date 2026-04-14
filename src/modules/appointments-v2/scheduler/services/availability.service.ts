@@ -29,6 +29,34 @@ import {
 import { addDays, todayIso } from "../../shared/utils/dates.js";
 import { pool } from "../../../../db/pool.js";
 
+/**
+ * Deeply sanitizes an object for consistent hashing or serialization by recursively
+ * converting Date objects to ISO strings and removing functions/Symbols.
+ * @param obj The object to sanitize.
+ * @returns A sanitized, plain object clone.
+ */
+function sanitizeContext(obj: any): any {
+  if (typeof obj !== 'object' || obj === null) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeContext(item));
+  }
+  const sanitized: { [key: string]: any } = {};
+  for (const key in obj) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
+      const value = obj[key];
+      if (typeof value === 'function' || typeof value === 'symbol') {
+        // Functions and Symbols cannot be reliably serialized for hashing/comparison
+        sanitized[key] = null; 
+      } else if (typeof value === 'object' && value !== null) {
+        sanitized[key] = sanitizeContext(value);
+      } else {
+        sanitized[key] = value;
+      }
+    }
+  }
+  return sanitized;
+}
+
 export interface AvailabilityDayDto {
   date: string;
   dailyCapacity: number;

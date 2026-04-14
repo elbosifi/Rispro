@@ -116,19 +116,17 @@ dicomRouter.post(
       throw new HttpError(400, `Unknown service: ${serviceName}`);
     }
 
-    const validServiceName = serviceName as "mwl" | "worklistBuilder";
-
-    if (validServiceName === "mwl") {
+    if (serviceName === "mwl") {
       const server = await startDicomGateway();
       if (!server) {
         throw new HttpError(500, "Failed to start DICOM gateway service");
       }
     } else {
-      throw new HttpError(501, `Service ${validServiceName} start not implemented yet`);
+      throw new HttpError(501, `Service ${serviceName} start not implemented yet`);
     }
 
-    const status = getServiceStatus(validServiceName);
-    res.json({ ok: true, service: validServiceName, status });
+    const status = getServiceStatus(serviceName as any);
+    res.json({ ok: true, service: serviceName, status });
   })
 );
 
