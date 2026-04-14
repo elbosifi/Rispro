@@ -31,7 +31,7 @@ describe("LivePolicyPanel — component structure", () => {
       "Blocked dates",
       "Exam date rules",
       "Special quotas",
-      "Special reason codes",
+      "Special reason codes (global)",
     ];
     for (const section of sections) {
       assert.ok(content.includes(`title="${section}"`) || content.includes(`>${section}<`), `Should have section: ${section}`);

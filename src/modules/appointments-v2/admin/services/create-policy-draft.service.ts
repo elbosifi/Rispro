@@ -2,8 +2,13 @@
  * Appointments V2 — Create policy draft service.
  *
  * Creates a new draft version based on the currently published version.
- * When a published version exists, all its rule rows are copied into the
- * new draft version and the config hash is recalculated from the persisted data.
+ * When a published version exists, all its versioned rule rows are copied
+ * into the new draft version and the config hash is recalculated from the
+ * authoritative persisted snapshot loaded from DB.
+ *
+ * NOTE: specialReasonCodes are global config and are NOT copied per-version.
+ * They are loaded globally by loadPolicySnapshot() and included in snapshots
+ * for display, but are never written by draft operations.
  */
 
 import type { PoolClient } from "pg";
@@ -100,14 +105,17 @@ async function createPolicyDraftInternal(
     changeNote ?? `Draft based on published version ${published.versionNo}`
   );
 
-  // 6. Copy all rule rows from the published snapshot into the draft version
+  // 6. Copy all versioned rule rows from the published snapshot into the draft version
   await copySnapshotIntoVersion(client, draft.id, publishedSnapshot);
 
-  // 7. Recalculate hash from the actually-persisted rules
-  const configHash = hashConfigSnapshot(publishedSnapshot);
+  // 7. Reload the authoritative persisted snapshot from DB
+  const persistedSnapshot = await loadPolicySnapshot(client, draft.id);
+
+  // 8. Recalculate hash from the reloaded DB snapshot (authoritative)
+  const configHash = hashConfigSnapshot(persistedSnapshot);
   await updateDraftConfig(client, draft.id, configHash, null);
 
-  // 8. Refresh and return
+  // 9. Refresh and return
   const refreshedDraft = await findVersionById(client, draft.id);
   if (!refreshedDraft) {
     throw new SchedulingError(
@@ -186,6 +194,7 @@ async function copySnapshotIntoVersion(
     });
   }
 
-  // Note: specialReasonCodes are global; we don't copy them here.
-  // They are already loaded globally by loadPolicySnapshot.
+  // NOTE: specialReasonCodes are global/live config. We do NOT copy them
+  // per-version. They are loaded globally by loadPolicySnapshot() and appear
+  // in all snapshots for display, but are managed independently of drafts.
 }

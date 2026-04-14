@@ -911,97 +911,19 @@ export function PolicyDraftEditor({
 
         <details>
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Special reason codes</summary>
-          <div style={{ display: "grid", gap: 8 }}>
-            {draft.specialReasonCodes.map((row, index) => (
-              <div key={`${row.code}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-5">
-                <input
-                  className={inputBase}
-                  placeholder="Code"
-                  value={row.code}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      specialReasonCodes: prev.specialReasonCodes.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, code: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <input
-                  className={inputBase}
-                  placeholder="English label"
-                  value={row.labelEn}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      specialReasonCodes: prev.specialReasonCodes.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, labelEn: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <input
-                  className={inputBase}
-                  placeholder="Arabic label"
-                  value={row.labelAr}
-                  onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      specialReasonCodes: prev.specialReasonCodes.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, labelAr: event.target.value } : item
-                      ),
-                    }))
-                  }
-                />
-                <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
-                  <input
-                    type="checkbox"
-                    checked={row.isActive}
-                    onChange={(event) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        specialReasonCodes: prev.specialReasonCodes.map((item, itemIndex) =>
-                          itemIndex === index ? { ...item, isActive: event.target.checked } : item
-                        ),
-                      }))
-                    }
-                  />
-                  Active
-                </label>
-                <button
-                  type="button"
-                  className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
-                  onClick={() =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      specialReasonCodes: prev.specialReasonCodes.filter((_, itemIndex) => itemIndex !== index),
-                    }))
-                  }
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-            <button
-              type="button"
-              className="w-fit rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
-              onClick={() =>
-                setDraft((prev) => ({
-                  ...prev,
-                  specialReasonCodes: [
-                    ...prev.specialReasonCodes,
-                    {
-                      code: "",
-                      labelEn: "",
-                      labelAr: "",
-                      isActive: true,
-                    } satisfies PolicySpecialReasonCodeDto,
-                  ],
-                }))
-              }
-            >
-              Add special reason code
-            </button>
+          <div
+            style={{
+              padding: 8,
+              border: "1px solid var(--border-color, #e2e8f0)",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "var(--text-muted, #64748b)",
+            }}
+          >
+            Special reason codes are global configuration and are not managed per-policy version.
+            They are shown here for reference only.
+            Changes to special reason codes must be made through the legacy settings page,
+            not through the V2 draft editor.
           </div>
         </details>
 

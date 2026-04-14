@@ -539,9 +539,12 @@ export async function upsertSpecialReasonCodes(
     ]);
   }
 
-  // Remove codes no longer in the snapshot
+  // Remove codes no longer in the snapshot.
+  // When the incoming list is empty, delete ALL codes.
   const codeList = codes.map((c) => c.code);
-  if (codeList.length > 0) {
+  if (codeList.length === 0) {
+    await client.query(`delete from appointments_v2.special_reason_codes`);
+  } else {
     await client.query(DELETE_UNUSED_SPECIAL_REASON_CODES_SQL, [codeList]);
   }
 }

@@ -252,7 +252,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
         </AccordionSection>
 
         {/* Special reason codes */}
-        <AccordionSection title="Special reason codes">
+        <AccordionSection title="Special reason codes (global)">
           {snapshot.specialReasonCodes.length === 0 ? (
             <EmptyMessage message="No special reason codes configured." />
           ) : (
