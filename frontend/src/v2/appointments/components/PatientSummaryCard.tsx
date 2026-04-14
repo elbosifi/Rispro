@@ -2,6 +2,7 @@ import type { SelectedPatient } from "../hooks/useCreateAppointmentForm";
 
 interface Props {
   patient: SelectedPatient | null;
+  caseCategory: "oncology" | "non_oncology";
 }
 
 function renderSex(sex?: string | null): string {
@@ -11,7 +12,7 @@ function renderSex(sex?: string | null): string {
   return sex;
 }
 
-export function PatientSummaryCard({ patient }: Props) {
+export function PatientSummaryCard({ patient, caseCategory }: Props) {
   if (!patient) {
     return (
       <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 12, color: "var(--text-muted, #64748b)" }}>
@@ -30,7 +31,7 @@ export function PatientSummaryCard({ patient }: Props) {
       <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12 }}>
         <span>Sex: {renderSex(patient.sex)}</span>
         <span>Age: {patient.ageYears ?? "—"}</span>
-        <span>Category: General</span>
+        <span>Category: {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}</span>
       </div>
     </div>
   );

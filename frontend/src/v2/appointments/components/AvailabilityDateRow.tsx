@@ -7,6 +7,7 @@ interface Props {
   remainingCapacity: number | null;
   dailyCapacity: number | null;
   reasonText: string;
+  requiresSupervisorOverride: boolean;
   selected: boolean;
   onClick: () => void;
 }
@@ -18,10 +19,14 @@ export function AvailabilityDateRow({
   remainingCapacity,
   dailyCapacity,
   reasonText,
+  requiresSupervisorOverride,
   selected,
   onClick,
 }: Props) {
-  const isClickable = status === "available" || status === "restricted";
+  const isClickable =
+    status === "available" ||
+    status === "restricted" ||
+    (status === "full" && requiresSupervisorOverride);
   const isBlockedLike = status === "blocked";
 
   const statusColor =

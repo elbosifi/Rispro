@@ -18,7 +18,7 @@
  * Requires DATABASE_URL or TEST_DATABASE_URL environment variable.
  */
 
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   isDatabaseAvailable,
@@ -60,8 +60,10 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   const fetch = (path: string, opts: Record<string, unknown> = {}) =>
     fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
 
-  function guard() {
-    return Boolean(testData);
+  function guard(t: TestContext) {
+    if (testData) return false;
+    t.skip("Database is not reachable in this environment");
+    return true;
   }
 
   function nextDateForWeekday(weekday: number): string {
@@ -170,8 +172,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 1: Blocked rule — specific_date
   // ---------------------------------------------------------------------------
   describe("Blocked rule — specific_date", () => {
-    it("date with raw spare capacity shows blocked, not bookable", async () => {
-      if (!guard()) return;
+    it("date with raw spare capacity shows blocked, not bookable", async (t) => {
+      if (guard(t)) return;
 
       const futureDate = "2027-03-15";
 
@@ -225,8 +227,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 2: Blocked rule — date_range
   // ---------------------------------------------------------------------------
   describe("Blocked rule — date_range", () => {
-    it("date within range shows blocked even with raw capacity", async () => {
-      if (!guard()) return;
+    it("date within range shows blocked even with raw capacity", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -275,8 +277,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 3: Blocked rule — yearly_recurrence
   // ---------------------------------------------------------------------------
   describe("Blocked rule — yearly_recurrence", () => {
-    it("date matching yearly recurrence shows blocked", async () => {
-      if (!guard()) return;
+    it("date matching yearly recurrence shows blocked", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -325,8 +327,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 4: Overridable blocked rule
   // ---------------------------------------------------------------------------
   describe("Blocked rule — overridable", () => {
-    it("overridable blocked date shows restricted, not blocked", async () => {
-      if (!guard()) return;
+    it("overridable blocked date shows restricted, not blocked", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -376,8 +378,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 5: Exam type hard restriction
   // ---------------------------------------------------------------------------
   describe("Exam type rule — hard_restriction", () => {
-    it("hard restriction blocks date only when examTypeId matches", async () => {
-      if (!guard()) return;
+    it("hard restriction blocks date only when examTypeId matches", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -441,8 +443,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 6: Exam type overridable restriction
   // ---------------------------------------------------------------------------
   describe("Exam type rule — restriction_overridable", () => {
-    it("overridable restriction shows restricted when examTypeId matches", async () => {
-      if (!guard()) return;
+    it("overridable restriction shows restricted when examTypeId matches", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -491,8 +493,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 6b: Exam type weekly recurrence hard restriction
   // ---------------------------------------------------------------------------
   describe("Exam type rule — weekly_recurrence hard restriction", () => {
-    it("blocks matching weekday and allows non-matching weekday", async () => {
-      if (!guard()) return;
+    it("blocks matching weekday and allows non-matching weekday", async (t) => {
+      if (guard(t)) return;
 
       const blockedWeekday = 1; // Monday
       const blockedDate = nextDateForWeekday(blockedWeekday);
@@ -562,8 +564,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 7: Category daily limit exhaustion
   // ---------------------------------------------------------------------------
   describe("Category daily limit — exhaustion", () => {
-    it("daily limit exhaustion shows blocked status", async () => {
-      if (!guard()) return;
+    it("daily limit exhaustion shows blocked status", async (t) => {
+      if (guard(t)) return;
 
       // Set daily limit to 0 — effectively always blocked by capacity
       await publishPolicyWithRules({
@@ -608,8 +610,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 8: Special quota — documents current behavior
   // ---------------------------------------------------------------------------
   describe("Special quota — current behavior", () => {
-    it("special quota allows booking when standard capacity exhausted", async () => {
-      if (!guard()) return;
+    it("special quota allows booking when standard capacity exhausted", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -654,8 +656,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 9: Create booking rejects blocked day
   // ---------------------------------------------------------------------------
   describe("Create booking — rejects blocked day", () => {
-    it("cannot book on a blocked date without override", async () => {
-      if (!guard()) return;
+    it("cannot book on a blocked date without override", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -708,8 +710,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   // Test 10: Reschedule rejects blocked target day
   // ---------------------------------------------------------------------------
   describe("Reschedule booking — rejects blocked target day", () => {
-    it("cannot reschedule from allowed day to blocked day", async () => {
-      if (!guard()) return;
+    it("cannot reschedule from allowed day to blocked day", async (t) => {
+      if (guard(t)) return;
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],

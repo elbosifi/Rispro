@@ -29,6 +29,7 @@ export function AvailabilityPanel({ rows, selectedDate, onSelectDate, loading, e
           remainingCapacity={row.remainingCapacity}
           dailyCapacity={row.dailyCapacity}
           reasonText={row.reasonText}
+          requiresSupervisorOverride={row.requiresSupervisorOverride}
           selected={selectedDate === row.date}
           onClick={() => onSelectDate(row)}
         />

@@ -15,6 +15,7 @@ export interface CreateAppointmentFormModel {
   patient: SelectedPatient | null;
   modalityId: number | null;
   examTypeId: number | null;
+  caseCategory: "oncology" | "non_oncology";
   appointmentDate: string;
   notes: string;
   useSpecialQuota: boolean;
@@ -29,6 +30,7 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   patient: null,
   modalityId: null,
   examTypeId: null,
+  caseCategory: "non_oncology",
   appointmentDate: "",
   notes: "",
   useSpecialQuota: false,
@@ -75,6 +77,15 @@ export function useCreateAppointmentForm() {
       setForm((prev) => ({
         ...prev,
         examTypeId,
+        appointmentDate: "",
+        overrideRequired: false,
+        overrideReason: "",
+      }));
+    },
+    setCaseCategory(caseCategory: "oncology" | "non_oncology") {
+      setForm((prev) => ({
+        ...prev,
+        caseCategory,
         appointmentDate: "",
         overrideRequired: false,
         overrideReason: "",

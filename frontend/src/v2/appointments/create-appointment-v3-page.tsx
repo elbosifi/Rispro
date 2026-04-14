@@ -41,10 +41,6 @@ export function AppointmentsV3CreatePage() {
         schedulingEngineEnabled
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
-        onSupervisorOverride={async () => {
-          // Backend booking endpoint remains the authoritative source for supervisor authentication.
-          return { ok: true };
-        }}
       />
 
       <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>

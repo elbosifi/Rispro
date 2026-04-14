@@ -12,6 +12,7 @@ export function ExamTypeSelect({ options, value, onChange, disabled }: Props) {
     <div>
       <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Exam Type</label>
       <select
+        aria-label="Exam Type"
         value={value ?? ""}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}

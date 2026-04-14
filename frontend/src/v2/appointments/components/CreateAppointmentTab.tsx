@@ -37,11 +37,6 @@ interface CreateAppointmentTabProps {
     specialReasonCode: string | null;
     includeOverrideEvaluation: boolean;
   }) => Promise<SchedulingDecisionDto>;
-  onSupervisorOverride: (input: {
-    supervisorUsername: string;
-    supervisorPassword: string;
-    overrideReason: string;
-  }) => Promise<{ ok: boolean; message?: string }>;
 }
 
 interface SuccessSummary {
@@ -60,7 +55,6 @@ export function CreateAppointmentTab({
   schedulingEngineEnabled,
   onCreateAppointment,
   onEvaluateAvailability,
-  onSupervisorOverride,
 }: CreateAppointmentTabProps) {
   const { form, actions } = useCreateAppointmentForm();
   const [availabilitySelectedRow, setAvailabilitySelectedRow] = useState<AvailabilityRowViewModel | null>(null);
@@ -83,7 +77,7 @@ export function CreateAppointmentTab({
     patientId: form.patientId,
     modalityId: form.modalityId,
     examTypeId: form.examTypeId,
-    caseCategory: "non_oncology",
+    caseCategory: form.caseCategory,
     useSpecialQuota: form.useSpecialQuota,
     specialReasonCode: form.specialReasonCode || null,
   });
@@ -120,7 +114,7 @@ export function CreateAppointmentTab({
       reportingPriorityId: null,
       bookingDate: form.appointmentDate,
       bookingTime: null,
-      caseCategory: "non_oncology",
+      caseCategory: form.caseCategory,
       useSpecialQuota: form.useSpecialQuota,
       specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
       notes: form.notes.trim() || null,
@@ -164,7 +158,7 @@ export function CreateAppointmentTab({
         modalityId: form.modalityId as number,
         examTypeId: form.examTypeId,
         scheduledDate: form.appointmentDate,
-        caseCategory: "non_oncology",
+        caseCategory: form.caseCategory,
         useSpecialQuota: form.useSpecialQuota,
         specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
         includeOverrideEvaluation: true,
@@ -199,12 +193,6 @@ export function CreateAppointmentTab({
     setOverrideError(null);
 
     try {
-      const auth = await onSupervisorOverride(payload);
-      if (!auth.ok) {
-        setOverrideError(auth.message || "Supervisor authentication failed");
-        return;
-      }
-
       if (!pendingDecision) {
         setOverrideError("Availability must be evaluated before override.");
         return;
@@ -263,7 +251,7 @@ export function CreateAppointmentTab({
           }}
         />
 
-        <PatientSummaryCard patient={form.patient} />
+        <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
 
         <ModalitySelect
           options={modalityOptions}
@@ -286,8 +274,22 @@ export function CreateAppointmentTab({
         />
 
         <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Case Category</label>
+          <select
+            aria-label="Case Category"
+            value={form.caseCategory}
+            onChange={(e) => actions.setCaseCategory(e.target.value as "oncology" | "non_oncology")}
+            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+          >
+            <option value="non_oncology">Non-Oncology</option>
+            <option value="oncology">Oncology</option>
+          </select>
+        </div>
+
+        <div>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Appointment Date</label>
           <input
+            aria-label="Appointment Date"
             type="date"
             value={form.appointmentDate}
             onChange={(e) => actions.setAppointmentDate(e.target.value, form.overrideRequired)}
