@@ -5,7 +5,8 @@ function countRules(snapshot: PolicySnapshotDto): number {
     (snapshot.categoryDailyLimits.length ?? 0) +
     (snapshot.modalityBlockedRules.length ?? 0) +
     (snapshot.examTypeRules.length ?? 0) +
-    (snapshot.examTypeSpecialQuotas.length ?? 0)
+    (snapshot.examTypeSpecialQuotas.length ?? 0) +
+    (snapshot.specialReasonCodes.length ?? 0)
   );
 }
 
