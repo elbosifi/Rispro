@@ -249,6 +249,37 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(await screen.findByText("Special reason code required")).toBeTruthy();
   });
 
+  it("passes specialReasonNote in create payload when special quota is enabled", async () => {
+    const { onCreateAppointment } = setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "Use special quota" }));
+    const selects = screen.getAllByRole("combobox");
+    const specialReasonSelect = selects[selects.length - 1] as HTMLSelectElement;
+    fireEvent.change(specialReasonSelect, { target: { value: "urgent" } });
+    fireEvent.change(screen.getByPlaceholderText("Optional note"), { target: { value: "High-risk escalation" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+    expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Supervisor username"), { target: { value: "sup" } });
+    fireEvent.change(screen.getByPlaceholderText("Supervisor password"), { target: { value: "pass" } });
+    fireEvent.change(screen.getByPlaceholderText("Override reason"), { target: { value: "approved" } });
+    await userEvent.click(screen.getByRole("button", { name: "Confirm Override" }));
+
+    await waitFor(() => {
+      expect(onCreateAppointment).toHaveBeenCalled();
+    });
+
+    const callArg = onCreateAppointment.mock.calls[0][0];
+    expect(callArg.useSpecialQuota).toBe(true);
+    expect(callArg.specialReasonCode).toBe("urgent");
+    expect(callArg.specialReasonNote).toBe("High-risk escalation");
+  });
+
   describe("success state actions", () => {
     function setupSuccess() {
       const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({

@@ -105,6 +105,8 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
           bookingDate: sqDate,
           caseCategory: "non_oncology",
           useSpecialQuota: true,
+          specialReasonCode: "urgent_oncology",
+          specialReasonNote: "High-risk urgent case",
         },
       });
 
@@ -114,10 +116,13 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
 
       const { pool } = await import("../../../../db/pool.js");
       const dbCheck = await pool.query(
-        `select uses_special_quota from appointments_v2.bookings where id = $1`,
+        `select uses_special_quota, special_reason_code, special_reason_note
+         from appointments_v2.bookings where id = $1`,
         [Number((booking as Record<string, unknown>).id)]
       );
       assert.strictEqual(dbCheck.rows[0]?.uses_special_quota, true, "DB should have uses_special_quota=true");
+      assert.strictEqual(dbCheck.rows[0]?.special_reason_code, "urgent_oncology");
+      assert.strictEqual(dbCheck.rows[0]?.special_reason_note, "High-risk urgent case");
     });
   });
 
@@ -248,6 +253,8 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
           bookingDate: fromDate,
           caseCategory: "non_oncology",
           useSpecialQuota: true,
+          specialReasonCode: "medical_priority",
+          specialReasonNote: "Initial quota booking",
         },
       });
       const booking = (createResult.data as Record<string, unknown>).booking as Record<string, unknown>;
@@ -262,16 +269,23 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
           examTypeId: testData.examTypeId,
           bookingDate: toDate,
           caseCategory: "non_oncology",
+          useSpecialQuota: true,
+          specialReasonCode: "equipment_window",
+          specialReasonNote: "Moved due to scanner window",
         },
       });
       assert.strictEqual(result.status, 200);
 
       const { pool } = await import("../../../../db/pool.js");
       const dbCheck = await pool.query(
-        `select booking_date from appointments_v2.bookings where id = $1`,
+        `select booking_date, uses_special_quota, special_reason_code, special_reason_note
+         from appointments_v2.bookings where id = $1`,
         [bookingId]
       );
       assert.strictEqual(dbCheck.rows.length, 1, "Booking should exist in DB");
+      assert.strictEqual(dbCheck.rows[0]?.uses_special_quota, false);
+      assert.strictEqual(dbCheck.rows[0]?.special_reason_code, "equipment_window");
+      assert.strictEqual(dbCheck.rows[0]?.special_reason_note, "Moved due to scanner window");
     });
 
     it("reschedule onto exhausted special-quota day fails", async () => {

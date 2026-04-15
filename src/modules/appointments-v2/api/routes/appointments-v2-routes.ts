@@ -102,6 +102,7 @@ router.post(
         caseCategory: body.caseCategory,
         useSpecialQuota: body.useSpecialQuota === true,
         specialReasonCode: body.specialReasonCode ?? null,
+        specialReasonNote: body.specialReasonNote ?? null,
         notes: body.notes ?? null,
         isWalkIn: body.isWalkIn ?? false,
         override: body.override,
@@ -147,6 +148,7 @@ router.put(
       body.override,
       body.useSpecialQuota === true,
       body.specialReasonCode ?? null,
+      body.specialReasonNote ?? null,
       body.rescheduleReason ?? null,
       body.policySetKey ?? "default"
     );

@@ -130,6 +130,7 @@ export function CreateAppointmentTab({
       caseCategory: form.caseCategory,
       useSpecialQuota: form.useSpecialQuota,
       specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
+      specialReasonNote: form.useSpecialQuota ? form.specialReasonNote.trim() || null : null,
       notes: form.notes.trim() || null,
       isWalkIn: form.isWalkIn,
       override,

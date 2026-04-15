@@ -14,6 +14,7 @@ export interface CreateAppointmentDto {
   caseCategory: CaseCategory;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   notes?: string | null;
   isWalkIn?: boolean;
   policySetKey?: string;
@@ -33,6 +34,7 @@ export interface UpdateAppointmentDto {
   caseCategory?: CaseCategory;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   rescheduleReason?: string | null;
   policySetKey?: string;
   override?: {

@@ -17,6 +17,8 @@ export interface Booking {
   notes: string | null;
   policyVersionId: number;
   usesSpecialQuota: boolean;
+  specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   isWalkIn: boolean;
   createdAt: string;
   createdByUserId: number | null;
@@ -34,6 +36,7 @@ export interface CreateBookingPayload {
   caseCategory: CaseCategory;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   notes?: string | null;
   isWalkIn?: boolean;
   override?: {

@@ -116,6 +116,7 @@ export interface CreateBookingRequest {
   caseCategory: CaseCategory;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   notes: string | null;
   isWalkIn?: boolean;
   override?: {
@@ -218,6 +219,7 @@ export interface RescheduleBookingRequest {
   bookingTime: string | null;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   rescheduleReason?: string | null;
   override?: {
     supervisorUsername: string;

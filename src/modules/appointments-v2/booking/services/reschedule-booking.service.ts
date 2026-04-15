@@ -47,6 +47,7 @@ export async function rescheduleBooking(
   override?: CreateBookingPayload["override"],
   useSpecialQuota: boolean = false,
   specialReasonCode: string | null = null,
+  specialReasonNote: string | null = null,
   rescheduleReason: string | null = null,
   policySetKey: string = "default"
 ): Promise<RescheduleBookingResult> {
@@ -60,6 +61,7 @@ export async function rescheduleBooking(
       override,
       useSpecialQuota,
       specialReasonCode,
+      specialReasonNote,
       rescheduleReason,
       policySetKey
     );
@@ -78,6 +80,7 @@ async function rescheduleBookingInternal(
   override: CreateBookingPayload["override"] | undefined,
   useSpecialQuota: boolean,
   specialReasonCode: string | null,
+  specialReasonNote: string | null,
   rescheduleReason: string | null,
   policySetKey: string
 ): Promise<RescheduleBookingResult> {
@@ -281,7 +284,9 @@ async function rescheduleBookingInternal(
     publishedVersion.id,
     userId,
     // Recompute uses_special_quota for the new booking state
-    decision.consumedCapacityMode === "special"
+    decision.consumedCapacityMode === "special",
+    specialReasonCode,
+    specialReasonNote
   );
 
   if (wasOverride && supervisorUserId != null) {
