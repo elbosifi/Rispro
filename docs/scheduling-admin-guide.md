@@ -43,9 +43,10 @@ Use **Settings -> Scheduling Engine Config** to manage:
 - Keep default core types active unless intentionally deprecated.
 
 ## Operational Recommendations
-- Start with `scheduling_engine_shadow_mode = enabled`.
-- Review audit and override events before enforcing full blocking.
-- Enable `scheduling_engine_enabled` only after validation.
+- Start with shadow mode enabled: set `APPOINTMENTS_V2_SHADOW_MODE_ENABLED=true` (or legacy fallback `SHADOW_MODE_ENABLED=true`)
+- Shadow mode logs comparisons via `{"type":"shadow_diff"}` and `{"type":"shadow_summary"}` — review before production enablement
+- Review audit and override events before enforcing full blocking
+- V2 routing: `/appointments` already serves V2; legacy fallback remains available separately
 
 ## Validation Expectations
 - Availability and suggestions are backend rule-aware.

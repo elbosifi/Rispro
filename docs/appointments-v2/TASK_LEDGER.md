@@ -1,5 +1,19 @@
 # Appointments V2 Task Ledger
 
+## Current State Summary (April 16, 2026)
+
+**Code-hardening scope: COMPLETE** — Shadow route E2E and DB-suite isolation hardening are done. Operational rollout validation remains.
+
+- **Tests**: 667 V2 unit tests + 44 V2 integration tests (100% pass individually; parallel execution works — suite-scoped DB data)
+- **Shadow route E2E**: Proves live availability-route shadow execution, policySetKey propagation, pass-through response (non-user-visible), route-generated shadow_diff/shadow_summary logging
+- **Suite isolation**: DB-backed integration suites now use suite-specific prefixes; all suites pass together in parallel without cancellations
+- **Routing**: `/appointments` serves V2; legacy available separately for fallback
+- **Shadow mode**: Primary `APPOINTMENTS_V2_SHADOW_MODE_ENABLED`, legacy fallback `SHADOW_MODE_ENABLED`, DB-backed system setting also supported
+
+Remaining work: Operational rollout validation (shadow soak, manual scenario pack, race validation) — see `docs/appointments-v2/STAGING_VALIDATION_RUNBOOK.md`.
+
+---
+
 ## Task log
 
 ### Task T041 — Shadow Mode Integration Tests

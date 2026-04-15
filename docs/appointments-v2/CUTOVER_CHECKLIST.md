@@ -1,11 +1,11 @@
 # Appointments V2 — Cutover Checklist
 
-## Current status
+## Current status (April 16, 2026)
 
 - **Backend**: ✅ Complete (Stages 2–8) — scaffold, schema, decision engine, availability APIs, transactional booking, admin policy versioning, shadow mode
 - **Frontend**: ✅ Complete (Stage 8/9) — types, API hooks, availability page, booking form, bookings list, cancel + reschedule UI, status badge
 - **Route wiring**: ✅ Complete — V2 page accessible at `/v2/appointments`
-- **Tests**: ✅ 215/229 V2 tests pass (0 failures); 14 cancelled when run in parallel due to shared DB seed data (both integration suites pass 100% individually)
+- **Tests**: ✅ 667 V2 unit tests + 44 integration tests (100% pass individually); parallel execution works — suite-scoped DB data eliminates shared-data conflicts. Shadow route E2E passes.
 - **TypeScript**: ✅ 0 errors in frontend and V2 backend (legacy `dicom.ts` has unrelated errors)
 
 ## Bug fixes applied during integration testing (April 12, 2026)
@@ -56,7 +56,7 @@ The following bugs were discovered and fixed while running integration tests aga
 - [ ] **Verify DB**: `SELECT schemaname, tablename FROM pg_tables WHERE schemaname = 'appointments_v2';` — should show 12 tables
 - [ ] **Test API**: `curl -s http://localhost:3000/api/v2/scheduling/availability?modalityId=1&days=7&caseCategory=non_oncology` — should return JSON
 - [ ] **Publish a policy**: Use admin endpoints to create, save, and publish a scheduling policy (V2 returns empty/blocked without one)
-- [ ] **Enable shadow mode** (optional): Set `SHADOW_MODE_ENABLED=true` in `.env`
+- [ ] **Enable shadow mode** (optional): Set `APPOINTMENTS_V2_SHADOW_MODE_ENABLED=true` in `.env` (or `SHADOW_MODE_ENABLED=true` as legacy fallback)
 - [ ] **Review shadow diffs**: Monitor stdout for `{"type":"shadow_diff"}` and `{"type":"shadow_summary"}` entries
 
 ## Post-deployment validation
@@ -73,10 +73,10 @@ The following bugs were discovered and fixed while running integration tests aga
 
 1. **No published policy**: V2 endpoints return empty/blocked if no policy version is published. Admin must create and publish a policy first.
 2. **Legacy tables not modified**: V2 uses its own tables. Legacy appointments continue to work independently.
-3. **Integration test parallel execution**: Both integration test suites (`availability-flow.test.ts` and `booking-flow.test.ts`) pass 100% individually but 14 tests are cancelled when run together because they share the same DB seed data (policy_set "default", modality "TEST_CT"). Running them sequentially or with separate test databases would resolve this.
-4. **Reschedule creates new booking ID**: The reschedule flow cancels the old booking and inserts a new one with a different ID (correct for audit trail). Downstream consumers holding the old ID need to use the returned new booking ID.
-5. **dailyCapacity = 0**: Modalities with `daily_capacity = 0` in the `modalities` table will show zero remaining capacity. Configure reasonable defaults per modality.
-6. **Legacy service tests**: 27 legacy service tests fail (`src/services/*.test.ts`) due to pre-existing SQL type inference issues and availability logic bugs. These are unrelated to V2.
+3. **Reschedule creates new booking ID**: The reschedule flow cancels the old booking and inserts a new one with a different ID (correct for audit trail). Downstream consumers holding the old ID need to use the returned new booking ID.
+4. **dailyCapacity = 0**: Modalities with `daily_capacity = 0` in the `modalities` table will show zero remaining capacity. Configure reasonable defaults per modality.
+5. **Legacy service tests**: 27 legacy service tests fail (`src/services/*.test.ts`) due to pre-existing SQL type inference issues and availability logic bugs. These are unrelated to V2.
+6. **Shadow soak required**: Shadow mode must be monitored for at least one representative cycle before production enablement. See STAGING_VALIDATION_RUNBOOK.md.
 
 ## Rollback plan
 

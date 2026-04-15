@@ -42,20 +42,24 @@ Read these first before any Appointments V2 task:
 8. Configuration saves in V2 must be authoritative.
 9. Booking must re-check decision and capacity inside the transaction before commit.
 
-### Current status (April 12, 2026)
+### Code-hardening status (April 16, 2026)
 
-Appointments V2 backend (Stages 2–8) and frontend (Stage 8/9) are **functionally complete**:
-- Decision engine: `pureEvaluate()` — all 7 D008 precedence steps implemented
-- Availability, suggestions, evaluate APIs: fully wired
-- Booking CRUD (create, reschedule, cancel, list): fully wired with transactional safety
-- Admin policy versioning (draft, save, publish, preview): fully wired
-- Shadow mode: implemented and gated behind `SHADOW_MODE_ENABLED`
-- Frontend page at `/v2/appointments`: modality selector, availability table, booking form, bookings list with cancel/reschedule buttons, override dialogs
-- 229 V2 tests: 215 pass, 0 fail, 14 cancelled when run in parallel (both integration suites pass 100% individually against PostgreSQL)
+**Shadow route E2E and DB-suite isolation hardening complete. Code-level work is done. Operational rollout validation remains.**
+
+- Shadow route E2E proves: live availability-route shadow execution, policySetKey propagation, pass-through response behavior (non-user-visible), route-generated shadow_diff / shadow_summary logging
+- DB-backed integration suites are now suite-scoped and pass both individually AND together in parallel (no more shared-data cancellations)
+- 667 V2 unit tests + 44 V2 integration tests: all pass individually; parallel execution works
 - 0 TypeScript errors in frontend and V2 backend
-- 7 bugs fixed during integration testing (see `docs/appointments-v2/CUTOVER_CHECKLIST.md`)
+- Remaining work is operational rollout validation, not feature implementation
 
-The module is ready for validation and cutover planning. See `docs/appointments-v2/CUTOVER_CHECKLIST.md` for deployment steps.
+See `docs/appointments-v2/STAGING_VALIDATION_RUNBOOK.md` for validation steps.
+
+### Current implementation notes
+
+- Primary shadow mode env: `APPOINTMENTS_V2_SHADOW_MODE_ENABLED=true`
+- Legacy fallback: `SHADOW_MODE_ENABLED=true`
+- DB-backed override: `system_settings` table, key `appointments_v2_shadow_mode_enabled`
+- Routing: `/appointments` serves V2; legacy available at separate route if needed for fallback
 
 ### Multi-agent rules
 

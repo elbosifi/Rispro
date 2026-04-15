@@ -20,12 +20,12 @@
   - cancelled
 
 ## Rollout Strategy
-- [ ] `scheduling_engine_shadow_mode=enabled`.
-- [ ] `scheduling_engine_enabled=disabled` during shadow period.
-- [ ] Review shadow/audit logs for at least one representative cycle.
-- [ ] Validate reception/supervisor workflows with real users.
-- [ ] Enable `scheduling_engine_enabled` in controlled rollout.
-- [ ] Monitor override frequency and blocked reason patterns post-enable.
+- [ ] Enable shadow mode: set `APPOINTMENTS_V2_SHADOW_MODE_ENABLED=true` (or legacy fallback `SHADOW_MODE_ENABLED=true`)
+- [ ] During shadow period: V2 runs alongside legacy (existing `/appointments` route serves V2, legacy available separately)
+- [ ] Review shadow/audit logs for at least one representative cycle: `{"type":"shadow_diff"}` and `{"type":"shadow_summary"}`
+- [ ] Validate reception/supervisor workflows with real users via STAGING_VALIDATION_RUNBOOK.md
+- [ ] Confirm shadow behavior remains non-user-visible (response unchanged, logs are server-side only)
+- [ ] Monitor override frequency and blocked reason patterns post-shadow-enablement
 
 ## Operational Safeguards
 - [ ] Backup confirmed before enabling strict enforcement.
