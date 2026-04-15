@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import type {
@@ -72,6 +72,7 @@ export function CreateAppointmentTab({
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+  const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
 
   const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
   const hasSafetyWarning = selectedModality?.safetyWarningEnabled && 
@@ -195,6 +196,7 @@ export function CreateAppointmentTab({
       }
 
       if (hasSafetyWarning && !safetyAcknowledged) {
+        pendingDecisionRef.current = decision;
         setShowSafetyModal(true);
         return;
       }
@@ -248,6 +250,8 @@ export function CreateAppointmentTab({
           actions.clearAfterSuccess();
           setAvailabilitySelectedRow(null);
           setPageError(null);
+          setSafetyAcknowledged(false);
+          setShowSafetyModal(false);
         }}
       />
     );
@@ -262,11 +266,15 @@ export function CreateAppointmentTab({
             actions.setPatient(patient);
             setAvailabilitySelectedRow(null);
             setPageError(null);
+            setSafetyAcknowledged(false);
+            setShowSafetyModal(false);
           }}
           onClearPatient={() => {
             actions.setPatient(null);
             setAvailabilitySelectedRow(null);
             setPageError(null);
+            setSafetyAcknowledged(false);
+            setShowSafetyModal(false);
           }}
         />
 
@@ -278,6 +286,8 @@ export function CreateAppointmentTab({
           onChange={(value) => {
             actions.setModalityId(value);
             setAvailabilitySelectedRow(null);
+            setSafetyAcknowledged(false);
+            setShowSafetyModal(false);
           }}
           disabled={!schedulingEngineEnabled || !form.patientId}
         />
@@ -373,7 +383,7 @@ export function CreateAppointmentTab({
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={() => actions.resetAll()} disabled={submitLoading}>Reset</button>
+          <button type="button" onClick={() => { actions.resetAll(); setSafetyAcknowledged(false); setShowSafetyModal(false); }} disabled={submitLoading}>Reset</button>
           <button type="button" onClick={runSubmitFlow} disabled={submitLoading || !schedulingEngineEnabled}>
             {submitLoading ? "Creating..." : "Create Appointment"}
           </button>
@@ -425,7 +435,22 @@ export function CreateAppointmentTab({
               </button>
               <button
                 type="button"
-                onClick={() => { setSafetyAcknowledged(true); setShowSafetyModal(false); }}
+                onClick={async () => {
+                  setSafetyAcknowledged(true);
+                  setShowSafetyModal(false);
+                  const decision = pendingDecisionRef.current;
+                  if (decision) {
+                    pendingDecisionRef.current = null;
+                    setSubmitLoading(true);
+                    try {
+                      await createWithDecision(decision);
+                    } catch (error) {
+                      setPageError(error instanceof Error ? error.message : "Failed to create appointment");
+                    } finally {
+                      setSubmitLoading(false);
+                    }
+                  }
+                }}
                 style={{ flex: 1, padding: "10px 16px", borderRadius: 8, border: "none", background: "#f59e0b", color: "#fff", fontWeight: 600, cursor: "pointer" }}
               >
                 Confirm
