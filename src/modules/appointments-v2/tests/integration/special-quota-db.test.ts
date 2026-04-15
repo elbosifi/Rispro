@@ -84,19 +84,6 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
       await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 3);
 
-      // Debug: Check what policy version the backend uses
-      const { pool } = await import("../../../../db/pool.js");
-      const pv = await pool.query(
-        "select id, status from appointments_v2.policy_versions where policy_set_id = (select id from appointments_v2.policy_sets where key = 'default') and status = 'published'"
-      );
-      console.log("Published PV:", pv.rows);
-      console.log("Test PV:", testData.policyVersionId);
-      const quotaCheck = await pool.query(
-        "select * from appointments_v2.exam_type_special_quotas where policy_version_id = $1 and exam_type_id = $2",
-        [testData.policyVersionId, testData.examTypeId]
-      );
-      console.log("Quota check:", quotaCheck.rows);
-
       const result = await fetch("/api/v2/appointments", {
         method: "POST",
         body: {
@@ -109,10 +96,16 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
         },
       });
 
-      console.log("Create result:", result.status, result.data);
       assert.strictEqual(result.status, 201);
       const booking = (result.data as Record<string, unknown>).booking as Record<string, unknown>;
       assert.strictEqual((booking as Record<string, unknown>).usesSpecialQuota, true);
+
+      const { pool } = await import("../../../../db/pool.js");
+      const dbCheck = await pool.query(
+        `select uses_special_quota from appointments_v2.bookings where id = $1`,
+        [Number((booking as Record<string, unknown>).id)]
+      );
+      assert.strictEqual(dbCheck.rows[0]?.uses_special_quota, true, "DB should have uses_special_quota=true");
     });
   });
 
@@ -227,9 +220,11 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
   describe("Reschedule booking — release/reconsume", () => {
     it("reschedule off special-quota day succeeds", async () => {
       guard();
-      const fromDate = uniqueDate();
-      const toDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
+      const runId = Date.now() % 10000;
+      const fromDate = "2033-01-" + String(runId % 28 + 1).padStart(2, "0");
+      const toDate = "2033-02-" + String(runId % 28 + 1).padStart(2, "0");
+      // toDate needs standard capacity > 0 since we're not using special quota
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 1);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 1);
 
       const createResult = await fetch("/api/v2/appointments", {
@@ -245,6 +240,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
       });
       const booking = (createResult.data as Record<string, unknown>).booking as Record<string, unknown>;
       const bookingId = Number((booking as Record<string, unknown>).id);
+      assert.strictEqual(fromDate !== toDate, true, "fromDate and toDate must differ");
 
       const result = await fetch("/api/v2/appointments/" + bookingId, {
         method: "PUT",
@@ -257,19 +253,28 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
         },
       });
       assert.strictEqual(result.status, 200);
+
+      const { pool } = await import("../../../../db/pool.js");
+      const dbCheck = await pool.query(
+        `select booking_date from appointments_v2.bookings where id = $1`,
+        [bookingId]
+      );
+      assert.strictEqual(dbCheck.rows.length, 1, "Booking should exist in DB");
     });
 
     it("reschedule onto exhausted special-quota day fails", async () => {
       guard();
-      const runId = (Date.now() % 10000) + 500;
-      const fullDate = "2032-01-" + String(runId % 28 + 1).padStart(2, "0");
-      const startDate = "2032-02-" + String(runId % 28 + 1).padStart(2, "0");
+      const runId = (Date.now() % 10000) + 800;
+      const fullDate = "2036-01-" + String(runId % 28 + 1).padStart(2, "0");
+      const startDate = "2036-02-" + String(runId % 28 + 1).padStart(2, "0");
       
-      // Setup: 1 standard slot, 1 special quota
+      assert.strictEqual(fullDate !== startDate, true, "fullDate and startDate must differ");
+
+      // Setup: 1 standard slot (for normal booking), 1 special quota (for target date)
       await setDailyLimit(testData.modalityId, testData.policyVersionId, 1);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 1);
 
-      // First: fill up special quota on fullDate
+      // First: fill up special quota on fullDate with useSpecialQuota=true
       const fillResult = await fetch("/api/v2/appointments", {
         method: "POST",
         body: {
@@ -283,7 +288,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
       });
       assert.strictEqual(fillResult.status, 201, "Fill-up booking should succeed");
 
-      // Second: create a normal booking on startDate
+      // Second: create a normal booking on startDate (uses standard capacity)
       const createResult = await fetch("/api/v2/appointments", {
         method: "POST",
         body: {
@@ -298,10 +303,9 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
       const booking = (createResult.data as Record<string, unknown>).booking as Record<string, unknown>;
       const bookingId = Number((booking as Record<string, unknown>).id);
 
-      // Third: reschedule FROM startDate TO fullDate (the exhausted special quota date)
-      // Small delay to ensure DB state is visible
-      await new Promise(r => setTimeout(r, 50));
-      
+      // Third: reschedule FROM startDate TO fullDate with useSpecialQuota=true
+      // fullDate already has special quota exhausted (1/1 used)
+      // Backend should block because special quota is exhausted
       const result = await fetch("/api/v2/appointments/" + bookingId, {
         method: "PUT",
         body: {
@@ -313,10 +317,9 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
           useSpecialQuota: true,
         },
       });
-      // Note: This test reveals edge case in reschedule path
-      // Skipping assertion as this appears to be a known behavior difference in reschedule
-      console.log("Reschedule result:", result.status);
-      assert.ok([409, 200].includes(result.status), "Should be either 409 (blocked) or 200 (allowed)");
+
+      // STRICT EXPECTATION: This SHOULD FAIL WITH 409
+      assert.strictEqual(result.status, 409, "Reschedule to exhausted special-quota day must fail with 409");
     });
   });
 

@@ -184,6 +184,10 @@ async function rescheduleBookingInternal(
       caseCategory: booking.caseCategory,
       examTypeId: booking.examTypeId,
     });
+    // If rescheduling WITH special quota, account for this booking's intent
+    if (useSpecialQuota) {
+      currentSpecialQuotaBookedCount += 1;
+    }
   }
 
   // 7. Build context and re-evaluate
