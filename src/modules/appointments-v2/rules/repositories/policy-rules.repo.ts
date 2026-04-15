@@ -18,9 +18,9 @@ const LOAD_BLOCKED_RULES_SQL = `
          policy_version_id as "policyVersionId",
          modality_id as "modalityId",
          rule_type as "ruleType",
-         specific_date as "specificDate",
-         start_date as "startDate",
-         end_date as "endDate",
+         specific_date::text as "specificDate",
+         start_date::text as "startDate",
+         end_date::text as "endDate",
          recur_start_month as "recurStartMonth",
          recur_start_day as "recurStartDay",
          recur_end_month as "recurEndMonth",
@@ -53,12 +53,12 @@ const LOAD_EXAM_RULES_SQL = `
          modality_id as "modalityId",
          rule_type as "ruleType",
          effect_mode as "effectMode",
-         specific_date as "specificDate",
-         start_date as "startDate",
-         end_date as "endDate",
+         specific_date::text as "specificDate",
+         start_date::text as "startDate",
+         end_date::text as "endDate",
          weekday,
          alternate_weeks as "alternateWeeks",
-         recurrence_anchor_date as "recurrenceAnchorDate",
+         recurrence_anchor_date::text as "recurrenceAnchorDate",
          title,
          notes,
          is_active as "isActive"
@@ -149,7 +149,7 @@ export async function loadExamTypeRuleItemExamTypeIds(
     LOAD_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL,
     [policyVersionId, modalityId]
   );
-  return result.rows.map((row) => row.examTypeId);
+  return result.rows.map((row) => Number(row.examTypeId));
 }
 
 /**
@@ -173,5 +173,5 @@ export async function loadAllExamTypeRuleItemExamTypeIds(
     LOAD_ALL_EXAM_RULE_ITEM_EXAM_TYPE_IDS_SQL,
     [policyVersionId]
   );
-  return result.rows.map((row) => row.examTypeId);
+  return result.rows.map((row) => Number(row.examTypeId));
 }

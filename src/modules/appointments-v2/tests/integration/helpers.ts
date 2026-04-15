@@ -187,7 +187,7 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
   await pool.query(`delete from appointments_v2.exam_type_special_quotas`);
   await pool.query(`delete from appointments_v2.modality_blocked_rules`);
   await pool.query(`delete from appointments_v2.policy_versions`);
-  await pool.query(`delete from appointments_v2.policy_sets where key like '${prefixLower}%' or key = 'default'`);
+  await pool.query(`delete from appointments_v2.policy_sets where key like '${prefixLower}%' or key like 'RE_ps%' or key = 'default'`);
   
   // Clean up legacy test data (prefix-aware)
   await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id in (select id from users where username like '${prefixLower}%')`);

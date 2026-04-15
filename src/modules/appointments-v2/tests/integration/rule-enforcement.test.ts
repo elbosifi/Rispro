@@ -93,6 +93,15 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     return `${y}-${m}-${d}`;
   }
 
+  function addDaysIso(daysAhead: number): string {
+    const now = new Date();
+    const target = new Date(now.getTime() + daysAhead * 24 * 60 * 60 * 1000);
+    const y = target.getUTCFullYear();
+    const m = String(target.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(target.getUTCDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
   // ---------------------------------------------------------------------------
   // Helper: create isolated policy set and publish rules to it.
   // Each test uses a unique policySetKey so tests don't interfere.
@@ -266,6 +275,10 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   describe("Blocked rule — date_range", () => {
     it("date within range shows blocked even with raw capacity", async (t) => {
       if (guard(t)) return;
+      const startDate = addDaysIso(40);
+      const blockedDate = addDaysIso(50);
+      const endDate = addDaysIso(70);
+      const outOfRangeDate = addDaysIso(80);
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -273,8 +286,8 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             modalityId: testData.modalityId,
             ruleType: "date_range",
             specificDate: null,
-            startDate: "2027-06-01",
-            endDate: "2027-06-30",
+            startDate,
+            endDate,
             recurStartMonth: null, recurStartDay: null,
             recurEndMonth: null, recurEndDay: null,
             isOverridable: false,
@@ -297,13 +310,13 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
       );
       const availData = availResult.data as any;
-      const inRange = (availData.items ?? []).find((d: any) => d.date === "2027-06-15");
+      const inRange = (availData.items ?? []).find((d: any) => d.date === blockedDate);
 
-      assert.ok(inRange, "Should have entry for 2027-06-15");
+      assert.ok(inRange, `Should have entry for ${blockedDate}`);
       assert.strictEqual(inRange.decision.displayStatus, "blocked");
 
       // Date outside range should NOT be blocked
-      const outOfRange = (availData.items ?? []).find((d: any) => d.date === "2027-07-05");
+      const outOfRange = (availData.items ?? []).find((d: any) => d.date === outOfRangeDate);
       if (outOfRange) {
         assert.notStrictEqual(outOfRange.decision.displayStatus, "blocked");
       }
@@ -366,13 +379,14 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   describe("Blocked rule — overridable", () => {
     it("overridable blocked date shows restricted, not blocked", async (t) => {
       if (guard(t)) return;
+      const softBlockedDate = addDaysIso(60);
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
           {
             modalityId: testData.modalityId,
             ruleType: "specific_date",
-            specificDate: "2027-08-10",
+            specificDate: softBlockedDate,
             startDate: null, endDate: null,
             recurStartMonth: null, recurStartDay: null,
             recurEndMonth: null, recurEndDay: null,
@@ -396,9 +410,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
       );
       const availData = availResult.data as any;
-      const softBlocked = (availData.items ?? []).find((d: any) => d.date === "2027-08-10");
+      const softBlocked = (availData.items ?? []).find((d: any) => d.date === softBlockedDate);
 
-      assert.ok(softBlocked, "Should have entry for 2027-08-10");
+      assert.ok(softBlocked, `Should have entry for ${softBlockedDate}`);
       assert.strictEqual(
         softBlocked.decision.displayStatus,
         "restricted",
@@ -417,6 +431,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   describe("Exam type rule — hard_restriction", () => {
     it("hard restriction blocks date only when examTypeId matches", async (t) => {
       if (guard(t)) return;
+      const restrictedDate = addDaysIso(90);
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -433,7 +448,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             modalityId: testData.modalityId,
             ruleType: "specific_date",
             effectMode: "hard_restriction",
-            specificDate: "2027-09-01",
+            specificDate: restrictedDate,
             startDate: null, endDate: null,
             weekday: null,
             alternateWeeks: false,
@@ -451,9 +466,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&examTypeId=${testData.examTypeId}&caseCategory=non_oncology`
       );
       const withExamData = withExam.data as any;
-      const restrictedDay = (withExamData.items ?? []).find((d: any) => d.date === "2027-09-01");
+      const restrictedDay = (withExamData.items ?? []).find((d: any) => d.date === restrictedDate);
 
-      assert.ok(restrictedDay, "Should have entry for 2027-09-01");
+      assert.ok(restrictedDay, `Should have entry for ${restrictedDate}`);
       assert.strictEqual(
         restrictedDay.decision.displayStatus,
         "blocked",
@@ -465,9 +480,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
       );
       const noExamData = noExam.data as any;
-      const freeDay = (noExamData.items ?? []).find((d: any) => d.date === "2027-09-01");
+      const freeDay = (noExamData.items ?? []).find((d: any) => d.date === restrictedDate);
 
-      assert.ok(freeDay, "Should have entry for 2027-09-01 (no exam type)");
+      assert.ok(freeDay, `Should have entry for ${restrictedDate} (no exam type)`);
       assert.notStrictEqual(
         freeDay.decision.displayStatus,
         "blocked",
@@ -482,6 +497,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   describe("Exam type rule — restriction_overridable", () => {
     it("overridable restriction shows restricted when examTypeId matches", async (t) => {
       if (guard(t)) return;
+      const restrictedDate = addDaysIso(110);
 
       await publishPolicyWithRules({
         modalityBlockedRules: [],
@@ -498,7 +514,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             modalityId: testData.modalityId,
             ruleType: "specific_date",
             effectMode: "restriction_overridable",
-            specificDate: "2027-10-01",
+            specificDate: restrictedDate,
             startDate: null, endDate: null,
             weekday: null,
             alternateWeeks: false,
@@ -515,9 +531,9 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&examTypeId=${testData.examTypeId}&caseCategory=non_oncology`
       );
       const withExamData = withExam.data as any;
-      const day = (withExamData.items ?? []).find((d: any) => d.date === "2027-10-01");
+      const day = (withExamData.items ?? []).find((d: any) => d.date === restrictedDate);
 
-      assert.ok(day, "Should have entry for 2027-10-01");
+      assert.ok(day, `Should have entry for ${restrictedDate}`);
       assert.strictEqual(
         day.decision.displayStatus,
         "restricted",
@@ -992,7 +1008,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             ruleType: "specific_date",
-            specificDate: "2027-06-05",
+            specificDate: "2027-06-06",
             startDate: null, endDate: null,
             recurStartMonth: null, recurStartDay: null,
             recurEndMonth: null, recurEndDay: null,
@@ -1062,7 +1078,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             ruleType: "specific_date",
-            specificDate: "2027-05-01",
+            specificDate: "2027-05-02",
             startDate: null, endDate: null,
             recurStartMonth: null, recurStartDay: null,
             recurEndMonth: null, recurEndDay: null,
@@ -1245,7 +1261,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         auditResult.rows.length > 0,
         "Override audit event should be recorded in DB"
       );
-      assert.strictEqual(auditResult.rows[0].booking_id, bookingId);
+      assert.strictEqual(Number(auditResult.rows[0].booking_id), bookingId);
     });
 
     it("restricted day without override credentials fails with 403", async (t) => {
