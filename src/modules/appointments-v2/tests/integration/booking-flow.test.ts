@@ -52,8 +52,20 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     await testDb.cleanup();
   });
 
-  const fetch = (path: string, opts: Record<string, unknown> = {}) =>
-    fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
+  const fetch = (path: string, opts: Record<string, unknown> = {}) => {
+    const { body: origBody, ...rest } = opts as Record<string, unknown> & { body?: unknown };
+    if (path.includes("/api/v2/appointments")) {
+      const body = origBody as Record<string, unknown> | undefined;
+      if (body) {
+        return fetchJson(app.baseUrl, path, {
+          cookie: authCookie,
+          ...rest,
+          body: { ...body, policySetKey: testData.policySetKey },
+        });
+      }
+    }
+    return fetchJson(app.baseUrl, path, { cookie: authCookie, ...rest, ...(origBody !== undefined ? { body: origBody } : {}) });
+  };
 
   /** Skip the remaining body of the test if setup failed */
   function guard() {

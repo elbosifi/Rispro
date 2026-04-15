@@ -1206,7 +1206,13 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     it("can book restricted overridable blocked day with valid supervisor credentials", async (t) => {
       if (guard(t)) return;
 
-      const supervisorUsername = `${TEST_PREFIX.toLowerCase().replace(/[^a-z0-9]/g, "")}supervisor`;
+      const { pool } = await import("../../../../db/pool.js");
+      const userResult = await pool.query<{ username: string }>(
+        `select username from users where id = $1`,
+        [testData.userId]
+      );
+      const supervisorUsername = userResult.rows[0]?.username;
+      assert.ok(supervisorUsername, "Supervisor username should exist for override test");
 
       await publishPolicyWithRules({
         modalityBlockedRules: [
@@ -1250,7 +1256,6 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
 
       // Verify override audit row was recorded (Test 7)
       const bookingId = Number((result.data as any).booking.id);
-      const { pool } = await import("../../../../db/pool.js");
       const auditResult = await pool.query(
         `select booking_id, supervisor_user_id, requesting_user_id
          from appointments_v2.override_audit_events

@@ -51,8 +51,34 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
     await testDb.cleanup();
   });
 
-  const fetch = (path: string, opts: Record<string, unknown> = {}) =>
-    fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
+  const fetch = (path: string, opts: Record<string, unknown> = {}) => {
+    const { body: origBody, ...rest } = opts as Record<string, unknown> & { body?: unknown };
+
+    if (path.includes("/api/v2/scheduling/availability")) {
+      const sep = path.includes("?") ? "&" : "?";
+      const withPolicy = `${path}${sep}policySetKey=${encodeURIComponent(testData.policySetKey)}`;
+      return fetchJson(app.baseUrl, withPolicy, { cookie: authCookie, ...rest });
+    }
+
+    if (path.includes("/api/v2/scheduling/evaluate")) {
+      const body = { ...(origBody as Record<string, unknown> ?? {}), policySetKey: testData.policySetKey };
+      return fetchJson(app.baseUrl, path, { cookie: authCookie, ...rest, body });
+    }
+
+    if (path.includes("/api/v2/scheduling/admin/policy")) {
+      const body = origBody as Record<string, unknown> | undefined;
+      if (body && !("policySetKey" in body) && path.includes("/draft")) {
+        return fetchJson(app.baseUrl, path, {
+          cookie: authCookie,
+          ...rest,
+          body: { ...body, policySetKey: testData.policySetKey },
+        });
+      }
+      return fetchJson(app.baseUrl, path, { cookie: authCookie, ...rest, ...(origBody !== undefined ? { body: origBody } : {}) });
+    }
+
+    return fetchJson(app.baseUrl, path, { cookie: authCookie, ...rest, ...(origBody !== undefined ? { body: origBody } : {}) });
+  };
 
   describe("Availability query", () => {
     it("should return availability for a date range", async () => {
@@ -240,7 +266,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       const { status, data } = await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
         body: {
-          policySetKey: "default",
+          policySetKey: testData.policySetKey,
           changeNote: "Integration test draft",
         },
       });
@@ -256,7 +282,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       const { status } = await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
         body: {
-          policySetKey: "default",
+          policySetKey: testData.policySetKey,
           changeNote: "Second draft should fail",
         },
       });
@@ -291,7 +317,13 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
         method: "PUT",
         body: {
           policySnapshot: {
-            categoryDailyLimits: [{ modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10 }],
+            categoryDailyLimits: [{
+              id: 1,
+              modalityId: testData.modalityId,
+              caseCategory: "non_oncology",
+              dailyLimit: 10,
+              isActive: true,
+            }],
             modalityBlockedRules: [],
             examTypeRules: [],
             examTypeSpecialQuotas: [],
@@ -309,7 +341,16 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
     it("should reject saving a non-draft version", async () => {
       const { status } = await fetch(`/api/v2/scheduling/admin/policy/draft/${testData.policyVersionId}`, {
         method: "PUT",
-        body: { policySnapshot: {}, changeNote: "Should fail" },
+        body: {
+          policySnapshot: {
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            specialReasonCodes: [],
+          },
+          changeNote: "Should fail",
+        },
       });
       assert.equal(status, 409);
     });
@@ -329,7 +370,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
         // Create a draft
         await fetch("/api/v2/scheduling/admin/policy/draft", {
           method: "POST",
-          body: { policySetKey: "default", changeNote: "Draft for publish" },
+          body: { policySetKey: testData.policySetKey, changeNote: "Draft for publish" },
         });
 
         const newResult = await pool.query(
@@ -367,7 +408,7 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       // Create a new draft
       await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
-        body: { policySetKey: "default", changeNote: "Draft for preview" },
+        body: { policySetKey: testData.policySetKey, changeNote: "Draft for preview" },
       });
 
       const { pool } = await import("../../../../db/pool.js");
@@ -394,22 +435,30 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
 
   describe("GET /policy — policy status", () => {
     it("should return published policy and no draft", async () => {
+      const { pool } = await import("../../../../db/pool.js");
+      await pool.query(
+        `delete from appointments_v2.policy_versions where policy_set_id = $1 and status = 'draft'`,
+        [testData.policySetId]
+      );
+
       const { status, data } = await fetch(
-        `/api/v2/scheduling/admin/policy?policySetKey=default`
+        `/api/v2/scheduling/admin/policy?policySetKey=${encodeURIComponent(testData.policySetKey)}`
       );
 
       assert.equal(status, 200);
       const response = data as Record<string, unknown>;
       assert.ok(typeof response.policySet === "object");
       const policySet = response.policySet as Record<string, unknown>;
-      assert.equal(policySet.key, "default");
+      assert.equal(policySet.key, testData.policySetKey);
       assert.ok(typeof response.published === "object");
       const published = response.published as Record<string, unknown>;
       assert.ok(typeof published.versionNo === "number");
       assert.ok(typeof published.configHash === "string");
       assert.equal(response.draft, null);
-      assert.ok(Array.isArray(response.publishedRules));
-      assert.ok(Array.isArray(response.draftRules));
+      const publishedSnapshot = response.publishedSnapshot as Record<string, unknown>;
+      const draftSnapshot = response.draftSnapshot as Record<string, unknown>;
+      assert.ok(Array.isArray(publishedSnapshot.categoryDailyLimits));
+      assert.ok(Array.isArray(draftSnapshot.categoryDailyLimits));
     });
 
     it("should return null policySet for unknown key", async () => {
@@ -422,19 +471,27 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       assert.equal(response.policySet, null);
       assert.equal(response.published, null);
       assert.equal(response.draft, null);
-      assert.ok(Array.isArray(response.publishedRules));
-      assert.ok(Array.isArray(response.draftRules));
+      const publishedSnapshot = response.publishedSnapshot as Record<string, unknown>;
+      const draftSnapshot = response.draftSnapshot as Record<string, unknown>;
+      assert.ok(Array.isArray(publishedSnapshot.categoryDailyLimits));
+      assert.ok(Array.isArray(draftSnapshot.categoryDailyLimits));
     });
 
     it("should return draft after one is created", async () => {
+      const { pool } = await import("../../../../db/pool.js");
+      await pool.query(
+        `delete from appointments_v2.policy_versions where policy_set_id = $1 and status = 'draft'`,
+        [testData.policySetId]
+      );
+
       // Create a draft
       await fetch("/api/v2/scheduling/admin/policy/draft", {
         method: "POST",
-        body: { policySetKey: "default", changeNote: "Test draft for GET /policy" },
+        body: { policySetKey: testData.policySetKey, changeNote: "Test draft for GET /policy" },
       });
 
       const { status, data } = await fetch(
-        `/api/v2/scheduling/admin/policy?policySetKey=default`
+        `/api/v2/scheduling/admin/policy?policySetKey=${encodeURIComponent(testData.policySetKey)}`
       );
 
       assert.equal(status, 200);
@@ -443,7 +500,8 @@ describe("Availability and policy flow — integration tests", { skip: !runTests
       assert.ok(typeof response.draft === "object");
       const draft = response.draft as Record<string, unknown>;
       assert.ok(typeof draft.versionNo === "number");
-      assert.ok(Array.isArray(response.draftRules));
+      const draftSnapshot = response.draftSnapshot as Record<string, unknown>;
+      assert.ok(Array.isArray(draftSnapshot.categoryDailyLimits));
     });
   });
 });

@@ -56,13 +56,14 @@ function createMockDecision(
 
 // Synchronous skip check at module load time
 const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
+const TEST_PREFIX = "SHADOW_MODE_";
 
 describe("Shadow Mode Integration Tests", { skip: skipEnv }, () => {
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
 
   before(async () => {
-    testDb = await setupTestDatabase();
-    await seedTestData(testDb.schemaName);
+    testDb = await setupTestDatabase(TEST_PREFIX);
+    await seedTestData(testDb.schemaName, TEST_PREFIX);
   });
 
   after(async () => {

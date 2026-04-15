@@ -64,6 +64,7 @@ export interface TestData {
   examTypeId: number;
   patientId: number;
   policySetId: number;
+  policySetKey: string;
   policyVersionId: number;
   schemaName: string;
 }
@@ -73,47 +74,41 @@ export async function seedTestData(
   dataPrefix: string = "TEST_"
 ): Promise<TestData> {
   const s = (table: string) => `appointments_v2.${table}`;
-
-  // Clean up any stale V2 test data from previous runs (prefix-aware)
-  await pool.query(`delete from ${s("override_audit_events")}`);
-  await pool.query(`delete from ${s("bookings")}`);
-  await pool.query(`delete from ${s("category_daily_limits")}`);
-  await pool.query(`delete from ${s("policy_versions")} where status = 'draft'`);
-  await pool.query(`delete from ${s("policy_sets")} where key like '${dataPrefix.toLowerCase()}%' or key = 'default'`);
+  const prefixLower = dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const runSuffix = randomUUID().replace(/-/g, "").slice(0, 8);
+  const keyBase = `${prefixLower}${runSuffix}`;
 
   // Create test supervisor user (unique per prefix to avoid conflicts)
   // password "test_password" — bcrypt hash generated via bcrypt.hash('test_password', 10)
   const bcryptHash = "$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS";
-  const username = `${dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "")}supervisor`;
+  const username = `${keyBase}supervisor`;
   const userResult = await pool.query(
     `insert into users (username, password_hash, full_name, role, is_active)
      values ($1, $2, $3, 'supervisor', true)
      on conflict (username) do update set password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, is_active = EXCLUDED.is_active
      returning id`,
-    [username, bcryptHash, `${dataPrefix}Supervisor`]
+    [username, bcryptHash, `${dataPrefix}${runSuffix}Supervisor`]
   );
   const userId = Number(userResult.rows[0].id);
 
   // Create test modality (unique per prefix)
-  const modalityCode = `${dataPrefix}CT`;
+  const modalityCode = `${dataPrefix}${runSuffix}CT`;
   const modalityResult = await pool.query(
     `insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
      values ($1, $2, $3, 10, true)
      on conflict (code) do update set is_active = true
      returning id`,
-    [`${dataPrefix}اشعة مقطعية`, `${dataPrefix}CT`, modalityCode]
+    [`${dataPrefix}${runSuffix}اشعة مقطعية`, `${dataPrefix}${runSuffix}CT`, modalityCode]
   );
   const modalityId = Number(modalityResult.rows[0].id);
 
   // Create test exam type (unique per prefix)
-  const examTypeName = `${dataPrefix}CT Head`;
-  await pool.query(`delete from appointments_v2.bookings where exam_type_id in (select id from exam_types where name_en = $1)`, [examTypeName]);
-  await pool.query(`delete from exam_types where name_en = $1`, [examTypeName]);
+  const examTypeName = `${dataPrefix}${runSuffix} CT Head`;
   const examTypeResult = await pool.query(
     `insert into exam_types (modality_id, name_ar, name_en, is_active)
      values ($1, $2, $3, true)
      returning id`,
-    [modalityId, `${dataPrefix}اشعة راس`, examTypeName]
+    [modalityId, `${dataPrefix}${runSuffix}اشعة راس`, examTypeName]
   );
   const examTypeId = Number(examTypeResult.rows[0].id);
 
@@ -123,23 +118,22 @@ export async function seedTestData(
     `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
      values ($1, $2, $3, $4, 'M', 30, 'national_id', $5)
      returning id`,
-    [`${dataPrefix}مريض اختبار`, `${dataPrefix}Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
+    [`${dataPrefix}${runSuffix}مريض اختبار`, `${dataPrefix}${runSuffix}Test Patient`, uniqueNationalId, "مريضاختبار", uniqueNationalId]
   );
   const patientId = Number(patientResult.rows[0].id);
 
-  // Create a published policy (use "default" key for all - policy is read-only in tests)
-  // Clean up any existing default policy from previous runs of THIS suite only
-  const policyKey = "default";
+  // Create a suite-scoped published policy set and version.
+  const policyKey = `${keyBase}_policy`;
   const policySetResult = await pool.query(
     `insert into ${s("policy_sets")} (key, name, created_by_user_id)
      values ($1, $2, $3)
      on conflict (key) do nothing
      returning id`,
-    [policyKey, `${dataPrefix}Policy`, userId]
+    [policyKey, `${dataPrefix}${runSuffix}Policy`, userId]
   );
   
   // If the policy already exists, use it
-  let policySetId = policySetResult.rows[0]?.id;
+  let policySetId = policySetResult.rows[0]?.id ? Number(policySetResult.rows[0].id) : undefined;
   if (!policySetId) {
     const existing = await pool.query(`select id from ${s("policy_sets")} where key = $1`, [policyKey]);
     policySetId = Number(existing.rows[0].id);
@@ -157,7 +151,7 @@ export async function seedTestData(
     [policySetId, configHash, userId]
   );
   
-  let policyVersionId = policyVersionResult.rows[0]?.id;
+  let policyVersionId = policyVersionResult.rows[0]?.id ? Number(policyVersionResult.rows[0].id) : undefined;
   if (!policyVersionId) {
     const existing = await pool.query(`select id from ${s("policy_versions")} where policy_set_id = $1 and version_no = 1`, [policySetId]);
     policyVersionId = Number(existing.rows[0].id);
@@ -172,29 +166,103 @@ export async function seedTestData(
     [policyVersionId, modalityId]
   );
 
-  return { userId, modalityId, examTypeId, patientId, policySetId, policyVersionId, schemaName: "appointments_v2" };
+  return {
+    userId,
+    modalityId,
+    examTypeId,
+    patientId,
+    policySetId,
+    policySetKey: policyKey,
+    policyVersionId,
+    schemaName: "appointments_v2",
+  };
 }
 
 export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<void> {
   const prefixLower = dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "");
-  
-  // Delete V2 test data (all, since it's all prefixed the same)
-  await pool.query(`delete from appointments_v2.override_audit_events`);
-  await pool.query(`delete from appointments_v2.bookings`);
-  await pool.query(`delete from appointments_v2.category_daily_limits`);
-  await pool.query(`delete from appointments_v2.exam_type_rule_items`);
-  await pool.query(`delete from appointments_v2.exam_type_rules`);
-  await pool.query(`delete from appointments_v2.exam_type_special_quotas`);
-  await pool.query(`delete from appointments_v2.modality_blocked_rules`);
-  await pool.query(`delete from appointments_v2.policy_versions`);
-  await pool.query(`delete from appointments_v2.policy_sets where key like '${prefixLower}%' or key like 'RE_ps%' or key = 'default'`);
-  
-  // Clean up legacy test data (prefix-aware)
-  await pool.query(`update system_settings set updated_by_user_id = null where updated_by_user_id in (select id from users where username like '${prefixLower}%')`);
-  await pool.query(`delete from users where username like '${prefixLower}%'`);
-  await pool.query(`delete from modalities where code like '${dataPrefix}%'`);
-  await pool.query(`delete from exam_types where name_en like '${dataPrefix}%'`);
-  await pool.query(`delete from patients where english_full_name like '${dataPrefix}%'`);
+  const prefixLike = `${prefixLower}%`;
+  const dataPrefixLike = `${dataPrefix}%`;
+
+  const policySetRows = await pool.query<{ id: string }>(
+    `select id::text as id from appointments_v2.policy_sets where key like $1`,
+    [prefixLike]
+  );
+
+  // Rule enforcement uses RE_psXX keys; keep deletion scoped to that suite only.
+  if (prefixLower === "ruleenf") {
+    const extra = await pool.query<{ id: string }>(
+      `select id::text as id from appointments_v2.policy_sets where key like 'RE_ps%'`
+    );
+    policySetRows.rows.push(...extra.rows);
+  }
+
+  const policySetIds = [...new Set(policySetRows.rows.map((r) => Number(r.id)))];
+  const userRows = await pool.query<{ id: string }>(
+    `select id::text as id from users where username like $1`,
+    [prefixLike]
+  );
+  const modalityRows = await pool.query<{ id: string }>(
+    `select id::text as id from modalities where code like $1`,
+    [dataPrefixLike]
+  );
+  const examTypeRows = await pool.query<{ id: string }>(
+    `select id::text as id from exam_types where name_en like $1`,
+    [dataPrefixLike]
+  );
+  const patientRows = await pool.query<{ id: string }>(
+    `select id::text as id from patients where english_full_name like $1`,
+    [dataPrefixLike]
+  );
+
+  const userIds = userRows.rows.map((r) => Number(r.id));
+  const modalityIds = modalityRows.rows.map((r) => Number(r.id));
+  const examTypeIds = examTypeRows.rows.map((r) => Number(r.id));
+  const patientIds = patientRows.rows.map((r) => Number(r.id));
+
+  const policyVersionRows = await pool.query<{ id: string }>(
+    `select id::text as id from appointments_v2.policy_versions where policy_set_id = any($1::bigint[])`,
+    [policySetIds]
+  );
+  const policyVersionIds = policyVersionRows.rows.map((r) => Number(r.id));
+
+  const bookingRows = await pool.query<{ id: string }>(
+    `
+      select b.id::text as id
+      from appointments_v2.bookings b
+      where b.policy_version_id = any($1::bigint[])
+         or b.modality_id = any($2::bigint[])
+         or coalesce(b.exam_type_id, -1) = any($3::bigint[])
+         or b.patient_id = any($4::bigint[])
+    `,
+    [policyVersionIds, modalityIds, examTypeIds, patientIds]
+  );
+  const bookingIds = bookingRows.rows.map((r) => Number(r.id));
+
+  await pool.query(
+    `delete from appointments_v2.reschedule_audit_events where booking_id = any($1::bigint[])`,
+    [bookingIds]
+  );
+  await pool.query(
+    `
+      delete from appointments_v2.override_audit_events
+      where coalesce(booking_id, -1) = any($1::bigint[])
+         or coalesce(requesting_user_id, -1) = any($2::bigint[])
+         or coalesce(supervisor_user_id, -1) = any($2::bigint[])
+    `,
+    [bookingIds, userIds]
+  );
+  await pool.query(`delete from appointments_v2.bookings where id = any($1::bigint[])`, [bookingIds]);
+
+  await pool.query(`delete from appointments_v2.policy_sets where id = any($1::bigint[])`, [policySetIds]);
+
+  await pool.query(
+    `update system_settings set updated_by_user_id = null where updated_by_user_id = any($1::bigint[])`,
+    [userIds]
+  );
+  await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]);
+  await pool.query(`delete from exam_types where id = any($1::bigint[])`, [examTypeIds]);
+  await pool.query(`delete from modalities where id = any($1::bigint[])`, [modalityIds]);
+  await pool.query(`delete from patients where id = any($1::bigint[])`, [patientIds]);
 }
 
 export async function createTestApp(): Promise<{
