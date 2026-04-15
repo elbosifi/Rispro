@@ -1562,13 +1562,20 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     </select>
   );
 
-  const ExamTypeMultiSelect = ({ values, onChange }: { values: number[]; onChange: (ids: number[]) => void }) => {
+  const ExamTypeMultiSelect = ({ values, onChange, modalityId }: { values: number[]; onChange: (ids: number[]) => void; modalityId?: string }) => {
     const toggle = (id: number) => {
       onChange(values.includes(id) ? values.filter((v) => v !== id) : [...values, id]);
     };
+    const allExamTypes = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
+    const filteredOptions = modalityId
+      ? examTypeOptions.filter((opt: { value: string }) => {
+          const et = allExamTypes.find((examType: any) => String(examType.id) === opt.value);
+          return et && String(et.modalityId || et.modality_id) === modalityId;
+        })
+      : examTypeOptions;
     return (
       <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-        {examTypeOptions.map((opt: { value: string; label: string }) => {
+        {filteredOptions.map((opt: { value: string; label: string }) => {
           const id = Number(opt.value);
           const checked = values.includes(id);
           return (
@@ -1713,6 +1720,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               <ExamTypeMultiSelect
                 values={(row.examTypeIds as number[]) || []}
                 onChange={(ids) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, examTypeIds: ids } : r) }))}
+                modalityId={row.modalityId as string}
               />
             </div>
             {row.ruleType === "specific_date" && (

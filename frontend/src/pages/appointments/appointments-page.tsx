@@ -982,7 +982,7 @@ export default function AppointmentsPage() {
                     const statusLabel = getAvailabilityLabel(day);
                     const statusNote = getAvailabilityNote(day);
 
-                    // Blocked rows: not clickable, reduced opacity, not-allowed cursor
+                    // Blocked rows: not clickable, reduced opacity, not-allowed cursor, no capacity shown
                     if (isBlocked) {
                       return (
                         <li key={dateStr} className="space-y-1">
@@ -997,7 +997,7 @@ export default function AppointmentsPage() {
                                 {weekday} {dateFormatted}
                               </span>
                               <span className="tabular-nums text-stone-400 dark:text-stone-500">
-                                {day.remaining_capacity}/{day.daily_capacity}
+                                —
                               </span>
                             </div>
                             <div className="mt-1">
@@ -1009,7 +1009,7 @@ export default function AppointmentsPage() {
                               </div>
                             </div>
                             <div className="w-full h-2 rounded-full bg-stone-200 dark:bg-stone-600 overflow-hidden mt-1">
-                              <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${occupancyPct}%` }} />
+                              <div className="h-full rounded-full bg-stone-300 dark:bg-stone-500" style={{ width: "0%" }} />
                             </div>
                           </div>
                         </li>
