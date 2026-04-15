@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups, getAppointmentById } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { printAppointmentSlip } from "@/lib/print-utils";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
@@ -21,7 +22,9 @@ export default function PrintPage() {
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
+  const autoprintParam = searchParams.get("autoprint") === "1";
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -59,6 +62,12 @@ export default function PrintPage() {
     const match = appointments.find((apt) => String(apt.id) === appointmentIdParam);
     if (match) setSelectedAppointment(match);
   }, [appointmentIdParam, appointments]);
+
+  useEffect(() => {
+    if (!autoprintParam || !selectedAppointment || autoprintDone) return;
+    setAutoprintDone(true);
+    printAppointmentSlip(selectedAppointment);
+  }, [autoprintParam, selectedAppointment, autoprintDone]);
 
   const handlePrintSlip = (apt: AppointmentWithDetails) => {
     const printWindow = window.open("", "_blank");

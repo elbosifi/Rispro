@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import type {
   BookingResponse,
@@ -40,6 +41,7 @@ interface CreateAppointmentTabProps {
 }
 
 interface SuccessSummary {
+  bookingId: number;
   patientName: string;
   bookingDate: string;
   modalityName: string;
@@ -57,6 +59,7 @@ export function CreateAppointmentTab({
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
   const { form, actions } = useCreateAppointmentForm();
+  const navigate = useNavigate();
   const [availabilitySelectedRow, setAvailabilitySelectedRow] = useState<AvailabilityRowViewModel | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [pendingDecision, setPendingDecision] = useState<SchedulingDecisionDto | null>(null);
@@ -125,6 +128,7 @@ export function CreateAppointmentTab({
     const modalityName = modalityOptions.find((m) => m.id === form.modalityId)?.name || "—";
     const examTypeName = effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name || null;
     setSuccess({
+      bookingId: response.booking.id,
       patientName: form.patient?.englishFullName || form.patient?.arabicFullName || `Patient #${form.patientId}`,
       bookingDate: response.booking.bookingDate,
       modalityName,
@@ -222,8 +226,8 @@ export function CreateAppointmentTab({
     return (
       <AppointmentSuccessState
         appointmentSummary={success}
-        onPrintSlip={() => pushToast({ type: "info", title: "Print", message: "Print flow can be connected to print page." })}
-        onViewDetails={() => pushToast({ type: "info", title: "Details", message: "Detail navigation can be connected in rollout." })}
+        onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}&autoprint=1`)}
+        onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
         onCreateAnother={() => {
           setSuccess(null);
           actions.clearAfterSuccess();
