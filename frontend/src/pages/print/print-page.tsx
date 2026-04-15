@@ -51,6 +51,10 @@ export default function PrintPage() {
   }, [searchParams]);
 
   useEffect(() => {
+    setAutoprintDone(false);
+  }, [appointmentIdParam]);
+
+  useEffect(() => {
     if (appointmentById) {
       setSelectedAppointment(appointmentById);
       setIsEditing(false);

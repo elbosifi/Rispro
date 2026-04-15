@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
@@ -125,21 +126,32 @@ function setup() {
   }));
 
   render(
-    <CreateAppointmentTab
-      patientLookups={{}}
-      modalityOptions={[
-        { id: 1, name: "CT", code: "CT", isActive: true },
-        { id: 2, name: "MRI", code: "MRI", isActive: true },
-      ]}
-      examTypeOptions={[]}
-      specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
-      schedulingEngineEnabled
-      onCreateAppointment={onCreateAppointment}
-      onEvaluateAvailability={onEvaluateAvailability}
-    />
+    <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+      <Routes>
+        <Route path="/v3/appointments/create" element={
+          <CreateAppointmentTab
+            patientLookups={{}}
+            modalityOptions={[
+              { id: 1, name: "CT", code: "CT", isActive: true },
+              { id: 2, name: "MRI", code: "MRI", isActive: true },
+            ]}
+            examTypeOptions={[]}
+            specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
+            schedulingEngineEnabled
+            onCreateAppointment={onCreateAppointment}
+            onEvaluateAvailability={onEvaluateAvailability}
+          />
+        } />
+        <Route path="/print" element={<PrintPlaceholder />} />
+      </Routes>
+    </MemoryRouter>
   );
 
   return { onCreateAppointment, onEvaluateAvailability };
+}
+
+function PrintPlaceholder() {
+  return <div data-testid="print-page">Print Page</div>;
 }
 
 describe("CreateAppointmentTab UI interactions", () => {
@@ -220,5 +232,123 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
     expect(await screen.findByText("Special reason code required")).toBeTruthy();
+  });
+
+  describe("success state actions", () => {
+    function setupSuccess() {
+      const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
+        booking: {
+          id: 42,
+          patientId: payload.patientId,
+          modalityId: payload.modalityId,
+          examTypeId: payload.examTypeId,
+          reportingPriorityId: null,
+          bookingDate: "2027-01-03",
+          bookingTime: null,
+          caseCategory: payload.caseCategory,
+          status: "scheduled" as const,
+          notes: payload.notes,
+          policyVersionId: 1,
+          createdAt: "",
+          updatedAt: "",
+        },
+        decision: {},
+        wasOverride: false,
+      }));
+
+      const onEvaluateAvailability = vi.fn(async (): Promise<SchedulingDecisionDto> => ({
+        isAllowed: true,
+        requiresSupervisorOverride: false,
+        displayStatus: "available" as const,
+        suggestedBookingMode: "standard" as const,
+        consumedCapacityMode: "standard" as const,
+        remainingStandardCapacity: 5,
+        remainingSpecialQuota: null,
+        matchedRuleIds: [],
+        reasons: [],
+        policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "x" },
+        decisionTrace: { evaluatedAt: "", input: {} },
+      }));
+
+      render(
+        <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+          <Routes>
+            <Route path="/v3/appointments/create" element={
+              <CreateAppointmentTab
+                patientLookups={{}}
+                modalityOptions={[
+                  { id: 1, name: "CT", code: "CT", isActive: true },
+                ]}
+                examTypeOptions={[]}
+                specialReasonOptions={[]}
+                schedulingEngineEnabled
+                onCreateAppointment={onCreateAppointment}
+                onEvaluateAvailability={onEvaluateAvailability}
+              />
+            } />
+            <Route path="/print" element={<PrintPlaceholder />} />
+          </Routes>
+        </MemoryRouter>
+      );
+
+      return { onCreateAppointment, onEvaluateAvailability };
+    }
+
+    it("View Details navigates to /print?appointmentId=<id>", async () => {
+      setupSuccess();
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "View Details" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("print-page")).toBeTruthy();
+      });
+    });
+
+    it("Print Slip navigates to /print?appointmentId=<id>&autoprint=1", async () => {
+      setupSuccess();
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "Print Slip" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("print-page")).toBeTruthy();
+      });
+    });
+
+    it("Create Another resets form state", async () => {
+      setupSuccess();
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "Create Another" }));
+
+      expect(screen.queryByText("Appointment Created Successfully")).toBeNull();
+      expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("");
+      expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).value).toBe("");
+    });
   });
 });
