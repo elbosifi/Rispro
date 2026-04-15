@@ -143,7 +143,7 @@ export async function evaluateWithDb(
   // 6. Build the context
   const context: RuleEvaluationContext = {
     policyVersionId: publishedVersion.id,
-    policySetKey: publishedVersion.policySetId.toString(),
+    policySetKey,
     policyVersionNo: publishedVersion.versionNo,
     policyConfigHash: publishedVersion.configHash,
     modalityExists,

@@ -106,7 +106,8 @@ router.post(
         isWalkIn: body.isWalkIn ?? false,
         override: body.override,
       },
-      userId
+      userId,
+      body.policySetKey ?? "default"
     );
 
     res.status(201).json({
@@ -146,7 +147,8 @@ router.put(
       body.override,
       body.useSpecialQuota === true,
       body.specialReasonCode ?? null,
-      body.rescheduleReason ?? null
+      body.rescheduleReason ?? null,
+      body.policySetKey ?? "default"
     );
 
     res.json({

@@ -82,12 +82,13 @@ export async function seedTestData(
   await pool.query(`delete from ${s("policy_sets")} where key like '${dataPrefix.toLowerCase()}%' or key = 'default'`);
 
   // Create test supervisor user (unique per prefix to avoid conflicts)
-  const bcryptHash = "$2a$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ01234";
+  // password "test_password" — bcrypt hash generated via bcrypt.hash('test_password', 10)
+  const bcryptHash = "$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS";
   const username = `${dataPrefix.toLowerCase().replace(/[^a-z0-9]/g, "")}supervisor`;
   const userResult = await pool.query(
     `insert into users (username, password_hash, full_name, role, is_active)
      values ($1, $2, $3, 'supervisor', true)
-     on conflict (username) do update set role = 'supervisor', is_active = true
+     on conflict (username) do update set password_hash = EXCLUDED.password_hash, role = EXCLUDED.role, is_active = EXCLUDED.is_active
      returning id`,
     [username, bcryptHash, `${dataPrefix}Supervisor`]
   );
@@ -217,7 +218,10 @@ export async function createTestApp(): Promise<{
   app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     console.error("Test app error:", err);
     const statusCode = (err as { statusCode?: number }).statusCode ?? 500;
-    res.status(statusCode).json({ error: err.message });
+    const details = (err as { details?: unknown }).details;
+    const response: Record<string, unknown> = { error: err.message };
+    if (details !== undefined) response.details = details;
+    res.status(statusCode).json(response);
   });
 
   const server = http.createServer(app);

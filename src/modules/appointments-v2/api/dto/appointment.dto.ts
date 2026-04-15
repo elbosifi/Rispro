@@ -16,6 +16,7 @@ export interface CreateAppointmentDto {
   specialReasonCode?: string | null;
   notes?: string | null;
   isWalkIn?: boolean;
+  policySetKey?: string;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
@@ -33,6 +34,7 @@ export interface UpdateAppointmentDto {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   rescheduleReason?: string | null;
+  policySetKey?: string;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

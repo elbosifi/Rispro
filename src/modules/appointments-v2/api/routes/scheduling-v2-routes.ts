@@ -39,7 +39,7 @@ router.post(
       useSpecialQuota: body.useSpecialQuota === true,
       specialReasonCode: body.specialReasonCode ? String(body.specialReasonCode) : null,
       includeOverrideEvaluation: body.includeOverrideEvaluation === true,
-    });
+    }, body.policySetKey as string | undefined);
     res.json(decision);
   })
 );
@@ -82,8 +82,9 @@ router.get(
       client.release();
     }
 
-    const availability = await getAvailabilityWithMeta(params);
-    const responseItems = await runAvailabilityWithShadow(availability.items, params);
+    const policySetKey = req.query.policySetKey as string | undefined;
+    const availability = await getAvailabilityWithMeta(params, policySetKey);
+    const responseItems = await runAvailabilityWithShadow(availability.items, params, policySetKey);
 
     res.json({
       items: responseItems,

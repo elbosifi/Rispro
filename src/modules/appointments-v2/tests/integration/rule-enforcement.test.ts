@@ -57,8 +57,24 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
     await testDb.cleanup();
   });
 
-  const fetch = (path: string, opts: Record<string, unknown> = {}) =>
-    fetchJson(app.baseUrl, path, { cookie: authCookie, ...opts });
+  let currentPolicySetKey = "default";
+  const fetch = (path: string, opts: Record<string, unknown> = {}) => {
+    const { body: _origBody, ...rest } = opts as any;
+    if (path.includes("/api/v2/scheduling/admin/policy")) {
+      return fetchJson(app.baseUrl, path, { ...rest, cookie: authCookie, body: _origBody });
+    }
+    if (path.includes("/appointments") || path.includes("/scheduling/evaluate")) {
+      const body = ((opts.body ?? {}) as Record<string, unknown>);
+      body.policySetKey = currentPolicySetKey;
+      return fetchJson(app.baseUrl, path, { ...rest, cookie: authCookie, body });
+    }
+    if (path.includes("/scheduling/availability")) {
+      const sep = path.includes("?") ? "&" : "?";
+      const newPath = `${path}${sep}policySetKey=${encodeURIComponent(currentPolicySetKey)}`;
+      return fetchJson(app.baseUrl, newPath, { ...rest, cookie: authCookie });
+    }
+    return fetchJson(app.baseUrl, path, { ...rest, cookie: authCookie, body: _origBody });
+  };
 
   function guard(t: TestContext) {
     if (testData) return false;
@@ -78,70 +94,53 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
   }
 
   // ---------------------------------------------------------------------------
-  // Helper: save a draft snapshot with specific rules and publish
+  // Helper: create isolated policy set and publish rules to it.
+  // Each test uses a unique policySetKey so tests don't interfere.
   // ---------------------------------------------------------------------------
-  async function publishPolicyWithRules(rules: {
-    modalityBlockedRules: Array<{
-      modalityId: number;
-      ruleType: string;
-      specificDate: string | null;
-      startDate: string | null;
-      endDate: string | null;
-      recurStartMonth: number | null;
-      recurStartDay: number | null;
-      recurEndMonth: number | null;
-      recurEndDay: number | null;
-      isOverridable: boolean;
-      isActive: boolean;
-      title: string | null;
-      notes: string | null;
-    }>;
-    categoryDailyLimits: Array<{
-      modalityId: number;
-      caseCategory: string;
-      dailyLimit: number;
-      isActive: boolean;
-    }>;
-    examTypeRules?: Array<{
-      modalityId: number;
-      ruleType: string;
-      effectMode: string;
-      specificDate: string | null;
-      startDate: string | null;
-      endDate: string | null;
-      weekday: number | null;
-      alternateWeeks: boolean;
-      recurrenceAnchorDate: string | null;
-      examTypeIds: number[];
-      title: string | null;
-      notes: string | null;
-      isActive: boolean;
-    }>;
-  }) {
-    const modalityId = testData.modalityId;
-    const examTypeId = testData.examTypeId;
-
-    // Create draft if needed
-    const statusBefore = await fetch("/api/v2/scheduling/admin/policy?policySetKey=default");
-    const dataBefore = statusBefore.data as any;
-    let draftVersionId = dataBefore?.draft?.id ?? null;
-
-    if (!draftVersionId) {
-      // If there's a published version, create a draft from it
-      if (dataBefore?.published?.id) {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        draftVersionId = (createResult.data as any).draft.id;
-      } else {
-        const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
-          method: "POST",
-          body: { policySetKey: "default" },
-        });
-        draftVersionId = (createResult.data as any).draft.id;
-      }
-    }
+  async function publishPolicyWithRules(
+    rules: {
+      modalityBlockedRules: Array<{
+        modalityId: number;
+        ruleType: string;
+        specificDate: string | null;
+        startDate: string | null;
+        endDate: string | null;
+        recurStartMonth: number | null;
+        recurStartDay: number | null;
+        recurEndMonth: number | null;
+        recurEndDay: number | null;
+        isOverridable: boolean;
+        isActive: boolean;
+        title: string | null;
+        notes: string | null;
+      }>;
+      categoryDailyLimits: Array<{
+        modalityId: number;
+        caseCategory: string;
+        dailyLimit: number;
+        isActive: boolean;
+      }>;
+      examTypeRules?: Array<{
+        modalityId: number;
+        ruleType: string;
+        effectMode: string;
+        specificDate: string | null;
+        startDate: string | null;
+        endDate: string | null;
+        weekday: number | null;
+        alternateWeeks: boolean;
+        recurrenceAnchorDate: string | null;
+        examTypeIds: number[];
+        title: string | null;
+        notes: string | null;
+        isActive: boolean;
+      }>;
+    },
+    policySetKey: string
+  ) {
+    currentPolicySetKey = policySetKey;
+    const { pool } = await import("../../../../db/pool.js");
+    const userId = testData.userId;
 
     const snapshot = {
       categoryDailyLimits: rules.categoryDailyLimits.map((r, i) => ({
@@ -157,15 +156,53 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       specialReasonCodes: [],
     };
 
-    await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
+    const psResult = await pool.query(
+      `insert into appointments_v2.policy_sets (key, name, created_by_user_id)
+       values ($1, $2, $3)
+       on conflict (key) do nothing
+       returning id`,
+      [policySetKey, `${policySetKey} policy`, userId]
+    );
+    let policySetId = psResult.rows[0]?.id;
+    if (!policySetId) {
+      const existing = await pool.query(
+        `select id from appointments_v2.policy_sets where key = $1`,
+        [policySetKey]
+      );
+      policySetId = Number(existing.rows[0].id);
+    }
+
+    await pool.query(
+      `delete from appointments_v2.policy_versions where policy_set_id = $1 and status = 'draft'`,
+      [policySetId]
+    );
+
+    const createResult = await fetch("/api/v2/scheduling/admin/policy/draft", {
+      method: "POST",
+      body: { policySetKey },
+    });
+    if (createResult.status !== 201) {
+      throw new Error("Failed to create draft: " + JSON.stringify(createResult.data));
+    }
+    const draftVersionId = (createResult.data as any).draft.id;
+
+    const updateResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}`, {
       method: "PUT",
       body: { policySnapshot: snapshot, changeNote: "Rule enforcement test" },
     });
+    if (updateResult.status !== 200) {
+      console.error("PUT update failed:", JSON.stringify(updateResult.data));
+      const err = updateResult.data as any;
+      throw new Error("Failed to update draft: " + JSON.stringify(err?.details?.fieldErrors ?? updateResult.data));
+    }
 
-    await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}/publish`, {
+    const publishResult = await fetch(`/api/v2/scheduling/admin/policy/draft/${draftVersionId}/publish`, {
       method: "POST",
       body: { changeNote: "Publish for test" },
     });
+    if (publishResult.status !== 200) {
+      throw new Error("Failed to publish draft: " + JSON.stringify(publishResult.data));
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -200,7 +237,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps01");
 
       // Check availability
       const availResult = await fetch(
@@ -254,7 +291,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps02");
 
       const availResult = await fetch(
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
@@ -305,7 +342,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps03");
 
       const availResult = await fetch(
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
@@ -353,7 +390,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps04");
 
       const availResult = await fetch(
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&caseCategory=non_oncology`
@@ -407,7 +444,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps05");
 
       // Query WITH examTypeId — should be blocked
       const withExam = await fetch(
@@ -472,7 +509,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps06");
 
       const withExam = await fetch(
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=400&offset=0&examTypeId=${testData.examTypeId}&caseCategory=non_oncology`
@@ -526,7 +563,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps07");
 
       const blockedEval = await fetch("/api/v2/scheduling/evaluate", {
         method: "POST",
@@ -578,7 +615,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps08");
 
       const availResult = await fetch(
         `/api/v2/scheduling/availability?modalityId=${testData.modalityId}&days=7&offset=0&caseCategory=non_oncology`
@@ -624,7 +661,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         examTypeRules: [],
-      });
+      }, "RE_ps09");
 
       // Note: special quotas are NOT versioned per-policy, they're part of the snapshot
       // The availability query uses useSpecialQuota=false by default.
@@ -682,7 +719,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps10");
 
       // Attempt to create a booking on the blocked date
       const bookingResult = await fetch("/api/v2/appointments", {
@@ -723,7 +760,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps11");
 
       const createResult = await fetch("/api/v2/appointments", {
         method: "POST",
@@ -763,7 +800,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
             isActive: true,
           },
         ],
-      });
+      }, "RE_ps12");
 
       const rescheduleResult = await fetch(`/api/v2/appointments/${bookingId}`, {
         method: "PUT",
@@ -776,6 +813,477 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       });
 
       assert.strictEqual(rescheduleResult.status, 409, "Reschedule to blocked day should fail");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 1: Blocked rule — date_range booking enforcement
+  // ---------------------------------------------------------------------------
+  describe("Blocked rule — date_range (booking enforcement)", () => {
+    it("create booking fails on date within blocked range", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "date_range",
+            specificDate: null,
+            startDate: "2027-11-01",
+            endDate: "2027-11-30",
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "November blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps13");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-11-15",
+          caseCategory: "non_oncology",
+          notes: "Should fail — date_range block",
+        },
+      });
+      assert.strictEqual(result.status, 409, "Booking inside date_range should return 409");
+    });
+
+    it("create booking succeeds on date outside blocked range", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "date_range",
+            specificDate: null,
+            startDate: "2027-11-01",
+            endDate: "2027-11-30",
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "November blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps14");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-12-01",
+          caseCategory: "non_oncology",
+          notes: "Should succeed — outside range",
+        },
+      });
+      assert.strictEqual(result.status, 201, "Booking outside date_range should succeed");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 2: Blocked rule — yearly_recurrence booking enforcement
+  // ---------------------------------------------------------------------------
+  describe("Blocked rule — yearly_recurrence (booking enforcement)", () => {
+    it("create booking fails on date matching yearly recurrence", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "yearly_recurrence",
+            specificDate: null,
+            startDate: null, endDate: null,
+            recurStartMonth: 12,
+            recurStartDay: 25,
+            recurEndMonth: 12,
+            recurEndDay: 31,
+            isOverridable: false,
+            isActive: true,
+            title: "Christmas holidays",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps15");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-12-25",
+          caseCategory: "non_oncology",
+          notes: "Should fail — yearly recurrence block",
+        },
+      });
+      assert.strictEqual(result.status, 409, "Booking on yearly recurring blocked date should return 409");
+    });
+
+    it("create booking succeeds on date outside yearly recurrence", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "yearly_recurrence",
+            specificDate: null,
+            startDate: null, endDate: null,
+            recurStartMonth: 12,
+            recurStartDay: 25,
+            recurEndMonth: 12,
+            recurEndDay: 31,
+            isOverridable: false,
+            isActive: true,
+            title: "Christmas holidays",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps16");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-12-24",
+          caseCategory: "non_oncology",
+          notes: "Should succeed — day before block starts",
+        },
+      });
+      assert.strictEqual(result.status, 201, "Booking on non-blocked day should succeed");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 3: Reschedule — rejects blocked date_range target
+  // ---------------------------------------------------------------------------
+  describe("Reschedule booking — rejects blocked date_range target", () => {
+    it("cannot reschedule to date within blocked date_range", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "specific_date",
+            specificDate: "2027-06-05",
+            startDate: null, endDate: null,
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "June 5 open",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps17");
+
+      const create = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-06-05",
+          caseCategory: "non_oncology",
+          notes: "Reschedule source",
+        },
+      });
+      assert.strictEqual(create.status, 201);
+      const bookingId = Number((create.data as any).booking.id);
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "date_range",
+            specificDate: null,
+            startDate: "2027-06-10",
+            endDate: "2027-06-20",
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "June 10-20 blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps18");
+
+      const reschedule = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: { bookingDate: "2027-06-15" },
+      });
+      assert.strictEqual(reschedule.status, 409, "Reschedule to date inside blocked range should return 409");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 4: Reschedule — rejects blocked yearly_recurrence target
+  // ---------------------------------------------------------------------------
+  describe("Reschedule booking — rejects blocked yearly_recurrence target", () => {
+    it("cannot reschedule to date matching yearly recurrence", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "specific_date",
+            specificDate: "2027-05-01",
+            startDate: null, endDate: null,
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: false,
+            isActive: true,
+            title: "May 1 open",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps19");
+
+      const create = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-05-01",
+          caseCategory: "non_oncology",
+          notes: "Reschedule source",
+        },
+      });
+      assert.strictEqual(create.status, 201);
+      const bookingId = Number((create.data as any).booking.id);
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "yearly_recurrence",
+            specificDate: null,
+            startDate: null, endDate: null,
+            recurStartMonth: 1,
+            recurStartDay: 1,
+            recurEndMonth: 1,
+            recurEndDay: 7,
+            isOverridable: false,
+            isActive: true,
+            title: "New Year blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps20");
+
+      const reschedule = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: { bookingDate: "2028-01-01" },
+      });
+      assert.strictEqual(reschedule.status, 409, "Reschedule to yearly recurring blocked date should return 409");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 5: Exam rule — weekly_recurrence hard_restriction in booking POST
+  // ---------------------------------------------------------------------------
+  describe("Exam rule — weekly_recurrence hard_restriction blocks booking", () => {
+    it("cannot book on weekday matching weekly_recurrence hard restriction", async (t) => {
+      if (guard(t)) return;
+
+      const blockedWeekday = nextDateForWeekday(1); // Monday
+      const allowedWeekday = nextDateForWeekday(3); // Wednesday
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+        examTypeRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "weekly_recurrence",
+            effectMode: "hard_restriction",
+            specificDate: null,
+            startDate: null, endDate: null,
+            weekday: 1, // Monday
+            alternateWeeks: false,
+            recurrenceAnchorDate: null,
+            examTypeIds: [testData.examTypeId],
+            title: "No Monday exams",
+            notes: null,
+            isActive: true,
+          },
+        ],
+      }, "RE_ps21");
+
+      const blockedResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: blockedWeekday,
+          caseCategory: "non_oncology",
+          notes: "Should fail — weekly_recurrence hard block",
+        },
+      });
+      assert.strictEqual(blockedResult.status, 409, "Booking on blocked weekday should return 409");
+
+      const allowedResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: allowedWeekday,
+          caseCategory: "non_oncology",
+          notes: "Should succeed — non-blocked weekday",
+        },
+      });
+      assert.strictEqual(allowedResult.status, 201, "Booking on non-blocked weekday should succeed");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // MISSING TEST 6: Restricted day — supervisor override succeeds
+  // MISSING TEST 7: Override audit row verification
+  // ---------------------------------------------------------------------------
+  describe("Restricted day — supervisor override succeeds", () => {
+    it("can book restricted overridable blocked day with valid supervisor credentials", async (t) => {
+      if (guard(t)) return;
+
+      const supervisorUsername = `${TEST_PREFIX.toLowerCase().replace(/[^a-z0-9]/g, "")}supervisor`;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "specific_date",
+            specificDate: "2027-07-15",
+            startDate: null, endDate: null,
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: true,
+            isActive: true,
+            title: "Soft blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps22");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-07-15",
+          caseCategory: "non_oncology",
+          notes: "Override test booking",
+          override: {
+            supervisorUsername,
+            supervisorPassword: "test_password",
+            reason: "Operational necessity",
+          },
+        },
+      });
+
+      assert.strictEqual(result.status, 201, "Override booking should succeed with valid supervisor credentials");
+      assert.strictEqual((result.data as any).wasOverride, true);
+
+      // Verify override audit row was recorded (Test 7)
+      const bookingId = Number((result.data as any).booking.id);
+      const { pool } = await import("../../../../db/pool.js");
+      const auditResult = await pool.query(
+        `select booking_id, supervisor_user_id, requesting_user_id
+         from appointments_v2.override_audit_events
+         where booking_id = $1`,
+        [bookingId]
+      );
+      assert.ok(
+        auditResult.rows.length > 0,
+        "Override audit event should be recorded in DB"
+      );
+      assert.strictEqual(auditResult.rows[0].booking_id, bookingId);
+    });
+
+    it("restricted day without override credentials fails with 403", async (t) => {
+      if (guard(t)) return;
+
+      await publishPolicyWithRules({
+        modalityBlockedRules: [
+          {
+            modalityId: testData.modalityId,
+            ruleType: "specific_date",
+            specificDate: "2027-07-20",
+            startDate: null, endDate: null,
+            recurStartMonth: null, recurStartDay: null,
+            recurEndMonth: null, recurEndDay: null,
+            isOverridable: true,
+            isActive: true,
+            title: "Soft blocked",
+            notes: null,
+          },
+        ],
+        categoryDailyLimits: [
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+        ],
+      }, "RE_ps23");
+
+      const result = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2027-07-20",
+          caseCategory: "non_oncology",
+          notes: "No override — should fail",
+        },
+      });
+
+      assert.strictEqual(result.status, 403, "Override required but not provided should return 403");
     });
   });
 });
