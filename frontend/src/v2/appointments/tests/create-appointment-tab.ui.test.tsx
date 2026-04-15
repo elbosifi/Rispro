@@ -416,6 +416,7 @@ describe("safety modal interactions", () => {
                 patientLookups={{}}
                 modalityOptions={[
                   { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
+                  { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
                 ]}
                 examTypeOptions={[]}
                 specialReasonOptions={[]}
@@ -463,16 +464,38 @@ describe("safety modal interactions", () => {
 
     it("modality change resets safety acknowledgment", async () => {
       const { onCreateAppointment } = setupWithSafetyWarning();
+
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+
+      // Select modality A (CT) with safety warning
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
       await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
+      // Confirm safety for modality A
       await screen.findByText("Safety Confirmation");
       await userEvent.click(screen.getByRole("button", { name: "Confirm" }));
 
-      expect(onCreateAppointment).toHaveBeenCalled();
+      await waitFor(() => {
+        expect(onCreateAppointment).toHaveBeenCalledTimes(1);
+      });
+
+      // Click Create Another to go back to form
+      await userEvent.click(screen.getByRole("button", { name: "Create Another" }));
+
+      await waitFor(() => {
+        expect(screen.getByLabelText("Modality")).toBeTruthy();
+      });
+
+      // Switch to modality B (MRI) - also has safety, should reset
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "201" } });
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      expect(await screen.findByText("Safety Confirmation")).toBeTruthy();
+      expect(onCreateAppointment).toHaveBeenCalledTimes(1);
     });
 
     it("reset button clears safety acknowledgment and modal", async () => {
