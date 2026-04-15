@@ -132,11 +132,12 @@ function setup() {
           <CreateAppointmentTab
             patientLookups={{}}
             modalityOptions={[
-              { id: 1, name: "CT", code: "CT", isActive: true },
-              { id: 2, name: "MRI", code: "MRI", isActive: true },
+              { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+              { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
             ]}
             examTypeOptions={[]}
             specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
+            priorityOptions={[]}
             schedulingEngineEnabled
             onCreateAppointment={onCreateAppointment}
             onEvaluateAvailability={onEvaluateAvailability}
@@ -277,10 +278,11 @@ describe("CreateAppointmentTab UI interactions", () => {
               <CreateAppointmentTab
                 patientLookups={{}}
                 modalityOptions={[
-                  { id: 1, name: "CT", code: "CT", isActive: true },
+                  { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
                 ]}
                 examTypeOptions={[]}
                 specialReasonOptions={[]}
+                priorityOptions={[]}
                 schedulingEngineEnabled
                 onCreateAppointment={onCreateAppointment}
                 onEvaluateAvailability={onEvaluateAvailability}

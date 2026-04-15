@@ -43,6 +43,9 @@ router.get(
           code: m.code,
           dailyCapacity: m.dailyCapacity,
           isActive: m.isActive,
+          safetyWarningEn: m.safetyWarningEn,
+          safetyWarningAr: m.safetyWarningAr,
+          safetyWarningEnabled: m.safetyWarningEnabled,
         })),
       });
     } finally {
@@ -117,6 +120,43 @@ router.get(
       );
 
       res.json({ items: result.rows });
+    } finally {
+      client.release();
+    }
+  })
+);
+
+/**
+ * GET /api/v2/lookups/priorities
+ * Return active reporting priorities.
+ */
+router.get(
+  "/priorities",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const client = await pool.connect();
+    try {
+      const result = await client.query<{
+        id: number;
+        name: string;
+        name_ar: string;
+        name_en: string;
+      }>(
+        `
+          select id, name, name_ar, name_en
+          from reporting_priorities
+          where is_active = true
+          order by id asc
+        `
+      );
+
+      res.json({
+        items: result.rows.map((r) => ({
+          id: r.id,
+          name: r.name,
+          nameAr: r.name_ar,
+          nameEn: r.name_en,
+        })),
+      });
     } finally {
       client.release();
     }

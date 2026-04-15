@@ -124,6 +124,18 @@ export async function fetchV2SpecialReasonCodes(): Promise<SpecialReasonCodeDto[
   return response.items;
 }
 
+export interface ReportingPriorityDto {
+  id: number;
+  name: string;
+  nameAr: string;
+  nameEn: string;
+}
+
+export async function fetchV2Priorities(): Promise<ReportingPriorityDto[]> {
+  const response = await api<{ items: ReportingPriorityDto[] }>("/v2/lookups/priorities");
+  return response.items;
+}
+
 export async function createV2Booking(input: CreateBookingRequest): Promise<BookingResponse> {
   return api<BookingResponse>("/v2/appointments", {
     method: "POST",
@@ -274,6 +286,14 @@ export function useV2SpecialReasonCodes() {
     queryKey: ["v2-special-reason-codes"] as const,
     queryFn: fetchV2SpecialReasonCodes,
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useV2Priorities() {
+  return useQuery({
+    queryKey: ["v2-priorities"] as const,
+    queryFn: fetchV2Priorities,
+    staleTime: 60 * 60_000, // Priorities rarely change
   });
 }
 

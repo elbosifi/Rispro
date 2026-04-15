@@ -18,6 +18,8 @@ export interface CreateAppointmentFormModel {
   caseCategory: "oncology" | "non_oncology";
   appointmentDate: string;
   notes: string;
+  reportingPriorityId: number | null;
+  isWalkIn: boolean;
   useSpecialQuota: boolean;
   specialReasonCode: string;
   specialReasonNote: string;
@@ -33,6 +35,8 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   caseCategory: "non_oncology",
   appointmentDate: "",
   notes: "",
+  reportingPriorityId: null,
+  isWalkIn: false,
   useSpecialQuota: false,
   specialReasonCode: "",
   specialReasonNote: "",
@@ -118,6 +122,12 @@ export function useCreateAppointmentForm() {
     },
     setOverrideReason(overrideReason: string) {
       setForm((prev) => ({ ...prev, overrideReason }));
+    },
+    setReportingPriorityId(reportingPriorityId: number | null) {
+      setForm((prev) => ({ ...prev, reportingPriorityId }));
+    },
+    setIsWalkIn(isWalkIn: boolean) {
+      setForm((prev) => ({ ...prev, isWalkIn }));
     },
     clearAfterSuccess() {
       setForm((prev) => ({

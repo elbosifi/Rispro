@@ -252,6 +252,7 @@ async function createBookingInternal(
     notes: payload.notes ?? null,
     policyVersionId: publishedVersion.id,
     usesSpecialQuota: consumedSpecialQuota,
+    isWalkIn: payload.isWalkIn ?? false,
     userId,
   });
 

@@ -15,6 +15,7 @@ export interface CreateAppointmentDto {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   notes?: string | null;
+  isWalkIn?: boolean;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
@@ -51,6 +52,8 @@ export interface AppointmentResponseDto {
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
+  usesSpecialQuota: boolean;
+  isWalkIn: boolean;
   createdAt: string;
   updatedAt: string;
 }

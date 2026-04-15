@@ -14,16 +14,39 @@ export interface ModalityRow {
   code: string;
   dailyCapacity: number;
   isActive: boolean;
+  safetyWarningEn: string | null;
+  safetyWarningAr: string | null;
+  safetyWarningEnabled: boolean;
 }
 
 const FIND_BY_ID_SQL = `
-  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", code, daily_capacity as "dailyCapacity", is_active as "isActive"
+  select 
+    id, 
+    name_ar as "nameAr", 
+    name_en as "nameEn", 
+    name_en as "name", 
+    code, 
+    daily_capacity as "dailyCapacity", 
+    is_active as "isActive",
+    safety_warning_en as "safetyWarningEn",
+    safety_warning_ar as "safetyWarningAr",
+    safety_warning_enabled as "safetyWarningEnabled"
   from modalities
   where id = $1
 `;
 
 const LIST_ACTIVE_SQL = `
-  select id, name_ar as "nameAr", name_en as "nameEn", name_en as "name", code, daily_capacity as "dailyCapacity", is_active as "isActive"
+  select 
+    id, 
+    name_ar as "nameAr", 
+    name_en as "nameEn", 
+    name_en as "name", 
+    code, 
+    daily_capacity as "dailyCapacity", 
+    is_active as "isActive",
+    safety_warning_en as "safetyWarningEn",
+    safety_warning_ar as "safetyWarningAr",
+    safety_warning_enabled as "safetyWarningEnabled"
   from modalities
   where is_active = true
   order by name_en

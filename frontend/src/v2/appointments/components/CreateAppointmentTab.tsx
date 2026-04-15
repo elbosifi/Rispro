@@ -26,6 +26,7 @@ interface CreateAppointmentTabProps {
   modalityOptions: ModalityDto[];
   examTypeOptions: ExamTypeDto[];
   specialReasonOptions: SpecialReasonCodeDto[];
+  priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }>;
   schedulingEngineEnabled: boolean;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
@@ -54,6 +55,7 @@ export function CreateAppointmentTab({
   modalityOptions,
   examTypeOptions,
   specialReasonOptions,
+  priorityOptions,
   schedulingEngineEnabled,
   onCreateAppointment,
   onEvaluateAvailability,
@@ -68,6 +70,13 @@ export function CreateAppointmentTab({
   const [overrideLoading, setOverrideLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
+  const [showSafetyModal, setShowSafetyModal] = useState(false);
+  const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+
+  const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
+  const hasSafetyWarning = selectedModality?.safetyWarningEnabled && 
+    !!(selectedModality.safetyWarningEn || selectedModality.safetyWarningAr);
+  const safetyMessage = selectedModality?.safetyWarningEn || selectedModality?.safetyWarningAr || "";
 
   const filteredExamTypes = useMemo(
     () => examTypeOptions.filter((et) => form.modalityId != null && et.modalityId === form.modalityId),
@@ -114,13 +123,14 @@ export function CreateAppointmentTab({
       patientId: form.patientId as number,
       modalityId: form.modalityId as number,
       examTypeId: form.examTypeId,
-      reportingPriorityId: null,
+      reportingPriorityId: form.reportingPriorityId,
       bookingDate: form.appointmentDate,
       bookingTime: null,
       caseCategory: form.caseCategory,
       useSpecialQuota: form.useSpecialQuota,
       specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
       notes: form.notes.trim() || null,
+      isWalkIn: form.isWalkIn,
       override,
     };
 
@@ -181,6 +191,11 @@ export function CreateAppointmentTab({
       if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted") {
         setPendingDecision(decision);
         setShowOverrideModal(true);
+        return;
+      }
+
+      if (hasSafetyWarning && !safetyAcknowledged) {
+        setShowSafetyModal(true);
         return;
       }
 
@@ -291,6 +306,32 @@ export function CreateAppointmentTab({
         </div>
 
         <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Priority</label>
+          <select
+            aria-label="Priority"
+            value={form.reportingPriorityId ?? ""}
+            onChange={(e) => actions.setReportingPriorityId(e.target.value ? Number(e.target.value) : null)}
+            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+          >
+            <option value="">Normal</option>
+            {priorityOptions.map((p) => (
+              <option key={p.id} value={p.id}>{p.nameEn}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input
+            type="checkbox"
+            id="isWalkIn"
+            checked={form.isWalkIn}
+            onChange={(e) => actions.setIsWalkIn(e.target.checked)}
+            style={{ width: 16, height: 16 }}
+          />
+          <label htmlFor="isWalkIn" style={{ fontSize: 13 }}>Walk-in patient</label>
+        </div>
+
+        <div>
           <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Appointment Date</label>
           <input
             aria-label="Appointment Date"
@@ -364,6 +405,35 @@ export function CreateAppointmentTab({
         loading={overrideLoading}
         authError={overrideError}
       />
+
+      {showSafetyModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}
+        >
+          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 400, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
+            <h3 style={{ fontSize: 18, fontWeight: 600, color: "#b45309", marginBottom: 12 }}>Safety Confirmation</h3>
+            <p style={{ fontSize: 14, color: "#b45309", marginBottom: 16 }}>{safetyMessage}</p>
+            <p style={{ fontSize: 14, color: "#444", marginBottom: 20 }}>Have you confirmed this patient has no contraindications for {selectedModality?.name}?</p>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => setShowSafetyModal(false)}
+                style={{ flex: 1, padding: "10px 16px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSafetyAcknowledged(true); setShowSafetyModal(false); }}
+                style={{ flex: 1, padding: "10px 16px", borderRadius: 8, border: "none", background: "#f59e0b", color: "#fff", fontWeight: 600, cursor: "pointer" }}
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

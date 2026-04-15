@@ -17,6 +17,7 @@ export interface Booking {
   notes: string | null;
   policyVersionId: number;
   usesSpecialQuota: boolean;
+  isWalkIn: boolean;
   createdAt: string;
   createdByUserId: number | null;
   updatedAt: string;
@@ -34,6 +35,7 @@ export interface CreateBookingPayload {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   notes?: string | null;
+  isWalkIn?: boolean;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;

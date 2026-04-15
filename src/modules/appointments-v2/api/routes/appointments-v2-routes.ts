@@ -103,6 +103,7 @@ router.post(
         useSpecialQuota: body.useSpecialQuota === true,
         specialReasonCode: body.specialReasonCode ?? null,
         notes: body.notes ?? null,
+        isWalkIn: body.isWalkIn ?? false,
         override: body.override,
       },
       userId

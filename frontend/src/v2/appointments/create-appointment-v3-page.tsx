@@ -1,4 +1,4 @@
-import { createV2Booking, evaluateV2Scheduling, useV2Lookups, useV2SpecialReasonCodes } from "./api";
+import { createV2Booking, evaluateV2Scheduling, useV2Lookups, useV2SpecialReasonCodes, useV2Priorities } from "./api";
 import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 
 const FLAG_ENABLED = String(import.meta.env.VITE_ENABLE_APPOINTMENTS_V3_CREATE ?? "false").toLowerCase() === "true";
@@ -6,6 +6,7 @@ const FLAG_ENABLED = String(import.meta.env.VITE_ENABLE_APPOINTMENTS_V3_CREATE ?
 export function AppointmentsV3CreatePage() {
   const lookups = useV2Lookups();
   const specialReasons = useV2SpecialReasonCodes();
+  const priorities = useV2Priorities();
 
   if (!FLAG_ENABLED) {
     return (
@@ -26,6 +27,10 @@ export function AppointmentsV3CreatePage() {
     return <div style={{ padding: 24, color: "#dc2626" }}>Failed to load lookups: {(lookups.error as Error)?.message}</div>;
   }
 
+  if (priorities.isLoading || priorities.isError) {
+    return <div style={{ padding: 24 }}>Loading priorities...</div>;
+  }
+
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24, display: "grid", gap: 14 }}>
       <h1 style={{ margin: 0, fontSize: 20 }}>Appointments V3 - Create Appointment</h1>
@@ -38,6 +43,7 @@ export function AppointmentsV3CreatePage() {
         modalityOptions={lookups.data?.modalities ?? []}
         examTypeOptions={[]}
         specialReasonOptions={specialReasons.data ?? []}
+        priorityOptions={priorities.data ?? []}
         schedulingEngineEnabled
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}

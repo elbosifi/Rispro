@@ -11,16 +11,16 @@ const INSERT_SQL = `
   insert into appointments_v2.bookings (
     patient_id, modality_id, exam_type_id, reporting_priority_id,
     booking_date, booking_time, case_category, status, notes,
-    policy_version_id, uses_special_quota, created_by_user_id, updated_by_user_id
+    policy_version_id, uses_special_quota, is_walk_in, created_by_user_id, updated_by_user_id
   ) values (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
   )
   returning id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
     booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
-    uses_special_quota as "usesSpecialQuota",
+    uses_special_quota as "usesSpecialQuota", is_walk_in as "isWalkIn",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
     updated_at as "updatedAt", updated_by_user_id as "updatedByUserId"
 `;
@@ -39,6 +39,7 @@ export async function insertBooking(
     notes: string | null;
     policyVersionId: number;
     usesSpecialQuota: boolean;
+    isWalkIn: boolean;
     userId: number;
   }
 ): Promise<Booking> {
@@ -54,6 +55,7 @@ export async function insertBooking(
     booking.notes,
     booking.policyVersionId,
     booking.usesSpecialQuota,
+    booking.isWalkIn,
     booking.userId,
     booking.userId,
   ]);

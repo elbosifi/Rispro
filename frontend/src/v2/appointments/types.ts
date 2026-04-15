@@ -117,6 +117,7 @@ export interface CreateBookingRequest {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   notes: string | null;
+  isWalkIn?: boolean;
   override?: {
     supervisorUsername: string;
     supervisorPassword: string;
@@ -147,8 +148,13 @@ export interface BookingResponse {
 export interface ModalityDto {
   id: number;
   name: string;
+  nameAr: string;
+  nameEn: string;
   code: string;
   isActive: boolean;
+  safetyWarningEn: string | null;
+  safetyWarningAr: string | null;
+  safetyWarningEnabled: boolean;
 }
 
 export interface ExamTypeDto {

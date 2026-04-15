@@ -4,14 +4,20 @@ import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import PrintPage from "./print-page";
 import * as printUtils from "@/lib/print-utils";
+import * as apiHooks from "@/lib/api-hooks";
 
-vi.mock("@/lib/api-hooks", () => ({
-  fetchAppointments: vi.fn().mockResolvedValue([]),
-  fetchAppointmentLookups: vi.fn().mockResolvedValue({ modalities: [], examTypes: [] }),
-  getAppointmentById: vi.fn().mockResolvedValue({
+const { mockAppointmentData: mockAppointment42, mockAppointment99 } = vi.hoisted(() => {
+  const mockAppointmentData = {
     id: 42,
+    patientId: 1,
+    modalityId: 1,
+    examTypeId: 101,
+    reportingPriorityId: null,
     accessionNumber: "ACC-42",
     appointmentDate: "2027-01-03",
+    dailySequence: 1,
+    status: "scheduled" as const,
+    isWalkIn: false,
     arabicFullName: "مريض",
     englishFullName: "Test Patient",
     nationalId: "123",
@@ -19,18 +25,31 @@ vi.mock("@/lib/api-hooks", () => ({
     ageYears: 30,
     sex: "M",
     phone1: "123456",
+    modalityNameAr: "CT",
     modalityNameEn: "CT",
+    modalityCode: "CT",
     modalityGeneralInstructionAr: null,
     modalityGeneralInstructionEn: null,
+    examNameAr: "رأس CT",
     examNameEn: "CT Head",
+    priorityNameAr: "عادي",
     priorityNameEn: "Normal",
-    status: "scheduled",
-    isWalkIn: false,
-    dailySequence: 1,
     modalitySlotNumber: null,
     createdAt: "2027-01-01",
     notes: null,
-  }),
+  };
+  const mockAppointment99 = {
+    ...mockAppointmentData,
+    id: 99,
+    accessionNumber: "ACC-99",
+  };
+  return { mockAppointmentData, mockAppointment99 };
+});
+
+vi.mock("@/lib/api-hooks", () => ({
+  fetchAppointments: vi.fn().mockResolvedValue([]),
+  fetchAppointmentLookups: vi.fn().mockResolvedValue({ modalities: [], examTypes: [] }),
+  getAppointmentById: vi.fn().mockResolvedValue(mockAppointment42),
 }));
 
 vi.mock("@/lib/print-utils", () => ({
@@ -94,5 +113,33 @@ describe("PrintPage autoprint", () => {
     await waitFor(() => {
       expect(printUtils.printAppointmentSlip).not.toHaveBeenCalled();
     });
+  });
+
+  it("autoprint resets and fires again when appointmentId changes", async () => {
+    const getAppointmentById = vi.spyOn(apiHooks, "getAppointmentById");
+
+    getAppointmentById
+      .mockResolvedValueOnce(mockAppointment42)
+      .mockResolvedValueOnce(mockAppointment99);
+
+    renderWithRouter("/print?appointmentId=42&autoprint=1");
+
+    await waitFor(() => {
+      expect(printUtils.printAppointmentSlip).toHaveBeenCalledTimes(1);
+    });
+
+    const firstCall = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(firstCall.accessionNumber).toBe("ACC-42");
+
+    vi.clearAllMocks();
+
+    renderWithRouter("/print?appointmentId=99&autoprint=1");
+
+    await waitFor(() => {
+      expect(printUtils.printAppointmentSlip).toHaveBeenCalledTimes(1);
+    });
+
+    const secondCall = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(secondCall.accessionNumber).toBe("ACC-99");
   });
 });
