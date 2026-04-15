@@ -236,3 +236,118 @@ export async function listBookings(
   ]);
   return result.rows;
 }
+
+const FIND_BOOKING_PRINT_DETAILS_SQL = `
+  with booking_base as (
+    select
+      b.id,
+      b.patient_id,
+      b.modality_id,
+      b.exam_type_id,
+      b.reporting_priority_id,
+      b.booking_date::text as appointment_date,
+      b.booking_time,
+      b.case_category,
+      b.status,
+      b.notes,
+      b.is_walk_in,
+      b.created_at,
+      b.updated_at
+    from appointments_v2.bookings b
+    where b.id = $1
+    limit 1
+  )
+  select
+    bb.id,
+    ('V2-' || bb.id::text) as accession_number,
+    bb.appointment_date,
+    (
+      select count(*)
+      from appointments_v2.bookings seq
+      where seq.booking_date = bb.appointment_date::date
+        and seq.id <= bb.id
+    )::int as daily_sequence,
+    (
+      select count(*)
+      from appointments_v2.bookings slot
+      where slot.modality_id = bb.modality_id
+        and slot.booking_date = bb.appointment_date::date
+        and slot.status <> 'cancelled'
+        and slot.id <= bb.id
+    )::int as modality_slot_number,
+    bb.status,
+    bb.notes,
+    bb.is_walk_in,
+    false as is_overbooked,
+    null::text as overbooking_reason,
+    bb.created_at,
+    bb.updated_at,
+    p.id as patient_id,
+    p.mrn,
+    p.national_id,
+    p.arabic_full_name,
+    p.english_full_name,
+    p.age_years,
+    p.sex,
+    p.phone_1,
+    p.address,
+    m.id as modality_id,
+    m.code as modality_code,
+    m.name_ar as modality_name_ar,
+    m.name_en as modality_name_en,
+    m.general_instruction_ar as modality_general_instruction_ar,
+    m.general_instruction_en as modality_general_instruction_en,
+    et.id as exam_type_id,
+    et.name_ar as exam_name_ar,
+    et.name_en as exam_name_en,
+    rp.name_ar as priority_name_ar,
+    rp.name_en as priority_name_en
+  from booking_base bb
+  join patients p on p.id = bb.patient_id
+  join modalities m on m.id = bb.modality_id
+  left join exam_types et on et.id = bb.exam_type_id
+  left join reporting_priorities rp on rp.id = bb.reporting_priority_id
+`;
+
+export interface BookingPrintDetailsRow {
+  id: number;
+  accession_number: string;
+  appointment_date: string;
+  daily_sequence: number;
+  modality_slot_number: number | null;
+  status: string;
+  notes: string | null;
+  is_walk_in: boolean;
+  is_overbooked: boolean;
+  overbooking_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  patient_id: number;
+  mrn: string | null;
+  national_id: string | null;
+  arabic_full_name: string;
+  english_full_name: string | null;
+  age_years: number;
+  sex: string | null;
+  phone_1: string | null;
+  address: string | null;
+  modality_id: number;
+  modality_code: string;
+  modality_name_ar: string;
+  modality_name_en: string;
+  modality_general_instruction_ar: string | null;
+  modality_general_instruction_en: string | null;
+  exam_type_id: number | null;
+  exam_name_ar: string | null;
+  exam_name_en: string | null;
+  priority_name_ar: string | null;
+  priority_name_en: string | null;
+}
+
+export async function findBookingPrintDetailsById(
+  pool: import("pg").Pool,
+  bookingId: number
+): Promise<BookingPrintDetailsRow | null> {
+  const result = await pool.query<BookingPrintDetailsRow>(FIND_BOOKING_PRINT_DETAILS_SQL, [bookingId]);
+  return result.rows[0] ?? null;
+}

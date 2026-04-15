@@ -11,6 +11,7 @@ import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { rescheduleBooking } from "../../booking/services/reschedule-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
+import { getBookingDetails } from "../../booking/services/get-booking-details.service.js";
 import { listBookingsService } from "../../booking/services/list-bookings.service.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
@@ -65,6 +66,24 @@ router.get(
     });
 
     res.json({ bookings });
+  })
+);
+
+/**
+ * GET /api/v2/appointments/:id/details
+ * Fetch one V2 booking in print/details shape.
+ */
+router.get(
+  "/:id/details",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const bookingId = parseInt(String(req.params.id), 10);
+    if (isNaN(bookingId)) {
+      res.status(400).json({ error: "Invalid booking ID" });
+      return;
+    }
+
+    const appointment = await getBookingDetails(bookingId);
+    res.json({ appointment });
   })
 );
 

@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups, getAppointmentById } from "@/lib/api-hooks";
+import {
+  fetchAppointments,
+  fetchAppointmentLookups,
+  getAppointmentById,
+  getV2AppointmentPrintDetails,
+} from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { printAppointmentSlip } from "@/lib/print-utils";
@@ -24,7 +29,16 @@ export default function PrintPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
+  const sourceParam = searchParams.get("source");
+  const v2BookingIdParam = searchParams.get("v2BookingId");
   const autoprintParam = searchParams.get("autoprint") === "1";
+  const isV2Source =
+    sourceParam === "v2" &&
+    !!v2BookingIdParam &&
+    !isNaN(parseInt(v2BookingIdParam, 10));
+  const printTargetKey = isV2Source
+    ? `v2:${v2BookingIdParam ?? ""}`
+    : `legacy:${appointmentIdParam ?? ""}`;
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -41,7 +55,14 @@ export default function PrintPage() {
   const { data: appointmentById } = useQuery({
     queryKey: ["print-appointment", appointmentIdParam],
     queryFn: () => getAppointmentById(parseInt(appointmentIdParam!, 10)),
-    enabled: !!appointmentIdParam && !isNaN(parseInt(appointmentIdParam, 10)),
+    enabled: !isV2Source && !!appointmentIdParam && !isNaN(parseInt(appointmentIdParam, 10)),
+    staleTime: 1000 * 30
+  });
+
+  const { data: v2AppointmentById } = useQuery({
+    queryKey: ["print-v2-booking", v2BookingIdParam],
+    queryFn: () => getV2AppointmentPrintDetails(parseInt(v2BookingIdParam!, 10)),
+    enabled: isV2Source,
     staleTime: 1000 * 30
   });
 
@@ -52,7 +73,7 @@ export default function PrintPage() {
 
   useEffect(() => {
     setAutoprintDone(false);
-  }, [appointmentIdParam]);
+  }, [printTargetKey]);
 
   useEffect(() => {
     if (appointmentById) {
@@ -62,10 +83,17 @@ export default function PrintPage() {
   }, [appointmentById]);
 
   useEffect(() => {
-    if (!appointmentIdParam) return;
+    if (v2AppointmentById) {
+      setSelectedAppointment(v2AppointmentById);
+      setIsEditing(false);
+    }
+  }, [v2AppointmentById]);
+
+  useEffect(() => {
+    if (isV2Source || !appointmentIdParam) return;
     const match = appointments.find((apt) => String(apt.id) === appointmentIdParam);
     if (match) setSelectedAppointment(match);
-  }, [appointmentIdParam, appointments]);
+  }, [isV2Source, appointmentIdParam, appointments]);
 
   useEffect(() => {
     if (!autoprintParam || !selectedAppointment || autoprintDone) return;

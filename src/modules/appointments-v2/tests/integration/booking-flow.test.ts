@@ -127,6 +127,41 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       });
       assert.equal(status, 400);
     });
+
+    it("should return print/details payload for a V2 booking", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          reportingPriorityId: 1,
+          bookingDate: "2026-05-03",
+          bookingTime: null,
+          caseCategory: "non_oncology",
+          notes: "Integration test details payload",
+        },
+      });
+
+      assert.equal(createResult.status, 201);
+      const booking = (createResult.data as Record<string, unknown>).booking as Record<string, unknown>;
+      const bookingId = Number(booking.id);
+      assert.ok(!isNaN(bookingId), "booking.id should be numeric");
+
+      const { status, data } = await fetch(`/api/v2/appointments/${bookingId}/details`);
+      assert.equal(status, 200);
+
+      const response = data as Record<string, unknown>;
+      const appointment = response.appointment as Record<string, unknown>;
+      assert.equal(Number(appointment.id), bookingId);
+      assert.equal(appointment.accession_number, `V2-${bookingId}`);
+      assert.equal(appointment.appointment_date, "2026-05-03");
+      assert.equal(Number(appointment.patient_id), testData.patientId);
+      assert.equal(Number(appointment.modality_id), testData.modalityId);
+      assert.equal(Number(appointment.exam_type_id), testData.examTypeId);
+      assert.equal(appointment.status, "scheduled");
+    });
   });
 
   describe("List bookings", () => {

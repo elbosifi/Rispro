@@ -181,6 +181,11 @@ export async function getAppointmentById(id: number) {
   return mapAppointmentWithDetails(raw.appointment);
 }
 
+export async function getV2AppointmentPrintDetails(bookingId: number) {
+  const raw = await api<{ appointment: RawRecord }>(`/v2/appointments/${bookingId}/details`);
+  return mapAppointmentWithDetails(raw.appointment);
+}
+
 export async function updateAppointment(id: number, payload: RawRecord) {
   const raw = await api<{ appointment: RawRecord }>(`/appointments/${id}`, {
     method: "PUT",

@@ -50,6 +50,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: vi.fn().mockResolvedValue([]),
   fetchAppointmentLookups: vi.fn().mockResolvedValue({ modalities: [], examTypes: [] }),
   getAppointmentById: vi.fn().mockResolvedValue(mockAppointment42),
+  getV2AppointmentPrintDetails: vi.fn().mockResolvedValue(mockAppointment99),
 }));
 
 vi.mock("@/lib/print-utils", () => ({
@@ -141,5 +142,21 @@ describe("PrintPage autoprint", () => {
 
     const secondCall = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(secondCall.accessionNumber).toBe("ACC-99");
+  });
+
+  it("uses V2 details endpoint and still autoprints for source=v2", async () => {
+    const getAppointmentById = vi.spyOn(apiHooks, "getAppointmentById");
+    const getV2AppointmentPrintDetails = vi.spyOn(apiHooks, "getV2AppointmentPrintDetails");
+
+    renderWithRouter("/print?source=v2&v2BookingId=99&autoprint=1");
+
+    await waitFor(() => {
+      expect(getAppointmentById).not.toHaveBeenCalled();
+      expect(getV2AppointmentPrintDetails).toHaveBeenCalledWith(99);
+      expect(printUtils.printAppointmentSlip).toHaveBeenCalledTimes(1);
+    });
+
+    const call = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(call.accessionNumber).toBe("ACC-99");
   });
 });

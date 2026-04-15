@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
@@ -166,7 +166,8 @@ function setup() {
 }
 
 function PrintPlaceholder() {
-  return <div data-testid="print-page">Print Page</div>;
+  const location = useLocation();
+  return <div data-testid="print-page">{`Print Page ${location.pathname}${location.search}`}</div>;
 }
 
 describe("CreateAppointmentTab UI interactions", () => {
@@ -341,7 +342,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       return { onCreateAppointment, onEvaluateAvailability };
     }
 
-    it("View Details navigates to /print?appointmentId=<id>", async () => {
+    it("View Details navigates to /print?source=v2&v2BookingId=<id>", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -356,11 +357,11 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "View Details" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("print-page")).toBeTruthy();
+        expect(screen.getByTestId("print-page").textContent).toContain("/print?source=v2&v2BookingId=42");
       });
     });
 
-    it("Print Slip navigates to /print?appointmentId=<id>&autoprint=1", async () => {
+    it("Print Slip navigates to /print?source=v2&v2BookingId=<id>&autoprint=1", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -375,7 +376,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Print Slip" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("print-page")).toBeTruthy();
+        expect(screen.getByTestId("print-page").textContent).toContain("/print?source=v2&v2BookingId=42&autoprint=1");
       });
     });
 
