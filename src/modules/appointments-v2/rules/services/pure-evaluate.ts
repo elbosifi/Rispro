@@ -227,8 +227,10 @@ function checkCapacity(
 
   // Standard capacity exhausted — check special quota
   if (input.useSpecialQuota && input.examTypeId != null) {
+    // Convert to number for comparison since DB returns strings
+    const examTypeIdNum = Number(input.examTypeId);
     const quota = ctx.specialQuotas.find(
-      (q) => q.examTypeId === input.examTypeId && q.isActive
+      (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
     );
 
     if (quota && quota.dailyExtraSlots > 0) {
