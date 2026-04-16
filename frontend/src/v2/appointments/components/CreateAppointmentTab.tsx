@@ -9,7 +9,7 @@ import type {
   SchedulingDecisionDto,
   SpecialReasonCodeDto,
 } from "../types";
-import { useV2ExamTypes } from "../api";
+import { useV2ExamTypes, useV2Suggestions } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
@@ -94,6 +94,12 @@ export function CreateAppointmentTab({
     useSpecialQuota: form.useSpecialQuota,
     specialReasonCode: form.specialReasonCode || null,
   });
+
+  const suggestions = useV2Suggestions(
+    form.modalityId != null && form.examTypeId != null && !form.useSpecialQuota
+      ? { modalityId: form.modalityId, days: 14, examTypeId: form.examTypeId, caseCategory: form.caseCategory }
+      : undefined
+  );
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -405,6 +411,27 @@ export function CreateAppointmentTab({
           }
         />
       </div>
+
+      {form.modalityId != null && form.examTypeId != null && !form.useSpecialQuota && (
+        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, marginTop: 14 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14 }}>Suggested Dates (Advisory)</h3>
+          {suggestions.isLoading ? (
+            <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>Loading suggestions...</p>
+          ) : suggestions.isError ? (
+            <p style={{ color: "var(--color-error, #ef4444)", fontSize: 12 }}>Could not load suggestions.</p>
+          ) : suggestions.data?.items.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+              {suggestions.data.items.slice(0, 5).map((s) => (
+                <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4, color: "var(--text-muted, #64748b)" }}>
+                  {s.date} — {s.decision.displayStatus}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>No alternative dates found.</p>
+          )}
+        </div>
+      )}
 
       <SupervisorOverrideModal
         open={showOverrideModal}

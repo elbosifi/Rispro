@@ -242,10 +242,11 @@ export function useV2Availability(params: Parameters<typeof fetchV2Availability>
   });
 }
 
-export function useV2Suggestions(params: Parameters<typeof fetchV2Suggestions>[0]) {
+export function useV2Suggestions(params: Parameters<typeof fetchV2Suggestions>[0] | undefined) {
   return useQuery({
     queryKey: ["v2-suggestions", params] as const,
-    queryFn: () => fetchV2Suggestions(params),
+    queryFn: () => fetchV2Suggestions(params as Parameters<typeof fetchV2Suggestions>[0]),
+    enabled: params != null,
     staleTime: 30_000,
   });
 }

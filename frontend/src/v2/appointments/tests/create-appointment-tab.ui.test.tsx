@@ -90,6 +90,21 @@ vi.mock("../api", () => ({
     }
     return { data: [] };
   },
+  useV2Suggestions: (_params: { modalityId: number; days: number; examTypeId: number; caseCategory: string } | undefined) => {
+    if (_params == null) {
+      return { data: undefined, isLoading: false, isError: false };
+    }
+    return {
+      data: {
+        items: [
+          { modalityId: _params.modalityId, date: "2027-01-10", decision: { displayStatus: "available" } },
+          { modalityId: _params.modalityId, date: "2027-01-11", decision: { displayStatus: "available" } },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+    };
+  },
 }));
 
 const availabilityRowsWithAvailable: AvailabilityRowViewModel[] = [
