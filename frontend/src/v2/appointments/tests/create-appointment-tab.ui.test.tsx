@@ -82,7 +82,25 @@ const availabilityRows: AvailabilityRowViewModel[] = [
 ];
 
 const mockRowsRef = { current: availabilityRows };
-const mockRawItemsRef = {
+type MockRawAvailabilityItem = {
+  date: string;
+  specialQuotaSummary: {
+    examTypeId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
+  examMixQuotaSummaries?: Array<{
+    ruleId: number;
+    title: string | null;
+    dailyLimit: number;
+    consumed: number;
+    remaining: number;
+    isBlocking: boolean;
+    isPrimaryBlocking: boolean;
+  }>;
+};
+const mockRawItemsRef: { current: MockRawAvailabilityItem[] } = {
   current: [
     {
       date: "2027-01-02",
