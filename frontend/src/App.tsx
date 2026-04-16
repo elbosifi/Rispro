@@ -55,6 +55,7 @@ function AppContent() {
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
   const { language, toggleLanguage } = useLanguage();
+  const v3AppointmentsEnabled = String(import.meta.env.VITE_ENABLE_APPOINTMENTS_V3_CREATE ?? "false").toLowerCase() === "true";
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -115,9 +116,19 @@ function AppContent() {
             <Route path="/patients" element={<PatientsPage />} />
             <Route path="/patients/new" element={<PatientsPage />} />
             <Route path="/patients/:id/edit" element={<EditPatientPage />} />
-            {/* V2 is now the default appointments UI. Legacy is supervisor-only fallback at /appointments/legacy.
-                Rollback path: remap /appointments back to <AppointmentsPage /> if needed. */}
-            <Route path="/appointments" element={<AppointmentsV2Page />} />
+            {/* Controlled cutover: /appointments is the canonical create route.
+                Route governance owns the V3 flag decision to avoid showing an internal
+                "disabled" placeholder on the main receptionist path. */}
+            <Route
+              path="/appointments"
+              element={
+                v3AppointmentsEnabled
+                  ? <AppointmentsV3CreatePage />
+                  : (user.role === "supervisor"
+                      ? <Navigate to="/appointments/legacy" replace />
+                      : <Navigate to="/" replace />)
+              }
+            />
             <Route
               path="/appointments/legacy"
               element={user.role === "supervisor" ? <AppointmentsPage /> : <Navigate to="/appointments" replace />}
@@ -133,9 +144,15 @@ function AppContent() {
             <Route path="/pacs" element={<PacsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
-            <Route path="/v2/appointments" element={<AppointmentsV2Page />} />
-            <Route path="/v2/appointments/admin" element={<SchedulingAdminV2Page />} />
-            <Route path="/v3/appointments/create" element={<AppointmentsV3CreatePage />} />
+            <Route
+              path="/v2/appointments"
+              element={user.role === "supervisor" ? <AppointmentsV2Page /> : <Navigate to="/appointments" replace />}
+            />
+            <Route
+              path="/v2/appointments/admin"
+              element={user.role === "supervisor" ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />}
+            />
+            <Route path="/v3/appointments/create" element={<Navigate to="/appointments" replace />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

@@ -1,23 +1,10 @@
 import { createV2Booking, evaluateV2Scheduling, useV2Lookups, useV2SpecialReasonCodes, useV2Priorities } from "./api";
 import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
 
-const FLAG_ENABLED = String(import.meta.env.VITE_ENABLE_APPOINTMENTS_V3_CREATE ?? "false").toLowerCase() === "true";
-
 export function AppointmentsV3CreatePage() {
   const lookups = useV2Lookups();
   const specialReasons = useV2SpecialReasonCodes();
   const priorities = useV2Priorities();
-
-  if (!FLAG_ENABLED) {
-    return (
-      <div style={{ padding: 24 }}>
-        <h1 style={{ margin: 0, fontSize: 20 }}>Appointments V3 (Internal)</h1>
-        <p style={{ marginTop: 8, color: "var(--text-muted, #64748b)" }}>
-          V3 create workflow is disabled. Enable <code>VITE_ENABLE_APPOINTMENTS_V3_CREATE=true</code> for controlled rollout.
-        </p>
-      </div>
-    );
-  }
 
   if (lookups.isLoading) {
     return <div style={{ padding: 24 }}>Loading V3 booking lookups...</div>;
