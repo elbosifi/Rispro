@@ -23,7 +23,8 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
   let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
   let testData: TestData;
   let app: Awaited<ReturnType<typeof createTestApp>>;
-  let authCookie: string;
+  let supervisorAuthCookie: string;
+  let receptionistAuthCookie: string;
 
   before(async () => {
     if (!await canReachDatabase()) {
@@ -33,7 +34,8 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     app = await createTestApp();
-    authCookie = createTestAuthCookie(testData.userId, "supervisor");
+    supervisorAuthCookie = createTestAuthCookie(testData.userId, "supervisor");
+    receptionistAuthCookie = createTestAuthCookie(testData.userId, "receptionist");
   });
 
   after(async () => {
@@ -46,24 +48,26 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     if (!testData) throw new Error("Test setup failed");
   }
 
-  const fetch = (path: string, opts: Record<string, unknown> = {}) => {
+  const fetchWithCookie = (cookie: string, path: string, opts: Record<string, unknown> = {}) => {
     const { body: origBody, ...rest } = opts as Record<string, unknown> & { body?: unknown };
     if (path.includes("/api/v2/appointments")) {
       const body = origBody as Record<string, unknown> | undefined;
       if (body) {
         return fetchJson(app.baseUrl, path, {
-          cookie: authCookie,
+          cookie,
           ...rest,
           body: { ...body, policySetKey: testData.policySetKey },
         });
       }
     }
     return fetchJson(app.baseUrl, path, {
-      cookie: authCookie,
+      cookie,
       ...rest,
       ...(origBody !== undefined ? { body: origBody } : {}),
     });
   };
+  const fetch = (path: string, opts: Record<string, unknown> = {}) =>
+    fetchWithCookie(supervisorAuthCookie, path, opts);
 
   async function db() {
     const mod = await import("../../../../db/pool.js");
@@ -323,6 +327,48 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
       [Number(booking.id)]
     );
     assert.equal(audit.rows[0]?.mode, "special_quota_extra");
+  });
+
+  it("non-supervisor API request with category_override is rejected", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(2);
+    await setCategoryLimits(1, 1);
+
+    const result = await fetchWithCookie(receptionistAuthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: await createPatient(),
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "category_override",
+      },
+    });
+    assert.equal(result.status, 403);
+  });
+
+  it("non-supervisor API request with special_quota_extra is rejected", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(1);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(2);
+
+    const result = await fetchWithCookie(receptionistAuthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: await createPatient(),
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      },
+    });
+    assert.equal(result.status, 403);
   });
 
   it("cancel and reschedule release/preserve quota according to selected mode", async () => {

@@ -29,6 +29,7 @@ interface CreateAppointmentTabProps {
   specialReasonOptions: SpecialReasonCodeDto[];
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }>;
   schedulingEngineEnabled: boolean;
+  canUseNonStandardCapacityModes?: boolean;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
     patientId: number;
@@ -59,6 +60,7 @@ export function CreateAppointmentTab({
   specialReasonOptions,
   priorityOptions,
   schedulingEngineEnabled,
+  canUseNonStandardCapacityModes = false,
   onCreateAppointment,
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
@@ -104,13 +106,19 @@ export function CreateAppointmentTab({
       : undefined
   );
   const hasSpecialQuotaAvailable = (availability.rawItems ?? []).some(
-    (item) => (item.specialQuotaSummary?.configured ?? 0) > 0
+    (item) =>
+      item.date === form.appointmentDate &&
+      (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
   useEffect(() => {
-    if (form.capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable) {
+    if (
+      form.capacityResolutionMode !== "standard" &&
+      (!canUseNonStandardCapacityModes ||
+        (form.capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable))
+    ) {
       actions.setCapacityResolutionMode("standard");
     }
-  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable]);
+  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseNonStandardCapacityModes]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -147,12 +155,16 @@ export function CreateAppointmentTab({
       bookingDate: form.appointmentDate,
       bookingTime: null,
       caseCategory: form.caseCategory,
-      capacityResolutionMode: form.capacityResolutionMode,
-      useSpecialQuota: form.capacityResolutionMode === "special_quota_extra",
+      capacityResolutionMode:
+        canUseNonStandardCapacityModes ? form.capacityResolutionMode : "standard",
+      useSpecialQuota:
+        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra",
       specialReasonCode:
-        form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
+        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
+          ? form.specialReasonCode || null
+          : null,
       specialReasonNote:
-        form.capacityResolutionMode === "special_quota_extra"
+        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
           ? form.specialReasonNote.trim() || null
           : null,
       notes: form.notes.trim() || null,
@@ -199,10 +211,14 @@ export function CreateAppointmentTab({
         examTypeId: form.examTypeId,
         scheduledDate: form.appointmentDate,
         caseCategory: form.caseCategory,
-        capacityResolutionMode: form.capacityResolutionMode,
-        useSpecialQuota: form.capacityResolutionMode === "special_quota_extra",
+        capacityResolutionMode:
+          canUseNonStandardCapacityModes ? form.capacityResolutionMode : "standard",
+        useSpecialQuota:
+          canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra",
         specialReasonCode:
-          form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
+          canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
+            ? form.specialReasonCode || null
+            : null,
         includeOverrideEvaluation: true,
       });
 
@@ -396,6 +412,7 @@ export function CreateAppointmentTab({
             actions.setCapacityResolutionMode(mode);
           }}
           specialQuotaAvailable={hasSpecialQuotaAvailable}
+          supervisorMode={canUseNonStandardCapacityModes}
           specialReasonCode={form.specialReasonCode}
           onChangeSpecialReasonCode={actions.setSpecialReasonCode}
           specialReasonNote={form.specialReasonNote}

@@ -85,6 +85,7 @@ const mockRowsRef = { current: availabilityRows };
 const mockRawItemsRef = {
   current: [
     {
+      date: "2027-01-02",
       specialQuotaSummary: {
         examTypeId: 101,
         configured: 2,
@@ -163,7 +164,7 @@ const availabilityRowsWithAvailable: AvailabilityRowViewModel[] = [
   },
 ];
 
-function setup() {
+function setup(canUseNonStandardCapacityModes: boolean = true) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
       id: 10,
@@ -214,6 +215,7 @@ function setup() {
             specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
             priorityOptions={[]}
             schedulingEngineEnabled
+            canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
             onCreateAppointment={onCreateAppointment}
             onEvaluateAvailability={onEvaluateAvailability}
           />
@@ -235,6 +237,7 @@ describe("CreateAppointmentTab UI interactions", () => {
   beforeEach(() => {
     mockRawItemsRef.current = [
       {
+        date: "2027-01-02",
         specialQuotaSummary: {
           examTypeId: 101,
           configured: 2,
@@ -371,6 +374,36 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(option?.disabled).toBe(true);
   });
 
+  it("disables special_quota_extra when configured quota exists but remaining is 0 for selected date", async () => {
+    mockRawItemsRef.current = [
+      {
+        date: "2027-01-02",
+        specialQuotaSummary: {
+          examTypeId: 101,
+          configured: 3,
+          consumed: 3,
+          remaining: 0,
+        },
+      },
+    ];
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+    const select = screen.getByLabelText("Capacity Resolution Action") as HTMLSelectElement;
+    const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
+    expect(option?.disabled).toBe(true);
+  });
+
+  it("non-supervisor UI does not show capacity resolution selector", async () => {
+    setup(false);
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    expect(screen.queryByLabelText("Capacity Resolution Action")).toBeNull();
+  });
+
   describe("success state actions", () => {
     function setupSuccess() {
       const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
@@ -422,6 +455,7 @@ describe("CreateAppointmentTab UI interactions", () => {
                 specialReasonOptions={[]}
                 priorityOptions={[]}
                 schedulingEngineEnabled
+                canUseNonStandardCapacityModes
                 onCreateAppointment={onCreateAppointment}
                 onEvaluateAvailability={onEvaluateAvailability}
               />
@@ -548,6 +582,7 @@ describe("safety modal interactions", () => {
                 specialReasonOptions={[]}
                 priorityOptions={[{ id: 1, nameEn: "Urgent", nameAr: "Urgent" }]}
                 schedulingEngineEnabled
+                canUseNonStandardCapacityModes
                 onCreateAppointment={onCreateAppointment}
                 onEvaluateAvailability={onEvaluateAvailability}
               />

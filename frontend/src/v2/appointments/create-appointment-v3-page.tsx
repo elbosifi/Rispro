@@ -1,7 +1,9 @@
 import { createV2Booking, evaluateV2Scheduling, useV2Lookups, useV2SpecialReasonCodes, useV2Priorities } from "./api";
 import { CreateAppointmentTab } from "./components/CreateAppointmentTab";
+import { useAuth } from "@/providers/auth-provider";
 
 export function AppointmentsV3CreatePage() {
+  const { user } = useAuth();
   const lookups = useV2Lookups();
   const specialReasons = useV2SpecialReasonCodes();
   const priorities = useV2Priorities();
@@ -40,6 +42,7 @@ export function AppointmentsV3CreatePage() {
         specialReasonOptions={specialReasons.data ?? []}
         priorityOptions={priorities.data ?? []}
         schedulingEngineEnabled
+        canUseNonStandardCapacityModes={user?.role === "supervisor"}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />
