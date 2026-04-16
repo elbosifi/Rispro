@@ -7,7 +7,7 @@ export function AppointmentsV3CreatePage() {
   const priorities = useV2Priorities();
 
   if (lookups.isLoading) {
-    return <div style={{ padding: 24 }}>Loading V3 booking lookups...</div>;
+    return <div style={{ padding: 24 }}>Loading booking lookups...</div>;
   }
 
   if (lookups.isError) {
@@ -20,9 +20,9 @@ export function AppointmentsV3CreatePage() {
 
   return (
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24, display: "grid", gap: 14 }}>
-      <h1 style={{ margin: 0, fontSize: 20 }}>Appointments V3 - Create Appointment</h1>
+      <h1 style={{ margin: 0, fontSize: 20 }}>Create Appointment</h1>
       <p style={{ margin: 0, color: "var(--text-muted, #64748b)", fontSize: 13 }}>
-        Controlled replacement path: this route is internal and non-default until parity and scenario validation are signed off.
+        This booking workflow is managed through controlled rollout governance.
       </p>
 
       <CreateAppointmentTab
