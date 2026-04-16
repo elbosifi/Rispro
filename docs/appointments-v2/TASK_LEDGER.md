@@ -277,26 +277,22 @@ Remaining work: Operational rollout validation (shadow soak, manual scenario pac
 - **Follow-up items**: None.
 - **Reviewer signoff**: ⏳ pending Agent L review
 
-### Task T035 — Special Quota Consumption Tracking (BLOCKED)
+### Task T035 — Special Quota Consumption Tracking
 - **Task ID**: T035
 - **Name**: Special Quota Consumption Tracking
 - **Agent**: Agent K (Qwen)
-- **Status**: BLOCKED — Requires live PostgreSQL database for migration + integration testing. Out of scope for offline agent session.
-- **Analysis**: The `pureEvaluate()` TODO at line 269 reports `remainingSpecialQuota: quota.dailyExtraSlots` (the total configured) instead of tracking actual consumption. This means when standard capacity is exhausted and a special quota exists (e.g., 5 extra slots), the system allows bookings via special quota but never decrements the counter — the same 5 slots can be "consumed" unlimited times.
-- **Root cause**: The `appointments_v2.bookings` table lacks a `uses_special_quota` column, so there's no way to count how many bookings used the special quota path. The legacy `appointments` table has this column (migration 022) but V2 does not.
-- **Required changes** (9+ files):
-  1. Migration `024_special_quota_tracking.sql` — `alter table appointments_v2.bookings add column uses_special_quota boolean not null default false`
-  2. `capacity.repo.ts` — new `getSpecialQuotaBookedCount()` query filtering on `uses_special_quota = true AND exam_type_id = $X`
-  3. `rule-evaluation-context.ts` — add `currentSpecialQuotaBookedCount: number` field
-  4. `evaluate-with-db.ts` — load special quota booked count and pass to context
-  5. `availability.service.ts` — same wiring for each date in availability window
-  6. `pure-evaluate.ts` — change `quota.dailyExtraSlots > 0` → `(quota.dailyExtraSlots - currentSpecialQuotaBookedCount) > 0`, return `remainingSpecialQuota: quota.dailyExtraSlots - currentSpecialQuotaBookedCount`
-  7. `create-booking.service.ts` — set `uses_special_quota = true` when booking decision path uses special quota
-  8. `reschedule-booking.service.ts` — preserve `uses_special_quota` flag from original booking
-  9. `shadow-availability.ts` — wire new count into shadow evaluation context
-- **Why blocked**: This task requires (a) running a DB migration against a live database, (b) integration testing to verify the quota tracking works end-to-end across create/reschedule/availability flows, and (c) multiple interdependent service changes. Cannot be safely implemented and verified in an offline agent session without access to the target database.
-- **Workaround for now**: The current behavior is safe but permissive — special quota bookings are allowed as long as a quota exists with `dailyExtraSlots > 0`, regardless of how many such bookings already exist. This is a soft limitation, not a data integrity issue. Admins can set `dailyExtraSlots = 0` to effectively disable special quota for an exam type.
-- **Follow-up**: Implement when database access is available. The migration is additive-safe (new column with default). No rollback risk.
+- **Status**: DONE (implemented and DB-verified)
+- **Implementation summary**:
+  1. Migration added: `src/db/migrations/025_special_quota_tracking.sql` adds `appointments_v2.bookings.uses_special_quota boolean not null default false`.
+  2. Capacity counting is DB-backed via `uses_special_quota = true` filters in `capacity.repo.ts`.
+  3. Booking create/update paths persist and recompute `uses_special_quota` with policy decision snapshots.
+  4. Availability/evaluation context includes consumed special-quota counts.
+- **Verification summary**:
+  - DB schema verification confirms `appointments_v2.bookings.uses_special_quota` exists (`boolean`, `not null`, default `false`).
+  - DB-backed integration tests cover create/cancel/reschedule flows and persistence checks for `uses_special_quota`.
+- **Remaining proof gaps (as of current pass)**:
+  - None for the `uses_special_quota` schema/tracking root cause.
+  - Capacity semantics proof now tracked separately under Option-1 integration tests (`option1-capacity-proof.test.ts`).
 
 ### Task T034 — Behavioral Tests for compilePolicy
 - **Task ID**: T034

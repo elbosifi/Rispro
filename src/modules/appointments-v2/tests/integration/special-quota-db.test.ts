@@ -82,18 +82,19 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
     );
   }
 
+  let uniqueDayOffset = 0;
   function uniqueDate(): string {
-    const now = Date.now();
-    const day = (now % 28) + 1;
-    const month = Math.floor(now / 28) % 12 + 1;
-    return "2027-" + String(month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+    uniqueDayOffset += 1;
+    const d = new Date(Date.UTC(2040, 0, 1));
+    d.setUTCDate(d.getUTCDate() + uniqueDayOffset);
+    return d.toISOString().slice(0, 10);
   }
 
   describe("Create booking — special quota consumption", () => {
     it("creates booking with useSpecialQuota=true", async () => {
       guard();
       const sqDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 1);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 3);
 
       const result = await fetch("/api/v2/appointments", {
@@ -130,7 +131,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
     it("second special quota booking succeeds", async () => {
       guard();
       const sqDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 2);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 3);
 
       const r1 = await fetch("/api/v2/appointments", {
@@ -163,7 +164,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
     it("third booking fails when quota exhausted", async () => {
       guard();
       const sqDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 2);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 2);
 
       for (let i = 0; i < 2; i++) {
@@ -192,6 +193,19 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
         },
       });
       assert.strictEqual(result.status, 409);
+
+      const { pool } = await import("../../../../db/pool.js");
+      const dbCheck = await pool.query<{ count: string }>(
+        `select count(*)::text as count
+         from appointments_v2.bookings
+         where modality_id = $1
+           and exam_type_id = $2
+           and booking_date = $3::date
+           and uses_special_quota = true
+           and status <> 'cancelled'`,
+        [testData.modalityId, testData.examTypeId, sqDate]
+      );
+      assert.strictEqual(Number(dbCheck.rows[0]?.count || "0"), 2);
     });
   });
 
@@ -199,7 +213,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
     it("cancelling frees quota for rebooking", async () => {
       guard();
       const sqDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 0);
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 1);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 1);
 
       const createResult = await fetch("/api/v2/appointments", {
@@ -353,7 +367,7 @@ describe("Special quota — DB-backed integration", { skip: skipEnv }, () => {
     it("standard booking leaves special quota available", async () => {
       guard();
       const sqDate = uniqueDate();
-      await setDailyLimit(testData.modalityId, testData.policyVersionId, 1);
+      await setDailyLimit(testData.modalityId, testData.policyVersionId, 2);
       await insertSpecialQuota(testData.policyVersionId, testData.examTypeId, 3);
 
       await fetch("/api/v2/appointments", {

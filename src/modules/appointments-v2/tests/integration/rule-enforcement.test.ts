@@ -242,7 +242,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100, // lots of raw capacity
+            dailyLimit: 10, // lots of raw capacity
             isActive: true,
           },
         ],
@@ -300,7 +300,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -351,7 +351,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -400,7 +400,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -439,7 +439,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -505,7 +505,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -559,7 +559,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -731,7 +731,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -772,7 +772,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -812,7 +812,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           {
             modalityId: testData.modalityId,
             caseCategory: "non_oncology",
-            dailyLimit: 100,
+            dailyLimit: 10,
             isActive: true,
           },
         ],
@@ -856,7 +856,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps13");
 
@@ -894,7 +894,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps14");
 
@@ -938,7 +938,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps15");
 
@@ -977,7 +977,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps16");
 
@@ -1019,7 +1019,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps17");
 
@@ -1054,7 +1054,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps18");
 
@@ -1089,7 +1089,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps19");
 
@@ -1125,7 +1125,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps20");
 
@@ -1150,7 +1150,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
       await publishPolicyWithRules({
         modalityBlockedRules: [],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
         examTypeRules: [
           {
@@ -1230,7 +1230,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps22");
 
@@ -1288,7 +1288,7 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
           },
         ],
         categoryDailyLimits: [
-          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 100, isActive: true },
+          { modalityId: testData.modalityId, caseCategory: "non_oncology", dailyLimit: 10, isActive: true },
         ],
       }, "RE_ps23");
 
