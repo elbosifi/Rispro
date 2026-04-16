@@ -155,10 +155,11 @@ check_git_repo() {
   local git_status=""
   git_status="$(git status --porcelain --untracked-files=all || true)"
 
-  if [ -n "${git_status}" ]; then
+   if [ -n "${git_status}" ]; then
     warn "Local git changes detected; preserving them and avoiding destructive cleanup."
-    if printf '%s\n' "${git_status}" | grep -qv '^\?\? '; then
+    if printf '%s\n' "${git_status}" | cut -c1-2 | grep -qxv '??'; then
       warn "Tracked changes are present; skipping git pull to avoid overwriting local edits."
+      warn "Review with: git status --short"
       return 0
     fi
 

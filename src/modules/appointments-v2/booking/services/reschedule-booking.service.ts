@@ -119,6 +119,7 @@ async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
+  const bookingModalityId = Number(booking.modalityId);
   const effectiveDate = newDate ?? previousDate;
   const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
   const effectiveCapacityResolutionMode =
@@ -129,10 +130,10 @@ async function rescheduleBookingInternal(
     if (!examType) {
       throw new SchedulingError(400, `Exam type ${effectiveExamTypeId} not found.`, ["exam_type_not_found"]);
     }
-    if (Number(examType.modalityId) !== booking.modalityId) {
+    if (Number(examType.modalityId) !== bookingModalityId) {
       throw new SchedulingError(
         400,
-        `Exam type ${effectiveExamTypeId} does not belong to modality ${booking.modalityId}.`,
+        `Exam type ${effectiveExamTypeId} does not belong to modality ${bookingModalityId}.`,
         ["exam_type_modality_mismatch"]
       );
     }
@@ -157,22 +158,22 @@ async function rescheduleBookingInternal(
   // 2. Acquire deterministic locks for both categories on source+target dates.
   await acquireBucketLocks(client, [
     {
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       date: previousDate,
       caseCategory: "oncology",
     },
     {
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       date: previousDate,
       caseCategory: "non_oncology",
     },
     {
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       date: effectiveDate,
       caseCategory: "oncology",
     },
     {
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       date: effectiveDate,
       caseCategory: "non_oncology",
     },
@@ -187,11 +188,11 @@ async function rescheduleBookingInternal(
       ["no_published_policy"]
     );
   }
-  const modality = await findModalityById(client, booking.modalityId);
+  const modality = await findModalityById(client, bookingModalityId);
   if (!modality) {
     throw new SchedulingError(
       400,
-      `Modality ${booking.modalityId} not found.`,
+      `Modality ${bookingModalityId} not found.`,
       ["modality_not_found"]
     );
   }
@@ -200,17 +201,17 @@ async function rescheduleBookingInternal(
   const blockedRules = await loadModalityBlockedRules(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
   const examTypeRules = await loadExamTypeRules(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
   const categoryLimits = await loadCategoryDailyLimits(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
   const specialQuotas = await loadExamTypeSpecialQuotas(
     client,
@@ -220,30 +221,30 @@ async function rescheduleBookingInternal(
   const examTypeRuleItemExamTypeIds = await loadExamTypeRuleItemExamTypeIds(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
   const examMixQuotaRules = await loadExamMixQuotaRules(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
   const examMixQuotaRuleItems = await loadExamMixQuotaRuleItems(
     client,
     publishedVersion.id,
-    booking.modalityId
+    bookingModalityId
   );
 
   // 5. Load current booked count for the NEW date (after lock)
   // Note: the old booking is still counted here because it hasn't been updated yet
   const currentBookedCount = await getBookedCountForDate(
     client,
-    booking.modalityId,
+    bookingModalityId,
     effectiveDate,
     booking.caseCategory
   );
   const bookedCounts = await getBookedCountsByCategoryForDate(
     client,
-    booking.modalityId,
+    bookingModalityId,
     effectiveDate
   );
 
@@ -251,14 +252,14 @@ async function rescheduleBookingInternal(
   let currentSpecialQuotaBookedCount = 0;
   if (effectiveExamTypeId != null) {
     currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       bookingDate: effectiveDate,
       examTypeId: effectiveExamTypeId,
     });
   }
   const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
     policyVersionId: publishedVersion.id,
-    modalityId: booking.modalityId,
+    modalityId: bookingModalityId,
     bookingDate: effectiveDate,
     ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
   });
@@ -290,7 +291,7 @@ async function rescheduleBookingInternal(
 
   const pureInput: PureEvaluateInput = {
     patientId: booking.patientId,
-    modalityId: booking.modalityId,
+    modalityId: bookingModalityId,
     examTypeId: effectiveExamTypeId,
     scheduledDate: effectiveDate,
     caseCategory: booking.caseCategory,
@@ -307,7 +308,7 @@ async function rescheduleBookingInternal(
   console.info(JSON.stringify({
     type: "appointments_v2_reschedule_decision",
     bookingId,
-    modalityId: booking.modalityId,
+    modalityId: bookingModalityId,
     previousDate,
     newDate: effectiveDate,
     caseCategory: booking.caseCategory,
@@ -381,7 +382,7 @@ async function rescheduleBookingInternal(
     await recordOverrideAudit(client, {
       bookingId,
       patientId: booking.patientId,
-      modalityId: booking.modalityId,
+      modalityId: bookingModalityId,
       examTypeId: effectiveExamTypeId,
       bookingDate: effectiveDate,
       requestingUserId: userId,

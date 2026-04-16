@@ -74,9 +74,9 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     const nationalId = `8${Math.random().toString().slice(2, 13).padEnd(11, "0").slice(0, 11)}`;
     const row = await pool.query<{ id: number }>(
       `insert into patients (arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years, identifier_type, identifier_value)
-       values ($1, $2, $3, $4, 'M', 40, 'national_id', $3)
+       values ($1, $2, $3, $4, 'M', 40, 'national_id', $5)
        returning id`,
-      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`]
+      [`${TEST_PREFIX}مريض`, `${TEST_PREFIX} Patient`, nationalId, `${TEST_PREFIX}مريض`, nationalId]
     );
     return Number(row.rows[0].id);
   }
@@ -110,7 +110,7 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       },
     });
     assert.equal(moved.status, 200);
-    assert.equal((moved.data as any).booking.examTypeId, secondExamTypeId);
+    assert.equal(Number((moved.data as any).booking.examTypeId), secondExamTypeId);
 
     const refillA = await fetch("/api/v2/appointments", {
       method: "POST",
@@ -141,4 +141,3 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     assert.ok(String((fillB.data as any).error ?? "").includes("not allowed"));
   });
 });
-
