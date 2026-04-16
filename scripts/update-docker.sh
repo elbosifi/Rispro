@@ -5,11 +5,16 @@ APP_NAME="RISpro Reception"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
+FRONTEND_ENV_FILE="${PROJECT_ROOT}/frontend/.env"
+FRONTEND_ENV_LOCAL_FILE="${PROJECT_ROOT}/frontend/.env.local"
 
 log()  { printf '[INFO] %s\n' "$*"; }
 ok()   { printf '[OK]   %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
 err()  { printf '[ERROR] %s\n' "$*" >&2; }
+
+DB_MODE=""
+COMPOSE_FILES=()
 
 cleanup() {
   local exit_code=$?
@@ -43,6 +48,17 @@ detect_compose() {
   fi
 }
 
+format_command() {
+  local out=""
+  local part
+
+  for part in "$@"; do
+    out="${out}$(printf '%q ' "$part")"
+  done
+
+  printf '%s' "${out% }"
+}
+
 read_env_value() {
   local key="$1"
   local value=""
@@ -50,6 +66,26 @@ read_env_value() {
     value="$(grep -E "^${key}=" "${ENV_FILE}" | tail -n1 | cut -d '=' -f2- || true)"
   fi
   printf '%s' "${value}"
+}
+
+normalize_db_mode() {
+  local raw="${1:-}"
+  raw="$(printf '%s' "${raw}" | tr '[:upper:]' '[:lower:]')"
+  case "${raw}" in
+    internal)
+      printf '%s' "internal"
+      ;;
+    external)
+      printf '%s' "external"
+      ;;
+    "")
+      printf '%s' "external"
+      ;;
+    *)
+      warn "Unrecognized DB mode '${raw}', defaulting to external."
+      printf '%s' "external"
+      ;;
+  esac
 }
 
 check_env() {
@@ -63,12 +99,41 @@ check_env() {
   if [ -z "${db_mode}" ]; then
     db_mode="$(read_env_value "DATABASE_MODE")"
   fi
+  DB_MODE="$(normalize_db_mode "${db_mode}")"
 
   if [ -z "${db_mode}" ]; then
     warn "Neither RISPRO_DB_MODE nor DATABASE_MODE found in .env"
   else
-    ok "Database mode: ${db_mode}"
+    ok "Database mode from .env: ${db_mode}"
   fi
+
+  ok "Using compose mode: ${DB_MODE}"
+
+  if [ -f "${FRONTEND_ENV_FILE}" ]; then
+    ok "frontend/.env found: yes"
+  else
+    warn "frontend/.env found: no"
+  fi
+
+  if [ -f "${FRONTEND_ENV_LOCAL_FILE}" ]; then
+    ok "frontend/.env.local found: yes"
+  else
+    warn "frontend/.env.local found: no"
+  fi
+}
+
+build_compose_args() {
+  case "${DB_MODE}" in
+    internal)
+      COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.internal-db.yml)
+      ;;
+    *)
+      COMPOSE_FILES=(-f docker-compose.yml)
+      ;;
+  esac
+
+  ok "Compose files selected: ${COMPOSE_FILES[*]}"
+  ok "Selected compose command: $(format_command "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build)"
 }
 
 check_git_repo() {
@@ -87,10 +152,17 @@ check_git_repo() {
     exit 1
   fi
 
-  if [ -n "$(git status --porcelain)" ]; then
-    warn "Discarding all local tracked and untracked changes before update..."
-    git reset --hard HEAD
-    git clean -fd
+  local git_status=""
+  git_status="$(git status --porcelain --untracked-files=all || true)"
+
+  if [ -n "${git_status}" ]; then
+    warn "Local git changes detected; preserving them and avoiding destructive cleanup."
+    if printf '%s\n' "${git_status}" | grep -qv '^\?\? '; then
+      warn "Tracked changes are present; skipping git pull to avoid overwriting local edits."
+      return 0
+    fi
+
+    ok "Only untracked files are present; proceeding with git pull."
   fi
 
   log "Fetching latest code from origin/${current_branch}..."
@@ -113,7 +185,7 @@ build_and_restart() {
   cd "${PROJECT_ROOT}"
 
   log "Building and restarting containers..."
-  "${COMPOSE_CMD[@]}" up -d --build --remove-orphans
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
   ok "Containers rebuilt and restarted."
 }
 
@@ -126,7 +198,7 @@ wait_for_health() {
   local attempts=30
   local i=1
 
-  container_id="$("${COMPOSE_CMD[@]}" ps -q app 2>/dev/null || true)"
+  container_id="$("${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" ps -q app 2>/dev/null || true)"
 
   if [ -z "${container_id}" ]; then
     warn "Could not find app container to check health. Skipping health wait."
@@ -144,7 +216,7 @@ wait_for_health() {
         ;;
       unhealthy|exited|dead)
         err "Application failed health check with status: ${status}"
-        "${COMPOSE_CMD[@]}" logs --tail=100 app || true
+        "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --tail=100 app || true
         exit 1
         ;;
     esac
@@ -154,7 +226,7 @@ wait_for_health() {
   done
 
   err "Timed out waiting for application health."
-  "${COMPOSE_CMD[@]}" logs --tail=100 app || true
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs --tail=100 app || true
   exit 1
 }
 
@@ -176,6 +248,7 @@ main() {
   require_cmd docker
   detect_compose
   check_env
+  build_compose_args
   check_git_repo
   build_and_restart
   wait_for_health
