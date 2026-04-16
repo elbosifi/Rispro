@@ -90,6 +90,15 @@ export interface AvailabilityDayDto {
     consumed: number;
     remaining: number;
   } | null;
+  examMixQuotaSummaries?: Array<{
+    ruleId: number;
+    title: string | null;
+    dailyLimit: number;
+    consumed: number;
+    remaining: number;
+    isBlocking: boolean;
+    isPrimaryBlocking: boolean;
+  }>;
   // Backward-compatible fields retained for existing clients.
   dailyCapacity: number;
   bookedCount: number;

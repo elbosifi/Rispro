@@ -115,6 +115,13 @@ const LOAD_ALL_RULES_FOR_VERSION_SQL = `
     etsq.daily_extra_slots as "dailyLimit", etsq.is_active as "isActive"
   from appointments_v2.exam_type_special_quotas etsq
   where etsq.policy_version_id = $1
+  union all
+  select
+    'exam_mix_quota' as rule_type,
+    emqr.id, emqr.modality_id as "modalityId", null as "caseCategory",
+    emqr.daily_limit as "dailyLimit", emqr.is_active as "isActive"
+  from appointments_v2.exam_mix_quota_rules emqr
+  where emqr.policy_version_id = $1
 `;
 
 export interface PolicySetRow {
@@ -273,6 +280,18 @@ const DELETE_EXAM_TYPE_RULES_SQL = `
   where policy_version_id = $1
 `;
 
+const DELETE_EXAM_MIX_QUOTA_RULE_ITEMS_SQL = `
+  delete from appointments_v2.exam_mix_quota_rule_items
+  where rule_id in (
+    select id from appointments_v2.exam_mix_quota_rules where policy_version_id = $1
+  )
+`;
+
+const DELETE_EXAM_MIX_QUOTA_RULES_SQL = `
+  delete from appointments_v2.exam_mix_quota_rules
+  where policy_version_id = $1
+`;
+
 const DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL = `
   delete from appointments_v2.exam_type_special_quotas
   where policy_version_id = $1
@@ -337,6 +356,30 @@ const INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL = `
     is_active as "isActive"
 `;
 
+const INSERT_EXAM_MIX_QUOTA_RULE_SQL = `
+  insert into appointments_v2.exam_mix_quota_rules (
+    policy_version_id, modality_id, title, rule_type, specific_date, start_date, end_date,
+    weekday, alternate_weeks, recurrence_anchor_date, daily_limit, is_active
+  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+  returning id,
+    modality_id as "modalityId",
+    title,
+    rule_type as "ruleType",
+    specific_date::text as "specificDate",
+    start_date::text as "startDate",
+    end_date::text as "endDate",
+    weekday,
+    alternate_weeks as "alternateWeeks",
+    recurrence_anchor_date::text as "recurrenceAnchorDate",
+    daily_limit as "dailyLimit",
+    is_active as "isActive"
+`;
+
+const INSERT_EXAM_MIX_QUOTA_RULE_ITEM_SQL = `
+  insert into appointments_v2.exam_mix_quota_rule_items (rule_id, exam_type_id)
+  values ($1, $2)
+`;
+
 const UPSERT_SPECIAL_REASON_CODE_SQL = `
   insert into appointments_v2.special_reason_codes (code, label_ar, label_en, is_active, updated_at, updated_by_user_id)
   values ($1, $2, $3, $4, now(), $5)
@@ -359,7 +402,9 @@ export async function deleteAllRulesForVersion(
 ): Promise<void> {
   // Delete in FK order: children first, then parents
   await client.query(DELETE_EXAM_TYPE_RULE_ITEMS_SQL, [policyVersionId]);
+  await client.query(DELETE_EXAM_MIX_QUOTA_RULE_ITEMS_SQL, [policyVersionId]);
   await client.query(DELETE_EXAM_TYPE_RULES_SQL, [policyVersionId]);
+  await client.query(DELETE_EXAM_MIX_QUOTA_RULES_SQL, [policyVersionId]);
   await client.query(DELETE_EXAM_TYPE_SPECIAL_QUOTAS_SQL, [policyVersionId]);
   await client.query(DELETE_MODALITY_BLOCKED_RULES_SQL, [policyVersionId]);
   await client.query(DELETE_CATEGORY_DAILY_LIMITS_SQL, [policyVersionId]);
@@ -522,6 +567,60 @@ export async function insertExamTypeSpecialQuota(
     rule.isActive,
   ]);
   return result.rows[0];
+}
+
+export interface InsertedExamMixQuotaRule {
+  id: number;
+  modalityId: number;
+  title: string | null;
+  ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+  specificDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  weekday: number | null;
+  alternateWeeks: boolean;
+  recurrenceAnchorDate: string | null;
+  dailyLimit: number;
+  isActive: boolean;
+}
+
+export async function insertExamMixQuotaRule(
+  client: PoolClient,
+  policyVersionId: number,
+  rule: {
+    modalityId: number;
+    title: string | null;
+    ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+    alternateWeeks: boolean;
+    recurrenceAnchorDate: string | null;
+    dailyLimit: number;
+    isActive: boolean;
+    examTypeIds: number[];
+  }
+): Promise<InsertedExamMixQuotaRule> {
+  const result = await client.query<InsertedExamMixQuotaRule>(INSERT_EXAM_MIX_QUOTA_RULE_SQL, [
+    policyVersionId,
+    rule.modalityId,
+    rule.title ?? null,
+    rule.ruleType,
+    rule.specificDate || null,
+    rule.startDate || null,
+    rule.endDate || null,
+    rule.weekday,
+    rule.alternateWeeks,
+    rule.recurrenceAnchorDate || null,
+    rule.dailyLimit,
+    rule.isActive,
+  ]);
+  const insertedRule = result.rows[0];
+  for (const examTypeId of rule.examTypeIds) {
+    await client.query(INSERT_EXAM_MIX_QUOTA_RULE_ITEM_SQL, [insertedRule.id, examTypeId]);
+  }
+  return insertedRule;
 }
 
 export async function upsertSpecialReasonCodes(

@@ -44,7 +44,8 @@ async function runValidateWithMocks(
   versionId: number,
   versionRow: Record<string, unknown> | null,
   rules: Record<string, unknown>[],
-  modalityCapacities: Record<number, number | null> = {}
+  modalityCapacities: Record<number, number | null> = {},
+  examMixRules: Record<string, unknown>[] = []
 ): Promise<{ isValid: boolean; errors: string[]; warnings: string[] }> {
   const mockClient = new MockPoolClient();
 
@@ -67,6 +68,7 @@ async function runValidateWithMocks(
     }));
     mockClient.queueResults(rows);
   }
+  mockClient.queueResults(examMixRules);
 
   // Mock pool.connect to return our mock client
   const connectMock = mock.method(poolModule.pool, "connect", async () => mockClient);
@@ -272,6 +274,89 @@ describe("validatePolicy — empty rules warning", () => {
     ];
     const result = await runValidateWithMocks(1, version, rules);
     assert.ok(!result.warnings.some((w) => w.includes("no rules")));
+  });
+});
+
+describe("validatePolicy — exam mix rule validations", () => {
+  afterEach(() => mock.restoreAll());
+
+  const version = {
+    id: 1,
+    policySetId: 1,
+    versionNo: 1,
+    status: "draft",
+    configHash: "abc123",
+    changeNote: null,
+    publishedAt: null,
+  };
+
+  it("errors on invalid exam mix completeness", async () => {
+    const result = await runValidateWithMocks(
+      1,
+      version,
+      [],
+      {},
+      [
+        {
+          id: 10,
+          modalityId: 7,
+          ruleType: "specific_date",
+          specificDate: null,
+          startDate: null,
+          endDate: null,
+          weekday: null,
+          alternateWeeks: false,
+          recurrenceAnchorDate: null,
+          dailyLimit: 0,
+          isActive: true,
+          examTypeIds: [],
+        },
+      ]
+    );
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((e) => e.includes("positive integer")));
+    assert.ok(result.errors.some((e) => e.includes("at least one exam type")));
+    assert.ok(result.errors.some((e) => e.includes("requires specificDate")));
+  });
+
+  it("warns when active exam mix groups overlap on same modality + exam types", async () => {
+    const result = await runValidateWithMocks(
+      1,
+      version,
+      [],
+      {},
+      [
+        {
+          id: 10,
+          modalityId: 7,
+          ruleType: "date_range",
+          specificDate: null,
+          startDate: "2026-01-01",
+          endDate: "2026-01-31",
+          weekday: null,
+          alternateWeeks: false,
+          recurrenceAnchorDate: null,
+          dailyLimit: 2,
+          isActive: true,
+          examTypeIds: [11, 12],
+        },
+        {
+          id: 11,
+          modalityId: 7,
+          ruleType: "weekly_recurrence",
+          specificDate: null,
+          startDate: null,
+          endDate: null,
+          weekday: 2,
+          alternateWeeks: false,
+          recurrenceAnchorDate: null,
+          dailyLimit: 1,
+          isActive: true,
+          examTypeIds: [12],
+        },
+      ]
+    );
+    assert.ok(result.warnings.some((w) => w.includes("Exam mix overlap warning")));
   });
 });
 

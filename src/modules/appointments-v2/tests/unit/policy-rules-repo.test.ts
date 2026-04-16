@@ -338,12 +338,56 @@ describe("loadAllExamTypeRuleItemExamTypeIds", () => {
 
   it("passes only policyVersionId parameter", () => {
     const funcStart = source.indexOf("export async function loadAllExamTypeRuleItemExamTypeIds");
-    const funcEnd = source.length;
+    const funcEnd = source.indexOf("const LOAD_EXAM_MIX_QUOTA_RULES_SQL", funcStart);
     const funcSource = source.slice(funcStart, funcEnd);
 
     assert.ok(
-      funcSource.includes("policyVersionId") && !funcSource.includes("modalityId"),
-      "Should pass only policyVersionId"
+      funcSource.includes("[policyVersionId]"),
+      "Should pass policyVersionId only"
     );
+  });
+});
+
+describe("loadExamMixQuotaRules", () => {
+  it("exports loadExamMixQuotaRules function", async () => {
+    const { loadExamMixQuotaRules } = await import(
+      "../../rules/repositories/policy-rules.repo.js"
+    );
+    assert.strictEqual(typeof loadExamMixQuotaRules, "function");
+  });
+
+  it("queries exam_mix_quota_rules table", () => {
+    assert.ok(
+      source.includes("appointments_v2.exam_mix_quota_rules"),
+      "Should query exam_mix_quota_rules table"
+    );
+  });
+
+  it("filters by policy_version_id, modality_id, and is_active", () => {
+    assert.ok(source.includes("where policy_version_id = $1"));
+    assert.ok(source.includes("and modality_id = $2"));
+    assert.ok(source.includes("and is_active = true"));
+  });
+});
+
+describe("loadExamMixQuotaRuleItems", () => {
+  it("exports loadExamMixQuotaRuleItems function", async () => {
+    const { loadExamMixQuotaRuleItems } = await import(
+      "../../rules/repositories/policy-rules.repo.js"
+    );
+    assert.strictEqual(typeof loadExamMixQuotaRuleItems, "function");
+  });
+
+  it("queries exam_mix_quota_rule_items table", () => {
+    assert.ok(
+      source.includes("appointments_v2.exam_mix_quota_rule_items"),
+      "Should query exam_mix_quota_rule_items table"
+    );
+  });
+
+  it("joins to exam_mix_quota_rules for policy version + modality filtering", () => {
+    assert.ok(source.includes("inner join appointments_v2.exam_mix_quota_rules"));
+    assert.ok(source.includes("emqr.policy_version_id = $1"));
+    assert.ok(source.includes("emqr.modality_id = $2"));
   });
 });

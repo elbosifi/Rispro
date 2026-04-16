@@ -161,3 +161,22 @@ export function examRuleMatchesDate(
       return false;
   }
 }
+
+/**
+ * Check if an exam-mix quota rule matches the given date.
+ * Rule semantics align with exam-type weekly/specific/range patterns.
+ */
+export function examMixQuotaRuleMatchesDate(
+  rule: {
+    ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+    alternateWeeks: boolean;
+    recurrenceAnchorDate: string | null;
+  },
+  dateStr: string
+): boolean {
+  return examRuleMatchesDate(rule, dateStr);
+}

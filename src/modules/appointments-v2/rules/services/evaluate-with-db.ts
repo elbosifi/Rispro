@@ -23,6 +23,8 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamMixQuotaRules,
+  loadExamMixQuotaRuleItems,
 } from "../repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
@@ -30,6 +32,7 @@ import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
+  getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 
 export interface EvaluateWithDbParams extends BookingDecisionInput {}
@@ -125,6 +128,16 @@ export async function evaluateWithDb(
     publishedVersion.id,
     params.modalityId
   );
+  const examMixQuotaRules = await loadExamMixQuotaRules(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
+  const examMixQuotaRuleItems = await loadExamMixQuotaRuleItems(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
 
   // 4. Load current booking count for the bucket
   const currentBookedCount = await getBookedCountForDate(
@@ -148,6 +161,12 @@ export async function evaluateWithDb(
       examTypeId: params.examTypeId,
     });
   }
+  const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
+    policyVersionId: publishedVersion.id,
+    modalityId: params.modalityId,
+    bookingDate: params.scheduledDate,
+    ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
+  });
 
   // 6. Build the context
   const context: RuleEvaluationContext = {
@@ -169,6 +188,9 @@ export async function evaluateWithDb(
     specialQuotas,
     currentBookedCount,
     currentSpecialQuotaBookedCount,
+    examMixQuotaRules,
+    examMixQuotaRuleItems,
+    currentExamMixConsumedByRuleId,
   };
 
   // 6. Evaluate

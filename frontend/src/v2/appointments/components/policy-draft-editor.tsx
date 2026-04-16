@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useV2ExamTypeCatalog, useV2Lookups } from "../api";
 import type {
   PolicyCategoryDailyLimitDto,
+  PolicyExamMixQuotaRuleDto,
   PolicyExamTypeRuleDto,
   PolicyExamTypeSpecialQuotaDto,
   PolicyModalityBlockedRuleDto,
@@ -14,6 +15,7 @@ function emptySnapshot(): PolicySnapshotDto {
     modalityBlockedRules: [],
     examTypeRules: [],
     examTypeSpecialQuotas: [],
+    examMixQuotaRules: [],
     specialReasonCodes: [],
   };
 }
@@ -817,6 +819,275 @@ export function PolicyDraftEditor({
               }
             >
               Add exam rule
+            </button>
+          </div>
+        </details>
+
+        <details open>
+          <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Exam mix quota groups</summary>
+          <div style={{ display: "grid", gap: 8 }}>
+            {(draft.examMixQuotaRules ?? []).map((row, index) => {
+              const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
+              return (
+                <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-4">
+                  <select
+                    className={inputBase}
+                    value={row.modalityId}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, modalityId: Number(event.target.value), examTypeIds: [] }
+                            : item
+                        ),
+                      }))
+                    }
+                  >
+                    <option value={0}>Select modality...</option>
+                    {modalityOptions.map((modality) => (
+                      <option key={modality.value} value={modality.value}>
+                        {modality.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    className={inputBase}
+                    placeholder="Group title"
+                    value={row.title ?? ""}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, title: event.target.value || null } : item
+                        ),
+                      }))
+                    }
+                  />
+                  <select
+                    className={inputBase}
+                    value={row.ruleType}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                          itemIndex === index
+                            ? { ...item, ruleType: event.target.value as PolicyExamMixQuotaRuleDto["ruleType"] }
+                            : item
+                        ),
+                      }))
+                    }
+                  >
+                    <option value="specific_date">Specific date</option>
+                    <option value="date_range">Date range</option>
+                    <option value="weekly_recurrence">Weekly recurrence</option>
+                  </select>
+                  <input
+                    className={inputBase}
+                    type="number"
+                    min={1}
+                    value={row.dailyLimit}
+                    onChange={(event) =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, dailyLimit: Number(event.target.value) } : item
+                        ),
+                      }))
+                    }
+                  />
+                  <div className="rounded border border-stone-300 p-2 text-xs dark:border-stone-600">
+                    <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Exam types in group</p>
+                    {examTypeOptionsForRow.length === 0 ? (
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-1">
+                        {examTypeOptionsForRow.map((examTypeOption) => (
+                          <label key={examTypeOption.value} className="inline-flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={row.examTypeIds.includes(examTypeOption.value)}
+                              onChange={(event) =>
+                                setDraft((prev) => ({
+                                  ...prev,
+                                  examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) => {
+                                    if (itemIndex !== index) return item;
+                                    return {
+                                      ...item,
+                                      examTypeIds: event.target.checked
+                                        ? [...item.examTypeIds, examTypeOption.value]
+                                        : item.examTypeIds.filter((id) => id !== examTypeOption.value),
+                                    };
+                                  }),
+                                }))
+                              }
+                            />
+                            {examTypeOption.label}
+                          </label>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  {row.ruleType === "specific_date" && (
+                    <input
+                      className={inputBase}
+                      type="date"
+                      value={row.specificDate ?? ""}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, specificDate: event.target.value || null } : item
+                          ),
+                        }))
+                      }
+                    />
+                  )}
+                  {row.ruleType === "date_range" && (
+                    <>
+                      <input
+                        className={inputBase}
+                        type="date"
+                        value={row.startDate ?? ""}
+                        onChange={(event) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, startDate: event.target.value || null } : item
+                            ),
+                          }))
+                        }
+                      />
+                      <input
+                        className={inputBase}
+                        type="date"
+                        value={row.endDate ?? ""}
+                        onChange={(event) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, endDate: event.target.value || null } : item
+                            ),
+                          }))
+                        }
+                      />
+                    </>
+                  )}
+                  {row.ruleType === "weekly_recurrence" && (
+                    <>
+                      <select
+                        className={inputBase}
+                        value={row.weekday ?? ""}
+                        onChange={(event) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, weekday: event.target.value ? Number(event.target.value) : null }
+                                : item
+                            ),
+                          }))
+                        }
+                      >
+                        <option value="">Select weekday...</option>
+                        <option value={0}>Sunday</option>
+                        <option value={1}>Monday</option>
+                        <option value={2}>Tuesday</option>
+                        <option value={3}>Wednesday</option>
+                        <option value={4}>Thursday</option>
+                        <option value={5}>Friday</option>
+                        <option value={6}>Saturday</option>
+                      </select>
+                      <input
+                        className={inputBase}
+                        type="date"
+                        value={row.recurrenceAnchorDate ?? ""}
+                        onChange={(event) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, recurrenceAnchorDate: event.target.value || null }
+                                : item
+                            ),
+                          }))
+                        }
+                      />
+                      <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
+                        <input
+                          type="checkbox"
+                          checked={row.alternateWeeks}
+                          onChange={(event) =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                                itemIndex === index ? { ...item, alternateWeeks: event.target.checked } : item
+                              ),
+                            }))
+                          }
+                        />
+                        Alternate weeks
+                      </label>
+                    </>
+                  )}
+                  <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
+                    <input
+                      type="checkbox"
+                      checked={row.isActive}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          examMixQuotaRules: (prev.examMixQuotaRules ?? []).map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, isActive: event.target.checked } : item
+                          ),
+                        }))
+                      }
+                    />
+                    Active
+                  </label>
+                  <button
+                    type="button"
+                    className="rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
+                    onClick={() =>
+                      setDraft((prev) => ({
+                        ...prev,
+                        examMixQuotaRules: (prev.examMixQuotaRules ?? []).filter((_, itemIndex) => itemIndex !== index),
+                      }))
+                    }
+                  >
+                    Remove
+                  </button>
+                </div>
+              );
+            })}
+            <button
+              type="button"
+              className="w-fit rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
+              onClick={() =>
+                setDraft((prev) => ({
+                  ...prev,
+                  examMixQuotaRules: [
+                    ...(prev.examMixQuotaRules ?? []),
+                    {
+                      id: createNextId(prev.examMixQuotaRules ?? []),
+                      modalityId: modalityOptions[0]?.value ?? 0,
+                      title: null,
+                      ruleType: "specific_date",
+                      specificDate: null,
+                      startDate: null,
+                      endDate: null,
+                      weekday: null,
+                      alternateWeeks: false,
+                      recurrenceAnchorDate: null,
+                      dailyLimit: 1,
+                      examTypeIds: [],
+                      isActive: true,
+                    } satisfies PolicyExamMixQuotaRuleDto,
+                  ],
+                }))
+              }
+            >
+              Add exam mix group
             </button>
           </div>
         </details>

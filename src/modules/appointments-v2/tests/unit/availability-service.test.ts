@@ -177,3 +177,14 @@ describe("Availability service — no hardcoded dailyCapacity default", () => {
     assert.ok(content.includes("modalityTotalCapacity"), "Should compute modality total capacity");
   });
 });
+
+describe("Availability service — exam mix summaries", () => {
+  it("includes examMixQuotaSummaries in response shape", async () => {
+    const fs = await import("node:fs/promises");
+    const content = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/scheduler/services/availability.service.ts",
+      "utf-8"
+    );
+    assert.ok(content.includes("examMixQuotaSummaries"), "Should include examMixQuotaSummaries");
+  });
+});

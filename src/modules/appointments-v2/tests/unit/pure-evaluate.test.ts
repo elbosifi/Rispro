@@ -599,3 +599,74 @@ describe("pureEvaluate — decision shape (D005 compliance)", () => {
     assert.equal(decision.decisionTrace.input.scheduledDate, "2026-04-15");
   });
 });
+
+describe("pureEvaluate — exam mix quota", () => {
+  it("blocks standard mode when primary exam-mix group is exhausted", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        capacityResolutionMode: "standard",
+        context: makeContext({
+          examMixQuotaRules: [
+            {
+              id: 901,
+              policyVersionId: 1,
+              modalityId: 10,
+              title: "Brain MRI",
+              ruleType: "specific_date",
+              specificDate: "2026-04-15",
+              startDate: null,
+              endDate: null,
+              weekday: null,
+              alternateWeeks: false,
+              recurrenceAnchorDate: null,
+              dailyLimit: 2,
+              isActive: true,
+            },
+          ],
+          examMixQuotaRuleItems: [{ ruleId: 901, examTypeId: 50 }],
+          currentExamMixConsumedByRuleId: { 901: 2 },
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "blocked");
+    assert.ok(decision.reasons.some((r) => r.code === "exam_mix_quota_exhausted"));
+  });
+
+  it("bypasses exam-mix blocking in special_quota_extra mode", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        capacityResolutionMode: "special_quota_extra",
+        useSpecialQuota: true,
+        context: makeContext({
+          specialQuotas: [
+            { id: 1, policyVersionId: 1, examTypeId: 50, dailyExtraSlots: 1, isActive: true },
+          ],
+          examMixQuotaRules: [
+            {
+              id: 901,
+              policyVersionId: 1,
+              modalityId: 10,
+              title: "Brain MRI",
+              ruleType: "specific_date",
+              specificDate: "2026-04-15",
+              startDate: null,
+              endDate: null,
+              weekday: null,
+              alternateWeeks: false,
+              recurrenceAnchorDate: null,
+              dailyLimit: 1,
+              isActive: true,
+            },
+          ],
+          examMixQuotaRuleItems: [{ ruleId: 901, examTypeId: 50 }],
+          currentExamMixConsumedByRuleId: { 901: 1 },
+          currentSpecialQuotaBookedCount: 0,
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "available");
+    assert.ok(!decision.reasons.some((r) => r.code === "exam_mix_quota_exhausted"));
+  });
+});

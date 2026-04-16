@@ -16,6 +16,22 @@ export interface AvailabilityRowViewModel {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  examMixQuotaSummaries?: Array<{
+    ruleId: number;
+    title: string | null;
+    dailyLimit: number;
+    consumed: number;
+    remaining: number;
+    isBlocking: boolean;
+    isPrimaryBlocking: boolean;
+  }>;
+  primaryExamMixBlocking?: {
+    ruleId: number;
+    title: string | null;
+    consumed: number;
+    dailyLimit: number;
+    remaining: number;
+  } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
 }
@@ -61,6 +77,17 @@ export function mapAvailabilityRow(day: AvailabilityDayDto): AvailabilityRowView
     nonOncologyFilled: day.nonOncology?.filled ?? 0,
     nonOncologyRemaining: day.nonOncology?.remaining ?? null,
     specialQuotaRemaining: day.specialQuotaSummary?.remaining ?? null,
+    examMixQuotaSummaries: day.examMixQuotaSummaries ?? [],
+    primaryExamMixBlocking:
+      (day.examMixQuotaSummaries ?? [])
+        .filter((row) => row.isPrimaryBlocking)
+        .map((row) => ({
+          ruleId: row.ruleId,
+          title: row.title,
+          consumed: row.consumed,
+          dailyLimit: row.dailyLimit,
+          remaining: row.remaining,
+        }))[0] ?? null,
     reasonText,
     requiresSupervisorOverride: day.decision.requiresSupervisorOverride,
   };

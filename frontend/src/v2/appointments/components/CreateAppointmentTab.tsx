@@ -110,6 +110,9 @@ export function CreateAppointmentTab({
       item.date === form.appointmentDate &&
       (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
+  const selectedRawItem = (availability.rawItems ?? []).find((item) => item.date === form.appointmentDate) ?? null;
+  const primaryExamMixBlocking =
+    selectedRawItem?.examMixQuotaSummaries?.find((row) => row.isPrimaryBlocking) ?? null;
   useEffect(() => {
     if (
       form.capacityResolutionMode !== "standard" &&
@@ -301,8 +304,69 @@ export function CreateAppointmentTab({
   }
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 1fr)", gap: 16 }}>
-      <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, display: "grid", gap: 12 }}>
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          border: "1px solid var(--border-color, #e2e8f0)",
+          borderRadius: 10,
+          padding: 12,
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: 8,
+          fontSize: 12,
+          background: "var(--bg-surface, #f8fafc)",
+        }}
+      >
+        <div><strong>Patient:</strong> {form.patient?.englishFullName ?? form.patient?.arabicFullName ?? "—"}</div>
+        <div><strong>Modality:</strong> {selectedModality?.name ?? "—"}</div>
+        <div><strong>Exam Type:</strong> {effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</div>
+        <div><strong>Category:</strong> {form.caseCategory === "oncology" ? "Oncology" : "Non-oncology"}</div>
+        <div><strong>Date:</strong> {form.appointmentDate || "—"}</div>
+        <div>
+          <strong>Exam mix:</strong>{" "}
+          {primaryExamMixBlocking
+            ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
+            : "No matching group"}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 1fr)", gap: 16 }}>
+        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16 }}>
+          <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: 16 }}>Evaluated Availability</h3>
+          <AvailabilityPanel
+            rows={availability.rows}
+            selectedDate={form.appointmentDate}
+            onSelectDate={handleSelectAvailabilityRow}
+            loading={availability.isLoading}
+            emptyMessage={
+              availability.enabled
+                ? "No evaluated availability rows returned by backend evaluator."
+                : "Select patient, modality, and exam type to load evaluated availability."
+            }
+          />
+          {form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard" && (
+            <div style={{ borderTop: "1px solid var(--border-color, #e2e8f0)", paddingTop: 12, marginTop: 12 }}>
+              <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14 }}>Suggested Dates (Advisory)</h3>
+              {suggestions.isLoading ? (
+                <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>Loading suggestions...</p>
+              ) : suggestions.isError ? (
+                <p style={{ color: "var(--color-error, #ef4444)", fontSize: 12 }}>Could not load suggestions.</p>
+              ) : suggestions.data?.items.length ? (
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+                  {suggestions.data.items.slice(0, 5).map((s) => (
+                    <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4, color: "var(--text-muted, #64748b)" }}>
+                      {s.date} — {s.decision.displayStatus}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>No alternative dates found.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, display: "grid", gap: 12, position: "sticky", top: 12, alignSelf: "start", maxHeight: "calc(100vh - 24px)", overflow: "auto" }}>
         <PatientSearchSection
           value={form.patient}
           onSelectPatient={(patient: SelectedPatient) => {
@@ -436,43 +500,8 @@ export function CreateAppointmentTab({
             {submitLoading ? "Creating..." : "Create Appointment"}
           </button>
         </div>
-      </div>
-
-      <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16 }}>
-        <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: 16 }}>Evaluated Availability</h3>
-        <AvailabilityPanel
-          rows={availability.rows}
-          selectedDate={form.appointmentDate}
-          onSelectDate={handleSelectAvailabilityRow}
-          loading={availability.isLoading}
-          emptyMessage={
-            availability.enabled
-              ? "No evaluated availability rows returned by backend evaluator."
-              : "Select patient, modality, and exam type to load evaluated availability."
-          }
-        />
-      </div>
-
-      {form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard" && (
-        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, marginTop: 14 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14 }}>Suggested Dates (Advisory)</h3>
-          {suggestions.isLoading ? (
-            <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>Loading suggestions...</p>
-          ) : suggestions.isError ? (
-            <p style={{ color: "var(--color-error, #ef4444)", fontSize: 12 }}>Could not load suggestions.</p>
-          ) : suggestions.data?.items.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-              {suggestions.data.items.slice(0, 5).map((s) => (
-                <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4, color: "var(--text-muted, #64748b)" }}>
-                  {s.date} — {s.decision.displayStatus}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>No alternative dates found.</p>
-          )}
         </div>
-      )}
+      </div>
 
       <SupervisorOverrideModal
         open={showOverrideModal}

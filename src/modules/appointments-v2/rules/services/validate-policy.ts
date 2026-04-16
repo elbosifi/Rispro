@@ -149,9 +149,138 @@ async function validatePolicyDraftInternal(
     }
   }
 
+  const examMixRules = await client.query<{
+    id: number;
+    modalityId: number;
+    ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+    alternateWeeks: boolean;
+    recurrenceAnchorDate: string | null;
+    dailyLimit: number;
+    isActive: boolean;
+    examTypeIds: number[];
+  }>(
+    `
+      select
+        emqr.id,
+        emqr.modality_id as "modalityId",
+        emqr.rule_type as "ruleType",
+        emqr.specific_date::text as "specificDate",
+        emqr.start_date::text as "startDate",
+        emqr.end_date::text as "endDate",
+        emqr.weekday,
+        emqr.alternate_weeks as "alternateWeeks",
+        emqr.recurrence_anchor_date::text as "recurrenceAnchorDate",
+        emqr.daily_limit as "dailyLimit",
+        emqr.is_active as "isActive",
+        coalesce(array_agg(emqri.exam_type_id order by emqri.exam_type_id)
+          filter (where emqri.exam_type_id is not null), '{}') as "examTypeIds"
+      from appointments_v2.exam_mix_quota_rules emqr
+      left join appointments_v2.exam_mix_quota_rule_items emqri
+        on emqri.rule_id = emqr.id
+      where emqr.policy_version_id = $1
+      group by emqr.id
+      order by emqr.id asc
+    `,
+    [policyVersionId]
+  );
+
+  const activeExamMix = examMixRules.rows.filter((row) => row.isActive);
+  for (const row of activeExamMix) {
+    if (!Number.isInteger(Number(row.dailyLimit)) || Number(row.dailyLimit) <= 0) {
+      errors.push(`Exam mix rule ${row.id}: dailyLimit must be a positive integer.`);
+    }
+    if (!Array.isArray(row.examTypeIds) || row.examTypeIds.length === 0) {
+      errors.push(`Exam mix rule ${row.id}: at least one exam type is required.`);
+    }
+    if (row.ruleType === "specific_date" && !row.specificDate) {
+      errors.push(`Exam mix rule ${row.id}: specific_date requires specificDate.`);
+    }
+    if (row.ruleType === "date_range" && (!row.startDate || !row.endDate)) {
+      errors.push(`Exam mix rule ${row.id}: date_range requires startDate and endDate.`);
+    }
+    if (row.ruleType === "weekly_recurrence" && row.weekday == null) {
+      errors.push(`Exam mix rule ${row.id}: weekly_recurrence requires weekday.`);
+    }
+  }
+
+  // Overlapping active groups are allowed, but we surface admin warnings.
+  for (let i = 0; i < activeExamMix.length; i++) {
+    for (let j = i + 1; j < activeExamMix.length; j++) {
+      const a = activeExamMix[i];
+      const b = activeExamMix[j];
+      if (a.modalityId !== b.modalityId) continue;
+      const sharedExamTypes = a.examTypeIds.filter((id) => b.examTypeIds.includes(id));
+      if (sharedExamTypes.length === 0) continue;
+      if (!examMixWindowsOverlap(a, b)) continue;
+      warnings.push(
+        `Exam mix overlap warning: rules ${a.id} and ${b.id} share exam types [${sharedExamTypes.join(", ")}] with overlapping active windows.`
+      );
+    }
+  }
+
   return {
     isValid: errors.length === 0,
     errors,
     warnings,
   };
+}
+
+function examMixWindowsOverlap(
+  a: {
+    ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+  },
+  b: {
+    ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+    specificDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    weekday: number | null;
+  }
+): boolean {
+  const toDate = (v: string | null) => (v ? new Date(`${v}T00:00:00Z`) : null);
+  const weekdayOf = (v: string) => new Date(`${v}T00:00:00Z`).getUTCDay();
+
+  if (a.ruleType === "specific_date" && b.ruleType === "specific_date") {
+    return a.specificDate != null && a.specificDate === b.specificDate;
+  }
+  if (a.ruleType === "specific_date" && b.ruleType === "date_range") {
+    return !!(a.specificDate && b.startDate && b.endDate && a.specificDate >= b.startDate && a.specificDate <= b.endDate);
+  }
+  if (a.ruleType === "date_range" && b.ruleType === "specific_date") {
+    return examMixWindowsOverlap(b, a);
+  }
+  if (a.ruleType === "specific_date" && b.ruleType === "weekly_recurrence") {
+    return !!(a.specificDate && b.weekday != null && weekdayOf(a.specificDate) === b.weekday);
+  }
+  if (a.ruleType === "weekly_recurrence" && b.ruleType === "specific_date") {
+    return examMixWindowsOverlap(b, a);
+  }
+  if (a.ruleType === "date_range" && b.ruleType === "date_range") {
+    return !!(a.startDate && a.endDate && b.startDate && b.endDate && a.startDate <= b.endDate && b.startDate <= a.endDate);
+  }
+  if (a.ruleType === "date_range" && b.ruleType === "weekly_recurrence") {
+    if (!a.startDate || !a.endDate || b.weekday == null) return false;
+    const start = toDate(a.startDate);
+    const end = toDate(a.endDate);
+    if (!start || !end) return false;
+    for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+      if (d.getUTCDay() === b.weekday) return true;
+    }
+    return false;
+  }
+  if (a.ruleType === "weekly_recurrence" && b.ruleType === "date_range") {
+    return examMixWindowsOverlap(b, a);
+  }
+  if (a.ruleType === "weekly_recurrence" && b.ruleType === "weekly_recurrence") {
+    return a.weekday != null && a.weekday === b.weekday;
+  }
+  return false;
 }

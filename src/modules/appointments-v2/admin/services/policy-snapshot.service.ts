@@ -11,6 +11,7 @@ import type {
   PolicyModalityBlockedRuleDto,
   PolicyExamTypeRuleDto,
   PolicyExamTypeSpecialQuotaDto,
+  PolicyExamMixQuotaRuleDto,
   PolicySpecialReasonCodeDto,
 } from "../../api/dto/admin-scheduling.dto.js";
 
@@ -19,6 +20,7 @@ const EMPTY_SNAPSHOT: PolicySnapshotDto = {
   modalityBlockedRules: [],
   examTypeRules: [],
   examTypeSpecialQuotas: [],
+  examMixQuotaRules: [],
   specialReasonCodes: [],
 };
 
@@ -39,12 +41,14 @@ export async function loadPolicySnapshot(
     modalityBlockedRules,
     examTypeRules,
     examTypeSpecialQuotas,
+    examMixQuotaRules,
     specialReasonCodes,
   ] = await Promise.all([
     listCategoryDailyLimits(client, versionId),
     listModalityBlockedRules(client, versionId),
     listExamTypeRules(client, versionId),
     listExamTypeSpecialQuotas(client, versionId),
+    listExamMixQuotaRules(client, versionId),
     listSpecialReasonCodes(client),
   ]);
 
@@ -53,6 +57,7 @@ export async function loadPolicySnapshot(
     modalityBlockedRules,
     examTypeRules,
     examTypeSpecialQuotas,
+    examMixQuotaRules,
     specialReasonCodes,
   };
 }
@@ -156,6 +161,39 @@ async function listExamTypeSpecialQuotas(
   return result.rows;
 }
 
+async function listExamMixQuotaRules(
+  client: PoolClient,
+  versionId: number
+): Promise<PolicyExamMixQuotaRuleDto[]> {
+  const SQL = `
+    select
+      emqr.id,
+      emqr.modality_id as "modalityId",
+      emqr.title,
+      emqr.rule_type as "ruleType",
+      emqr.specific_date::text as "specificDate",
+      emqr.start_date::text as "startDate",
+      emqr.end_date::text as "endDate",
+      emqr.weekday,
+      emqr.alternate_weeks as "alternateWeeks",
+      emqr.recurrence_anchor_date::text as "recurrenceAnchorDate",
+      emqr.daily_limit as "dailyLimit",
+      emqr.is_active as "isActive",
+      coalesce(array_agg(emqri.exam_type_id order by emqri.exam_type_id)
+        filter (where emqri.exam_type_id is not null), '{}') as "examTypeIds"
+    from appointments_v2.exam_mix_quota_rules emqr
+    left join appointments_v2.exam_mix_quota_rule_items emqri on emqri.rule_id = emqr.id
+    where emqr.policy_version_id = $1
+    group by emqr.id
+    order by emqr.id asc
+  `;
+  const result = await client.query<PolicyExamMixQuotaRuleDto>(SQL, [versionId]);
+  return result.rows.map((row) => ({
+    ...row,
+    examTypeIds: Array.isArray(row.examTypeIds) ? row.examTypeIds.map(Number) : [],
+  }));
+}
+
 async function listSpecialReasonCodes(
   client: PoolClient
 ): Promise<PolicySpecialReasonCodeDto[]> {
@@ -171,4 +209,3 @@ async function listSpecialReasonCodes(
   const result = await client.query<PolicySpecialReasonCodeDto>(SQL);
   return result.rows;
 }
-

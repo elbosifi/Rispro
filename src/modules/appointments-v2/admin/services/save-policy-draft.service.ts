@@ -24,6 +24,7 @@ import {
   insertModalityBlockedRule,
   insertExamTypeRule,
   insertExamTypeSpecialQuota,
+  insertExamMixQuotaRule,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import type { PolicySnapshotDto } from "../../api/dto/admin-scheduling.dto.js";
@@ -72,6 +73,7 @@ async function savePolicyDraftInternal(
   }
 
   await validateCategoryCapacityPolicy(client, policySnapshot);
+  validateExamMixPolicy(policySnapshot);
 
   // 3. Delete all existing versioned rules for this version (authoritative replace)
   await deleteAllRulesForVersion(client, versionId);
@@ -130,6 +132,23 @@ async function savePolicyDraftInternal(
     });
   }
 
+  for (const rule of policySnapshot.examMixQuotaRules ?? []) {
+    await insertExamMixQuotaRule(client, versionId, {
+      modalityId: rule.modalityId,
+      title: rule.title,
+      ruleType: rule.ruleType,
+      specificDate: rule.specificDate,
+      startDate: rule.startDate,
+      endDate: rule.endDate,
+      weekday: rule.weekday,
+      alternateWeeks: rule.alternateWeeks,
+      recurrenceAnchorDate: rule.recurrenceAnchorDate,
+      dailyLimit: rule.dailyLimit,
+      isActive: rule.isActive,
+      examTypeIds: rule.examTypeIds,
+    });
+  }
+
   // NOTE: specialReasonCodes are global/live config. We do NOT mutate the
   // global special_reason_codes table during draft save. This preserves draft
   // isolation — two concurrent drafts cannot overwrite each other's special
@@ -168,6 +187,55 @@ async function savePolicyDraftInternal(
     version: refreshed,
     configHash,
   };
+}
+
+function validateExamMixPolicy(policySnapshot: PolicySnapshotDto): void {
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  for (const [index, row] of (policySnapshot.examMixQuotaRules ?? []).entries()) {
+    if (!Number.isInteger(row.dailyLimit) || Number(row.dailyLimit) <= 0) {
+      fieldErrors.push({
+        field: `policySnapshot.examMixQuotaRules[${index}].dailyLimit`,
+        code: "exam_mix_daily_limit_invalid",
+        message: "Exam mix dailyLimit must be a positive integer.",
+      });
+    }
+    if (!Array.isArray(row.examTypeIds) || row.examTypeIds.length === 0) {
+      fieldErrors.push({
+        field: `policySnapshot.examMixQuotaRules[${index}].examTypeIds`,
+        code: "exam_mix_exam_types_required",
+        message: "Exam mix rule must include at least one linked exam type.",
+      });
+    }
+    if (row.ruleType === "specific_date" && !row.specificDate) {
+      fieldErrors.push({
+        field: `policySnapshot.examMixQuotaRules[${index}].specificDate`,
+        code: "exam_mix_specific_date_required",
+        message: "specific_date exam mix rule requires specificDate.",
+      });
+    }
+    if (row.ruleType === "date_range" && (!row.startDate || !row.endDate)) {
+      fieldErrors.push({
+        field: `policySnapshot.examMixQuotaRules[${index}]`,
+        code: "exam_mix_date_range_required",
+        message: "date_range exam mix rule requires startDate and endDate.",
+      });
+    }
+    if (row.ruleType === "weekly_recurrence" && row.weekday == null) {
+      fieldErrors.push({
+        field: `policySnapshot.examMixQuotaRules[${index}].weekday`,
+        code: "exam_mix_weekday_required",
+        message: "weekly_recurrence exam mix rule requires weekday.",
+      });
+    }
+  }
+  if (fieldErrors.length > 0) {
+    throw new SchedulingError(
+      400,
+      "Validation failed",
+      ["validation_failed"],
+      { fieldErrors }
+    );
+  }
 }
 
 async function validateCategoryCapacityPolicy(

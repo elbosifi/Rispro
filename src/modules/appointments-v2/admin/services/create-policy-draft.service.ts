@@ -29,6 +29,7 @@ import {
   insertModalityBlockedRule,
   insertExamTypeRule,
   insertExamTypeSpecialQuota,
+  insertExamMixQuotaRule,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import { pool } from "../../../../db/pool.js";
@@ -209,6 +210,23 @@ async function copySnapshotIntoVersion(
       examTypeId: rule.examTypeId,
       dailyExtraSlots: rule.dailyExtraSlots,
       isActive: rule.isActive,
+    });
+  }
+
+  for (const rule of snapshot.examMixQuotaRules ?? []) {
+    await insertExamMixQuotaRule(client, policyVersionId, {
+      modalityId: rule.modalityId,
+      title: rule.title,
+      ruleType: rule.ruleType,
+      specificDate: rule.specificDate,
+      startDate: rule.startDate,
+      endDate: rule.endDate,
+      weekday: rule.weekday,
+      alternateWeeks: rule.alternateWeeks,
+      recurrenceAnchorDate: rule.recurrenceAnchorDate,
+      dailyLimit: rule.dailyLimit,
+      isActive: rule.isActive,
+      examTypeIds: rule.examTypeIds,
     });
   }
 

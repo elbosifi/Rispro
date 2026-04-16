@@ -191,6 +191,7 @@ router.put(
       bookingId,
       body.bookingDate ?? null,
       body.bookingTime ?? null,
+      body.examTypeId ?? null,
       userId,
       body.override,
       capacityResolutionMode,

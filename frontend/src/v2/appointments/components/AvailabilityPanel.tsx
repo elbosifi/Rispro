@@ -36,6 +36,8 @@ export function AvailabilityPanel({ rows, selectedDate, onSelectDate, loading, e
           nonOncologyFilled={row.nonOncologyFilled}
           nonOncologyRemaining={row.nonOncologyRemaining}
           specialQuotaRemaining={row.specialQuotaRemaining}
+          examMixQuotaSummaries={row.examMixQuotaSummaries}
+          primaryExamMixBlocking={row.primaryExamMixBlocking}
           reasonText={row.reasonText}
           requiresSupervisorOverride={row.requiresSupervisorOverride}
           selected={selectedDate === row.date}

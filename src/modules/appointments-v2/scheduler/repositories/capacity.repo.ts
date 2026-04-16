@@ -90,3 +90,46 @@ export async function getSpecialQuotaBookedCount(
   ]);
   return result.rows[0]?.count ?? 0;
 }
+
+const GET_EXAM_MIX_CONSUMED_BY_RULES_SQL = `
+  select
+    emqr.id as "ruleId",
+    count(b.id)::int as consumed
+  from appointments_v2.exam_mix_quota_rules emqr
+  left join appointments_v2.exam_mix_quota_rule_items emqri
+    on emqri.rule_id = emqr.id
+  left join appointments_v2.bookings b
+    on b.modality_id = emqr.modality_id
+   and b.booking_date = $3
+   and b.status <> 'cancelled'
+   and b.uses_special_quota = false
+   and b.exam_type_id = emqri.exam_type_id
+  where emqr.policy_version_id = $1
+    and emqr.modality_id = $2
+    and emqr.id = any($4::bigint[])
+  group by emqr.id
+`;
+
+export async function getExamMixConsumedCountsByRule(
+  client: PoolClient,
+  params: {
+    policyVersionId: number;
+    modalityId: number;
+    bookingDate: string;
+    ruleIds: number[];
+  }
+): Promise<Record<number, number>> {
+  if (params.ruleIds.length === 0) return {};
+  const result = await client.query<{ ruleId: number; consumed: number }>(
+    GET_EXAM_MIX_CONSUMED_BY_RULES_SQL,
+    [params.policyVersionId, params.modalityId, params.bookingDate, params.ruleIds]
+  );
+  const out: Record<number, number> = {};
+  for (const row of result.rows) {
+    out[Number(row.ruleId)] = Number(row.consumed ?? 0);
+  }
+  for (const ruleId of params.ruleIds) {
+    if (out[ruleId] == null) out[ruleId] = 0;
+  }
+  return out;
+}

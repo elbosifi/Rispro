@@ -31,6 +31,7 @@ export async function getPolicyStatus(
           modalityBlockedRules: [],
           examTypeRules: [],
           examTypeSpecialQuotas: [],
+          examMixQuotaRules: [],
           specialReasonCodes: [],
         },
         draftSnapshot: {
@@ -38,6 +39,7 @@ export async function getPolicyStatus(
           modalityBlockedRules: [],
           examTypeRules: [],
           examTypeSpecialQuotas: [],
+          examMixQuotaRules: [],
           specialReasonCodes: [],
         },
       };

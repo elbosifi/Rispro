@@ -17,6 +17,8 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadAllExamTypeRuleItemExamTypeIds,
+  loadAllExamMixQuotaRules,
+  loadAllExamMixQuotaRuleItems,
 } from "../repositories/policy-rules.repo.js";
 
 export interface CompiledPolicyContext {
@@ -29,6 +31,8 @@ export interface CompiledPolicyContext {
   categoryLimits: unknown[];
   specialQuotas: unknown[];
   examTypeRuleItemExamTypeIds: number[];
+  examMixQuotaRules: unknown[];
+  examMixQuotaRuleItems: unknown[];
 }
 
 export interface CompiledPolicy {
@@ -57,6 +61,8 @@ export async function compilePolicy(
   const categoryLimits = await loadCategoryDailyLimits(client, policyVersionId, 0); // 0 = all modalities
   const specialQuotas = await loadExamTypeSpecialQuotas(client, policyVersionId);
   const examTypeRuleItemExamTypeIds = await loadAllExamTypeRuleItemExamTypeIds(client, policyVersionId);
+  const examMixQuotaRules = await loadAllExamMixQuotaRules(client, policyVersionId);
+  const examMixQuotaRuleItems = await loadAllExamMixQuotaRuleItems(client, policyVersionId);
 
   return {
     policySetKey,
@@ -74,6 +80,8 @@ export async function compilePolicy(
       categoryLimits,
       specialQuotas,
       examTypeRuleItemExamTypeIds,
+      examMixQuotaRules,
+      examMixQuotaRuleItems,
     },
   };
 }

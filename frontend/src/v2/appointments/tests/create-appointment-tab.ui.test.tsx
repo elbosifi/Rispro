@@ -244,6 +244,17 @@ describe("CreateAppointmentTab UI interactions", () => {
           consumed: 0,
           remaining: 2,
         },
+        examMixQuotaSummaries: [
+          {
+            ruleId: 501,
+            title: "Brain MRI group",
+            dailyLimit: 2,
+            consumed: 2,
+            remaining: 0,
+            isBlocking: true,
+            isPrimaryBlocking: true,
+          },
+        ],
       },
     ];
   });
@@ -285,6 +296,22 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /2027-01-03 full/i }));
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-03");
+  });
+
+  it("shows primary exam-mix group in top summary strip", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    fireEvent.change(screen.getByLabelText("Appointment Date"), { target: { value: "2027-01-02" } });
+    expect(screen.getByText(/Exam mix:/)).toBeTruthy();
+    expect(screen.getByText(/Brain MRI group 2\/2/)).toBeTruthy();
+  });
+
+  it("uses sticky booking controls pane styling", async () => {
+    setup();
+    const stickyPane = document.querySelector('div[style*="position: sticky"]');
+    expect(stickyPane).toBeTruthy();
   });
 
   it("opens override modal and submits override payload", async () => {

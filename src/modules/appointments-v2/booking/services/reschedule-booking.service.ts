@@ -18,11 +18,14 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamMixQuotaRules,
+  loadExamMixQuotaRuleItems,
 } from "../../rules/repositories/policy-rules.repo.js";
 import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
+  getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { findBookingById, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
 import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
@@ -33,6 +36,7 @@ import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
+import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface RescheduleBookingResult {
@@ -46,6 +50,7 @@ export async function rescheduleBooking(
   bookingId: number,
   newDate: string | null,
   newTime: string | null,
+  newExamTypeId: number | null,
   userId: number,
   override?: CreateBookingPayload["override"],
   capacityResolutionMode?: CapacityResolutionMode,
@@ -60,6 +65,7 @@ export async function rescheduleBooking(
       bookingId,
       newDate,
       newTime,
+      newExamTypeId,
       userId,
       override,
       capacityResolutionMode,
@@ -79,6 +85,7 @@ async function rescheduleBookingInternal(
   bookingId: number,
   newDate: string | null,
   newTime: string | null,
+  newExamTypeId: number | null,
   userId: number,
   override: CreateBookingPayload["override"] | undefined,
   capacityResolutionMode: CapacityResolutionMode | undefined,
@@ -112,11 +119,29 @@ async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
+  const effectiveDate = newDate ?? previousDate;
+  const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
 
-  // If the date hasn't changed (or no new date provided), just update the time — no re-evaluation needed
-  if (!newDate || previousDate === newDate) {
+  if (effectiveExamTypeId != null) {
+    const examType = await findExamTypeById(client, effectiveExamTypeId);
+    if (!examType) {
+      throw new SchedulingError(400, `Exam type ${effectiveExamTypeId} not found.`, ["exam_type_not_found"]);
+    }
+    if (Number(examType.modalityId) !== booking.modalityId) {
+      throw new SchedulingError(
+        400,
+        `Exam type ${effectiveExamTypeId} does not belong to modality ${booking.modalityId}.`,
+        ["exam_type_modality_mismatch"]
+      );
+    }
+  }
+
+  const dateUnchanged = previousDate === effectiveDate;
+  const examTypeUnchanged = Number(booking.examTypeId ?? -1) === Number(effectiveExamTypeId ?? -1);
+  // If date + exam type are unchanged, this is a time-only update.
+  if (dateUnchanged && examTypeUnchanged) {
     return rescheduleTimeOnly(
       client,
       bookingId,
@@ -143,12 +168,12 @@ async function rescheduleBookingInternal(
     },
     {
       modalityId: booking.modalityId,
-      date: newDate,
+      date: effectiveDate,
       caseCategory: "oncology",
     },
     {
       modalityId: booking.modalityId,
-      date: newDate,
+      date: effectiveDate,
       caseCategory: "non_oncology",
     },
   ]);
@@ -197,30 +222,46 @@ async function rescheduleBookingInternal(
     publishedVersion.id,
     booking.modalityId
   );
+  const examMixQuotaRules = await loadExamMixQuotaRules(
+    client,
+    publishedVersion.id,
+    booking.modalityId
+  );
+  const examMixQuotaRuleItems = await loadExamMixQuotaRuleItems(
+    client,
+    publishedVersion.id,
+    booking.modalityId
+  );
 
   // 5. Load current booked count for the NEW date (after lock)
   // Note: the old booking is still counted here because it hasn't been updated yet
   const currentBookedCount = await getBookedCountForDate(
     client,
     booking.modalityId,
-    newDate,
+    effectiveDate,
     booking.caseCategory
   );
   const bookedCounts = await getBookedCountsByCategoryForDate(
     client,
     booking.modalityId,
-    newDate
+    effectiveDate
   );
 
   // 6. Load special quota booked count for the NEW date (only when examTypeId is provided)
   let currentSpecialQuotaBookedCount = 0;
-  if (booking.examTypeId != null) {
+  if (effectiveExamTypeId != null) {
     currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
       modalityId: booking.modalityId,
-      bookingDate: newDate,
-      examTypeId: booking.examTypeId,
+      bookingDate: effectiveDate,
+      examTypeId: effectiveExamTypeId,
     });
   }
+  const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
+    policyVersionId: publishedVersion.id,
+    modalityId: booking.modalityId,
+    bookingDate: effectiveDate,
+    ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
+  });
 
   // 7. Build context and re-evaluate
   const context: RuleEvaluationContext = {
@@ -229,7 +270,7 @@ async function rescheduleBookingInternal(
     policyVersionNo: publishedVersion.versionNo,
     policyConfigHash: publishedVersion.configHash,
     modalityExists: true,
-    examTypeExists: booking.examTypeId != null,
+    examTypeExists: effectiveExamTypeId != null,
     examTypeBelongsToModality: true, // Was already validated at creation
     blockedRules,
     examTypeRules,
@@ -242,13 +283,16 @@ async function rescheduleBookingInternal(
     specialQuotas,
     currentBookedCount, // Includes this booking if newDate === oldDate
     currentSpecialQuotaBookedCount,
+    examMixQuotaRules,
+    examMixQuotaRuleItems,
+    currentExamMixConsumedByRuleId,
   };
 
   const pureInput: PureEvaluateInput = {
     patientId: booking.patientId,
     modalityId: booking.modalityId,
-    examTypeId: booking.examTypeId,
-    scheduledDate: newDate,
+    examTypeId: effectiveExamTypeId,
+    scheduledDate: effectiveDate,
     caseCategory: booking.caseCategory,
     capacityResolutionMode: effectiveCapacityResolutionMode,
     useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
@@ -265,7 +309,7 @@ async function rescheduleBookingInternal(
     bookingId,
     modalityId: booking.modalityId,
     previousDate,
-    newDate,
+    newDate: effectiveDate,
     caseCategory: booking.caseCategory,
     displayStatus: decision.displayStatus,
     requiresSupervisorOverride: decision.requiresSupervisorOverride,
@@ -321,7 +365,7 @@ async function rescheduleBookingInternal(
   await updateBookingForReschedule(
     client,
     bookingId,
-    newDate,
+    effectiveDate,
     newTime,
     publishedVersion.id,
     userId,
@@ -329,7 +373,8 @@ async function rescheduleBookingInternal(
     // Recompute uses_special_quota for the new booking state
     decision.consumedCapacityMode === "special",
     specialReasonCode,
-    specialReasonNote
+    specialReasonNote,
+    effectiveExamTypeId
   );
 
   if (wasOverride && supervisorUserId != null) {
@@ -337,8 +382,8 @@ async function rescheduleBookingInternal(
       bookingId,
       patientId: booking.patientId,
       modalityId: booking.modalityId,
-      examTypeId: booking.examTypeId,
-      bookingDate: newDate,
+      examTypeId: effectiveExamTypeId,
+      bookingDate: effectiveDate,
       requestingUserId: userId,
       supervisorUserId,
       overrideReason: override?.reason ?? null,
@@ -351,7 +396,7 @@ async function rescheduleBookingInternal(
     bookingId,
     previousDate,
     previousTime,
-    newDate,
+    newDate: effectiveDate,
     newTime,
     changedByUserId: userId,
     overrideUsed: wasOverride,

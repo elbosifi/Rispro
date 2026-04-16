@@ -12,6 +12,8 @@ import type {
   ExamTypeRuleRow,
   CategoryDailyLimitRow,
   ExamTypeSpecialQuotaRow,
+  ExamMixQuotaRuleRow,
+  ExamMixQuotaRuleItemRow,
 } from "../models/rule-types.js";
 
 /**
@@ -67,6 +69,18 @@ export interface RuleEvaluationContext {
    * Only non-zero when examTypeId is provided and special quota rules apply.
    */
   currentSpecialQuotaBookedCount: number;
+
+  /** Exam-mix quota rules for this modality/policy version. */
+  examMixQuotaRules?: ExamMixQuotaRuleRow[];
+
+  /** Exam type memberships for exam-mix groups. */
+  examMixQuotaRuleItems?: ExamMixQuotaRuleItemRow[];
+
+  /**
+   * Per-rule consumed counts for the evaluated date.
+   * Count excludes cancelled bookings and excludes special_quota_extra bookings.
+   */
+  currentExamMixConsumedByRuleId?: Record<number, number>;
 
   /**
    * Any reason codes accumulated by earlier stages.

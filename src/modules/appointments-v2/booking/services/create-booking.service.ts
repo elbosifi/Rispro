@@ -18,6 +18,8 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamMixQuotaRules,
+  loadExamMixQuotaRuleItems,
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
@@ -25,6 +27,7 @@ import {
   getBookedCountForDate,
   getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
+  getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
@@ -145,6 +148,16 @@ async function createBookingInternal(
     publishedVersion.id,
     payload.modalityId
   );
+  const examMixQuotaRules = await loadExamMixQuotaRules(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
+  const examMixQuotaRuleItems = await loadExamMixQuotaRuleItems(
+    client,
+    publishedVersion.id,
+    payload.modalityId
+  );
 
   // 6. Load current booked count (after lock, so this is consistent)
   const currentBookedCount = await getBookedCountForDate(
@@ -168,6 +181,12 @@ async function createBookingInternal(
       examTypeId: payload.examTypeId,
     });
   }
+  const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
+    policyVersionId: publishedVersion.id,
+    modalityId: payload.modalityId,
+    bookingDate: payload.bookingDate,
+    ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
+  });
 
   // 8. Build context and evaluate
   const context: RuleEvaluationContext = {
@@ -189,6 +208,9 @@ async function createBookingInternal(
     specialQuotas,
     currentBookedCount,
     currentSpecialQuotaBookedCount,
+    examMixQuotaRules,
+    examMixQuotaRuleItems,
+    currentExamMixConsumedByRuleId,
   };
 
   const pureInput: PureEvaluateInput = {

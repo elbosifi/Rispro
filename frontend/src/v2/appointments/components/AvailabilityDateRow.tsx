@@ -14,6 +14,22 @@ interface Props {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
   specialQuotaRemaining: number | null;
+  examMixQuotaSummaries?: Array<{
+    ruleId: number;
+    title: string | null;
+    dailyLimit: number;
+    consumed: number;
+    remaining: number;
+    isBlocking: boolean;
+    isPrimaryBlocking: boolean;
+  }>;
+  primaryExamMixBlocking?: {
+    ruleId: number;
+    title: string | null;
+    consumed: number;
+    dailyLimit: number;
+    remaining: number;
+  } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
   selected: boolean;
@@ -34,6 +50,8 @@ export function AvailabilityDateRow({
   nonOncologyFilled,
   nonOncologyRemaining,
   specialQuotaRemaining,
+  examMixQuotaSummaries,
+  primaryExamMixBlocking,
   reasonText,
   requiresSupervisorOverride,
   selected,
@@ -109,6 +127,19 @@ export function AvailabilityDateRow({
           )}
           {specialQuotaRemaining != null && (
             <div>Special quota remaining: {specialQuotaRemaining}</div>
+          )}
+          {primaryExamMixBlocking && (
+            <div style={{ color: "#b91c1c", fontWeight: 600 }}>
+              Primary mix block: {primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ({primaryExamMixBlocking.consumed}/{primaryExamMixBlocking.dailyLimit})
+            </div>
+          )}
+          {(examMixQuotaSummaries ?? []).length > 0 && (
+            <div>
+              Exam mix groups:{" "}
+              {(examMixQuotaSummaries ?? [])
+                .map((group) => `${group.title ?? `#${group.ruleId}`} ${group.consumed}/${group.dailyLimit}${group.isPrimaryBlocking ? " (primary)" : ""}`)
+                .join(" • ")}
+            </div>
           )}
         </div>
       )}

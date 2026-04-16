@@ -139,9 +139,10 @@ const UPDATE_RESCHEDULE_SQL = `
       uses_special_quota = $5,
       special_reason_code = $6,
       special_reason_note = $7,
+      exam_type_id = $8,
       updated_at = now(),
-      updated_by_user_id = $8
-  where id = $9
+      updated_by_user_id = $9
+  where id = $10
 `;
 
 export async function updateBookingForReschedule(
@@ -154,7 +155,8 @@ export async function updateBookingForReschedule(
   capacityResolutionMode: "standard" | "category_override" | "special_quota_extra",
   usesSpecialQuota: boolean,
   specialReasonCode: string | null,
-  specialReasonNote: string | null
+  specialReasonNote: string | null,
+  examTypeId: number | null
 ): Promise<void> {
   await client.query(UPDATE_RESCHEDULE_SQL, [
     newDate,
@@ -164,6 +166,7 @@ export async function updateBookingForReschedule(
     usesSpecialQuota,
     specialReasonCode,
     specialReasonNote,
+    examTypeId,
     userId,
     bookingId,
   ]);

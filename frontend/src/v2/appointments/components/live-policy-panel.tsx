@@ -226,6 +226,35 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
         </AccordionSection>
 
         {/* Special quotas */}
+        <AccordionSection title="Exam mix quota groups">
+          {(snapshot.examMixQuotaRules ?? []).length === 0 ? (
+            <EmptyMessage message="No exam mix quota groups configured." />
+          ) : (
+            (snapshot.examMixQuotaRules ?? []).map((row, index) => (
+              <div
+                key={`${row.id}-${index}`}
+                style={{
+                  padding: 8,
+                  borderRadius: 6,
+                  border: "1px solid var(--border-color, #e2e8f0)",
+                  backgroundColor: "var(--bg-card, #fff)",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                  gap: 8,
+                }}
+              >
+                <ReadOnlyField label="Modality" value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label="Title" value={row.title ?? "—"} />
+                <ReadOnlyField label="Rule type" value={row.ruleType} />
+                <ReadOnlyField label="Daily limit" value={row.dailyLimit} />
+                <ReadOnlyField label="Exam type IDs" value={row.examTypeIds.join(", ") || "—"} />
+                <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
+              </div>
+            ))
+          )}
+        </AccordionSection>
+
+        {/* Special quotas */}
         <AccordionSection title="Special quotas">
           {snapshot.examTypeSpecialQuotas.length === 0 ? (
             <EmptyMessage message="No special quotas configured." />

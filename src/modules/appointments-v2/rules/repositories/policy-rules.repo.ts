@@ -11,6 +11,8 @@ import type {
   ExamTypeRuleRow,
   CategoryDailyLimitRow,
   ExamTypeSpecialQuotaRow,
+  ExamMixQuotaRuleRow,
+  ExamMixQuotaRuleItemRow,
 } from "../models/rule-types.js";
 
 const LOAD_BLOCKED_RULES_SQL = `
@@ -174,4 +176,116 @@ export async function loadAllExamTypeRuleItemExamTypeIds(
     [policyVersionId]
   );
   return result.rows.map((row) => Number(row.examTypeId));
+}
+
+const LOAD_EXAM_MIX_QUOTA_RULES_SQL = `
+  select
+    id,
+    policy_version_id as "policyVersionId",
+    modality_id as "modalityId",
+    title,
+    rule_type as "ruleType",
+    specific_date::text as "specificDate",
+    start_date::text as "startDate",
+    end_date::text as "endDate",
+    weekday,
+    alternate_weeks as "alternateWeeks",
+    recurrence_anchor_date::text as "recurrenceAnchorDate",
+    daily_limit as "dailyLimit",
+    is_active as "isActive"
+  from appointments_v2.exam_mix_quota_rules
+  where policy_version_id = $1
+    and modality_id = $2
+    and is_active = true
+`;
+
+export async function loadExamMixQuotaRules(
+  client: PoolClient,
+  policyVersionId: number,
+  modalityId: number
+): Promise<ExamMixQuotaRuleRow[]> {
+  const result = await client.query<ExamMixQuotaRuleRow>(LOAD_EXAM_MIX_QUOTA_RULES_SQL, [
+    policyVersionId,
+    modalityId,
+  ]);
+  return result.rows;
+}
+
+const LOAD_ALL_EXAM_MIX_QUOTA_RULES_SQL = `
+  select
+    id,
+    policy_version_id as "policyVersionId",
+    modality_id as "modalityId",
+    title,
+    rule_type as "ruleType",
+    specific_date::text as "specificDate",
+    start_date::text as "startDate",
+    end_date::text as "endDate",
+    weekday,
+    alternate_weeks as "alternateWeeks",
+    recurrence_anchor_date::text as "recurrenceAnchorDate",
+    daily_limit as "dailyLimit",
+    is_active as "isActive"
+  from appointments_v2.exam_mix_quota_rules
+  where policy_version_id = $1
+`;
+
+export async function loadAllExamMixQuotaRules(
+  client: PoolClient,
+  policyVersionId: number
+): Promise<ExamMixQuotaRuleRow[]> {
+  const result = await client.query<ExamMixQuotaRuleRow>(LOAD_ALL_EXAM_MIX_QUOTA_RULES_SQL, [
+    policyVersionId,
+  ]);
+  return result.rows;
+}
+
+const LOAD_EXAM_MIX_QUOTA_RULE_ITEMS_SQL = `
+  select
+    emqri.rule_id as "ruleId",
+    emqri.exam_type_id as "examTypeId"
+  from appointments_v2.exam_mix_quota_rule_items emqri
+  inner join appointments_v2.exam_mix_quota_rules emqr
+    on emqri.rule_id = emqr.id
+  where emqr.policy_version_id = $1
+    and emqr.modality_id = $2
+    and emqr.is_active = true
+`;
+
+export async function loadExamMixQuotaRuleItems(
+  client: PoolClient,
+  policyVersionId: number,
+  modalityId: number
+): Promise<ExamMixQuotaRuleItemRow[]> {
+  const result = await client.query<ExamMixQuotaRuleItemRow>(LOAD_EXAM_MIX_QUOTA_RULE_ITEMS_SQL, [
+    policyVersionId,
+    modalityId,
+  ]);
+  return result.rows.map((row) => ({
+    ruleId: Number(row.ruleId),
+    examTypeId: Number(row.examTypeId),
+  }));
+}
+
+const LOAD_ALL_EXAM_MIX_QUOTA_RULE_ITEMS_SQL = `
+  select
+    emqri.rule_id as "ruleId",
+    emqri.exam_type_id as "examTypeId"
+  from appointments_v2.exam_mix_quota_rule_items emqri
+  inner join appointments_v2.exam_mix_quota_rules emqr
+    on emqri.rule_id = emqr.id
+  where emqr.policy_version_id = $1
+`;
+
+export async function loadAllExamMixQuotaRuleItems(
+  client: PoolClient,
+  policyVersionId: number
+): Promise<ExamMixQuotaRuleItemRow[]> {
+  const result = await client.query<ExamMixQuotaRuleItemRow>(LOAD_ALL_EXAM_MIX_QUOTA_RULE_ITEMS_SQL, [
+    policyVersionId,
+  ]);
+  return result.rows.map((row) => ({
+    ruleId: Number(row.ruleId),
+    examTypeId: Number(row.examTypeId),
+  }));
 }

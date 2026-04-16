@@ -10,7 +10,11 @@
 
 import type { PoolClient } from "pg";
 import type { BookingDecision } from "../../rules/models/booking-decision.js";
-import { pureEvaluate } from "../../rules/services/pure-evaluate.js";
+import {
+  pureEvaluate,
+  evaluateExamMixQuotaSummaries,
+  type EvaluatedExamMixQuotaSummary,
+} from "../../rules/services/pure-evaluate.js";
 import type { PureEvaluateInput, RuleEvaluationContext } from "../../rules/models/rule-evaluation-context.js";
 import { findPublishedPolicyVersion } from "../../rules/repositories/policy-version.repo.js";
 import {
@@ -19,12 +23,15 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamMixQuotaRules,
+  loadExamMixQuotaRuleItems,
 } from "../../rules/repositories/policy-rules.repo.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
+  getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../../shared/utils/dates.js";
 import { pool } from "../../../../db/pool.js";
@@ -51,6 +58,7 @@ export interface AvailabilityDayDto {
     consumed: number;
     remaining: number;
   } | null;
+  examMixQuotaSummaries: EvaluatedExamMixQuotaSummary[];
   // Backward-compatible fields
   dailyCapacity: number;
   bookedCount: number;
@@ -156,6 +164,16 @@ async function getAvailabilityInternal(
     publishedVersion.id,
     params.modalityId
   );
+  const examMixQuotaRules = await loadExamMixQuotaRules(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
+  const examMixQuotaRuleItems = await loadExamMixQuotaRuleItems(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
 
   const activeOncology = categoryLimits.find(
     (l) => l.isActive && l.caseCategory === "oncology"
@@ -203,6 +221,12 @@ async function getAvailabilityInternal(
         };
       }
     }
+    const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
+      policyVersionId: publishedVersion.id,
+      modalityId: params.modalityId,
+      bookingDate: date,
+      ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
+    });
 
     let oncologyReserved: number | null = null;
     let nonOncologyReserved: number | null = null;
@@ -242,6 +266,9 @@ async function getAvailabilityInternal(
       specialQuotas,
       currentBookedCount: bookedCountForCategory,
       currentSpecialQuotaBookedCount,
+      examMixQuotaRules,
+      examMixQuotaRuleItems,
+      currentExamMixConsumedByRuleId,
     };
 
     const pureInput: PureEvaluateInput = {
@@ -258,6 +285,7 @@ async function getAvailabilityInternal(
     };
 
     const decision = await pureEvaluate(pureInput);
+    const examMixQuotaSummaries = evaluateExamMixQuotaSummaries(pureInput);
 
     results.push({
       date,
@@ -279,6 +307,7 @@ async function getAvailabilityInternal(
             : Math.max(0, nonOncologyReserved - bookedCounts.nonOncology),
       },
       specialQuotaSummary,
+      examMixQuotaSummaries,
       dailyCapacity: modalityTotalCapacity,
       bookedCount: bookedCounts.total,
       remainingCapacity,

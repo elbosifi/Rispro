@@ -62,6 +62,22 @@ export interface PolicyExamTypeSpecialQuotaDto {
   isActive: boolean;
 }
 
+export interface PolicyExamMixQuotaRuleDto {
+  id: number;
+  modalityId: number;
+  title: string | null;
+  ruleType: "specific_date" | "date_range" | "weekly_recurrence";
+  specificDate: string | null;
+  startDate: string | null;
+  endDate: string | null;
+  weekday: number | null;
+  alternateWeeks: boolean;
+  recurrenceAnchorDate: string | null;
+  dailyLimit: number;
+  examTypeIds: number[];
+  isActive: boolean;
+}
+
 export interface PolicySpecialReasonCodeDto {
   code: string;
   labelAr: string;
@@ -74,6 +90,7 @@ export interface PolicySnapshotDto {
   modalityBlockedRules: PolicyModalityBlockedRuleDto[];
   examTypeRules: PolicyExamTypeRuleDto[];
   examTypeSpecialQuotas: PolicyExamTypeSpecialQuotaDto[];
+  examMixQuotaRules?: PolicyExamMixQuotaRuleDto[];
   specialReasonCodes: PolicySpecialReasonCodeDto[];
 }
 

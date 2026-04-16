@@ -18,7 +18,11 @@
 import type { BookingDecision } from "../models/booking-decision.js";
 import type { PureEvaluateInput, RuleEvaluationContext } from "../models/rule-evaluation-context.js";
 import type { ReasonCode, DecisionStatus } from "../../shared/types/common.js";
-import { blockedRuleMatchesDate, examRuleMatchesDate } from "../utils/date-rule-matching.js";
+import {
+  blockedRuleMatchesDate,
+  examRuleMatchesDate,
+  examMixQuotaRuleMatchesDate,
+} from "../utils/date-rule-matching.js";
 
 /** Helper to build a reason code */
 function reason(
@@ -413,6 +417,107 @@ function checkCapacity(
   };
 }
 
+export interface EvaluatedExamMixQuotaSummary {
+  ruleId: number;
+  title: string | null;
+  dailyLimit: number;
+  consumed: number;
+  remaining: number;
+  isBlocking: boolean;
+  isPrimaryBlocking: boolean;
+}
+
+function selectPrimaryBlockingGroup(
+  groups: EvaluatedExamMixQuotaSummary[]
+): EvaluatedExamMixQuotaSummary | null {
+  const exhausted = groups.filter((g) => g.isBlocking);
+  if (exhausted.length === 0) return null;
+  exhausted.sort((a, b) => {
+    if (a.dailyLimit !== b.dailyLimit) return a.dailyLimit - b.dailyLimit;
+    return a.ruleId - b.ruleId;
+  });
+  return exhausted[0];
+}
+
+export function evaluateExamMixQuotaSummaries(input: PureEvaluateInput): EvaluatedExamMixQuotaSummary[] {
+  if (input.examTypeId == null) return [];
+  const examTypeId = Number(input.examTypeId);
+  const ctx = input.context;
+  const memberships = new Set(
+    (ctx.examMixQuotaRuleItems ?? [])
+      .filter((row) => Number(row.examTypeId) === examTypeId)
+      .map((row) => Number(row.ruleId))
+  );
+  if (memberships.size === 0) return [];
+
+  const matched: EvaluatedExamMixQuotaSummary[] = (ctx.examMixQuotaRules ?? [])
+    .filter((rule) => rule.isActive)
+    .filter((rule) => memberships.has(Number(rule.id)))
+    .filter((rule) => examMixQuotaRuleMatchesDate(rule, input.scheduledDate))
+    .map((rule) => {
+      const consumed = Number((ctx.currentExamMixConsumedByRuleId ?? {})[Number(rule.id)] ?? 0);
+      const dailyLimit = Number(rule.dailyLimit);
+      const remaining = Math.max(0, dailyLimit - consumed);
+      return {
+        ruleId: Number(rule.id),
+        title: rule.title ?? null,
+        dailyLimit,
+        consumed,
+        remaining,
+        isBlocking: remaining <= 0,
+        isPrimaryBlocking: false,
+      };
+    });
+
+  const primary = selectPrimaryBlockingGroup(matched);
+  if (primary) {
+    const idx = matched.findIndex((m) => m.ruleId === primary.ruleId);
+    if (idx >= 0) matched[idx] = { ...matched[idx], isPrimaryBlocking: true };
+  }
+
+  return matched.sort((a, b) => a.ruleId - b.ruleId);
+}
+
+function checkExamMixQuota(
+  input: PureEvaluateInput
+): {
+  blocked: boolean;
+  reasons: ReasonCode[];
+  matchedIds: number[];
+  summaries: EvaluatedExamMixQuotaSummary[];
+} {
+  // Explicit semantics: special_quota_extra bypasses exam-mix blocking and
+  // does not consume exam-mix counts (counts are pre-filtered in DB loader).
+  if (input.capacityResolutionMode === "special_quota_extra") {
+    return { blocked: false, reasons: [], matchedIds: [], summaries: [] };
+  }
+
+  const summaries = evaluateExamMixQuotaSummaries(input);
+  if (summaries.length === 0) {
+    return { blocked: false, reasons: [], matchedIds: [], summaries };
+  }
+
+  const matchedIds = summaries.map((s) => s.ruleId);
+  const primary = summaries.find((s) => s.isPrimaryBlocking);
+  if (!primary) {
+    return { blocked: false, reasons: [], matchedIds, summaries };
+  }
+
+  return {
+    blocked: true,
+    reasons: [
+      reason(
+        "exam_mix_quota_exhausted",
+        "error",
+        `${primary.title ?? "Exam mix quota"} is full for this date.`,
+        { type: "exam_mix_quota_rule", id: primary.ruleId }
+      ),
+    ],
+    matchedIds,
+    summaries,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Main evaluator
 // ---------------------------------------------------------------------------
@@ -454,8 +559,13 @@ export async function pureEvaluate(
   const capCheck = checkCapacity(input);
   allReasons.push(...capCheck.reasons);
 
+  // Step 5.5: Exam mix quotas
+  const examMixCheck = checkExamMixQuota(input);
+  allMatchedIds.push(...examMixCheck.matchedIds);
+  allReasons.push(...examMixCheck.reasons);
+
   const hasOverridableBlocks = hardBlocks.overridable || examCheck.overridable;
-  const capacityExhausted = capCheck.status === "blocked";
+  const capacityExhausted = capCheck.status === "blocked" || examMixCheck.blocked;
 
   // Step 6: Determine final status with override consideration
   let displayStatus: DecisionStatus;
