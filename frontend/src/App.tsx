@@ -55,7 +55,6 @@ function AppContent() {
   const location = useLocation();
   const { user, isLoading, logout } = useAuth();
   const { language, toggleLanguage } = useLanguage();
-  const v3AppointmentsEnabled = String(import.meta.env.VITE_ENABLE_APPOINTMENTS_V3_CREATE ?? "false").toLowerCase() === "true";
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -116,19 +115,7 @@ function AppContent() {
             <Route path="/patients" element={<PatientsPage />} />
             <Route path="/patients/new" element={<PatientsPage />} />
             <Route path="/patients/:id/edit" element={<EditPatientPage />} />
-            {/* Controlled cutover: /appointments is the canonical create route.
-                Route governance owns the V3 flag decision to avoid showing an internal
-                "disabled" placeholder on the main receptionist path. */}
-            <Route
-              path="/appointments"
-              element={
-                v3AppointmentsEnabled
-                  ? <AppointmentsV3CreatePage />
-                  : (user.role === "supervisor"
-                      ? <Navigate to="/appointments/legacy" replace />
-                      : <Navigate to="/" replace />)
-              }
-            />
+            <Route path="/appointments" element={<AppointmentsV3CreatePage />} />
             <Route
               path="/appointments/legacy"
               element={user.role === "supervisor" ? <AppointmentsPage /> : <Navigate to="/appointments" replace />}

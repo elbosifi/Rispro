@@ -22,7 +22,7 @@ export function AppointmentsV3CreatePage() {
     <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24, display: "grid", gap: 14 }}>
       <h1 style={{ margin: 0, fontSize: 20 }}>Create Appointment</h1>
       <p style={{ margin: 0, color: "var(--text-muted, #64748b)", fontSize: 13 }}>
-        This booking workflow is managed through controlled rollout governance.
+        Primary appointment creation workflow.
       </p>
 
       <CreateAppointmentTab
