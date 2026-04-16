@@ -14,6 +14,11 @@ export type BookingStatus =
   | "no-show"
   | "cancelled";
 
+export type CapacityResolutionMode =
+  | "standard"
+  | "category_override"
+  | "special_quota_extra";
+
 export type DecisionStatus = "available" | "restricted" | "blocked";
 
 export type PolicyStatus = "draft" | "published" | "archived";

@@ -70,8 +70,7 @@ const GET_SPECIAL_QUOTA_BOOKED_COUNT_SQL = `
   from appointments_v2.bookings
   where modality_id = $1
     and booking_date = $2
-    and case_category = $3
-    and exam_type_id = $4
+    and exam_type_id = $3
     and status <> 'cancelled'
     and uses_special_quota = true
 `;
@@ -81,14 +80,12 @@ export async function getSpecialQuotaBookedCount(
   params: {
     modalityId: number;
     bookingDate: string;
-    caseCategory: string;
     examTypeId: number;
   }
 ): Promise<number> {
   const result = await client.query<{ count: number }>(GET_SPECIAL_QUOTA_BOOKED_COUNT_SQL, [
     params.modalityId,
     params.bookingDate,
-    params.caseCategory,
     params.examTypeId,
   ]);
   return result.rows[0]?.count ?? 0;

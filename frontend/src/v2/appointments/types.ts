@@ -5,6 +5,7 @@
  */
 
 export type CaseCategory = "oncology" | "non_oncology";
+export type CapacityResolutionMode = "standard" | "category_override" | "special_quota_extra";
 export type DecisionStatus = "available" | "restricted" | "blocked";
 export type BookingStatus =
   | "scheduled"
@@ -121,6 +122,7 @@ export interface EvaluateRequest {
   examTypeId: number | null;
   scheduledDate: string;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota: boolean;
   specialReasonCode: string | null;
   includeOverrideEvaluation: boolean;
@@ -134,6 +136,7 @@ export interface CreateBookingRequest {
   bookingDate: string;
   bookingTime: string | null;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
@@ -159,6 +162,8 @@ export interface BookingResponse {
     status: BookingStatus;
     notes: string | null;
     policyVersionId: number;
+    capacityResolutionMode: CapacityResolutionMode;
+    usesSpecialQuota: boolean;
     createdAt: string;
     updatedAt: string;
   };
@@ -237,6 +242,7 @@ export interface ListBookingsParams {
 export interface RescheduleBookingRequest {
   bookingDate: string;
   bookingTime: string | null;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
@@ -261,6 +267,8 @@ export interface RescheduleBookingResponse {
     status: BookingStatus;
     notes: string | null;
     policyVersionId: number;
+    capacityResolutionMode: CapacityResolutionMode;
+    usesSpecialQuota: boolean;
     createdAt: string;
     updatedAt: string;
   };

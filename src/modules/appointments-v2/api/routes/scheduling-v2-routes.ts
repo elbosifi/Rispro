@@ -17,6 +17,7 @@ import { getSuggestions } from "../../scheduler/services/suggestion.service.js";
 import { runAvailabilityWithShadow } from "../../observability/shadow-availability.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { pool } from "../../../../db/pool.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 const router = Router();
 
@@ -30,12 +31,15 @@ router.post(
   "/evaluate",
   asyncRoute(async (req: Request<unknown, unknown, unknown>, res: Response) => {
     const body = req.body as Record<string, unknown>;
+    const capacityResolutionMode = (body.capacityResolutionMode as CapacityResolutionMode | undefined) ??
+      (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
     const decision = await evaluateBookingDecision({
       patientId: Number(body.patientId),
       modalityId: Number(body.modalityId),
       examTypeId: body.examTypeId ? Number(body.examTypeId) : null,
       scheduledDate: String(body.scheduledDate),
       caseCategory: String(body.caseCategory) as "oncology" | "non_oncology",
+      capacityResolutionMode,
       useSpecialQuota: body.useSpecialQuota === true,
       specialReasonCode: body.specialReasonCode ? String(body.specialReasonCode) : null,
       includeOverrideEvaluation: body.includeOverrideEvaluation === true,
@@ -56,6 +60,9 @@ router.get(
     const offset = req.query.offset ? Number(req.query.offset) : 0;
     const examTypeId = req.query.examTypeId ? Number(req.query.examTypeId) : null;
     const caseCategory = (req.query.caseCategory as "oncology" | "non_oncology") ?? "non_oncology";
+    const capacityResolutionMode =
+      (req.query.capacityResolutionMode as CapacityResolutionMode | undefined) ??
+      (req.query.useSpecialQuota === "true" ? "special_quota_extra" : "standard");
 
     if (!modalityId) {
       throw new SchedulingError(400, "modalityId is required");
@@ -67,6 +74,7 @@ router.get(
       offset,
       examTypeId,
       caseCategory,
+      capacityResolutionMode,
       useSpecialQuota: req.query.useSpecialQuota === "true",
       specialReasonCode: req.query.specialReasonCode ? String(req.query.specialReasonCode) : null,
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",

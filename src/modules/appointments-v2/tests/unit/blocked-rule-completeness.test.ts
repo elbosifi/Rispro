@@ -39,12 +39,16 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
 }
 
 function makeInput(overrides: Partial<PureEvaluateInput> = {}): PureEvaluateInput {
+  const capacityResolutionMode =
+    overrides.capacityResolutionMode ??
+    (overrides.useSpecialQuota ? "special_quota_extra" : "standard");
   return {
     patientId: 1,
     modalityId: 10,
     examTypeId: null,
     scheduledDate: "2026-04-15",
     caseCategory: "non_oncology",
+    capacityResolutionMode,
     useSpecialQuota: false,
     specialReasonCode: null,
     includeOverrideEvaluation: false,

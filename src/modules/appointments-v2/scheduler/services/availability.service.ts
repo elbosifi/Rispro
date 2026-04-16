@@ -28,6 +28,7 @@ import {
 } from "../../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../../shared/utils/dates.js";
 import { pool } from "../../../../db/pool.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface AvailabilityDayDto {
   date: string;
@@ -65,6 +66,7 @@ export interface GetAvailabilityParams {
   offset: number;
   examTypeId?: number | null;
   caseCategory: "oncology" | "non_oncology";
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideCandidates?: boolean;
@@ -100,6 +102,9 @@ async function getAvailabilityInternal(
   params: GetAvailabilityParams,
   policySetKey: string
 ): Promise<AvailabilityQueryResult> {
+  const capacityResolutionMode: CapacityResolutionMode =
+    params.capacityResolutionMode ??
+    (params.useSpecialQuota ? "special_quota_extra" : "standard");
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -184,7 +189,6 @@ async function getAvailabilityInternal(
       currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
         modalityId: params.modalityId,
         bookingDate: date,
-        caseCategory: params.caseCategory,
         examTypeId: params.examTypeId,
       });
       const quota = specialQuotas.find(
@@ -246,7 +250,8 @@ async function getAvailabilityInternal(
       examTypeId: params.examTypeId ?? null,
       scheduledDate: date,
       caseCategory: params.caseCategory,
-      useSpecialQuota: params.useSpecialQuota ?? false,
+      capacityResolutionMode,
+      useSpecialQuota: capacityResolutionMode === "special_quota_extra",
       specialReasonCode: params.specialReasonCode ?? null,
       includeOverrideEvaluation: params.includeOverrideCandidates ?? false,
       context,

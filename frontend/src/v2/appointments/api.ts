@@ -36,6 +36,7 @@ export async function fetchV2Availability(params: {
   offset: number;
   examTypeId: number | null;
   caseCategory: "oncology" | "non_oncology";
+  capacityResolutionMode?: "standard" | "category_override" | "special_quota_extra";
   useSpecialQuota: boolean;
   specialReasonCode: string | null;
   includeOverrideCandidates: boolean;
@@ -49,6 +50,9 @@ export async function fetchV2Availability(params: {
 
   if (params.examTypeId != null) {
     searchParams.set("examTypeId", String(params.examTypeId));
+  }
+  if (params.capacityResolutionMode) {
+    searchParams.set("capacityResolutionMode", params.capacityResolutionMode);
   }
   if (params.useSpecialQuota) {
     searchParams.set("useSpecialQuota", "true");

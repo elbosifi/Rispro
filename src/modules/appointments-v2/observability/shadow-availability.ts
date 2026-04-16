@@ -29,6 +29,7 @@ import {
 import { addDays, todayIso } from "../shared/utils/dates.js";
 import { pool } from "../../../db/pool.js";
 import type { AvailabilityDayDto, GetAvailabilityParams } from "../scheduler/services/availability.service.js";
+import type { CapacityResolutionMode } from "../shared/types/common.js";
 import {
   compareLegacyVsV2,
   logShadowDiffs,
@@ -138,6 +139,9 @@ async function computeShadowDiffsInternal(
   params: GetAvailabilityParams,
   policySetKey: string
 ): Promise<ShadowDiffEntry[]> {
+  const capacityResolutionMode: CapacityResolutionMode =
+    params.capacityResolutionMode ??
+    (params.useSpecialQuota ? "special_quota_extra" : "standard");
   // Load the published policy once
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -208,7 +212,6 @@ async function computeShadowDiffsInternal(
       currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
         modalityId: params.modalityId,
         bookingDate: legacyDay.date,
-        caseCategory: params.caseCategory,
         examTypeId: params.examTypeId,
       });
     }
@@ -242,7 +245,8 @@ async function computeShadowDiffsInternal(
       examTypeId: params.examTypeId ?? null,
       scheduledDate: legacyDay.date,
       caseCategory: params.caseCategory,
-      useSpecialQuota: params.useSpecialQuota ?? false,
+      capacityResolutionMode,
+      useSpecialQuota: capacityResolutionMode === "special_quota_extra",
       specialReasonCode: params.specialReasonCode ?? null,
       includeOverrideEvaluation: params.includeOverrideCandidates ?? false,
       context,

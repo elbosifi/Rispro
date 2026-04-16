@@ -2,7 +2,7 @@
  * Appointments V2 — Booking model.
  */
 
-import type { BookingStatus, CaseCategory } from "../../shared/types/common.js";
+import type { BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface Booking {
   id: number;
@@ -16,6 +16,7 @@ export interface Booking {
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
+  capacityResolutionMode: CapacityResolutionMode;
   usesSpecialQuota: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
@@ -34,6 +35,7 @@ export interface CreateBookingPayload {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;

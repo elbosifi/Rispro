@@ -197,6 +197,7 @@ function checkCapacity(
 } {
   const ctx = input.context;
   const reasons: ReasonCode[] = [];
+  const mode = input.capacityResolutionMode;
   const modalityDailyCapacity = ctx.modalityDailyCapacity;
   if (modalityDailyCapacity == null || modalityDailyCapacity <= 0) {
     reasons.push(
@@ -297,7 +298,82 @@ function checkCapacity(
       : ctx.currentBookedCount;
 
   const totalRemaining = modalityDailyCapacity - totalBookedCount;
-  if (totalRemaining <= 0) {
+  const totalExhausted = totalRemaining <= 0;
+
+  let remainingStandardCapacity = totalRemaining;
+  let bucketExhausted = false;
+  if (partitioned) {
+    const reserve =
+      input.caseCategory === "oncology" ? (oncologyReserve ?? 0) : (nonOncologyReserve ?? 0);
+    const bookedInCategory = selectedBookedCount;
+    const bucketRemaining = reserve - bookedInCategory;
+    bucketExhausted = bucketRemaining <= 0;
+    remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
+  }
+
+  let remainingSpecialQuota: number | null = null;
+  if (mode === "special_quota_extra" && input.examTypeId != null) {
+    const examTypeIdNum = Number(input.examTypeId);
+    const quota = ctx.specialQuotas.find(
+      (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
+    );
+    if (quota && quota.dailyExtraSlots > 0) {
+      remainingSpecialQuota = Math.max(
+        0,
+        quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount
+      );
+    }
+  }
+
+  if (mode === "special_quota_extra") {
+    if (remainingSpecialQuota != null && remainingSpecialQuota > 0) {
+      return {
+        status: "available",
+        remainingStandardCapacity: Math.max(0, totalRemaining),
+        remainingSpecialQuota,
+        reasons: [],
+      };
+    }
+    reasons.push(
+      reason(
+        "special_quota_exhausted",
+        "error",
+        "No remaining special quota for this exam type/date."
+      )
+    );
+    return {
+      status: "blocked",
+      remainingStandardCapacity: Math.max(0, totalRemaining),
+      remainingSpecialQuota: 0,
+      reasons,
+    };
+  }
+
+  if (mode === "category_override") {
+    if (totalExhausted) {
+      reasons.push(
+        reason(
+          "standard_capacity_exhausted",
+          "error",
+          "No remaining capacity for this modality date."
+        )
+      );
+      return {
+        status: "blocked",
+        remainingStandardCapacity: 0,
+        remainingSpecialQuota: null,
+        reasons,
+      };
+    }
+    return {
+      status: "available",
+      remainingStandardCapacity: totalRemaining,
+      remainingSpecialQuota: null,
+      reasons: [],
+    };
+  }
+
+  if (totalExhausted) {
     reasons.push(
       reason(
         "standard_capacity_exhausted",
@@ -313,42 +389,20 @@ function checkCapacity(
     };
   }
 
-  let remainingStandardCapacity = totalRemaining;
-  if (partitioned) {
-    const reserve =
-      input.caseCategory === "oncology" ? (oncologyReserve ?? 0) : (nonOncologyReserve ?? 0);
-    const bookedInCategory = selectedBookedCount;
-    const bucketRemaining = reserve - bookedInCategory;
-    if (bucketRemaining <= 0) {
-      reasons.push(
-        reason(
-          "standard_capacity_exhausted",
-          "error",
-          "No remaining capacity for this date and category."
-        )
-      );
-      return {
-        status: "blocked",
-        remainingStandardCapacity: 0,
-        remainingSpecialQuota: null,
-        reasons,
-      };
-    }
-    remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
-  }
-
-  let remainingSpecialQuota: number | null = null;
-  if (input.useSpecialQuota && input.examTypeId != null) {
-    const examTypeIdNum = Number(input.examTypeId);
-    const quota = ctx.specialQuotas.find(
-      (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
+  if (bucketExhausted) {
+    reasons.push(
+      reason(
+        "standard_capacity_exhausted",
+        "error",
+        "No remaining capacity for this date and category."
+      )
     );
-    if (quota && quota.dailyExtraSlots > 0) {
-      remainingSpecialQuota = Math.max(
-        0,
-        quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount
-      );
-    }
+    return {
+      status: "blocked",
+      remainingStandardCapacity: 0,
+      remainingSpecialQuota: null,
+      reasons,
+    };
   }
 
   return {
@@ -426,9 +480,16 @@ export async function pureEvaluate(
     consumedCapacityMode = "standard";
   } else {
     // Available — check if special quota is being used
-    if (input.useSpecialQuota && capCheck.remainingSpecialQuota != null && capCheck.remainingSpecialQuota > 0) {
+    if (
+      input.capacityResolutionMode === "special_quota_extra" &&
+      capCheck.remainingSpecialQuota != null &&
+      capCheck.remainingSpecialQuota > 0
+    ) {
       suggestedMode = "special";
       consumedCapacityMode = "special";
+    } else if (input.capacityResolutionMode === "category_override") {
+      suggestedMode = "override";
+      consumedCapacityMode = "override";
     }
     displayStatus = "available";
   }
@@ -453,7 +514,8 @@ export async function pureEvaluate(
     capCheck.remainingSpecialQuota,
     allMatchedIds,
     allReasons,
-    consumedCapacityMode
+    consumedCapacityMode,
+    suggestedMode
   );
 }
 
@@ -469,7 +531,8 @@ function buildDecision(
   remainingSpecialQuota: number | null,
   matchedRuleIds: number[],
   reasons: ReasonCode[],
-  consumedCapacityMode: "standard" | "special" | "override" | null = "standard"
+  consumedCapacityMode: "standard" | "special" | "override" | null = "standard",
+  suggestedBookingModeOverride?: "standard" | "special" | "override"
 ): BookingDecision {
   const ctx = input.context;
 
@@ -478,13 +541,14 @@ function buildDecision(
     requiresSupervisorOverride: requiresOverride,
     displayStatus,
     suggestedBookingMode:
-      displayStatus === "blocked" && !requiresOverride
+      suggestedBookingModeOverride ??
+      (displayStatus === "blocked" && !requiresOverride
         ? "override"
         : displayStatus === "restricted"
         ? "override"
         : input.useSpecialQuota && remainingSpecialQuota != null && remainingSpecialQuota > 0
         ? "special"
-        : "standard",
+        : "standard"),
     consumedCapacityMode,
     remainingStandardCapacity,
     remainingSpecialQuota,
@@ -504,6 +568,7 @@ function buildDecision(
         examTypeId: input.examTypeId,
         scheduledDate: input.scheduledDate,
         caseCategory: input.caseCategory,
+        capacityResolutionMode: input.capacityResolutionMode,
         useSpecialQuota: input.useSpecialQuota,
         specialReasonCode: input.specialReasonCode,
         includeOverrideEvaluation: input.includeOverrideEvaluation,

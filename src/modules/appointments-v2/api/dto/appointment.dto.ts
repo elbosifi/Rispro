@@ -2,7 +2,7 @@
  * Appointments V2 — Appointment DTOs.
  */
 
-import type { BookingStatus, CaseCategory } from "../../shared/types/common.js";
+import type { BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface CreateAppointmentDto {
   patientId: number;
@@ -12,6 +12,7 @@ export interface CreateAppointmentDto {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
@@ -32,6 +33,7 @@ export interface UpdateAppointmentDto {
   reportingPriorityId?: number | null;
   notes?: string | null;
   caseCategory?: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   specialReasonNote?: string | null;
@@ -56,6 +58,7 @@ export interface AppointmentResponseDto {
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
+  capacityResolutionMode: CapacityResolutionMode;
   usesSpecialQuota: boolean;
   isWalkIn: boolean;
   createdAt: string;

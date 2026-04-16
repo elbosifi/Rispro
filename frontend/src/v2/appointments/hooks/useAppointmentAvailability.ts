@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useV2Availability } from "../api";
 import { mapAvailabilityRow } from "./availability-row-mapper";
+import type { CapacityResolutionMode } from "../types";
 export type { AvailabilityRowStatus, AvailabilityRowViewModel } from "./availability-row-mapper";
 
 interface UseAppointmentAvailabilityArgs {
@@ -8,7 +9,7 @@ interface UseAppointmentAvailabilityArgs {
   modalityId: number | null;
   examTypeId: number | null;
   caseCategory: "oncology" | "non_oncology";
-  useSpecialQuota: boolean;
+  capacityResolutionMode: CapacityResolutionMode;
   specialReasonCode: string | null;
   days?: number;
 }
@@ -24,7 +25,8 @@ export function useAppointmentAvailability(args: UseAppointmentAvailabilityArgs)
           offset: 0,
           examTypeId: args.examTypeId,
           caseCategory: args.caseCategory,
-          useSpecialQuota: args.useSpecialQuota,
+          capacityResolutionMode: args.capacityResolutionMode,
+          useSpecialQuota: args.capacityResolutionMode === "special_quota_extra",
           specialReasonCode: args.specialReasonCode,
           includeOverrideCandidates: true,
         }

@@ -5,7 +5,7 @@
  * See D008 for rule precedence.
  */
 
-import type { DecisionStatus, ReasonCode, CaseCategory } from "../../shared/types/common.js";
+import type { DecisionStatus, ReasonCode, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface BookingDecisionInput {
   patientId: number;
@@ -13,6 +13,7 @@ export interface BookingDecisionInput {
   examTypeId?: number | null;
   scheduledDate: string;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideEvaluation?: boolean;

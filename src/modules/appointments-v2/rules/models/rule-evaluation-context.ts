@@ -6,7 +6,7 @@
  * accepts, keeping it side-effect-free and easily testable.
  */
 
-import type { CaseCategory, ReasonCode } from "../../shared/types/common.js";
+import type { CaseCategory, ReasonCode, CapacityResolutionMode } from "../../shared/types/common.js";
 import type {
   ModalityBlockedRuleRow,
   ExamTypeRuleRow,
@@ -84,6 +84,7 @@ export interface PureEvaluateInput {
   examTypeId: number | null;
   scheduledDate: string; // ISO yyyy-mm-dd
   caseCategory: CaseCategory;
+  capacityResolutionMode: CapacityResolutionMode;
   useSpecialQuota: boolean;
   specialReasonCode: string | null;
   includeOverrideEvaluation: boolean;

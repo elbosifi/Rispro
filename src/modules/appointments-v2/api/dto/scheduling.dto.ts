@@ -8,6 +8,7 @@ import type {
   DecisionStatus,
   CaseCategory,
   ReasonCode,
+  CapacityResolutionMode,
 } from "../../shared/types/common.js";
 
 // --- Request DTOs ---
@@ -18,6 +19,7 @@ export interface AvailabilityQueryDto {
   offset?: number;
   examTypeId?: number | null;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideCandidates?: boolean;
@@ -37,6 +39,7 @@ export interface EvaluateRequestDto {
   examTypeId?: number | null;
   scheduledDate: string;
   caseCategory: CaseCategory;
+  capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideEvaluation?: boolean;

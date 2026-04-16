@@ -15,6 +15,7 @@ import type { BookingDecision } from "../models/booking-decision.js";
 import type { BookingDecisionInput } from "../models/booking-decision.js";
 import { pureEvaluate } from "./pure-evaluate.js";
 import type { PureEvaluateInput, RuleEvaluationContext } from "../models/rule-evaluation-context.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 import { findPublishedPolicyVersion } from "../repositories/policy-version.repo.js";
 import {
   loadModalityBlockedRules,
@@ -42,6 +43,9 @@ export async function evaluateWithDb(
   params: EvaluateWithDbParams,
   policySetKey: string = "default"
 ): Promise<BookingDecision> {
+  const capacityResolutionMode: CapacityResolutionMode =
+    params.capacityResolutionMode ??
+    (params.useSpecialQuota ? "special_quota_extra" : "standard");
   // 1. Load the published policy version
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -141,7 +145,6 @@ export async function evaluateWithDb(
     currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
       modalityId: params.modalityId,
       bookingDate: params.scheduledDate,
-      caseCategory: params.caseCategory,
       examTypeId: params.examTypeId,
     });
   }
@@ -175,7 +178,8 @@ export async function evaluateWithDb(
     examTypeId: params.examTypeId ?? null,
     scheduledDate: params.scheduledDate,
     caseCategory: params.caseCategory,
-    useSpecialQuota: params.useSpecialQuota ?? false,
+    capacityResolutionMode,
+    useSpecialQuota: capacityResolutionMode === "special_quota_extra",
     specialReasonCode: params.specialReasonCode ?? null,
     includeOverrideEvaluation: params.includeOverrideEvaluation ?? false,
     context,

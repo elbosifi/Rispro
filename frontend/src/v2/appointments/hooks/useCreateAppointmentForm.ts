@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import type { CapacityResolutionMode } from "../types";
 
 export interface SelectedPatient {
   id: number;
@@ -20,7 +21,7 @@ export interface CreateAppointmentFormModel {
   notes: string;
   reportingPriorityId: number | null;
   isWalkIn: boolean;
-  useSpecialQuota: boolean;
+  capacityResolutionMode: CapacityResolutionMode;
   specialReasonCode: string;
   specialReasonNote: string;
   overrideRequired: boolean;
@@ -37,7 +38,7 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   notes: "",
   reportingPriorityId: null,
   isWalkIn: false,
-  useSpecialQuota: false,
+  capacityResolutionMode: "standard",
   specialReasonCode: "",
   specialReasonNote: "",
   overrideRequired: false,
@@ -57,7 +58,7 @@ export function useCreateAppointmentForm() {
         examTypeId: null,
         appointmentDate: "",
         notes: "",
-        useSpecialQuota: false,
+        capacityResolutionMode: "standard",
         specialReasonCode: "",
         specialReasonNote: "",
         overrideRequired: false,
@@ -70,7 +71,7 @@ export function useCreateAppointmentForm() {
         modalityId,
         examTypeId: null,
         appointmentDate: "",
-        useSpecialQuota: false,
+        capacityResolutionMode: "standard",
         specialReasonCode: "",
         specialReasonNote: "",
         overrideRequired: false,
@@ -106,12 +107,14 @@ export function useCreateAppointmentForm() {
     setNotes(notes: string) {
       setForm((prev) => ({ ...prev, notes }));
     },
-    setUseSpecialQuota(useSpecialQuota: boolean) {
+    setCapacityResolutionMode(capacityResolutionMode: CapacityResolutionMode) {
       setForm((prev) => ({
         ...prev,
-        useSpecialQuota,
-        specialReasonCode: useSpecialQuota ? prev.specialReasonCode : "",
-        specialReasonNote: useSpecialQuota ? prev.specialReasonNote : "",
+        capacityResolutionMode,
+        specialReasonCode:
+          capacityResolutionMode === "special_quota_extra" ? prev.specialReasonCode : "",
+        specialReasonNote:
+          capacityResolutionMode === "special_quota_extra" ? prev.specialReasonNote : "",
       }));
     },
     setSpecialReasonCode(specialReasonCode: string) {

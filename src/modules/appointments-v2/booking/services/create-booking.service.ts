@@ -30,6 +30,7 @@ import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -50,12 +51,18 @@ export async function createBooking(
   });
 }
 
+function normalizeCapacityResolutionMode(payload: CreateBookingPayload): CapacityResolutionMode {
+  if (payload.capacityResolutionMode) return payload.capacityResolutionMode;
+  return payload.useSpecialQuota === true ? "special_quota_extra" : "standard";
+}
+
 async function createBookingInternal(
   client: PoolClient,
   payload: CreateBookingPayload,
   userId: number,
   policySetKey: string
 ): Promise<CreateBookingResult> {
+  const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -158,7 +165,6 @@ async function createBookingInternal(
     currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
       modalityId: payload.modalityId,
       bookingDate: payload.bookingDate,
-      caseCategory: payload.caseCategory,
       examTypeId: payload.examTypeId,
     });
   }
@@ -191,7 +197,8 @@ async function createBookingInternal(
     examTypeId: payload.examTypeId ?? null,
     scheduledDate: payload.bookingDate,
     caseCategory: payload.caseCategory,
-    useSpecialQuota: payload.useSpecialQuota === true,
+    capacityResolutionMode,
+    useSpecialQuota: capacityResolutionMode === "special_quota_extra",
     // `specialReasonCode` is metadata/audit justification and is not a
     // standalone scheduling rule input at this stage.
     specialReasonCode: payload.specialReasonCode ?? null,
@@ -252,6 +259,14 @@ async function createBookingInternal(
     wasOverride = true;
   }
 
+  if (capacityResolutionMode === "special_quota_extra" && !payload.specialReasonCode) {
+    throw new SchedulingError(
+      400,
+      "Special quota extra mode requires specialReasonCode.",
+      ["special_reason_code_required"]
+    );
+  }
+
   // 9. Determine whether special quota was consumed
   const consumedSpecialQuota = decision.consumedCapacityMode === "special";
 
@@ -267,6 +282,7 @@ async function createBookingInternal(
     status: "scheduled",
     notes: payload.notes ?? null,
     policyVersionId: publishedVersion.id,
+    capacityResolutionMode,
     usesSpecialQuota: consumedSpecialQuota,
     specialReasonCode: payload.specialReasonCode ?? null,
     specialReasonNote: payload.specialReasonNote ?? null,
@@ -285,7 +301,7 @@ async function createBookingInternal(
       requestingUserId: userId,
       supervisorUserId,
       overrideReason: payload.override?.reason ?? null,
-      decisionSnapshot: decision,
+      decisionSnapshot: { ...decision, capacityResolutionMode },
       outcome: "approved_and_booked",
     });
   }

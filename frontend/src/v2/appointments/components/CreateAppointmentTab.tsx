@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import type {
   BookingResponse,
+  CapacityResolutionMode,
   CreateBookingRequest,
   ExamTypeDto,
   ModalityDto,
@@ -35,6 +36,7 @@ interface CreateAppointmentTabProps {
     examTypeId: number | null;
     scheduledDate: string;
     caseCategory: "oncology" | "non_oncology";
+    capacityResolutionMode: CapacityResolutionMode;
     useSpecialQuota: boolean;
     specialReasonCode: string | null;
     includeOverrideEvaluation: boolean;
@@ -91,15 +93,24 @@ export function CreateAppointmentTab({
     modalityId: form.modalityId,
     examTypeId: form.examTypeId,
     caseCategory: form.caseCategory,
-    useSpecialQuota: form.useSpecialQuota,
-    specialReasonCode: form.specialReasonCode || null,
+    capacityResolutionMode: form.capacityResolutionMode,
+    specialReasonCode:
+      form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
   });
 
   const suggestions = useV2Suggestions(
-    form.modalityId != null && form.examTypeId != null && !form.useSpecialQuota
+    form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard"
       ? { modalityId: form.modalityId, days: 14, examTypeId: form.examTypeId, caseCategory: form.caseCategory }
       : undefined
   );
+  const hasSpecialQuotaAvailable = (availability.rawItems ?? []).some(
+    (item) => (item.specialQuotaSummary?.configured ?? 0) > 0
+  );
+  useEffect(() => {
+    if (form.capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable) {
+      actions.setCapacityResolutionMode("standard");
+    }
+  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -121,7 +132,9 @@ export function CreateAppointmentTab({
     if (!form.modalityId) return "Missing modality";
     if (!form.examTypeId) return "Missing exam type";
     if (!form.appointmentDate) return "Selected date unavailable";
-    if (form.useSpecialQuota && !form.specialReasonCode) return "Special reason code required";
+    if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonCode) {
+      return "Special reason code required";
+    }
     return null;
   }
 
@@ -134,9 +147,14 @@ export function CreateAppointmentTab({
       bookingDate: form.appointmentDate,
       bookingTime: null,
       caseCategory: form.caseCategory,
-      useSpecialQuota: form.useSpecialQuota,
-      specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
-      specialReasonNote: form.useSpecialQuota ? form.specialReasonNote.trim() || null : null,
+      capacityResolutionMode: form.capacityResolutionMode,
+      useSpecialQuota: form.capacityResolutionMode === "special_quota_extra",
+      specialReasonCode:
+        form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
+      specialReasonNote:
+        form.capacityResolutionMode === "special_quota_extra"
+          ? form.specialReasonNote.trim() || null
+          : null,
       notes: form.notes.trim() || null,
       isWalkIn: form.isWalkIn,
       override,
@@ -181,8 +199,10 @@ export function CreateAppointmentTab({
         examTypeId: form.examTypeId,
         scheduledDate: form.appointmentDate,
         caseCategory: form.caseCategory,
-        useSpecialQuota: form.useSpecialQuota,
-        specialReasonCode: form.useSpecialQuota ? form.specialReasonCode || null : null,
+        capacityResolutionMode: form.capacityResolutionMode,
+        useSpecialQuota: form.capacityResolutionMode === "special_quota_extra",
+        specialReasonCode:
+          form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
         includeOverrideEvaluation: true,
       });
 
@@ -370,8 +390,12 @@ export function CreateAppointmentTab({
         </div>
 
         <SpecialQuotaSection
-          enabled={form.useSpecialQuota}
-          onToggle={actions.setUseSpecialQuota}
+          capacityResolutionMode={form.capacityResolutionMode}
+          onChangeCapacityResolutionMode={(mode) => {
+            if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
+            actions.setCapacityResolutionMode(mode);
+          }}
+          specialQuotaAvailable={hasSpecialQuotaAvailable}
           specialReasonCode={form.specialReasonCode}
           onChangeSpecialReasonCode={actions.setSpecialReasonCode}
           specialReasonNote={form.specialReasonNote}
@@ -412,7 +436,7 @@ export function CreateAppointmentTab({
         />
       </div>
 
-      {form.modalityId != null && form.examTypeId != null && !form.useSpecialQuota && (
+      {form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard" && (
         <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, marginTop: 14 }}>
           <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14 }}>Suggested Dates (Advisory)</h3>
           {suggestions.isLoading ? (

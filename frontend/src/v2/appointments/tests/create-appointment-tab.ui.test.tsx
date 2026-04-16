@@ -82,12 +82,24 @@ const availabilityRows: AvailabilityRowViewModel[] = [
 ];
 
 const mockRowsRef = { current: availabilityRows };
+const mockRawItemsRef = {
+  current: [
+    {
+      specialQuotaSummary: {
+        examTypeId: 101,
+        configured: 2,
+        consumed: 0,
+        remaining: 2,
+      },
+    },
+  ],
+};
 
 vi.mock("../hooks/useAppointmentAvailability", () => ({
   useAppointmentAvailability: () => ({
     enabled: true,
     rows: mockRowsRef.current,
-    rawItems: [],
+    rawItems: mockRawItemsRef.current,
     isLoading: false,
     isError: false,
     error: null,
@@ -165,6 +177,8 @@ function setup() {
       status: "scheduled" as const,
       notes: payload.notes,
       policyVersionId: 1,
+      capacityResolutionMode: payload.capacityResolutionMode ?? "standard",
+      usesSpecialQuota: payload.capacityResolutionMode === "special_quota_extra",
       createdAt: "",
       updatedAt: "",
     },
@@ -218,6 +232,19 @@ function PrintPlaceholder() {
 }
 
 describe("CreateAppointmentTab UI interactions", () => {
+  beforeEach(() => {
+    mockRawItemsRef.current = [
+      {
+        specialQuotaSummary: {
+          examTypeId: 101,
+          configured: 2,
+          consumed: 0,
+          remaining: 2,
+        },
+      },
+    ];
+  });
+
   it("filters exam types by selected modality", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
@@ -284,14 +311,16 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(callArg.override!.reason).toBe("urgent");
   });
 
-  it("requires special reason when special quota is enabled", async () => {
+  it("requires special reason when special quota mode is selected", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "Use special quota" }));
+    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+      target: { value: "special_quota_extra" },
+    });
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
     expect(await screen.findByText("Special reason code required")).toBeTruthy();
@@ -304,7 +333,9 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
-    await userEvent.click(screen.getByRole("checkbox", { name: "Use special quota" }));
+    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+      target: { value: "special_quota_extra" },
+    });
     const selects = screen.getAllByRole("combobox");
     const specialReasonSelect = selects[selects.length - 1] as HTMLSelectElement;
     fireEvent.change(specialReasonSelect, { target: { value: "urgent" } });
@@ -323,9 +354,21 @@ describe("CreateAppointmentTab UI interactions", () => {
     });
 
     const callArg = onCreateAppointment.mock.calls[0][0];
+    expect(callArg.capacityResolutionMode).toBe("special_quota_extra");
     expect(callArg.useSpecialQuota).toBe(true);
     expect(callArg.specialReasonCode).toBe("urgent");
     expect(callArg.specialReasonNote).toBe("High-risk escalation");
+  });
+
+  it("disables special_quota_extra mode when no special quota exists", async () => {
+    mockRawItemsRef.current = [];
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    const select = screen.getByLabelText("Capacity Resolution Action") as HTMLSelectElement;
+    const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
+    expect(option?.disabled).toBe(true);
   });
 
   describe("success state actions", () => {
@@ -343,6 +386,8 @@ describe("CreateAppointmentTab UI interactions", () => {
           status: "scheduled" as const,
           notes: payload.notes,
           policyVersionId: 1,
+          capacityResolutionMode: payload.capacityResolutionMode ?? "standard",
+          usesSpecialQuota: payload.capacityResolutionMode === "special_quota_extra",
           createdAt: "",
           updatedAt: "",
         },
@@ -466,6 +511,8 @@ describe("safety modal interactions", () => {
           status: "scheduled" as const,
           notes: payload.notes,
           policyVersionId: 1,
+          capacityResolutionMode: payload.capacityResolutionMode ?? "standard",
+          usesSpecialQuota: payload.capacityResolutionMode === "special_quota_extra",
           createdAt: "",
           updatedAt: "",
         },

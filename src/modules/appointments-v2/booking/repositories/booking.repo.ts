@@ -11,16 +11,17 @@ const INSERT_SQL = `
   insert into appointments_v2.bookings (
     patient_id, modality_id, exam_type_id, reporting_priority_id,
     booking_date, booking_time, case_category, status, notes,
-    policy_version_id, uses_special_quota, special_reason_code, special_reason_note,
+    policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code, special_reason_note,
     is_walk_in, created_by_user_id, updated_by_user_id
   ) values (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
   )
   returning id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
     booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
+    capacity_resolution_mode as "capacityResolutionMode",
     uses_special_quota as "usesSpecialQuota",
     special_reason_code as "specialReasonCode",
     special_reason_note as "specialReasonNote",
@@ -42,6 +43,7 @@ export async function insertBooking(
     status: string;
     notes: string | null;
     policyVersionId: number;
+    capacityResolutionMode: "standard" | "category_override" | "special_quota_extra";
     usesSpecialQuota: boolean;
     specialReasonCode: string | null;
     specialReasonNote: string | null;
@@ -60,6 +62,7 @@ export async function insertBooking(
     booking.status,
     booking.notes,
     booking.policyVersionId,
+    booking.capacityResolutionMode,
     booking.usesSpecialQuota,
     booking.specialReasonCode,
     booking.specialReasonNote,
@@ -76,6 +79,7 @@ const FIND_BY_ID_SQL = `
     booking_date::text as "bookingDate", booking_time as "bookingTime",
     case_category as "caseCategory", status, notes,
     policy_version_id as "policyVersionId",
+    capacity_resolution_mode as "capacityResolutionMode",
     uses_special_quota as "usesSpecialQuota",
     special_reason_code as "specialReasonCode",
     special_reason_note as "specialReasonNote",
@@ -131,12 +135,13 @@ const UPDATE_RESCHEDULE_SQL = `
   set booking_date = $1,
       booking_time = $2,
       policy_version_id = $3,
-      uses_special_quota = $4,
-      special_reason_code = $5,
-      special_reason_note = $6,
+      capacity_resolution_mode = $4,
+      uses_special_quota = $5,
+      special_reason_code = $6,
+      special_reason_note = $7,
       updated_at = now(),
-      updated_by_user_id = $7
-  where id = $8
+      updated_by_user_id = $8
+  where id = $9
 `;
 
 export async function updateBookingForReschedule(
@@ -146,6 +151,7 @@ export async function updateBookingForReschedule(
   newTime: string | null,
   policyVersionId: number,
   userId: number,
+  capacityResolutionMode: "standard" | "category_override" | "special_quota_extra",
   usesSpecialQuota: boolean,
   specialReasonCode: string | null,
   specialReasonNote: string | null
@@ -154,6 +160,7 @@ export async function updateBookingForReschedule(
     newDate,
     newTime,
     policyVersionId,
+    capacityResolutionMode,
     usesSpecialQuota,
     specialReasonCode,
     specialReasonNote,
@@ -179,6 +186,7 @@ const LIST_BOOKINGS_SQL = `
     b.status,
     b.notes,
     b.policy_version_id as "policyVersionId",
+    b.capacity_resolution_mode as "capacityResolutionMode",
     b.uses_special_quota as "usesSpecialQuota",
     b.special_reason_code as "specialReasonCode",
     b.special_reason_note as "specialReasonNote",

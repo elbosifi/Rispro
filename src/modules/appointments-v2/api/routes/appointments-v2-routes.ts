@@ -15,6 +15,7 @@ import { getBookingDetails } from "../../booking/services/get-booking-details.se
 import { listBookingsService } from "../../booking/services/list-bookings.service.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 const router = Router();
 
@@ -109,6 +110,9 @@ router.post(
     }
 
     const userId = Number(req.user?.sub ?? 0);
+    const capacityResolutionMode: CapacityResolutionMode =
+      body.capacityResolutionMode ??
+      (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
 
     const result = await createBooking(
       {
@@ -119,6 +123,7 @@ router.post(
         bookingDate: body.bookingDate,
         bookingTime: body.bookingTime ?? null,
         caseCategory: body.caseCategory,
+        capacityResolutionMode,
         useSpecialQuota: body.useSpecialQuota === true,
         specialReasonCode: body.specialReasonCode ?? null,
         specialReasonNote: body.specialReasonNote ?? null,
@@ -157,6 +162,9 @@ router.put(
     const body = req.body as UpdateAppointmentDto;
 
     const userId = Number(req.user?.sub ?? 0);
+    const capacityResolutionMode: CapacityResolutionMode | undefined =
+      body.capacityResolutionMode ??
+      (body.useSpecialQuota === true ? "special_quota_extra" : undefined);
 
     // If no date change provided, keep the existing booking date (time-only reschedule)
     const result = await rescheduleBooking(
@@ -165,7 +173,7 @@ router.put(
       body.bookingTime ?? null,
       userId,
       body.override,
-      body.useSpecialQuota === true,
+      capacityResolutionMode,
       body.specialReasonCode ?? null,
       body.specialReasonNote ?? null,
       body.rescheduleReason ?? null,

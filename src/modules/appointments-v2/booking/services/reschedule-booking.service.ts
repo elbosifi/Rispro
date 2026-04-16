@@ -33,6 +33,7 @@ import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -47,7 +48,7 @@ export async function rescheduleBooking(
   newTime: string | null,
   userId: number,
   override?: CreateBookingPayload["override"],
-  useSpecialQuota: boolean = false,
+  capacityResolutionMode?: CapacityResolutionMode,
   specialReasonCode: string | null = null,
   specialReasonNote: string | null = null,
   rescheduleReason: string | null = null,
@@ -61,7 +62,7 @@ export async function rescheduleBooking(
       newTime,
       userId,
       override,
-      useSpecialQuota,
+      capacityResolutionMode,
       specialReasonCode,
       specialReasonNote,
       rescheduleReason,
@@ -80,7 +81,7 @@ async function rescheduleBookingInternal(
   newTime: string | null,
   userId: number,
   override: CreateBookingPayload["override"] | undefined,
-  useSpecialQuota: boolean,
+  capacityResolutionMode: CapacityResolutionMode | undefined,
   specialReasonCode: string | null,
   specialReasonNote: string | null,
   rescheduleReason: string | null,
@@ -111,6 +112,8 @@ async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
+  const effectiveCapacityResolutionMode =
+    capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
 
   // If the date hasn't changed (or no new date provided), just update the time — no re-evaluation needed
   if (!newDate || previousDate === newDate) {
@@ -215,13 +218,8 @@ async function rescheduleBookingInternal(
     currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
       modalityId: booking.modalityId,
       bookingDate: newDate,
-      caseCategory: booking.caseCategory,
       examTypeId: booking.examTypeId,
     });
-    // If rescheduling WITH special quota, account for this booking's intent
-    if (useSpecialQuota) {
-      currentSpecialQuotaBookedCount += 1;
-    }
   }
 
   // 7. Build context and re-evaluate
@@ -252,7 +250,8 @@ async function rescheduleBookingInternal(
     examTypeId: booking.examTypeId,
     scheduledDate: newDate,
     caseCategory: booking.caseCategory,
-    useSpecialQuota,
+    capacityResolutionMode: effectiveCapacityResolutionMode,
+    useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
     // `specialReasonCode` remains metadata/audit justification only and does
     // not create independent scheduling policy behavior.
     specialReasonCode,
@@ -311,6 +310,14 @@ async function rescheduleBookingInternal(
     wasOverride = true;
   }
 
+  if (effectiveCapacityResolutionMode === "special_quota_extra" && !specialReasonCode) {
+    throw new SchedulingError(
+      400,
+      "Special quota extra mode requires specialReasonCode.",
+      ["special_reason_code_required"]
+    );
+  }
+
   await updateBookingForReschedule(
     client,
     bookingId,
@@ -318,6 +325,7 @@ async function rescheduleBookingInternal(
     newTime,
     publishedVersion.id,
     userId,
+    effectiveCapacityResolutionMode,
     // Recompute uses_special_quota for the new booking state
     decision.consumedCapacityMode === "special",
     specialReasonCode,
@@ -334,7 +342,7 @@ async function rescheduleBookingInternal(
       requestingUserId: userId,
       supervisorUserId,
       overrideReason: override?.reason ?? null,
-      decisionSnapshot: decision,
+      decisionSnapshot: { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
       outcome: "approved_and_booked",
     });
   }

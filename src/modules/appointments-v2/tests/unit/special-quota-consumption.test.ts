@@ -42,12 +42,16 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
 }
 
 function makeInput(overrides: Partial<PureEvaluateInput> = {}): PureEvaluateInput {
+  const capacityResolutionMode =
+    overrides.capacityResolutionMode ??
+    (overrides.useSpecialQuota ? "special_quota_extra" : "standard");
   return {
     patientId: 1,
     modalityId: 1,
     examTypeId: 10,
     scheduledDate: "2026-06-01",
     caseCategory: "non_oncology",
+    capacityResolutionMode,
     useSpecialQuota: false,
     specialReasonCode: null,
     includeOverrideEvaluation: false,
@@ -88,8 +92,9 @@ describe("Special quota consumption — pureEvaluate", () => {
     assert.strictEqual(decision.remainingSpecialQuota, 2); // 3 - 1 = 2
   });
 
-  it("returns blocked when standard/category capacity is exhausted even if special quota exists", async () => {
+  it("allows special_quota_extra when standard/category capacity is exhausted and quota exists", async () => {
     const input = makeInput({
+      capacityResolutionMode: "special_quota_extra",
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 5, // category exhausted
@@ -99,10 +104,9 @@ describe("Special quota consumption — pureEvaluate", () => {
 
     const decision = await pureEvaluate(input);
 
-    assert.strictEqual(decision.displayStatus, "blocked");
+    assert.strictEqual(decision.displayStatus, "available");
     assert.strictEqual(decision.remainingStandardCapacity, 0);
-    assert.strictEqual(decision.remainingSpecialQuota, null);
-    assert.ok(decision.reasons.some((r) => r.code === "standard_capacity_exhausted"));
+    assert.strictEqual(decision.remainingSpecialQuota, 3);
   });
 
   it("returns available with standard capacity when not exhausted (ignores special quota)", async () => {
@@ -136,7 +140,7 @@ describe("Special quota consumption — pureEvaluate", () => {
     assert.strictEqual(decision.displayStatus, "available");
   });
 
-  it("returns null remainingSpecialQuota when no examTypeId provided", async () => {
+  it("blocks special_quota_extra when no examTypeId is provided", async () => {
     const input = makeInput({
       examTypeId: null,
       useSpecialQuota: true,
@@ -148,11 +152,11 @@ describe("Special quota consumption — pureEvaluate", () => {
 
     const decision = await pureEvaluate(input);
 
-    assert.strictEqual(decision.remainingSpecialQuota, null);
-    assert.strictEqual(decision.displayStatus, "available");
+    assert.strictEqual(decision.remainingSpecialQuota, 0);
+    assert.strictEqual(decision.displayStatus, "blocked");
   });
 
-  it("returns available when no special quota configured for exam type", async () => {
+  it("blocks special_quota_extra when no special quota is configured for exam type", async () => {
     const input = makeInput({
       examTypeId: 99, // no quota for this exam type
       useSpecialQuota: true,
@@ -167,8 +171,8 @@ describe("Special quota consumption — pureEvaluate", () => {
 
     const decision = await pureEvaluate(input);
 
-    assert.strictEqual(decision.displayStatus, "available");
-    assert.strictEqual(decision.remainingSpecialQuota, null);
+    assert.strictEqual(decision.displayStatus, "blocked");
+    assert.strictEqual(decision.remainingSpecialQuota, 0);
   });
 
   it("returns special suggestion mode when special quota requested and available", async () => {
