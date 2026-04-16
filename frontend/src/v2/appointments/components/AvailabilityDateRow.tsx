@@ -4,8 +4,16 @@ interface Props {
   date: string;
   dayLabel: string;
   status: AvailabilityRowStatus;
+  bucketMode: "partitioned" | "total_only";
   remainingCapacity: number | null;
   dailyCapacity: number | null;
+  oncologyReserved: number | null;
+  oncologyFilled: number;
+  oncologyRemaining: number | null;
+  nonOncologyReserved: number | null;
+  nonOncologyFilled: number;
+  nonOncologyRemaining: number | null;
+  specialQuotaRemaining: number | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
   selected: boolean;
@@ -16,8 +24,16 @@ export function AvailabilityDateRow({
   date,
   dayLabel,
   status,
+  bucketMode,
   remainingCapacity,
   dailyCapacity,
+  oncologyReserved,
+  oncologyFilled,
+  oncologyRemaining,
+  nonOncologyReserved,
+  nonOncologyFilled,
+  nonOncologyRemaining,
+  specialQuotaRemaining,
   reasonText,
   requiresSupervisorOverride,
   selected,
@@ -70,8 +86,30 @@ export function AvailabilityDateRow({
       {isBlockedLike ? (
         <div style={{ marginTop: 8, fontSize: 12, color: "#dc2626" }}>Blocked</div>
       ) : (
-        <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
-          {remainingCapacity ?? 0} / {dailyCapacity ?? 0} slots
+        <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted, #64748b)", display: "grid", gap: 2 }}>
+          <div>
+            Total: {remainingCapacity ?? 0} / {dailyCapacity ?? 0} remaining
+          </div>
+          {bucketMode === "partitioned" ? (
+            <>
+              <div>
+                Oncology: {oncologyFilled} filled, {oncologyRemaining ?? 0} remaining
+                {oncologyReserved != null ? ` (reserved ${oncologyReserved})` : ""}
+              </div>
+              <div>
+                Non-oncology: {nonOncologyFilled} filled, {nonOncologyRemaining ?? 0} remaining
+                {nonOncologyReserved != null ? ` (reserved ${nonOncologyReserved})` : ""}
+              </div>
+            </>
+          ) : (
+            <>
+              <div>Mode: Total-capacity only</div>
+              <div>Booked by category: Oncology {oncologyFilled}, Non-oncology {nonOncologyFilled}</div>
+            </>
+          )}
+          {specialQuotaRemaining != null && (
+            <div>Special quota remaining: {specialQuotaRemaining}</div>
+          )}
         </div>
       )}
 

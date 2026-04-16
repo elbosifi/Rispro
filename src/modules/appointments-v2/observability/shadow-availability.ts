@@ -23,7 +23,7 @@ import {
 import { findModalityById } from "../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../catalog/repositories/exam-type-catalog.repo.js";
 import {
-  getBookedCountForDate,
+  getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
 } from "../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../shared/utils/dates.js";
@@ -158,6 +158,10 @@ async function computeShadowDiffsInternal(
   }
 
   // Load rules once (same for all dates)
+  const modality = await findModalityById(client, params.modalityId);
+  if (!modality) {
+    return [];
+  }
   const blockedRules = await loadModalityBlockedRules(
     client,
     publishedVersion.id,
@@ -188,13 +192,15 @@ async function computeShadowDiffsInternal(
 
   // Compare each date
   for (const legacyDay of legacyResults) {
-    // Load booked count for this date
-    const currentBookedCount = await getBookedCountForDate(
+    const bookedCounts = await getBookedCountsByCategoryForDate(
       client,
       params.modalityId,
-      legacyDay.date,
-      params.caseCategory
+      legacyDay.date
     );
+    const currentBookedCount =
+      params.caseCategory === "oncology"
+        ? bookedCounts.oncology
+        : bookedCounts.nonOncology;
 
     // Load special quota booked count (only when examTypeId is provided)
     let currentSpecialQuotaBookedCount = 0;
@@ -220,6 +226,10 @@ async function computeShadowDiffsInternal(
       examTypeRules,
       examTypeRuleItemExamTypeIds,
       categoryLimits,
+      modalityDailyCapacity: modality.dailyCapacity ?? null,
+      currentBookedCountTotal: bookedCounts.total,
+      currentBookedCountOncology: bookedCounts.oncology,
+      currentBookedCountNonOncology: bookedCounts.nonOncology,
       specialQuotas,
       currentBookedCount,
       currentSpecialQuotaBookedCount,

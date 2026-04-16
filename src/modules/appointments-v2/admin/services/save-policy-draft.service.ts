@@ -27,6 +27,7 @@ import {
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import type { PolicySnapshotDto } from "../../api/dto/admin-scheduling.dto.js";
+import type { FieldValidationErrorDto } from "../../api/dto/admin-scheduling.dto.js";
 
 export interface SavePolicyDraftResult {
   version: PolicyVersionRow;
@@ -69,6 +70,8 @@ async function savePolicyDraftInternal(
       ["policy_version_not_draft"]
     );
   }
+
+  await validateCategoryCapacityPolicy(client, policySnapshot);
 
   // 3. Delete all existing versioned rules for this version (authoritative replace)
   await deleteAllRulesForVersion(client, versionId);
@@ -165,4 +168,83 @@ async function savePolicyDraftInternal(
     version: refreshed,
     configHash,
   };
+}
+
+async function validateCategoryCapacityPolicy(
+  client: PoolClient,
+  policySnapshot: PolicySnapshotDto
+): Promise<void> {
+  const activeLimits = policySnapshot.categoryDailyLimits.filter((row) => row.isActive);
+  if (activeLimits.length === 0) return;
+
+  const modalityIds = [...new Set(activeLimits.map((row) => Number(row.modalityId)).filter((v) => Number.isFinite(v) && v > 0))];
+  if (modalityIds.length === 0) return;
+
+  const modalities = await client.query<{ id: number; dailyCapacity: number | null }>(
+    `
+      select id, daily_capacity as "dailyCapacity"
+      from modalities
+      where id = any($1::bigint[])
+    `,
+    [modalityIds]
+  );
+  const capacityByModality = new Map<number, number | null>();
+  for (const row of modalities.rows) {
+    capacityByModality.set(Number(row.id), row.dailyCapacity == null ? null : Number(row.dailyCapacity));
+  }
+
+  const byModality = new Map<number, Array<PolicySnapshotDto["categoryDailyLimits"][number]>>();
+  for (const row of activeLimits) {
+    const modalityId = Number(row.modalityId);
+    const existing = byModality.get(modalityId) ?? [];
+    existing.push(row);
+    byModality.set(modalityId, existing);
+  }
+
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  for (const [modalityId, rows] of byModality) {
+    const modalityCapacity = capacityByModality.get(modalityId) ?? null;
+    if (modalityCapacity == null || !Number.isFinite(modalityCapacity)) {
+      fieldErrors.push({
+        field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}]`,
+        code: "modality_capacity_missing",
+        message: `Modality ${modalityId} has no valid daily capacity configured.`,
+      });
+      continue;
+    }
+
+    const oncology = rows.find((r) => r.caseCategory === "oncology");
+    const nonOncology = rows.find((r) => r.caseCategory === "non_oncology");
+
+    if (oncology && nonOncology) {
+      const sum = Number(oncology.dailyLimit) + Number(nonOncology.dailyLimit);
+      if (sum !== modalityCapacity) {
+        fieldErrors.push({
+          field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}]`,
+          code: "category_limits_must_equal_modality_capacity",
+          message: `Oncology + non-oncology limits must equal modality daily capacity (${modalityCapacity}).`,
+        });
+      }
+      continue;
+    }
+
+    const configured = oncology ?? nonOncology;
+    if (!configured) continue;
+    if (Number(configured.dailyLimit) > modalityCapacity) {
+      fieldErrors.push({
+        field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}][caseCategory=${configured.caseCategory}]`,
+        code: "category_limit_exceeds_modality_capacity",
+        message: `Configured ${configured.caseCategory} limit exceeds modality daily capacity (${modalityCapacity}).`,
+      });
+    }
+  }
+
+  if (fieldErrors.length > 0) {
+    throw new SchedulingError(
+      400,
+      "Validation failed",
+      ["validation_failed"],
+      { fieldErrors }
+    );
+  }
 }

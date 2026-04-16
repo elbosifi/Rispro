@@ -13,6 +13,11 @@ import assert from "node:assert/strict";
 // ---------------------------------------------------------------------------
 
 describe("bucket-mutex — function structure", () => {
+  it("exports acquireBucketLocks", async () => {
+    const { acquireBucketLocks } = await import("../../booking/repositories/bucket-mutex.repo.js");
+    assert.ok(typeof acquireBucketLocks === "function");
+  });
+
   it("exports acquireBucketLock", async () => {
     const { acquireBucketLock } = await import("../../booking/repositories/bucket-mutex.repo.js");
     assert.ok(typeof acquireBucketLock === "function");
@@ -31,6 +36,34 @@ describe("bucket-mutex — function structure", () => {
   it("releaseBucketLock is async", async () => {
     const { releaseBucketLock } = await import("../../booking/repositories/bucket-mutex.repo.js");
     assert.ok(releaseBucketLock.constructor.name === "AsyncFunction" || typeof releaseBucketLock === "function");
+  });
+});
+
+describe("bucket-mutex — deterministic multi-lock ordering", () => {
+  it("acquires all locks in globally sorted order", async () => {
+    const { acquireBucketLocks } = await import("../../booking/repositories/bucket-mutex.repo.js");
+    const calls: string[] = [];
+    const client = {
+      async query(_sql: string, params: unknown[]) {
+        calls.push(String(params.join("|")));
+        return { rows: [] };
+      },
+    } as unknown as import("pg").PoolClient;
+
+    await acquireBucketLocks(client, [
+      { modalityId: 2, date: "2026-04-20", caseCategory: "non_oncology" },
+      { modalityId: 1, date: "2026-04-21", caseCategory: "oncology" },
+      { modalityId: 1, date: "2026-04-20", caseCategory: "non_oncology" },
+      { modalityId: 1, date: "2026-04-20", caseCategory: "oncology" },
+    ]);
+
+    const keyCalls = calls.filter((_, index) => index % 2 === 0);
+    assert.deepEqual(keyCalls, [
+      "1|2026-04-20|non_oncology",
+      "1|2026-04-20|oncology",
+      "1|2026-04-21|oncology",
+      "2|2026-04-20|non_oncology",
+    ]);
   });
 });
 
@@ -72,13 +105,15 @@ describe("bucket-mutex — SQL queries", () => {
     assert.ok(source.includes("case_category = $3"), "Should filter by case_category");
   });
 
-  it("acquireBucketLock executes both queries in sequence", () => {
+  it("acquireBucketLocks executes both queries in sequence", () => {
     assert.ok(source.includes("await client.query(ACQUIRE_SQL"), "Should execute ACQUIRE_SQL first");
     assert.ok(source.includes("await client.query(LOCK_SQL"), "Should execute LOCK_SQL second");
   });
 
   it("acquireBucketLock passes parameters correctly", () => {
-    assert.ok(source.includes("[modalityId, date, caseCategory]"), "Should pass all three parameters");
+    assert.ok(source.includes("modalityId"), "Should pass modalityId");
+    assert.ok(source.includes("date"), "Should pass date");
+    assert.ok(source.includes("caseCategory"), "Should pass caseCategory");
   });
 
   it("releaseBucketLock is a no-op (locks released on COMMIT/ROLLBACK)", () => {
@@ -146,8 +181,8 @@ describe("bucket-mutex — integration wiring", () => {
       "create-booking should import bucket-mutex.repo"
     );
     assert.ok(
-      source.includes("acquireBucketLock"),
-      "create-booking should call acquireBucketLock"
+      source.includes("acquireBucketLocks"),
+      "create-booking should call acquireBucketLocks"
     );
   });
 
@@ -162,8 +197,8 @@ describe("bucket-mutex — integration wiring", () => {
       "reschedule-booking should import bucket-mutex.repo"
     );
     assert.ok(
-      source.includes("acquireBucketLock"),
-      "reschedule-booking should call acquireBucketLock"
+      source.includes("acquireBucketLocks"),
+      "reschedule-booking should call acquireBucketLocks"
     );
   });
 });

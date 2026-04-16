@@ -27,6 +27,7 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountForDate,
+  getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
 } from "../../scheduler/repositories/capacity.repo.js";
 
@@ -128,6 +129,11 @@ export async function evaluateWithDb(
     params.scheduledDate,
     params.caseCategory
   );
+  const bookedCounts = await getBookedCountsByCategoryForDate(
+    client,
+    params.modalityId,
+    params.scheduledDate
+  );
 
   // 5. Load special quota booked count (only when examTypeId is provided)
   let currentSpecialQuotaBookedCount = 0;
@@ -153,6 +159,10 @@ export async function evaluateWithDb(
     examTypeRules,
     examTypeRuleItemExamTypeIds,
     categoryLimits,
+    modalityDailyCapacity: modality?.dailyCapacity ?? null,
+    currentBookedCountTotal: bookedCounts.total,
+    currentBookedCountOncology: bookedCounts.oncology,
+    currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount,
     currentSpecialQuotaBookedCount,

@@ -111,9 +111,7 @@ describe("ModalityRow — dailyCapacity field", () => {
     assert.strictEqual(typeof modality.dailyCapacity, "number");
   });
 
-  it("dailyCapacity is used when no category limit is configured", () => {
-    // Simulate the fallback logic from availability.service.ts:
-    // const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
+  it("modality dailyCapacity is always the total ceiling", () => {
     const modality = {
       id: 1,
       name: "CT",
@@ -121,14 +119,10 @@ describe("ModalityRow — dailyCapacity field", () => {
       dailyCapacity: 25,
       isActive: true,
     };
-    const categoryLimit = null; // No category limit configured
-
-    const dailyCapacity = categoryLimit ? (categoryLimit as any).dailyLimit : modality.dailyCapacity;
-
-    assert.strictEqual(dailyCapacity, 25);
+    assert.strictEqual(modality.dailyCapacity, 25);
   });
 
-  it("category limit overrides modality dailyCapacity when present", () => {
+  it("category limits do not replace modality total capacity", () => {
     const modality = {
       id: 1,
       name: "CT",
@@ -137,10 +131,9 @@ describe("ModalityRow — dailyCapacity field", () => {
       isActive: true,
     };
     const categoryLimit = { dailyLimit: 15, caseCategory: "non_oncology" as const, isActive: true };
-
-    const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
-
-    assert.strictEqual(dailyCapacity, 15); // Category limit takes precedence
+    const dailyCapacity = modality.dailyCapacity;
+    assert.strictEqual(dailyCapacity, 25);
+    assert.notStrictEqual(dailyCapacity, categoryLimit.dailyLimit);
   });
 });
 
@@ -181,7 +174,6 @@ describe("Availability service — no hardcoded dailyCapacity default", () => {
     );
     // Should NOT contain the old hardcoded default
     assert.ok(!content.includes("defaultDailyCapacity"), "Should not have defaultDailyCapacity variable");
-    // Should use modality.dailyCapacity as fallback
-    assert.ok(content.includes("modality.dailyCapacity"), "Should use modality.dailyCapacity as fallback");
+    assert.ok(content.includes("modalityTotalCapacity"), "Should compute modality total capacity");
   });
 });

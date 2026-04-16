@@ -101,6 +101,54 @@ async function validatePolicyDraftInternal(
     );
   }
 
+  // 9. Category limits must be consistent with modality daily capacity.
+  const activeCategoryRules = rules.filter(
+    (r: PolicyRuleRow) => r.ruleType === "category_daily_limit" && r.isActive && r.modalityId != null
+  );
+  if (activeCategoryRules.length > 0) {
+    const modalityIds = [...new Set(activeCategoryRules.map((r) => Number(r.modalityId)))];
+    const capacities = await client.query<{ id: number; dailyCapacity: number | null }>(
+      `
+        select id, daily_capacity as "dailyCapacity"
+        from modalities
+        where id = any($1::bigint[])
+      `,
+      [modalityIds]
+    );
+    const capacityByModality = new Map<number, number | null>();
+    for (const row of capacities.rows) {
+      capacityByModality.set(Number(row.id), row.dailyCapacity == null ? null : Number(row.dailyCapacity));
+    }
+
+    for (const modalityId of modalityIds) {
+      const modalityCapacity = capacityByModality.get(modalityId) ?? null;
+      if (modalityCapacity == null || !Number.isFinite(modalityCapacity)) {
+        errors.push(`Modality ${modalityId} has no valid daily capacity.`);
+        continue;
+      }
+
+      const rows = activeCategoryRules.filter((r) => Number(r.modalityId) === modalityId);
+      const oncology = rows.find((r) => r.caseCategory === "oncology");
+      const nonOncology = rows.find((r) => r.caseCategory === "non_oncology");
+      if (oncology && nonOncology) {
+        const sum = Number(oncology.dailyLimit ?? 0) + Number(nonOncology.dailyLimit ?? 0);
+        if (sum !== modalityCapacity) {
+          errors.push(
+            `Modality ${modalityId}: oncology + non_oncology limits must equal daily capacity (${modalityCapacity}).`
+          );
+        }
+      } else {
+        const configured = oncology ?? nonOncology;
+        if (!configured) continue;
+        if (Number(configured.dailyLimit ?? 0) > modalityCapacity) {
+          errors.push(
+            `Modality ${modalityId}: ${configured.caseCategory} daily limit cannot exceed daily capacity (${modalityCapacity}).`
+          );
+        }
+      }
+    }
+  }
+
   return {
     isValid: errors.length === 0,
     errors,

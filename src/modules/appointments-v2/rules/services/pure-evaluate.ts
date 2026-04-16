@@ -197,71 +197,165 @@ function checkCapacity(
 } {
   const ctx = input.context;
   const reasons: ReasonCode[] = [];
-
-  // Find the category limit for this modality + case category
-  const limit = ctx.categoryLimits.find(
-    (l) => l.caseCategory === input.caseCategory && l.isActive
-  );
-
-  if (!limit) {
-    // No limit configured — assume unlimited capacity
+  const modalityDailyCapacity = ctx.modalityDailyCapacity;
+  if (modalityDailyCapacity == null || modalityDailyCapacity <= 0) {
+    reasons.push(
+      reason(
+        "modality_capacity_not_configured",
+        "error",
+        "This modality has no valid daily capacity configured."
+      )
+    );
     return {
-      status: "available",
-      remainingStandardCapacity: null,
+      status: "blocked",
+      remainingStandardCapacity: 0,
       remainingSpecialQuota: null,
-      reasons: [],
+      reasons,
     };
   }
 
-  const remainingStandard = limit.dailyLimit - ctx.currentBookedCount;
+  const activeLimits = ctx.categoryLimits.filter((l) => l.isActive);
+  const oncologyLimit = activeLimits.find((l) => l.caseCategory === "oncology");
+  const nonOncologyLimit = activeLimits.find((l) => l.caseCategory === "non_oncology");
 
-  if (remainingStandard > 0) {
-    // Standard capacity available
+  let partitioned = false;
+  let oncologyReserve: number | null = null;
+  let nonOncologyReserve: number | null = null;
+
+  if (oncologyLimit && nonOncologyLimit) {
+    const sum = oncologyLimit.dailyLimit + nonOncologyLimit.dailyLimit;
+    if (sum !== modalityDailyCapacity) {
+      reasons.push(
+        reason(
+          "invalid_category_capacity_configuration",
+          "error",
+          "Oncology and non-oncology limits must exactly match modality daily capacity."
+        )
+      );
+      return {
+        status: "blocked",
+        remainingStandardCapacity: 0,
+        remainingSpecialQuota: null,
+        reasons,
+      };
+    }
+    partitioned = true;
+    oncologyReserve = oncologyLimit.dailyLimit;
+    nonOncologyReserve = nonOncologyLimit.dailyLimit;
+  } else if (oncologyLimit || nonOncologyLimit) {
+    partitioned = true;
+    if (oncologyLimit) {
+      if (oncologyLimit.dailyLimit > modalityDailyCapacity) {
+        reasons.push(
+          reason(
+            "invalid_category_capacity_configuration",
+            "error",
+            "Configured oncology limit exceeds modality daily capacity."
+          )
+        );
+        return {
+          status: "blocked",
+          remainingStandardCapacity: 0,
+          remainingSpecialQuota: null,
+          reasons,
+        };
+      }
+      oncologyReserve = oncologyLimit.dailyLimit;
+      nonOncologyReserve = modalityDailyCapacity - oncologyLimit.dailyLimit;
+    } else if (nonOncologyLimit) {
+      if (nonOncologyLimit.dailyLimit > modalityDailyCapacity) {
+        reasons.push(
+          reason(
+            "invalid_category_capacity_configuration",
+            "error",
+            "Configured non-oncology limit exceeds modality daily capacity."
+          )
+        );
+        return {
+          status: "blocked",
+          remainingStandardCapacity: 0,
+          remainingSpecialQuota: null,
+          reasons,
+        };
+      }
+      nonOncologyReserve = nonOncologyLimit.dailyLimit;
+      oncologyReserve = modalityDailyCapacity - nonOncologyLimit.dailyLimit;
+    }
+  }
+
+  const categoryBookedFallback =
+    input.caseCategory === "oncology"
+      ? ctx.currentBookedCountOncology
+      : ctx.currentBookedCountNonOncology;
+  const selectedBookedCount =
+    categoryBookedFallback > 0 ? categoryBookedFallback : ctx.currentBookedCount;
+  const totalBookedCount =
+    ctx.currentBookedCountTotal > 0
+      ? ctx.currentBookedCountTotal
+      : (ctx.currentBookedCountOncology + ctx.currentBookedCountNonOncology) > 0
+      ? (ctx.currentBookedCountOncology + ctx.currentBookedCountNonOncology)
+      : ctx.currentBookedCount;
+
+  const totalRemaining = modalityDailyCapacity - totalBookedCount;
+  if (totalRemaining <= 0) {
+    reasons.push(
+      reason(
+        "standard_capacity_exhausted",
+        "error",
+        "No remaining capacity for this modality date."
+      )
+    );
     return {
-      status: "available",
-      remainingStandardCapacity: remainingStandard,
+      status: "blocked",
+      remainingStandardCapacity: 0,
       remainingSpecialQuota: null,
-      reasons: [],
+      reasons,
     };
   }
 
-  // Standard capacity exhausted — check special quota
+  let remainingStandardCapacity = totalRemaining;
+  if (partitioned) {
+    const reserve =
+      input.caseCategory === "oncology" ? (oncologyReserve ?? 0) : (nonOncologyReserve ?? 0);
+    const bookedInCategory = selectedBookedCount;
+    const bucketRemaining = reserve - bookedInCategory;
+    if (bucketRemaining <= 0) {
+      reasons.push(
+        reason(
+          "standard_capacity_exhausted",
+          "error",
+          "No remaining capacity for this date and category."
+        )
+      );
+      return {
+        status: "blocked",
+        remainingStandardCapacity: 0,
+        remainingSpecialQuota: null,
+        reasons,
+      };
+    }
+    remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
+  }
+
+  let remainingSpecialQuota: number | null = null;
   if (input.useSpecialQuota && input.examTypeId != null) {
-    // Convert to number for comparison since DB returns strings
     const examTypeIdNum = Number(input.examTypeId);
     const quota = ctx.specialQuotas.find(
       (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
     );
-
     if (quota && quota.dailyExtraSlots > 0) {
-      // Compute remaining special quota by subtracting already-consumed bookings
-      const remainingSpecialQuota = quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount;
-
-      if (remainingSpecialQuota > 0) {
-        return {
-          status: "available",
-          remainingStandardCapacity: 0,
-          remainingSpecialQuota,
-          reasons: [],
-        };
-      }
+      remainingSpecialQuota = Math.max(
+        0,
+        quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount
+      );
     }
   }
 
-  // No special quota available — capacity exhausted
-  reasons.push(
-    reason(
-      "standard_capacity_exhausted",
-      "error",
-      "No remaining capacity for this date and category."
-    )
-  );
-
   return {
-    status: "blocked",
-    remainingStandardCapacity: 0,
-    remainingSpecialQuota: null,
-    reasons,
+    status: "available",
+    remainingStandardCapacity,
+    remainingSpecialQuota,
+    reasons: [],
   };
 }
 

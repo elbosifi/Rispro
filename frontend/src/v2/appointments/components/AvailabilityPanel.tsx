@@ -26,8 +26,16 @@ export function AvailabilityPanel({ rows, selectedDate, onSelectDate, loading, e
           date={row.date}
           dayLabel={row.dayLabel}
           status={row.status}
+          bucketMode={row.bucketMode}
           remainingCapacity={row.remainingCapacity}
           dailyCapacity={row.dailyCapacity}
+          oncologyReserved={row.oncologyReserved}
+          oncologyFilled={row.oncologyFilled}
+          oncologyRemaining={row.oncologyRemaining}
+          nonOncologyReserved={row.nonOncologyReserved}
+          nonOncologyFilled={row.nonOncologyFilled}
+          nonOncologyRemaining={row.nonOncologyRemaining}
+          specialQuotaRemaining={row.specialQuotaRemaining}
           reasonText={row.reasonText}
           requiresSupervisorOverride={row.requiresSupervisorOverride}
           selected={selectedDate === row.date}

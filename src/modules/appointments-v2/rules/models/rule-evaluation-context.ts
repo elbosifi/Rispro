@@ -44,10 +44,22 @@ export interface RuleEvaluationContext {
   /** Daily capacity limits for this modality */
   categoryLimits: CategoryDailyLimitRow[];
 
+  /** Hard total capacity from modality.daily_capacity */
+  modalityDailyCapacity: number | null;
+
+  /** Current booked counts for modality/date (all categories). */
+  currentBookedCountTotal: number;
+
+  /** Current oncology booked count for modality/date. */
+  currentBookedCountOncology: number;
+
+  /** Current non-oncology booked count for modality/date. */
+  currentBookedCountNonOncology: number;
+
   /** Special quotas for exam types */
   specialQuotas: ExamTypeSpecialQuotaRow[];
 
-  /** Current booked count for this bucket (standard capacity) */
+  /** Current booked count for selected input category (compat shim). */
   currentBookedCount: number;
 
   /**

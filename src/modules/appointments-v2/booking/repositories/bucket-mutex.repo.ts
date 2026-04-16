@@ -7,6 +7,12 @@
 
 import type { PoolClient } from "pg";
 
+export interface BucketLockKey {
+  modalityId: number;
+  date: string;
+  caseCategory: string;
+}
+
 const ACQUIRE_SQL = `
   insert into appointments_v2.bucket_mutex (modality_id, booking_date, case_category)
   values ($1, $2, $3)
@@ -20,16 +26,36 @@ const LOCK_SQL = `
   for update
 `;
 
+function compareLockKeys(a: BucketLockKey, b: BucketLockKey): number {
+  if (a.modalityId !== b.modalityId) return a.modalityId - b.modalityId;
+  if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+  if (a.caseCategory === b.caseCategory) return 0;
+  return a.caseCategory < b.caseCategory ? -1 : 1;
+}
+
+export async function acquireBucketLocks(
+  client: PoolClient,
+  keys: BucketLockKey[]
+): Promise<void> {
+  const dedup = new Map<string, BucketLockKey>();
+  for (const key of keys) {
+    dedup.set(`${key.modalityId}:${key.date}:${key.caseCategory}`, key);
+  }
+
+  const ordered = [...dedup.values()].sort(compareLockKeys);
+  for (const key of ordered) {
+    await client.query(ACQUIRE_SQL, [key.modalityId, key.date, key.caseCategory]);
+    await client.query(LOCK_SQL, [key.modalityId, key.date, key.caseCategory]);
+  }
+}
+
 export async function acquireBucketLock(
   client: PoolClient,
   modalityId: number,
   date: string,
   caseCategory: string
 ): Promise<void> {
-  // Ensure the row exists
-  await client.query(ACQUIRE_SQL, [modalityId, date, caseCategory]);
-  // Lock it for the duration of the transaction
-  await client.query(LOCK_SQL, [modalityId, date, caseCategory]);
+  await acquireBucketLocks(client, [{ modalityId, date, caseCategory }]);
 }
 
 export async function releaseBucketLock(

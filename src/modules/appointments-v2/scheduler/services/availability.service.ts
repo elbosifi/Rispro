@@ -23,7 +23,7 @@ import {
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
-  getBookedCountForDate,
+  getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { addDays, todayIso } from "../../shared/utils/dates.js";
@@ -31,6 +31,26 @@ import { pool } from "../../../../db/pool.js";
 
 export interface AvailabilityDayDto {
   date: string;
+  bucketMode: "partitioned" | "total_only";
+  modalityTotalCapacity: number;
+  bookedTotal: number;
+  oncology: {
+    reserved: number | null;
+    filled: number;
+    remaining: number | null;
+  };
+  nonOncology: {
+    reserved: number | null;
+    filled: number;
+    remaining: number | null;
+  };
+  specialQuotaSummary: {
+    examTypeId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
+  // Backward-compatible fields
   dailyCapacity: number;
   bookedCount: number;
   remainingCapacity: number;
@@ -132,11 +152,15 @@ async function getAvailabilityInternal(
     params.modalityId
   );
 
-  // Find the applicable category limit
-  const categoryLimit = categoryLimits.find(
-    (l) => l.caseCategory === params.caseCategory && l.isActive
+  const activeOncology = categoryLimits.find(
+    (l) => l.isActive && l.caseCategory === "oncology"
   );
-  const dailyCapacity = categoryLimit ? categoryLimit.dailyLimit : modality.dailyCapacity;
+  const activeNonOncology = categoryLimits.find(
+    (l) => l.isActive && l.caseCategory === "non_oncology"
+  );
+  const modalityTotalCapacity = modality.dailyCapacity ?? 0;
+  const bucketMode: "partitioned" | "total_only" =
+    activeOncology || activeNonOncology ? "partitioned" : "total_only";
 
   // 5. Generate dates
   const startDate = todayIso();
@@ -145,16 +169,17 @@ async function getAvailabilityInternal(
   for (let i = params.offset; i < params.offset + params.days; i++) {
     const date = addDays(startDate, i);
 
-    // 6. Load booked count for this date
-    const bookedCount = await getBookedCountForDate(
+    const bookedCounts = await getBookedCountsByCategoryForDate(
       client,
       params.modalityId,
-      date,
-      params.caseCategory
+      date
     );
+    const bookedCountForCategory =
+      params.caseCategory === "oncology" ? bookedCounts.oncology : bookedCounts.nonOncology;
 
     // 7. Load special quota booked count (only when examTypeId is provided)
     let currentSpecialQuotaBookedCount = 0;
+    let specialQuotaSummary: AvailabilityDayDto["specialQuotaSummary"] = null;
     if (params.examTypeId != null) {
       currentSpecialQuotaBookedCount = await getSpecialQuotaBookedCount(client, {
         modalityId: params.modalityId,
@@ -162,9 +187,35 @@ async function getAvailabilityInternal(
         caseCategory: params.caseCategory,
         examTypeId: params.examTypeId,
       });
+      const quota = specialQuotas.find(
+        (q) => q.isActive && Number(q.examTypeId) === Number(params.examTypeId)
+      );
+      if (quota) {
+        specialQuotaSummary = {
+          examTypeId: Number(quota.examTypeId),
+          configured: quota.dailyExtraSlots,
+          consumed: currentSpecialQuotaBookedCount,
+          remaining: Math.max(0, quota.dailyExtraSlots - currentSpecialQuotaBookedCount),
+        };
+      }
     }
 
-    const remainingCapacity = Math.max(0, dailyCapacity - bookedCount);
+    let oncologyReserved: number | null = null;
+    let nonOncologyReserved: number | null = null;
+    if (bucketMode === "partitioned") {
+      if (activeOncology && activeNonOncology) {
+        oncologyReserved = activeOncology.dailyLimit;
+        nonOncologyReserved = activeNonOncology.dailyLimit;
+      } else if (activeOncology) {
+        oncologyReserved = activeOncology.dailyLimit;
+        nonOncologyReserved = Math.max(0, modalityTotalCapacity - activeOncology.dailyLimit);
+      } else if (activeNonOncology) {
+        nonOncologyReserved = activeNonOncology.dailyLimit;
+        oncologyReserved = Math.max(0, modalityTotalCapacity - activeNonOncology.dailyLimit);
+      }
+    }
+
+    const remainingCapacity = Math.max(0, modalityTotalCapacity - bookedCounts.total);
     const isFull = remainingCapacity <= 0;
 
     // 8. Evaluate the decision for this date
@@ -180,8 +231,12 @@ async function getAvailabilityInternal(
       examTypeRules,
       examTypeRuleItemExamTypeIds,
       categoryLimits,
+      modalityDailyCapacity: modalityTotalCapacity,
+      currentBookedCountTotal: bookedCounts.total,
+      currentBookedCountOncology: bookedCounts.oncology,
+      currentBookedCountNonOncology: bookedCounts.nonOncology,
       specialQuotas,
-      currentBookedCount: bookedCount,
+      currentBookedCount: bookedCountForCategory,
       currentSpecialQuotaBookedCount,
     };
 
@@ -201,8 +256,26 @@ async function getAvailabilityInternal(
 
     results.push({
       date,
-      dailyCapacity,
-      bookedCount,
+      bucketMode,
+      modalityTotalCapacity,
+      bookedTotal: bookedCounts.total,
+      oncology: {
+        reserved: oncologyReserved,
+        filled: bookedCounts.oncology,
+        remaining:
+          oncologyReserved == null ? null : Math.max(0, oncologyReserved - bookedCounts.oncology),
+      },
+      nonOncology: {
+        reserved: nonOncologyReserved,
+        filled: bookedCounts.nonOncology,
+        remaining:
+          nonOncologyReserved == null
+            ? null
+            : Math.max(0, nonOncologyReserved - bookedCounts.nonOncology),
+      },
+      specialQuotaSummary,
+      dailyCapacity: modalityTotalCapacity,
+      bookedCount: bookedCounts.total,
       remainingCapacity,
       isFull,
       rowDisplayStatus:

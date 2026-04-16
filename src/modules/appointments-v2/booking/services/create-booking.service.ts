@@ -23,9 +23,10 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import {
   getBookedCountForDate,
+  getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
 } from "../../scheduler/repositories/capacity.repo.js";
-import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
+import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
@@ -97,13 +98,19 @@ async function createBookingInternal(
     }
   }
 
-  // 4. Acquire bucket lock (D012: row-level locking)
-  await acquireBucketLock(
-    client,
-    payload.modalityId,
-    payload.bookingDate,
-    payload.caseCategory
-  );
+  // 4. Acquire both category locks for the target date (deterministic order).
+  await acquireBucketLocks(client, [
+    {
+      modalityId: payload.modalityId,
+      date: payload.bookingDate,
+      caseCategory: "oncology",
+    },
+    {
+      modalityId: payload.modalityId,
+      date: payload.bookingDate,
+      caseCategory: "non_oncology",
+    },
+  ]);
 
   // 5. Load all rules for re-evaluation inside the transaction
   const blockedRules = await loadModalityBlockedRules(
@@ -139,6 +146,11 @@ async function createBookingInternal(
     payload.bookingDate,
     payload.caseCategory
   );
+  const bookedCounts = await getBookedCountsByCategoryForDate(
+    client,
+    payload.modalityId,
+    payload.bookingDate
+  );
 
   // 7. Load special quota booked count (only when examTypeId is provided)
   let currentSpecialQuotaBookedCount = 0;
@@ -164,6 +176,10 @@ async function createBookingInternal(
     examTypeRules,
     examTypeRuleItemExamTypeIds,
     categoryLimits,
+    modalityDailyCapacity: modality.dailyCapacity ?? null,
+    currentBookedCountTotal: bookedCounts.total,
+    currentBookedCountOncology: bookedCounts.oncology,
+    currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount,
     currentSpecialQuotaBookedCount,

@@ -89,7 +89,7 @@ describe("createBooking — source verification", () => {
   });
 
   it("acquires bucket lock before evaluation", () => {
-    assert.ok(source.includes("acquireBucketLock"), "Should call acquireBucketLock");
+    assert.ok(source.includes("acquireBucketLocks"), "Should call acquireBucketLocks");
   });
 
   it("loads all rule types for re-evaluation", () => {

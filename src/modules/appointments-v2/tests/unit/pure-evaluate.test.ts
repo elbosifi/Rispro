@@ -29,6 +29,10 @@ function makeContext(
     examTypeRules: [],
     examTypeRuleItemExamTypeIds: [],
     categoryLimits: [],
+    modalityDailyCapacity: 20,
+    currentBookedCountTotal: 0,
+    currentBookedCountOncology: 0,
+    currentBookedCountNonOncology: 0,
     specialQuotas: [],
     currentBookedCount: 0,
     currentSpecialQuotaBookedCount: 0,
@@ -385,7 +389,7 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
       })
     );
     assert.equal(decision.displayStatus, "available");
-    assert.equal(decision.remainingStandardCapacity, null);
+    assert.equal(decision.remainingStandardCapacity, 20);
   });
 
   it("uses correct category limit (not wrong category)", async () => {
@@ -398,8 +402,58 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
         }),
       })
     );
-    // No non_oncology limit → unlimited
+    // Missing non_oncology limit derives reserve from modality remainder.
+    assert.equal(decision.displayStatus, "blocked");
+  });
+
+  it("enforces total modality ceiling even when selected category has reserve", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        caseCategory: "non_oncology",
+        context: makeContext({
+          modalityDailyCapacity: 10,
+          categoryLimits: [makeLimit(6, "non_oncology"), makeLimit(4, "oncology")],
+          currentBookedCountTotal: 10,
+          currentBookedCountOncology: 4,
+          currentBookedCountNonOncology: 6,
+          currentBookedCount: 6,
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "blocked");
+    assert.ok(decision.reasons.some((r) => r.code === "standard_capacity_exhausted"));
+  });
+
+  it("derives missing category reserve from modality remainder", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        caseCategory: "oncology",
+        context: makeContext({
+          modalityDailyCapacity: 10,
+          categoryLimits: [makeLimit(6, "non_oncology")],
+          currentBookedCountTotal: 6,
+          currentBookedCountOncology: 3,
+          currentBookedCountNonOncology: 3,
+          currentBookedCount: 3,
+        }),
+      })
+    );
     assert.equal(decision.displayStatus, "available");
+    assert.equal(decision.remainingStandardCapacity, 4 - 3);
+  });
+
+  it("blocks when both limits do not exactly equal modality capacity", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        context: makeContext({
+          modalityDailyCapacity: 10,
+          categoryLimits: [makeLimit(7, "non_oncology"), makeLimit(4, "oncology")],
+          currentBookedCountTotal: 0,
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "blocked");
+    assert.ok(decision.reasons.some((r) => r.code === "invalid_category_capacity_configuration"));
   });
 });
 
@@ -417,7 +471,7 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
     };
   }
 
-  it("allows via special quota when standard capacity exhausted", async () => {
+  it("does not bypass bucket ceiling via special quota", async () => {
     const decision = await pureEvaluate(
       makeInput({
         examTypeId: 50,
@@ -439,8 +493,7 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
         }),
       })
     );
-    assert.equal(decision.displayStatus, "available");
-    assert.equal(decision.remainingSpecialQuota, 3);
+    assert.equal(decision.displayStatus, "blocked");
   });
 
   it("blocks when special quota not requested and capacity exhausted", async () => {

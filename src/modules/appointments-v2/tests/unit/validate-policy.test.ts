@@ -43,7 +43,8 @@ class MockPoolClient {
 async function runValidateWithMocks(
   versionId: number,
   versionRow: Record<string, unknown> | null,
-  rules: Record<string, unknown>[]
+  rules: Record<string, unknown>[],
+  modalityCapacities: Record<number, number | null> = {}
 ): Promise<{ isValid: boolean; errors: string[]; warnings: string[] }> {
   const mockClient = new MockPoolClient();
 
@@ -51,6 +52,21 @@ async function runValidateWithMocks(
   mockClient.queueResults(versionRow ? [versionRow] : []);
   // Second query: loadAllRulesForVersion
   mockClient.queueResults(rules);
+  const modalityIds = [...new Set(
+    rules
+      .filter((rule) => rule.ruleType === "category_daily_limit" && rule.modalityId != null)
+      .map((rule) => Number(rule.modalityId))
+  )];
+  if (modalityIds.length > 0) {
+    const rows = modalityIds.map((id) => ({
+      id,
+      dailyCapacity:
+        Object.prototype.hasOwnProperty.call(modalityCapacities, id)
+          ? modalityCapacities[id]
+          : 100,
+    }));
+    mockClient.queueResults(rows);
+  }
 
   // Mock pool.connect to return our mock client
   const connectMock = mock.method(poolModule.pool, "connect", async () => mockClient);
@@ -311,5 +327,38 @@ describe("validatePolicy — function structure", () => {
     assert.equal(typeof result.isValid, "boolean");
     assert.ok(Array.isArray(result.errors));
     assert.ok(Array.isArray(result.warnings));
+  });
+});
+
+describe("validatePolicy — category sum semantics", () => {
+  afterEach(() => mock.restoreAll());
+
+  const version = {
+    id: 1,
+    policySetId: 1,
+    versionNo: 1,
+    status: "draft",
+    configHash: "abc123",
+    changeNote: null,
+    publishedAt: null,
+  };
+
+  it("errors when both category limits do not equal modality capacity", async () => {
+    const rules = [
+      { ruleType: "category_daily_limit", id: 1, modalityId: 10, caseCategory: "oncology", dailyLimit: 4, isActive: true },
+      { ruleType: "category_daily_limit", id: 2, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 5, isActive: true },
+    ];
+    const result = await runValidateWithMocks(1, version, rules, { 10: 10 });
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((e) => e.includes("must equal daily capacity")));
+  });
+
+  it("accepts when both limits equal modality capacity", async () => {
+    const rules = [
+      { ruleType: "category_daily_limit", id: 1, modalityId: 10, caseCategory: "oncology", dailyLimit: 4, isActive: true },
+      { ruleType: "category_daily_limit", id: 2, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 6, isActive: true },
+    ];
+    const result = await runValidateWithMocks(1, version, rules, { 10: 10 });
+    assert.equal(result.errors.length, 0);
   });
 });

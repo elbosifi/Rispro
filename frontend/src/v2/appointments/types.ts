@@ -70,6 +70,26 @@ export interface SchedulingDecisionDto {
 
 export interface AvailabilityDayDto {
   date: string;
+  bucketMode: "partitioned" | "total_only";
+  modalityTotalCapacity: number;
+  bookedTotal: number;
+  oncology: {
+    reserved: number | null;
+    filled: number;
+    remaining: number | null;
+  };
+  nonOncology: {
+    reserved: number | null;
+    filled: number;
+    remaining: number | null;
+  };
+  specialQuotaSummary: {
+    examTypeId: number;
+    configured: number;
+    consumed: number;
+    remaining: number;
+  } | null;
+  // Backward-compatible fields retained for existing clients.
   dailyCapacity: number;
   bookedCount: number;
   remainingCapacity: number;

@@ -21,16 +21,18 @@ import {
 } from "../../rules/repositories/policy-rules.repo.js";
 import {
   getBookedCountForDate,
+  getBookedCountsByCategoryForDate,
   getSpecialQuotaBookedCount,
 } from "../../scheduler/repositories/capacity.repo.js";
 import { findBookingById, updateBookingDateTime, updateBookingForReschedule } from "../repositories/booking.repo.js";
-import { acquireBucketLock } from "../repositories/bucket-mutex.repo.js";
+import { acquireBucketLocks } from "../repositories/bucket-mutex.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import { recordRescheduleAudit } from "../repositories/reschedule-audit.repo.js";
 import type { Booking } from "../models/booking.js";
 import type { CreateBookingPayload } from "../models/booking.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
+import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -124,13 +126,29 @@ async function rescheduleBookingInternal(
     );
   }
 
-  // 2. Acquire the NEW bucket lock (for the new date)
-  await acquireBucketLock(
-    client,
-    booking.modalityId,
-    newDate,
-    booking.caseCategory
-  );
+  // 2. Acquire deterministic locks for both categories on source+target dates.
+  await acquireBucketLocks(client, [
+    {
+      modalityId: booking.modalityId,
+      date: previousDate,
+      caseCategory: "oncology",
+    },
+    {
+      modalityId: booking.modalityId,
+      date: previousDate,
+      caseCategory: "non_oncology",
+    },
+    {
+      modalityId: booking.modalityId,
+      date: newDate,
+      caseCategory: "oncology",
+    },
+    {
+      modalityId: booking.modalityId,
+      date: newDate,
+      caseCategory: "non_oncology",
+    },
+  ]);
 
   // 3. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
@@ -139,6 +157,14 @@ async function rescheduleBookingInternal(
       400,
       "No scheduling policy has been published.",
       ["no_published_policy"]
+    );
+  }
+  const modality = await findModalityById(client, booking.modalityId);
+  if (!modality) {
+    throw new SchedulingError(
+      400,
+      `Modality ${booking.modalityId} not found.`,
+      ["modality_not_found"]
     );
   }
 
@@ -177,6 +203,11 @@ async function rescheduleBookingInternal(
     newDate,
     booking.caseCategory
   );
+  const bookedCounts = await getBookedCountsByCategoryForDate(
+    client,
+    booking.modalityId,
+    newDate
+  );
 
   // 6. Load special quota booked count for the NEW date (only when examTypeId is provided)
   let currentSpecialQuotaBookedCount = 0;
@@ -206,6 +237,10 @@ async function rescheduleBookingInternal(
     examTypeRules,
     examTypeRuleItemExamTypeIds,
     categoryLimits,
+    modalityDailyCapacity: modality.dailyCapacity ?? null,
+    currentBookedCountTotal: bookedCounts.total,
+    currentBookedCountOncology: bookedCounts.oncology,
+    currentBookedCountNonOncology: bookedCounts.nonOncology,
     specialQuotas,
     currentBookedCount, // Includes this booking if newDate === oldDate
     currentSpecialQuotaBookedCount,

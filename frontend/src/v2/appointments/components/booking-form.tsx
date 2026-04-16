@@ -325,16 +325,19 @@ export function BookingForm({
                     const dayStatus = day?.decision.displayStatus;
                     const isBlocked = dayStatus === "blocked";
                     const isRestricted = dayStatus === "restricted";
-                    const standard = isBlocked ? null : Math.max(0, day?.decision.remainingStandardCapacity ?? day?.remainingCapacity ?? 0);
+                    const totalRemaining = isBlocked ? null : Math.max(0, (day?.modalityTotalCapacity ?? day?.dailyCapacity ?? 0) - (day?.bookedTotal ?? day?.bookedCount ?? 0));
                     const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
                     const specialVal = special ?? 0;
                     let label: string;
                     if (isBlocked) {
                       label = `${date} (Blocked)`;
-                    } else if (specialVal > 0) {
-                      label = `${date} (${standard} standard, ${specialVal} special)`;
                     } else {
-                      label = `${date} (${standard} standard)`;
+                      const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
+                      if (specialVal > 0) {
+                        label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
+                      } else {
+                        label = `${date} (${totalRemaining} total, ${modeLabel})`;
+                      }
                     }
                     return (
                       <option key={date} value={date}>

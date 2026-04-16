@@ -458,6 +458,9 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
             const isBlocked = status === "blocked";
             const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
             const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
+            const totalCapacity = day.modalityTotalCapacity ?? day.dailyCapacity;
+            const totalBooked = day.bookedTotal ?? day.bookedCount;
+            const totalRemaining = Math.max(0, totalCapacity - totalBooked);
             return (
             <tr
               key={day.date}
@@ -469,8 +472,8 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
                 <div style={{ fontWeight: 500 }}>{formatDate(day.date)}</div>
                 <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>{day.date}</div>
               </td>
-              <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.dailyCapacity}</td>
-              <td style={{ textAlign: "center", padding: "10px 12px" }}>{day.bookedCount}</td>
+              <td style={{ textAlign: "center", padding: "10px 12px" }}>{totalCapacity}</td>
+              <td style={{ textAlign: "center", padding: "10px 12px" }}>{totalBooked}</td>
               <td style={{ textAlign: "center", padding: "10px 12px" }}>
                 {isBlocked ? (
                   <span style={{ fontWeight: 700, color: "var(--color-error, #ef4444)" }}>
@@ -479,11 +482,20 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
                 ) : (
                   <>
                     <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
-                      {standard} std
+                      {totalRemaining} total
                     </div>
-                    {special > 0 && (
+                    {day.bucketMode === "partitioned" ? (
+                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
+                        Onc {day.oncology.filled}/{day.oncology.reserved ?? 0}, Non-onc {day.nonOncology.filled}/{day.nonOncology.reserved ?? 0}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
+                        Total-only mode (no category reserves)
+                      </div>
+                    )}
+                    {(day.specialQuotaSummary?.remaining ?? special) > 0 && (
                       <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
-                        + {special} special
+                        Special remaining: {day.specialQuotaSummary?.remaining ?? special}
                       </div>
                     )}
                   </>

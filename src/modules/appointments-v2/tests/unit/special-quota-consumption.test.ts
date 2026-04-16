@@ -28,6 +28,10 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
     categoryLimits: [
       { id: 1, policyVersionId: 1, modalityId: 1, caseCategory: "non_oncology", dailyLimit: 5, isActive: true },
     ],
+    modalityDailyCapacity: 5,
+    currentBookedCountTotal: 0,
+    currentBookedCountOncology: 0,
+    currentBookedCountNonOncology: 0,
     specialQuotas: [
       { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, isActive: true },
     ],
@@ -53,11 +57,11 @@ function makeInput(overrides: Partial<PureEvaluateInput> = {}): PureEvaluateInpu
 }
 
 describe("Special quota consumption — pureEvaluate", () => {
-  it("returns remainingSpecialQuota when standard capacity is exhausted and quota exists", async () => {
+  it("returns remainingSpecialQuota when capacity is available and special quota is requested", async () => {
     const input = makeInput({
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5, // standard exhausted
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 0,
       }),
     });
@@ -65,7 +69,7 @@ describe("Special quota consumption — pureEvaluate", () => {
     const decision = await pureEvaluate(input);
 
     assert.strictEqual(decision.displayStatus, "available");
-    assert.strictEqual(decision.remainingStandardCapacity, 0);
+    assert.strictEqual(decision.remainingStandardCapacity, 3);
     assert.strictEqual(decision.remainingSpecialQuota, 3);
   });
 
@@ -73,7 +77,7 @@ describe("Special quota consumption — pureEvaluate", () => {
     const input = makeInput({
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5, // standard exhausted
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 1, // 1 already consumed
       }),
     });
@@ -84,12 +88,12 @@ describe("Special quota consumption — pureEvaluate", () => {
     assert.strictEqual(decision.remainingSpecialQuota, 2); // 3 - 1 = 2
   });
 
-  it("returns blocked when special quota is fully consumed", async () => {
+  it("returns blocked when standard/category capacity is exhausted even if special quota exists", async () => {
     const input = makeInput({
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5, // standard exhausted
-        currentSpecialQuotaBookedCount: 3, // all 3 consumed
+        currentBookedCount: 5, // category exhausted
+        currentSpecialQuotaBookedCount: 0,
       }),
     });
 
@@ -121,7 +125,7 @@ describe("Special quota consumption — pureEvaluate", () => {
     const input = makeInput({
       useSpecialQuota: false,
       context: makeContext({
-        currentBookedCount: 5,
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 0,
       }),
     });
@@ -129,7 +133,7 @@ describe("Special quota consumption — pureEvaluate", () => {
     const decision = await pureEvaluate(input);
 
     assert.strictEqual(decision.remainingSpecialQuota, null);
-    assert.strictEqual(decision.displayStatus, "blocked");
+    assert.strictEqual(decision.displayStatus, "available");
   });
 
   it("returns null remainingSpecialQuota when no examTypeId provided", async () => {
@@ -137,7 +141,7 @@ describe("Special quota consumption — pureEvaluate", () => {
       examTypeId: null,
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5,
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 0,
       }),
     });
@@ -145,15 +149,15 @@ describe("Special quota consumption — pureEvaluate", () => {
     const decision = await pureEvaluate(input);
 
     assert.strictEqual(decision.remainingSpecialQuota, null);
-    assert.strictEqual(decision.displayStatus, "blocked");
+    assert.strictEqual(decision.displayStatus, "available");
   });
 
-  it("returns blocked when no special quota configured for exam type", async () => {
+  it("returns available when no special quota configured for exam type", async () => {
     const input = makeInput({
       examTypeId: 99, // no quota for this exam type
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5,
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 0,
         specialQuotas: [
           { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, isActive: true }, // quota for exam type 10, not 99
@@ -163,15 +167,15 @@ describe("Special quota consumption — pureEvaluate", () => {
 
     const decision = await pureEvaluate(input);
 
-    assert.strictEqual(decision.displayStatus, "blocked");
+    assert.strictEqual(decision.displayStatus, "available");
     assert.strictEqual(decision.remainingSpecialQuota, null);
   });
 
-  it("returns available when consumedSpecialQuota equals dailyExtraSlots minus 1", async () => {
+  it("returns special suggestion mode when special quota requested and available", async () => {
     const input = makeInput({
       useSpecialQuota: true,
       context: makeContext({
-        currentBookedCount: 5,
+        currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 2, // 3 - 2 = 1 remaining
       }),
     });
