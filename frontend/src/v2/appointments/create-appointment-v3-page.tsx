@@ -14,8 +14,16 @@ export function AppointmentsV3CreatePage() {
     return <div style={{ padding: 24, color: "#dc2626" }}>Failed to load lookups: {(lookups.error as Error)?.message}</div>;
   }
 
-  if (priorities.isLoading || priorities.isError) {
+  if (priorities.isLoading) {
     return <div style={{ padding: 24 }}>Loading priorities...</div>;
+  }
+
+  if (priorities.isError) {
+    return (
+      <div style={{ padding: 24, color: "#dc2626" }}>
+        Failed to load priorities: {(priorities.error as Error)?.message}
+      </div>
+    );
   }
 
   return (

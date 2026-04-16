@@ -137,22 +137,22 @@ router.get(
     try {
       const result = await client.query<{
         id: number;
-        name: string;
+        code: string;
         name_ar: string;
         name_en: string;
+        sort_order: number;
       }>(
         `
-          select id, name, name_ar, name_en
+          select id, code, name_ar, name_en, sort_order
           from reporting_priorities
-          where is_active = true
-          order by id asc
+          order by sort_order asc, name_en asc
         `
       );
 
       res.json({
         items: result.rows.map((r) => ({
           id: r.id,
-          name: r.name,
+          name: r.name_en || r.name_ar,
           nameAr: r.name_ar,
           nameEn: r.name_en,
         })),

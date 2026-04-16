@@ -82,3 +82,57 @@ describe("V2 lookups backend — special reason codes query", () => {
     );
   });
 });
+
+describe("V2 lookups backend — priorities query", () => {
+  it("uses actual reporting_priorities columns (id, code, name_ar, name_en, sort_order)", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      "utf-8"
+    );
+    assert.ok(
+      source.includes("select id, code, name_ar, name_en, sort_order"),
+      "Should query actual columns: id, code, name_ar, name_en, sort_order"
+    );
+  });
+
+  it("does not query nonexistent columns name or is_active", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      "utf-8"
+    );
+    const prioritiesSection = source.match(/router\.get\(\s*"\/priorities"[\s\S]*?\n\);/);
+    assert.ok(prioritiesSection, "Should have priorities endpoint");
+    assert.ok(
+      !prioritiesSection[0].includes("select id, name,") && !prioritiesSection[0].includes("where is_active"),
+      "Should not use nonexistent columns name or is_active in priorities query"
+    );
+  });
+
+  it("orders priorities by sort_order asc, name_en asc", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      "utf-8"
+    );
+    assert.ok(
+      source.includes("order by sort_order asc, name_en asc"),
+      "Should order priorities by sort_order asc, name_en asc"
+    );
+  });
+
+  it("maps response to frontend DTO with id, name, nameAr, nameEn", async () => {
+    const fs = await import("node:fs/promises");
+    const source = await fs.readFile(
+      "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/lookups-v2-routes.ts",
+      "utf-8"
+    );
+    const prioritiesSection = source.match(/router\.get\(\s*"\/priorities"[\s\S]*?\n\);/);
+    assert.ok(prioritiesSection, "Should have priorities endpoint");
+    const section = prioritiesSection[0];
+    assert.ok(section.includes("r.id") && section.includes("r.name_en"), "Should map from real columns");
+    assert.ok(section.includes("name: r.name_en || r.name_ar"), "Should set name with fallback");
+    assert.ok(section.includes("nameAr: r.name_ar") && section.includes("nameEn: r.name_en"), "Should map nameAr and nameEn");
+  });
+});
