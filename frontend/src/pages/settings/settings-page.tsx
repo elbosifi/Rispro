@@ -398,7 +398,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
     mutationFn: (data: any) => createExamType({
       modalityId: data.modalityId ? parseInt(data.modalityId, 10) : undefined,
       nameAr: data.name_ar,
-      nameEn: data.name_en
+      nameEn: data.name_en,
+      is_active: true
     }),
     onSuccess: () => { 
       queryClient.invalidateQueries({ queryKey: ["exam-types"] }); 
@@ -480,6 +481,10 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 ) : (
                   <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
                 )}
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
+                  Active
+                </label>
                 <div className="flex gap-2">
                   <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
@@ -494,6 +499,9 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${et.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {et.is_active ? t("settings.active") : t("settings.inactive")}
+                  </span>
                   <button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
                   <button onClick={() => { if (window.confirm("Delete this exam type?")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
                 </div>
