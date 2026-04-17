@@ -537,6 +537,7 @@ export function PolicyDraftEditor({
           <div style={{ display: "grid", gap: 8 }}>
             {draft.examTypeRules.map((row, index) => {
               const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
+              const selectedModalityLabel = modalityOptions.find((m) => m.value === row.modalityId)?.label ?? "selected modality";
               return (
                 <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-4">
                   <select
@@ -603,7 +604,10 @@ export function PolicyDraftEditor({
                     {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
                     ) : examTypeOptionsForRow.length === 0 ? (
-                      <p className="text-[11px] text-stone-500 dark:text-stone-400">No exam types configured for selected modality.</p>
+                      <div className="text-[11px] text-stone-400 dark:text-stone-500 leading-relaxed">
+                        <p>No exam types configured for {selectedModalityLabel}.</p>
+                        <p className="mt-1 text-[10px] text-stone-400">Add exam types in Settings before using this modality.</p>
+                      </div>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {examTypeOptionsForRow.map((examTypeOption) => (
@@ -830,6 +834,7 @@ export function PolicyDraftEditor({
           <div style={{ display: "grid", gap: 8 }}>
             {(draft.examMixQuotaRules ?? []).map((row, index) => {
               const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
+              const selectedModalityLabel = modalityOptions.find((m) => m.value === row.modalityId)?.label ?? "selected modality";
               return (
                 <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-4">
                   <select
@@ -903,7 +908,10 @@ export function PolicyDraftEditor({
                     {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
                     ) : examTypeOptionsForRow.length === 0 ? (
-                      <p className="text-[11px] text-stone-500 dark:text-stone-400">No exam types configured for selected modality.</p>
+                      <div className="text-[11px] text-stone-400 dark:text-stone-500 leading-relaxed">
+                        <p>No exam types configured for {selectedModalityLabel}.</p>
+                        <p className="mt-1 text-[10px] text-stone-400">Add exam types in Settings before using this modality.</p>
+                      </div>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {examTypeOptionsForRow.map((examTypeOption) => (
