@@ -291,6 +291,26 @@ describe("loadExamTypeRuleItemExamTypeIds", () => {
   });
 });
 
+describe("loadExamTypeRuleItems", () => {
+  it("exports loadExamTypeRuleItems function", async () => {
+    const { loadExamTypeRuleItems } = await import(
+      "../../rules/repositories/policy-rules.repo.js"
+    );
+    assert.strictEqual(typeof loadExamTypeRuleItems, "function");
+  });
+
+  it("selects rule_id and exam_type_id for per-rule matching", () => {
+    assert.ok(
+      source.includes('etri.rule_id as "ruleId"'),
+      'Should select rule_id as "ruleId"'
+    );
+    assert.ok(
+      source.includes('etri.exam_type_id as "examTypeId"'),
+      'Should select exam_type_id as "examTypeId"'
+    );
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 6. loadAllExamTypeRuleItemExamTypeIds
 // ---------------------------------------------------------------------------

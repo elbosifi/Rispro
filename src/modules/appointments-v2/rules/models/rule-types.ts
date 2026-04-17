@@ -58,6 +58,11 @@ export interface ExamTypeRuleRow {
   isActive: boolean;
 }
 
+export interface ExamTypeRuleItemRow {
+  ruleId: number;
+  examTypeId: number;
+}
+
 export interface CategoryDailyLimitRow {
   id: number;
   policyVersionId: number;

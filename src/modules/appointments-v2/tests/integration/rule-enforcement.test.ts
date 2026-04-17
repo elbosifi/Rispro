@@ -474,6 +474,15 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         "blocked",
         "Hard restriction should block when examTypeId matches"
       );
+      assert.ok(
+        Array.isArray(restrictedDay.decision.matchedExamRuleSummaries),
+        "Blocked exam-rule day should include matchedExamRuleSummaries"
+      );
+      assert.equal(
+        restrictedDay.decision.matchedExamRuleSummaries?.[0]?.effectMode,
+        "hard_restriction",
+        "Matched exam-rule summary should preserve effect mode"
+      );
 
       // Query WITHOUT examTypeId — should NOT be blocked by exam rule
       const noExam = await fetch(
@@ -538,6 +547,15 @@ describe("Rule enforcement — integration tests", { skip: skipEnv }, () => {
         day.decision.displayStatus,
         "restricted",
         "Overridable restriction should show 'restricted'"
+      );
+      assert.ok(
+        Array.isArray(day.decision.matchedExamRuleSummaries),
+        "Restricted exam-rule day should include matchedExamRuleSummaries"
+      );
+      assert.equal(
+        day.decision.matchedExamRuleSummaries?.[0]?.effectMode,
+        "restriction_overridable",
+        "Matched exam-rule summary should preserve effect mode"
       );
     });
   });

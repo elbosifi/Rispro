@@ -10,6 +10,7 @@ import type { CaseCategory, ReasonCode, CapacityResolutionMode } from "../../sha
 import type {
   ModalityBlockedRuleRow,
   ExamTypeRuleRow,
+  ExamTypeRuleItemRow,
   CategoryDailyLimitRow,
   ExamTypeSpecialQuotaRow,
   ExamMixQuotaRuleRow,
@@ -42,6 +43,12 @@ export interface RuleEvaluationContext {
 
   /** Exam type IDs that belong to the exam_type_rules (for matching) */
   examTypeRuleItemExamTypeIds: number[];
+
+  /**
+   * Per-rule exam type memberships for exam-type restriction rules.
+   * This is the authoritative mapping used to determine rule applicability.
+   */
+  examTypeRuleItems?: ExamTypeRuleItemRow[];
 
   /** Daily capacity limits for this modality */
   categoryLimits: CategoryDailyLimitRow[];

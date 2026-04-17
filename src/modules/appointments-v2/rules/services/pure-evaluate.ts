@@ -135,20 +135,44 @@ function checkExamEligibility(
   overridable: boolean;
   reasons: ReasonCode[];
   matchedIds: number[];
+  matchedSummaries: Array<{
+    ruleId: string;
+    title: string;
+    ruleType: string;
+    effectMode: string;
+    isBlocking: boolean;
+  }>;
 } {
   const ctx = input.context;
   const reasons: ReasonCode[] = [];
   const matchedIds: number[] = [];
+  const matchedSummaries: Array<{
+    ruleId: string;
+    title: string;
+    ruleType: string;
+    effectMode: string;
+    isBlocking: boolean;
+  }> = [];
 
   if (input.examTypeId == null) {
     // No exam type specified — skip exam rules
-    return { blocked: false, overridable: false, reasons: [], matchedIds: [] };
+    return { blocked: false, overridable: false, reasons: [], matchedIds: [], matchedSummaries: [] };
   }
 
-  // Does the exam type belong to any of the exam_type_rule_items?
+  const examTypeId = Number(input.examTypeId);
+  const ruleIdsForExamType = new Set(
+    (ctx.examTypeRuleItems ?? [])
+      .filter((item) => Number(item.examTypeId) === examTypeId)
+      .map((item) => Number(item.ruleId))
+  );
+  // Fallback path preserved for backward compatibility in older contexts.
+  const hasFlattenedMembership = ctx.examTypeRuleItemExamTypeIds.includes(examTypeId);
+
   const applicableRules = ctx.examTypeRules.filter((rule) => {
     if (!rule.isActive) return false;
-    if (!ctx.examTypeRuleItemExamTypeIds.includes(input.examTypeId!)) return false;
+    const hasPerRuleMembership =
+      ruleIdsForExamType.size > 0 ? ruleIdsForExamType.has(Number(rule.id)) : hasFlattenedMembership;
+    if (!hasPerRuleMembership) return false;
     if (!examRuleMatchesDate(rule, input.scheduledDate)) return false;
     return true;
   });
@@ -157,6 +181,13 @@ function checkExamEligibility(
 
   for (const rule of applicableRules) {
     matchedIds.push(rule.id);
+    matchedSummaries.push({
+      ruleId: String(rule.id),
+      title: rule.title ?? `Exam rule #${rule.id}`,
+      ruleType: String(rule.ruleType),
+      effectMode: String(rule.effectMode),
+      isBlocking: rule.effectMode === "hard_restriction",
+    });
 
     if (rule.effectMode === "hard_restriction") {
       hardBlocked = true;
@@ -182,10 +213,10 @@ function checkExamEligibility(
   }
 
   if (hardBlocked) {
-    return { blocked: true, overridable: false, reasons, matchedIds };
+    return { blocked: true, overridable: false, reasons, matchedIds, matchedSummaries };
   }
 
-  return { blocked: false, overridable: reasons.length > 0, reasons, matchedIds };
+  return { blocked: false, overridable: reasons.length > 0, reasons, matchedIds, matchedSummaries };
 }
 
 // ---------------------------------------------------------------------------
@@ -552,7 +583,19 @@ export async function pureEvaluate(
 
   if (examCheck.blocked && !examCheck.overridable) {
     // Hard exam restriction → blocked
-    return buildDecision(input, "blocked", false, false, null, null, allMatchedIds, allReasons);
+    return buildDecision(
+      input,
+      "blocked",
+      false,
+      false,
+      null,
+      null,
+      allMatchedIds,
+      allReasons,
+      "standard",
+      undefined,
+      examCheck.matchedSummaries
+    );
   }
 
   // Step 4 & 5: Capacity
@@ -625,7 +668,8 @@ export async function pureEvaluate(
     allMatchedIds,
     allReasons,
     consumedCapacityMode,
-    suggestedMode
+    suggestedMode,
+    examCheck.matchedSummaries
   );
 }
 
@@ -642,7 +686,14 @@ function buildDecision(
   matchedRuleIds: number[],
   reasons: ReasonCode[],
   consumedCapacityMode: "standard" | "special" | "override" | null = "standard",
-  suggestedBookingModeOverride?: "standard" | "special" | "override"
+  suggestedBookingModeOverride?: "standard" | "special" | "override",
+  matchedExamRuleSummaries?: Array<{
+    ruleId: string;
+    title: string;
+    ruleType: string;
+    effectMode: string;
+    isBlocking: boolean;
+  }>
 ): BookingDecision {
   const ctx = input.context;
 
@@ -663,6 +714,10 @@ function buildDecision(
     remainingStandardCapacity,
     remainingSpecialQuota,
     matchedRuleIds: [...new Set(matchedRuleIds)], // deduplicate
+    matchedExamRuleSummaries:
+      matchedExamRuleSummaries && matchedExamRuleSummaries.length > 0
+        ? matchedExamRuleSummaries
+        : undefined,
     reasons,
     policyVersionRef: {
       policySetKey: ctx.policySetKey,

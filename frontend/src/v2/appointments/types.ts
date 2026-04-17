@@ -45,6 +45,7 @@ export interface DecisionReason {
   code: string;
   severity: "error" | "warning";
   message: string;
+  ruleRef?: { type: string; id: number };
 }
 
 export interface SchedulingDecisionDto {
@@ -56,6 +57,13 @@ export interface SchedulingDecisionDto {
   remainingStandardCapacity: number | null;
   remainingSpecialQuota: number | null;
   matchedRuleIds: number[];
+  matchedExamRuleSummaries?: Array<{
+    ruleId: string;
+    title: string;
+    ruleType: string;
+    effectMode: string;
+    isBlocking: boolean;
+  }>;
   reasons: DecisionReason[];
   policy: {
     policySetKey: string;

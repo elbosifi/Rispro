@@ -23,6 +23,7 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamTypeRuleItems,
   loadExamMixQuotaRules,
   loadExamMixQuotaRuleItems,
 } from "../repositories/policy-rules.repo.js";
@@ -128,6 +129,11 @@ export async function evaluateWithDb(
     publishedVersion.id,
     params.modalityId
   );
+  const examTypeRuleItems = await loadExamTypeRuleItems(
+    client,
+    publishedVersion.id,
+    params.modalityId
+  );
   const examMixQuotaRules = await loadExamMixQuotaRules(
     client,
     publishedVersion.id,
@@ -180,6 +186,7 @@ export async function evaluateWithDb(
     blockedRules,
     examTypeRules,
     examTypeRuleItemExamTypeIds,
+    examTypeRuleItems,
     categoryLimits,
     modalityDailyCapacity: modality?.dailyCapacity ?? null,
     currentBookedCountTotal: bookedCounts.total,

@@ -18,6 +18,7 @@ import {
   loadCategoryDailyLimits,
   loadExamTypeSpecialQuotas,
   loadExamTypeRuleItemExamTypeIds,
+  loadExamTypeRuleItems,
   loadExamMixQuotaRules,
   loadExamMixQuotaRuleItems,
 } from "../../rules/repositories/policy-rules.repo.js";
@@ -223,6 +224,11 @@ async function rescheduleBookingInternal(
     publishedVersion.id,
     bookingModalityId
   );
+  const examTypeRuleItems = await loadExamTypeRuleItems(
+    client,
+    publishedVersion.id,
+    bookingModalityId
+  );
   const examMixQuotaRules = await loadExamMixQuotaRules(
     client,
     publishedVersion.id,
@@ -276,6 +282,7 @@ async function rescheduleBookingInternal(
     blockedRules,
     examTypeRules,
     examTypeRuleItemExamTypeIds,
+    examTypeRuleItems,
     categoryLimits,
     modalityDailyCapacity: modality.dailyCapacity ?? null,
     currentBookedCountTotal: bookedCounts.total,

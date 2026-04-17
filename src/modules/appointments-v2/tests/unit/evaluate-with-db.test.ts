@@ -154,6 +154,13 @@ describe("evaluateWithDb — source verification", () => {
     );
   });
 
+  it("loads per-rule exam type memberships from DB", () => {
+    assert.ok(
+      source.includes("loadExamTypeRuleItems"),
+      "Should call loadExamTypeRuleItems"
+    );
+  });
+
   it("loads booked count from capacity repo", () => {
     assert.ok(
       source.includes("getBookedCountForDate"),
@@ -227,10 +234,10 @@ describe("evaluateWithDb — PureEvaluateInput construction", () => {
     assert.ok(source.includes("caseCategory: params.caseCategory"), "Should pass caseCategory");
   });
 
-  it("passes useSpecialQuota with false fallback", () => {
+  it("passes useSpecialQuota derived from capacityResolutionMode", () => {
     assert.ok(
-      source.includes("useSpecialQuota: params.useSpecialQuota") && source.includes("?? false"),
-      "Should pass useSpecialQuota with false fallback"
+      source.includes('useSpecialQuota: capacityResolutionMode === "special_quota_extra"'),
+      "Should derive useSpecialQuota from capacityResolutionMode"
     );
   });
 

@@ -30,6 +30,12 @@ interface Props {
     dailyLimit: number;
     remaining: number;
   } | null;
+  matchedExamRuleSummary?: {
+    ruleId: string;
+    title: string;
+    effectLabel: string;
+    isBlocking: boolean;
+  } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
   selected: boolean;
@@ -52,6 +58,7 @@ export function AvailabilityDateRow({
   specialQuotaRemaining,
   examMixQuotaSummaries,
   primaryExamMixBlocking,
+  matchedExamRuleSummary,
   reasonText,
   requiresSupervisorOverride,
   selected,
@@ -139,6 +146,11 @@ export function AvailabilityDateRow({
               {(examMixQuotaSummaries ?? [])
                 .map((group) => `${group.title ?? `#${group.ruleId}`} ${group.consumed}/${group.dailyLimit}${group.isPrimaryBlocking ? " (primary)" : ""}`)
                 .join(" • ")}
+            </div>
+          )}
+          {matchedExamRuleSummary && (
+            <div style={{ color: matchedExamRuleSummary.isBlocking ? "#b91c1c" : "#92400e", fontWeight: 600 }}>
+              Exam rule: {matchedExamRuleSummary.title} ({matchedExamRuleSummary.effectLabel})
             </div>
           )}
         </div>

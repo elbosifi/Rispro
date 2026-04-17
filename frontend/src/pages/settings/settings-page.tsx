@@ -1572,19 +1572,27 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           const et = allExamTypes.find((examType: any) => String(examType.id) === opt.value);
           return et && String(et.modalityId || et.modality_id) === modalityId;
         })
-      : examTypeOptions;
+      : [];
     return (
-      <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
-        {filteredOptions.map((opt: { value: string; label: string }) => {
-          const id = Number(opt.value);
-          const checked = values.includes(id);
-          return (
-            <label key={opt.value} className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border cursor-pointer ${checked ? "bg-teal-50 dark:bg-teal-900/30 border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300" : "bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-600 dark:text-stone-400"}`}>
-              <input type="checkbox" checked={checked} onChange={() => toggle(id)} className="sr-only" />
-              {opt.label}
-            </label>
-          );
-        })}
+      <div className="space-y-1">
+        {!modalityId && (
+          <p className="text-[10px] text-stone-500">Select a modality first</p>
+        )}
+        {!!modalityId && filteredOptions.length === 0 && (
+          <p className="text-[10px] text-stone-500">No exam types configured for selected modality</p>
+        )}
+        <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+          {filteredOptions.map((opt: { value: string; label: string }) => {
+            const id = Number(opt.value);
+            const checked = values.includes(id);
+            return (
+              <label key={opt.value} className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border cursor-pointer ${checked ? "bg-teal-50 dark:bg-teal-900/30 border-teal-300 dark:border-teal-700 text-teal-700 dark:text-teal-300" : "bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-600 dark:text-stone-400"}`}>
+                <input type="checkbox" checked={checked} onChange={() => toggle(id)} className="sr-only" />
+                {opt.label}
+              </label>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -1705,7 +1713,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
         })),
         (row, idx) => (
           <div key={`er-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
-            <ModalitySelect value={row.modalityId as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, modalityId: v } : r) }))} />
+            <ModalitySelect value={row.modalityId as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, modalityId: v, examTypeIds: [] } : r) }))} />
             <select className="input-field text-xs" value={row.ruleType as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, ruleType: e.target.value as ExamRuleRow["ruleType"] } : r) }))}>
               <option value="specific_date">{RULE_TYPE_LABELS.specific_date}</option>
               <option value="date_range">{RULE_TYPE_LABELS.date_range}</option>

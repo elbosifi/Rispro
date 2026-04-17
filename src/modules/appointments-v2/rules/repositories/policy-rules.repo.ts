@@ -9,6 +9,7 @@ import type { PoolClient } from "pg";
 import type {
   ModalityBlockedRuleRow,
   ExamTypeRuleRow,
+  ExamTypeRuleItemRow,
   CategoryDailyLimitRow,
   ExamTypeSpecialQuotaRow,
   ExamMixQuotaRuleRow,
@@ -152,6 +153,33 @@ export async function loadExamTypeRuleItemExamTypeIds(
     [policyVersionId, modalityId]
   );
   return result.rows.map((row) => Number(row.examTypeId));
+}
+
+const LOAD_EXAM_RULE_ITEMS_SQL = `
+  select
+    etri.rule_id as "ruleId",
+    etri.exam_type_id as "examTypeId"
+  from appointments_v2.exam_type_rule_items etri
+  inner join appointments_v2.exam_type_rules etr
+    on etri.rule_id = etr.id
+  where etr.policy_version_id = $1
+    and etr.modality_id = $2
+    and etr.is_active = true
+`;
+
+export async function loadExamTypeRuleItems(
+  client: PoolClient,
+  policyVersionId: number,
+  modalityId: number
+): Promise<ExamTypeRuleItemRow[]> {
+  const result = await client.query<ExamTypeRuleItemRow>(LOAD_EXAM_RULE_ITEMS_SQL, [
+    policyVersionId,
+    modalityId,
+  ]);
+  return result.rows.map((row) => ({
+    ruleId: Number(row.ruleId),
+    examTypeId: Number(row.examTypeId),
+  }));
 }
 
 /**

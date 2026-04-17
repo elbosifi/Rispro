@@ -32,6 +32,12 @@ export interface AvailabilityRowViewModel {
     dailyLimit: number;
     remaining: number;
   } | null;
+  matchedExamRuleSummary?: {
+    ruleId: string;
+    title: string;
+    effectLabel: string;
+    isBlocking: boolean;
+  } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
 }
@@ -59,7 +65,17 @@ export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityR
 
 export function mapAvailabilityRow(day: AvailabilityDayDto): AvailabilityRowViewModel {
   const status = getAvailabilityRowStatus(day);
-  const reasonText = day.decision.reasons[0]?.message ?? "";
+  const matchedExamRuleSummary =
+    day.decision.matchedExamRuleSummaries && day.decision.matchedExamRuleSummaries.length > 0
+      ? day.decision.matchedExamRuleSummaries[0]
+      : null;
+  const effectLabel =
+    matchedExamRuleSummary?.effectMode === "hard_restriction"
+      ? "Hard restriction"
+      : matchedExamRuleSummary?.effectMode === "restriction_overridable"
+      ? "Restricted unless supervisor approves"
+      : matchedExamRuleSummary?.effectMode ?? "";
+  const reasonText = matchedExamRuleSummary ? "" : day.decision.reasons[0]?.message ?? "";
 
   const hideRawCapacity = status === "blocked";
 
@@ -88,6 +104,14 @@ export function mapAvailabilityRow(day: AvailabilityDayDto): AvailabilityRowView
           dailyLimit: row.dailyLimit,
           remaining: row.remaining,
         }))[0] ?? null,
+    matchedExamRuleSummary: matchedExamRuleSummary
+      ? {
+          ruleId: matchedExamRuleSummary.ruleId,
+          title: matchedExamRuleSummary.title,
+          effectLabel,
+          isBlocking: matchedExamRuleSummary.isBlocking,
+        }
+      : null,
     reasonText,
     requiresSupervisorOverride: day.decision.requiresSupervisorOverride,
   };

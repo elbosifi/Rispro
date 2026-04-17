@@ -36,6 +36,7 @@ function mapDecisionToDto(day: AvailabilityDayDto): SchedulingDecisionDto {
     remainingStandardCapacity: decision.remainingStandardCapacity,
     remainingSpecialQuota: decision.remainingSpecialQuota,
     matchedRuleIds: decision.matchedRuleIds,
+    matchedExamRuleSummaries: decision.matchedExamRuleSummaries,
     reasons: decision.reasons,
     policy: {
       policySetKey: decision.policyVersionRef.policySetKey,

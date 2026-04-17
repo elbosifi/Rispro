@@ -341,6 +341,59 @@ describe("pureEvaluate — exam eligibility (D008 step 3)", () => {
     );
     assert.equal(decision.displayStatus, "available");
   });
+
+  it("matches exam rules by per-rule exam type membership (not flattened global list)", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        scheduledDate: "2026-04-15",
+        context: makeContext({
+          examTypeRules: [
+            makeExamRule("hard_restriction", { id: 200, title: "Rule A hard block" }),
+            makeExamRule("restriction_overridable", { id: 201, title: "Rule B overridable" }),
+          ],
+          examTypeRuleItemExamTypeIds: [50], // legacy flattened list says exam type is globally present
+          examTypeRuleItems: [
+            { ruleId: 201, examTypeId: 50 }, // but per-rule mapping only links exam type to rule 201
+          ],
+        }),
+      })
+    );
+
+    assert.equal(decision.displayStatus, "restricted");
+    assert.equal(decision.reasons.some((r) => r.code === "exam_type_not_allowed_for_rule"), true);
+    assert.equal(decision.matchedRuleIds.includes(200), false);
+    assert.equal(decision.matchedRuleIds.includes(201), true);
+  });
+
+  it("emits matchedExamRuleSummaries for matched exam rules", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        scheduledDate: "2026-04-15",
+        context: makeContext({
+          examTypeRules: [
+            makeExamRule("hard_restriction", {
+              id: 202,
+              title: "No CT Head on this date",
+              ruleType: "specific_date",
+            }),
+          ],
+          examTypeRuleItemExamTypeIds: [50],
+          examTypeRuleItems: [{ ruleId: 202, examTypeId: 50 }],
+        }),
+      })
+    );
+
+    assert.ok(Array.isArray(decision.matchedExamRuleSummaries));
+    assert.deepEqual(decision.matchedExamRuleSummaries?.[0], {
+      ruleId: "202",
+      title: "No CT Head on this date",
+      ruleType: "specific_date",
+      effectMode: "hard_restriction",
+      isBlocking: true,
+    });
+  });
 });
 
 describe("pureEvaluate — capacity checks (D008 step 4)", () => {

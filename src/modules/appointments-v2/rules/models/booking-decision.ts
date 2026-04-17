@@ -28,6 +28,13 @@ export interface BookingDecision {
   remainingStandardCapacity: number | null;
   remainingSpecialQuota: number | null;
   matchedRuleIds: number[];
+  matchedExamRuleSummaries?: Array<{
+    ruleId: string;
+    title: string;
+    ruleType: string;
+    effectMode: string;
+    isBlocking: boolean;
+  }>;
   reasons: ReasonCode[];
   policyVersionRef: {
     policySetKey: string;
