@@ -67,7 +67,7 @@ const WEEKDAY_LABELS: Record<string, string> = {
 const SECTION_HELPERS: Record<string, string> = {
   categoryLimits: "Set the daily limit for oncology and non-oncology cases.",
   blockedRules: "Block full dates or date ranges for a modality.",
-  examRules: "Control when specific exam types can be booked.",
+  examRules: "Checked exams are the ones this rule blocks or restricts.",
   specialQuotas: "Add a few extra slots for selected exam types.",
   specialReasons: "Reasons staff can choose when using a special quota.",
   identifierTypes: "Extra patient ID types available during registration."
@@ -76,7 +76,7 @@ const SECTION_HELPERS: Record<string, string> = {
 const SECTION_TITLES: Record<string, string> = {
   categoryLimits: "Category Daily Limits",
   blockedRules: "Blocked Dates",
-  examRules: "Exam Date Rules",
+  examRules: "Exam Restriction Rules",
   specialQuotas: "Special Quotas",
   specialReasons: "Special Reason Codes",
   identifierTypes: "Patient Identifier Types"
@@ -1619,6 +1619,20 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
         {!!modalityId && filteredOptions.length === 0 && (
           <p className="text-[10px] text-stone-500">No exam types configured for selected modality</p>
         )}
+        {!!modalityId && filteredOptions.length > 0 && (
+          <>
+            <p className="text-[10px] text-stone-500">Restricted exams</p>
+            <p className="text-[10px] text-stone-500">Checked exams are the ones this rule blocks or restricts.</p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary text-[10px]" onClick={() => onChange(filteredOptions.map((opt: { value: string }) => Number(opt.value)))}>
+                Select all
+              </button>
+              <button type="button" className="btn-secondary text-[10px]" onClick={() => onChange([])}>
+                Clear all
+              </button>
+            </div>
+          </>
+        )}
         <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
           {filteredOptions.map((opt: { value: string; label: string }) => {
             const id = Number(opt.value);
@@ -1762,7 +1776,6 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               <option value="hard_restriction">{EFFECT_MODE_LABELS.hard_restriction}</option>
             </select>
             <div className="md:col-span-1">
-              <p className="text-[10px] text-stone-500 mb-1">Choose the exam types this rule applies to.</p>
               <ExamTypeMultiSelect
                 values={(row.examTypeIds as number[]) || []}
                 onChange={(ids) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, examTypeIds: ids } : r) }))}

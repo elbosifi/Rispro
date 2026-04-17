@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PolicyDraftEditor } from "../components/policy-draft-editor";
 
@@ -20,6 +20,46 @@ vi.mock("../api", () => ({
 
 describe("PolicyDraftEditor exam type helper text", () => {
   describe("Exam date rules section", () => {
+    it("shows restriction-based wording and bulk actions when modality has exam types", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      expect(screen.getByText("Exam restriction rules")).toBeTruthy();
+      expect(screen.getByText("Restricted exams")).toBeTruthy();
+      expect(screen.getByText("Checked exams are the ones this rule blocks or restricts.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Select all" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Clear all" })).toBeTruthy();
+    });
+
     it("shows 'Select a modality first.' when no modality is selected", () => {
       render(
         <PolicyDraftEditor
@@ -128,6 +168,48 @@ describe("PolicyDraftEditor exam type helper text", () => {
 
       expect(screen.getByText("CT Head")).toBeTruthy();
       expect(screen.getByText("CT Chest")).toBeTruthy();
+    });
+
+    it("selects and clears all restricted exams", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: 1,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(true);
+      expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+      expect((screen.getByLabelText("CT Head") as HTMLInputElement).checked).toBe(false);
+      expect((screen.getByLabelText("CT Chest") as HTMLInputElement).checked).toBe(false);
     });
   });
 

@@ -548,7 +548,7 @@ export function PolicyDraftEditor({
         </details>
 
         <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Exam date rules</summary>
+          <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Exam restriction rules</summary>
           <div style={{ display: "grid", gap: 8 }}>
             {draft.examTypeRules.map((row, index) => {
               const examTypeOptionsForRow = examTypeOptionsByModality.get(row.modalityId) ?? [];
@@ -615,7 +615,7 @@ export function PolicyDraftEditor({
                     <option value="hard_restriction">Hard restriction</option>
                   </select>
                   <div className="rounded border border-stone-300 p-2 text-xs dark:border-stone-600">
-                    <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Exam types</p>
+                    <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Restricted exams</p>
                     {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
                     ) : examTypeOptionsForRow.length === 0 ? (
@@ -624,30 +624,67 @@ export function PolicyDraftEditor({
                         <p className="mt-1 text-[10px] text-stone-400">Add exam types in Settings before using this modality.</p>
                       </div>
                     ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {examTypeOptionsForRow.map((examTypeOption) => (
-                          <label key={examTypeOption.value} className="inline-flex items-center gap-1">
-                            <input
-                              type="checkbox"
-                              checked={row.examTypeIds.includes(examTypeOption.value)}
-                              onChange={(event) =>
-                                setDraft((prev) => ({
-                                  ...prev,
-                                  examTypeRules: prev.examTypeRules.map((item, itemIndex) => {
-                                    if (itemIndex !== index) return item;
-                                    return {
-                                      ...item,
-                                      examTypeIds: event.target.checked
-                                        ? [...item.examTypeIds, examTypeOption.value]
-                                        : item.examTypeIds.filter((id) => id !== examTypeOption.value),
-                                    };
-                                  }),
-                                }))
-                              }
-                            />
-                            {examTypeOption.label}
-                          </label>
-                        ))}
+                      <div>
+                        <p className="mb-2 text-[10px] text-stone-500 dark:text-stone-400">
+                          Checked exams are the ones this rule blocks or restricts.
+                        </p>
+                        <div className="mb-2 flex gap-2">
+                          <button
+                            type="button"
+                            className="rounded border border-stone-300 px-2 py-1 text-[10px] dark:border-stone-600"
+                            onClick={() =>
+                              setDraft((prev) => ({
+                                ...prev,
+                                examTypeRules: prev.examTypeRules.map((item, itemIndex) =>
+                                  itemIndex === index
+                                    ? { ...item, examTypeIds: examTypeOptionsForRow.map((option) => option.value) }
+                                    : item
+                                ),
+                              }))
+                            }
+                          >
+                            Select all
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded border border-stone-300 px-2 py-1 text-[10px] dark:border-stone-600"
+                            onClick={() =>
+                              setDraft((prev) => ({
+                                ...prev,
+                                examTypeRules: prev.examTypeRules.map((item, itemIndex) =>
+                                  itemIndex === index ? { ...item, examTypeIds: [] } : item
+                                ),
+                              }))
+                            }
+                          >
+                            Clear all
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {examTypeOptionsForRow.map((examTypeOption) => (
+                            <label key={examTypeOption.value} className="inline-flex items-center gap-1">
+                              <input
+                                type="checkbox"
+                                checked={row.examTypeIds.includes(examTypeOption.value)}
+                                onChange={(event) =>
+                                  setDraft((prev) => ({
+                                    ...prev,
+                                    examTypeRules: prev.examTypeRules.map((item, itemIndex) => {
+                                      if (itemIndex !== index) return item;
+                                      return {
+                                        ...item,
+                                        examTypeIds: event.target.checked
+                                          ? [...item.examTypeIds, examTypeOption.value]
+                                          : item.examTypeIds.filter((id) => id !== examTypeOption.value),
+                                      };
+                                    }),
+                                  }))
+                                }
+                              />
+                              {examTypeOption.label}
+                            </label>
+                          ))}
+                        </div>
                       </div>
                     )}
                   </div>
