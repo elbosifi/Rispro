@@ -30,6 +30,7 @@ interface CreateAppointmentTabProps {
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }>;
   schedulingEngineEnabled: boolean;
   canUseNonStandardCapacityModes?: boolean;
+  initialSelectedPatient?: SelectedPatient | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
     patientId: number;
@@ -61,6 +62,7 @@ export function CreateAppointmentTab({
   priorityOptions,
   schedulingEngineEnabled,
   canUseNonStandardCapacityModes = false,
+  initialSelectedPatient = null,
   onCreateAppointment,
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
@@ -77,6 +79,15 @@ export function CreateAppointmentTab({
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
   const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
+  const initialPatientAppliedRef = useRef(false);
+
+  useEffect(() => {
+    if (initialPatientAppliedRef.current) return;
+    if (!initialSelectedPatient) return;
+    if (form.patientId != null) return;
+    actions.setPatient(initialSelectedPatient);
+    initialPatientAppliedRef.current = true;
+  }, [actions, form.patientId, initialSelectedPatient]);
 
   const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
   const hasSafetyWarning = selectedModality?.safetyWarningEnabled && 

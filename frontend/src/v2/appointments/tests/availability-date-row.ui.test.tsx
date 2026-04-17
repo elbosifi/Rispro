@@ -56,4 +56,21 @@ describe("AvailabilityDateRow exam-rule display", () => {
 
     expect(screen.getByText("Generic fallback reason")).toBeTruthy();
   });
+
+  it("renders segmented capacity progress with category fill colors", () => {
+    render(
+      <AvailabilityDateRow
+        {...baseProps()}
+        matchedExamRuleSummary={null}
+      />
+    );
+
+    const progress = screen.getByLabelText("slot-capacity-progress");
+    expect(progress).toBeTruthy();
+    expect(progress.children.length).toBe(20);
+    expect((progress.children[0] as HTMLElement).style.backgroundColor).toBe("rgb(22, 101, 52)");
+    expect((progress.children[9] as HTMLElement).style.backgroundColor).toBe("rgb(134, 239, 172)");
+    expect((progress.children[10] as HTMLElement).style.backgroundColor).toBe("rgb(29, 78, 216)");
+    expect((progress.children[19] as HTMLElement).style.backgroundColor).toBe("rgb(147, 197, 253)");
+  });
 });

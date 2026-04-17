@@ -42,6 +42,61 @@ interface Props {
   onClick: () => void;
 }
 
+type SlotSegment = {
+  key: string;
+  color: string;
+  category: "oncology" | "non_oncology";
+  isFilled: boolean;
+};
+
+function clampNonNegative(value: number | null | undefined): number {
+  const parsed = Number(value ?? 0);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+function buildSlotSegments(params: {
+  oncologyReserved: number | null;
+  oncologyFilled: number;
+  oncologyRemaining: number | null;
+  nonOncologyReserved: number | null;
+  nonOncologyFilled: number;
+  nonOncologyRemaining: number | null;
+}): SlotSegment[] {
+  const oncologyTotalRaw = params.oncologyReserved ?? (params.oncologyFilled + (params.oncologyRemaining ?? 0));
+  const nonOncologyTotalRaw =
+    params.nonOncologyReserved ?? (params.nonOncologyFilled + (params.nonOncologyRemaining ?? 0));
+
+  const oncologyTotal = clampNonNegative(oncologyTotalRaw);
+  const nonOncologyTotal = clampNonNegative(nonOncologyTotalRaw);
+  const oncologyFilled = Math.min(clampNonNegative(params.oncologyFilled), oncologyTotal);
+  const nonOncologyFilled = Math.min(clampNonNegative(params.nonOncologyFilled), nonOncologyTotal);
+
+  const segments: SlotSegment[] = [];
+
+  for (let idx = 0; idx < oncologyTotal; idx += 1) {
+    const isFilled = idx < oncologyFilled;
+    segments.push({
+      key: `oncology-${idx}`,
+      color: isFilled ? "#166534" : "#86efac",
+      category: "oncology",
+      isFilled
+    });
+  }
+
+  for (let idx = 0; idx < nonOncologyTotal; idx += 1) {
+    const isFilled = idx < nonOncologyFilled;
+    segments.push({
+      key: `non-oncology-${idx}`,
+      color: isFilled ? "#1d4ed8" : "#93c5fd",
+      category: "non_oncology",
+      isFilled
+    });
+  }
+
+  return segments;
+}
+
 export function AvailabilityDateRow({
   date,
   dayLabel,
@@ -78,6 +133,14 @@ export function AvailabilityDateRow({
       : status === "full"
       ? "#92400e"
       : "#dc2626";
+  const slotSegments = buildSlotSegments({
+    oncologyReserved,
+    oncologyFilled,
+    oncologyRemaining,
+    nonOncologyReserved,
+    nonOncologyFilled,
+    nonOncologyRemaining
+  });
 
   return (
     <button
@@ -112,6 +175,31 @@ export function AvailabilityDateRow({
         <div style={{ marginTop: 8, fontSize: 12, color: "#dc2626" }}>Blocked</div>
       ) : (
         <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted, #64748b)", display: "grid", gap: 2 }}>
+          {slotSegments.length > 0 && (
+            <div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${slotSegments.length}, minmax(0, 1fr))`,
+                  gap: 2,
+                  marginBottom: 4
+                }}
+                aria-label="slot-capacity-progress"
+              >
+                {slotSegments.map((segment) => (
+                  <span
+                    key={segment.key}
+                    title={`${segment.category === "oncology" ? "Oncology" : "Non-oncology"} ${segment.isFilled ? "filled" : "remaining"} slot`}
+                    style={{
+                      height: 8,
+                      borderRadius: 2,
+                      backgroundColor: segment.color
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
           <div>
             Total: {remainingCapacity ?? 0} / {dailyCapacity ?? 0} remaining
           </div>
