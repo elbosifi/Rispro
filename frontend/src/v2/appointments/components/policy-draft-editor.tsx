@@ -600,8 +600,10 @@ export function PolicyDraftEditor({
                   </select>
                   <div className="rounded border border-stone-300 p-2 text-xs dark:border-stone-600">
                     <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Exam types</p>
-                    {examTypeOptionsForRow.length === 0 ? (
+                    {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
+                    ) : examTypeOptionsForRow.length === 0 ? (
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">No exam types configured for selected modality.</p>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {examTypeOptionsForRow.map((examTypeOption) => (
@@ -898,8 +900,10 @@ export function PolicyDraftEditor({
                   />
                   <div className="rounded border border-stone-300 p-2 text-xs dark:border-stone-600">
                     <p className="mb-1 text-[11px] text-stone-500 dark:text-stone-400">Exam types in group</p>
-                    {examTypeOptionsForRow.length === 0 ? (
+                    {row.modalityId === 0 ? (
                       <p className="text-[11px] text-stone-500 dark:text-stone-400">Select a modality first.</p>
+                    ) : examTypeOptionsForRow.length === 0 ? (
+                      <p className="text-[11px] text-stone-500 dark:text-stone-400">No exam types configured for selected modality.</p>
                     ) : (
                       <div className="flex flex-wrap gap-1">
                         {examTypeOptionsForRow.map((examTypeOption) => (
