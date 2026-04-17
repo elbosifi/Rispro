@@ -104,7 +104,7 @@ function patientToForm(p: Patient): PatientFormState {
     sex,
     estimatedDateOfBirth: dob,
     ageYears: p.ageYears ? String(p.ageYears) : "",
-    demographicsEstimated: Boolean((p as Record<string, unknown>).demographicsEstimated ?? (p as Record<string, unknown>).demographics_estimated),
+    demographicsEstimated: Boolean(p.demographicsEstimated),
     phone1: p.phone1 || "",
     phone2: p.phone2 || "",
     address: p.address || "",
