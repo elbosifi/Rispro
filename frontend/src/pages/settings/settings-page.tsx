@@ -360,7 +360,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["exam-types"], queryFn: fetchExamTypes });
-  const { data: modalityData } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
+  const { data: modalityData, isLoading: modalitiesLoading, error: modalitiesError } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -433,11 +433,13 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 <option value="">{t("settings.selectModality")}</option>
                 {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
+            ) : modalitiesLoading ? (
+              <p className="text-sm text-stone-500">{t("settings.loading")}</p>
             ) : (
-              <input value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} placeholder={t("settings.selectModality")} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+              <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
             )}
           </div>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
         </div>
       )}
 
@@ -450,6 +452,16 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                   <input value={editForm.name_en} onChange={(e) => setEditForm({ ...editForm, name_en: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                   <input value={editForm.name_ar} onChange={(e) => setEditForm({ ...editForm, name_ar: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                 </div>
+                {modalityOptions.length > 0 ? (
+                  <select value={editForm.modalityId || ""} onChange={(e) => setEditForm({ ...editForm, modalityId: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
+                    <option value="">{t("settings.selectModality")}</option>
+                    {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                ) : modalitiesLoading ? (
+                  <p className="text-sm text-stone-500">{t("settings.loading")}</p>
+                ) : (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
+                )}
                 <div className="flex gap-2">
                   <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
                   <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
