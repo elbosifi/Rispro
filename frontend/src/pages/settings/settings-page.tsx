@@ -370,7 +370,12 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteExamType(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setMutationError(null); },
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ["exam-types"] }); 
+      queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+      setMutationError(null); 
+    },
     onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
   });
   const updateMutation = useMutation({
@@ -380,7 +385,13 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       nameEn: data.name_en,
       is_active: data.is_active
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setEditingId(null); setMutationError(null); },
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ["exam-types"] }); 
+      queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+      setEditingId(null); 
+      setMutationError(null); 
+    },
     onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
   });
   const createMutation = useMutation({
@@ -389,7 +400,14 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       nameAr: data.name_ar,
       nameEn: data.name_en
     }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["exam-types"] }); setShowCreate(false); setCreateForm({ modalityId: "", name_ar: "", name_en: "" }); setMutationError(null); },
+    onSuccess: () => { 
+      queryClient.invalidateQueries({ queryKey: ["exam-types"] }); 
+      queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+      setShowCreate(false); 
+      setCreateForm({ modalityId: "", name_ar: "", name_en: "" }); 
+      setMutationError(null); 
+    },
     onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
   });
 
