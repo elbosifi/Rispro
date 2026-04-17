@@ -73,4 +73,33 @@ describe("AvailabilityDateRow exam-rule display", () => {
     expect((progress.children[10] as HTMLElement).style.backgroundColor).toBe("rgb(29, 78, 216)");
     expect((progress.children[19] as HTMLElement).style.backgroundColor).toBe("rgb(147, 197, 253)");
   });
+
+  it("renders uncategorized slots in yellow shades when modality capacity exceeds category quotas", () => {
+    render(
+      <AvailabilityDateRow
+        {...baseProps()}
+        dailyCapacity={24}
+        remainingCapacity={8}
+        matchedExamRuleSummary={null}
+      />
+    );
+
+    const progress = screen.getByLabelText("slot-capacity-progress");
+    expect(progress.children.length).toBe(24);
+    expect((progress.children[20] as HTMLElement).style.backgroundColor).toBe("rgb(161, 98, 7)");
+    expect((progress.children[23] as HTMLElement).style.backgroundColor).toBe("rgb(253, 230, 138)");
+  });
+
+  it("keeps progress bar visible for blocked rows", () => {
+    render(
+      <AvailabilityDateRow
+        {...baseProps()}
+        status="blocked"
+        matchedExamRuleSummary={null}
+      />
+    );
+
+    expect(screen.getByLabelText("slot-capacity-progress")).toBeTruthy();
+    expect(screen.getAllByText("Blocked").length).toBeGreaterThan(0);
+  });
 });

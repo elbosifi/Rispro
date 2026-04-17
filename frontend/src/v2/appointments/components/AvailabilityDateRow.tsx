@@ -45,7 +45,7 @@ interface Props {
 type SlotSegment = {
   key: string;
   color: string;
-  category: "oncology" | "non_oncology";
+  category: "oncology" | "non_oncology" | "uncategorized";
   isFilled: boolean;
 };
 
@@ -56,6 +56,9 @@ function clampNonNegative(value: number | null | undefined): number {
 }
 
 function buildSlotSegments(params: {
+  bucketMode: "partitioned" | "total_only";
+  dailyCapacity: number | null;
+  remainingCapacity: number | null;
   oncologyReserved: number | null;
   oncologyFilled: number;
   oncologyRemaining: number | null;
@@ -63,14 +66,42 @@ function buildSlotSegments(params: {
   nonOncologyFilled: number;
   nonOncologyRemaining: number | null;
 }): SlotSegment[] {
-  const oncologyTotalRaw = params.oncologyReserved ?? (params.oncologyFilled + (params.oncologyRemaining ?? 0));
-  const nonOncologyTotalRaw =
-    params.nonOncologyReserved ?? (params.nonOncologyFilled + (params.nonOncologyRemaining ?? 0));
+  const dailyCapacity = clampNonNegative(params.dailyCapacity);
+  const oncologyTotalRaw = params.bucketMode === "partitioned"
+    ? (params.oncologyReserved ?? (params.oncologyFilled + (params.oncologyRemaining ?? 0)))
+    : 0;
+  const nonOncologyTotalRaw = params.bucketMode === "partitioned"
+    ? (params.nonOncologyReserved ?? (params.nonOncologyFilled + (params.nonOncologyRemaining ?? 0)))
+    : 0;
 
-  const oncologyTotal = clampNonNegative(oncologyTotalRaw);
-  const nonOncologyTotal = clampNonNegative(nonOncologyTotalRaw);
+  const categoryTotal = clampNonNegative(oncologyTotalRaw) + clampNonNegative(nonOncologyTotalRaw);
+  const fallbackCapacityFromCounts =
+    clampNonNegative(params.oncologyFilled) +
+    clampNonNegative(params.nonOncologyFilled) +
+    clampNonNegative(params.remainingCapacity);
+  const capacity = Math.max(dailyCapacity, categoryTotal, fallbackCapacityFromCounts, 1);
+
+  let oncologyTotal = Math.min(clampNonNegative(oncologyTotalRaw), capacity);
+  let nonOncologyTotal = Math.min(clampNonNegative(nonOncologyTotalRaw), Math.max(capacity - oncologyTotal, 0));
+  let uncategorizedTotal = Math.max(capacity - oncologyTotal - nonOncologyTotal, 0);
+
+  if (params.bucketMode === "total_only") {
+    oncologyTotal = 0;
+    nonOncologyTotal = 0;
+    uncategorizedTotal = capacity;
+  }
+
   const oncologyFilled = Math.min(clampNonNegative(params.oncologyFilled), oncologyTotal);
   const nonOncologyFilled = Math.min(clampNonNegative(params.nonOncologyFilled), nonOncologyTotal);
+  const uncategorizedFilled = Math.min(
+    Math.max(
+      clampNonNegative(params.remainingCapacity) > 0
+        ? capacity - clampNonNegative(params.remainingCapacity) - oncologyFilled - nonOncologyFilled
+        : 0,
+      0
+    ),
+    uncategorizedTotal
+  );
 
   const segments: SlotSegment[] = [];
 
@@ -90,6 +121,16 @@ function buildSlotSegments(params: {
       key: `non-oncology-${idx}`,
       color: isFilled ? "#1d4ed8" : "#93c5fd",
       category: "non_oncology",
+      isFilled
+    });
+  }
+
+  for (let idx = 0; idx < uncategorizedTotal; idx += 1) {
+    const isFilled = idx < uncategorizedFilled;
+    segments.push({
+      key: `uncategorized-${idx}`,
+      color: isFilled ? "#a16207" : "#fde68a",
+      category: "uncategorized",
       isFilled
     });
   }
@@ -134,6 +175,9 @@ export function AvailabilityDateRow({
       ? "#92400e"
       : "#dc2626";
   const slotSegments = buildSlotSegments({
+    bucketMode,
+    dailyCapacity,
+    remainingCapacity,
     oncologyReserved,
     oncologyFilled,
     oncologyRemaining,
@@ -170,36 +214,35 @@ export function AvailabilityDateRow({
           {status === "blocked" ? "Blocked" : status}
         </div>
       </div>
+      <div style={{ marginTop: 8, marginBottom: 4 }}>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: `repeat(${slotSegments.length}, minmax(0, 1fr))`,
+            gap: 2,
+            width: "100%",
+            minHeight: 8
+          }}
+          aria-label="slot-capacity-progress"
+        >
+          {slotSegments.map((segment) => (
+            <span
+              key={segment.key}
+              title={`${segment.category === "oncology" ? "Oncology" : segment.category === "non_oncology" ? "Non-oncology" : "Uncategorized"} ${segment.isFilled ? "filled" : "remaining"} slot`}
+              style={{
+                height: 8,
+                borderRadius: 2,
+                backgroundColor: segment.color
+              }}
+            />
+          ))}
+        </div>
+      </div>
 
       {isBlockedLike ? (
         <div style={{ marginTop: 8, fontSize: 12, color: "#dc2626" }}>Blocked</div>
       ) : (
         <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted, #64748b)", display: "grid", gap: 2 }}>
-          {slotSegments.length > 0 && (
-            <div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: `repeat(${slotSegments.length}, minmax(0, 1fr))`,
-                  gap: 2,
-                  marginBottom: 4
-                }}
-                aria-label="slot-capacity-progress"
-              >
-                {slotSegments.map((segment) => (
-                  <span
-                    key={segment.key}
-                    title={`${segment.category === "oncology" ? "Oncology" : "Non-oncology"} ${segment.isFilled ? "filled" : "remaining"} slot`}
-                    style={{
-                      height: 8,
-                      borderRadius: 2,
-                      backgroundColor: segment.color
-                    }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
           <div>
             Total: {remainingCapacity ?? 0} / {dailyCapacity ?? 0} remaining
           </div>
