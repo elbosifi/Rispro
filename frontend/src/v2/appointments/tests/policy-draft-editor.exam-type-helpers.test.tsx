@@ -56,6 +56,43 @@ describe("PolicyDraftEditor exam type helper text", () => {
       expect(screen.getByText("Select a modality first.")).toBeTruthy();
     });
 
+    it("shows modality-aware empty-state when modality has no exam types", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [
+              {
+                id: 1,
+                modalityId: 99,
+                ruleType: "specific_date",
+                effectMode: "restriction_overridable",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                examTypeIds: [],
+                title: null,
+                notes: null,
+                isActive: true,
+              },
+            ],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      const emptyState = screen.getByText(/No exam types configured for/);
+      expect(emptyState).toBeTruthy();
+    });
+
     it("shows exam type checkboxes when modality has exam types", () => {
       render(
         <PolicyDraftEditor
@@ -128,6 +165,42 @@ describe("PolicyDraftEditor exam type helper text", () => {
       );
 
       expect(screen.getByText("Select a modality first.")).toBeTruthy();
+    });
+
+    it("shows modality-aware empty-state when modality has no exam types", () => {
+      render(
+        <PolicyDraftEditor
+          isSaving={false}
+          onSave={async () => {}}
+          snapshot={{
+            categoryDailyLimits: [],
+            modalityBlockedRules: [],
+            examTypeRules: [],
+            examTypeSpecialQuotas: [],
+            examMixQuotaRules: [
+              {
+                id: 1,
+                modalityId: 99,
+                title: null,
+                ruleType: "specific_date",
+                specificDate: null,
+                startDate: null,
+                endDate: null,
+                weekday: null,
+                alternateWeeks: false,
+                recurrenceAnchorDate: null,
+                dailyLimit: 1,
+                examTypeIds: [],
+                isActive: true,
+              },
+            ],
+            specialReasonCodes: [],
+          }}
+        />
+      );
+
+      const emptyState = screen.getByText(/No exam types configured for/);
+      expect(emptyState).toBeTruthy();
     });
 
     it("shows exam type checkboxes when modality has exam types", () => {
