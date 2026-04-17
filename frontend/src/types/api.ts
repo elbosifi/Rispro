@@ -53,6 +53,7 @@ export interface Patient {
   arabicFullName: string;
   englishFullName?: string | null;
   ageYears: number;
+  demographicsEstimated?: boolean;
   estimatedDateOfBirth?: string | null;
   sex: string;
   phone1: string;
@@ -106,6 +107,7 @@ export interface Appointment {
   isOverbooked?: boolean;
   overbookingReason?: string | null;
   approvedByName?: string | null;
+  demographicsEstimated?: boolean;
   notes?: string | null;
   modalityGeneralInstructionAr?: string | null;
   modalityGeneralInstructionEn?: string | null;

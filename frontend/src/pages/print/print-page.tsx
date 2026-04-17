@@ -140,7 +140,7 @@ export default function PrintPage() {
               ${slipField("English Name", apt.englishFullName || "—")}
               ${slipField("National ID", apt.nationalId || "—")}
               ${slipField("MRN", apt.mrn || "—")}
-              ${slipField("Age / Sex", `${apt.ageYears ?? "—"} / ${apt.sex || "—"}`)}
+              ${slipField("Age / Sex", `${apt.ageYears ?? "—"}${apt.demographicsEstimated ? " (Estimated)" : ""} / ${apt.sex || "—"}`)}
               ${slipField("Phone", apt.phone1 || "—")}
               ${slipField("Modality", apt.modalityNameEn || "—")}
               ${(apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn) ? slipField("Modality Notes", apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn || "—", Boolean(apt.modalityGeneralInstructionAr)) : ""}
@@ -372,7 +372,7 @@ export default function PrintPage() {
                   <Field label="English Name" value={selectedAppointment.englishFullName || "—"} />
                   <Field label="National ID" value={selectedAppointment.nationalId || "—"} />
                   <Field label="MRN" value={selectedAppointment.mrn || "—"} />
-                  <Field label="Age / Sex" value={`${selectedAppointment.ageYears ?? "—"} / ${selectedAppointment.sex || "—"}`} />
+                  <Field label="Age / Sex" value={`${selectedAppointment.ageYears ?? "—"}${selectedAppointment.demographicsEstimated ? " (Estimated)" : ""} / ${selectedAppointment.sex || "—"}`} />
                   <Field label="Phone" value={selectedAppointment.phone1 || "—"} />
                   <Field label="Modality" value={selectedAppointment.modalityNameEn || "—"} />
                   {(selectedAppointment.modalityGeneralInstructionAr || selectedAppointment.modalityGeneralInstructionEn) && (

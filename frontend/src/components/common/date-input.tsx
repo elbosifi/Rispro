@@ -9,9 +9,29 @@ interface DateInputProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  required?: boolean;
+  name?: string;
+  inputRef?: React.RefObject<HTMLInputElement | null>;
+  onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>;
 }
 
-export function DateInput({ label, value, onChange, disabled = false }: DateInputProps) {
+function autoFormatDisplayDateDraft(rawValue: string): string {
+  const digits = String(rawValue || "").replace(/\D/g, "").slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+export function DateInput({
+  label,
+  value,
+  onChange,
+  disabled = false,
+  required = false,
+  name,
+  inputRef,
+  onKeyDown
+}: DateInputProps) {
   const { language } = useLanguage();
   const hiddenInputRef = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(isoToDisplayDateLy(value));
@@ -48,13 +68,17 @@ export function DateInput({ label, value, onChange, disabled = false }: DateInpu
       </label>
       <div className="relative">
         <input
+          ref={inputRef}
           id={inputId}
           type="text"
+          name={name}
           dir="ltr"
           value={draft}
           placeholder={t(language, "dateInput.placeholder")}
           disabled={disabled}
-          onChange={(event) => setDraft(event.target.value)}
+          required={required}
+          onChange={(event) => setDraft(autoFormatDisplayDateDraft(event.target.value))}
+          onKeyDown={onKeyDown}
           onBlur={commitDraft}
           className="input-premium input-ltr w-full pr-12 disabled:opacity-50"
         />

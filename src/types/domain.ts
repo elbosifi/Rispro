@@ -39,6 +39,7 @@ export interface Patient {
   arabicFullName: string;
   englishFullName?: string | null;
   ageYears: number;
+  demographicsEstimated?: boolean;
   estimatedDateOfBirth?: string | null;
   sex: string;
   phone1: string;

@@ -136,7 +136,11 @@ export default function PatientsPage() {
                     <td className="p-3" style={{ color: "var(--text-muted)" }}>{patient.nationalId || "—"}</td>
                     <td className="p-3" style={{ color: "var(--text-muted)" }}>{patient.mrn || "—"}</td>
                     <td className="p-3" style={{ color: "var(--text-muted)" }}>{patient.sex || "—"}</td>
-                    <td className="p-3" style={{ color: "var(--text-muted)" }}>{patient.ageYears ?? "—"}</td>
+                    <td className="p-3" style={{ color: "var(--text-muted)" }}>
+                      {patient.ageYears != null
+                        ? `${patient.ageYears}${patient.demographicsEstimated ? " (Estimated)" : ""}`
+                        : "—"}
+                    </td>
                     <td className="p-3" style={{ color: "var(--text-muted)" }}>{patient.phone1 || "—"}</td>
                     <td className="p-3">
                       <div className="flex gap-1.5 justify-end">

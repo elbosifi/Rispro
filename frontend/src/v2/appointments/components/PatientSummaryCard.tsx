@@ -30,7 +30,7 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
       <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>Primary ID: {primaryIdentifier}</div>
       <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12 }}>
         <span>Sex: {renderSex(patient.sex)}</span>
-        <span>Age: {patient.ageYears ?? "—"}</span>
+        <span>Age: {patient.ageYears ?? "—"}{patient.demographicsEstimated ? " (Estimated)" : ""}</span>
         <span>Category: {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}</span>
       </div>
     </div>

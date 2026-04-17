@@ -153,6 +153,7 @@ interface PatientLookupRow {
   arabic_full_name: string;
   english_full_name: string | null;
   age_years: number;
+  demographics_estimated: boolean;
   estimated_date_of_birth: string | null;
   sex: string | null;
   phone_1: string | null;
@@ -236,6 +237,7 @@ export interface AppointmentListRow {
   arabic_full_name: string;
   english_full_name: string | null;
   age_years: number;
+  demographics_estimated: boolean;
   sex: string | null;
   phone_1: string | null;
   address: string | null;
@@ -708,7 +710,7 @@ async function getPatientById(
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const { rows } = await client.query(
     `
-      select id, mrn, national_id, arabic_full_name, english_full_name, age_years, estimated_date_of_birth, sex, phone_1, phone_2, address
+      select id, mrn, national_id, arabic_full_name, english_full_name, age_years, demographics_estimated, estimated_date_of_birth, sex, phone_1, phone_2, address
       from patients
       where id = $1
       limit 1
@@ -952,6 +954,7 @@ export async function listAppointmentsForPrint(
       patients.arabic_full_name,
       patients.english_full_name,
       patients.age_years,
+      patients.demographics_estimated,
       patients.sex,
       patients.phone_1,
       patients.address,
@@ -1178,6 +1181,7 @@ export async function getAppointmentPrintDetails(
       patients.arabic_full_name,
       patients.english_full_name,
       patients.age_years,
+      patients.demographics_estimated,
       patients.sex,
       patients.phone_1,
       patients.address,

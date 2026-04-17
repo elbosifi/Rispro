@@ -21,6 +21,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient }:
             mrn: patient.mrn,
             sex: patient.sex,
             ageYears: patient.ageYears,
+            demographicsEstimated: patient.demographicsEstimated,
           });
         }}
         selectedPatient={value}

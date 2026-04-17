@@ -40,6 +40,7 @@ export interface PatientRow {
   arabic_full_name: string;
   english_full_name: string | null;
   age_years: number;
+  demographics_estimated: boolean;
   sex: string | null;
   phone_1: string | null;
   phone_2: string | null;
@@ -55,6 +56,7 @@ export interface PatientPayload {
   arabicFullName?: string;
   englishFullName?: string;
   ageYears?: number;
+  demographicsEstimated?: unknown;
   estimatedDateOfBirth?: string;
   sex?: string;
   phone1?: unknown;
@@ -78,6 +80,7 @@ export interface ValidatedPatientPayload {
   englishFullName: string;
   normalizedArabicName: string;
   parsedAge: number;
+  demographicsEstimated: boolean;
   estimatedDob: string | null;
   sex: string;
   cleanPhone1: string;
@@ -186,6 +189,14 @@ function normalizeDateString(value: unknown, fieldName: string): string {
   return validateIsoDate(raw, fieldName);
 }
 
+function normalizeBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "true" || raw === "1" || raw === "yes") return true;
+  if (raw === "false" || raw === "0" || raw === "no" || raw === "") return false;
+  return false;
+}
+
 function calculateAgeYearsFromDob(dob: string): number | null {
   const parsed = new Date(`${dob}T00:00:00Z`);
 
@@ -274,6 +285,7 @@ async function validatePatientPayload(
     arabicFullName,
     englishFullName,
     ageYears,
+    demographicsEstimated = false,
     estimatedDateOfBirth,
     sex,
     phone1,
@@ -292,6 +304,7 @@ async function validatePatientPayload(
   );
   const cleanPhone1 = validatePhone(phone1, "phone1", { required: rules.phoneRule !== "optional" });
   const cleanPhone2 = validatePhone(phone2, "phone2", { required: false });
+  const cleanDemographicsEstimated = normalizeBoolean(demographicsEstimated);
   const dobValue = normalizeDateString(estimatedDateOfBirth, "estimatedDateOfBirth");
   const hasDob = Boolean(dobValue);
   const hasAgeValue = String(ageYears ?? "").trim() !== "";
@@ -368,6 +381,7 @@ async function validatePatientPayload(
     englishFullName: finalEnglishName,
     normalizedArabicName: normalizeArabicName(arabicFullName),
     parsedAge: finalAge,
+    demographicsEstimated: cleanDemographicsEstimated,
     estimatedDob: finalDob || formatDateForSql(buildEstimatedDobFromAge(finalAge)),
     sex: resolvedSex,
     cleanPhone1,
@@ -389,6 +403,7 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
         arabic_full_name,
         english_full_name,
         age_years,
+        demographics_estimated,
         sex,
         phone_1,
         phone_2,
@@ -460,6 +475,7 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       p.arabic_full_name,
       p.english_full_name,
       p.age_years,
+      p.demographics_estimated,
       p.sex,
       p.phone_1,
       p.phone_2,
@@ -609,6 +625,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
           english_full_name,
           normalized_arabic_name,
           age_years,
+          demographics_estimated,
           estimated_date_of_birth,
           sex,
           phone_1,
@@ -627,11 +644,12 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
           $7,
           $8,
           $9,
-          nullif($10, ''),
+          $10,
           nullif($11, ''),
           nullif($12, ''),
-          $13,
-          $13
+          nullif($13, ''),
+          $14,
+          $14
         )
         returning *
       `,
@@ -643,6 +661,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
         validated.englishFullName,
         validated.normalizedArabicName,
         validated.parsedAge,
+        validated.demographicsEstimated,
         validated.estimatedDob,
         validated.sex,
         validated.cleanPhone1,
@@ -716,12 +735,13 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
           english_full_name = nullif($6, ''),
           normalized_arabic_name = $7,
           age_years = $8,
-          estimated_date_of_birth = $9,
-          sex = $10,
-          phone_1 = nullif($11, ''),
-          phone_2 = nullif($12, ''),
-          address = nullif($13, ''),
-          updated_by_user_id = $14,
+          demographics_estimated = $9,
+          estimated_date_of_birth = $10,
+          sex = $11,
+          phone_1 = nullif($12, ''),
+          phone_2 = nullif($13, ''),
+          address = nullif($14, ''),
+          updated_by_user_id = $15,
           updated_at = now()
         where id = $1
         returning *
@@ -735,6 +755,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
         validated.englishFullName,
         validated.normalizedArabicName,
         validated.parsedAge,
+        validated.demographicsEstimated,
         validated.estimatedDob,
         validated.sex,
         validated.cleanPhone1,
@@ -845,26 +866,25 @@ async function mergePatientIdentifiers(
 ): Promise<void> {
   await client.query(
     `
-      insert into patient_identifiers (
-        patient_id,
-        identifier_type_id,
-        value,
-        normalized_value,
-        is_primary,
-        created_by_user_id,
-        updated_by_user_id
-      )
-      select
-        $1,
-        pi.identifier_type_id,
-        pi.value,
-        pi.normalized_value,
-        false,
-        pi.created_by_user_id,
-        $3
-      from patient_identifiers pi
-      where pi.patient_id = $2
-      on conflict do nothing
+      delete from patient_identifiers src
+      using patient_identifiers tgt
+      where src.patient_id = $2
+        and tgt.patient_id = $1
+        and src.identifier_type_id = tgt.identifier_type_id
+        and src.normalized_value = tgt.normalized_value
+    `,
+    [targetPatientId, sourcePatientId]
+  );
+
+  await client.query(
+    `
+      update patient_identifiers
+      set
+        patient_id = $1,
+        is_primary = false,
+        updated_by_user_id = $3,
+        updated_at = now()
+      where patient_id = $2
     `,
     [targetPatientId, sourcePatientId, actingUserId]
   );
@@ -953,7 +973,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
 
     const targetPatient = await client.query<PatientRow>(
       `
-        select id, mrn, national_id, arabic_full_name, english_full_name, age_years, sex, phone_1, phone_2, address, estimated_date_of_birth
+        select id, mrn, national_id, arabic_full_name, english_full_name, age_years, demographics_estimated, sex, phone_1, phone_2, address, estimated_date_of_birth
         from patients
         where id = $1
         limit 1

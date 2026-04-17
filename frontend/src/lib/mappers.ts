@@ -73,6 +73,7 @@ export interface AppointmentWithDetails extends Appointment {
   nationalId: string | null;
   mrn: string | null;
   ageYears: number;
+  demographicsEstimated?: boolean;
   sex: string;
   phone1: string | null;
   modalityNameAr: string;
@@ -136,6 +137,7 @@ export function mapPatient(raw: RawRecord): Patient {
     arabicFullName: str(raw, 'arabic_full_name') || str(raw, 'arabicFullName'),
     englishFullName: strOrNull(raw, 'english_full_name') ?? strOrNull(raw, 'englishFullName'),
     ageYears: num(raw, 'age_years') || num(raw, 'ageYears'),
+    demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
     estimatedDateOfBirth: strOrNull(raw, 'estimated_date_of_birth') ?? strOrNull(raw, 'estimatedDateOfBirth'),
     sex: str(raw, 'sex'),
     phone1: str(raw, 'phone_1') || str(raw, 'phone1'),
@@ -217,6 +219,7 @@ export function mapAppointment(raw: RawRecord): Appointment {
     isOverbooked: bool(raw, 'is_overbooked', bool(raw, 'isOverbooked', false)),
     overbookingReason: strOrNull(raw, 'overbooking_reason') ?? strOrNull(raw, 'overbookingReason'),
     approvedByName: strOrNull(raw, 'approved_by_name') ?? strOrNull(raw, 'approvedByName'),
+    demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
     notes: strOrNull(raw, 'notes'),
     noShowReason: strOrNull(raw, 'no_show_reason') ?? strOrNull(raw, 'noShowReason'),
     cancelReason: strOrNull(raw, 'cancel_reason') ?? strOrNull(raw, 'cancelReason'),
@@ -242,6 +245,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     nationalId: strOrNull(raw, 'national_id') ?? strOrNull(raw, 'nationalId'),
     mrn: strOrNull(raw, 'mrn'),
     ageYears: num(raw, 'age_years') || num(raw, 'ageYears'),
+    demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
     sex: str(raw, 'sex'),
     phone1: strOrNull(raw, 'phone_1') ?? strOrNull(raw, 'phone1'),
     // Modality fields

@@ -9,6 +9,7 @@ export interface SelectedPatient {
   mrn?: string | null;
   sex?: string | null;
   ageYears?: number | null;
+  demographicsEstimated?: boolean;
 }
 
 export interface CreateAppointmentFormModel {

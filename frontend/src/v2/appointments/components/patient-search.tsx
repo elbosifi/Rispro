@@ -20,6 +20,7 @@ interface Patient {
   phone1?: string | null;
   sex?: string | null;
   ageYears?: number | null;
+  demographicsEstimated?: boolean;
 }
 
 interface PatientSearchProps {

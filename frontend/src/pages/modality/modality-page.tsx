@@ -159,7 +159,7 @@ export default function ModalityPage() {
                       {apt.accessionNumber} • {apt.modalityNameEn} • {apt.examNameEn || "—"}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      ID: {apt.nationalId || "—"} • Age: {apt.ageYears || "—"} • Priority: {apt.priorityNameEn || "Normal"}
+                      ID: {apt.nationalId || "—"} • Age: {apt.ageYears || "—"}{apt.demographicsEstimated ? " (Estimated)" : ""} • Priority: {apt.priorityNameEn || "Normal"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4">

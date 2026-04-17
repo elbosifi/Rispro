@@ -26,6 +26,11 @@ function uniqueSuffix(): string {
   return `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 }
 
+function uniqueNationalId(prefixDigit: string): string {
+  const digits = `${Date.now()}${Math.floor(Math.random() * 100000).toString().padStart(5, "0")}`;
+  return `${prefixDigit}${digits.slice(-11)}`;
+}
+
 async function createFixture(): Promise<FixtureContext> {
   const suffix = uniqueSuffix();
   const receptionistHash = bcrypt.hashSync("test-pass", 10);
@@ -43,11 +48,11 @@ async function createFixture(): Promise<FixtureContext> {
   // Create an extra identifier type (active)
   const idType = await pool.query<{ id: number }>(
     `
-      insert into patient_identifier_types (code, label, is_active)
-      values ($1, $2, true)
+      insert into patient_identifier_types (code, label_ar, label_en, is_active)
+      values ($1, $2, $3, true)
       returning id
     `,
-    [`test_${suffix}`, `Test ID ${suffix}`]
+    [`test_${suffix}`, `اختبار ${suffix}`, `Test ID ${suffix}`]
   );
   const identifierTypeId = Number(idType.rows[0]?.id);
 
@@ -60,7 +65,7 @@ async function createFixture(): Promise<FixtureContext> {
           age_years, estimated_date_of_birth, sex, phone_1, address,
           created_by_user_id, updated_by_user_id
         )
-        values ($1, 'national_id', $1, $2, $3, $4, 30, '1996-01-01', 'M', $5, 'city', $6, $6)
+        values ($1::text, 'national_id', $1::text, $2, $3, $4, 30, '1996-01-01', 'M', $5, 'city', $6, $6)
         returning id
       `,
       [seed, `مريض ${seed}`, `Patient ${seed}`, `مريض${seed}`, `09${seed.slice(-8)}`, receptionistUserId]
@@ -81,18 +86,19 @@ async function createFixture(): Promise<FixtureContext> {
   };
 
   // Patient A: national_id + secondary identifiers
-  const patientAId = await mkPatient(`1${suffix.padStart(11, "0").slice(-11)}`, [
+  const patientAId = await mkPatient(uniqueNationalId("1"), [
     { typeCode: `test_${suffix}`, value: `SECONDARY-${suffix}`, isPrimary: false },
     { typeCode: `test_${suffix}`, value: `PASSPORT-${suffix}`, isPrimary: false }
   ]);
 
   // Patient B: no secondary identifiers
-  const patientBId = await mkPatient(`2${suffix.padStart(11, "0").slice(-11)}`);
+  const patientBId = await mkPatient(uniqueNationalId("2"));
 
   const cleanup = async () => {
     await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [[patientAId, patientBId]]);
     await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId]]);
     await pool.query(`delete from patient_identifier_types where id = $1`, [identifierTypeId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
     await pool.query(`delete from users where id = $1`, [receptionistUserId]);
   };
 
@@ -140,6 +146,55 @@ test("searchPatients: finds patient by normalized identifier variant", async (t)
     assert.ok(found, "Should find patient A by normalized identifier variant");
   } finally {
     await fx.cleanup();
+  }
+});
+
+test("createPatient: persists demographics_estimated flag", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_est_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const nationalId = uniqueNationalId("1");
+
+  try {
+    const created = await createPatient(
+      {
+        nationalId,
+        nationalIdConfirmation: nationalId,
+        identifierType: "national_id",
+        identifierValue: nationalId,
+        arabicFullName: `مريض تقديري ${suffix}`,
+        englishFullName: `Estimated ${suffix}`,
+        ageYears: 40,
+        demographicsEstimated: true,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city"
+      },
+      receptionistUserId
+    );
+
+    assert.equal(created.demographics_estimated, true, "create should persist demographics_estimated");
+    const fetched = await getPatientById(created.id);
+    assert.equal(fetched.demographics_estimated, true, "read should include demographics_estimated");
+
+    const searchResults = await searchPatients(nationalId);
+    const found = searchResults.find((row) => Number(row.id) === Number(created.id));
+    assert.ok(found, "search should include created patient");
+    assert.equal(found?.demographics_estimated, true, "search should include demographics_estimated");
+  } finally {
+    await pool.query(`delete from patients where national_id = $1`, [nationalId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
   }
 });
 
@@ -236,14 +291,14 @@ test("mergePatients: does not create duplicate identifier rows", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const fx = await createFixture();
   try {
-    // Give patient B the same secondary identifier as patient A
+    const targetIdentifierValue = `TARGET-${uniqueSuffix()}`;
+    // Give patient B an extra unique secondary identifier before merge
     await pool.query(
       `
         insert into patient_identifiers (patient_id, identifier_type_id, value, normalized_value, is_primary, created_by_user_id, updated_by_user_id)
-        select $1, identifier_type_id, value, normalized_value, false, created_by_user_id, updated_by_user_id
-        from patient_identifiers where patient_id = $2 limit 1
+        values ($1, $2, $3, $4, false, $5, $5)
       `,
-      [fx.patientBId, fx.patientAId]
+      [fx.patientBId, fx.identifierTypeId, targetIdentifierValue, targetIdentifierValue.toLowerCase(), fx.receptionistUserId]
     );
 
     await mergePatients(
@@ -309,16 +364,16 @@ test("updatePatient: works with inactive identifier type", async (t) => {
   // Create an INACTIVE identifier type
   const inactiveType = await pool.query<{ id: number }>(
     `
-      insert into patient_identifier_types (code, label, is_active)
-      values ($1, $2, false)
+      insert into patient_identifier_types (code, label_ar, label_en, is_active)
+      values ($1, $2, $3, false)
       returning id
     `,
-    [`inactive_${suffix}`, `Inactive Type ${suffix}`]
+    [`inactive_${suffix}`, `معرّف غير نشط ${suffix}`, `Inactive Type ${suffix}`]
   );
   const inactiveTypeId = Number(inactiveType.rows[0]?.id);
 
   // Create a patient with the inactive identifier type
-  const natId = `9${suffix.padStart(11, "0").slice(-11)}`;
+  const natId = uniqueNationalId("2");
   const patientResult = await pool.query<{ id: number }>(
     `
       insert into patients (
@@ -327,7 +382,7 @@ test("updatePatient: works with inactive identifier type", async (t) => {
         age_years, estimated_date_of_birth, sex, phone_1, address,
         created_by_user_id, updated_by_user_id
       )
-      values ($1, 'national_id', $1, $2, $3, $4, 25, '2001-01-01', 'F', '0912345678', 'city', $5, $5)
+      values ($1::text, 'national_id', $1::text, $2, $3, $4, 25, '2001-01-01', 'F', '0912345678', 'city', $5, $5)
       returning id
     `,
     [natId, `مريض قديم ${suffix}`, `Old Patient ${suffix}`, `مريض${suffix}`, receptionistUserId]
@@ -353,6 +408,7 @@ test("updatePatient: works with inactive identifier type", async (t) => {
       arabicFullName: `مريض محدث ${suffix}`,
       englishFullName: `Updated Patient ${suffix}`,
       ageYears: 26,
+      demographicsEstimated: true,
       sex: "F",
       phone1: "0912345678",
       address: "updated city",
@@ -364,6 +420,17 @@ test("updatePatient: works with inactive identifier type", async (t) => {
 
     const updated = await updatePatient(patientId, payload, receptionistUserId);
     assert.equal(updated.arabic_full_name, `مريض محدث ${suffix}`);
+    assert.equal(updated.demographics_estimated, true, "demographics_estimated should persist true");
+
+    const toggled = await updatePatient(
+      patientId,
+      {
+        ...payload,
+        demographicsEstimated: false
+      },
+      receptionistUserId
+    );
+    assert.equal(toggled.demographics_estimated, false, "demographics_estimated should be editable later");
 
     // Verify the inactive identifier is still present
     const identifiersAfter = await pool.query(
@@ -375,6 +442,7 @@ test("updatePatient: works with inactive identifier type", async (t) => {
     await pool.query(`delete from patient_identifiers where patient_id = $1`, [patientId]);
     await pool.query(`delete from patients where id = $1`, [patientId]);
     await pool.query(`delete from patient_identifier_types where id = $1`, [inactiveTypeId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
     await pool.query(`delete from users where id = $1`, [receptionistUserId]);
   }
 });

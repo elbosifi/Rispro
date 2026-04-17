@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchPatients, deletePatient } from "@/lib/api-hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -7,6 +7,8 @@ import type { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Search, User, Save, Trash2, X, Pencil } from "lucide-react";
+import { DateInput } from "@/components/common/date-input";
+import { formatDateLy } from "@/lib/date-format";
 
 export default function SearchPage() {
   const { language } = useLanguage();
@@ -231,8 +233,11 @@ function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void
         <Field label={t(language, "search.fieldNationalId")} value={patient.nationalId} />
         <Field label={t(language, "search.fieldMRN")} value={patient.mrn} />
         <Field label={t(language, "search.fieldSex")} value={patient.sex} />
-        <Field label={t(language, "search.fieldAge")} value={patient.ageYears} />
-        <Field label={t(language, "search.fieldDOB")} value={patient.estimatedDateOfBirth} />
+        <Field
+          label={t(language, "search.fieldAge")}
+          value={patient.ageYears != null ? `${patient.ageYears}${patient.demographicsEstimated ? " (Estimated)" : ""}` : "—"}
+        />
+        <Field label={t(language, "search.fieldDOB")} value={patient.estimatedDateOfBirth ? formatDateLy(patient.estimatedDateOfBirth) : "—"} />
         <Field label={t(language, "search.fieldPhone")} value={patient.phone1} />
         <div className="md:col-span-2">
           <Field label={t(language, "search.fieldAddress")} value={patient.address} />
@@ -265,16 +270,40 @@ function EditPatientForm({
     sex: patient.sex || "",
     ageYears: patient.ageYears?.toString() || "",
     estimatedDateOfBirth: patient.estimatedDateOfBirth || "",
+    demographicsEstimated: Boolean(patient.demographicsEstimated),
     phone1: patient.phone1 || "",
     address: patient.address || ""
   });
+  const [localError, setLocalError] = useState<string | null>(null);
+  const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    // Transform empty strings to undefined/null for the API
-    const payload = Object.fromEntries(
-      Object.entries(form).map(([k, v]) => [k, v === "" ? null : v])
-    );
+    setLocalError(null);
+    if (!form.sex) {
+      setLocalError("Sex is required.");
+      return;
+    }
+    if (!form.estimatedDateOfBirth && !form.ageYears.trim()) {
+      setLocalError("Please provide either Date of Birth or Age.");
+      return;
+    }
+    if (!form.phone1) {
+      setLocalError("Phone is required.");
+      return;
+    }
+
+    const payload: Partial<Patient> = {
+      arabicFullName: form.arabicFullName,
+      englishFullName: form.englishFullName || undefined,
+      nationalId: form.nationalId || undefined,
+      sex: form.sex || undefined,
+      ageYears: form.ageYears ? Number(form.ageYears) : undefined,
+      estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
+      demographicsEstimated: form.demographicsEstimated,
+      phone1: form.phone1 || undefined,
+      address: form.address || undefined
+    };
     onSave(payload);
   };
 
@@ -341,6 +370,7 @@ function EditPatientForm({
           label={t(language, "search.fieldSex")}
           value={form.sex}
           onChange={(v) => setForm((f) => ({ ...f, sex: v }))}
+          required
           options={[
             { value: "", label: t(language, "search.selectLabel") },
             { value: "M", label: t(language, "search.male") },
@@ -350,18 +380,30 @@ function EditPatientForm({
         <InputField
           label={t(language, "search.fieldAge")}
           value={form.ageYears}
-          onChange={(v) => setForm((f) => ({ ...f, ageYears: v }))}
+          onChange={(v) => setForm((f) => ({ ...f, ageYears: v.replace(/\D/g, "").slice(0, 3) }))}
           type="number"
         />
-        <InputField
-          label={t(language, "search.fieldDOBFormat")}
-          value={form.estimatedDateOfBirth || ""}
-          onChange={(v) => setForm((f) => ({ ...f, estimatedDateOfBirth: v }))}
-        />
+        <div>
+          <DateInput
+            label={t(language, "search.fieldDOBFormat")}
+            value={form.estimatedDateOfBirth || ""}
+            onChange={(v) => setForm((f) => ({ ...f, estimatedDateOfBirth: v }))}
+            name="estimatedDateOfBirth"
+          />
+          <label className="mt-2 inline-flex items-center gap-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+            <input
+              type="checkbox"
+              checked={form.demographicsEstimated}
+              onChange={(e) => setForm((f) => ({ ...f, demographicsEstimated: e.target.checked }))}
+            />
+            Estimated (uncertain DOB/age)
+          </label>
+        </div>
         <InputField
           label={t(language, "search.fieldPhone")}
           value={form.phone1}
-          onChange={(v) => setForm((f) => ({ ...f, phone1: v }))}
+          onChange={(v) => setForm((f) => ({ ...f, phone1: normalizePhoneInput(v) }))}
+          maxLength={10}
           required
         />
         <InputField
@@ -370,6 +412,9 @@ function EditPatientForm({
           onChange={(v) => setForm((f) => ({ ...f, address: v }))}
           className="md:col-span-2"
         />
+        {localError && (
+          <p className="md:col-span-2 text-xs font-mono-data text-red-600 dark:text-red-400">{localError}</p>
+        )}
       </div>
     </form>
   );
@@ -393,7 +438,9 @@ function InputField({
   required,
   type = "text",
   dir,
-  className
+  className,
+  maxLength,
+  disabled = false
 }: {
   label: string;
   value: string;
@@ -402,17 +449,23 @@ function InputField({
   type?: string;
   dir?: "rtl" | "ltr";
   className?: string;
+  maxLength?: number;
+  disabled?: boolean;
 }) {
+  const inputId = useId();
   return (
     <div className={className}>
-      <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+      <label htmlFor={inputId} className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
         {label}
       </label>
       <input
+        id={inputId}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         required={required}
+        disabled={disabled}
+        maxLength={maxLength}
         dir={dir}
         className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
         style={{ color: "var(--text)" }}
@@ -425,21 +478,26 @@ function SelectField({
   label,
   value,
   onChange,
-  options
+  options,
+  required = false
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  required?: boolean;
 }) {
+  const selectId = useId();
   return (
     <div>
-      <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
+      <label htmlFor={selectId} className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
         {label}
       </label>
       <select
+        id={selectId}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        required={required}
         className="input-premium w-full px-4 py-2 rounded-lg outline-none font-mono-data"
         style={{ color: "var(--text)" }}
       >

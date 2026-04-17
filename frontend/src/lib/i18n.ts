@@ -469,7 +469,7 @@ const en = {
   "search.fieldDOB": "DOB",
   "search.fieldPhone": "Phone",
   "search.fieldAddress": "Address",
-  "search.fieldDOBFormat": "DOB (YYYY-MM-DD)",
+  "search.fieldDOBFormat": "DOB (dd/mm/yyyy)",
 
   "login.username": "Username",
   "login.password": "Password"
@@ -942,7 +942,7 @@ const ar = {
   "search.fieldDOB": "تاريخ الميلاد",
   "search.fieldPhone": "الهاتف",
   "search.fieldAddress": "العنوان",
-  "search.fieldDOBFormat": "تاريخ الميلاد (YYYY-MM-DD)",
+  "search.fieldDOBFormat": "تاريخ الميلاد (يوم/شهر/سنة)",
 
   "login.username": "اسم المستخدم",
   "login.password": "كلمة المرور"

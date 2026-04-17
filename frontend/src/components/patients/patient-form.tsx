@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, useRef, useId, type FormEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -34,6 +34,7 @@ interface PatientFormState {
   sex: string;
   estimatedDateOfBirth: string;
   ageYears: string;
+  demographicsEstimated: boolean;
   phone1: string;
   phone2: string;
   address: string;
@@ -49,11 +50,25 @@ const DEFAULT_FORM: PatientFormState = {
   sex: "",
   estimatedDateOfBirth: "",
   ageYears: "",
+  demographicsEstimated: false,
   phone1: "",
   phone2: "",
   address: "benghazi",
   identifiers: [{ typeCode: "national_id", value: "", isPrimary: true }]
 };
+
+type FormFieldKey =
+  | "arabicFullName"
+  | "englishFullName"
+  | "identifierType"
+  | "identifierValue"
+  | "nationalIdConfirmation"
+  | "sex"
+  | "estimatedDateOfBirth"
+  | "ageYears"
+  | "phone1"
+  | "phone2"
+  | "address";
 
 function patientToForm(p: Patient): PatientFormState {
   const dob = p.estimatedDateOfBirth
@@ -89,6 +104,7 @@ function patientToForm(p: Patient): PatientFormState {
     sex,
     estimatedDateOfBirth: dob,
     ageYears: p.ageYears ? String(p.ageYears) : "",
+    demographicsEstimated: Boolean((p as Record<string, unknown>).demographicsEstimated ?? (p as Record<string, unknown>).demographics_estimated),
     phone1: p.phone1 || "",
     phone2: p.phone2 || "",
     address: p.address || "",
@@ -123,7 +139,17 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const [localDictionary, setLocalDictionary] = useState<DictionaryEntry[]>([]);
   const prevArabicTokenCountRef = useRef(0);
   const queryClient = useQueryClient();
+  const arabicFullNameRef = useRef<HTMLInputElement>(null);
+  const englishFullNameRef = useRef<HTMLInputElement>(null);
+  const identifierTypeRef = useRef<HTMLSelectElement>(null);
+  const identifierValueRef = useRef<HTMLInputElement>(null);
   const nationalIdConfirmationRef = useRef<HTMLInputElement>(null);
+  const sexRef = useRef<HTMLSelectElement>(null);
+  const dobRef = useRef<HTMLInputElement>(null);
+  const ageRef = useRef<HTMLInputElement>(null);
+  const phone1Ref = useRef<HTMLInputElement>(null);
+  const phone2Ref = useRef<HTMLInputElement>(null);
+  const addressRef = useRef<HTMLSelectElement>(null);
   const navigate = useNavigate();
 
   // Dictionary
@@ -157,7 +183,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   // Duplicate checking (create only)
   const dupQuery = !isEdit ? form.phone1 || form.arabicFullName || form.englishFullName || form.identifierValue || "" : "";
-  const { data: potentialDuplicates } = useQuery({
+  const { data: potentialDuplicates, isFetching: duplicatesLoading } = useQuery({
     queryKey: ["duplicates", dupQuery],
     queryFn: () => searchPatients(dupQuery),
     enabled: !isEdit && dupQuery.length > 1,
@@ -210,6 +236,102 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
   });
   const mutation = isEdit ? updateMutation : createMutation;
+
+  const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
+  const normalizeIdentifierForType = (type: IdentifierType, value: string) => (
+    type === "passport" ? value.toUpperCase() : value
+  );
+
+  const fieldOrder: FormFieldKey[] = [
+    "arabicFullName",
+    "englishFullName",
+    "identifierType",
+    "identifierValue",
+    "nationalIdConfirmation",
+    "sex",
+    "estimatedDateOfBirth",
+    "ageYears",
+    "phone1",
+    "phone2",
+    "address"
+  ];
+
+  const getFieldElement = (key: FormFieldKey): HTMLElement | null => {
+    const map: Record<FormFieldKey, HTMLElement | null> = {
+      arabicFullName: arabicFullNameRef.current,
+      englishFullName: englishFullNameRef.current,
+      identifierType: identifierTypeRef.current,
+      identifierValue: identifierValueRef.current,
+      nationalIdConfirmation: nationalIdConfirmationRef.current,
+      sex: sexRef.current,
+      estimatedDateOfBirth: dobRef.current,
+      ageYears: ageRef.current,
+      phone1: phone1Ref.current,
+      phone2: phone2Ref.current,
+      address: addressRef.current
+    };
+    return map[key];
+  };
+
+  const isFieldEmpty = (key: FormFieldKey): boolean => {
+    switch (key) {
+      case "arabicFullName":
+        return form.arabicFullName.trim() === "";
+      case "englishFullName":
+        return form.englishFullName.trim() === "";
+      case "identifierType":
+        return form.identifierType.trim() === "";
+      case "identifierValue":
+        return form.identifierValue.trim() === "";
+      case "nationalIdConfirmation":
+        return showConfirmation ? form.nationalIdConfirmation.trim() === "" : false;
+      case "sex":
+        return form.sex.trim() === "";
+      case "estimatedDateOfBirth":
+        return form.estimatedDateOfBirth.trim() === "";
+      case "ageYears":
+        return form.ageYears.trim() === "";
+      case "phone1":
+        return form.phone1.trim() === "";
+      case "phone2":
+        return form.phone2.trim() === "";
+      case "address":
+        return form.address.trim() === "";
+      default:
+        return false;
+    }
+  };
+
+  const focusNextField = (currentField: FormFieldKey) => {
+    const currentIndex = fieldOrder.indexOf(currentField);
+    if (currentIndex < 0) return;
+
+    for (let idx = currentIndex + 1; idx < fieldOrder.length; idx += 1) {
+      const fieldKey = fieldOrder[idx];
+      if (!fieldKey) continue;
+      const element = getFieldElement(fieldKey);
+      if (element && isFieldEmpty(fieldKey)) {
+        element.focus();
+        return;
+      }
+    }
+
+    for (let idx = currentIndex + 1; idx < fieldOrder.length; idx += 1) {
+      const fieldKey = fieldOrder[idx];
+      if (!fieldKey) continue;
+      const element = getFieldElement(fieldKey);
+      if (element) {
+        element.focus();
+        return;
+      }
+    }
+  };
+
+  const handleEnterNavigation = (currentField: FormFieldKey) => (event: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    focusNextField(currentField);
+  };
 
   // Handlers
   const handleArabicNameChange = (value: string) => {
@@ -315,6 +437,16 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       showToast("Exactly one primary identifier is required.", "error");
       return;
     }
+    if (!form.sex) {
+      showToast("Sex is required.", "error");
+      sexRef.current?.focus();
+      return;
+    }
+    if (!form.estimatedDateOfBirth && !form.ageYears.trim()) {
+      showToast("Please provide either Date of Birth or Age.", "error");
+      dobRef.current?.focus();
+      return;
+    }
     const isNat = form.identifierType === "national_id";
     const isNationalIdComplete = isValidNationalId(form.identifierValue);
     const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
@@ -337,10 +469,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       nationalId: isNat ? form.identifierValue : undefined,
       nationalIdConfirmation: isNat ? form.nationalIdConfirmation : undefined,
       sex: form.sex || undefined,
+      demographicsEstimated: form.demographicsEstimated,
       estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
       ageYears: form.ageYears ? parseInt(form.ageYears, 10) : undefined,
-      phone1: form.phone1,
-      phone2: form.phone2 || undefined,
+      phone1: normalizePhoneInput(form.phone1),
+      phone2: form.phone2 ? normalizePhoneInput(form.phone2) : undefined,
       address: form.address || undefined,
       autoGenerateEnglish: !englishNameManuallyEdited && !form.englishFullName,
       identifiers: form.identifiers
@@ -365,6 +498,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         return result.missingTokens;
       })()
     : [];
+  const hasShortArabicNameWarning = (() => {
+    const parts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
+    return parts.length > 0 && parts.length < 3;
+  })();
   const isNationalId = form.identifierType === "national_id";
   // Show confirmation only in create mode, or in edit mode when national ID was changed
   const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
@@ -386,9 +523,25 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Identity</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Arabic Full Name" value={form.arabicFullName} onChange={handleArabicNameChange} onBlur={() => { if (form.arabicFullName && !form.arabicFullName.endsWith(" ")) handleArabicNameChange(form.arabicFullName + " "); }} required dir="rtl" />
+          <Input
+            label="Arabic Full Name"
+            value={form.arabicFullName}
+            onChange={handleArabicNameChange}
+            onBlur={() => { if (form.arabicFullName && !form.arabicFullName.endsWith(" ")) handleArabicNameChange(form.arabicFullName + " "); }}
+            onKeyDown={handleEnterNavigation("arabicFullName")}
+            required
+            dir="rtl"
+            inputRef={arabicFullNameRef}
+          />
           <div>
-            <Input label="English Full Name" value={form.englishFullName} onChange={handleEnglishNameChange} dir="ltr" />
+            <Input
+              label="English Full Name"
+              value={form.englishFullName}
+              onChange={handleEnglishNameChange}
+              onKeyDown={handleEnterNavigation("englishFullName")}
+              dir="ltr"
+              inputRef={englishFullNameRef}
+            />
             {form.arabicFullName && !englishNameManuallyEdited && (
               <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
                 Generated from name dictionary.
@@ -400,6 +553,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             )}
           </div>
         </div>
+        {hasShortArabicNameWarning && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Warning: patient name usually includes at least 3 parts.
+          </p>
+        )}
 
         {currentMissingTokens.length > 0 && (
           <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-2">
@@ -418,30 +576,74 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Select label="Identifier Type" value={form.identifierType} onChange={(v) => setForm((f) => {
-            const nextIdentifiers = [...f.identifiers];
-            if (nextIdentifiers.length === 0) {
-              nextIdentifiers.push({ typeCode: v as IdentifierType, value: f.identifierValue, isPrimary: true });
-            } else {
-              nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: v as IdentifierType, isPrimary: true };
-            }
-            return { ...f, identifierType: v as IdentifierType, identifiers: nextIdentifiers, nationalIdConfirmation: "" };
-          })} options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]} />
-          {isNationalId ? (
-            <Input label="National ID (12 digits)" value={form.identifierValue} onChange={handleIdentifierValueChange} maxLength={12} placeholder="1xxxxxxxxxxx" />
-          ) : (
-            <Input label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"} value={form.identifierValue} onChange={(v) => setForm((f) => {
+          <Select
+            label="Identifier Type"
+            value={form.identifierType}
+            onKeyDown={handleEnterNavigation("identifierType")}
+            selectRef={identifierTypeRef}
+            required
+            onChange={(v) => setForm((f) => {
+              const nextType = v as IdentifierType;
+              const nextValue = normalizeIdentifierForType(nextType, f.identifierValue);
               const nextIdentifiers = [...f.identifiers];
               if (nextIdentifiers.length === 0) {
-                nextIdentifiers.push({ typeCode: f.identifierType, value: v, isPrimary: true });
+                nextIdentifiers.push({ typeCode: nextType, value: nextValue, isPrimary: true });
               } else {
-                nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: v, isPrimary: true };
+                nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: nextType, value: nextValue, isPrimary: true };
               }
-              return { ...f, identifierValue: v, identifiers: nextIdentifiers };
-            })} placeholder={form.identifierType === "passport" ? "AB1234567" : ""} />
+              return {
+                ...f,
+                identifierType: nextType,
+                identifierValue: nextValue,
+                identifiers: nextIdentifiers,
+                nationalIdConfirmation: ""
+              };
+            })}
+            options={[{ value: "national_id", label: "National ID (Libyan)" }, { value: "passport", label: "Passport" }, { value: "other", label: "Other" }]}
+          />
+          {isNationalId ? (
+            <Input
+              label="National ID (12 digits)"
+              value={form.identifierValue}
+              onChange={handleIdentifierValueChange}
+              onKeyDown={handleEnterNavigation("identifierValue")}
+              inputRef={identifierValueRef}
+              maxLength={12}
+              placeholder="1xxxxxxxxxxx"
+            />
+          ) : (
+            <Input
+              label={form.identifierType === "passport" ? "Passport Number" : "Identifier Value"}
+              value={form.identifierValue}
+              onChange={(v) => setForm((f) => {
+                const nextValue = normalizeIdentifierForType(f.identifierType, v);
+                const nextIdentifiers = [...f.identifiers];
+                if (nextIdentifiers.length === 0) {
+                  nextIdentifiers.push({ typeCode: f.identifierType, value: nextValue, isPrimary: true });
+                } else {
+                  nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: nextValue, isPrimary: true };
+                }
+                return { ...f, identifierValue: nextValue, identifiers: nextIdentifiers };
+              })}
+              onKeyDown={handleEnterNavigation("identifierValue")}
+              inputRef={identifierValueRef}
+              placeholder={form.identifierType === "passport" ? "AB1234567" : ""}
+            />
           )}
           {showConfirmation && (
-            <Input label="Confirm National ID" value={form.nationalIdConfirmation} onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))} maxLength={12} ref={nationalIdConfirmationRef} onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }} onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }} placeholder="Re-type the National ID" required={nationalIdWasEdited} />
+            <Input
+              label="Confirm National ID"
+              value={form.nationalIdConfirmation}
+              onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.replace(/\D/g, "") }))}
+              onKeyDown={handleEnterNavigation("nationalIdConfirmation")}
+              maxLength={12}
+              inputRef={nationalIdConfirmationRef}
+              onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+              placeholder="Re-type the National ID"
+              required={nationalIdWasEdited}
+            />
           )}
         </div>
         <div className="space-y-2 rounded-lg border border-stone-200 dark:border-stone-700 p-3">
@@ -470,9 +672,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onChange={(e) =>
                   setForm((f) => {
                     const next = [...f.identifiers];
-                    next[idx] = { ...next[idx], typeCode: e.target.value as IdentifierType };
+                    const nextType = e.target.value as IdentifierType;
+                    const nextValue = normalizeIdentifierForType(nextType, next[idx]?.value || "");
+                    next[idx] = { ...next[idx], typeCode: nextType, value: nextValue };
                     if (idx === 0) {
-                      return { ...f, identifiers: next, identifierType: e.target.value as IdentifierType };
+                      return { ...f, identifiers: next, identifierType: nextType, identifierValue: nextValue };
                     }
                     return { ...f, identifiers: next };
                   })
@@ -488,9 +692,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onChange={(e) =>
                   setForm((f) => {
                     const next = [...f.identifiers];
-                    next[idx] = { ...next[idx], value: e.target.value };
+                    const nextValue = normalizeIdentifierForType(next[idx]?.typeCode || "other", e.target.value);
+                    next[idx] = { ...next[idx], value: nextValue };
                     if (idx === 0) {
-                      return { ...f, identifiers: next, identifierValue: e.target.value };
+                      return { ...f, identifiers: next, identifierValue: nextValue };
                     }
                     return { ...f, identifiers: next };
                   })
@@ -554,9 +759,41 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Demographics</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Select label="Sex" value={form.sex} onChange={(v) => setForm((f) => ({ ...f, sex: v }))} options={[{ value: "", label: "Select..." }, { value: "M", label: "Male" }, { value: "F", label: "Female" }]} />
-          <DateInput label="Date of Birth" value={form.estimatedDateOfBirth} onChange={handleDobChange} />
-          <Input label="Age (years)" value={form.ageYears} onChange={(v) => setForm((f) => ({ ...f, ageYears: v.replace(/\D/g, "") }))} type="number" min="0" max="130" />
+          <Select
+            label="Sex"
+            value={form.sex}
+            onChange={(v) => setForm((f) => ({ ...f, sex: v }))}
+            onKeyDown={handleEnterNavigation("sex")}
+            selectRef={sexRef}
+            required
+            options={[{ value: "", label: "Select..." }, { value: "M", label: "Male" }, { value: "F", label: "Female" }]}
+          />
+          <DateInput
+            label="Date of Birth"
+            value={form.estimatedDateOfBirth}
+            onChange={handleDobChange}
+            onKeyDown={handleEnterNavigation("estimatedDateOfBirth")}
+            inputRef={dobRef}
+            name="estimatedDateOfBirth"
+          />
+          <Input
+            label="Age (years)"
+            value={form.ageYears}
+            onChange={(v) => setForm((f) => ({ ...f, ageYears: v.replace(/\D/g, "").slice(0, 3) }))}
+            onKeyDown={handleEnterNavigation("ageYears")}
+            inputRef={ageRef}
+            type="number"
+            min="0"
+            max="130"
+          />
+          <label className="flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300 mt-1">
+            <input
+              type="checkbox"
+              checked={form.demographicsEstimated}
+              onChange={(event) => setForm((f) => ({ ...f, demographicsEstimated: event.target.checked }))}
+            />
+            Estimated (uncertain DOB/age)
+          </label>
         </div>
         {isNationalId && isValidNationalId(form.identifierValue) && (
           <p className="text-xs text-teal-600 dark:text-teal-400">Demographics auto-derived from National ID. You can override them manually.</p>
@@ -567,10 +804,32 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <h3 className="text-lg font-semibold text-stone-900 dark:text-white border-b pb-2">Contact</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <Input label="Phone 1 (Required)" value={form.phone1} onChange={(v) => setForm((f) => ({ ...f, phone1: v }))} required />
-          <Input label="Phone 2 (Optional)" value={form.phone2} onChange={(v) => setForm((f) => ({ ...f, phone2: v }))} />
+          <Input
+            label="Phone 1 (Required)"
+            value={form.phone1}
+            onChange={(v) => setForm((f) => ({ ...f, phone1: normalizePhoneInput(v) }))}
+            onKeyDown={handleEnterNavigation("phone1")}
+            inputRef={phone1Ref}
+            maxLength={10}
+            required
+          />
+          <Input
+            label="Phone 2 (Optional)"
+            value={form.phone2}
+            onChange={(v) => setForm((f) => ({ ...f, phone2: normalizePhoneInput(v) }))}
+            onKeyDown={handleEnterNavigation("phone2")}
+            inputRef={phone2Ref}
+            maxLength={10}
+          />
           <div className="md:col-span-2">
-            <Select label="City" value={form.address} onChange={(v) => setForm((f) => ({ ...f, address: v }))} options={[{ value: "", label: "Select a city..." }, ...LIBYAN_CITIES.map((c) => ({ value: c.code, label: `${c.nameAr} / ${c.nameEn}` }))]} />
+            <Select
+              label="City"
+              value={form.address}
+              onChange={(v) => setForm((f) => ({ ...f, address: v }))}
+              onKeyDown={handleEnterNavigation("address")}
+              selectRef={addressRef}
+              options={[{ value: "", label: "Select a city..." }, ...LIBYAN_CITIES.map((c) => ({ value: c.code, label: `${c.nameAr} / ${c.nameEn}` }))]}
+            />
           </div>
         </div>
       </div>
@@ -607,141 +866,155 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // ============================================================
   if (!isEdit) {
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">{formFields}</div>
-        <div className="space-y-6">
-          {duplicates.length > 0 && (
+      <>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">{formFields}</div>
+          <div className="space-y-6">
             <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 space-y-3">
-              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">Possible Duplicates ({duplicates.length})</h3>
-              <ul className="space-y-2">
-                {duplicates.slice(0, 5).map((p) => (
-                  <li key={p.id} className="bg-white dark:bg-stone-800 rounded-lg border border-amber-200/50 dark:border-amber-800/50 overflow-hidden">
-                    <button type="button" onClick={() => setPreviewPatient(p)} className="w-full p-3 space-y-1 text-right hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
-                      <p className="font-medium text-sm text-stone-900 dark:text-white">{p.arabicFullName}</p>
-                      {p.englishFullName && <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>}
-                      <p className="text-xs text-stone-500 dark:text-stone-400">{p.identifierValue || p.nationalId || "No ID"}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}MRN: {p.mrn || "—"}</p>
-                      {p.phone1 && <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>}
-                      {p.address && <p className="text-xs text-stone-500 dark:text-stone-400">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
-                    </button>
-                    <div className="flex gap-2 border-t border-amber-200/50 dark:border-amber-800/50">
-                      <button type="button" onClick={() => navigate(`/patients/${p.id}/edit`)} className="flex-1 text-center py-2 px-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">Edit Patient</button>
-                      <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="flex-1 text-center py-2 px-2 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors">Create Appointment</button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+              <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                Possible Duplicates {dupQuery.length > 1 ? `(${duplicates.length})` : ""}
+              </h3>
+              {dupQuery.length <= 1 ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300">Type at least 2 characters in phone, name, or identifier to check matches.</p>
+              ) : duplicatesLoading ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300">Checking possible matches…</p>
+              ) : duplicates.length === 0 ? (
+                <p className="text-xs text-amber-700 dark:text-amber-300">No possible matches found.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {duplicates.slice(0, 5).map((p) => (
+                    <li key={p.id} className="bg-white dark:bg-stone-800 rounded-lg border border-amber-200/50 dark:border-amber-800/50 overflow-hidden">
+                      <button type="button" onClick={() => setPreviewPatient(p)} className="w-full p-3 space-y-1 text-right hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors">
+                        <p className="font-medium text-sm text-stone-900 dark:text-white">{p.arabicFullName}</p>
+                        {p.englishFullName && <p className="text-xs text-stone-500 dark:text-stone-400">{p.englishFullName}</p>}
+                        <p className="text-xs text-stone-500 dark:text-stone-400">{p.identifierValue || p.nationalId || "No ID"}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}MRN: {p.mrn || "—"}</p>
+                        {p.phone1 && <p className="text-xs text-stone-500 dark:text-stone-400">Phone: {p.phone1}</p>}
+                        {p.address && <p className="text-xs text-stone-500 dark:text-stone-400">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
+                      </button>
+                      <div className="flex gap-2 border-t border-amber-200/50 dark:border-amber-800/50">
+                        <button type="button" onClick={() => navigate(`/patients/${p.id}/edit`)} className="flex-1 text-center py-2 px-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors">Edit Patient</button>
+                        <button type="button" onClick={() => navigate(`/appointments?patientId=${p.id}`)} className="flex-1 text-center py-2 px-2 bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 text-xs font-medium hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors">Create Appointment</button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          )}
 
-          {/* Patient Preview Modal */}
-          {previewPatient && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setPreviewPatient(null); }}>
-              <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-xl w-full max-w-md mx-4 p-6 space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Patient Details</h3>
-                  <button onClick={() => setPreviewPatient(null)} className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200">✕</button>
-                </div>
-                <div className="space-y-2 text-sm">
-                  <Field label="Arabic Name" value={previewPatient.arabicFullName} />
-                  {previewPatient.englishFullName && <Field label="English Name" value={previewPatient.englishFullName} />}
-                  <Field label="Identifier" value={`${previewPatient.identifierValue || previewPatient.nationalId || "No ID"}${previewPatient.identifierType && previewPatient.identifierType !== "national_id" ? ` (${previewPatient.identifierType})` : ""}`} />
-                  <Field label="MRN" value={previewPatient.mrn || "—"} />
-                  <Field label="Sex" value={previewPatient.sex === "M" ? "Male" : previewPatient.sex === "F" ? "Female" : previewPatient.sex} />
-                  <Field label="Age" value={previewPatient.ageYears ? `${previewPatient.ageYears} years` : "—"} />
-                  <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? formatDateLy(previewPatient.estimatedDateOfBirth) : "—"} />
-                  <Field label="Phone" value={previewPatient.phone1 || "—"} />
-                  {previewPatient.phone2 && <Field label="Phone 2" value={previewPatient.phone2} />}
-                  {previewPatient.address && <Field label="City" value={LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn || previewPatient.address} />}
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button onClick={() => navigate(`/patients/${previewPatient.id}/edit`)} className="flex-1 py-2 px-4 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 font-medium rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors text-sm">Edit</button>
-                  <button onClick={() => navigate(`/appointments?patientId=${previewPatient.id}`)} className="flex-1 py-2 px-4 bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300 font-medium rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors text-sm">Create Appointment</button>
+            {/* Patient Preview Modal */}
+            {previewPatient && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setPreviewPatient(null); }}>
+                <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-xl w-full max-w-md mx-4 p-6 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-lg font-semibold text-stone-900 dark:text-white">Patient Details</h3>
+                    <button onClick={() => setPreviewPatient(null)} className="text-stone-400 hover:text-stone-600 dark:hover:text-stone-200">✕</button>
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    <Field label="Arabic Name" value={previewPatient.arabicFullName} />
+                    {previewPatient.englishFullName && <Field label="English Name" value={previewPatient.englishFullName} />}
+                    <Field label="Identifier" value={`${previewPatient.identifierValue || previewPatient.nationalId || "No ID"}${previewPatient.identifierType && previewPatient.identifierType !== "national_id" ? ` (${previewPatient.identifierType})` : ""}`} />
+                    <Field label="MRN" value={previewPatient.mrn || "—"} />
+                    <Field label="Sex" value={previewPatient.sex === "M" ? "Male" : previewPatient.sex === "F" ? "Female" : previewPatient.sex} />
+                    <Field label="Age" value={previewPatient.ageYears ? `${previewPatient.ageYears} years${previewPatient.demographicsEstimated ? " (Estimated)" : ""}` : "—"} />
+                    <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? formatDateLy(previewPatient.estimatedDateOfBirth) : "—"} />
+                    <Field label="Phone" value={previewPatient.phone1 || "—"} />
+                    {previewPatient.phone2 && <Field label="Phone 2" value={previewPatient.phone2} />}
+                    {previewPatient.address && <Field label="City" value={LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn || previewPatient.address} />}
+                  </div>
+                  <div className="flex gap-2 pt-2">
+                    <button onClick={() => navigate(`/patients/${previewPatient.id}/edit`)} className="flex-1 py-2 px-4 bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300 font-medium rounded-lg hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors text-sm">Edit</button>
+                    <button onClick={() => navigate(`/appointments?patientId=${previewPatient.id}`)} className="flex-1 py-2 px-4 bg-teal-100 dark:bg-teal-900/30 text-teal-800 dark:text-teal-300 font-medium rounded-lg hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors text-sm">Create Appointment</button>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
-      </div>
-    );
-  }
-
-  // Edit mode: form only (toast handles success)
-  if (isEdit) {
-    return (
-      <>
-        {formFields}
         {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        {postCreatePatient &&
+          createPortal(
+            <div
+              className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 px-4"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setPostCreatePatient(null);
+              }}
+            >
+              <div className="w-full max-w-lg rounded-3xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-6 shadow-2xl">
+                <div className="text-center space-y-3">
+                  <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">
+                    <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                  <h3 className="text-xl font-bold text-stone-900 dark:text-white">Patient registered</h3>
+                  <p className="text-sm text-stone-600 dark:text-stone-300">
+                    Choose what to do next for {postCreatePatient.arabicFullName}.
+                  </p>
+                </div>
+                <div className="mt-6 flex flex-col gap-3">
+                  <button
+                    type="button"
+                    onClick={() => navigate(`/appointments?patientId=${postCreatePatient.id}`)}
+                    className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700 transition-colors"
+                  >
+                    Create appointment for this patient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPostCreatePatient(null);
+                      arabicFullNameRef.current?.focus();
+                    }}
+                    className="w-full rounded-xl border border-stone-200 dark:border-stone-700 px-4 py-3 text-sm font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+                  >
+                    Register another patient
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPostCreatePatient(null)}
+                    className="w-full rounded-xl border border-stone-200 dark:border-stone-700 px-4 py-3 text-sm font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
       </>
     );
   }
 
+  // Edit mode: form only (toast handles success)
   return (
     <>
       {formFields}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
-      {postCreatePatient &&
-        createPortal(
-          <div
-            className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 px-4"
-            onClick={(e) => {
-              if (e.target === e.currentTarget) setPostCreatePatient(null);
-            }}
-          >
-            <div className="w-full max-w-lg rounded-3xl border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 p-6 shadow-2xl">
-              <div className="text-center space-y-3">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300">
-                  <svg className="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                  </svg>
-                </div>
-                <h3 className="text-xl font-bold text-stone-900 dark:text-white">Patient registered</h3>
-                <p className="text-sm text-stone-600 dark:text-stone-300">
-                  Book an appointment for {postCreatePatient.arabicFullName} now?
-                </p>
-              </div>
-              <div className="mt-6 flex flex-col sm:flex-row gap-3">
-                <button
-                  type="button"
-                  onClick={() => setPostCreatePatient(null)}
-                  className="flex-1 rounded-xl border border-stone-200 dark:border-stone-700 px-4 py-3 text-sm font-semibold text-stone-700 dark:text-stone-300 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors"
-                >
-                  Not now
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigate(`/appointments?patientId=${postCreatePatient.id}`)}
-                  className="flex-1 rounded-xl bg-teal-600 px-4 py-3 text-sm font-semibold text-white hover:bg-teal-700 transition-colors"
-                >
-                  Book appointment
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
     </>
   );
 }
 
 // -- Sub-components --
 
-function Input({ label, value, onChange, required, type = "text", maxLength, placeholder, dir, min, max, onPaste, onDragOver, onDrop, onBlur, ref }: {
-  label: string; value: string; onChange: (v: string) => void; required?: boolean; type?: string; maxLength?: number; placeholder?: string; dir?: "rtl" | "ltr"; min?: string; max?: string; onPaste?: React.ClipboardEventHandler<HTMLInputElement>; onDragOver?: React.DragEventHandler<HTMLInputElement>; onDrop?: React.DragEventHandler<HTMLInputElement>; onBlur?: () => void; ref?: React.RefObject<HTMLInputElement | null>;
+function Input({ label, value, onChange, required, type = "text", maxLength, placeholder, dir, min, max, onPaste, onDragOver, onDrop, onBlur, onKeyDown, inputRef }: {
+  label: string; value: string; onChange: (v: string) => void; required?: boolean; type?: string; maxLength?: number; placeholder?: string; dir?: "rtl" | "ltr"; min?: string; max?: string; onPaste?: React.ClipboardEventHandler<HTMLInputElement>; onDragOver?: React.DragEventHandler<HTMLInputElement>; onDrop?: React.DragEventHandler<HTMLInputElement>; onBlur?: () => void; onKeyDown?: React.KeyboardEventHandler<HTMLInputElement>; inputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
+  const inputId = useId();
   const directionClass = dir === "rtl" ? "input-rtl" : "input-ltr";
   return (
     <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
-      <input ref={ref} type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} maxLength={maxLength} placeholder={placeholder} dir={dir} min={min} max={max} onPaste={onPaste} onDragOver={onDragOver} onDrop={onDrop} onBlur={onBlur} className={`input-premium w-full ${directionClass}`} />
+      <label htmlFor={inputId} className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
+      <input id={inputId} ref={inputRef} type={type} value={value} onChange={(e) => onChange(e.target.value)} required={required} maxLength={maxLength} placeholder={placeholder} dir={dir} min={min} max={max} onPaste={onPaste} onDragOver={onDragOver} onDrop={onDrop} onBlur={onBlur} onKeyDown={onKeyDown} className={`input-premium w-full ${directionClass}`} />
     </div>
   );
 }
 
-function Select({ label, value, onChange, options }: { label: string; value: string; onChange: (v: IdentifierType | string) => void; options: { value: string; label: string }[] }) {
+function Select({ label, value, onChange, options, required, selectRef, onKeyDown }: { label: string; value: string; onChange: (v: IdentifierType | string) => void; options: { value: string; label: string }[]; required?: boolean; selectRef?: React.RefObject<HTMLSelectElement | null>; onKeyDown?: React.KeyboardEventHandler<HTMLSelectElement> }) {
+  const selectId = useId();
   return (
     <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <select value={value} onChange={(e) => onChange(e.target.value)} className="input-premium input-ltr w-full">
+      <label htmlFor={selectId} className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}{required && <span className="text-red-500 ml-1">*</span>}</label>
+      <select id={selectId} ref={selectRef} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={onKeyDown} className="input-premium input-ltr w-full">
         {options.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}
       </select>
     </div>
