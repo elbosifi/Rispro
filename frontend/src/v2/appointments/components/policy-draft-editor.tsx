@@ -53,22 +53,31 @@ export function PolicyDraftEditor({
   }, [draft]);
 
   const modalityOptions = useMemo(() => {
-    return (lookups.data?.modalities ?? []).map((m) => ({
-      value: m.id,
-      label: m.name || m.code || `Modality ${m.id}`,
-    }));
+    return (lookups.data?.modalities ?? [])
+      .map((m) => {
+        const modalityId = Number(m.id);
+        return Number.isFinite(modalityId)
+          ? {
+              value: modalityId,
+              label: m.name || m.code || `Modality ${modalityId}`,
+            }
+          : null;
+      })
+      .filter((option): option is { value: number; label: string } => option != null);
   }, [lookups.data?.modalities]);
 
   const examTypeOptionsByModality = useMemo(() => {
     const map = new Map<number, Array<{ value: number; label: string }>>();
     for (const examType of examTypeCatalog.data ?? []) {
-      if (examType.modalityId == null) continue;
-      const list = map.get(examType.modalityId) ?? [];
+      const modalityId = examType.modalityId == null ? null : Number(examType.modalityId);
+      const examTypeId = Number(examType.id);
+      if (modalityId == null || !Number.isFinite(modalityId) || !Number.isFinite(examTypeId)) continue;
+      const list = map.get(modalityId) ?? [];
       list.push({
-        value: examType.id,
-        label: examType.name || examType.code || `Exam type ${examType.id}`,
+        value: examTypeId,
+        label: examType.name || examType.code || `Exam type ${examTypeId}`,
       });
-      map.set(examType.modalityId, list);
+      map.set(modalityId, list);
     }
     for (const [, list] of map) {
       list.sort((a, b) => a.label.localeCompare(b.label));
@@ -79,10 +88,16 @@ export function PolicyDraftEditor({
   const allExamTypeOptions = useMemo(() => {
     const values = examTypeCatalog.data ?? [];
     return values
-      .map((examType) => ({
-        value: examType.id,
-        label: examType.name || examType.code || `Exam type ${examType.id}`,
-      }))
+      .map((examType) => {
+        const examTypeId = Number(examType.id);
+        return Number.isFinite(examTypeId)
+          ? {
+              value: examTypeId,
+              label: examType.name || examType.code || `Exam type ${examTypeId}`,
+            }
+          : null;
+      })
+      .filter((option): option is { value: number; label: string } => option != null)
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [examTypeCatalog.data]);
 

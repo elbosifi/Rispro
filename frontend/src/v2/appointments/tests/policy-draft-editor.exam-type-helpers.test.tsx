@@ -4,14 +4,14 @@ import { PolicyDraftEditor } from "../components/policy-draft-editor";
 
 vi.mock("../api", () => ({
   useV2Lookups: () => ({
-    data: { modalities: [{ id: 1, name: "CT", code: "CT" }] },
+    data: { modalities: [{ id: "1" as unknown as number, name: "CT", code: "CT" }] },
     isLoading: false,
     isError: false,
   }),
   useV2ExamTypeCatalog: () => ({
     data: [
-      { id: 101, modalityId: 1, name: "CT Head", code: "CTH" },
-      { id: 102, modalityId: 1, name: "CT Chest", code: "CTC" },
+      { id: "101" as unknown as number, modalityId: "1" as unknown as number, name: "CT Head", code: "CTH" },
+      { id: "102" as unknown as number, modalityId: "1" as unknown as number, name: "CT Chest", code: "CTC" },
     ],
     isLoading: false,
     isError: false,

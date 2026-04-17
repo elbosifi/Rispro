@@ -26,6 +26,12 @@ import type {
   SpecialReasonCodeDto,
 } from "./types";
 
+function toOptionalNumber(value: number | string | null | undefined): number | null {
+  if (value == null || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 // ---------------------------------------------------------------------------
 // V2 API client functions (can be used without React)
 // ---------------------------------------------------------------------------
@@ -96,18 +102,38 @@ export async function evaluateV2Scheduling(input: EvaluateRequest): Promise<Sche
 }
 
 export async function fetchV2Modalities(): Promise<ModalityDto[]> {
-  const response = await api<{ items: ModalityDto[] }>("/v2/lookups/modalities");
-  return response.items;
+  const response = await api<{ items: Array<Omit<ModalityDto, "id"> & { id: number | string }> }>("/v2/lookups/modalities");
+  return response.items
+    .map((modality) => {
+      const id = toOptionalNumber(modality.id);
+      return id == null ? null : { ...modality, id };
+    })
+    .filter((modality): modality is ModalityDto => modality != null);
 }
 
 export async function fetchV2ExamTypes(modalityId: number): Promise<ExamTypeDto[]> {
-  const response = await api<{ modalityId: number; items: Array<Omit<ExamTypeDto, "code"> & { code?: string }> }>(
+  const response = await api<{
+    modalityId: number | string;
+    items: Array<Omit<ExamTypeDto, "id" | "modalityId" | "code"> & {
+      id: number | string;
+      modalityId: number | string | null;
+      code?: string;
+    }>;
+  }>(
     `/v2/lookups/modalities/${modalityId}/exam-types`
   );
-  return response.items.map((examType) => ({
-    ...examType,
-    code: examType.code ?? "",
-  }));
+  return response.items
+    .map((examType) => {
+      const id = toOptionalNumber(examType.id);
+      if (id == null) return null;
+      return {
+        ...examType,
+        id,
+        modalityId: toOptionalNumber(examType.modalityId),
+        code: examType.code ?? "",
+      };
+    })
+    .filter((examType): examType is ExamTypeDto => examType != null);
 }
 
 export async function fetchV2ExamTypeCatalog(): Promise<ExamTypeDto[]> {
