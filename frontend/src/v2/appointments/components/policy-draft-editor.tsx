@@ -806,7 +806,7 @@ export function PolicyDraftEditor({
                     ...prev.examTypeRules,
                     {
                       id: createNextId(prev.examTypeRules),
-                      modalityId: modalityOptions[0]?.value ?? 0,
+                      modalityId: 0,
                       ruleType: "specific_date",
                       effectMode: "restriction_overridable",
                       specificDate: null,
@@ -1082,7 +1082,7 @@ export function PolicyDraftEditor({
                     ...(prev.examMixQuotaRules ?? []),
                     {
                       id: createNextId(prev.examMixQuotaRules ?? []),
-                      modalityId: modalityOptions[0]?.value ?? 0,
+                      modalityId: 0,
                       title: null,
                       ruleType: "specific_date",
                       specificDate: null,
