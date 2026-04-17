@@ -1336,6 +1336,18 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
       .map((et: any) => ({ value: String(et.id), label: et.nameEn || et.name_en || `Exam ${et.id}` }));
   }, [examTypeLookup]);
 
+  // Build exam type options with modality for filtering
+  const examTypeOptionsWithModality = useMemo(() => {
+    const rows = Array.isArray(examTypeLookup?.examTypes) ? examTypeLookup.examTypes : [];
+    return rows
+      .filter((et: any) => et.isActive !== false)
+      .map((et: any) => ({
+        value: String(et.id),
+        label: et.nameEn || et.name_en || `Exam ${et.id}`,
+        modalityId: et.modalityId ?? et.modality_id
+      }));
+  }, [examTypeLookup]);
+
   const normalizeConfig = (raw: SchedulingEngineConfig): SchedulingDraft => {
     const categoryLimits = asArray(raw.categoryLimits).map((row) => ({
       id: asNum(row.id) ?? undefined,
@@ -1495,6 +1507,8 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
   }, [data]);
 
   const [saveNotice, setSaveNotice] = useState<"saved" | null>(null);
+  const [quotaModalityFilter, setQuotaModalityFilter] = useState<string>("");
+  const [quotaNotice, setQuotaNotice] = useState<string>("");
   const isSettingFromServer = useRef(false);
 
   // Clear save notice on any user edit (but not on server-set drafts)
@@ -1810,22 +1824,117 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
       )}
 
       {/* D. Special Quotas */}
-      {renderSection("specialQuotas", SECTION_TITLES.specialQuotas, SECTION_HELPERS.specialQuotas,
-        () => setDraft((prev) => ({ ...prev, specialQuotas: [...prev.specialQuotas, { examTypeId: "", dailyExtraSlots: "0", isActive: true }] })),
-        (row, idx) => (
-          <div key={`sq-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
-            <select className="input-field text-xs" value={row.examTypeId as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, examTypeId: e.target.value } : r) }))}>
-              <option value="">Select exam type…</option>
-              {examTypeOptions.map((opt: { value: string; label: string }) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-            <input className="input-field text-xs" type="number" min="0" placeholder="Extra slots per day" value={row.dailyExtraSlots as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, dailyExtraSlots: e.target.value } : r) }))} />
-            <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
+      <section className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <h4 className="font-medium text-sm">{SECTION_TITLES.specialQuotas}</h4>
+          <div className="flex items-center gap-2">
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: [...prev.specialQuotas, { examTypeId: "", dailyExtraSlots: "0", isActive: true }] }))}>
+              {ACTION_LABELS.add.specialQuotas}
+            </button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => {
+              const existingIds = new Set(draft.specialQuotas.map(q => q.examTypeId).filter(id => id.trim()));
+              const allActiveExamTypes = examTypeOptionsWithModality.filter(et => !existingIds.has(et.value));
+              if (allActiveExamTypes.length === 0) {
+                setQuotaNotice("All exam types already added");
+                return;
+              }
+              setDraft(prev => ({
+                ...prev,
+                specialQuotas: [
+                  ...prev.specialQuotas,
+                  ...allActiveExamTypes.map(et => ({ examTypeId: et.value, dailyExtraSlots: "0", isActive: true }))
+                ]
+              }));
+              setQuotaNotice("");
+            }}>
+              Add all exams
+            </button>
+            <button type="button" className="btn-secondary text-xs" disabled={!quotaModalityFilter} onClick={() => {
+              if (!quotaModalityFilter) {
+                setQuotaNotice("Select a modality first");
+                return;
+              }
+              const existingIds = new Set(draft.specialQuotas.map(q => q.examTypeId).filter(id => id.trim()));
+              const allActiveExamTypes = examTypeOptionsWithModality.filter(et => !existingIds.has(et.value) && String(et.modalityId) === quotaModalityFilter);
+              if (allActiveExamTypes.length === 0) {
+                setQuotaNotice("No exam types found for selected modality");
+                return;
+              }
+              setDraft(prev => ({
+                ...prev,
+                specialQuotas: [
+                  ...prev.specialQuotas,
+                  ...allActiveExamTypes.map(et => ({ examTypeId: et.value, dailyExtraSlots: "0", isActive: true }))
+                ]
+              }));
+              setQuotaNotice("");
+            }}>
+              Add all for modality
+            </button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => {
+              if (!confirm("Remove all special quota rows?")) return;
+              setDraft(prev => ({ ...prev, specialQuotas: [] }));
+              setQuotaNotice("");
+            }}>
+              Delete all
+            </button>
+            <button type="button" className="btn-secondary text-xs" disabled={!quotaModalityFilter} onClick={() => {
+              if (!quotaModalityFilter) {
+                setQuotaNotice("Select a modality first");
+                return;
+              }
+              if (!confirm(`Remove all special quota rows for the selected modality?`)) return;
+              const examTypeIds = new Set(
+                examTypeOptionsWithModality
+                  .filter(et => String(et.modalityId) === quotaModalityFilter)
+                  .map(et => et.value)
+              );
+              setDraft(prev => ({
+                ...prev,
+                specialQuotas: prev.specialQuotas.filter(q => !examTypeIds.has(q.examTypeId))
+              }));
+              setQuotaNotice("");
+            }}>
+              Delete for modality
+            </button>
           </div>
-        )
-      )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-stone-600 dark:text-stone-400">Filter by modality:</span>
+          <select className="input-field text-xs" value={quotaModalityFilter} onChange={(e) => setQuotaModalityFilter(e.target.value)}>
+            <option value="">All modalities</option>
+            {modalityOptions.map((opt: { value: string; label: string }) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
+        </div>
+        {quotaNotice && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">{quotaNotice}</p>
+        )}
+        <details className="space-y-2" open>
+          <summary className="cursor-pointer list-none text-[11px] text-stone-500 dark:text-stone-400">
+            {SECTION_HELPERS.specialQuotas}
+          </summary>
+          <div className="space-y-2">
+            {draft.specialQuotas.map((row, idx) => (
+              <div key={`sq-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                <select className="input-field text-xs" value={row.examTypeId as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, examTypeId: e.target.value } : r) }))}>
+                  <option value="">Select exam type…</option>
+                  {examTypeOptions.map((opt: { value: string; label: string }) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+                <input className="input-field text-xs" type="number" min="0" placeholder="Extra slots per day" value={row.dailyExtraSlots as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, dailyExtraSlots: e.target.value } : r) }))} />
+                <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
+                <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
+              </div>
+            ))}
+            {draft.specialQuotas.length === 0 && (
+              <p className="text-[11px] text-stone-400 dark:text-stone-500 italic">No rows configured yet.</p>
+            )}
+          </div>
+        </details>
+      </section>
 
       {/* E. Special Reason Codes */}
       {renderSection("specialReasons", SECTION_TITLES.specialReasons, SECTION_HELPERS.specialReasons,
