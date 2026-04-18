@@ -5,6 +5,7 @@ import type { Appointment, AppointmentLookups } from "@/types/api";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
+import { useV2ExamTypes } from "@/v2/appointments/api";
 
 interface AppointmentEditorProps {
   appointment: Appointment & Record<string, any>;
@@ -16,6 +17,9 @@ interface AppointmentEditorProps {
 export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }: AppointmentEditorProps) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
+  const parsedModalityId = Number(appointment.modalityId);
+  const modalityId = Number.isFinite(parsedModalityId) ? parsedModalityId : null;
+  const modalityExamTypes = useV2ExamTypes(modalityId);
   const [examTypeId, setExamTypeId] = useState(String(appointment.examTypeId ?? ""));
   const [priorityId, setPriorityId] = useState(String(appointment.reportingPriorityId ?? ""));
   const [notes, setNotes] = useState(String(appointment.notes ?? ""));
@@ -32,13 +36,30 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
       String(appointment.updatedAt) !== String(appointment.createdAt)
   );
 
-  const filteredExamTypes = useMemo(() => {
+  const fallbackExamTypes = useMemo(() => {
     return (lookups?.examTypes ?? []).filter((examType) => {
       if (!examType.isActive) return false;
       if (!appointment.modalityId) return true;
       return !examType.modalityId || String(examType.modalityId) === String(appointment.modalityId);
     });
   }, [lookups, appointment.modalityId]);
+
+  const examTypeOptions = useMemo(() => {
+    const modalityExamTypeData = modalityExamTypes.data ?? [];
+    if (modalityExamTypeData.length > 0) {
+      return modalityExamTypeData
+        .filter((examType) => examType.isActive)
+        .map((examType) => ({
+          id: examType.id,
+          label: examType.name,
+        }));
+    }
+
+    return fallbackExamTypes.map((examType) => ({
+      id: examType.id,
+      label: chooseLocalized(language, examType.nameAr, examType.nameEn),
+    }));
+  }, [fallbackExamTypes, language, modalityExamTypes.data]);
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -118,9 +139,9 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
             className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
           >
             <option value="">{t(language, "appointmentEditor.noExamType")}</option>
-            {filteredExamTypes.map((examType) => (
+            {examTypeOptions.map((examType) => (
               <option key={examType.id} value={examType.id}>
-                {chooseLocalized(language, examType.nameAr, examType.nameEn)}
+                {examType.label}
               </option>
             ))}
           </select>
