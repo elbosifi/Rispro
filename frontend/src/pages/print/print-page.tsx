@@ -122,7 +122,7 @@ export default function PrintPage() {
               ${slipField("Modality", apt.modalityNameEn || "—")}
               ${(apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn) ? slipField("Modality Notes", apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn || "—", Boolean(apt.modalityGeneralInstructionAr)) : ""}
               ${slipField("Exam", apt.examNameEn || "—")}
-              ${slipField("Priority", apt.priorityNameEn || "Normal")}
+              ${slipField("Priority", apt.priorityNameEn || "Routine")}
               ${slipField("Status", apt.status || "—")}
               ${slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")}
               ${slipField("Sequence", String(apt.dailySequence ?? "—"))}
@@ -200,7 +200,7 @@ export default function PrintPage() {
                   <span class="label">Status</span><span class="value">${escapeHtml(apt.status || "—")}</span>
                   <span class="label">Exam</span><span class="value">${escapeHtml(apt.examNameEn || "—")}</span>
                   <span class="label">Slot</span><span class="value">${escapeHtml(apt.modalitySlotNumber ? String(apt.modalitySlotNumber) : "—")}</span>
-                  <span class="label">Priority</span><span class="value">${escapeHtml(apt.priorityNameEn || "Normal")}</span>
+                  <span class="label">Priority</span><span class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</span>
                   <span class="label">Notes</span><span class="value arabic">${escapeHtml(apt.notes || "—")}</span>
                 </div>
               `
@@ -362,7 +362,7 @@ export default function PrintPage() {
                     </div>
                   )}
                   <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
-                  <Field label="Priority" value={selectedAppointment.priorityNameEn || "Normal"} />
+                  <Field label="Priority" value={selectedAppointment.priorityNameEn || "Routine"} />
                   <Field label="Status" value={selectedAppointment.status || "—"} />
                   <Field label="Walk-In" value={selectedAppointment.isWalkIn ? "Yes" : "No"} />
                   <Field label="Sequence" value={String(selectedAppointment.dailySequence ?? "—")} />
@@ -389,6 +389,7 @@ export default function PrintPage() {
                     <AppointmentEditor
                       appointment={selectedAppointment}
                       lookups={lookups}
+                      defaultOpen
                       onUpdated={(updated) => {
                         setSelectedAppointment(updated);
                         setIsEditing(false);

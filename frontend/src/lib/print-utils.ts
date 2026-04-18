@@ -58,7 +58,7 @@ export function printAppointmentSlip(apt: AppointmentWithDetails): void {
             ${slipField("Modality", apt.modalityNameEn || "—")}
             ${(apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn) ? slipField("Modality Notes", apt.modalityGeneralInstructionAr || apt.modalityGeneralInstructionEn || "—", Boolean(apt.modalityGeneralInstructionAr)) : ""}
             ${slipField("Exam", apt.examNameEn || "—")}
-            ${slipField("Priority", apt.priorityNameEn || "Normal")}
+            ${slipField("Priority", apt.priorityNameEn || "Routine")}
             ${slipField("Status", apt.status || "—")}
             ${slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")}
             ${slipField("Sequence", String(apt.dailySequence ?? "—"))}
@@ -96,7 +96,7 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
         <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
         <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
         <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
-        <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Normal")}</div></div>
+        <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
         <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
       </div>
     `

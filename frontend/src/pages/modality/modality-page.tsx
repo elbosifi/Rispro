@@ -159,7 +159,7 @@ export default function ModalityPage() {
                       {apt.accessionNumber} • {apt.modalityNameEn} • {apt.examNameEn || "—"}
                     </p>
                     <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      ID: {apt.nationalId || "—"} • Age: {apt.ageYears || "—"}{apt.demographicsEstimated ? " (Estimated)" : ""} • Priority: {apt.priorityNameEn || "Normal"}
+                      ID: {apt.nationalId || "—"} • Age: {apt.ageYears || "—"}{apt.demographicsEstimated ? " (Estimated)" : ""} • Priority: {apt.priorityNameEn || "Routine"}
                     </p>
                   </div>
                   <div className="flex items-center gap-2 ml-4">
@@ -216,7 +216,7 @@ export default function ModalityPage() {
                 <Field label={t(language, "modality.fieldExam")} value={selectedAppointment.examNameEn || "—"} />
                 <Field label={t(language, "modality.fieldDate")} value={selectedAppointment.appointmentDate} />
                 <Field label={t(language, "modality.fieldStatus")} value={selectedAppointment.status} />
-                <Field label={t(language, "modality.fieldPriority")} value={selectedAppointment.priorityNameEn || "Normal"} />
+                <Field label={t(language, "modality.fieldPriority")} value={selectedAppointment.priorityNameEn || "Routine"} />
                 <Field label={t(language, "modality.fieldNotes")} value={selectedAppointment.notes || "—"} />
               </div>
               <div className="mt-6">

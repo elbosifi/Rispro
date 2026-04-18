@@ -12,23 +12,46 @@ interface AppointmentEditorProps {
   lookups: AppointmentLookups | undefined;
   onUpdated?: (appointment: any) => void;
   onDeleted?: () => void;
+  defaultOpen?: boolean;
 }
 
-export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }: AppointmentEditorProps) {
+function resolveRoutinePriorityId(lookups: AppointmentLookups | undefined): number | null {
+  const priorities = lookups?.priorities ?? [];
+  const routine = priorities.find((priority) => {
+    const code = String((priority as { code?: string }).code ?? "").toLowerCase();
+    const nameEn = String(priority.nameEn ?? "").toLowerCase();
+    const nameAr = String(priority.nameAr ?? "").toLowerCase();
+    return code === "routine" || nameEn.includes("routine") || nameAr.includes("روت");
+  });
+  return routine?.id ?? priorities[0]?.id ?? null;
+}
+
+function getPriorityTone(codeOrName: string): "urgent" | "stat" | null {
+  const normalized = codeOrName.toLowerCase();
+  if (normalized.includes("stat")) return "stat";
+  if (normalized.includes("urgent")) return "urgent";
+  return null;
+}
+
+export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, defaultOpen = false }: AppointmentEditorProps) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const parsedModalityId = Number(appointment.modalityId);
   const modalityId = Number.isFinite(parsedModalityId) ? parsedModalityId : null;
   const modalityExamTypes = useV2ExamTypes(modalityId);
   const [examTypeId, setExamTypeId] = useState(String(appointment.examTypeId ?? ""));
-  const [priorityId, setPriorityId] = useState(String(appointment.reportingPriorityId ?? ""));
+  const [isEditing, setIsEditing] = useState(defaultOpen);
+  const [priorityId, setPriorityId] = useState("");
   const [notes, setNotes] = useState(String(appointment.notes ?? ""));
+  const routinePriorityId = resolveRoutinePriorityId(lookups);
+  const routinePriorityIdString = routinePriorityId != null ? String(routinePriorityId) : "";
 
   useEffect(() => {
     setExamTypeId(String(appointment.examTypeId ?? ""));
-    setPriorityId(String(appointment.reportingPriorityId ?? ""));
+    setPriorityId(String(appointment.reportingPriorityId ?? routinePriorityIdString));
     setNotes(String(appointment.notes ?? ""));
-  }, [appointment.id, appointment.examTypeId, appointment.reportingPriorityId, appointment.notes]);
+    setIsEditing(defaultOpen);
+  }, [appointment.id, appointment.examTypeId, appointment.reportingPriorityId, appointment.notes, defaultOpen, routinePriorityIdString]);
 
   const isEdited = Boolean(
     appointment.updatedAt &&
@@ -60,6 +83,16 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
       label: chooseLocalized(language, examType.nameAr, examType.nameEn),
     }));
   }, [fallbackExamTypes, language, modalityExamTypes.data]);
+
+  const selectedPriority = (lookups?.priorities ?? []).find((priority) => String(priority.id) === priorityId);
+  const selectedPriorityCodeOrName = String((selectedPriority as { code?: string } | undefined)?.code ?? selectedPriority?.nameEn ?? "");
+  const selectedPriorityTone = getPriorityTone(selectedPriorityCodeOrName);
+  const priorityToneClass =
+    selectedPriorityTone === "urgent"
+      ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200"
+      : selectedPriorityTone === "stat"
+      ? "border-red-300 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-900/30 dark:text-red-200"
+      : "border-stone-300 bg-white text-stone-900 dark:border-stone-600 dark:bg-stone-800 dark:text-white";
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -112,6 +145,20 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
     }
   });
 
+  if (!isEditing) {
+    return (
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={() => setIsEditing(true)}
+          className="rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-amber-600 transition-colors"
+        >
+          {t(language, "common.edit")}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/30 p-4 space-y-4">
       <div>
@@ -154,9 +201,8 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
           <select
             value={priorityId}
             onChange={(e) => setPriorityId(e.target.value)}
-            className="w-full px-3 py-2 rounded-lg border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
+            className={`w-full px-3 py-2 rounded-lg border text-sm focus:ring-2 focus:ring-teal-500 outline-none ${priorityToneClass}`}
           >
-            <option value="">{t(language, "appointmentEditor.normal")}</option>
             {(lookups?.priorities ?? []).map((priority) => (
               <option key={priority.id} value={priority.id}>
                 {chooseLocalized(language, priority.nameAr, priority.nameEn)}
@@ -181,6 +227,13 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted }
 
       <div className="flex justify-end">
         <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => setIsEditing(false)}
+            className="px-4 py-2 rounded-lg bg-stone-200 hover:bg-stone-300 dark:bg-stone-700 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-200 text-sm font-medium transition-colors"
+          >
+            {t(language, "common.cancel")}
+          </button>
           <button
             type="button"
             onClick={() => {
