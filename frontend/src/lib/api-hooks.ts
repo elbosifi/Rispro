@@ -1,4 +1,4 @@
-import { api } from "@/lib/api-client";
+import { ApiError, api } from "@/lib/api-client";
 import {
   mapPatient,
   mapPatients,
@@ -202,11 +202,24 @@ export async function getV2AppointmentPrintDetails(bookingId: number) {
 }
 
 export async function updateAppointment(id: number, payload: RawRecord) {
-  const raw = await api<{ appointment: RawRecord }>(`/appointments/${id}`, {
+  try {
+    await api<{ booking: RawRecord }>(`/v2/appointments/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload)
+    });
+    const details = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${id}`);
+    return mapAppointmentWithDetails(details.appointment);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
+  const legacy = await api<{ appointment: RawRecord }>(`/appointments/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
-  return mapAppointmentWithDetails(raw.appointment);
+  return mapAppointmentWithDetails(legacy.appointment);
 }
 
 export async function cancelAppointment(id: number, cancelReason: string) {
@@ -217,6 +230,17 @@ export async function cancelAppointment(id: number, cancelReason: string) {
 }
 
 export async function deleteAppointment(id: number) {
+  try {
+    await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
+      method: "POST"
+    });
+    return { ok: true };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
   return api<{ ok: boolean }>(`/appointments/${id}`, {
     method: "DELETE"
   });
