@@ -35,6 +35,7 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
         <RequestDocumentsPanel
           appointmentId={appointmentSummary.bookingId}
           patientId={appointmentSummary.patientId}
+          appointmentRefType="v2_booking"
           title="Attach Request (Later)"
         />
       </div>

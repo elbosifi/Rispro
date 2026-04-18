@@ -28,10 +28,13 @@ import type { DictionaryEntry } from "@/lib/name-generation";
 // Generic raw response type for API responses that are passed through mappers
 type RawRecord = Record<string, unknown>;
 
+export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
+
 export interface RequestDocument {
   id: number;
   patientId: number | null;
   appointmentId: number | null;
+  v2BookingId: number | null;
   documentType: string;
   originalFilename: string;
   storedPath: string;
@@ -49,6 +52,8 @@ function mapRequestDocument(raw: RawRecord): RequestDocument {
     patientId: raw.patient_id == null ? (raw.patientId == null ? null : Number(raw.patientId)) : Number(raw.patient_id),
     appointmentId:
       raw.appointment_id == null ? (raw.appointmentId == null ? null : Number(raw.appointmentId)) : Number(raw.appointment_id),
+    v2BookingId:
+      raw.v2_booking_id == null ? (raw.v2BookingId == null ? null : Number(raw.v2BookingId)) : Number(raw.v2_booking_id),
     documentType: String(raw.document_type ?? raw.documentType ?? ""),
     originalFilename: String(raw.original_filename ?? raw.originalFilename ?? ""),
     storedPath: String(raw.stored_path ?? raw.storedPath ?? ""),
@@ -75,14 +80,21 @@ export async function fetchCurrentSession(): Promise<User | null> {
 }
 
 // -- Documents --
-export async function listAppointmentDocuments(appointmentId: number): Promise<RequestDocument[]> {
-  const raw = await api<{ documents: RawRecord[] }>(`/documents?appointmentId=${encodeURIComponent(String(appointmentId))}`);
+export async function listAppointmentDocuments(
+  appointmentId: number,
+  appointmentRefType: AppointmentRefType = "auto"
+): Promise<RequestDocument[]> {
+  const params = new URLSearchParams();
+  params.set("appointmentId", String(appointmentId));
+  params.set("appointmentRefType", appointmentRefType);
+  const raw = await api<{ documents: RawRecord[] }>(`/documents?${params.toString()}`);
   return (raw.documents ?? []).map(mapRequestDocument);
 }
 
 export async function uploadAppointmentDocument(payload: {
   patientId: number | null;
   appointmentId: number;
+  appointmentRefType?: AppointmentRefType;
   documentType?: string;
   originalFilename: string;
   mimeType: string;
@@ -90,7 +102,10 @@ export async function uploadAppointmentDocument(payload: {
 }): Promise<RequestDocument> {
   const raw = await api<{ document: RawRecord }>("/documents", {
     method: "POST",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      appointmentRefType: payload.appointmentRefType || "auto",
+    }),
   });
   return mapRequestDocument(raw.document);
 }
@@ -105,6 +120,7 @@ export async function prepareScanSession(payload: {
   appointmentId: number;
   patientId?: number | null;
   documentType?: string;
+  appointmentRefType?: AppointmentRefType;
 }) {
   return api<{ preparation: RawRecord }>("/integrations/scan-prepare", {
     method: "POST",

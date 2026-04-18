@@ -380,6 +380,7 @@ export default function PrintPage() {
                 <RequestDocumentsPanel
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
+                  appointmentRefType="v2_booking"
                   title="Request Documents"
                 />
               </div>

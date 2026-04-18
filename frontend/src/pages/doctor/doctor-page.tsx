@@ -135,6 +135,7 @@ export default function DoctorPage() {
                 <RequestDocumentsPanel
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
+                  appointmentRefType="v2_booking"
                   title="Doctor Request Documents"
                   enablePreviewModal
                 />

@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
-import { asOptionalUserId } from "../utils/request-coercion.js";
+import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
   deleteDocumentById,
@@ -21,7 +21,8 @@ documentsRouter.get(
     const query = asUnknownRecord(req.query);
     const documents = await listDocuments({
       patientId: asOptionalUserId(query.patientId),
-      appointmentId: asOptionalUserId(query.appointmentId)
+      appointmentId: asOptionalUserId(query.appointmentId),
+      appointmentRefType: asOptionalString(query.appointmentRefType),
     });
     res.json({ documents });
   })
@@ -44,7 +45,16 @@ documentsRouter.get(
 documentsRouter.post(
   "/",
   asyncRoute(async (req: Request, res: Response) => {
-    const document = await uploadDocument(req.body || {}, req.user!.sub);
+    const body = asUnknownRecord(req.body);
+    const document = await uploadDocument(
+      {
+        ...body,
+        patientId: asOptionalUserId(body.patientId),
+        appointmentId: asOptionalUserId(body.appointmentId),
+        appointmentRefType: asOptionalString(body.appointmentRefType),
+      },
+      req.user!.sub
+    );
     res.status(201).json({ document });
   })
 );

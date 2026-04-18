@@ -19,6 +19,7 @@ import type { DbQueryResult } from "../types/db.js";
 export interface DocumentUploadPayload {
   patientId?: UserId;
   appointmentId?: UserId;
+  appointmentRefType?: string;
   documentType?: string;
   originalFilename?: string;
   mimeType?: string;
@@ -29,6 +30,7 @@ export interface DocumentRow {
   id: number;
   patient_id: number | null;
   appointment_id: number | null;
+  v2_booking_id: number | null;
   document_type: string;
   original_filename: string;
   stored_path: string;
@@ -43,6 +45,7 @@ export interface DocumentRow {
 interface DocumentFilters {
   patientId?: UserId;
   appointmentId?: UserId;
+  appointmentRefType?: string;
 }
 
 export interface DocumentsDeleteScope {
@@ -91,35 +94,75 @@ function decodeBase64File(fileContentBase64: unknown): Buffer {
   return Buffer.from(normalized || "", "base64");
 }
 
-async function ensureRelatedRecords(
-  patientId: number | null,
-  appointmentId: number | null
-): Promise<void> {
+async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null): Promise<void> {
   if (!patientId && !appointmentId) {
     throw new HttpError(400, "patientId or appointmentId is required.");
   }
 
   if (patientId) {
-    const { rowCount } = await pool.query(
-      "select 1 from patients where id = $1 limit 1",
-      [patientId]
-    );
-
+    const { rowCount } = await pool.query("select 1 from patients where id = $1 limit 1", [patientId]);
     if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Patient not found.");
     }
   }
+}
 
-  if (appointmentId) {
-    const { rowCount } = await pool.query(
-      "select 1 from appointments where id = $1 limit 1",
-      [appointmentId]
-    );
+type AppointmentReference = {
+  legacyAppointmentId: number | null;
+  v2BookingId: number | null;
+};
 
-    if (Number(rowCount || 0) === 0) {
-      throw new HttpError(404, "Appointment not found.");
-    }
+type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
+
+function normalizeAppointmentRefType(
+  refType: unknown
+): AppointmentRefType {
+  const value = String(refType || "").trim().toLowerCase();
+  if (value === "legacy_appointment") return "legacy_appointment";
+  if (value === "v2_booking") return "v2_booking";
+  return "auto";
+}
+
+async function findLegacyAppointmentId(appointmentId: number): Promise<number | null> {
+  const { rowCount } = await pool.query("select 1 from appointments where id = $1 limit 1", [appointmentId]);
+  return Number(rowCount || 0) > 0 ? appointmentId : null;
+}
+
+async function findV2BookingId(appointmentId: number): Promise<number | null> {
+  const { rowCount } = await pool.query("select 1 from appointments_v2.bookings where id = $1 limit 1", [appointmentId]);
+  return Number(rowCount || 0) > 0 ? appointmentId : null;
+}
+
+async function resolveAppointmentReference(
+  appointmentId: number | null,
+  refType: AppointmentRefType
+): Promise<AppointmentReference> {
+  if (!appointmentId) {
+    return { legacyAppointmentId: null, v2BookingId: null };
   }
+
+  if (refType === "legacy_appointment") {
+    const legacyAppointmentId = await findLegacyAppointmentId(appointmentId);
+    if (!legacyAppointmentId) throw new HttpError(404, "Appointment not found.");
+    return { legacyAppointmentId, v2BookingId: null };
+  }
+
+  if (refType === "v2_booking") {
+    const v2BookingId = await findV2BookingId(appointmentId);
+    if (!v2BookingId) throw new HttpError(404, "Appointment not found.");
+    return { legacyAppointmentId: null, v2BookingId };
+  }
+
+  // Auto mode: prefer V2 for modern UI flows.
+  const v2BookingId = await findV2BookingId(appointmentId);
+  if (v2BookingId) {
+    return { legacyAppointmentId: null, v2BookingId };
+  }
+  const legacyAppointmentId = await findLegacyAppointmentId(appointmentId);
+  if (legacyAppointmentId) {
+    return { legacyAppointmentId, v2BookingId: null };
+  }
+  throw new HttpError(404, "Appointment not found.");
 }
 
 function isTruthyFlag(raw: string): boolean {
@@ -174,6 +217,7 @@ export async function listDocuments(
 ): Promise<DocumentRow[]> {
   const params: unknown[] = [];
   const conditions: string[] = [];
+  const appointmentRefType = normalizeAppointmentRefType(filters.appointmentRefType);
 
   if (filters.patientId) {
     params.push(normalizePositiveInteger(filters.patientId, "patientId"));
@@ -182,7 +226,14 @@ export async function listDocuments(
 
   if (filters.appointmentId) {
     params.push(normalizePositiveInteger(filters.appointmentId, "appointmentId"));
-    conditions.push(`appointment_id = $${params.length}`);
+    const appointmentIdIndex = params.length;
+    if (appointmentRefType === "legacy_appointment") {
+      conditions.push(`appointment_id = $${appointmentIdIndex}`);
+    } else if (appointmentRefType === "v2_booking") {
+      conditions.push(`v2_booking_id = $${appointmentIdIndex}`);
+    } else {
+      conditions.push(`(appointment_id = $${appointmentIdIndex} or v2_booking_id = $${appointmentIdIndex})`);
+    }
   }
 
   const whereClause = conditions.length ? `where ${conditions.join(" and ")}` : "";
@@ -192,6 +243,7 @@ export async function listDocuments(
         id,
         patient_id,
         appointment_id,
+        v2_booking_id,
         document_type,
         original_filename,
         stored_path,
@@ -220,6 +272,7 @@ export async function getDocumentById(documentId: UserId): Promise<DocumentRow> 
         id,
         patient_id,
         appointment_id,
+        v2_booking_id,
         document_type,
         original_filename,
         stored_path,
@@ -271,7 +324,7 @@ function buildDeleteScopeWhere(scope: DocumentsDeleteScope, params: unknown[]): 
   const fromIndex = params.length;
   params.push(dateTo);
   const toIndex = params.length;
-  return `where a.appointment_date between $${fromIndex}::date and $${toIndex}::date`;
+  return `where coalesce(a.appointment_date, b.booking_date) between $${fromIndex}::date and $${toIndex}::date`;
 }
 
 async function selectDocumentsForScope(scope: DocumentsDeleteScope): Promise<DocumentRow[]> {
@@ -283,6 +336,7 @@ async function selectDocumentsForScope(scope: DocumentsDeleteScope): Promise<Doc
         d.id,
         d.patient_id,
         d.appointment_id,
+        d.v2_booking_id,
         d.document_type,
         d.original_filename,
         d.stored_path,
@@ -294,6 +348,7 @@ async function selectDocumentsForScope(scope: DocumentsDeleteScope): Promise<Doc
         d.created_at
       from documents d
       left join appointments a on a.id = d.appointment_id
+      left join appointments_v2.bookings b on b.id = d.v2_booking_id
       ${whereClause}
       order by d.id asc
     `,
@@ -321,6 +376,7 @@ export async function uploadDocument(
 ): Promise<DocumentRow> {
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });
   const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
+  const appointmentRefType = normalizeAppointmentRefType(payload.appointmentRefType);
   const documentType = String(payload.documentType || "referral_request").trim();
   const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
   const mimeType = String(payload.mimeType || "application/octet-stream").trim();
@@ -331,6 +387,7 @@ export async function uploadDocument(
   }
 
   await ensureRelatedRecords(patientId, appointmentId);
+  const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType);
 
   const storageConfig = await loadDocumentStorageConfig();
   let storedPath = "";
@@ -364,6 +421,7 @@ export async function uploadDocument(
       insert into documents (
         patient_id,
         appointment_id,
+        v2_booking_id,
         document_type,
         original_filename,
         stored_path,
@@ -373,11 +431,12 @@ export async function uploadDocument(
         last_move_error,
         uploaded_by_user_id
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       returning
         id,
         patient_id,
         appointment_id,
+        v2_booking_id,
         document_type,
         original_filename,
         stored_path,
@@ -390,7 +449,8 @@ export async function uploadDocument(
     `,
     [
       patientId,
-      appointmentId,
+      appointmentReference.legacyAppointmentId,
+      appointmentReference.v2BookingId,
       documentType,
       originalFilename,
       storedPath,

@@ -26,7 +26,10 @@ interface ScanPreparePayload {
   appointmentId?: UserId;
   patientId?: UserId;
   documentType?: string;
+  appointmentRefType?: string;
 }
+
+type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
 
 interface IntegrationStatus {
   printer: {
@@ -101,8 +104,14 @@ function parseCsvList(value: unknown): string[] {
     .filter(Boolean);
 }
 
-async function getAppointmentSummary(appointmentId: UserId): Promise<AppointmentSummaryRow> {
-  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+function normalizeAppointmentRefType(refType: unknown): AppointmentRefType {
+  const value = String(refType || "").trim().toLowerCase();
+  if (value === "legacy_appointment") return "legacy_appointment";
+  if (value === "v2_booking") return "v2_booking";
+  return "auto";
+}
+
+async function getLegacyAppointmentSummary(cleanAppointmentId: number): Promise<AppointmentSummaryRow | null> {
   const { rows } = await pool.query(
     `
       select
@@ -119,8 +128,47 @@ async function getAppointmentSummary(appointmentId: UserId): Promise<Appointment
     `,
     [cleanAppointmentId]
   );
+  return (rows[0] as AppointmentSummaryRow | undefined) || null;
+}
 
-  const appointment = (rows[0] as AppointmentSummaryRow | undefined);
+async function getV2BookingSummary(cleanAppointmentId: number): Promise<AppointmentSummaryRow | null> {
+  const { rows } = await pool.query(
+    `
+      select
+        bookings.id,
+        bookings.patient_id,
+        concat('V2-', bookings.id)::text as accession_number,
+        bookings.booking_date as appointment_date,
+        patients.arabic_full_name,
+        patients.english_full_name
+      from appointments_v2.bookings as bookings
+      join patients on patients.id = bookings.patient_id
+      where bookings.id = $1
+      limit 1
+    `,
+    [cleanAppointmentId]
+  );
+  return (rows[0] as AppointmentSummaryRow | undefined) || null;
+}
+
+async function getAppointmentSummary(
+  appointmentId: UserId,
+  appointmentRefTypeInput: unknown = "auto"
+): Promise<AppointmentSummaryRow> {
+  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const appointmentRefType = normalizeAppointmentRefType(appointmentRefTypeInput);
+  let appointment: AppointmentSummaryRow | null = null;
+
+  if (appointmentRefType === "legacy_appointment") {
+    appointment = await getLegacyAppointmentSummary(cleanAppointmentId);
+  } else if (appointmentRefType === "v2_booking") {
+    appointment = await getV2BookingSummary(cleanAppointmentId);
+  } else {
+    appointment = await getV2BookingSummary(cleanAppointmentId);
+    if (!appointment) {
+      appointment = await getLegacyAppointmentSummary(cleanAppointmentId);
+    }
+  }
 
   if (!appointment) {
     throw new HttpError(404, "Appointment not found.");
@@ -214,7 +262,9 @@ export async function preparePrintJob(payload: PrintPreparePayload, currentUserI
 
 export async function prepareScanSession(payload: ScanPreparePayload, currentUserId: OptionalUserId): Promise<ScanPreparation> {
   const documentType = String(payload.documentType || "referral_request").trim() || "referral_request";
-  const appointment = payload.appointmentId ? await getAppointmentSummary(payload.appointmentId) : null;
+  const appointment = payload.appointmentId
+    ? await getAppointmentSummary(payload.appointmentId, payload.appointmentRefType)
+    : null;
   const patientId =
     appointment?.patient_id || normalizePositiveInteger(payload.patientId, "patientId", { required: false });
 

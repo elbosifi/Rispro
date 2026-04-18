@@ -59,7 +59,8 @@ integrationsRouter.post(
       {
         appointmentId: asOptionalUserId(body.appointmentId),
         patientId: asOptionalUserId(body.patientId),
-        documentType: asOptionalString(body.documentType)
+        documentType: asOptionalString(body.documentType),
+        appointmentRefType: asOptionalString(body.appointmentRefType),
       },
       requireUserSub(request)
     );

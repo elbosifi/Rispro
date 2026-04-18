@@ -5,6 +5,7 @@ import {
   listAppointmentDocuments,
   prepareScanSession,
   uploadAppointmentDocument,
+  type AppointmentRefType,
   type RequestDocument,
 } from "@/lib/api-hooks";
 import { pushToast } from "@/lib/toast";
@@ -22,6 +23,7 @@ async function fileToBase64(file: File): Promise<string> {
 interface RequestDocumentsPanelProps {
   appointmentId: number;
   patientId: number | null;
+  appointmentRefType?: AppointmentRefType;
   title?: string;
   enablePreviewModal?: boolean;
 }
@@ -29,6 +31,7 @@ interface RequestDocumentsPanelProps {
 export function RequestDocumentsPanel({
   appointmentId,
   patientId,
+  appointmentRefType = "auto",
   title = "Request Documents",
   enablePreviewModal = false,
 }: RequestDocumentsPanelProps) {
@@ -37,10 +40,13 @@ export function RequestDocumentsPanel({
   const [documentType, setDocumentType] = useState("referral_request");
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
 
-  const queryKey = useMemo(() => ["appointment-documents", appointmentId], [appointmentId]);
+  const queryKey = useMemo(
+    () => ["appointment-documents", appointmentRefType, appointmentId],
+    [appointmentId, appointmentRefType]
+  );
   const { data: documents = [], isLoading, error } = useQuery({
     queryKey,
-    queryFn: () => listAppointmentDocuments(appointmentId),
+    queryFn: () => listAppointmentDocuments(appointmentId, appointmentRefType),
     enabled: Number.isFinite(appointmentId) && appointmentId > 0,
   });
 
@@ -51,6 +57,7 @@ export function RequestDocumentsPanel({
       return uploadAppointmentDocument({
         patientId,
         appointmentId,
+        appointmentRefType,
         documentType: documentType || "referral_request",
         originalFilename: file.name,
         mimeType: file.type || "application/octet-stream",
@@ -100,6 +107,7 @@ export function RequestDocumentsPanel({
         appointmentId,
         patientId,
         documentType: documentType || "referral_request",
+        appointmentRefType,
       }),
     onSuccess: (result) => {
       const preparation = (result as { preparation?: { sessionCode?: string; guidance?: string } }).preparation;
