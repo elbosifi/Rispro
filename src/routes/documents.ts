@@ -3,7 +3,13 @@ import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { getDocumentAbsolutePath, getDocumentById, listDocuments, uploadDocument } from "../services/document-service.js";
+import {
+  deleteDocumentById,
+  getDocumentAbsolutePath,
+  getDocumentById,
+  listDocuments,
+  uploadDocument,
+} from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
 
@@ -40,5 +46,13 @@ documentsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const document = await uploadDocument(req.body || {}, req.user!.sub);
     res.status(201).json({ document });
+  })
+);
+
+documentsRouter.delete(
+  "/:documentId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const result = await deleteDocumentById(String(req.params.documentId || ""), req.user!.sub);
+    res.json(result);
   })
 );

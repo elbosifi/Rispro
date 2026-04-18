@@ -1,5 +1,9 @@
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+
 interface Props {
   appointmentSummary: {
+    bookingId: number;
+    patientId: number | null;
     patientName: string;
     bookingDate: string;
     modalityName: string;
@@ -26,6 +30,13 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
         <button type="button" onClick={onPrintSlip}>Print Slip</button>
         <button type="button" onClick={onViewDetails}>View Details</button>
         <button type="button" onClick={onCreateAnother}>Create Another</button>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <RequestDocumentsPanel
+          appointmentId={appointmentSummary.bookingId}
+          patientId={appointmentSummary.patientId}
+          title="Attach Request (Later)"
+        />
       </div>
     </div>
   );

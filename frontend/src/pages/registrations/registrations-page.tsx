@@ -8,6 +8,7 @@ import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { pushToast } from "@/lib/toast";
 
 interface RegistrationsFilters {
@@ -223,6 +224,13 @@ export default function RegistrationsPage() {
             <Field label={t("registrations.statusCol")} value={statusLabel(language, selectedAppointment.status)} />
             <Field label={t("registrations.walkIn")} value={selectedAppointment.isWalkIn ? t("registrations.yes") : t("registrations.no")} />
             <Field label={t("registrations.notes")} value={selectedAppointment.notes} />
+          </div>
+          <div className="mt-6">
+            <RequestDocumentsPanel
+              appointmentId={selectedAppointment.id}
+              patientId={selectedAppointment.patientId}
+              title="Request Documents"
+            />
           </div>
           <div className="mt-6">
             {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (

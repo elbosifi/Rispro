@@ -11,6 +11,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { printAppointmentSlip } from "@/lib/print-utils";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 
@@ -375,6 +376,14 @@ export default function PrintPage() {
               </div>
 
               {/* Edit toggle */}
+              <div className="mt-6">
+                <RequestDocumentsPanel
+                  appointmentId={selectedAppointment.id}
+                  patientId={selectedAppointment.patientId}
+                  title="Request Documents"
+                />
+              </div>
+
               <div className="mt-6 flex gap-3">
                 {!isEditing ? (
                   <button

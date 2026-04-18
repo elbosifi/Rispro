@@ -1,16 +1,11 @@
 import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
 import type { PoolClient } from "pg";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { resolveStoredPath } from "./document-storage-path.js";
 import type { NullableUserId, UnknownRecord } from "../types/http.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const rootDir = path.resolve(__dirname, "..", "..");
 
 const backupTables = [
   "users",
@@ -66,7 +61,7 @@ async function readDocumentFiles(documentRows: BackupDocumentRow[]): Promise<Bac
     let fileContentBase64: string | null = null;
 
     if (row.stored_path) {
-      const absolutePath = path.join(rootDir, row.stored_path);
+      const absolutePath = resolveStoredPath(row.stored_path);
 
       try {
         const fileBuffer = await fs.readFile(absolutePath);
@@ -168,7 +163,7 @@ async function restoreDocumentFiles(documentRows: BackupDocumentRow[]): Promise<
       continue;
     }
 
-    const absolutePath = path.join(rootDir, row.stored_path);
+    const absolutePath = resolveStoredPath(row.stored_path);
     await fs.mkdir(path.dirname(absolutePath), { recursive: true });
     await fs.writeFile(absolutePath, Buffer.from(row.file_content_base64, "base64"));
   }

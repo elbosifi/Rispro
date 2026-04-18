@@ -48,6 +48,7 @@ interface CreateAppointmentTabProps {
 
 interface SuccessSummary {
   bookingId: number;
+  patientId: number | null;
   patientName: string;
   bookingDate: string;
   modalityName: string;
@@ -282,6 +283,7 @@ export function CreateAppointmentTab({
     const examTypeName = effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name || null;
     setSuccess({
       bookingId: response.booking.id,
+      patientId: form.patientId,
       patientName: form.patient?.englishFullName || form.patient?.arabicFullName || `Patient #${form.patientId}`,
       bookingDate: response.booking.bookingDate,
       modalityName,

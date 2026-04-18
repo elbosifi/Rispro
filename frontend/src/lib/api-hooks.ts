@@ -28,6 +28,42 @@ import type { DictionaryEntry } from "@/lib/name-generation";
 // Generic raw response type for API responses that are passed through mappers
 type RawRecord = Record<string, unknown>;
 
+export interface RequestDocument {
+  id: number;
+  patientId: number | null;
+  appointmentId: number | null;
+  documentType: string;
+  originalFilename: string;
+  storedPath: string;
+  mimeType: string;
+  fileSize: number;
+  storageLocationType: "network" | "local_fallback";
+  lastMoveAttemptAt: string | null;
+  lastMoveError: string | null;
+  createdAt: string;
+}
+
+function mapRequestDocument(raw: RawRecord): RequestDocument {
+  return {
+    id: Number(raw.id ?? 0),
+    patientId: raw.patient_id == null ? (raw.patientId == null ? null : Number(raw.patientId)) : Number(raw.patient_id),
+    appointmentId:
+      raw.appointment_id == null ? (raw.appointmentId == null ? null : Number(raw.appointmentId)) : Number(raw.appointment_id),
+    documentType: String(raw.document_type ?? raw.documentType ?? ""),
+    originalFilename: String(raw.original_filename ?? raw.originalFilename ?? ""),
+    storedPath: String(raw.stored_path ?? raw.storedPath ?? ""),
+    mimeType: String(raw.mime_type ?? raw.mimeType ?? ""),
+    fileSize: Number(raw.file_size ?? raw.fileSize ?? 0),
+    storageLocationType:
+      String(raw.storage_location_type ?? raw.storageLocationType ?? "local_fallback") === "network"
+        ? "network"
+        : "local_fallback",
+    lastMoveAttemptAt: (raw.last_move_attempt_at ?? raw.lastMoveAttemptAt ?? null) as string | null,
+    lastMoveError: (raw.last_move_error ?? raw.lastMoveError ?? null) as string | null,
+    createdAt: String(raw.created_at ?? raw.createdAt ?? ""),
+  };
+}
+
 // -- Auth --
 export async function fetchCurrentSession(): Promise<User | null> {
   try {
@@ -36,6 +72,81 @@ export async function fetchCurrentSession(): Promise<User | null> {
   } catch {
     return null;
   }
+}
+
+// -- Documents --
+export async function listAppointmentDocuments(appointmentId: number): Promise<RequestDocument[]> {
+  const raw = await api<{ documents: RawRecord[] }>(`/documents?appointmentId=${encodeURIComponent(String(appointmentId))}`);
+  return (raw.documents ?? []).map(mapRequestDocument);
+}
+
+export async function uploadAppointmentDocument(payload: {
+  patientId: number | null;
+  appointmentId: number;
+  documentType?: string;
+  originalFilename: string;
+  mimeType: string;
+  fileContentBase64: string;
+}): Promise<RequestDocument> {
+  const raw = await api<{ document: RawRecord }>("/documents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return mapRequestDocument(raw.document);
+}
+
+export async function deleteAppointmentDocument(documentId: number): Promise<{ deleted: boolean; documentId: number }> {
+  return api<{ deleted: boolean; documentId: number }>(`/documents/${documentId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function prepareScanSession(payload: {
+  appointmentId: number;
+  patientId?: number | null;
+  documentType?: string;
+}) {
+  return api<{ preparation: RawRecord }>("/integrations/scan-prepare", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminBulkDeleteDocuments(payload: {
+  mode: "all" | "appointment_date_range";
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  return api<{ deletedCount: number; failedCount: number; failures: Array<{ documentId: number; reason: string }> }>(
+    "/admin/documents/delete",
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export async function adminMoveDocumentsToStorage(payload: {
+  mode: "all" | "appointment_date_range";
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  return api<{
+    movedCount: number;
+    failedCount: number;
+    skippedCount: number;
+    failures: Array<{ documentId: number; reason: string }>;
+  }>("/admin/documents/move-storage", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function adminTestDocumentStorageConnectivity() {
+  return api<{ ok: boolean; path: string; authUsername: string; message: string }>(
+    "/admin/documents/storage-test",
+    { method: "POST" }
+  );
 }
 
 export async function login(username: string, password: string): Promise<User> {

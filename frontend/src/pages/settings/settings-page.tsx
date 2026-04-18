@@ -21,7 +21,10 @@ import {
   deleteExamType,
   saveSettings,
   fetchSchedulingEngineConfig,
-  saveSchedulingEngineConfig
+  saveSchedulingEngineConfig,
+  adminBulkDeleteDocuments,
+  adminMoveDocumentsToStorage,
+  adminTestDocumentStorageConnectivity,
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -134,6 +137,7 @@ type SettingsSection =
   | "exam_types"
   | "modalities"
   | "name_dictionary"
+  | "documents_and_uploads"
   | "backup_restore";
 
 const SECTION_KEYS: SettingsSection[] = [
@@ -150,6 +154,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "exam_types",
   "modalities",
   "name_dictionary",
+  "documents_and_uploads",
   "backup_restore"
 ];
 
@@ -219,6 +224,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
+            {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" onReAuthRequired={requestReAuth} />}
             {section === "scheduling_and_capacity" && <SimpleSettingsSection category="scheduling_and_capacity" onReAuthRequired={requestReAuth} />}
@@ -2024,6 +2030,219 @@ function QueryError({ message }: { message: string }) {
     <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
       <p className="text-sm font-medium text-red-700 dark:text-red-400">{t("settings.failedLoad")}</p>
       <p className="text-xs text-red-600 dark:text-red-500 mt-1 font-mono break-all">{message}</p>
+    </div>
+  );
+}
+
+function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+  const queryClient = useQueryClient();
+  const [storagePath, setStoragePath] = useState("");
+  const [authUsername, setAuthUsername] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authDomain, setAuthDomain] = useState("");
+  const [fallbackEnabled, setFallbackEnabled] = useState(true);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [resultMessage, setResultMessage] = useState<string>("");
+
+  const { data: settings, error, isLoading } = useQuery({
+    queryKey: ["settings", "documents_and_uploads"],
+    queryFn: () => fetchSettings("documents_and_uploads"),
+    staleTime: 1000 * 60,
+  });
+
+  useEffect(() => {
+    if (!settings) return;
+    setStoragePath(settings.storage_path || "");
+    setAuthUsername(settings.storage_auth_username || "");
+    setAuthPassword(settings.storage_auth_password || "");
+    setAuthDomain(settings.storage_auth_domain || "");
+    setFallbackEnabled(String(settings.storage_fallback_enabled || "true").toLowerCase() === "true");
+  }, [settings]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () =>
+      saveSettings("documents_and_uploads", {
+        entries: [
+          { key: "storage_path", value: { value: storagePath } },
+          { key: "storage_auth_username", value: { value: authUsername } },
+          { key: "storage_auth_password", value: { value: authPassword } },
+          { key: "storage_auth_domain", value: { value: authDomain } },
+          { key: "storage_fallback_enabled", value: { value: String(fallbackEnabled) } },
+        ],
+      }),
+    onSuccess: () => {
+      setResultMessage("Storage settings saved.");
+      queryClient.invalidateQueries({ queryKey: ["settings", "documents_and_uploads"] });
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Failed to save storage settings.");
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: adminTestDocumentStorageConnectivity,
+    onSuccess: (result) => {
+      setResultMessage(result.ok ? `Connectivity OK: ${result.message}` : `Connectivity failed: ${result.message}`);
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Connectivity test failed.");
+    },
+  });
+
+  const deleteAllMutation = useMutation({
+    mutationFn: () => adminBulkDeleteDocuments({ mode: "all" }),
+    onSuccess: (result) => {
+      setResultMessage(`Deleted ${result.deletedCount} documents. Failed: ${result.failedCount}.`);
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Bulk delete failed.");
+    },
+  });
+
+  const deleteRangeMutation = useMutation({
+    mutationFn: () => adminBulkDeleteDocuments({ mode: "appointment_date_range", dateFrom, dateTo }),
+    onSuccess: (result) => {
+      setResultMessage(`Deleted ${result.deletedCount} documents in range. Failed: ${result.failedCount}.`);
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Range delete failed.");
+    },
+  });
+
+  const moveAllMutation = useMutation({
+    mutationFn: () => adminMoveDocumentsToStorage({ mode: "all" }),
+    onSuccess: (result) => {
+      setResultMessage(`Moved ${result.movedCount} docs. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Move job failed.");
+    },
+  });
+
+  const moveRangeMutation = useMutation({
+    mutationFn: () => adminMoveDocumentsToStorage({ mode: "appointment_date_range", dateFrom, dateTo }),
+    onSuccess: (result) => {
+      setResultMessage(`Moved ${result.movedCount} docs in range. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : "Range move job failed.");
+    },
+  });
+
+  if (error) {
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "documents_and_uploads"])} />;
+    }
+    return <QueryError message={msg} />;
+  }
+
+  if (isLoading) {
+    return <p className="description-center">Loading documents settings...</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-sm font-medium mb-1">Storage path (UNC/local/relative)</label>
+          <input value={storagePath} onChange={(e) => setStoragePath(e.target.value)} className="input-premium w-full" />
+        </div>
+        <div className="flex items-end">
+          <label className="inline-flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={fallbackEnabled} onChange={(e) => setFallbackEnabled(e.target.checked)} />
+            Enable local fallback when preferred path is unavailable
+          </label>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Network username</label>
+          <input value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} className="input-premium w-full" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Network password</label>
+          <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="input-premium w-full" />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Network domain (optional)</label>
+          <input value={authDomain} onChange={(e) => setAuthDomain(e.target.value)} className="input-premium w-full" />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => saveMutation.mutate()} className="btn-primary text-sm" disabled={saveMutation.isPending}>
+          {saveMutation.isPending ? "Saving..." : "Save storage settings"}
+        </button>
+        <button onClick={() => testMutation.mutate()} className="btn-secondary text-sm" disabled={testMutation.isPending}>
+          {testMutation.isPending ? "Testing..." : "Connectivity test"}
+        </button>
+      </div>
+
+      <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
+        <h4 className="font-medium text-sm">Bulk cleanup and move jobs</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs mb-1">From date</label>
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input-premium w-full" />
+          </div>
+          <div>
+            <label className="block text-xs mb-1">To date</label>
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input-premium w-full" />
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
+            onClick={() => {
+              if (!window.confirm("Delete all stored request documents?")) return;
+              deleteAllMutation.mutate();
+            }}
+            disabled={deleteAllMutation.isPending}
+          >
+            {deleteAllMutation.isPending ? "Deleting..." : "Delete all documents"}
+          </button>
+          <button
+            className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
+            onClick={() => {
+              if (!dateFrom || !dateTo) {
+                setResultMessage("Please select both dateFrom and dateTo.");
+                return;
+              }
+              if (!window.confirm("Delete documents in selected appointment date range?")) return;
+              deleteRangeMutation.mutate();
+            }}
+            disabled={deleteRangeMutation.isPending}
+          >
+            {deleteRangeMutation.isPending ? "Deleting..." : "Delete by appointment period"}
+          </button>
+          <button
+            className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
+            onClick={() => moveAllMutation.mutate()}
+            disabled={moveAllMutation.isPending}
+          >
+            {moveAllMutation.isPending ? "Moving..." : "Move local fallback docs (all)"}
+          </button>
+          <button
+            className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
+            onClick={() => {
+              if (!dateFrom || !dateTo) {
+                setResultMessage("Please select both dateFrom and dateTo.");
+                return;
+              }
+              moveRangeMutation.mutate();
+            }}
+            disabled={moveRangeMutation.isPending}
+          >
+            {moveRangeMutation.isPending ? "Moving..." : "Move local fallback docs (period)"}
+          </button>
+        </div>
+      </div>
+
+      {resultMessage && (
+        <div className="p-3 rounded border border-stone-200 dark:border-stone-700 text-sm">
+          {resultMessage}
+        </div>
+      )}
     </div>
   );
 }

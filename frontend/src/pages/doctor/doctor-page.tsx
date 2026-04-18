@@ -6,6 +6,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import type { Appointment } from "@/types/api";
@@ -129,6 +130,14 @@ export default function DoctorPage() {
                 <Field label={t(language, "doctor.fieldDate")} value={formatDateLy(selectedAppointment.appointmentDate)} />
                 <Field label={t(language, "doctor.fieldStatus")} value={selectedAppointment.status} />
                 <Field label={t(language, "doctor.fieldNotes")} value={selectedAppointment.notes} />
+              </div>
+              <div className="mt-6">
+                <RequestDocumentsPanel
+                  appointmentId={selectedAppointment.id}
+                  patientId={selectedAppointment.patientId}
+                  title="Doctor Request Documents"
+                  enablePreviewModal
+                />
               </div>
               <div className="mt-6">
                 <AppointmentEditor
