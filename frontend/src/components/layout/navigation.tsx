@@ -66,7 +66,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
   { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
   { route: "queue", labelKey: "nav.queue", icon: "queue" },
-  { route: "modality", labelKey: "nav.modality", icon: "modality", roles: ["modality_staff", "supervisor"] },
+  { route: "modality", labelKey: "nav.modality", icon: "modality" },
   { route: "doctor", labelKey: "nav.doctor", icon: "doctor" },
   { route: "print", labelKey: "nav.print", icon: "print" },
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
