@@ -86,7 +86,7 @@ export interface AvailabilityQueryResult {
   noPublishedPolicy: boolean;
 }
 
-type WeekdayName = "sunday" | "friday" | "saturday";
+type WeekdayName = "friday" | "saturday";
 
 function normalizeSettingToggle(value: unknown, fallbackEnabled: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -97,7 +97,6 @@ function normalizeSettingToggle(value: unknown, fallbackEnabled: boolean): boole
 
 function weekdayNameFromIsoDate(isoDate: string): WeekdayName | "other" {
   const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
-  if (day === 0) return "sunday";
   if (day === 5) return "friday";
   if (day === 6) return "saturday";
   return "other";
@@ -111,8 +110,7 @@ async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayN
       where category = 'scheduling_and_capacity'
         and setting_key in (
           'allow_friday_appointments',
-          'allow_saturday_appointments',
-          'allow_sunday_appointments'
+          'allow_saturday_appointments'
         )
     `
   );
@@ -130,7 +128,6 @@ async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayN
   const disabled = new Set<WeekdayName>();
   if (!normalizeSettingToggle(valuesByKey.allow_friday_appointments, true)) disabled.add("friday");
   if (!normalizeSettingToggle(valuesByKey.allow_saturday_appointments, true)) disabled.add("saturday");
-  if (!normalizeSettingToggle(valuesByKey.allow_sunday_appointments, true)) disabled.add("sunday");
   return disabled;
 }
 

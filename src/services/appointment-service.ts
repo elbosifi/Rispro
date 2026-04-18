@@ -512,7 +512,7 @@ function getTripoliWeekday(isoDate: string): string {
 
 export async function getAppointmentDaySettings(
   client: DbExecutor = pool
-): Promise<{ fridayEnabled: boolean; saturdayEnabled: boolean; sundayEnabled: boolean }> {
+): Promise<{ fridayEnabled: boolean; saturdayEnabled: boolean }> {
   const { rows } = await client.query<{
     setting_key: string;
     setting_value: unknown;
@@ -520,7 +520,7 @@ export async function getAppointmentDaySettings(
     select setting_key, setting_value
     from system_settings
     where category = 'scheduling_and_capacity'
-      and setting_key in ('allow_friday_appointments', 'allow_saturday_appointments', 'allow_sunday_appointments')
+      and setting_key in ('allow_friday_appointments', 'allow_saturday_appointments')
   `);
 
   const settingsRows = rows as unknown as SchedulingSettingRow[];
@@ -536,8 +536,7 @@ export async function getAppointmentDaySettings(
 
   return {
     fridayEnabled: normalizeSettingToggle(values.allow_friday_appointments, true),
-    saturdayEnabled: normalizeSettingToggle(values.allow_saturday_appointments, true),
-    sundayEnabled: normalizeSettingToggle(values.allow_sunday_appointments, true)
+    saturdayEnabled: normalizeSettingToggle(values.allow_saturday_appointments, true)
   };
 }
 
@@ -556,9 +555,6 @@ async function requireAppointmentDayEnabled(
     throw new HttpError(409, "Appointments are disabled on Saturday in settings.");
   }
 
-  if (weekday === "sunday" && !settings.sundayEnabled) {
-    throw new HttpError(409, "Appointments are disabled on Sunday in settings.");
-  }
 }
 
 async function getMaxCasesPerModality(client: DbExecutor): Promise<number | null> {
@@ -1292,10 +1288,6 @@ export async function listAvailability(
       }
 
       if (weekday === "saturday" && !daySettings.saturdayEnabled) {
-        return false;
-      }
-
-      if (weekday === "sunday" && !daySettings.sundayEnabled) {
         return false;
       }
 

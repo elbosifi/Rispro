@@ -932,11 +932,6 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "enabled", label: "Enabled" },
     { value: "disabled", label: "Disabled" }
   ]},
-  allow_sunday_appointments: { label: "Allow Sunday Appointments", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
-  ]},
-
   // Queue & Arrival
   barcode_check_in: { label: "Barcode Check-In", type: "dropdown", options: [
     { value: "enabled", label: "Enabled" },
