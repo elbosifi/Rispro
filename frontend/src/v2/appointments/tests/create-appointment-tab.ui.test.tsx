@@ -374,6 +374,22 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(await screen.findByText("Special reason code required")).toBeTruthy();
   });
 
+  it("requires special-reason confirmation checkbox when special quota mode is selected", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+
+    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+      target: { value: "special_quota_extra" },
+    });
+    fireEvent.change(screen.getByLabelText("Special Reason"), { target: { value: "urgent" } });
+    await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+    expect(await screen.findByText("Confirm special reason selection")).toBeTruthy();
+  });
+
   it("passes specialReasonNote in create payload when special quota is enabled", async () => {
     const { onCreateAppointment } = setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
@@ -387,6 +403,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     const selects = screen.getAllByRole("combobox");
     const specialReasonSelect = selects[selects.length - 1] as HTMLSelectElement;
     fireEvent.change(specialReasonSelect, { target: { value: "urgent" } });
+    await userEvent.click(screen.getByLabelText("I confirm the selected special reason is correct"));
     fireEvent.change(screen.getByPlaceholderText("Optional note"), { target: { value: "High-risk escalation" } });
 
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));

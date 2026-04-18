@@ -194,6 +194,7 @@ export interface ModalityDto {
   nameAr: string;
   nameEn: string;
   code: string;
+  dailyCapacity?: number | null;
   isActive: boolean;
   safetyWarningEn: string | null;
   safetyWarningAr: string | null;

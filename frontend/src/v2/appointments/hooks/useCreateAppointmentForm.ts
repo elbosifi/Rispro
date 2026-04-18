@@ -24,6 +24,7 @@ export interface CreateAppointmentFormModel {
   isWalkIn: boolean;
   capacityResolutionMode: CapacityResolutionMode;
   specialReasonCode: string;
+  specialReasonConfirmed: boolean;
   specialReasonNote: string;
   overrideRequired: boolean;
   overrideReason: string;
@@ -41,6 +42,7 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   isWalkIn: false,
   capacityResolutionMode: "standard",
   specialReasonCode: "",
+  specialReasonConfirmed: false,
   specialReasonNote: "",
   overrideRequired: false,
   overrideReason: "",
@@ -61,6 +63,7 @@ export function useCreateAppointmentForm() {
         notes: "",
         capacityResolutionMode: "standard",
         specialReasonCode: "",
+        specialReasonConfirmed: false,
         specialReasonNote: "",
         overrideRequired: false,
         overrideReason: "",
@@ -74,6 +77,7 @@ export function useCreateAppointmentForm() {
         appointmentDate: "",
         capacityResolutionMode: "standard",
         specialReasonCode: "",
+        specialReasonConfirmed: false,
         specialReasonNote: "",
         overrideRequired: false,
         overrideReason: "",
@@ -114,12 +118,24 @@ export function useCreateAppointmentForm() {
         capacityResolutionMode,
         specialReasonCode:
           capacityResolutionMode === "special_quota_extra" ? prev.specialReasonCode : "",
+        specialReasonConfirmed:
+          capacityResolutionMode === "special_quota_extra" ? prev.specialReasonConfirmed : false,
         specialReasonNote:
           capacityResolutionMode === "special_quota_extra" ? prev.specialReasonNote : "",
       }));
     },
     setSpecialReasonCode(specialReasonCode: string) {
-      setForm((prev) => ({ ...prev, specialReasonCode }));
+      setForm((prev) => ({
+        ...prev,
+        specialReasonCode,
+        specialReasonConfirmed:
+          specialReasonCode && specialReasonCode === prev.specialReasonCode
+            ? prev.specialReasonConfirmed
+            : false,
+      }));
+    },
+    setSpecialReasonConfirmed(specialReasonConfirmed: boolean) {
+      setForm((prev) => ({ ...prev, specialReasonConfirmed }));
     },
     setSpecialReasonNote(specialReasonNote: string) {
       setForm((prev) => ({ ...prev, specialReasonNote }));

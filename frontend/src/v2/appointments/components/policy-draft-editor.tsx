@@ -25,6 +25,70 @@ function createNextId(values: Array<{ id: number }>): number {
   return maxId + 1;
 }
 
+interface ModalityOption {
+  value: number;
+  label: string;
+  dailyCapacity: number | null;
+}
+
+function clampDailyLimit(value: number, dailyCapacity: number | null): number {
+  const next = Number.isFinite(value) ? Math.max(0, value) : 0;
+  if (dailyCapacity == null || !Number.isFinite(dailyCapacity)) return next;
+  return Math.min(next, Math.max(0, dailyCapacity));
+}
+
+function validateCategoryDailyLimits(
+  limits: PolicySnapshotDto["categoryDailyLimits"],
+  modalityOptions: ModalityOption[]
+): string | null {
+  const activeLimits = limits.filter((row) => row.isActive);
+  if (activeLimits.length === 0) return null;
+
+  const dailyCapacityByModality = new Map<number, number | null>(
+    modalityOptions.map((option) => [option.value, option.dailyCapacity])
+  );
+  const seen = new Set<string>();
+  const grouped = new Map<number, typeof activeLimits>();
+
+  for (const row of activeLimits) {
+    const modalityId = Number(row.modalityId);
+    if (!Number.isFinite(modalityId) || modalityId <= 0) {
+      return "Each active category limit must select a modality.";
+    }
+    const key = `${modalityId}:${row.caseCategory}`;
+    if (seen.has(key)) {
+      return "Duplicate active category limits detected for the same modality/category.";
+    }
+    seen.add(key);
+    const existing = grouped.get(modalityId) ?? [];
+    existing.push(row);
+    grouped.set(modalityId, existing);
+  }
+
+  for (const [modalityId, rows] of grouped) {
+    const modalityCapacity = dailyCapacityByModality.get(modalityId) ?? null;
+    if (modalityCapacity == null || !Number.isFinite(modalityCapacity)) {
+      return `Modality ${modalityId} is missing a valid daily capacity.`;
+    }
+    const oncology = rows.find((row) => row.caseCategory === "oncology");
+    const nonOncology = rows.find((row) => row.caseCategory === "non_oncology");
+
+    if (oncology && nonOncology) {
+      if (Number(oncology.dailyLimit) + Number(nonOncology.dailyLimit) !== modalityCapacity) {
+        return `Category limits for modality ${modalityId} must sum to ${modalityCapacity}.`;
+      }
+      continue;
+    }
+
+    const configured = oncology ?? nonOncology;
+    if (configured && Number(configured.dailyLimit) > modalityCapacity) {
+      return `Configured ${configured.caseCategory} limit exceeds modality ${modalityId} daily capacity (${modalityCapacity}).`;
+    }
+  }
+
+  return null;
+}
+
 export function PolicyDraftEditor({
   snapshot,
   onSave,
@@ -40,30 +104,35 @@ export function PolicyDraftEditor({
   const [changeNote, setChangeNote] = useState("");
   const [advancedJsonValue, setAdvancedJsonValue] = useState("");
   const [advancedJsonError, setAdvancedJsonError] = useState<string | null>(null);
+  const [saveValidationError, setSaveValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     const next = snapshot ?? emptySnapshot();
     setDraft(next);
     setAdvancedJsonValue(JSON.stringify(next, null, 2));
     setAdvancedJsonError(null);
+    setSaveValidationError(null);
   }, [snapshot]);
 
   useEffect(() => {
     setAdvancedJsonValue(JSON.stringify(draft, null, 2));
+    setSaveValidationError(null);
   }, [draft]);
 
   const modalityOptions = useMemo(() => {
     return (lookups.data?.modalities ?? [])
       .map((m) => {
         const modalityId = Number(m.id);
+        const dailyCapacity = m.dailyCapacity == null ? null : Number(m.dailyCapacity);
         return Number.isFinite(modalityId)
           ? {
               value: modalityId,
               label: m.name || m.code || `Modality ${modalityId}`,
+              dailyCapacity: Number.isFinite(dailyCapacity) ? dailyCapacity : null,
             }
           : null;
       })
-      .filter((option): option is { value: number; label: string } => option != null);
+      .filter((option): option is ModalityOption => option != null);
   }, [lookups.data?.modalities]);
 
   const examTypeOptionsByModality = useMemo(() => {
@@ -118,6 +187,11 @@ export function PolicyDraftEditor({
 
   async function handleSave() {
     if (!hasDraftSnapshot) return;
+    const categoryLimitsError = validateCategoryDailyLimits(draft.categoryDailyLimits, modalityOptions);
+    if (categoryLimitsError) {
+      setSaveValidationError(categoryLimitsError);
+      return;
+    }
     await onSave(draft, changeNote.trim() || null);
   }
 
@@ -220,12 +294,49 @@ export function PolicyDraftEditor({
                   min={0}
                   value={row.dailyLimit}
                   onChange={(event) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      categoryDailyLimits: prev.categoryDailyLimits.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, dailyLimit: Number(event.target.value) } : item
-                      ),
-                    }))
+                    setDraft((prev) => {
+                      const rawValue = Number(event.target.value);
+                      const nextLimits = prev.categoryDailyLimits.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, dailyLimit: Number.isFinite(rawValue) ? rawValue : 0 } : item
+                      );
+                      const changedRow = nextLimits[index];
+                      if (!changedRow) {
+                        return { ...prev, categoryDailyLimits: nextLimits };
+                      }
+
+                      const modalityId = Number(changedRow.modalityId);
+                      const modalityCapacity =
+                        modalityOptions.find((option) => option.value === modalityId)?.dailyCapacity ?? null;
+                      const boundedDailyLimit = clampDailyLimit(Number(changedRow.dailyLimit), modalityCapacity);
+
+                      nextLimits[index] = {
+                        ...changedRow,
+                        dailyLimit: boundedDailyLimit,
+                      };
+
+                      if (changedRow.isActive && modalityCapacity != null) {
+                        const counterpartIndex = nextLimits.findIndex(
+                          (item, itemIndex) =>
+                            itemIndex !== index &&
+                            item.isActive &&
+                            Number(item.modalityId) === modalityId &&
+                            item.caseCategory !== changedRow.caseCategory
+                        );
+
+                        if (counterpartIndex >= 0) {
+                          const counterpart = nextLimits[counterpartIndex];
+                          nextLimits[counterpartIndex] = {
+                            ...counterpart,
+                            dailyLimit: Math.max(modalityCapacity - boundedDailyLimit, 0),
+                          };
+                        }
+                      }
+
+                      return {
+                        ...prev,
+                        categoryDailyLimits: nextLimits,
+                      };
+                    })
                   }
                 />
                 <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
@@ -1316,6 +1427,20 @@ export function PolicyDraftEditor({
       </div>
 
       <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+        {saveValidationError && (
+          <div
+            style={{
+              color: "var(--color-error, #ef4444)",
+              fontSize: 12,
+              border: "1px solid #fecaca",
+              borderRadius: 6,
+              background: "#fef2f2",
+              padding: "8px 10px",
+            }}
+          >
+            {saveValidationError}
+          </div>
+        )}
         <input
           type="text"
           placeholder="Change note (optional)"

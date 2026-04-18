@@ -157,6 +157,9 @@ export function CreateAppointmentTab({
     if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonCode) {
       return "Special reason code required";
     }
+    if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonConfirmed) {
+      return "Confirm special reason selection";
+    }
     return null;
   }
 
@@ -490,6 +493,8 @@ export function CreateAppointmentTab({
           supervisorMode={canUseNonStandardCapacityModes}
           specialReasonCode={form.specialReasonCode}
           onChangeSpecialReasonCode={actions.setSpecialReasonCode}
+          specialReasonConfirmed={form.specialReasonConfirmed}
+          onChangeSpecialReasonConfirmed={actions.setSpecialReasonConfirmed}
           specialReasonNote={form.specialReasonNote}
           onChangeSpecialReasonNote={actions.setSpecialReasonNote}
           options={specialReasonOptions}

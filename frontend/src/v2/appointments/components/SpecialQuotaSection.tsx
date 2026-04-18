@@ -8,6 +8,8 @@ interface Props {
   supervisorMode?: boolean;
   specialReasonCode: string;
   onChangeSpecialReasonCode: (value: string) => void;
+  specialReasonConfirmed: boolean;
+  onChangeSpecialReasonConfirmed: (value: boolean) => void;
   specialReasonNote: string;
   onChangeSpecialReasonNote: (value: string) => void;
   options: SpecialReasonCodeDto[];
@@ -20,6 +22,8 @@ export function SpecialQuotaSection({
   supervisorMode = true,
   specialReasonCode,
   onChangeSpecialReasonCode,
+  specialReasonConfirmed,
+  onChangeSpecialReasonConfirmed,
   specialReasonNote,
   onChangeSpecialReasonNote,
   options,
@@ -63,6 +67,7 @@ export function SpecialQuotaSection({
       {specialQuotaEnabled && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginTop: 10 }}>
           <select
+            aria-label="Special Reason"
             value={specialReasonCode}
             onChange={(e) => onChangeSpecialReasonCode(e.target.value)}
             style={{ padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
@@ -72,6 +77,14 @@ export function SpecialQuotaSection({
               <option key={o.code} value={o.code}>{o.labelEn || o.code}</option>
             ))}
           </select>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+            <input
+              type="checkbox"
+              checked={specialReasonConfirmed}
+              onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
+            />
+            I confirm the selected special reason is correct
+          </label>
           <input
             value={specialReasonNote}
             onChange={(e) => onChangeSpecialReasonNote(e.target.value)}
