@@ -118,7 +118,7 @@ export function CreateAppointmentTab({
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
-  const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string }>>([]);
+  const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string; status: string }>>([]);
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
   const [showFullDays, setShowFullDays] = useState(false);
@@ -190,7 +190,7 @@ export function CreateAppointmentTab({
     setNoShowLoading(true);
 
     fetchAppointments({
-      status: ["no-show"],
+      status: ["no-show", "cancelled"],
       patientId: String(form.patientId),
       dateTo: new Date().toISOString().slice(0, 10),
     })
@@ -202,6 +202,7 @@ export function CreateAppointmentTab({
             id: appointment.id,
             appointmentDate: appointment.appointmentDate,
             examTypeName: appointment.examNameEn || appointment.examNameAr || "—",
+            status: String(appointment.status || ""),
           }));
         setPatientNoShows(history);
       })
@@ -485,7 +486,7 @@ export function CreateAppointmentTab({
         <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
         {form.patientId != null && (
           <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 10, background: "#fff7ed" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>Previous No-Shows</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>Previous No-Shows / Cancelled</div>
             {noShowLoading ? (
               <div style={{ fontSize: 12, color: "#9a3412" }}>Loading no-show history...</div>
             ) : patientNoShows.length === 0 ? (
@@ -494,7 +495,7 @@ export function CreateAppointmentTab({
               <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12, color: "#7c2d12" }}>
                 {patientNoShows.map((item) => (
                   <li key={item.id} style={{ marginBottom: 4 }}>
-                    {item.appointmentDate} — {item.examTypeName}
+                    {item.appointmentDate} — {item.examTypeName} ({item.status})
                   </li>
                 ))}
               </ul>

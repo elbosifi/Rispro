@@ -223,6 +223,17 @@ export async function updateAppointment(id: number, payload: RawRecord) {
 }
 
 export async function cancelAppointment(id: number, cancelReason: string) {
+  try {
+    const raw = await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
+      method: "POST"
+    });
+    return { appointment: raw.booking };
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) {
+      throw error;
+    }
+  }
+
   return api<{ appointment: RawRecord }>(`/appointments/${id}/cancel`, {
     method: "POST",
     body: JSON.stringify({ cancelReason })

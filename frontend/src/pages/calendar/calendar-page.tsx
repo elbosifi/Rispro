@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cancelAppointment, fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { pushToast } from "@/lib/toast";
 
 interface CalendarDay {
   date: string;
@@ -26,6 +27,28 @@ export default function CalendarPage() {
   const [modalityFilter, setModalityFilter] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const cancelMutation = useMutation({
+    mutationFn: (appointmentId: number) => cancelAppointment(appointmentId, "Cancelled from calendar"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      pushToast({
+        type: "success",
+        title: "Appointment cancelled",
+        message: "Appointment status changed to cancelled."
+      });
+      setSelectedAppointment(null);
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: "Cancel failed",
+        message: err?.message || "Could not cancel appointment."
+      });
+    }
+  });
 
   // Load appointments for the displayed month range
   const startDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth(), 1));
@@ -240,6 +263,20 @@ export default function CalendarPage() {
                   <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
                 </div>
                 <div className="mt-4">
+                {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
+                  <div className="mb-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!window.confirm("Cancel this appointment?")) return;
+                        cancelMutation.mutate(selectedAppointment.id);
+                      }}
+                      className="rounded-lg bg-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200 dark:hover:bg-stone-600"
+                    >
+                      Cancel appointment
+                    </button>
+                  </div>
+                )}
                 <AppointmentEditor
                   appointment={selectedAppointment}
                   lookups={lookups}

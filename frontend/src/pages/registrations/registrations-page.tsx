@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { cancelAppointment, fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { pushToast } from "@/lib/toast";
 
 interface RegistrationsFilters {
   date: string;
@@ -21,6 +22,7 @@ interface RegistrationsFilters {
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>({
     date: todayIsoDateLy(),
     dateFrom: "",
@@ -31,6 +33,27 @@ export default function RegistrationsPage() {
   });
 
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
+  const cancelMutation = useMutation({
+    mutationFn: (appointmentId: number) => cancelAppointment(appointmentId, "Cancelled from registrations"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      pushToast({
+        type: "success",
+        title: "Appointment cancelled",
+        message: "Appointment status changed to cancelled."
+      });
+      setSelectedAppointment(null);
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: "Cancel failed",
+        message: err?.message || "Could not cancel appointment."
+      });
+    }
+  });
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["registrations", filters],
@@ -202,6 +225,20 @@ export default function RegistrationsPage() {
             <Field label={t("registrations.notes")} value={selectedAppointment.notes} />
           </div>
           <div className="mt-6">
+            {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
+              <div className="mb-3 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm("Cancel this appointment?")) return;
+                    cancelMutation.mutate(selectedAppointment.id);
+                  }}
+                  className="rounded-lg bg-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200 dark:hover:bg-stone-600"
+                >
+                  Cancel appointment
+                </button>
+              </div>
+            )}
             <AppointmentEditor
               appointment={selectedAppointment}
               lookups={lookups}

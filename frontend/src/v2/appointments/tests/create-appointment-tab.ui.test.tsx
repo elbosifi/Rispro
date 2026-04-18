@@ -11,6 +11,7 @@ type MockNoShowAppointment = {
   appointmentDate: string;
   examNameEn: string | null;
   examNameAr: string | null;
+  status?: string;
 };
 
 const mockFetchAppointments = vi.fn<
@@ -363,12 +364,13 @@ describe("CreateAppointmentTab UI interactions", () => {
         appointmentDate: "2026-03-01",
         examNameEn: "MRI Spine",
         examNameAr: null,
+        status: "no-show",
       },
     ]);
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-    expect(await screen.findByText("Previous No-Shows")).toBeTruthy();
-    expect(await screen.findByText("2026-03-01 — MRI Spine")).toBeTruthy();
+    expect(await screen.findByText("Previous No-Shows / Cancelled")).toBeTruthy();
+    expect(await screen.findByText("2026-03-01 — MRI Spine (no-show)")).toBeTruthy();
   });
 
   it("keeps routine as default but removes routine from selectable priorities", async () => {

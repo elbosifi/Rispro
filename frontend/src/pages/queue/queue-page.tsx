@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, searchPatients, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, cancelAppointment, searchPatients, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
@@ -114,6 +114,27 @@ export default function QueuePage() {
       queryClient.invalidateQueries({ queryKey: ["queue"] });
     }
   });
+  const cancelMutation = useMutation({
+    mutationFn: ({ appointmentId }: { appointmentId: number }) =>
+      cancelAppointment(appointmentId, "Cancelled from queue"),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      pushToast({
+        type: "success",
+        title: "Appointment cancelled",
+        message: "Appointment status changed to cancelled."
+      });
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: "Cancel failed",
+        message: err?.message || "Could not cancel appointment."
+      });
+    }
+  });
 
   const handleScan = (e: FormEvent) => {
     e.preventDefault();
@@ -142,6 +163,11 @@ export default function QueuePage() {
 
   const handleNoShow = (appointmentId: number) => {
     noShowMutation.mutate({ appointmentId, reason: t("queue.noShowReason") });
+  };
+
+  const handleCancel = (appointmentId: number) => {
+    if (!window.confirm("Cancel this appointment?")) return;
+    cancelMutation.mutate({ appointmentId });
   };
 
   return (
@@ -273,6 +299,14 @@ export default function QueuePage() {
                           className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50"
                         >
                           {t("queue.markNoShow")}
+                        </button>
+                      )}
+                      {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
+                        <button
+                          onClick={() => handleCancel(entry.appointmentId)}
+                          className="px-2 py-1 bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 rounded text-xs font-medium hover:bg-stone-300 dark:hover:bg-stone-600"
+                        >
+                          Cancel appointment
                         </button>
                       )}
                     </div>
