@@ -325,7 +325,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
   });
 
-  it("allows restricted and full-with-override row selection", async () => {
+  it("allows restricted row selection and full row only after showing full days", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -334,6 +334,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-02");
 
+    expect(screen.queryByRole("button", { name: /2027-01-03 full/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-03 full/i }));
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-03");
   });
@@ -391,6 +393,20 @@ describe("CreateAppointmentTab UI interactions", () => {
     setup();
     const stickyPane = document.querySelector('div[style*="position: sticky"]');
     expect(stickyPane).toBeTruthy();
+  });
+
+  it("supports availability window navigation controls", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    const startDateInput = screen.getByLabelText("Availability Start Date") as HTMLInputElement;
+    fireEvent.change(startDateInput, { target: { value: "2027-01-15" } });
+    expect(startDateInput.value).toBe("2027-01-15");
+
+    expect(screen.getByRole("button", { name: "Previous slots" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Next slots" })).toBeTruthy();
   });
 
   it("opens override modal and submits override payload", async () => {

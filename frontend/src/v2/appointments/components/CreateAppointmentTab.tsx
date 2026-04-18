@@ -11,7 +11,7 @@ import type {
   SchedulingDecisionDto,
   SpecialReasonCodeDto,
 } from "../types";
-import { useV2ExamTypes, useV2Suggestions } from "../api";
+import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
@@ -55,6 +55,32 @@ interface SuccessSummary {
   wasOverride: boolean;
 }
 
+const AVAILABILITY_WINDOW_DAYS = 14;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function clampAvailabilityOffset(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.floor(value);
+}
+
+function startDateFromOffset(offset: number): string {
+  const start = new Date(`${todayIsoDate()}T00:00:00Z`);
+  start.setUTCDate(start.getUTCDate() + clampAvailabilityOffset(offset));
+  return start.toISOString().slice(0, 10);
+}
+
+function offsetFromStartDate(isoDate: string): number {
+  if (!isoDate) return 0;
+  const start = new Date(`${todayIsoDate()}T00:00:00Z`).getTime();
+  const selected = new Date(`${isoDate}T00:00:00Z`).getTime();
+  if (!Number.isFinite(selected)) return 0;
+  return clampAvailabilityOffset(Math.floor((selected - start) / DAY_MS));
+}
+
 function isRoutinePriority(priority: { nameEn?: string | null; nameAr?: string | null }): boolean {
   const nameEn = String(priority.nameEn ?? "").trim().toLowerCase();
   const nameAr = String(priority.nameAr ?? "").trim();
@@ -94,6 +120,8 @@ export function CreateAppointmentTab({
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
   const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string }>>([]);
   const [noShowLoading, setNoShowLoading] = useState(false);
+  const [availabilityOffset, setAvailabilityOffset] = useState(0);
+  const [showFullDays, setShowFullDays] = useState(false);
   const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
   const initialPatientAppliedRef = useRef(false);
 
@@ -125,13 +153,9 @@ export function CreateAppointmentTab({
     capacityResolutionMode: form.capacityResolutionMode,
     specialReasonCode:
       form.capacityResolutionMode === "special_quota_extra" ? form.specialReasonCode || null : null,
+    days: AVAILABILITY_WINDOW_DAYS,
+    offset: availabilityOffset,
   });
-
-  const suggestions = useV2Suggestions(
-    form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard"
-      ? { modalityId: form.modalityId, days: 14, examTypeId: form.examTypeId, caseCategory: form.caseCategory }
-      : undefined
-  );
   const hasSpecialQuotaAvailable = (availability.rawItems ?? []).some(
     (item) =>
       item.date === form.appointmentDate &&
@@ -415,32 +439,28 @@ export function CreateAppointmentTab({
             selectedDate={form.appointmentDate}
             onSelectDate={handleSelectAvailabilityRow}
             loading={availability.isLoading}
+            showFullDays={showFullDays}
+            onToggleShowFullDays={() => setShowFullDays((current) => !current)}
+            startDate={startDateFromOffset(availabilityOffset)}
+            onChangeStartDate={(nextDate) => {
+              setAvailabilityOffset(offsetFromStartDate(nextDate));
+              setAvailabilitySelectedRow(null);
+            }}
+            onPreviousPage={() => {
+              setAvailabilityOffset((current) => Math.max(0, current - AVAILABILITY_WINDOW_DAYS));
+              setAvailabilitySelectedRow(null);
+            }}
+            onNextPage={() => {
+              setAvailabilityOffset((current) => current + AVAILABILITY_WINDOW_DAYS);
+              setAvailabilitySelectedRow(null);
+            }}
+            canGoPrevious={availabilityOffset > 0}
             emptyMessage={
               availability.enabled
                 ? "No evaluated availability rows returned by backend evaluator."
                 : "Select patient, modality, and exam type to load evaluated availability."
             }
           />
-          {form.modalityId != null && form.examTypeId != null && form.capacityResolutionMode === "standard" && (
-            <div style={{ borderTop: "1px solid var(--border-color, #e2e8f0)", paddingTop: 12, marginTop: 12 }}>
-              <h3 style={{ marginTop: 0, marginBottom: 8, fontSize: 14 }}>Suggested Dates (Advisory)</h3>
-              {suggestions.isLoading ? (
-                <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>Loading suggestions...</p>
-              ) : suggestions.isError ? (
-                <p style={{ color: "var(--color-error, #ef4444)", fontSize: 12 }}>Could not load suggestions.</p>
-              ) : suggestions.data?.items.length ? (
-                <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
-                  {suggestions.data.items.slice(0, 5).map((s) => (
-                    <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4, color: "var(--text-muted, #64748b)" }}>
-                      {s.date} — {s.decision.displayStatus}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>No alternative dates found.</p>
-              )}
-            </div>
-          )}
         </div>
 
         <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, display: "grid", gap: 12, position: "sticky", top: 12, alignSelf: "start", maxHeight: "calc(100vh - 24px)", overflow: "auto" }}>

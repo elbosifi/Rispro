@@ -86,6 +86,49 @@ export interface AvailabilityQueryResult {
   noPublishedPolicy: boolean;
 }
 
+type WeekdayName = "sunday" | "friday" | "saturday";
+
+function normalizeSettingToggle(value: unknown, fallbackEnabled: boolean): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "enabled" || normalized === "true" || normalized === "1") return true;
+  if (normalized === "disabled" || normalized === "false" || normalized === "0") return false;
+  return fallbackEnabled;
+}
+
+function weekdayNameFromIsoDate(isoDate: string): WeekdayName | "other" {
+  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
+  if (day === 0) return "sunday";
+  if (day === 5) return "friday";
+  if (day === 6) return "saturday";
+  return "other";
+}
+
+async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayName>> {
+  const { rows } = await client.query<{ setting_key: string; setting_value: { value?: unknown } | null }>(
+    `
+      select setting_key, setting_value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key in (
+          'allow_friday_appointments',
+          'allow_saturday_appointments',
+          'allow_sunday_appointments'
+        )
+    `
+  );
+
+  const valuesByKey = rows.reduce<Record<string, unknown>>((accumulator, row) => {
+    accumulator[row.setting_key] = row.setting_value?.value;
+    return accumulator;
+  }, {});
+
+  const disabled = new Set<WeekdayName>();
+  if (!normalizeSettingToggle(valuesByKey.allow_friday_appointments, true)) disabled.add("friday");
+  if (!normalizeSettingToggle(valuesByKey.allow_saturday_appointments, true)) disabled.add("saturday");
+  if (!normalizeSettingToggle(valuesByKey.allow_sunday_appointments, true)) disabled.add("sunday");
+  return disabled;
+}
+
 export async function getAvailability(
   params: GetAvailabilityParams,
   policySetKey: string = "default"
@@ -190,6 +233,7 @@ async function getAvailabilityInternal(
   const modalityTotalCapacity = modality.dailyCapacity ?? 0;
   const bucketMode: "partitioned" | "total_only" =
     activeOncology || activeNonOncology ? "partitioned" : "total_only";
+  const disabledBookingDays = await loadDisabledBookingDays(client);
 
   // 5. Generate dates
   const startDate = todayIso();
@@ -197,6 +241,10 @@ async function getAvailabilityInternal(
 
   for (let i = params.offset; i < params.offset + params.days; i++) {
     const date = addDays(startDate, i);
+    const weekday = weekdayNameFromIsoDate(date);
+    if (weekday !== "other" && disabledBookingDays.has(weekday)) {
+      continue;
+    }
 
     const bookedCounts = await getBookedCountsByCategoryForDate(
       client,

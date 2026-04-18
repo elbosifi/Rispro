@@ -12,6 +12,7 @@ interface UseAppointmentAvailabilityArgs {
   capacityResolutionMode: CapacityResolutionMode;
   specialReasonCode: string | null;
   days?: number;
+  offset?: number;
 }
 
 export function useAppointmentAvailability(args: UseAppointmentAvailabilityArgs) {
@@ -22,7 +23,7 @@ export function useAppointmentAvailability(args: UseAppointmentAvailabilityArgs)
       ? {
           modalityId: args.modalityId as number,
           days: args.days ?? 14,
-          offset: 0,
+          offset: args.offset ?? 0,
           examTypeId: args.examTypeId,
           caseCategory: args.caseCategory,
           capacityResolutionMode: args.capacityResolutionMode,
