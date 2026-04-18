@@ -116,8 +116,13 @@ export async function updateBookingStatus(
 
 const UPDATE_DATE_TIME_SQL = `
   update appointments_v2.bookings
-  set booking_date = $1, booking_time = $2, updated_at = now(), updated_by_user_id = $3
-  where id = $4
+  set booking_date = $1,
+      booking_time = $2,
+      reporting_priority_id = $3,
+      notes = $4,
+      updated_at = now(),
+      updated_by_user_id = $5
+  where id = $6
 `;
 
 export async function updateBookingDateTime(
@@ -125,9 +130,18 @@ export async function updateBookingDateTime(
   bookingId: number,
   newDate: string,
   newTime: string | null,
-  userId: number
+  userId: number,
+  reportingPriorityId: number | null,
+  notes: string | null
 ): Promise<void> {
-  await client.query(UPDATE_DATE_TIME_SQL, [newDate, newTime, userId, bookingId]);
+  await client.query(UPDATE_DATE_TIME_SQL, [
+    newDate,
+    newTime,
+    reportingPriorityId,
+    notes,
+    userId,
+    bookingId,
+  ]);
 }
 
 const UPDATE_RESCHEDULE_SQL = `
@@ -140,9 +154,11 @@ const UPDATE_RESCHEDULE_SQL = `
       special_reason_code = $6,
       special_reason_note = $7,
       exam_type_id = $8,
+      reporting_priority_id = $9,
+      notes = $10,
       updated_at = now(),
-      updated_by_user_id = $9
-  where id = $10
+      updated_by_user_id = $11
+  where id = $12
 `;
 
 export async function updateBookingForReschedule(
@@ -156,7 +172,9 @@ export async function updateBookingForReschedule(
   usesSpecialQuota: boolean,
   specialReasonCode: string | null,
   specialReasonNote: string | null,
-  examTypeId: number | null
+  examTypeId: number | null,
+  reportingPriorityId: number | null,
+  notes: string | null
 ): Promise<void> {
   await client.query(UPDATE_RESCHEDULE_SQL, [
     newDate,
@@ -167,6 +185,8 @@ export async function updateBookingForReschedule(
     specialReasonCode,
     specialReasonNote,
     examTypeId,
+    reportingPriorityId,
+    notes,
     userId,
     bookingId,
   ]);

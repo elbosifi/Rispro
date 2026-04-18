@@ -52,6 +52,8 @@ export async function rescheduleBooking(
   newDate: string | null,
   newTime: string | null,
   newExamTypeId: number | null,
+  reportingPriorityId: number | null,
+  notes: string | null,
   userId: number,
   override?: CreateBookingPayload["override"],
   capacityResolutionMode?: CapacityResolutionMode,
@@ -67,6 +69,8 @@ export async function rescheduleBooking(
       newDate,
       newTime,
       newExamTypeId,
+      reportingPriorityId,
+      notes,
       userId,
       override,
       capacityResolutionMode,
@@ -87,6 +91,8 @@ async function rescheduleBookingInternal(
   newDate: string | null,
   newTime: string | null,
   newExamTypeId: number | null,
+  reportingPriorityId: number | null,
+  notes: string | null,
   userId: number,
   override: CreateBookingPayload["override"] | undefined,
   capacityResolutionMode: CapacityResolutionMode | undefined,
@@ -123,6 +129,8 @@ async function rescheduleBookingInternal(
   const bookingModalityId = Number(booking.modalityId);
   const effectiveDate = newDate ?? previousDate;
   const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
+  const effectiveReportingPriorityId = reportingPriorityId ?? booking.reportingPriorityId;
+  const effectiveNotes = notes ?? booking.notes;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
 
@@ -151,6 +159,8 @@ async function rescheduleBookingInternal(
       userId,
       previousDate,
       previousTime,
+      effectiveReportingPriorityId,
+      effectiveNotes,
       override,
       rescheduleReason
     );
@@ -382,7 +392,9 @@ async function rescheduleBookingInternal(
     decision.consumedCapacityMode === "special",
     specialReasonCode,
     specialReasonNote,
-    effectiveExamTypeId
+    effectiveExamTypeId,
+    effectiveReportingPriorityId,
+    effectiveNotes
   );
 
   if (wasOverride && supervisorUserId != null) {
@@ -436,10 +448,12 @@ async function rescheduleTimeOnly(
   userId: number,
   previousDate: string,
   previousTime: string | null,
+  reportingPriorityId: number | null,
+  notes: string | null,
   override: CreateBookingPayload["override"] | undefined,
   rescheduleReason: string | null
 ): Promise<RescheduleBookingResult> {
-  await updateBookingDateTime(client, bookingId, previousDate, newTime, userId);
+  await updateBookingDateTime(client, bookingId, previousDate, newTime, userId, reportingPriorityId, notes);
 
   await recordRescheduleAudit(client, {
     bookingId,
