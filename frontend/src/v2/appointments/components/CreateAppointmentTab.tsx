@@ -303,8 +303,8 @@ export function CreateAppointmentTab({
     return (
       <AppointmentSuccessState
         appointmentSummary={success}
-        onPrintSlip={() => navigate(`/print?source=v2&v2BookingId=${success.bookingId}&autoprint=1`)}
-        onViewDetails={() => navigate(`/print?source=v2&v2BookingId=${success.bookingId}`)}
+        onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}&autoprint=1`)}
+        onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
         onCreateAnother={() => {
           setSuccess(null);
           actions.clearAfterSuccess();

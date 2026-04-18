@@ -530,7 +530,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       return { onCreateAppointment, onEvaluateAvailability };
     }
 
-    it("View Details navigates to /print?source=v2&v2BookingId=<id>", async () => {
+    it("View Details navigates to /print?appointmentId=<id>", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -545,11 +545,11 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "View Details" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("print-page").textContent).toContain("/print?source=v2&v2BookingId=42");
+        expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42");
       });
     });
 
-    it("Print Slip navigates to /print?source=v2&v2BookingId=<id>&autoprint=1", async () => {
+    it("Print Slip navigates to /print?appointmentId=<id>&autoprint=1", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -564,7 +564,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Print Slip" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("print-page").textContent).toContain("/print?source=v2&v2BookingId=42&autoprint=1");
+        expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42&autoprint=1");
       });
     });
 

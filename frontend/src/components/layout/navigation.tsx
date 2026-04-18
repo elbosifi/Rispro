@@ -43,7 +43,6 @@ interface NavItemConfig {
     | "nav.dashboard"
     | "nav.patients"
     | "nav.appointments"
-    | "nav.appointmentsLegacy"
     | "nav.appointmentsV2Admin"
     | "nav.calendar"
     | "nav.registrations"
@@ -63,7 +62,6 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
   { route: "patients", labelKey: "nav.patients", icon: "patients" },
   { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
-  { route: "appointments.legacy", labelKey: "nav.appointmentsLegacy", icon: "legacy", roles: ["supervisor"] },
   { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor"] },
   { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
   { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },

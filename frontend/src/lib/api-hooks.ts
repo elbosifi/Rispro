@@ -60,13 +60,28 @@ export async function logout() {
 
 // -- Lookups --
 export async function fetchAppointmentLookups(): Promise<AppointmentLookups> {
-  const raw = await api<RawRecord>("/appointments/lookups");
-  return mapAppointmentLookups(raw);
+  const [modalitiesRes, prioritiesRes, specialReasonsRes] = await Promise.all([
+    api<{ items: RawRecord[] }>("/v2/lookups/modalities"),
+    api<{ items: RawRecord[] }>("/v2/lookups/priorities"),
+    api<{ items: RawRecord[] }>("/v2/lookups/special-reason-codes"),
+  ]);
+  return mapAppointmentLookups({
+    modalities: modalitiesRes.items ?? [],
+    examTypes: [],
+    priorities: (prioritiesRes.items ?? []).map((p) => ({
+      id: p.id,
+      code: p.code ?? String(p.nameEn ?? p.name ?? "priority"),
+      name_en: p.nameEn ?? p.name,
+      name_ar: p.nameAr ?? p.name,
+      sort_order: 0,
+    })),
+    specialReasons: specialReasonsRes.items ?? [],
+  });
 }
 
 // -- Dashboard Data --
 export async function fetchQueueSnapshot(): Promise<QueueSnapshot> {
-  const raw = await api<RawRecord>("/queue");
+  const raw = await api<RawRecord>("/v2/read/queue");
   return mapQueueSnapshot(raw);
 }
 
@@ -177,12 +192,12 @@ export async function createAppointment(payload: RawRecord) {
 }
 
 export async function getAppointmentById(id: number) {
-  const raw = await api<{ appointment: RawRecord }>(`/appointments/${id}`);
+  const raw = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${id}`);
   return mapAppointmentWithDetails(raw.appointment);
 }
 
 export async function getV2AppointmentPrintDetails(bookingId: number) {
-  const raw = await api<{ appointment: RawRecord }>(`/v2/appointments/${bookingId}/details`);
+  const raw = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${bookingId}`);
   return mapAppointmentWithDetails(raw.appointment);
 }
 
@@ -229,7 +244,7 @@ export async function fetchAppointments(params: Record<string, string | string[]
     }
   });
 
-  const raw = await api<{ appointments: RawRecord[] }>(`/appointments?${query.toString()}`);
+  const raw = await api<{ appointments: RawRecord[] }>(`/v2/read/appointments?${query.toString()}`);
   return mapAppointmentsWithDetails(raw.appointments);
 }
 
@@ -238,29 +253,29 @@ export async function fetchStatistics(date: string, modalityId: string): Promise
   const params = new URLSearchParams();
   params.set("date", date);
   if (modalityId) params.set("modalityId", modalityId);
-  const raw = await api<RawRecord>(`/appointments/statistics?${params.toString()}`);
+  const raw = await api<RawRecord>(`/v2/read/statistics?${params.toString()}`);
   return mapStatistics(raw);
 }
 
 // -- Queue --
 export async function scanIntoQueue(scanValue: string) {
-  return api<RawRecord>("/queue/scan", {
+  return api<RawRecord>("/v2/read/queue/scan", {
     method: "POST",
     body: JSON.stringify({ scanValue })
   });
 }
 
 export async function addWalkIn(payload: RawRecord) {
-  return api<RawRecord>("/queue/walk-in", {
+  return api<RawRecord>("/v2/read/queue/walk-in", {
     method: "POST",
     body: JSON.stringify(payload)
   });
 }
 
 export async function confirmNoShow(appointmentId: number, reason: string) {
-  return api<RawRecord>("/queue/confirm-no-show", {
+  return api<RawRecord>(`/v2/read/appointments/${appointmentId}/no-show`, {
     method: "POST",
-    body: JSON.stringify({ appointmentId, reason })
+    body: JSON.stringify({ reason })
   });
 }
 
@@ -273,12 +288,12 @@ export async function fetchModalityWorklist(modalityId: string, date: string, sc
   } else {
     params.set("scope", "all");
   }
-  const raw = await api<{ appointments: RawRecord[] }>(`/modality/worklist?${params.toString()}`);
+  const raw = await api<{ appointments: RawRecord[] }>(`/v2/read/modality/worklist?${params.toString()}`);
   return mapAppointmentsWithDetails(raw.appointments);
 }
 
 export async function completeAppointment(id: number) {
-  return api<RawRecord>(`/modality/${id}/complete`, { method: "POST" });
+  return api<RawRecord>(`/v2/read/appointments/${id}/complete`, { method: "POST" });
 }
 
 // -- Settings --

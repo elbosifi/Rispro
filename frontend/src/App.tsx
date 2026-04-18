@@ -7,7 +7,6 @@ import { DashboardPage } from "@/pages/dashboard/dashboard-page";
 import SearchPage from "@/pages/search/search-page";
 import PatientsPage from "@/pages/patients/patients-page";
 import EditPatientPage from "@/pages/patients/edit-patient-page";
-import AppointmentsPage from "@/pages/appointments/appointments-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
 import QueuePage from "@/pages/queue/queue-page";
@@ -18,7 +17,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
-import { AppointmentsV2Page, AppointmentsV3CreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
+import { AppointmentsV3CreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -29,7 +28,6 @@ const ROUTE_PATHS: Record<string, string> = {
   patients: "/patients",
   "patients.new": "/patients/new",
   appointments: "/appointments",
-  "appointments.legacy": "/appointments/legacy",
   calendar: "/calendar",
   registrations: "/registrations",
   queue: "/queue",
@@ -41,9 +39,7 @@ const ROUTE_PATHS: Record<string, string> = {
   pacs: "/pacs",
   settings: "/settings",
   legacy: "/legacy-access-viewer",
-  "v2.appointments": "/v2/appointments",
   "v2.appointments.admin": "/v2/appointments/admin",
-  "v3.appointments.create": "/v3/appointments/create",
 };
 
 const PATH_TO_ROUTE = Object.fromEntries(
@@ -116,10 +112,7 @@ function AppContent() {
             <Route path="/patients/new" element={<PatientsPage />} />
             <Route path="/patients/:id/edit" element={<EditPatientPage />} />
             <Route path="/appointments" element={<AppointmentsV3CreatePage />} />
-            <Route
-              path="/appointments/legacy"
-              element={user.role === "supervisor" ? <AppointmentsPage /> : <Navigate to="/appointments" replace />}
-            />
+            <Route path="/appointments/legacy" element={<Navigate to="/appointments" replace />} />
             <Route path="/calendar" element={<CalendarPage />} />
             <Route path="/registrations" element={<RegistrationsPage />} />
             <Route path="/queue" element={<QueuePage />} />
@@ -131,15 +124,11 @@ function AppContent() {
             <Route path="/pacs" element={<PacsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
-            <Route
-              path="/v2/appointments"
-              element={user.role === "supervisor" ? <AppointmentsV2Page /> : <Navigate to="/appointments" replace />}
-            />
+            <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />
             <Route
               path="/v2/appointments/admin"
               element={user.role === "supervisor" ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />}
             />
-            <Route path="/v3/appointments/create" element={<Navigate to="/appointments" replace />} />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

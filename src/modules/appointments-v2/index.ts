@@ -10,6 +10,7 @@ import { appointmentsV2Router } from "./api/routes/appointments-v2-routes.js";
 import { schedulingV2Router } from "./api/routes/scheduling-v2-routes.js";
 import { adminSchedulingV2Router } from "./api/routes/admin-scheduling-v2-routes.js";
 import { lookupsV2Router } from "./api/routes/lookups-v2-routes.js";
+import { readV2Router } from "./api/routes/read-v2-routes.js";
 
 /**
  * Create and return the complete V2 router tree.
@@ -35,6 +36,9 @@ export function createAppointmentsV2Router(): Router {
   // Catalog lookups (modalities, exam types)
   v2Router.use("/lookups", lookupsV2Router);
 
+  // Reader facade for appointment-facing pages (calendar/queue/print/etc.)
+  v2Router.use("/read", readV2Router);
+
   return v2Router;
 }
 
@@ -43,6 +47,7 @@ export { appointmentsV2Router } from "./api/routes/appointments-v2-routes.js";
 export { schedulingV2Router } from "./api/routes/scheduling-v2-routes.js";
 export { adminSchedulingV2Router } from "./api/routes/admin-scheduling-v2-routes.js";
 export { lookupsV2Router } from "./api/routes/lookups-v2-routes.js";
+export { readV2Router } from "./api/routes/read-v2-routes.js";
 
 // Re-export shared utilities
 export { SchedulingError } from "./shared/errors/scheduling-error.js";
