@@ -15,8 +15,8 @@ function renderSex(sex?: string | null): string {
 export function PatientSummaryCard({ patient, caseCategory }: Props) {
   if (!patient) {
     return (
-      <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 12, color: "var(--text-muted, #64748b)" }}>
-        No patient selected.
+      <div className="card-shell p-4">
+        <p style={{ color: "var(--text-muted)" }}>No patient selected.</p>
       </div>
     );
   }
@@ -25,10 +25,10 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
   const primaryIdentifier = patient.identifierValue || patient.nationalId || patient.mrn || "—";
 
   return (
-    <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 12, background: "var(--bg-surface, #fff)" }}>
-      <div style={{ fontWeight: 700 }}>{fullName}</div>
-      <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>Primary ID: {primaryIdentifier}</div>
-      <div style={{ display: "flex", gap: 12, marginTop: 8, fontSize: 12 }}>
+    <div className="card-shell p-4">
+      <div className="font-bold" style={{ color: "var(--text)" }}>{fullName}</div>
+      <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>Primary ID: {primaryIdentifier}</div>
+      <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
         <span>Sex: {renderSex(patient.sex)}</span>
         <span>Age: {patient.ageYears ?? "—"}{patient.demographicsEstimated ? " (Estimated)" : ""}</span>
         <span>Category: {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}</span>

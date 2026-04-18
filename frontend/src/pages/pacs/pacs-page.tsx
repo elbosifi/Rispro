@@ -133,11 +133,6 @@ export default function PacsPage() {
 
       {/* Search Form */}
       <div className="card-shell relative p-6">
-        {/* Corner screws */}
-        <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute bottom-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute bottom-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
 
         <form onSubmit={handleSearch} className="space-y-4">
           {/* Primary search: National ID */}

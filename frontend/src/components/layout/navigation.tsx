@@ -103,16 +103,6 @@ function NavIconGlyph({ icon, size = 20 }: { icon: NavIcon; size?: number }) {
   return <LucideIcon size={size} strokeWidth={1.5} />;
 }
 
-function VentSlots() {
-  return (
-    <div className="hidden lg:flex items-center gap-0.5" aria-hidden="true">
-      <div className="vent-slot" />
-      <div className="vent-slot" />
-      <div className="vent-slot" />
-    </div>
-  );
-}
-
 function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
   return (
     <div
@@ -122,14 +112,9 @@ function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }
         boxShadow: "4px 4px 8px rgba(166, 50, 60, 0.3), -2px -2px 4px rgba(255, 100, 110, 0.2)"
       }}
     >
-      {/* Corner screws */}
-      <div className="absolute top-2 left-2 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4), rgba(0,0,0,0.2))" }} />
-      <div className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 30% 30%, rgba(255,255,255,0.4), rgba(0,0,0,0.2))" }} />
-
       <p className="text-[10px] uppercase tracking-[0.2em] opacity-80 font-mono-data">{t(language, "shell.menu")}</p>
       <p className="mt-1 text-lg font-bold text-embossed">{t(language, "shell.reception")}</p>
       <div className="flex items-center justify-center gap-1.5 mt-2">
-        <span className="led-dot led-dot--online" />
         <span className="text-[10px] uppercase tracking-[0.15em] opacity-80 font-mono-data">SYSTEM ONLINE</span>
       </div>
     </div>
@@ -250,8 +235,6 @@ export function TopBar({
 
         {/* Actions */}
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
-          <VentSlots />
-
           {/* Undo */}
           <button
             className="btn-ghost"
@@ -376,7 +359,6 @@ export function SideNav({
         }}
       >
         <div className="flex items-center justify-center gap-1.5">
-          <span className="led-dot led-dot--online" />
           <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
             MWL ACTIVE
           </span>
@@ -462,7 +444,6 @@ export function MobileDrawer({
           style={{ borderColor: "var(--border)" }}
         >
           <div className="flex items-center justify-center gap-1.5">
-            <span className="led-dot led-dot--online" />
             <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
               SYSTEM OPERATIONAL
             </span>

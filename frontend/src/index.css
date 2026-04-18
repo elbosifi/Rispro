@@ -1,3 +1,6 @@
+/* Add Google Fonts import */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
 @import "tailwindcss";
 
 /* ============================================
@@ -51,26 +54,30 @@
 
   /* --- Neumorphic Shadow System --- */
   /* Card (base lift) — standard panel elevation */
-  --shadow-card: 8px 8px 16px #babecc, -8px -8px 16px #ffffff;
+  --shadow-card: 9px 9px 16px rgb(163,177,198,0.6), -9px -9px 16px rgba(255,255,255,0.5);
   /* Floating — high elevation for interactive elements */
-  --shadow-floating: 12px 12px 24px #babecc, -12px -12px 24px #ffffff, inset 1px 1px 0 rgba(255, 255, 255, 0.5);
+  --shadow-floating: 12px 12px 20px rgb(163,177,198,0.7), -12px -12px 20px rgba(255,255,255,0.6);
   /* Pressed — active state, shadow direction reverses */
-  --shadow-pressed: inset 6px 6px 12px #babecc, inset -6px -6px 12px #ffffff;
+  --shadow-pressed: inset 6px 6px 10px rgb(163,177,198,0.6), inset -6px -6px 10px rgba(255,255,255,0.5);
   /* Recessed — inputs, screens, grooves */
-  --shadow-recessed: inset 4px 4px 8px #babecc, inset -4px -4px 8px #ffffff;
+  --shadow-recessed: inset 10px 10px 20px rgb(163,177,198,0.7), inset -10px -10px 20px rgba(255,255,255,0.6);
   /* Sharp — mechanical edge for metal tags, borders */
   --shadow-sharp: 4px 4px 8px rgba(0, 0, 0, 0.15), -1px -1px 1px rgba(255, 255, 255, 0.8);
   /* LED glow — colored bloom for active indicators */
   --shadow-glow: 0 0 10px 2px rgba(255, 71, 87, 0.6);
   /* Green LED glow for "online" states */
   --shadow-glow-green: 0 0 10px 2px rgba(34, 197, 94, 0.6);
+  /* Small shadow for subtle elements */
+  --shadow-small: 5px 5px 10px rgb(163,177,198,0.6), -5px -5px 10px rgba(255,255,255,0.5);
+  /* Pressed small shadow */
+  --shadow-pressed-small: inset 3px 3px 6px rgb(163,177,198,0.6), inset -3px -3px 6px rgba(255,255,255,0.5);
 
   /* --- Border Radius Scale --- */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 16px;
-  --radius-xl: 24px;
-  --radius-2xl: 30px;
+  --radius-sm: 12px;
+  --radius-md: 16px;    /* New base button radius */
+  --radius-lg: 24px;
+  --radius-xl: 32px;    /* New card/container radius */
+  --radius-2xl: 32px;
   --radius-full: 9999px;
 }
 
@@ -81,9 +88,18 @@ body,
   min-height: 100%;
 }
 
+:root {
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-body: 'DM Sans', sans-serif;
+}
+
 html {
-  font-family: "Inter", "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-family: var(--font-body), "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+}
+
+.font-display {
+  font-family: var(--font-display);
 }
 
 body {
@@ -148,7 +164,7 @@ body::before {
   background: var(--accent);
   color: var(--accent-foreground);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 0.65rem 1.25rem;
   font-weight: 700;
   font-size: 0.8rem;
@@ -157,7 +173,7 @@ body::before {
   box-shadow:
     4px 4px 8px rgba(166, 50, 60, 0.4),
     -4px -4px 8px rgba(255, 100, 110, 0.4);
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 300ms ease-out;
   cursor: pointer;
   min-height: 48px;
   display: inline-flex;
@@ -168,10 +184,14 @@ body::before {
 
 .btn-primary:hover:not(:disabled) {
   filter: brightness(1.1);
+  transform: translateY(-1px);
+  box-shadow:
+    6px 6px 12px rgba(166, 50, 60, 0.5),
+    -6px -6px 12px rgba(255, 100, 110, 0.5);
 }
 
 .btn-primary:active:not(:disabled) {
-  transform: translateY(2px);
+  transform: translateY(0.5px);
   box-shadow: var(--shadow-pressed);
   border-color: transparent;
 }
@@ -195,14 +215,14 @@ body::before {
   background: var(--background);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 0.65rem 1.25rem;
   font-weight: 700;
   font-size: 0.8rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   box-shadow: var(--shadow-card);
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 300ms ease-out;
   cursor: pointer;
   min-height: 48px;
   display: inline-flex;
@@ -214,10 +234,12 @@ body::before {
 .btn-secondary:hover:not(:disabled) {
   color: var(--accent);
   border-color: var(--border-dark);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-floating);
 }
 
 .btn-secondary:active:not(:disabled) {
-  transform: translateY(2px);
+  transform: translateY(0.5px);
   box-shadow: var(--shadow-pressed);
   border-color: transparent;
 }
@@ -236,7 +258,7 @@ body::before {
   padding: 0.5rem 0.85rem;
   font-weight: 600;
   font-size: 0.8rem;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 300ms ease-out;
   cursor: pointer;
   min-height: 44px;
   display: inline-flex;
@@ -266,39 +288,20 @@ body::before {
 /* Standard card — physical panel on chassis */
 .card-shell {
   background: var(--background);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-xl);
   box-shadow: var(--shadow-card);
   padding: 1.5rem;
-  transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 300ms ease-out;
   position: relative;
 }
 
 /* Elevated card — higher lift on hover */
 .card-shell.card-elevated:hover {
   box-shadow: var(--shadow-floating);
-  transform: translateY(-4px);
+  transform: translateY(-2px);
 }
 
-/* Corner screw pseudo-elements */
-.card-shell::before,
-.card-shell::after {
-  content: "";
-  position: absolute;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 2px 2px, rgba(0, 0, 0, 0.2) 1.5px, transparent 2px);
-}
 
-.card-shell::before {
-  top: 12px;
-  left: 12px;
-}
-
-.card-shell::after {
-  top: 12px;
-  right: 12px;
-}
 
 /* --- Inputs (Data Slots) --- */
 
@@ -308,11 +311,11 @@ body::before {
   border: none;
   border-radius: var(--radius-md);
   padding: 0.75rem 1.25rem;
-  font-family: "JetBrains Mono", "Roboto Mono", "Inter", monospace;
+  font-family: "JetBrains Mono", "Roboto Mono", var(--font-body), monospace;
   font-size: 0.9rem;
-  box-shadow: var(--shadow-recessed);
+  box-shadow: var(--shadow-pressed);
   outline: none;
-  transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 300ms ease-out;
   min-height: 56px;
   width: 100%;
 }
@@ -325,7 +328,8 @@ body::before {
 .input-premium:focus-visible {
   box-shadow:
     var(--shadow-recessed),
-    0 0 0 2px var(--accent);
+    0 0 0 2px var(--background),
+    0 0 0 4px var(--accent);
 }
 
 .input-premium:disabled {
@@ -362,37 +366,7 @@ body::before {
   gap: 0.35rem;
 }
 
-/* LED status dot */
-.led-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  display: inline-block;
-  flex-shrink: 0;
-}
 
-.led-dot--online {
-  background: var(--green);
-  box-shadow: var(--shadow-glow-green);
-  animation: led-pulse 2s ease-in-out infinite;
-}
-
-.led-dot--alert {
-  background: var(--accent);
-  box-shadow: var(--shadow-glow);
-  animation: led-pulse 2s ease-in-out infinite;
-}
-
-.led-dot--warning {
-  background: var(--amber);
-  box-shadow: 0 0 10px 2px rgba(245, 158, 11, 0.6);
-  animation: led-pulse 2s ease-in-out infinite;
-}
-
-@keyframes led-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
 
 /* --- Description / Muted Text --- */
 .description-center {
@@ -425,14 +399,7 @@ body::before {
   height: 64px;
 }
 
-/* --- Vent Slots (decorative) --- */
-.vent-slot {
-  width: 2px;
-  height: 24px;
-  border-radius: var(--radius-full);
-  background: var(--muted);
-  box-shadow: inset 1px 1px 2px rgba(0, 0, 0, 0.15);
-}
+
 
 /* --- Monospace Data Display --- */
 .font-mono-data {

@@ -8,14 +8,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { ArrowLeft, UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
 
-function CornerScrews() {
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-      <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-    </div>
-  );
-}
+
 
 export default function PatientsPage() {
   const { language } = useLanguage();
@@ -74,7 +67,6 @@ export default function PatientsPage() {
 
       {/* Search */}
       <div className="card-shell relative">
-        <CornerScrews />
         <div className="relative">
           <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center" style={{ color: "var(--text-muted)" }}>
             <Search size={18} strokeWidth={1.5} />
@@ -91,7 +83,6 @@ export default function PatientsPage() {
 
       {/* Results */}
       <div className="card-shell relative overflow-hidden">
-        <CornerScrews />
         <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
           <h3 className="text-sm font-bold uppercase tracking-[0.08em]" style={{ color: "var(--text)" }}>
             {t(language, "patients.results")}

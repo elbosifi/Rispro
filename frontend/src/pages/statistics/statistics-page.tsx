@@ -53,11 +53,6 @@ export default function StatisticsPage() {
 
       {/* Filters */}
       <div className="card-shell relative p-4">
-        {/* Corner screws */}
-        <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute bottom-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-        <div className="absolute bottom-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <DateInput label={t(language, "statistics.dateCol")} value={date} onChange={setDate} />

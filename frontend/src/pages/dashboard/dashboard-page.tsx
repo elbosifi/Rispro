@@ -21,26 +21,7 @@ import {
   AlertTriangle
 } from "lucide-react";
 
-/* --- Corner screws for cards --- */
-function CornerScrews() {
-  return (
-    <div className="absolute inset-0 pointer-events-none" aria-hidden="true">
-      <div className="absolute top-3 left-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-      <div className="absolute top-3 right-3 w-1.5 h-1.5 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.18) 1.5px, transparent 2px)" }} />
-    </div>
-  );
-}
 
-/* --- Vent slots (top-right) --- */
-function VentSlots() {
-  return (
-    <div className="absolute top-3 right-3 hidden md:flex items-center gap-0.5" aria-hidden="true">
-      <div className="vent-slot" />
-      <div className="vent-slot" />
-      <div className="vent-slot" />
-    </div>
-  );
-}
 
 /* --- Stat Card (neumorphic with LED) --- */
 function StatCard({
@@ -56,16 +37,13 @@ function StatCard({
   icon: React.ReactNode;
   tone?: DashboardTone;
 }) {
-  const ledColor = tone === "good" ? "led-dot--online" : tone === "warn" ? "led-dot--warning" : tone === "alert" ? "led-dot--alert" : null;
   const valueColor = tone === "good" ? "text-green-700" : tone === "warn" ? "text-amber-700" : tone === "alert" ? "text-red-700" : "";
 
   return (
     <div className="card-shell card-elevated p-4 relative">
-      <CornerScrews />
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-1.5 mb-1">
-            {ledColor && <span className={`led-dot ${ledColor}`} />}
             <p className="text-[10px] uppercase tracking-[0.12em] font-mono-data" style={{ color: "var(--text-muted)" }}>{label}</p>
           </div>
           <p className={`text-2xl font-bold text-embossed ${valueColor}`}>{value}</p>
@@ -95,8 +73,6 @@ function WidgetShell({
 }) {
   return (
     <div className="card-shell relative overflow-hidden">
-      <CornerScrews />
-      <VentSlots />
       <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-embossed" style={{ color: "var(--text)" }}>{title}</h3>
         {stale && (
@@ -240,7 +216,6 @@ export function DashboardPage() {
                 borderColor: user?.role === "supervisor" ? "rgba(255,71,87,0.3)" : "rgba(34,197,94,0.3)"
               }}
             >
-              <span className="led-dot led-dot--online" />
               {user?.role === "supervisor" ? t("shell.supervisorMode") : t("shell.receptionMode")}
             </span>
             <button

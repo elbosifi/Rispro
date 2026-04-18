@@ -39,11 +39,6 @@ export function LoginPage() {
       <div className="w-full max-w-md relative z-10">
         {/* Main login card */}
         <div className="card-shell p-8 relative">
-          {/* Corner screws */}
-          <div className="absolute top-3 left-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
-          <div className="absolute top-3 right-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
-          <div className="absolute bottom-3 left-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
-          <div className="absolute bottom-3 right-3 w-2 h-2 rounded-full" style={{ background: "radial-gradient(circle at 35% 35%, rgba(0,0,0,0.2) 2px, transparent 3px)" }} />
 
           {/* Header */}
           <div className="text-center space-y-3 mb-8">
@@ -151,7 +146,6 @@ export function LoginPage() {
         {/* Footer status */}
         <div className="mt-4 text-center">
           <div className="inline-flex items-center gap-1.5">
-            <span className="led-dot led-dot--online" />
             <span className="text-[10px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
               RISpro Reception v2.0
             </span>
