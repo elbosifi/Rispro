@@ -15,6 +15,8 @@ vi.mock("../components/PatientSearchSection", () => ({
           id: 9,
           arabicFullName: "Test Patient",
           englishFullName: "Test Patient",
+          identifierType: "passport",
+          identifierValue: "P-12345",
           nationalId: "123",
           mrn: "MRN-9",
           sex: "M",
@@ -324,6 +326,12 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Appointment Date"), { target: { value: "2027-01-02" } });
     expect(screen.getByText(/Exam mix:/)).toBeTruthy();
     expect(screen.getByText(/Brain MRI group 2\/2/)).toBeTruthy();
+  });
+
+  it("shows selected patient primary identifier value instead of MRN in summary", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    expect(screen.getByText("Primary ID: P-12345")).toBeTruthy();
   });
 
   it("uses sticky booking controls pane styling", async () => {

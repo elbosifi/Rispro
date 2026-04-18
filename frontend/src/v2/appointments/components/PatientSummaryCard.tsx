@@ -22,7 +22,7 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
   }
 
   const fullName = patient.englishFullName || patient.arabicFullName;
-  const primaryIdentifier = patient.nationalId || patient.mrn || "—";
+  const primaryIdentifier = patient.identifierValue || patient.nationalId || patient.mrn || "—";
 
   return (
     <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 12, background: "var(--bg-surface, #fff)" }}>

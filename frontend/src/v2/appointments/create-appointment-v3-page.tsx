@@ -28,6 +28,8 @@ export function AppointmentsV3CreatePage() {
         id: preloadPatientQuery.data.id,
         arabicFullName: preloadPatientQuery.data.arabicFullName,
         englishFullName: preloadPatientQuery.data.englishFullName,
+        identifierType: preloadPatientQuery.data.identifierType,
+        identifierValue: preloadPatientQuery.data.identifierValue,
         nationalId: preloadPatientQuery.data.nationalId,
         mrn: preloadPatientQuery.data.mrn,
         sex: preloadPatientQuery.data.sex,

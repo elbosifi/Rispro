@@ -13,6 +13,8 @@ interface Patient {
   id: number;
   arabicFullName: string;
   englishFullName?: string | null;
+  identifierType?: string | null;
+  identifierValue?: string | null;
   nationalId?: string | null;
   mrn?: string | null;
   medicalRecordNo?: string | null;
@@ -27,6 +29,32 @@ interface PatientSearchProps {
   onSelect: (patient: Patient) => void;
   selectedPatient: Patient | null;
   onClear: () => void;
+}
+
+function getPrimaryIdentifier(patient: Patient): { label: string; value: string | null } {
+  if (patient.identifierValue) {
+    return {
+      label: "Primary ID",
+      value: patient.identifierValue,
+    };
+  }
+
+  if (patient.nationalId) {
+    return {
+      label: "Primary ID",
+      value: patient.nationalId,
+    };
+  }
+
+  const mrn = patient.mrn || patient.medicalRecordNo || null;
+  if (mrn) {
+    return {
+      label: "MRN",
+      value: mrn,
+    };
+  }
+
+  return { label: "Primary ID", value: null };
 }
 
 export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSearchProps) {
@@ -72,6 +100,10 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
   }, []);
 
   if (selectedPatient) {
+    const primaryIdentifier = getPrimaryIdentifier(selectedPatient);
+    const mrn = selectedPatient.mrn || selectedPatient.medicalRecordNo || null;
+    const showMrn = mrn != null && !(primaryIdentifier.label === "MRN" && primaryIdentifier.value === mrn);
+
     return (
       <div
         style={{
@@ -90,10 +122,8 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
             {selectedPatient.englishFullName}
-            {selectedPatient.nationalId ? ` · ${selectedPatient.nationalId}` : ""}
-            {(selectedPatient.mrn || selectedPatient.medicalRecordNo)
-              ? ` · MRN: ${selectedPatient.mrn || selectedPatient.medicalRecordNo}`
-              : ""}
+            {primaryIdentifier.value ? ` · ${primaryIdentifier.label}: ${primaryIdentifier.value}` : ""}
+            {showMrn ? ` · MRN: ${mrn}` : ""}
           </div>
         </div>
         <button
@@ -176,36 +206,43 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
             boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
           }}
         >
-          {results.map((patient) => (
-            <li key={patient.id}>
-              <button
-                type="button"
-                onClick={() => selectPatient(patient)}
-                style={{
-                  width: "100%",
-                  textAlign: "left",
-                  padding: "8px 12px",
-                  border: "none",
-                  borderBottom: "1px solid var(--border-color, #f1f5f9)",
-                  background: "none",
-                  cursor: "pointer",
-                  fontSize: 13,
-                }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.backgroundColor = "var(--bg-hover, #f8fafc)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.backgroundColor = "transparent")
-                }
-              >
-                <div style={{ fontWeight: 500 }}>{patient.arabicFullName}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
-                  {patient.englishFullName}
-                  {patient.nationalId ? ` · ${patient.nationalId}` : ""}
-                </div>
-              </button>
-            </li>
-          ))}
+          {results.map((patient) => {
+            const primaryIdentifier = getPrimaryIdentifier(patient);
+            const mrn = patient.mrn || patient.medicalRecordNo || null;
+            const showMrn = mrn != null && !(primaryIdentifier.label === "MRN" && primaryIdentifier.value === mrn);
+
+            return (
+              <li key={patient.id}>
+                <button
+                  type="button"
+                  onClick={() => selectPatient(patient)}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "8px 12px",
+                    border: "none",
+                    borderBottom: "1px solid var(--border-color, #f1f5f9)",
+                    background: "none",
+                    cursor: "pointer",
+                    fontSize: 13,
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.backgroundColor = "var(--bg-hover, #f8fafc)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.backgroundColor = "transparent")
+                  }
+                >
+                  <div style={{ fontWeight: 500 }}>{patient.arabicFullName}</div>
+                  <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
+                    {patient.englishFullName}
+                    {primaryIdentifier.value ? ` · ${primaryIdentifier.label}: ${primaryIdentifier.value}` : ""}
+                    {showMrn ? ` · MRN: ${mrn}` : ""}
+                  </div>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
 

@@ -5,6 +5,8 @@ export interface SelectedPatient {
   id: number;
   arabicFullName: string;
   englishFullName?: string | null;
+  identifierType?: string | null;
+  identifierValue?: string | null;
   nationalId?: string | null;
   mrn?: string | null;
   sex?: string | null;
