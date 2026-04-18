@@ -6,6 +6,12 @@ import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
 
+const mockFetchAppointments = vi.fn(async () => []);
+
+vi.mock("@/lib/api-hooks", () => ({
+  fetchAppointments: (params: unknown) => mockFetchAppointments(params),
+}));
+
 vi.mock("../components/PatientSearchSection", () => ({
   PatientSearchSection: ({ onSelectPatient }: { onSelectPatient: (p: unknown) => void }) => (
     <button
@@ -184,7 +190,10 @@ const availabilityRowsWithAvailable: AvailabilityRowViewModel[] = [
   },
 ];
 
-function setup(canUseNonStandardCapacityModes: boolean = true) {
+function setup(
+  canUseNonStandardCapacityModes: boolean = true,
+  priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = []
+) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
       id: 10,
@@ -233,7 +242,7 @@ function setup(canUseNonStandardCapacityModes: boolean = true) {
             ]}
             examTypeOptions={[]}
             specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
-            priorityOptions={[]}
+            priorityOptions={priorityOptions}
             schedulingEngineEnabled
             canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
             onCreateAppointment={onCreateAppointment}
@@ -255,6 +264,8 @@ function PrintPlaceholder() {
 
 describe("CreateAppointmentTab UI interactions", () => {
   beforeEach(() => {
+    mockFetchAppointments.mockReset();
+    mockFetchAppointments.mockResolvedValue([]);
     mockRawItemsRef.current = [
       {
         date: "2027-01-02",
@@ -332,6 +343,39 @@ describe("CreateAppointmentTab UI interactions", () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     expect(screen.getByText("Primary ID: P-12345")).toBeTruthy();
+  });
+
+  it("shows previous no-shows list with date and exam type", async () => {
+    mockFetchAppointments.mockResolvedValueOnce([
+      {
+        id: 91,
+        appointmentDate: "2026-03-01",
+        examNameEn: "MRI Spine",
+        examNameAr: null,
+      },
+    ]);
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    expect(await screen.findByText("Previous No-Shows")).toBeTruthy();
+    expect(await screen.findByText("2026-03-01 — MRI Spine")).toBeTruthy();
+  });
+
+  it("keeps routine as default but removes routine from selectable priorities", async () => {
+    setup(true, [
+      { id: 1, nameEn: "Routine", nameAr: "عادي" },
+      { id: 2, nameEn: "Urgent", nameAr: "عاجل" },
+      { id: 3, nameEn: "STAT", nameAr: "فوري" },
+    ]);
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+
+    const prioritySelect = screen.getByLabelText("Priority") as HTMLSelectElement;
+    const optionTexts = Array.from(prioritySelect.options).map((option) => option.textContent ?? "");
+    const optionValues = Array.from(prioritySelect.options).map((option) => option.value);
+
+    expect(optionTexts).toContain("Routine (default)");
+    expect(optionValues).not.toContain("1");
+    expect(optionValues).toContain("2");
+    expect(optionValues).toContain("3");
   });
 
   it("uses sticky booking controls pane styling", async () => {

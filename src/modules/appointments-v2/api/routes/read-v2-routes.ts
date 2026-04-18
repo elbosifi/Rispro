@@ -34,6 +34,7 @@ router.get(
     const dateFrom = typeof query.dateFrom === "string" ? query.dateFrom : "";
     const dateTo = typeof query.dateTo === "string" ? query.dateTo : "";
     const modalityId = typeof query.modalityId === "string" ? Number(query.modalityId) : null;
+    const patientId = typeof query.patientId === "string" ? Number(query.patientId) : null;
     const q = typeof query.q === "string" ? query.q.trim() : "";
 
     const status = parseStatuses(query["status[]"] ?? query.status);
@@ -58,6 +59,11 @@ router.get(
     if (modalityId && Number.isFinite(modalityId)) {
       params.push(modalityId);
       where.push(`b.modality_id = $${params.length}`);
+    }
+
+    if (patientId && Number.isFinite(patientId)) {
+      params.push(patientId);
+      where.push(`b.patient_id = $${params.length}`);
     }
 
     if (status.length > 0) {

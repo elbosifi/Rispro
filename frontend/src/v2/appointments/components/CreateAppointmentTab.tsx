@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
+import { fetchAppointments } from "@/lib/api-hooks";
 import type {
   BookingResponse,
   CapacityResolutionMode,
@@ -54,6 +55,19 @@ interface SuccessSummary {
   wasOverride: boolean;
 }
 
+function isRoutinePriority(priority: { nameEn?: string | null; nameAr?: string | null }): boolean {
+  const nameEn = String(priority.nameEn ?? "").trim().toLowerCase();
+  const nameAr = String(priority.nameAr ?? "").trim();
+  return (
+    nameEn === "routine" ||
+    nameEn === "normal" ||
+    nameEn.includes("routine") ||
+    nameEn.includes("normal") ||
+    nameAr.includes("روت") ||
+    nameAr.includes("عادي")
+  );
+}
+
 export function CreateAppointmentTab({
   patientLookups: _patientLookups,
   modalityOptions,
@@ -78,6 +92,8 @@ export function CreateAppointmentTab({
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+  const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string }>>([]);
+  const [noShowLoading, setNoShowLoading] = useState(false);
   const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
   const initialPatientAppliedRef = useRef(false);
 
@@ -124,6 +140,11 @@ export function CreateAppointmentTab({
   const selectedRawItem = (availability.rawItems ?? []).find((item) => item.date === form.appointmentDate) ?? null;
   const primaryExamMixBlocking =
     selectedRawItem?.examMixQuotaSummaries?.find((row) => row.isPrimaryBlocking) ?? null;
+  const filteredPriorityOptions = useMemo(
+    () => priorityOptions.filter((p) => !isRoutinePriority(p)),
+    [priorityOptions]
+  );
+
   useEffect(() => {
     if (
       form.capacityResolutionMode !== "standard" &&
@@ -133,6 +154,48 @@ export function CreateAppointmentTab({
       actions.setCapacityResolutionMode("standard");
     }
   }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseNonStandardCapacityModes]);
+
+  useEffect(() => {
+    if (!form.patientId) {
+      setPatientNoShows([]);
+      setNoShowLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setNoShowLoading(true);
+
+    fetchAppointments({
+      status: ["no-show"],
+      patientId: String(form.patientId),
+      dateTo: new Date().toISOString().slice(0, 10),
+    })
+      .then((appointments) => {
+        if (cancelled) return;
+        const history = appointments
+          .slice(0, 5)
+          .map((appointment) => ({
+            id: appointment.id,
+            appointmentDate: appointment.appointmentDate,
+            examTypeName: appointment.examNameEn || appointment.examNameAr || "—",
+          }));
+        setPatientNoShows(history);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPatientNoShows([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setNoShowLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [form.patientId]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -400,6 +463,24 @@ export function CreateAppointmentTab({
         />
 
         <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
+        {form.patientId != null && (
+          <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 10, background: "#fff7ed" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>Previous No-Shows</div>
+            {noShowLoading ? (
+              <div style={{ fontSize: 12, color: "#9a3412" }}>Loading no-show history...</div>
+            ) : patientNoShows.length === 0 ? (
+              <div style={{ fontSize: 12, color: "#9a3412" }}>No previous no-shows.</div>
+            ) : (
+              <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12, color: "#7c2d12" }}>
+                {patientNoShows.map((item) => (
+                  <li key={item.id} style={{ marginBottom: 4 }}>
+                    {item.appointmentDate} — {item.examTypeName}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         <ModalitySelect
           options={modalityOptions}
@@ -444,8 +525,8 @@ export function CreateAppointmentTab({
             onChange={(e) => actions.setReportingPriorityId(e.target.value ? Number(e.target.value) : null)}
             style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
           >
-            <option value="">Normal</option>
-            {priorityOptions.map((p) => (
+            <option value="" hidden>Routine (default)</option>
+            {filteredPriorityOptions.map((p) => (
               <option key={p.id} value={p.id}>{p.nameEn}</option>
             ))}
           </select>
