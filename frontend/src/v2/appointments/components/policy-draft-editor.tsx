@@ -73,16 +73,11 @@ function validateCategoryDailyLimits(
     const oncology = rows.find((row) => row.caseCategory === "oncology");
     const nonOncology = rows.find((row) => row.caseCategory === "non_oncology");
 
-    if (oncology && nonOncology) {
-      if (Number(oncology.dailyLimit) + Number(nonOncology.dailyLimit) !== modalityCapacity) {
-        return `Category limits for modality ${modalityId} must sum to ${modalityCapacity}.`;
+    const configuredRows = [oncology, nonOncology].filter((row) => row != null);
+    for (const configured of configuredRows) {
+      if (Number(configured.dailyLimit) > modalityCapacity) {
+        return `Configured ${configured.caseCategory} limit exceeds modality ${modalityId} daily capacity (${modalityCapacity}).`;
       }
-      continue;
-    }
-
-    const configured = oncology ?? nonOncology;
-    if (configured && Number(configured.dailyLimit) > modalityCapacity) {
-      return `Configured ${configured.caseCategory} limit exceeds modality ${modalityId} daily capacity (${modalityCapacity}).`;
     }
   }
 
@@ -300,37 +295,14 @@ export function PolicyDraftEditor({
                         itemIndex === index ? { ...item, dailyLimit: Number.isFinite(rawValue) ? rawValue : 0 } : item
                       );
                       const changedRow = nextLimits[index];
-                      if (!changedRow) {
-                        return { ...prev, categoryDailyLimits: nextLimits };
-                      }
-
+                      if (!changedRow) return { ...prev, categoryDailyLimits: nextLimits };
                       const modalityId = Number(changedRow.modalityId);
                       const modalityCapacity =
                         modalityOptions.find((option) => option.value === modalityId)?.dailyCapacity ?? null;
-                      const boundedDailyLimit = clampDailyLimit(Number(changedRow.dailyLimit), modalityCapacity);
-
                       nextLimits[index] = {
                         ...changedRow,
-                        dailyLimit: boundedDailyLimit,
+                        dailyLimit: clampDailyLimit(Number(changedRow.dailyLimit), modalityCapacity),
                       };
-
-                      if (changedRow.isActive && modalityCapacity != null) {
-                        const counterpartIndex = nextLimits.findIndex(
-                          (item, itemIndex) =>
-                            itemIndex !== index &&
-                            item.isActive &&
-                            Number(item.modalityId) === modalityId &&
-                            item.caseCategory !== changedRow.caseCategory
-                        );
-
-                        if (counterpartIndex >= 0) {
-                          const counterpart = nextLimits[counterpartIndex];
-                          nextLimits[counterpartIndex] = {
-                            ...counterpart,
-                            dailyLimit: Math.max(modalityCapacity - boundedDailyLimit, 0),
-                          };
-                        }
-                      }
 
                       return {
                         ...prev,

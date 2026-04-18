@@ -284,26 +284,15 @@ async function validateCategoryCapacityPolicy(
     const oncology = rows.find((r) => r.caseCategory === "oncology");
     const nonOncology = rows.find((r) => r.caseCategory === "non_oncology");
 
-    if (oncology && nonOncology) {
-      const sum = Number(oncology.dailyLimit) + Number(nonOncology.dailyLimit);
-      if (sum !== modalityCapacity) {
+    const configuredRows = [oncology, nonOncology].filter((row) => row != null);
+    for (const configured of configuredRows) {
+      if (Number(configured.dailyLimit) > modalityCapacity) {
         fieldErrors.push({
-          field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}]`,
-          code: "category_limits_must_equal_modality_capacity",
-          message: `Oncology + non-oncology limits must equal modality daily capacity (${modalityCapacity}).`,
+          field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}][caseCategory=${configured.caseCategory}]`,
+          code: "category_limit_exceeds_modality_capacity",
+          message: `Configured ${configured.caseCategory} limit exceeds modality daily capacity (${modalityCapacity}).`,
         });
       }
-      continue;
-    }
-
-    const configured = oncology ?? nonOncology;
-    if (!configured) continue;
-    if (Number(configured.dailyLimit) > modalityCapacity) {
-      fieldErrors.push({
-        field: `policySnapshot.categoryDailyLimits[modalityId=${modalityId}][caseCategory=${configured.caseCategory}]`,
-        code: "category_limit_exceeds_modality_capacity",
-        message: `Configured ${configured.caseCategory} limit exceeds modality daily capacity (${modalityCapacity}).`,
-      });
     }
   }
 

@@ -415,7 +415,7 @@ describe("validatePolicy — function structure", () => {
   });
 });
 
-describe("validatePolicy — category sum semantics", () => {
+describe("validatePolicy — category limit semantics", () => {
   afterEach(() => mock.restoreAll());
 
   const version = {
@@ -428,14 +428,14 @@ describe("validatePolicy — category sum semantics", () => {
     publishedAt: null,
   };
 
-  it("errors when both category limits do not equal modality capacity", async () => {
+  it("allows both category limits when each is within modality capacity", async () => {
     const rules = [
       { ruleType: "category_daily_limit", id: 1, modalityId: 10, caseCategory: "oncology", dailyLimit: 4, isActive: true },
       { ruleType: "category_daily_limit", id: 2, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 5, isActive: true },
     ];
     const result = await runValidateWithMocks(1, version, rules, { 10: 10 });
-    assert.equal(result.isValid, false);
-    assert.ok(result.errors.some((e) => e.includes("must equal daily capacity")));
+    assert.equal(result.isValid, true);
+    assert.equal(result.errors.length, 0);
   });
 
   it("accepts when both limits equal modality capacity", async () => {
@@ -445,5 +445,15 @@ describe("validatePolicy — category sum semantics", () => {
     ];
     const result = await runValidateWithMocks(1, version, rules, { 10: 10 });
     assert.equal(result.errors.length, 0);
+  });
+
+  it("errors when any category limit exceeds modality capacity", async () => {
+    const rules = [
+      { ruleType: "category_daily_limit", id: 1, modalityId: 10, caseCategory: "oncology", dailyLimit: 11, isActive: true },
+      { ruleType: "category_daily_limit", id: 2, modalityId: 10, caseCategory: "non_oncology", dailyLimit: 2, isActive: true },
+    ];
+    const result = await runValidateWithMocks(1, version, rules, { 10: 10 });
+    assert.equal(result.isValid, false);
+    assert.ok(result.errors.some((e) => e.includes("cannot exceed daily capacity")));
   });
 });

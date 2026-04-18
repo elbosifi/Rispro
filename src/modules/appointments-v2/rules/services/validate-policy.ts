@@ -130,16 +130,8 @@ async function validatePolicyDraftInternal(
       const rows = activeCategoryRules.filter((r) => Number(r.modalityId) === modalityId);
       const oncology = rows.find((r) => r.caseCategory === "oncology");
       const nonOncology = rows.find((r) => r.caseCategory === "non_oncology");
-      if (oncology && nonOncology) {
-        const sum = Number(oncology.dailyLimit ?? 0) + Number(nonOncology.dailyLimit ?? 0);
-        if (sum !== modalityCapacity) {
-          errors.push(
-            `Modality ${modalityId}: oncology + non_oncology limits must equal daily capacity (${modalityCapacity}).`
-          );
-        }
-      } else {
-        const configured = oncology ?? nonOncology;
-        if (!configured) continue;
+      const configuredRows = [oncology, nonOncology].filter((row) => row != null);
+      for (const configured of configuredRows) {
         if (Number(configured.dailyLimit ?? 0) > modalityCapacity) {
           errors.push(
             `Modality ${modalityId}: ${configured.caseCategory} daily limit cannot exceed daily capacity (${modalityCapacity}).`

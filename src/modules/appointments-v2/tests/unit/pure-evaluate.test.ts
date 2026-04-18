@@ -459,8 +459,8 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
         }),
       })
     );
-    // Missing non_oncology limit derives reserve from modality remainder.
-    assert.equal(decision.displayStatus, "blocked");
+    // Missing non_oncology limit means no category-specific cap for non_oncology.
+    assert.equal(decision.displayStatus, "available");
   });
 
   it("enforces total modality ceiling even when selected category has reserve", async () => {
@@ -481,7 +481,7 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
     assert.ok(decision.reasons.some((r) => r.code === "standard_capacity_exhausted"));
   });
 
-  it("derives missing category reserve from modality remainder", async () => {
+  it("does not derive opposite-category reserve when limit is missing", async () => {
     const decision = await pureEvaluate(
       makeInput({
         caseCategory: "oncology",
@@ -496,10 +496,10 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
       })
     );
     assert.equal(decision.displayStatus, "available");
-    assert.equal(decision.remainingStandardCapacity, 4 - 3);
+    assert.equal(decision.remainingStandardCapacity, 4);
   });
 
-  it("blocks when both limits do not exactly equal modality capacity", async () => {
+  it("allows when both limits do not sum to modality capacity", async () => {
     const decision = await pureEvaluate(
       makeInput({
         context: makeContext({
@@ -509,8 +509,8 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
         }),
       })
     );
-    assert.equal(decision.displayStatus, "blocked");
-    assert.ok(decision.reasons.some((r) => r.code === "invalid_category_capacity_configuration"));
+    assert.equal(decision.displayStatus, "available");
+    assert.equal(decision.remainingStandardCapacity, 7);
   });
 });
 

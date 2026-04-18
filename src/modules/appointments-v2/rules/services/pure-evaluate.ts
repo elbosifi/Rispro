@@ -253,70 +253,22 @@ function checkCapacity(
   const activeLimits = ctx.categoryLimits.filter((l) => l.isActive);
   const oncologyLimit = activeLimits.find((l) => l.caseCategory === "oncology");
   const nonOncologyLimit = activeLimits.find((l) => l.caseCategory === "non_oncology");
-
-  let partitioned = false;
-  let oncologyReserve: number | null = null;
-  let nonOncologyReserve: number | null = null;
-
-  if (oncologyLimit && nonOncologyLimit) {
-    const sum = oncologyLimit.dailyLimit + nonOncologyLimit.dailyLimit;
-    if (sum !== modalityDailyCapacity) {
-      reasons.push(
-        reason(
-          "invalid_category_capacity_configuration",
-          "error",
-          "Oncology and non-oncology limits must exactly match modality daily capacity."
-        )
-      );
-      return {
-        status: "blocked",
-        remainingStandardCapacity: 0,
-        remainingSpecialQuota: null,
-        reasons,
-      };
-    }
-    partitioned = true;
-    oncologyReserve = oncologyLimit.dailyLimit;
-    nonOncologyReserve = nonOncologyLimit.dailyLimit;
-  } else if (oncologyLimit || nonOncologyLimit) {
-    partitioned = true;
-    if (oncologyLimit) {
-      if (oncologyLimit.dailyLimit > modalityDailyCapacity) {
-        reasons.push(
-          reason(
-            "invalid_category_capacity_configuration",
-            "error",
-            "Configured oncology limit exceeds modality daily capacity."
-          )
-        );
-        return {
-          status: "blocked",
-          remainingStandardCapacity: 0,
-          remainingSpecialQuota: null,
-          reasons,
-        };
-      }
-      oncologyReserve = oncologyLimit.dailyLimit;
-      nonOncologyReserve = modalityDailyCapacity - oncologyLimit.dailyLimit;
-    } else if (nonOncologyLimit) {
-      if (nonOncologyLimit.dailyLimit > modalityDailyCapacity) {
-        reasons.push(
-          reason(
-            "invalid_category_capacity_configuration",
-            "error",
-            "Configured non-oncology limit exceeds modality daily capacity."
-          )
-        );
-        return {
-          status: "blocked",
-          remainingStandardCapacity: 0,
-          remainingSpecialQuota: null,
-          reasons,
-        };
-      }
-      nonOncologyReserve = nonOncologyLimit.dailyLimit;
-      oncologyReserve = modalityDailyCapacity - nonOncologyLimit.dailyLimit;
-    }
+  const selectedCategoryLimit =
+    input.caseCategory === "oncology" ? oncologyLimit : nonOncologyLimit;
+  if (selectedCategoryLimit && selectedCategoryLimit.dailyLimit > modalityDailyCapacity) {
+    reasons.push(
+      reason(
+        "invalid_category_capacity_configuration",
+        "error",
+        `Configured ${input.caseCategory === "oncology" ? "oncology" : "non-oncology"} limit exceeds modality daily capacity.`
+      )
+    );
+    return {
+      status: "blocked",
+      remainingStandardCapacity: 0,
+      remainingSpecialQuota: null,
+      reasons,
+    };
   }
 
   const categoryBookedFallback =
@@ -335,16 +287,12 @@ function checkCapacity(
   const totalRemaining = modalityDailyCapacity - totalBookedCount;
   const totalExhausted = totalRemaining <= 0;
 
-  let remainingStandardCapacity = totalRemaining;
-  let bucketExhausted = false;
-  if (partitioned) {
-    const reserve =
-      input.caseCategory === "oncology" ? (oncologyReserve ?? 0) : (nonOncologyReserve ?? 0);
-    const bookedInCategory = selectedBookedCount;
-    const bucketRemaining = reserve - bookedInCategory;
-    bucketExhausted = bucketRemaining <= 0;
-    remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
-  }
+  const bucketRemaining =
+    selectedCategoryLimit != null
+      ? selectedCategoryLimit.dailyLimit - selectedBookedCount
+      : Number.POSITIVE_INFINITY;
+  const bucketExhausted = bucketRemaining <= 0;
+  const remainingStandardCapacity = Math.min(totalRemaining, bucketRemaining);
 
   let remainingSpecialQuota: number | null = null;
   if (mode === "special_quota_extra" && input.examTypeId != null) {

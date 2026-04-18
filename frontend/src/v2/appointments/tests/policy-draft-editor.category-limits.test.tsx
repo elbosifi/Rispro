@@ -18,7 +18,7 @@ vi.mock("../api", () => ({
 }));
 
 describe("PolicyDraftEditor category daily limits", () => {
-  it("auto-balances counterpart category limit when both categories exist", () => {
+  it("does not auto-balance the other category limit", () => {
     render(
       <PolicyDraftEditor
         isSaving={false}
@@ -41,7 +41,7 @@ describe("PolicyDraftEditor category daily limits", () => {
     fireEvent.change(dailyLimitInputs[0], { target: { value: "7" } });
 
     expect(dailyLimitInputs[0].value).toBe("7");
-    expect(dailyLimitInputs[1].value).toBe("3");
+    expect(dailyLimitInputs[1].value).toBe("6");
   });
 
   it("blocks save when duplicate active modality/category rows exist", async () => {
