@@ -104,7 +104,7 @@ function weekdayNameFromIsoDate(isoDate: string): WeekdayName | "other" {
 }
 
 async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayName>> {
-  const { rows } = await client.query<{ setting_key: string; setting_value: { value?: unknown } | null }>(
+  const { rows } = await client.query<{ setting_key: string; setting_value: unknown }>(
     `
       select setting_key, setting_value
       from system_settings
@@ -118,7 +118,12 @@ async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayN
   );
 
   const valuesByKey = rows.reduce<Record<string, unknown>>((accumulator, row) => {
-    accumulator[row.setting_key] = row.setting_value?.value;
+    const raw = row.setting_value;
+    const nestedValue =
+      raw && typeof raw === "object" && "value" in (raw as Record<string, unknown>)
+        ? (raw as Record<string, unknown>).value
+        : raw;
+    accumulator[row.setting_key] = nestedValue;
     return accumulator;
   }, {});
 

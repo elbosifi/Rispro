@@ -988,7 +988,13 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   const [mutationError, setMutationError] = useState<string | null>(null);
   const saveMutation = useMutation({
     mutationFn: (payload: { entries: { key: string; value: any }[] }) => saveSettings(category, payload),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["settings", category] }); setMutationError(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["settings", category] });
+      if (category === "scheduling_and_capacity") {
+        queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+      }
+      setMutationError(null);
+    },
     onError: (err: any) => { setMutationError(err?.message || "Save failed"); }
   });
 

@@ -515,7 +515,7 @@ export async function getAppointmentDaySettings(
 ): Promise<{ fridayEnabled: boolean; saturdayEnabled: boolean; sundayEnabled: boolean }> {
   const { rows } = await client.query<{
     setting_key: string;
-    setting_value: { value?: unknown } | null;
+    setting_value: unknown;
   }>(`
     select setting_key, setting_value
     from system_settings
@@ -525,7 +525,12 @@ export async function getAppointmentDaySettings(
 
   const settingsRows = rows as unknown as SchedulingSettingRow[];
   const values = settingsRows.reduce<Record<string, string>>((accumulator, row) => {
-    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
+    const raw = row.setting_value;
+    const nestedValue =
+      raw && typeof raw === "object" && "value" in (raw as Record<string, unknown>)
+        ? (raw as Record<string, unknown>).value
+        : raw;
+    accumulator[row.setting_key] = String(nestedValue ?? "");
     return accumulator;
   }, {});
 
