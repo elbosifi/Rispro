@@ -241,6 +241,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const normalizeIdentifierForType = (type: IdentifierType, value: string) => (
     type === "passport" ? value.toUpperCase() : value
   );
+  const findPrimaryIdentifierIndex = (identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>) => {
+    const idx = identifiers.findIndex((entry) => entry.isPrimary);
+    return idx >= 0 ? idx : 0;
+  };
 
   const fieldOrder: FormFieldKey[] = [
     "arabicFullName",
@@ -402,10 +406,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const cv = value.replace(/\D/g, "");
     setForm((f) => {
       const nextIdentifiers = [...f.identifiers];
-      if (nextIdentifiers.length === 0) {
+      const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
+      if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
         nextIdentifiers.push({ typeCode: f.identifierType, value: cv, isPrimary: true });
       } else {
-        nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: cv, isPrimary: true };
+        nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: f.identifierType, value: cv, isPrimary: true };
       }
 
       const u: Partial<PatientFormState> = { identifierValue: cv, identifiers: nextIdentifiers };
@@ -586,10 +591,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               const nextType = v as IdentifierType;
               const nextValue = normalizeIdentifierForType(nextType, f.identifierValue);
               const nextIdentifiers = [...f.identifiers];
-              if (nextIdentifiers.length === 0) {
+              const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
+              if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
                 nextIdentifiers.push({ typeCode: nextType, value: nextValue, isPrimary: true });
               } else {
-                nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: nextType, value: nextValue, isPrimary: true };
+                nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: nextType, value: nextValue, isPrimary: true };
               }
               return {
                 ...f,
@@ -618,10 +624,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               onChange={(v) => setForm((f) => {
                 const nextValue = normalizeIdentifierForType(f.identifierType, v);
                 const nextIdentifiers = [...f.identifiers];
-                if (nextIdentifiers.length === 0) {
+                const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
+                if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
                   nextIdentifiers.push({ typeCode: f.identifierType, value: nextValue, isPrimary: true });
                 } else {
-                  nextIdentifiers[0] = { ...nextIdentifiers[0], typeCode: f.identifierType, value: nextValue, isPrimary: true };
+                  nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: f.identifierType, value: nextValue, isPrimary: true };
                 }
                 return { ...f, identifierValue: nextValue, identifiers: nextIdentifiers };
               })}
@@ -675,7 +682,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     const nextType = e.target.value as IdentifierType;
                     const nextValue = normalizeIdentifierForType(nextType, next[idx]?.value || "");
                     next[idx] = { ...next[idx], typeCode: nextType, value: nextValue };
-                    if (idx === 0) {
+                    if (next[idx]?.isPrimary) {
                       return { ...f, identifiers: next, identifierType: nextType, identifierValue: nextValue };
                     }
                     return { ...f, identifiers: next };
@@ -694,7 +701,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     const next = [...f.identifiers];
                     const nextValue = normalizeIdentifierForType(next[idx]?.typeCode || "other", e.target.value);
                     next[idx] = { ...next[idx], value: nextValue };
-                    if (idx === 0) {
+                    if (next[idx]?.isPrimary) {
                       return { ...f, identifiers: next, identifierValue: nextValue };
                     }
                     return { ...f, identifiers: next };

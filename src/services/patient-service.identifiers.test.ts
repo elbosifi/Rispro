@@ -198,6 +198,89 @@ test("createPatient: persists demographics_estimated flag", async (t) => {
   }
 });
 
+test("createPatient: selected primary identifier is reflected in patient identifier_type/value", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_primary_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+
+  const idType = await pool.query<{ id: number }>(
+    `
+      insert into patient_identifier_types (code, label_ar, label_en, is_active)
+      values ($1, $2, $3, true)
+      returning id
+    `,
+    [`test_primary_${suffix}`, `اختبار أساسي ${suffix}`, `Primary Test ${suffix}`]
+  );
+  const identifierTypeId = Number(idType.rows[0]?.id);
+
+  const nationalId = uniqueNationalId("1");
+  const primaryPassport = `P-${suffix}`;
+
+  try {
+    const created = await createPatient(
+      {
+        nationalId,
+        nationalIdConfirmation: nationalId,
+        identifierType: "national_id",
+        identifierValue: nationalId,
+        arabicFullName: `مريض أساسي ${suffix}`,
+        englishFullName: `Primary ${suffix}`,
+        ageYears: 34,
+        demographicsEstimated: false,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city",
+        identifiers: [
+          { typeCode: "national_id", value: nationalId, isPrimary: false },
+          { typeCode: "passport", value: primaryPassport, isPrimary: true },
+        ],
+      },
+      receptionistUserId
+    );
+
+    const topLevel = await pool.query<{ identifier_type: string; identifier_value: string | null; national_id: string | null }>(
+      `
+        select identifier_type, identifier_value, national_id
+        from patients
+        where id = $1
+      `,
+      [created.id]
+    );
+    assert.equal(topLevel.rows[0]?.identifier_type, "passport");
+    assert.equal(topLevel.rows[0]?.identifier_value, primaryPassport);
+    assert.equal(topLevel.rows[0]?.national_id, null);
+
+    const primaryRow = await pool.query<{ type_code: string; value: string }>(
+      `
+        select pit.code as type_code, pi.value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = $1 and pi.is_primary = true
+        limit 1
+      `,
+      [created.id]
+    );
+    assert.equal(primaryRow.rows[0]?.type_code, "passport");
+    assert.equal(primaryRow.rows[0]?.value, primaryPassport);
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض أساسي ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض أساسي ${suffix}`]);
+    await pool.query(`delete from patient_identifier_types where id = $1`, [identifierTypeId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Test: deleting a patient with multiple identifiers succeeds cleanly
 // ---------------------------------------------------------------------------

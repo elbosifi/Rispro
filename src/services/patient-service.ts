@@ -606,6 +606,44 @@ async function replacePatientIdentifiers(
   }
 }
 
+async function syncPatientPrimaryIdentifierColumns(
+  client: PoolClient,
+  patientId: number,
+  actingUserId: OptionalUserId
+): Promise<void> {
+  const { rows } = await client.query<{ type_code: string; value: string }>(
+    `
+      select pit.code as type_code, pi.value
+      from patient_identifiers pi
+      join patient_identifier_types pit on pit.id = pi.identifier_type_id
+      where pi.patient_id = $1
+      order by pi.is_primary desc, pi.id asc
+      limit 1
+    `,
+    [patientId]
+  );
+
+  const primary = rows[0];
+  if (!primary) return;
+
+  const typeCode = String(primary.type_code || "national_id");
+  const value = String(primary.value || "");
+
+  await client.query(
+    `
+      update patients
+      set
+        identifier_type = $2,
+        identifier_value = nullif($3, ''),
+        national_id = case when $2 = 'national_id' then nullif($3, '') else null end,
+        updated_by_user_id = $4,
+        updated_at = now()
+      where id = $1
+    `,
+    [patientId, typeCode, value, actingUserId]
+  );
+}
+
 export async function createPatient(payload: PatientPayload, createdByUserId: OptionalUserId): Promise<PersistedPatientRow> {
   const rules = await loadPatientRegistrationSettings();
   const dictionary = await loadNameDictionary();
@@ -678,6 +716,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
       }
 
       await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId);
+      await syncPatientPrimaryIdentifierColumns(client, Number(createdPatient.id), createdByUserId);
 
       await logAuditEntry(
         {
@@ -772,6 +811,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
       }
 
       await replacePatientIdentifiers(client, Number(updatedPatient.id), payload, validated, updatedByUserId);
+      await syncPatientPrimaryIdentifierColumns(client, Number(updatedPatient.id), updatedByUserId);
 
       await logAuditEntry(
         {
