@@ -18,6 +18,7 @@ ENABLE_DICOM_GATEWAY="${ENABLE_DICOM_GATEWAY:-0}"
 DICOM_GATEWAY_SERVICE_NAME="${DICOM_GATEWAY_SERVICE_NAME:-rispro-dicom-gateway}"
 DICOM_GATEWAY_APP_USER="${DICOM_GATEWAY_APP_USER:-www-data}"
 DICOM_INSTALL_DCMTK="${DICOM_INSTALL_DCMTK:-1}"
+INSTALL_NATIVE_IMAGE_DEPS="${INSTALL_NATIVE_IMAGE_DEPS:-1}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1"
@@ -118,6 +119,41 @@ ensure_dcmtk_tools() {
 
   log "WARNING: DCMTK tools are still missing after installation."
   return 1
+}
+
+ensure_native_image_deps() {
+  if ! is_enabled "$INSTALL_NATIVE_IMAGE_DEPS"; then
+    log "Skipping libpng/libtiff installation because INSTALL_NATIVE_IMAGE_DEPS is disabled."
+    return 0
+  fi
+
+  if command -v apt-get >/dev/null 2>&1; then
+    log "Installing native image dependencies via apt-get (libpng-dev, libtiff-dev)..."
+    sudo apt-get update -qq
+    sudo apt-get install -y -qq libpng-dev libtiff-dev
+    return 0
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    log "Installing native image dependencies via dnf (libpng-devel, libtiff-devel)..."
+    sudo dnf install -y -q libpng-devel libtiff-devel
+    return 0
+  fi
+
+  if command -v yum >/dev/null 2>&1; then
+    log "Installing native image dependencies via yum (libpng-devel, libtiff-devel)..."
+    sudo yum install -y -q libpng-devel libtiff-devel
+    return 0
+  fi
+
+  if command -v brew >/dev/null 2>&1; then
+    log "Installing native image dependencies via Homebrew (libpng, libtiff)..."
+    brew install libpng libtiff
+    return 0
+  fi
+
+  log "WARNING: No supported package manager found to install libpng/libtiff automatically."
+  return 0
 }
 
 provision_dicom_gateway_service() {
@@ -225,6 +261,7 @@ main() {
   fi
 
   run_cmd "$BACKUP_CMD"
+  ensure_native_image_deps
   run_cmd "$INSTALL_CMD"
   run_cmd "$MIGRATE_CMD"
   run_cmd "$POST_MIGRATE_CMD"

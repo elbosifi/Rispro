@@ -92,6 +92,7 @@ Optional variables:
 - `DEPLOY_INSTALL_CMD`: defaults to `npm ci --omit=dev`
 - `DEPLOY_MIGRATE_CMD`: defaults to `npm run migrate`
 - `DEPLOY_POST_MIGRATE_CMD`: anything extra you want after migration
+- `INSTALL_NATIVE_IMAGE_DEPS`: defaults to `1`; installs `libpng` and `libtiff` packages during deployment (set to `0` to disable)
 
 ## Recommended permissions for the server user
 

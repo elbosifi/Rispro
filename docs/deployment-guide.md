@@ -46,6 +46,14 @@ curl http://localhost:3000/api/health
 
 ### 1. Install Dependencies
 
+Install required native image libraries first (`libpng` and `libtiff`):
+
+```bash
+# Debian/Ubuntu
+sudo apt-get update
+sudo apt-get install -y libpng-dev libtiff-dev
+```
+
 ```bash
 npm ci --omit=dev
 ```
