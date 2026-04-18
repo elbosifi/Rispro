@@ -59,28 +59,21 @@ export function AppointmentsV2Page() {
   // Show explicit error if lookups fail
   if (lookups.isError) {
     return (
-      <div style={{ padding: 32, textAlign: "center" }}>
-        <p style={{ fontSize: 18, fontWeight: 600, color: "var(--color-error, #ef4444)", marginBottom: 8 }}>
-          Failed to load modality list
-        </p>
-        <p style={{ fontSize: 14, color: "var(--text-muted, #64748b)" }}>
-          {(lookups.error as Error)?.message ?? "Unknown error"}
-        </p>
-        <button
-          onClick={() => lookups.refetch()}
-          style={{
-            marginTop: 16,
-            padding: "8px 20px",
-            borderRadius: 6,
-            border: "none",
-            background: "var(--color-primary, #3b82f6)",
-            color: "#fff",
-            fontSize: 14,
-            cursor: "pointer",
-          }}
-        >
-          Retry
-        </button>
+      <div className="max-w-7xl mx-auto p-4 lg:p-6">
+        <div className="card-shell p-8 text-center">
+          <p className="text-lg font-bold mb-2" style={{ color: "var(--accent)" }}>
+            Failed to load modality list
+          </p>
+          <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
+            {(lookups.error as Error)?.message ?? "Unknown error"}
+          </p>
+          <button
+            onClick={() => lookups.refetch()}
+            className="btn-primary"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }
@@ -121,22 +114,16 @@ export function AppointmentsV2Page() {
   const noPublishedPolicy = availability.data?.meta?.noPublishedPolicy === true;
 
   return (
-    <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 24 }}>
+    <div className="max-w-7xl mx-auto p-4 lg:p-6">
+      <h1 className="text-2xl font-bold mb-6 text-embossed" style={{ color: "var(--text)" }}>
         Appointments V2
       </h1>
       {user?.role === "supervisor" && (
-        <div style={{ marginBottom: 12 }}>
+        <div className="mb-4">
           <button
             type="button"
             onClick={() => navigate("/v2/appointments/admin")}
-            style={{
-              padding: "8px 12px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              background: "var(--bg-surface, #f8fafc)",
-              cursor: "pointer",
-            }}
+            className="btn-secondary"
           >
             Open Scheduling Policy Admin
           </button>
@@ -144,185 +131,116 @@ export function AppointmentsV2Page() {
       )}
 
       {/* Filters */}
-      <div
-        style={{
-          display: "flex",
-          gap: 16,
-          flexWrap: "wrap",
-          marginBottom: 24,
-          padding: 16,
-          borderRadius: 8,
-          backgroundColor: "var(--bg-surface, #f8fafc)",
-          border: "1px solid var(--border-color, #e2e8f0)",
-        }}
-      >
-        {/* Modality */}
-        <div style={{ flex: "1 1 200px" }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: 4,
-              color: "var(--text-muted, #64748b)",
-            }}
-          >
-            Modality
-          </label>
-          <select
-            value={modalityId ?? ""}
-            onChange={(e) => {
-              setModalityId(e.target.value ? Number(e.target.value) : null);
-              setExamTypeId(null);
-            }}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              fontSize: 14,
-            }}
-          >
-            <option value="">Select modality…</option>
-            {lookups.data?.modalities.map((m: { id: number; name: string }) => (
-              <option key={m.id} value={m.id}>
-                {m.name}
-              </option>
-            ))}
-          </select>
-        </div>
+      <div className="card-shell p-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {/* Modality */}
+          <div>
+            <label
+              className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Modality
+            </label>
+            <select
+              value={modalityId ?? ""}
+              onChange={(e) => {
+                setModalityId(e.target.value ? Number(e.target.value) : null);
+                setExamTypeId(null);
+              }}
+              className="input-premium"
+            >
+              <option value="">Select modality…</option>
+              {lookups.data?.modalities.map((m: { id: number; name: string }) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        {/* Exam Type */}
-        <div style={{ flex: "1 1 200px" }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: 4,
-              color: "var(--text-muted, #64748b)",
-            }}
-          >
-            Exam Type (optional)
-          </label>
-          <select
-            value={examTypeId ?? ""}
-            onChange={(e) => setExamTypeId(e.target.value ? Number(e.target.value) : null)}
-            disabled={!modalityId}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              fontSize: 14,
-              opacity: !modalityId ? 0.5 : 1,
-            }}
-          >
-            <option value="">All exam types</option>
-            {examTypes.data?.map((et: { id: number; name: string }) => (
-              <option key={et.id} value={et.id}>
-                {et.name}
-              </option>
-            ))}
-          </select>
-        </div>
+          {/* Exam Type */}
+          <div>
+            <label
+              className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Exam Type (optional)
+            </label>
+            <select
+              value={examTypeId ?? ""}
+              onChange={(e) => setExamTypeId(e.target.value ? Number(e.target.value) : null)}
+              disabled={!modalityId}
+              className="input-premium"
+            >
+              <option value="">All exam types</option>
+              {examTypes.data?.map((et: { id: number; name: string }) => (
+                <option key={et.id} value={et.id}>
+                  {et.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        {/* Case Category */}
-        <div style={{ flex: "0 1 180px" }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: 4,
-              color: "var(--text-muted, #64748b)",
-            }}
-          >
-            Case Category
-          </label>
-          <select
-            value={caseCategory}
-            onChange={(e) => setCaseCategory(e.target.value as CaseCategory)}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              fontSize: 14,
-            }}
-          >
-            <option value="non_oncology">Non-Oncology</option>
-            <option value="oncology">Oncology</option>
-          </select>
-        </div>
+          {/* Case Category */}
+          <div>
+            <label
+              className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Case Category
+            </label>
+            <select
+              value={caseCategory}
+              onChange={(e) => setCaseCategory(e.target.value as CaseCategory)}
+              className="input-premium"
+            >
+              <option value="non_oncology">Non-Oncology</option>
+              <option value="oncology">Oncology</option>
+            </select>
+          </div>
 
-        {/* Days */}
-        <div style={{ flex: "0 1 120px" }}>
-          <label
-            style={{
-              display: "block",
-              fontSize: 11,
-              fontWeight: 600,
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-              marginBottom: 4,
-              color: "var(--text-muted, #64748b)",
-            }}
-          >
-            Days
-          </label>
-          <select
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            style={{
-              width: "100%",
-              padding: "6px 10px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              fontSize: 14,
-            }}
-          >
-            <option value={7}>7 days</option>
-            <option value={14}>14 days</option>
-            <option value={30}>30 days</option>
-          </select>
+          {/* Days */}
+          <div>
+            <label
+              className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
+              style={{ color: "var(--text-muted)" }}
+            >
+              Days
+            </label>
+            <select
+              value={days}
+              onChange={(e) => setDays(Number(e.target.value))}
+              className="input-premium"
+            >
+              <option value={7}>7 days</option>
+              <option value={14}>14 days</option>
+              <option value={30}>30 days</option>
+            </select>
+          </div>
         </div>
       </div>
 
       {/* Availability Table */}
       {disabled ? (
-        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
           Select a modality to view availability.
         </p>
       ) : availability.isLoading ? (
-        <p style={{ color: "var(--text-muted, #64748b)" }}>Loading availability…</p>
+        <p className="text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading availability…</p>
       ) : availability.isError ? (
-        <p style={{ color: "var(--color-error, #ef4444)" }}>
+        <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
           Could not load availability. {(availability.error as Error).message}
         </p>
       ) : noPublishedPolicy ? (
-        <div
-          style={{
-            padding: 16,
-            borderRadius: 8,
-            border: "1px solid var(--border-color, #e2e8f0)",
-            background: "var(--bg-surface, #f8fafc)",
-          }}
-        >
-          <p style={{ color: "var(--text-primary, #1e293b)", fontWeight: 600, marginBottom: 6 }}>
+        <div className="card-shell p-6">
+          <p className="font-bold mb-2" style={{ color: "var(--text)" }}>
             No scheduling policy has been published yet.
           </p>
-          <p style={{ color: "var(--text-muted, #64748b)", marginBottom: user?.role === "supervisor" ? 12 : 0 }}>
+          <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
             Availability is empty because no published policy exists for V2 scheduling.
           </p>
           {user?.role !== "supervisor" && (
-            <p style={{ color: "var(--text-muted, #64748b)" }}>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               Ask a supervisor to publish a policy before booking.
             </p>
           )}
@@ -330,54 +248,48 @@ export function AppointmentsV2Page() {
             <button
               type="button"
               onClick={() => navigate("/v2/appointments/admin")}
-              style={{
-                padding: "8px 12px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #e2e8f0)",
-                background: "var(--bg-page, #fff)",
-                cursor: "pointer",
-              }}
+              className="btn-secondary mt-2"
             >
               Publish or Update Policy
             </button>
           )}
         </div>
       ) : availability.data?.items.length === 0 ? (
-        <div>
-          <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
-            No availability found for the selected filters.
-          </p>
-        </div>
+        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
+          No availability found for the selected filters.
+        </p>
       ) : (
         <>
           <AvailabilityTable items={availability.data?.items ?? []} />
 
           {/* Suggestions */}
-          <div style={{ marginTop: 24 }}>
-            <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Suggestions</h2>
+          <div className="mt-6">
+            <h2 className="text-lg font-bold mb-4 text-embossed" style={{ color: "var(--text)" }}>Suggestions</h2>
             {suggestions.isLoading ? (
-              <p style={{ color: "var(--text-muted, #64748b)" }}>Loading next available suggestions…</p>
+              <p style={{ color: "var(--text-muted)" }}>Loading next available suggestions…</p>
             ) : suggestions.isError ? (
-              <p style={{ color: "var(--color-error, #ef4444)" }}>
+              <p style={{ color: "var(--accent)" }}>
                 Could not load suggestions. {(suggestions.error as Error).message}
               </p>
             ) : suggestions.data?.items.length ? (
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
-                {suggestions.data.items.slice(0, 5).map((s) => (
-                  <li key={`${s.modalityId}-${s.date}`} style={{ marginBottom: 4 }}>
-                    {s.date} — {s.decision.displayStatus}
-                  </li>
-                ))}
-              </ul>
+              <div className="card-shell p-4">
+                <ul className="space-y-2">
+                  {suggestions.data.items.slice(0, 5).map((s) => (
+                    <li key={`${s.modalityId}-${s.date}`} className="text-sm" style={{ color: "var(--text-muted)" }}>
+                      {s.date} — {s.decision.displayStatus}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : (
-              <p style={{ color: "var(--text-muted, #64748b)" }}>
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 No better dates found in the selected window.
               </p>
             )}
           </div>
 
           {/* Booking Form */}
-          <div style={{ marginTop: 32 }}>
+          <div className="mt-8">
             <BookingForm
               modalities={lookups.data?.modalities ?? []}
               availability={availability.data?.items ?? []}
@@ -394,7 +306,7 @@ export function AppointmentsV2Page() {
 
           {/* Recent Bookings */}
           {modalityId != null && (
-            <div style={{ marginTop: 32 }}>
+            <div className="mt-8">
               <BookingsList
                 modalityId={modalityId}
                 availabilityItems={availability.data?.items ?? []}
@@ -421,102 +333,93 @@ interface AvailabilityTableProps {
 
 function AvailabilityTable({ items }: AvailabilityTableProps) {
   return (
-    <div style={{ overflowX: "auto" }}>
-      <table
-        style={{
-          width: "100%",
-          borderCollapse: "collapse",
-          fontSize: 14,
-        }}
-      >
-        <thead>
-          <tr
-            style={{
-              borderBottom: "2px solid var(--border-color, #e2e8f0)",
-            }}
-          >
-            <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Date
-            </th>
-            <th style={{ textAlign: "center", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Capacity
-            </th>
-            <th style={{ textAlign: "center", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Booked
-            </th>
-            <th style={{ textAlign: "center", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Availability
-            </th>
-            <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
-              Status
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.map((day) => {
-            const status = day.decision.displayStatus as DecisionStatus;
-            const isBlocked = status === "blocked";
-            const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
-            const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
-            const totalCapacity = day.modalityTotalCapacity ?? day.dailyCapacity;
-            const totalBooked = day.bookedTotal ?? day.bookedCount;
-            const totalRemaining = Math.max(0, totalCapacity - totalBooked);
-            return (
-            <tr
-              key={day.date}
-              style={{
-                borderBottom: "1px solid var(--border-color, #e2e8f0)",
-              }}
-            >
-              <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
-                <div style={{ fontWeight: 500 }}>{formatDate(day.date)}</div>
-                <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>{day.date}</div>
-              </td>
-              <td style={{ textAlign: "center", padding: "10px 12px" }}>{totalCapacity}</td>
-              <td style={{ textAlign: "center", padding: "10px 12px" }}>{totalBooked}</td>
-              <td style={{ textAlign: "center", padding: "10px 12px" }}>
-                {isBlocked ? (
-                  <span style={{ fontWeight: 700, color: "var(--color-error, #ef4444)" }}>
-                    Blocked
-                  </span>
-                ) : (
-                  <>
-                    <div style={{ fontWeight: standard <= 0 ? 700 : 400, color: standard <= 0 ? "var(--color-error, #ef4444)" : "var(--text-primary, #1e293b)" }}>
-                      {totalRemaining} total
-                    </div>
-                    {day.bucketMode === "partitioned" ? (
-                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
-                        Onc {day.oncology.filled}/{day.oncology.reserved ?? 0}, Non-onc {day.nonOncology.filled}/{day.nonOncology.reserved ?? 0}
-                      </div>
-                    ) : (
-                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
-                        Total-only mode (no category reserves)
-                      </div>
-                    )}
-                    {(day.specialQuotaSummary?.remaining ?? special) > 0 && (
-                      <div style={{ fontSize: 11, color: "var(--color-warning, #f59e0b)", fontWeight: 600 }}>
-                        Special remaining: {day.specialQuotaSummary?.remaining ?? special}
-                      </div>
-                    )}
-                  </>
-                )}
-              </td>
-              <td style={{ padding: "10px 12px" }}>
-                <StatusBadge
-                  status={status}
-                  reasons={day.decision.reasons.map((r: { code: string; severity: "error" | "warning"; message: string }) => ({
-                    ...r,
-                    message: describeReason(r.code),
-                  }))}
-                  remainingStandardCapacity={isBlocked ? null : day.decision.remainingStandardCapacity}
-                  remainingSpecialQuota={isBlocked ? null : day.decision.remainingSpecialQuota}
-                />
-              </td>
+    <div className="card-shell overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b" style={{ borderColor: "var(--border)" }}>
+              <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+                Date
+              </th>
+              <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+                Capacity
+              </th>
+              <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+                Booked
+              </th>
+              <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+                Availability
+              </th>
+              <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
+                Status
+              </th>
             </tr>
-            );
-          })}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {items.map((day) => {
+              const status = day.decision.displayStatus as DecisionStatus;
+              const isBlocked = status === "blocked";
+              const standard = Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0);
+              const special = Math.max(0, day.decision.remainingSpecialQuota ?? 0);
+              const totalCapacity = day.modalityTotalCapacity ?? day.dailyCapacity;
+              const totalBooked = day.bookedTotal ?? day.bookedCount;
+              const totalRemaining = Math.max(0, totalCapacity - totalBooked);
+              return (
+              <tr
+                key={day.date}
+                className="border-b transition-colors hover:bg-[var(--muted)]"
+                style={{ borderColor: "var(--border)" }}
+              >
+                <td className="p-3 whitespace-nowrap">
+                  <div className="font-medium" style={{ color: "var(--text)" }}>{formatDate(day.date)}</div>
+                  <div className="text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>{day.date}</div>
+                </td>
+                <td className="text-center p-3" style={{ color: "var(--text)" }}>{totalCapacity}</td>
+                <td className="text-center p-3" style={{ color: "var(--text)" }}>{totalBooked}</td>
+                <td className="text-center p-3">
+                  {isBlocked ? (
+                    <span className="font-bold" style={{ color: "var(--accent)" }}>
+                      Blocked
+                    </span>
+                  ) : (
+                    <>
+                      <div className="font-medium" style={{ color: standard <= 0 ? "var(--accent)" : "var(--text)" }}>
+                        {totalRemaining} total
+                      </div>
+                      {day.bucketMode === "partitioned" ? (
+                        <div className="text-xs font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
+                          Onc {day.oncology.filled}/{day.oncology.reserved ?? 0}, Non-onc {day.nonOncology.filled}/{day.nonOncology.reserved ?? 0}
+                        </div>
+                      ) : (
+                        <div className="text-xs font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
+                          Total-only mode (no category reserves)
+                        </div>
+                      )}
+                      {(day.specialQuotaSummary?.remaining ?? special) > 0 && (
+                        <div className="text-xs font-mono-data mt-1" style={{ color: "var(--amber)", fontWeight: "600" }}>
+                          Special remaining: {day.specialQuotaSummary?.remaining ?? special}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td className="p-3">
+                  <StatusBadge
+                    status={status}
+                    reasons={day.decision.reasons.map((r: { code: string; severity: "error" | "warning"; message: string }) => ({
+                      ...r,
+                      message: describeReason(r.code),
+                    }))}
+                    remainingStandardCapacity={isBlocked ? null : day.decision.remainingStandardCapacity}
+                    remainingSpecialQuota={isBlocked ? null : day.decision.remainingSpecialQuota}
+                  />
+                </td>
+              </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -629,82 +532,57 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
   const bookingsList = bookings.data?.bookings ?? [];
 
   return (
-    <div
-      style={{
-        padding: 16,
-        borderRadius: 8,
-        backgroundColor: "var(--bg-surface, #f8fafc)",
-        border: "1px solid var(--border-color, #e2e8f0)",
-      }}
-    >
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>
+    <div className="card-shell p-4">
+      <div className="flex flex-wrap justify-between items-center mb-4 gap-4">
+        <h2 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>
           Recent Bookings
         </h2>
 
         {/* Include cancelled toggle */}
         <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-            color: "var(--text-muted, #64748b)",
-            cursor: "pointer",
-            userSelect: "none",
-          }}
+          className="flex items-center gap-2 text-sm cursor-pointer user-select-none"
+          style={{ color: "var(--text-muted)" }}
         >
           <input
             type="checkbox"
             checked={includeCancelled}
             onChange={(e) => setIncludeCancelled(e.target.checked)}
-            style={{
-              width: 16,
-              height: 16,
-              accentColor: "var(--color-primary, #3b82f6)",
-              cursor: "pointer",
-            }}
+            className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
           />
           Include cancelled
         </label>
       </div>
 
       {bookings.isLoading ? (
-        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
           Loading bookings…
         </p>
       ) : bookings.isError ? (
-        <p style={{ color: "var(--color-error, #ef4444)" }}>
+        <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
           Could not load bookings. {(bookings.error as Error).message}
         </p>
       ) : bookingsList.length === 0 ? (
-        <p style={{ color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
+        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
           No bookings found for the selected date range.
         </p>
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table
-            style={{
-              width: "100%",
-              borderCollapse: "collapse",
-              fontSize: 14,
-            }}
-          >
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
             <thead>
-              <tr style={{ borderBottom: "2px solid var(--border-color, #e2e8f0)" }}>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+              <tr className="border-b" style={{ borderColor: "var(--border)" }}>
+                <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
                   Patient
                 </th>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
                   Date
                 </th>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
                   Category
                 </th>
-                <th style={{ textAlign: "left", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
                   Status
                 </th>
-                <th style={{ textAlign: "right", padding: "8px 12px", fontWeight: 600, fontSize: 12 }}>
+                <th className="text-right p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
                   Action
                 </th>
               </tr>
@@ -718,33 +596,34 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                 return (
                   <tr
                     key={booking.id}
+                    className="border-b transition-colors hover:bg-[var(--muted)]"
                     style={{
-                      borderBottom: "1px solid var(--border-color, #e2e8f0)",
+                      borderColor: "var(--border)",
                       opacity: booking.status === "cancelled" ? 0.6 : 1,
                     }}
                   >
-                  <td style={{ padding: "10px 12px" }}>
-                    <div style={{ fontWeight: 500 }}>{booking.patientEnglishName}</div>
+                  <td className="p-3">
+                    <div className="font-medium" style={{ color: "var(--text)" }}>{booking.patientEnglishName}</div>
                     {booking.patientNationalId && (
-                      <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
+                      <div className="text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
                         {booking.patientNationalId}
                       </div>
                     )}
                   </td>
-                  <td style={{ padding: "10px 12px", whiteSpace: "nowrap" }}>
+                  <td className="p-3 whitespace-nowrap" style={{ color: "var(--text)" }}>
                     {booking.bookingDate}
                     {booking.bookingTime ? ` ${booking.bookingTime}` : ""}
                   </td>
-                  <td style={{ padding: "10px 12px" }}>
-                    <span style={{ fontSize: 12 }}>
+                  <td className="p-3">
+                    <span className="text-xs">
                       {booking.caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
                     </span>
                   </td>
-                  <td style={{ padding: "10px 12px" }}>
+                  <td className="p-3">
                     <BookingStatusBadge status={booking.status} />
                   </td>
-                  <td style={{ padding: "10px 12px", textAlign: "right" }}>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <td className="p-3 text-right">
+                    <div className="flex gap-2 justify-end flex-wrap">
                       <button
                         type="button"
                         onClick={() => setRescheduleTarget(booking)}
@@ -754,17 +633,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                             ? (reschedulePendingForRow ? "Rescheduling in progress" : "Reschedule this booking")
                             : `Cannot reschedule a booking with status "${booking.status}"`
                         }
-                        style={{
-                          padding: "4px 12px",
-                          borderRadius: 4,
-                          border: `1px solid ${RESCHEDULABLE_STATUSES.includes(booking.status) ? "var(--color-info, #3b82f6)" : "var(--border-color, #e2e8f0)"}`,
-                          backgroundColor: "transparent",
-                          color: RESCHEDULABLE_STATUSES.includes(booking.status) ? "var(--color-info, #3b82f6)" : "var(--text-muted, #94a3b8)",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          cursor: RESCHEDULABLE_STATUSES.includes(booking.status) && !reschedulePendingForRow ? "pointer" : "not-allowed",
-                          opacity: RESCHEDULABLE_STATUSES.includes(booking.status) && !reschedulePendingForRow ? 1 : 0.5,
-                        }}
+                        className="btn-ghost text-xs h-8 px-2"
                       >
                         {reschedulePendingForRow ? "Rescheduling…" : "Reschedule"}
                       </button>
@@ -783,17 +652,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                             ? (cancelPendingForRow ? "Cancellation in progress" : "Cancel this booking")
                             : `Cannot cancel a booking with status "${booking.status}"`
                         }
-                        style={{
-                          padding: "4px 12px",
-                          borderRadius: 4,
-                          border: `1px solid ${CANCELLABLE_STATUSES.includes(booking.status) ? "var(--color-error, #ef4444)" : "var(--border-color, #e2e8f0)"}`,
-                          backgroundColor: "transparent",
-                          color: CANCELLABLE_STATUSES.includes(booking.status) ? "var(--color-error, #ef4444)" : "var(--text-muted, #94a3b8)",
-                          fontSize: 12,
-                          fontWeight: 500,
-                          cursor: CANCELLABLE_STATUSES.includes(booking.status) && !cancelPendingForRow ? "pointer" : "not-allowed",
-                          opacity: CANCELLABLE_STATUSES.includes(booking.status) && !cancelPendingForRow ? 1 : 0.5,
-                        }}
+                        className="btn-ghost text-xs h-8 px-2"
+                        style={{ color: "var(--accent)" }}
                       >
                         {cancelPendingForRow ? "Cancelling…" : "Cancel"}
                       </button>
@@ -848,17 +708,7 @@ function BookingStatusBadge({ status }: { status: string }) {
   const c = config[status] ?? { label: status, color: "#6b7280", bg: "#f3f4f6" };
 
   return (
-    <span
-      style={{
-        display: "inline-block",
-        padding: "2px 8px",
-        borderRadius: 4,
-        fontSize: 11,
-        fontWeight: 600,
-        color: c.color,
-        backgroundColor: c.bg,
-      }}
-    >
+    <span className="pill-soft text-xs font-bold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.bg }}>
       {c.label}
     </span>
   );

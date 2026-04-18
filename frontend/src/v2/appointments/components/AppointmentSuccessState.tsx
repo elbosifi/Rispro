@@ -17,21 +17,33 @@ interface Props {
 
 export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCreateAnother, onViewDetails }: Props) {
   return (
-    <div style={{ border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 10, padding: 16 }}>
-      <h3 style={{ margin: 0, color: "#15803d", fontSize: 16 }}>Appointment Created Successfully</h3>
-      <div style={{ marginTop: 8, fontSize: 13, color: "#166534" }}>
-        <div>Patient: {appointmentSummary.patientName}</div>
-        <div>Date: {appointmentSummary.bookingDate}</div>
-        <div>Modality: {appointmentSummary.modalityName}</div>
-        <div>Exam Type: {appointmentSummary.examTypeName || "—"}</div>
-        <div>Mode: {appointmentSummary.wasOverride ? "Supervisor override" : "Standard"}</div>
+    <div className="card-shell p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
+      <h3 className="text-lg font-bold mb-4" style={{ color: "var(--green)" }}>
+        Appointment Created Successfully
+      </h3>
+      <div className="space-y-2 mb-6">
+        <div className="text-sm" style={{ color: "var(--text)" }}>
+          <span className="font-bold">Patient:</span> {appointmentSummary.patientName}
+        </div>
+        <div className="text-sm" style={{ color: "var(--text)" }}>
+          <span className="font-bold">Date:</span> {appointmentSummary.bookingDate}
+        </div>
+        <div className="text-sm" style={{ color: "var(--text)" }}>
+          <span className="font-bold">Modality:</span> {appointmentSummary.modalityName}
+        </div>
+        <div className="text-sm" style={{ color: "var(--text)" }}>
+          <span className="font-bold">Exam Type:</span> {appointmentSummary.examTypeName || "—"}
+        </div>
+        <div className="text-sm" style={{ color: "var(--text)" }}>
+          <span className="font-bold">Mode:</span> {appointmentSummary.wasOverride ? "Supervisor override" : "Standard"}
+        </div>
       </div>
-      <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button type="button" onClick={onPrintSlip}>Print Slip</button>
-        <button type="button" onClick={onViewDetails}>View Details</button>
-        <button type="button" onClick={onCreateAnother}>Create Another</button>
+      <div className="flex flex-wrap gap-4 mb-6">
+        <button type="button" className="btn-secondary" onClick={onPrintSlip}>Print Slip</button>
+        <button type="button" className="btn-secondary" onClick={onViewDetails}>View Details</button>
+        <button type="button" className="btn-primary" onClick={onCreateAnother}>Create Another</button>
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div>
         <RequestDocumentsPanel
           appointmentId={appointmentSummary.bookingId}
           patientId={appointmentSummary.patientId}

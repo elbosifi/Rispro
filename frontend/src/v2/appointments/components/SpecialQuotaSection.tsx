@@ -34,15 +34,15 @@ export function SpecialQuotaSection({
   if (!supervisorMode) return null;
 
   return (
-    <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 12 }}>
-      <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+    <div className="card-shell p-4">
+      <label className="block text-xs uppercase tracking-[0.08em] mb-3 font-mono-data" style={{ color: "var(--text-muted)" }}>
         Capacity Resolution Action (Supervisor)
       </label>
       <select
         aria-label="Capacity Resolution Action"
         value={capacityResolutionMode}
         onChange={(e) => onChangeCapacityResolutionMode(e.target.value as CapacityResolutionMode)}
-        style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+        className="input-premium"
       >
         <option value="standard">Standard booking (normal capacity rules)</option>
         <option value="category_override">Override category reserve (stay within daily total)</option>
@@ -51,45 +51,48 @@ export function SpecialQuotaSection({
         </option>
       </select>
       {!specialQuotaAvailable && (
-        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+        <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
           Special quota extra slot unavailable for selected exam type.
         </div>
       )}
       {categoryOverrideEnabled && (
-        <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+        <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
           Category reserve bypass only. Modality daily total remains a hard ceiling.
         </div>
       )}
-      <div style={{ marginTop: 6, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+      <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
         Special reason is justification/audit metadata only; it is not an independent policy bypass.
       </div>
 
       {specialQuotaEnabled && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8, marginTop: 10 }}>
+        <div className="space-y-3 mt-4">
           <select
             aria-label="Special Reason"
             value={specialReasonCode}
             onChange={(e) => onChangeSpecialReasonCode(e.target.value)}
-            style={{ padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+            className="input-premium"
           >
             <option value="">Select special reason (required)...</option>
             {options.filter((o) => o.isActive !== false).map((o) => (
               <option key={o.code} value={o.code}>{o.labelEn || o.code}</option>
             ))}
           </select>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+          <label className="flex items-center gap-2 cursor-pointer user-select-none">
             <input
               type="checkbox"
               checked={specialReasonConfirmed}
               onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
+              className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
             />
-            I confirm the selected special reason is correct
+            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+              I confirm the selected special reason is correct
+            </span>
           </label>
           <input
             value={specialReasonNote}
             onChange={(e) => onChangeSpecialReasonNote(e.target.value)}
             placeholder="Optional note"
-            style={{ padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+            className="input-premium"
           />
         </div>
       )}

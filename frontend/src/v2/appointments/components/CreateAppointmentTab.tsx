@@ -391,52 +391,62 @@ export function CreateAppointmentTab({
 
   if (success) {
     return (
-      <AppointmentSuccessState
-        appointmentSummary={success}
-        onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}&autoprint=1`)}
-        onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
-        onCreateAnother={() => {
-          setSuccess(null);
-          actions.clearAfterSuccess();
-          setAvailabilitySelectedRow(null);
-          setPageError(null);
-          setSafetyAcknowledged(false);
-          setShowSafetyModal(false);
-        }}
-      />
+      <div className="max-w-2xl mx-auto">
+        <AppointmentSuccessState
+          appointmentSummary={success}
+          onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}&autoprint=1`)}
+          onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
+          onCreateAnother={() => {
+            setSuccess(null);
+            actions.clearAfterSuccess();
+            setAvailabilitySelectedRow(null);
+            setPageError(null);
+            setSafetyAcknowledged(false);
+            setShowSafetyModal(false);
+          }}
+        />
+      </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <div
-        style={{
-          border: "1px solid var(--border-color, #e2e8f0)",
-          borderRadius: 10,
-          padding: 12,
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: 8,
-          fontSize: 12,
-          background: "var(--bg-surface, #f8fafc)",
-        }}
-      >
-        <div><strong>Patient:</strong> {form.patient?.englishFullName ?? form.patient?.arabicFullName ?? "—"}</div>
-        <div><strong>Modality:</strong> {selectedModality?.name ?? "—"}</div>
-        <div><strong>Exam Type:</strong> {effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</div>
-        <div><strong>Category:</strong> {form.caseCategory === "oncology" ? "Oncology" : "Non-oncology"}</div>
-        <div><strong>Date:</strong> {form.appointmentDate || "—"}</div>
-        <div>
-          <strong>Exam mix:</strong>{" "}
-          {primaryExamMixBlocking
-            ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
-            : "No matching group"}
+    <div className="space-y-6">
+      <div className="card-shell p-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Patient:</span>{" "}
+            <span style={{ color: "var(--text)" }}>{form.patient?.englishFullName ?? form.patient?.arabicFullName ?? "—"}</span>
+          </div>
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Modality:</span>{" "}
+            <span style={{ color: "var(--text)" }}>{selectedModality?.name ?? "—"}</span>
+          </div>
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Exam Type:</span>{" "}
+            <span style={{ color: "var(--text)" }}>{effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</span>
+          </div>
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Category:</span>{" "}
+            <span style={{ color: "var(--text)" }}>{form.caseCategory === "oncology" ? "Oncology" : "Non-oncology"}</span>
+          </div>
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Date:</span>{" "}
+            <span style={{ color: "var(--text)" }}>{form.appointmentDate || "—"}</span>
+          </div>
+          <div>
+            <span className="font-bold" style={{ color: "var(--text-muted)" }}>Exam mix:</span>{" "}
+            <span style={{ color: "var(--text)" }}>
+              {primaryExamMixBlocking
+                ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
+                : "No matching group"}
+            </span>
+          </div>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(0, 1fr)", gap: 16 }}>
-        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16 }}>
-          <h3 style={{ marginTop: 0, marginBottom: 12, fontSize: 16 }}>Evaluated Availability</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card-shell p-4">
+          <h3 className="text-lg font-bold mb-4 text-embossed" style={{ color: "var(--text)" }}>Evaluated Availability</h3>
           <AvailabilityPanel
             rows={availability.rows}
             selectedDate={form.appointmentDate}
@@ -466,160 +476,191 @@ export function CreateAppointmentTab({
           />
         </div>
 
-        <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 10, padding: 16, display: "grid", gap: 12, position: "sticky", top: 12, alignSelf: "start", maxHeight: "calc(100vh - 24px)", overflow: "auto" }}>
-        <PatientSearchSection
-          value={form.patient}
-          onSelectPatient={(patient: SelectedPatient) => {
-            actions.setPatient(patient);
-            setAvailabilitySelectedRow(null);
-            setPageError(null);
-            setSafetyAcknowledged(false);
-            setShowSafetyModal(false);
-          }}
-          onClearPatient={() => {
-            actions.setPatient(null);
-            setAvailabilitySelectedRow(null);
-            setPageError(null);
-            setSafetyAcknowledged(false);
-            setShowSafetyModal(false);
-          }}
-        />
+        <div className="card-shell p-4 lg:sticky lg:top-4 h-fit">
+          <PatientSearchSection
+            value={form.patient}
+            onSelectPatient={(patient: SelectedPatient) => {
+              actions.setPatient(patient);
+              setAvailabilitySelectedRow(null);
+              setPageError(null);
+              setSafetyAcknowledged(false);
+              setShowSafetyModal(false);
+            }}
+            onClearPatient={() => {
+              actions.setPatient(null);
+              setAvailabilitySelectedRow(null);
+              setPageError(null);
+              setSafetyAcknowledged(false);
+              setShowSafetyModal(false);
+            }}
+          />
 
-        <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
-        {form.patientId != null && (
-          <div style={{ border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 8, padding: 10, background: "#fff7ed" }}>
-            <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>Previous No-Shows / Cancelled</div>
-            {noShowLoading ? (
-              <div style={{ fontSize: 12, color: "#9a3412" }}>Loading no-show history...</div>
-            ) : patientNoShows.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#9a3412" }}>No previous no-shows.</div>
-            ) : (
-              <ul style={{ margin: 0, paddingInlineStart: 18, fontSize: 12, color: "#7c2d12" }}>
-                {patientNoShows.map((item) => (
-                  <li key={item.id} style={{ marginBottom: 4 }}>
-                    {item.appointmentDate} — {item.examTypeName} ({item.status})
-                  </li>
+          <div className="mt-4">
+            <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
+          </div>
+
+          {form.patientId != null && patientNoShows.length > 0 && (
+            <div className="card-shell p-4 mt-4" style={{ background: "rgba(245, 158, 11, 0.1)" }}>
+              <div className="text-xs uppercase tracking-[0.08em] font-bold mb-2" style={{ color: "var(--amber)" }}>
+                Previous No-Shows / Cancelled
+              </div>
+              {noShowLoading ? (
+                <div className="text-sm" style={{ color: "var(--amber)" }}>Loading no-show history...</div>
+              ) : (
+                <ul className="space-y-1">
+                  {patientNoShows.map((item) => (
+                    <li key={item.id} className="text-sm font-mono-data" style={{ color: "var(--text-muted)" }}>
+                      {item.appointmentDate} — {item.examTypeName} ({item.status})
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-4 mt-4">
+            <ModalitySelect
+              options={modalityOptions}
+              value={form.modalityId}
+              onChange={(value) => {
+                actions.setModalityId(value);
+                setAvailabilitySelectedRow(null);
+                setSafetyAcknowledged(false);
+                setShowSafetyModal(false);
+              }}
+              disabled={!schedulingEngineEnabled || !form.patientId}
+            />
+
+            <ExamTypeSelect
+              options={effectiveExamTypes}
+              value={form.examTypeId}
+              onChange={(value) => {
+                actions.setExamTypeId(value);
+                setAvailabilitySelectedRow(null);
+              }}
+              disabled={!schedulingEngineEnabled || !form.modalityId}
+            />
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+                Case Category
+              </label>
+              <select
+                aria-label="Case Category"
+                value={form.caseCategory}
+                onChange={(e) => actions.setCaseCategory(e.target.value as "oncology" | "non_oncology")}
+                className="input-premium"
+              >
+                <option value="non_oncology">Non-Oncology</option>
+                <option value="oncology">Oncology</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+                Priority
+              </label>
+              <select
+                aria-label="Priority"
+                value={form.reportingPriorityId ?? ""}
+                onChange={(e) => actions.setReportingPriorityId(e.target.value ? Number(e.target.value) : null)}
+                className="input-premium"
+              >
+                <option value="" hidden>Routine (default)</option>
+                {filteredPriorityOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.nameEn}</option>
                 ))}
-              </ul>
+              </select>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer user-select-none">
+              <input
+                type="checkbox"
+                id="isWalkIn"
+                checked={form.isWalkIn}
+                onChange={(e) => actions.setIsWalkIn(e.target.checked)}
+                className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
+              />
+              <span className="text-sm" style={{ color: "var(--text)" }}>Walk-in patient</span>
+            </label>
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+                Appointment Date
+              </label>
+              <input
+                aria-label="Appointment Date"
+                type="date"
+                value={form.appointmentDate}
+                onChange={(e) => actions.setAppointmentDate(e.target.value, form.overrideRequired)}
+                className="input-premium"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+                Notes
+              </label>
+              <textarea
+                value={form.notes}
+                onChange={(e) => actions.setNotes(e.target.value)}
+                rows={3}
+                className="input-premium"
+              />
+            </div>
+
+            <SpecialQuotaSection
+              capacityResolutionMode={form.capacityResolutionMode}
+              onChangeCapacityResolutionMode={(mode) => {
+                if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
+                actions.setCapacityResolutionMode(mode);
+              }}
+              specialQuotaAvailable={hasSpecialQuotaAvailable}
+              supervisorMode={canUseNonStandardCapacityModes}
+              specialReasonCode={form.specialReasonCode}
+              onChangeSpecialReasonCode={actions.setSpecialReasonCode}
+              specialReasonConfirmed={form.specialReasonConfirmed}
+              onChangeSpecialReasonConfirmed={actions.setSpecialReasonConfirmed}
+              specialReasonNote={form.specialReasonNote}
+              onChangeSpecialReasonNote={actions.setSpecialReasonNote}
+              options={specialReasonOptions}
+            />
+
+            {form.overrideRequired && (
+              <div className="text-sm font-mono-data" style={{ color: "var(--amber)" }}>
+                Selected date requires supervisor override.
+              </div>
             )}
+
+            {pageError && (
+              <div className="card-shell p-3" style={{ background: "rgba(255, 71, 87, 0.1)", color: "var(--accent)" }}>
+                <span className="text-sm">{pageError}</span>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-4 pt-2">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  actions.resetAll();
+                  setSafetyAcknowledged(false);
+                  setShowSafetyModal(false);
+                }}
+                disabled={submitLoading}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                className="btn-primary"
+                onClick={runSubmitFlow}
+                disabled={submitLoading || !schedulingEngineEnabled}
+              >
+                {submitLoading ? "Creating..." : "Create Appointment"}
+              </button>
+            </div>
           </div>
-        )}
-
-        <ModalitySelect
-          options={modalityOptions}
-          value={form.modalityId}
-          onChange={(value) => {
-            actions.setModalityId(value);
-            setAvailabilitySelectedRow(null);
-            setSafetyAcknowledged(false);
-            setShowSafetyModal(false);
-          }}
-          disabled={!schedulingEngineEnabled || !form.patientId}
-        />
-
-        <ExamTypeSelect
-          options={effectiveExamTypes}
-          value={form.examTypeId}
-          onChange={(value) => {
-            actions.setExamTypeId(value);
-            setAvailabilitySelectedRow(null);
-          }}
-          disabled={!schedulingEngineEnabled || !form.modalityId}
-        />
-
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Case Category</label>
-          <select
-            aria-label="Case Category"
-            value={form.caseCategory}
-            onChange={(e) => actions.setCaseCategory(e.target.value as "oncology" | "non_oncology")}
-            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
-          >
-            <option value="non_oncology">Non-Oncology</option>
-            <option value="oncology">Oncology</option>
-          </select>
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Priority</label>
-          <select
-            aria-label="Priority"
-            value={form.reportingPriorityId ?? ""}
-            onChange={(e) => actions.setReportingPriorityId(e.target.value ? Number(e.target.value) : null)}
-            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
-          >
-            <option value="" hidden>Routine (default)</option>
-            {filteredPriorityOptions.map((p) => (
-              <option key={p.id} value={p.id}>{p.nameEn}</option>
-            ))}
-          </select>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            id="isWalkIn"
-            checked={form.isWalkIn}
-            onChange={(e) => actions.setIsWalkIn(e.target.checked)}
-            style={{ width: 16, height: 16 }}
-          />
-          <label htmlFor="isWalkIn" style={{ fontSize: 13 }}>Walk-in patient</label>
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Appointment Date</label>
-          <input
-            aria-label="Appointment Date"
-            type="date"
-            value={form.appointmentDate}
-            onChange={(e) => actions.setAppointmentDate(e.target.value, form.overrideRequired)}
-            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
-          />
-        </div>
-
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Notes</label>
-          <textarea
-            value={form.notes}
-            onChange={(e) => actions.setNotes(e.target.value)}
-            rows={3}
-            style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
-          />
-        </div>
-
-        <SpecialQuotaSection
-          capacityResolutionMode={form.capacityResolutionMode}
-          onChangeCapacityResolutionMode={(mode) => {
-            if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
-            actions.setCapacityResolutionMode(mode);
-          }}
-          specialQuotaAvailable={hasSpecialQuotaAvailable}
-          supervisorMode={canUseNonStandardCapacityModes}
-          specialReasonCode={form.specialReasonCode}
-          onChangeSpecialReasonCode={actions.setSpecialReasonCode}
-          specialReasonConfirmed={form.specialReasonConfirmed}
-          onChangeSpecialReasonConfirmed={actions.setSpecialReasonConfirmed}
-          specialReasonNote={form.specialReasonNote}
-          onChangeSpecialReasonNote={actions.setSpecialReasonNote}
-          options={specialReasonOptions}
-        />
-
-        {form.overrideRequired && (
-          <div style={{ fontSize: 12, color: "#b45309" }}>Selected date requires supervisor override.</div>
-        )}
-
-        {pageError && (
-          <div style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #fecaca", background: "#fef2f2", color: "#dc2626", fontSize: 12 }}>
-            {pageError}
-          </div>
-        )}
-
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={() => { actions.resetAll(); setSafetyAcknowledged(false); setShowSafetyModal(false); }} disabled={submitLoading}>Reset</button>
-          <button type="button" onClick={runSubmitFlow} disabled={submitLoading || !schedulingEngineEnabled}>
-            {submitLoading ? "Creating..." : "Create Appointment"}
-          </button>
-        </div>
         </div>
       </div>
 
@@ -635,24 +676,25 @@ export function CreateAppointmentTab({
       />
 
       {showSafetyModal && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}
-        >
-          <div style={{ background: "white", borderRadius: 12, padding: 24, maxWidth: 400, boxShadow: "0 25px 50px -12px rgba(0,0,0,0.25)" }}>
-            <h3 style={{ fontSize: 18, fontWeight: 600, color: "#b45309", marginBottom: 12 }}>Safety Confirmation</h3>
-            <p style={{ fontSize: 14, color: "#b45309", marginBottom: 16 }}>{safetyMessage}</p>
-            <p style={{ fontSize: 14, color: "#444", marginBottom: 20 }}>Have you confirmed this patient has no contraindications for {selectedModality?.name}?</p>
-            <div style={{ display: "flex", gap: 12 }}>
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
+          <div className="card-shell p-6 max-w-md">
+            <h3 className="text-lg font-bold mb-4" style={{ color: "var(--amber)" }}>Safety Confirmation</h3>
+            <p className="text-sm mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
+            <p className="text-sm mb-6" style={{ color: "var(--text)" }}>
+              Have you confirmed this patient has no contraindications for {selectedModality?.name}?
+            </p>
+            <div className="flex gap-4">
               <button
                 type="button"
+                className="btn-secondary flex-1"
                 onClick={() => setShowSafetyModal(false)}
-                style={{ flex: 1, padding: "10px 16px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer" }}
               >
                 Cancel
               </button>
               <button
                 type="button"
+                className="btn-primary flex-1"
+                style={{ background: "var(--amber)" }}
                 onClick={async () => {
                   setSafetyAcknowledged(true);
                   setShowSafetyModal(false);
@@ -669,7 +711,6 @@ export function CreateAppointmentTab({
                     }
                   }
                 }}
-                style={{ flex: 1, padding: "10px 16px", borderRadius: 8, border: "none", background: "#f59e0b", color: "#fff", fontWeight: 600, cursor: "pointer" }}
               >
                 Confirm
               </button>

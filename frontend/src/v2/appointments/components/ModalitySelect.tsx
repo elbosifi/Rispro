@@ -10,13 +10,15 @@ interface Props {
 export function ModalitySelect({ options, value, onChange, disabled }: Props) {
   return (
     <div>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Modality</label>
+      <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+        Modality
+      </label>
       <select
         aria-label="Modality"
         value={value ?? ""}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
-        style={{ width: "100%", padding: "8px 10px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+        className="input-premium"
       >
         <option value="">Select modality...</option>
         {options.filter((m) => m.isActive).map((m) => (

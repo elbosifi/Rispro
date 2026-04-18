@@ -33,26 +33,26 @@ export function AvailabilityPanel({
   const visibleRows = showFullDays ? rows : rows.filter((row) => row.status !== "full");
 
   if (loading) {
-    return <div style={{ color: "var(--text-muted, #64748b)" }}>Loading evaluated availability...</div>;
+    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading evaluated availability...</div>;
   }
 
   if (rows.length === 0) {
-    return <div style={{ color: "var(--text-muted, #64748b)" }}>{emptyMessage}</div>;
+    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" onClick={onPreviousPage} disabled={!canGoPrevious}>
+    <div className="space-y-4">
+      <div className="flex flex-wrap gap-4 items-center justify-between">
+        <div className="flex gap-2 items-center">
+          <button type="button" onClick={onPreviousPage} disabled={!canGoPrevious} className="btn-ghost text-xs h-8 px-2">
             Previous slots
           </button>
-          <button type="button" onClick={onNextPage}>
+          <button type="button" onClick={onNextPage} className="btn-ghost text-xs h-8 px-2">
             Next slots
           </button>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <label style={{ fontSize: 12, fontWeight: 600 }}>
+        <div className="flex flex-wrap gap-2 items-center">
+          <label className="flex items-center gap-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
             Start date
           </label>
           <input
@@ -60,15 +60,15 @@ export function AvailabilityPanel({
             type="date"
             value={startDate}
             onChange={(event) => onChangeStartDate(event.target.value)}
-            style={{ padding: "6px 8px", border: "1px solid var(--border-color, #e2e8f0)", borderRadius: 6 }}
+            className="input-premium text-xs py-2 h-8 w-40"
           />
-          <button type="button" onClick={onToggleShowFullDays}>
+          <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
             {showFullDays ? "Hide full days" : "Show full days"}
           </button>
         </div>
       </div>
       {visibleRows.length === 0 ? (
-        <div style={{ color: "var(--text-muted, #64748b)", fontSize: 12 }}>
+        <div className="text-sm text-center" style={{ color: "var(--text-muted)" }}>
           No non-full days in this window. Click "Show full days" to view all dates.
         </div>
       ) : visibleRows.map((row) => (
