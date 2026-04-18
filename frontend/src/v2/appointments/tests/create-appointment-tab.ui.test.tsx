@@ -6,7 +6,16 @@ import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
 
-const mockFetchAppointments = vi.fn(async () => []);
+type MockNoShowAppointment = {
+  id: number;
+  appointmentDate: string;
+  examNameEn: string | null;
+  examNameAr: string | null;
+};
+
+const mockFetchAppointments = vi.fn<
+  (params: unknown) => Promise<MockNoShowAppointment[]>
+>(async () => []);
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
