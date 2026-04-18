@@ -437,6 +437,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
+    if (!isEdit && arabicNameParts.length < 3) {
+      showToast("Arabic full name must include at least 3 names before registering.", "error");
+      arabicFullNameRef.current?.focus();
+      return;
+    }
     const primaryCount = form.identifiers.filter((entry) => entry.isPrimary).length;
     if (primaryCount !== 1) {
       showToast("Exactly one primary identifier is required.", "error");

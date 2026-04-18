@@ -72,7 +72,7 @@ describe("PatientForm workflow hardening", () => {
     vi.mocked(fetchNameDictionary).mockResolvedValue({ entries: [] } as any);
     vi.mocked(searchPatients).mockResolvedValue([]);
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
-    vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد", mrn: "MRN-100" }));
+    vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد ثالث", mrn: "MRN-100" }));
     vi.mocked(fetchPatientById).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: true }));
     vi.mocked(updatePatient).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: false }));
     vi.mocked(deletePatient).mockResolvedValue({ ok: true });
@@ -82,7 +82,7 @@ describe("PatientForm workflow hardening", () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
 
-    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
@@ -110,7 +110,7 @@ describe("PatientForm workflow hardening", () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
 
-    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
     expect(await screen.findByText(/Sex is required/i)).toBeTruthy();
@@ -118,6 +118,20 @@ describe("PatientForm workflow hardening", () => {
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
     expect(await screen.findByText(/either Date of Birth or Age/i)).toBeTruthy();
+  });
+
+  it("blocks registering when Arabic full name has fewer than 3 names", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد علي");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "28");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/at least 3 names before registering/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
   });
 
   it("uses Enter for sequential navigation and does not submit early", async () => {
@@ -146,7 +160,7 @@ describe("PatientForm workflow hardening", () => {
     await user.type(phoneInput, "09123ab456789");
     expect(phoneInput.value).toBe("0912345678");
 
-    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "34");
     await user.click(screen.getByLabelText(/Estimated \(uncertain DOB\/age\)/i));
@@ -189,7 +203,7 @@ describe("PatientForm workflow hardening", () => {
     const primaryRadios = screen.getAllByLabelText(/Primary/i) as HTMLInputElement[];
     await user.click(primaryRadios[1]!);
 
-    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد");
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
