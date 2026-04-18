@@ -174,4 +174,31 @@ describe("PatientForm workflow hardening", () => {
     const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(updatePayload.demographicsEstimated).toBe(false);
   });
+
+  it("submits identifierType/identifierValue from the selected primary identifier row", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.selectOptions(screen.getByLabelText(/Identifier Type/i), "passport");
+    await user.type(screen.getByLabelText(/Passport Number/i), "FIRST123");
+
+    await user.click(screen.getByRole("button", { name: /Add identifier/i }));
+    const identifierInputs = screen.getAllByPlaceholderText(/Identifier value/i) as HTMLInputElement[];
+    await user.type(identifierInputs[1]!, "SECONDARY-PRIMARY");
+
+    const primaryRadios = screen.getAllByLabelText(/Primary/i) as HTMLInputElement[];
+    await user.click(primaryRadios[1]!);
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    await waitFor(() => expect(createPatient).toHaveBeenCalled());
+    const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, any>;
+    expect(payload.identifierType).toBe("other");
+    expect(payload.identifierValue).toBe("SECONDARY-PRIMARY");
+    expect(payload.identifiers.find((x: any) => x.isPrimary)?.value).toBe("SECONDARY-PRIMARY");
+  });
 });

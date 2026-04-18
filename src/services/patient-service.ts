@@ -395,20 +395,24 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
   const { rows } = await pool.query<PatientRow>(
     `
       select
-        id,
-        mrn,
-        national_id,
-        identifier_type,
-        identifier_value,
-        arabic_full_name,
-        english_full_name,
-        age_years,
-        demographics_estimated,
-        sex,
-        phone_1,
-        phone_2,
-        address,
-        estimated_date_of_birth,
+        p.id,
+        p.mrn,
+        case
+          when coalesce(primary_identifier.identifier_type, p.identifier_type) = 'national_id'
+            then coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id)
+          else null
+        end as national_id,
+        coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
+        coalesce(primary_identifier.identifier_value, p.identifier_value) as identifier_value,
+        p.arabic_full_name,
+        p.english_full_name,
+        p.age_years,
+        p.demographics_estimated,
+        p.sex,
+        p.phone_1,
+        p.phone_2,
+        p.address,
+        p.estimated_date_of_birth,
         (
           select coalesce(json_agg(json_build_object(
             'id', pi.id,
@@ -420,10 +424,20 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
           ) order by pi.is_primary desc, pi.id asc), '[]'::json)
           from patient_identifiers pi
           join patient_identifier_types pit on pit.id = pi.identifier_type_id
-          where pi.patient_id = patients.id
+          where pi.patient_id = p.id
         ) as identifiers
-      from patients
-      where id = $1
+      from patients p
+      left join lateral (
+        select
+          pit.code as identifier_type,
+          pi.value as identifier_value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = p.id
+        order by pi.is_primary desc, pi.id asc
+        limit 1
+      ) as primary_identifier on true
+      where p.id = $1
       limit 1
     `,
     [cleanPatientId]
@@ -469,9 +483,13 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     select distinct
       p.id,
       p.mrn,
-      p.national_id,
-      p.identifier_type,
-      p.identifier_value,
+      case
+        when coalesce(primary_identifier.identifier_type, p.identifier_type) = 'national_id'
+          then coalesce(primary_identifier.identifier_value, p.identifier_value, p.national_id)
+        else null
+      end as national_id,
+      coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
+      coalesce(primary_identifier.identifier_value, p.identifier_value) as identifier_value,
       p.arabic_full_name,
       p.english_full_name,
       p.age_years,
@@ -482,6 +500,16 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       p.address,
       p.estimated_date_of_birth
     from patients p
+    left join lateral (
+      select
+        pit.code as identifier_type,
+        pi.value as identifier_value
+      from patient_identifiers pi
+      join patient_identifier_types pit on pit.id = pi.identifier_type_id
+      where pi.patient_id = p.id
+      order by pi.is_primary desc, pi.id asc
+      limit 1
+    ) as primary_identifier on true
     left join patient_identifiers pi on pi.patient_id = p.id
     where
       $1 = ''
