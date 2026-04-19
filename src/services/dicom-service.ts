@@ -85,6 +85,7 @@ export interface WorklistAppointmentRow {
   accession_number: string;
   appointment_date: string;
   status: AppointmentStatus;
+  scheduled_station_ae_title: string | null;
   exam_name_ar: string | null;
   exam_name_en: string | null;
   modality_name_ar: string;
@@ -162,7 +163,7 @@ export interface FindDicomDeviceParams {
 export interface WorklistManifestFile {
   manifestPath: string;
   dumpPath: string;
-  deviceId: number;
+  deviceId: number | null;
 }
 
 export interface WorklistSyncResult {
@@ -206,6 +207,13 @@ interface LogPatch {
   errorMessage?: string;
   deviceId?: number | null;
   appointmentId?: number | null;
+}
+
+interface WorklistDatasetContext {
+  deviceId: number | null;
+  scheduledStationAeTitle: string;
+  stationName: string;
+  stationLocation: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +372,10 @@ function buildSequenceDump(tag: string, lines: string[]): string[] {
   ];
 }
 
+function normalizeAeTitle(value: unknown): string {
+  return normalizeOptionalText(value).toUpperCase();
+}
+
 function mapAppointmentToScheduledProcedureStepStatus(status: string): string {
   if (status === APPOINTMENT_STATUS_ARRIVED || status === APPOINTMENT_STATUS_WAITING) {
     return "ARRIVED";
@@ -481,7 +493,13 @@ async function removeMatchingFiles(directory: string, prefix: string): Promise<v
 // Worklist file generation
 // ---------------------------------------------------------------------------
 
-function buildWorklistDump({ appointment, device }: { appointment: WorklistAppointmentRow; device: DicomDeviceRow }): string {
+export function buildWorklistDump({
+  appointment,
+  dataset
+}: {
+  appointment: WorklistAppointmentRow;
+  dataset: WorklistDatasetContext;
+}): string {
   const startDate = normalizeDateForDicom(appointment.appointment_date);
   const startTime = normalizeTimeForDicom("", "080000");
   const patientName = formatDicomPersonName(appointment.english_full_name || "", appointment.arabic_full_name);
@@ -490,19 +508,19 @@ function buildWorklistDump({ appointment, device }: { appointment: WorklistAppoi
     formatDicomString(appointment.modality_name_en || "", appointment.modality_name_ar || "") ||
     "Scheduled study";
   const requestedProcedureId = appointment.accession_number;
-  const scheduledProcedureStepId = `${appointment.accession_number}-${sanitizeFileToken(device.scheduled_station_ae_title)}`;
+  const scheduledProcedureStepId = `${appointment.accession_number}-${sanitizeFileToken(dataset.scheduledStationAeTitle)}`;
   const scheduledStatus = mapAppointmentToScheduledProcedureStepStatus(appointment.status);
 
   const scheduledProcedureStepSequence = buildSequenceDump("(0040,0100)", [
     `(0008,0060) CS ${quoteDicomValue(appointment.modality_code || "")}`,
-    `(0040,0001) AE ${quoteDicomValue(device.scheduled_station_ae_title)}`,
+    `(0040,0001) AE ${quoteDicomValue(dataset.scheduledStationAeTitle)}`,
     `(0040,0002) DA ${quoteDicomValue(startDate)}`,
     `(0040,0003) TM ${quoteDicomValue(startTime)}`,
     `(0040,0006) PN ${quoteDicomValue("")}`,
     `(0040,0007) LO ${quoteDicomValue(scheduledProcedureStepDescription(appointment))}`,
     `(0040,0009) SH ${quoteDicomValue(scheduledProcedureStepId)}`,
-    `(0040,0010) SH ${quoteDicomValue(formatDicomString(device.station_name))}`,
-    `(0040,0011) SH ${quoteDicomValue(formatDicomString(device.station_location))}`,
+    `(0040,0010) SH ${quoteDicomValue(formatDicomString(dataset.stationName))}`,
+    `(0040,0011) SH ${quoteDicomValue(formatDicomString(dataset.stationLocation))}`,
     `(0040,0020) CS ${quoteDicomValue(scheduledStatus)}`
   ]);
 
@@ -533,12 +551,29 @@ function scheduledProcedureStepDescription(appointment: WorklistAppointmentRow):
   );
 }
 
+function resolveWorklistDatasetContext(
+  appointment: WorklistAppointmentRow,
+  devices: DicomDeviceRow[],
+  gatewaySettings: Pick<GatewaySettings, "mwlAeTitle">
+): WorklistDatasetContext {
+  const appointmentStationAeTitle = normalizeAeTitle(appointment.scheduled_station_ae_title);
+  const scheduledStationAeTitle = appointmentStationAeTitle || normalizeAeTitle(gatewaySettings.mwlAeTitle);
+  const matchingDevice = devices.find((device) => normalizeAeTitle(device.scheduled_station_ae_title) === scheduledStationAeTitle) || null;
+
+  return {
+    deviceId: matchingDevice?.id ?? null,
+    scheduledStationAeTitle,
+    stationName: matchingDevice?.station_name || "",
+    stationLocation: matchingDevice?.station_location || ""
+  };
+}
+
 function buildWorklistManifest({
   appointment,
-  device
+  dataset
 }: {
   appointment: WorklistAppointmentRow;
-  device: DicomDeviceRow;
+  dataset: WorklistDatasetContext;
 }): UnknownRecord {
   return {
     appointmentId: appointment.id,
@@ -553,16 +588,45 @@ function buildWorklistManifest({
     appointmentDate: normalizeDateValue(appointment.appointment_date),
     appointmentStatus: appointment.status,
     scheduledProcedureStepStatus: mapAppointmentToScheduledProcedureStepStatus(appointment.status),
-    device: {
-      id: device.id,
-      name: device.device_name,
-      modalityAeTitle: device.modality_ae_title,
-      scheduledStationAeTitle: device.scheduled_station_ae_title,
-      stationName: device.station_name,
-      stationLocation: device.station_location,
-      sourceIp: device.source_ip
-    }
+    worklist: {
+      scheduledStationAeTitle: dataset.scheduledStationAeTitle,
+      stationName: dataset.stationName,
+      stationLocation: dataset.stationLocation
+    },
+    device: dataset.deviceId ? { id: dataset.deviceId } : null
   };
+}
+
+async function removeMatchingOutputFiles(outputDir: string, prefix: string): Promise<void> {
+  try {
+    const entries = await fs.readdir(outputDir, { withFileTypes: true });
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = path.join(outputDir, entry.name);
+
+        if (entry.isFile() && entry.name.startsWith(prefix)) {
+          await fs.rm(entryPath, { force: true });
+          return;
+        }
+
+        if (!entry.isDirectory()) {
+          return;
+        }
+
+        const files = await fs.readdir(entryPath).catch(() => []);
+        await Promise.all(
+          files
+            .filter((file) => file.startsWith(prefix))
+            .map((file) => fs.rm(path.join(entryPath, file), { force: true }))
+        );
+      })
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+  }
 }
 
 async function writeWorklistSourceFiles(
@@ -573,48 +637,26 @@ async function writeWorklistSourceFiles(
   const sourceDir = gatewaySettings.worklistSourceDir;
   const outputDir = gatewaySettings.worklistOutputDir;
   const sourcePrefix = `${sanitizeFileToken(appointment.accession_number)}--`;
+  const dataset = resolveWorklistDatasetContext(appointment, devices, gatewaySettings as GatewaySettings);
 
   await ensureDicomGatewayLayout(gatewaySettings as GatewaySettings);
   await removeMatchingFiles(sourceDir, sourcePrefix);
-  await removeMatchingFiles(outputDir, sourcePrefix);
+  await removeMatchingOutputFiles(outputDir, sourcePrefix);
 
-  if (!ACTIVE_WORKLIST_STATUSES.has(appointment.status) || !devices.length) {
+  if (!ACTIVE_WORKLIST_STATUSES.has(appointment.status)) {
     return { files: [], removedOnly: true, ok: true };
   }
 
-  const writtenFiles: WorklistManifestFile[] = [];
+  const fileStem = `${sourcePrefix}${sanitizeFileToken(dataset.scheduledStationAeTitle)}`;
+  const manifestPath = path.join(sourceDir, `${fileStem}.json`);
+  const dumpPath = path.join(sourceDir, `${fileStem}.dump`);
+  const manifest = buildWorklistManifest({ appointment, dataset });
+  const dump = buildWorklistDump({ appointment, dataset });
 
-  for (const device of devices) {
-    const fileStem = `${sourcePrefix}${sanitizeFileToken(device.scheduled_station_ae_title)}`;
-    const manifestPath = path.join(sourceDir, `${fileStem}.json`);
-    const dumpPath = path.join(sourceDir, `${fileStem}.dump`);
-    const manifest = buildWorklistManifest({ appointment, device });
-    const dump = buildWorklistDump({ appointment, device });
+  await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
+  await fs.writeFile(dumpPath, `${dump}\n`, "utf8");
 
-    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
-    await fs.writeFile(dumpPath, `${dump}\n`, "utf8");
-    writtenFiles.push({ manifestPath, dumpPath, deviceId: device.id });
-  }
-
-  return { files: writtenFiles, removedOnly: false, ok: true };
-}
-
-async function updateAppointmentStationAeTitle(
-  client: PoolClient,
-  appointmentId: number,
-  devices: DicomDeviceRow[]
-): Promise<void> {
-  const firstDevice = devices[0] || null;
-  await client.query(
-    `
-      update appointments
-      set
-        scheduled_station_ae_title = $2,
-        updated_at = now()
-      where id = $1
-    `,
-    [appointmentId, firstDevice ? firstDevice.scheduled_station_ae_title : null]
-  );
+  return { files: [{ manifestPath, dumpPath, deviceId: dataset.deviceId }], removedOnly: false, ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -937,7 +979,6 @@ export async function syncAppointmentWorklistSources(
     }
 
     const devices = await listDevicesForModality(client, appointment.modality_id);
-    await updateAppointmentStationAeTitle(client, appointment.id, devices);
     const result = await writeWorklistSourceFiles(appointment, devices, gatewaySettings);
     return result;
   } finally {

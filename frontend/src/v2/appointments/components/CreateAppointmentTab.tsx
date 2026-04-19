@@ -15,6 +15,7 @@ import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
+import { PatientSummaryCard } from "./PatientSummaryCard";
 import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
@@ -412,7 +413,7 @@ export function CreateAppointmentTab({
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Page Header */}
-      <div className="space-y-4 mb-8">
+      <div className="space-y-4 mb-6">
         <div className="flex items-center gap-4">
           <SectionLabel pulsing>APPOINTMENT SCHEDULING</SectionLabel>
         </div>
@@ -426,7 +427,7 @@ export function CreateAppointmentTab({
 
       {/* Appointment Summary Card */}
       <Card className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-1">
             <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Patient</span>
             <p className="text-lg font-medium">{form.patient?.englishFullName ?? form.patient?.arabicFullName ?? "—"}</p>
@@ -459,7 +460,7 @@ export function CreateAppointmentTab({
       </Card>
 
       {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Availability Panel */}
         <div className="space-y-4">
           <div className="flex items-center gap-4">
@@ -521,6 +522,10 @@ export function CreateAppointmentTab({
                 setShowSafetyModal(false);
               }}
             />
+
+            <div className="mt-6">
+              <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
+            </div>
 
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>

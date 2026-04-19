@@ -1,3 +1,4 @@
+// @ts-nocheck
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -20,6 +21,16 @@ const DEFAULTS = {
   dump2dcmCommand: "dump2dcm",
   pollMs: 3000
 };
+
+const REQUIRED_DUMP_TAGS = [
+  "(0040,0100)",
+  "(0008,0060)",
+  "(0040,0001)",
+  "(0040,0002)",
+  "(0040,0003)",
+  "(0040,0007)",
+  "(0040,0009)"
+];
 
 async function loadSettings() {
   // Try loading from running backend first
@@ -83,16 +94,8 @@ async function listDirectories(directory) {
   return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
 }
 
-function getAeTitleFromDumpFileName(fileName, fallbackAeTitle) {
-  const stem = fileName.replace(/\.dump$/i, "");
-  const separatorIndex = stem.lastIndexOf("--");
-
-  if (separatorIndex < 0) {
-    return fallbackAeTitle;
-  }
-
-  const aeTitle = stem.slice(separatorIndex + 2).trim();
-  return aeTitle || fallbackAeTitle;
+export function getOutputAeTitle(_fileName, fallbackAeTitle) {
+  return fallbackAeTitle;
 }
 
 function getOutputStem(fileName) {
@@ -108,6 +111,15 @@ async function ensureAeOutputLayout(aeOutputDir) {
   await fs.writeFile(path.join(aeOutputDir, "lockfile"), "", "utf8");
 }
 
+export async function validateDumpFile(sourcePath) {
+  const dumpContents = await fs.readFile(sourcePath, "utf8");
+  const missingTags = REQUIRED_DUMP_TAGS.filter((tag) => !dumpContents.includes(tag));
+  return {
+    ok: missingTags.length === 0,
+    missingTags
+  };
+}
+
 async function convertDumpFile(fileName, sourceDir, aeOutputDir, dump2dcmCommand) {
   const sourcePath = path.join(sourceDir, fileName);
   const targetPath = path.join(aeOutputDir, getOutputStem(fileName));
@@ -115,6 +127,12 @@ async function convertDumpFile(fileName, sourceDir, aeOutputDir, dump2dcmCommand
   try {
     const sourceStats = await fs.stat(sourcePath);
     const targetStats = await fs.stat(targetPath).catch(() => null);
+    const validation = await validateDumpFile(sourcePath);
+
+    if (!validation.ok) {
+      console.error(`Skipping ${fileName}: missing required MWL dump tags ${validation.missingTags.join(", ")}`);
+      return false;
+    }
 
     if (targetStats && targetStats.mtimeMs >= sourceStats.mtimeMs) {
       return false;
@@ -124,6 +142,9 @@ async function convertDumpFile(fileName, sourceDir, aeOutputDir, dump2dcmCommand
       timeout: 10000,
       maxBuffer: 1024 * 1024
     });
+
+    await fs.stat(targetPath);
+    console.log(`Converted ${fileName} -> ${targetPath}`);
 
     return true;
   } catch (error) {
@@ -149,13 +170,13 @@ async function removeLegacyFlatOutputFiles(outputDir) {
   await Promise.all(outputFiles.map((file) => fs.rm(path.join(outputDir, file), { force: true })));
 }
 
-async function runCycle(sourceDir, outputDir, dump2dcmCommand, fallbackAeTitle) {
+export async function runCycle(sourceDir, outputDir, dump2dcmCommand, fallbackAeTitle) {
   await ensureLayout(sourceDir, outputDir);
   const sourceFiles = await listFiles(sourceDir, ".dump");
   const filesByAeTitle = new Map();
 
   for (const fileName of sourceFiles) {
-    const aeTitle = getAeTitleFromDumpFileName(fileName, fallbackAeTitle);
+    const aeTitle = getOutputAeTitle(fileName, fallbackAeTitle);
     const aeOutputDir = getAeOutputDir(outputDir, aeTitle);
 
     if (!filesByAeTitle.has(aeTitle)) {
@@ -198,7 +219,19 @@ async function main() {
   }
 }
 
-main().catch((error) => {
-  console.error("DICOM worklist builder crashed.", error);
-  process.exit(1);
-});
+function isDirectExecution() {
+  const entryPath = process.argv[1];
+
+  if (!entryPath) {
+    return false;
+  }
+
+  return path.resolve(entryPath) === fileURLToPath(import.meta.url);
+}
+
+if (isDirectExecution()) {
+  main().catch((error) => {
+    console.error("DICOM worklist builder crashed.", error);
+    process.exit(1);
+  });
+}
