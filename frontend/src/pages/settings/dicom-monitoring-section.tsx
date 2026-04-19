@@ -106,6 +106,21 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   const tools = overview?.tools || { dump2dcm: {}, dcmdump: {} };
   const fileHealth = overview?.fileHealth || {};
   const deviceSummary = overview?.deviceSummary || {};
+  const mwlService = services.mwl;
+  const toolSummary = summarizeDicomTools(tools);
+  const sourceDir = fileHealth.sourceDir;
+  const outputDir = fileHealth.outputDir;
+  const gatewayStatusLabel = formatGatewayStatus(mwlService?.status || status.gatewayStatus, status.gatewayEnabled);
+  const gatewayStatusType = statusToType(mwlService?.status || status.gatewayStatus, status.gatewayEnabled);
+  const gatewayDetails = buildGatewayDetails({
+    gatewayEnabled: Boolean(status.gatewayEnabled),
+    bindHost: settings.bindHost,
+    mwlAeTitle: settings.mwlAeTitle,
+    mwlPort: settings.mwlPort,
+    pid: mwlService?.pid || status.gatewayPid || null,
+    lastError: mwlService?.lastError || status.gatewayLastError || null,
+    toolsDetected: Boolean(status.toolsDetected)
+  });
 
   return (
     <div className="space-y-4">
@@ -150,14 +165,9 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <StatusCard
               title="Gateway Status"
-              status={formatGatewayStatus(services.mwl?.status || status.gatewayStatus, status.gatewayEnabled)}
-              statusType={statusToType(services.mwl?.status || status.gatewayStatus, status.gatewayEnabled)}
-              details={[
-                `AE Title: ${settings.mwlAeTitle || "N/A"}`,
-                `Port: ${settings.mwlPort || "N/A"}`,
-                `PID: ${services.mwl?.pid || status.gatewayPid || "N/A"}`,
-                services.mwl?.lastError || status.gatewayLastError ? `Last error: ${services.mwl?.lastError || status.gatewayLastError}` : `Mode: ${status.gatewayEnabled ? "Enabled" : "Disabled"}`
-              ]}
+              status={gatewayStatusLabel}
+              statusType={gatewayStatusType}
+              details={gatewayDetails}
               actions={
                 status.gatewayEnabled
                   ? [
@@ -171,12 +181,9 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
 
             <StatusCard
               title="DICOM Tools"
-              status={tools.dump2dcm?.detected && tools.dcmdump?.detected ? "Detected" : "Not Detected"}
-              statusType={tools.dump2dcm?.detected && tools.dcmdump?.detected ? "success" : "warning"}
-              details={[
-                `dump2dcm: ${tools.dump2dcm?.detected ? tools.dump2dcm.path || "Yes" : "Missing"}`,
-                `dcmdump: ${tools.dcmdump?.detected ? tools.dcmdump.path || "Yes" : "Missing"}`
-              ]}
+              status={toolSummary.status}
+              statusType={toolSummary.type}
+              details={toolSummary.details}
             />
 
             <StatusCard
@@ -197,11 +204,14 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
               <ServiceStatusCard
                 serviceName="MWL SCP Server"
                 service={services.mwl}
+                gatewayEnabled={Boolean(status.gatewayEnabled)}
                 showControls={false}
               />
               <ServiceStatusCard
                 serviceName="Worklist Builder"
                 service={services.worklistBuilder}
+                gatewayEnabled={Boolean(status.gatewayEnabled)}
+                inactiveReason={tools.dump2dcm?.detected ? undefined : "Waiting for dump2dcm to be installed"}
                 showControls={false}
               />
             </div>
@@ -211,8 +221,18 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
           <div className="card-shell p-4 bg-stone-50 dark:bg-stone-800/50">
             <h4 className="text-sm font-semibold text-stone-900 dark:text-white mb-3">File System Health</h4>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-              <FileStat label="Source Files" count={fileHealth.sourceDir?.fileCount || 0} exists={fileHealth.sourceDir?.exists} />
-              <FileStat label="Output Files" count={fileHealth.outputDir?.fileCount || 0} exists={fileHealth.outputDir?.exists} />
+              <FileStat
+                label="Source Files"
+                count={sourceDir?.fileCount || 0}
+                exists={sourceDir?.exists}
+                path={sourceDir?.path}
+              />
+              <FileStat
+                label="Output Files"
+                count={outputDir?.fileCount || 0}
+                exists={outputDir?.exists}
+                path={outputDir?.path}
+              />
             </div>
             {(fileHealth.orphanedSourceFiles?.length > 0 || fileHealth.orphanedOutputFiles?.length > 0) && (
               <div className="mt-3 text-xs text-amber-700 dark:text-amber-400">
@@ -439,12 +459,13 @@ function StatusCard({
   );
 }
 
-function FileStat({ label, count, exists }: { label: string; count: number; exists?: boolean }) {
+function FileStat({ label, count, exists, path }: { label: string; count: number; exists?: boolean; path?: string }) {
   return (
     <div className={`p-2 rounded border ${exists ? "bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700" : "bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800"}`}>
       <div className="font-medium text-stone-900 dark:text-white">{label}</div>
       <div className="text-lg font-bold text-stone-700 dark:text-stone-300">{count}</div>
-      {!exists && <div className="text-xs text-red-600 dark:text-red-400">Missing</div>}
+      <div className="text-xs text-stone-500 dark:text-stone-400 break-all">{path || "Path unavailable"}</div>
+      {!exists && <div className="text-xs text-red-600 dark:text-red-400">Directory missing on server</div>}
     </div>
   );
 }
@@ -456,7 +477,9 @@ function ServiceStatusCard({
   onStop,
   onRestart,
   showControls = true,
-  isBusy = false
+  isBusy = false,
+  gatewayEnabled = true,
+  inactiveReason
 }: {
   serviceName: string;
   service: ServiceEntry | null;
@@ -465,16 +488,22 @@ function ServiceStatusCard({
   onRestart?: () => void;
   showControls?: boolean;
   isBusy?: boolean;
+  gatewayEnabled?: boolean;
+  inactiveReason?: string;
 }) {
   const statusColor: Record<string, string> = {
     running: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
     stopped: "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400",
     starting: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
     stopping: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
-    error: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+    error: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400",
+    disabled: "bg-stone-100 dark:bg-stone-700 text-stone-500 dark:text-stone-400"
   };
 
-  const statusLabel = service?.status || "unknown";
+  const statusLabel = gatewayEnabled ? service?.status || "unknown" : "disabled";
+  const helperText = !gatewayEnabled
+    ? "Disabled in settings"
+    : inactiveReason || (statusLabel === "unknown" ? "No process status reported yet" : undefined);
 
   return (
     <div className="p-3 rounded border bg-white dark:bg-stone-800 border-stone-200 dark:border-stone-700">
@@ -493,6 +522,10 @@ function ServiceStatusCard({
         <div className="text-xs text-red-600 dark:text-red-400 mb-2" title={service.lastError}>
           ⚠️ Error
         </div>
+      )}
+
+      {helperText && (
+        <div className="text-xs text-stone-500 dark:text-stone-400 mb-2">{helperText}</div>
       )}
 
       {showControls && (
@@ -553,6 +586,82 @@ function statusToType(status: string | undefined, enabled: boolean): "success" |
   if (status === "running") return "success";
   if (status === "error") return "error";
   return "warning";
+}
+
+function summarizeDicomTools(tools: any): {
+  status: string;
+  type: "success" | "warning" | "error";
+  details: string[];
+} {
+  const dump2dcmDetected = Boolean(tools.dump2dcm?.detected);
+  const dcmdumpDetected = Boolean(tools.dcmdump?.detected);
+
+  if (dump2dcmDetected && dcmdumpDetected) {
+    return {
+      status: "Installed",
+      type: "success",
+      details: [
+        `dump2dcm: ${tools.dump2dcm.path || "Detected"}`,
+        `dcmdump: ${tools.dcmdump.path || "Detected"}`
+      ]
+    };
+  }
+
+  const missingTools = [
+    !dump2dcmDetected ? "dump2dcm" : null,
+    !dcmdumpDetected ? "dcmdump" : null
+  ].filter(Boolean);
+
+  return {
+    status: missingTools.length === 2 ? "DCMTK tools missing" : "Tool setup incomplete",
+    type: "warning",
+    details: [
+      `dump2dcm: ${dump2dcmDetected ? tools.dump2dcm.path || "Detected" : "Not installed on server"}`,
+      `dcmdump: ${dcmdumpDetected ? tools.dcmdump.path || "Detected" : "Not installed on server"}`
+    ]
+  };
+}
+
+function buildGatewayDetails({
+  gatewayEnabled,
+  bindHost,
+  mwlAeTitle,
+  mwlPort,
+  pid,
+  lastError,
+  toolsDetected
+}: {
+  gatewayEnabled: boolean;
+  bindHost?: string;
+  mwlAeTitle?: string;
+  mwlPort?: number;
+  pid?: number | null;
+  lastError?: string | null;
+  toolsDetected?: boolean;
+}): string[] {
+  const details = [
+    `Bind: ${bindHost || "N/A"}:${mwlPort || "N/A"}`,
+    `AE Title: ${mwlAeTitle || "N/A"}`,
+    `PID: ${pid || "Not running"}`
+  ];
+
+  if (!gatewayEnabled) {
+    details.push("Gateway is disabled in DICOM settings");
+    return details;
+  }
+
+  if (!toolsDetected) {
+    details.push("MWL startup is blocked until DCMTK tools are installed");
+    return details;
+  }
+
+  if (lastError) {
+    details.push(`Last error: ${lastError}`);
+    return details;
+  }
+
+  details.push("Gateway is enabled and waiting for runtime status");
+  return details;
 }
 
 function QueryError({ message }: { message: string }) {
