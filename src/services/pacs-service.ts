@@ -3,6 +3,7 @@ import { createRequire } from "module";
 import { HttpError } from "../utils/http-error.js";
 import { validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
+import { getDefaultPacsNode, type PacsNodeRow } from "./pacs-node-service.js";
 import { loadSettingsMap } from "./settings-service.js";
 import type { UnknownRecord, OptionalUserId } from "../types/http.js";
 
@@ -13,6 +14,8 @@ const FALLBACK_DIMSE_SOURCE_IP = "127.0.0.1";
 const FALLBACK_DIMSE_SOURCE_PORT = 4006;
 const AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
+const PACS_FIND_QUERY_MODEL = "study-root";
+const PACS_QUERY_RETRIEVE_LEVEL = "STUDY";
 const DICOM_DATASET_KEYS = new Set([
   "00100020",
   "00100010",
@@ -53,6 +56,16 @@ export function __resetDimseModuleForTests(): void {
   dimse = null;
 }
 
+let getDefaultPacsNodeForSearch = getDefaultPacsNode;
+
+export function __setGetDefaultPacsNodeForTests(mockResolver: typeof getDefaultPacsNode): void {
+  getDefaultPacsNodeForSearch = mockResolver;
+}
+
+export function __resetGetDefaultPacsNodeForTests(): void {
+  getDefaultPacsNodeForSearch = getDefaultPacsNode;
+}
+
 export interface PacsFindResult {
   patientId?: string;
   patientName?: string;
@@ -88,6 +101,39 @@ export interface PacsSettings {
   calledAeTitle: string;
   callingAeTitle: string;
   timeoutSeconds: number;
+}
+
+function logFindNegotiationFailure({
+  host,
+  port,
+  calledAeTitle,
+  callingAeTitle,
+  timeoutSeconds,
+  criteria,
+  errorMessage,
+  rawResult
+}: {
+  host: string;
+  port: number;
+  calledAeTitle: string;
+  callingAeTitle: string;
+  timeoutSeconds: number;
+  criteria: StudySearchCriteria;
+  errorMessage: string;
+  rawResult?: unknown;
+}): void {
+  console.error("PACS C-FIND negotiation/query failed.", {
+    queryModel: PACS_FIND_QUERY_MODEL,
+    queryRetrieveLevel: PACS_QUERY_RETRIEVE_LEVEL,
+    host,
+    port,
+    calledAeTitle,
+    callingAeTitle,
+    timeoutSeconds,
+    criteria,
+    errorMessage,
+    rawResult
+  });
 }
 
 function parseEnabled(value: unknown): boolean {
@@ -459,7 +505,7 @@ function normalizePacsSettingsInput(input: UnknownRecord = {}): PacsSettings {
 
 function buildStudySearchTags(criteria: StudySearchCriteria): { key: string; value: string }[] {
   const tags = [
-    { key: "00080052", value: "STUDY" },
+    { key: "00080052", value: PACS_QUERY_RETRIEVE_LEVEL },
     { key: "00100010", value: criteria.patientName ? `*${criteria.patientName}*` : "" },
     { key: "00100020", value: criteria.patientId || "" },
     { key: "00080050", value: criteria.accessionNumber || "" },
@@ -521,6 +567,9 @@ async function runDimseFindScu({
         ip: host,
         port: Number(port)
       },
+      // The current native binding negotiates Study Root internally; we mirror the
+      // selected model here so diagnostics and any future wrapper upgrade stay explicit.
+      queryModel: PACS_FIND_QUERY_MODEL,
       tags: buildStudySearchTags(criteria),
       timeout: Number(timeoutSeconds),
       verbose: true
@@ -551,6 +600,16 @@ async function runDimseFindScu({
 
         if (isFailureDimseResult(parsed)) {
           const errorMessage = String(parsed?.error || parsed?.message || "PACS query failed.");
+          logFindNegotiationFailure({
+            host,
+            port: Number(port),
+            calledAeTitle,
+            callingAeTitle,
+            timeoutSeconds,
+            criteria,
+            errorMessage,
+            rawResult: parsed
+          });
           settleReject(new Error(errorMessage));
           return;
         }
@@ -559,6 +618,16 @@ async function runDimseFindScu({
         settleResolve((payload ?? []) as PacsFindResult[]);
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logFindNegotiationFailure({
+        host,
+        port: Number(port),
+        calledAeTitle,
+        callingAeTitle,
+        timeoutSeconds,
+        criteria,
+        errorMessage
+      });
       settleReject(error);
     }
   });
@@ -790,11 +859,23 @@ export async function testPacsConnection({
 // ---------------------------------------------------------------------------
 
 export interface PacsNodeForSearch {
+  id?: number;
+  name?: string;
   host: string;
   port: number | string;
   called_ae_title: string;
   calling_ae_title: string;
   timeout_seconds: number | string;
+}
+
+export async function resolveDefaultPacsNodeForSearch(): Promise<PacsNodeRow> {
+  const defaultNode = await getDefaultPacsNodeForSearch();
+
+  if (!defaultNode || !defaultNode.is_active) {
+    throw new HttpError(400, "No active default PACS node is configured.");
+  }
+
+  return defaultNode;
 }
 
 export async function searchPacsStudiesWithNode({

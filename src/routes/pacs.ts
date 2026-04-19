@@ -190,13 +190,15 @@ pacsRouter.post(
 
       res.json({ studies, node: { id: node.id, name: node.name } });
     } else {
-      // Use default node or legacy behavior
-      const studies = await searchPacsStudies({
+      const { resolveDefaultPacsNodeForSearch, searchPacsStudiesWithNode } = await import("../services/pacs-service.js");
+      const defaultNode = await resolveDefaultPacsNodeForSearch();
+      const studies = await searchPacsStudiesWithNode({
         criteria,
+        node: defaultNode,
         currentUserId: request.user.sub as UserId
       });
 
-      res.json({ studies });
+      res.json({ studies, node: { id: defaultNode.id, name: defaultNode.name } });
     }
   })
 );

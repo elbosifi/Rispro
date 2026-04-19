@@ -1,14 +1,18 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
+  __resetGetDefaultPacsNodeForTests,
+  __setGetDefaultPacsNodeForTests,
   __resetDimseModuleForTests,
   __setDimseModuleForTests,
   normalizeDimseStudyList,
+  resolveDefaultPacsNodeForSearch,
   testPacsConnection
 } from "./pacs-service.js";
 
 afterEach(() => {
   __resetDimseModuleForTests();
+  __resetGetDefaultPacsNodeForTests();
 });
 
 test("testPacsConnection rejects URL-like PACS hosts with a clear error", async () => {
@@ -90,4 +94,36 @@ test("normalizeDimseStudyList supports a single DICOM dataset object payload", (
       studyDate: "20260419"
     }
   ]);
+});
+
+test("resolveDefaultPacsNodeForSearch returns the active default PACS node", async () => {
+  __setGetDefaultPacsNodeForTests(async () => ({
+    id: 7,
+    name: "Default PACS",
+    host: "192.9.101.164",
+    port: 103,
+    called_ae_title: "OSIRIXR",
+    calling_ae_title: "RISPRO",
+    timeout_seconds: 10,
+    is_active: true,
+    is_default: true,
+    created_by_user_id: null,
+    updated_by_user_id: null,
+    created_at: "",
+    updated_at: ""
+  }));
+
+  const node = await resolveDefaultPacsNodeForSearch();
+  assert.equal(node.id, 7);
+  assert.equal(node.name, "Default PACS");
+  assert.equal(node.is_default, true);
+});
+
+test("resolveDefaultPacsNodeForSearch rejects when there is no active default PACS node", async () => {
+  __setGetDefaultPacsNodeForTests(async () => null);
+
+  await assert.rejects(
+    resolveDefaultPacsNodeForSearch(),
+    /No active default PACS node is configured/i
+  );
 });
