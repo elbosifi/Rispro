@@ -6,7 +6,8 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { Search, X } from "lucide-react";
+import { X } from "lucide-react";
+import { SearchInput } from "@/components/shared/SearchInput";
 import { searchPatients } from "@/lib/api-hooks";
 
 interface Patient {
@@ -111,9 +112,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
           alignItems: "center",
           justifyContent: "space-between",
           padding: "10px 14px",
-          borderRadius: 8,
-          backgroundColor: "var(--bg-success, #ecfdf5)",
-          border: "1px solid var(--border-success, #a7f3d0)",
+          borderRadius: "var(--radius-md)",
+          backgroundColor: "rgba(34, 197, 94, 0.1)",
+          border: "1px solid rgba(34, 197, 94, 0.3)",
         }}
       >
         <div>
@@ -146,46 +147,12 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
 
   return (
     <div style={{ position: "relative" }}>
-      <div style={{ position: "relative" }}>
-        <Search
-          size={16}
-          style={{
-            position: "absolute",
-            left: 10,
-            top: "50%",
-            transform: "translateY(-50%)",
-            color: "var(--text-muted, #64748b)",
-            pointerEvents: "none",
-          }}
-        />
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => handleSearch(e.target.value)}
-          placeholder="Search patient by name, national ID, or MRN…"
-          style={{
-            width: "100%",
-            padding: "8px 10px 8px 32px",
-            borderRadius: 6,
-            border: "1px solid var(--border-color, #e2e8f0)",
-            fontSize: 14,
-          }}
-        />
-        {isSearching && (
-          <div
-            style={{
-              position: "absolute",
-              right: 10,
-              top: "50%",
-              transform: "translateY(-50%)",
-              fontSize: 11,
-              color: "var(--text-muted, #64748b)",
-            }}
-          >
-            Searching…
-          </div>
-        )}
-      </div>
+      <SearchInput
+        value={query}
+        onChange={(e) => handleSearch(e.target.value)}
+        placeholder="Search patient by name, national ID, or MRN…"
+        isLoading={isSearching}
+      />
 
       {results.length > 0 && (
         <ul
@@ -200,10 +167,10 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
             margin: 0,
             padding: 0,
             listStyle: "none",
-            borderRadius: 6,
-            border: "1px solid var(--border-color, #e2e8f0)",
-            backgroundColor: "var(--bg-surface, #fff)",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border)",
+            backgroundColor: "var(--background)",
+            boxShadow: "var(--shadow-floating)",
           }}
         >
           {results.map((patient) => {
