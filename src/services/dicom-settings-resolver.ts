@@ -11,7 +11,7 @@ import { normalizeOptionalText } from "../utils/normalize.js";
 
 export const DICOM_GATEWAY_DEFAULTS: Record<string, unknown> = {
   enabled: "enabled",
-  bind_host: "127.0.0.1",
+  bind_host: "0.0.0.0",
   mwl_ae_title: "RISPRO_MWL",
   mwl_port: "11112",
   worklist_source_dir: "storage/dicom/worklist-source",

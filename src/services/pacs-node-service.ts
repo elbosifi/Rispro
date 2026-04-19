@@ -6,6 +6,40 @@ import { logAuditEntry } from "./audit-service.js";
 import type { UserId, UnknownRecord } from "../types/http.js";
 import type { DbNumeric } from "../types/db.js";
 
+const PACS_AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
+const PACS_HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
+
+function normalizePacsHost(value: unknown): string {
+  const host = normalizeOptionalText(value);
+
+  if (!host) {
+    throw new HttpError(400, "PACS node host is required.");
+  }
+
+  if (host.includes("://") || host.includes("/") || host.includes("?") || host.includes("#")) {
+    throw new HttpError(400, "PACS node host must be a bare hostname or IPv4 address, not a URL.");
+  }
+
+  const isIpv4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host);
+  const isHostname = PACS_HOSTNAME_PATTERN.test(host);
+
+  if (!isIpv4 && !isHostname) {
+    throw new HttpError(400, "PACS node host must be a valid IPv4 address or hostname.");
+  }
+
+  return host;
+}
+
+function normalizePacsAeTitle(value: unknown, fallback: string, fieldName: string): string {
+  const aeTitle = normalizeOptionalText(value)?.toUpperCase() || fallback;
+
+  if (!PACS_AE_TITLE_PATTERN.test(aeTitle)) {
+    throw new HttpError(400, `${fieldName} must be 1-16 chars using A-Z, 0-9, or underscore.`);
+  }
+
+  return aeTitle;
+}
+
 // ---------------------------------------------------------------------------
 // Type definitions
 // ---------------------------------------------------------------------------
@@ -106,10 +140,10 @@ export async function createPacsNode(
   currentUserId: UserId
 ): Promise<PacsNodeRow> {
   const name = normalizeOptionalText(payload.name);
-  const host = normalizeOptionalText(payload.host);
+  const host = normalizePacsHost(payload.host);
   const port = normalizePositiveInteger(payload.port, "port");
-  const calledAeTitle = normalizeOptionalText(payload.calledAeTitle)?.toUpperCase() || "PACS";
-  const callingAeTitle = normalizeOptionalText(payload.callingAeTitle)?.toUpperCase() || "RISPRO";
+  const calledAeTitle = normalizePacsAeTitle(payload.calledAeTitle, "PACS", "calledAeTitle");
+  const callingAeTitle = normalizePacsAeTitle(payload.callingAeTitle, "RISPRO", "callingAeTitle");
   const timeoutSeconds = normalizePositiveInteger(payload.timeoutSeconds, "timeoutSeconds") || 10;
   const isActive = String(payload.isActive ?? "enabled").trim().toLowerCase() !== "disabled";
   const isDefault = String(payload.isDefault ?? "disabled").trim().toLowerCase() !== "disabled";
@@ -183,10 +217,14 @@ export async function updatePacsNode(
 ): Promise<PacsNodeRow> {
   const cleanId = normalizePositiveInteger(nodeId, "nodeId");
   const name = normalizeOptionalText(payload.name);
-  const host = normalizeOptionalText(payload.host);
+  const host = payload.host !== undefined ? normalizePacsHost(payload.host) : undefined;
   const port = payload.port !== undefined ? normalizePositiveInteger(payload.port, "port") : undefined;
-  const calledAeTitle = payload.calledAeTitle !== undefined ? normalizeOptionalText(payload.calledAeTitle)?.toUpperCase() : undefined;
-  const callingAeTitle = payload.callingAeTitle !== undefined ? normalizeOptionalText(payload.callingAeTitle)?.toUpperCase() : undefined;
+  const calledAeTitle = payload.calledAeTitle !== undefined
+    ? normalizePacsAeTitle(payload.calledAeTitle, "PACS", "calledAeTitle")
+    : undefined;
+  const callingAeTitle = payload.callingAeTitle !== undefined
+    ? normalizePacsAeTitle(payload.callingAeTitle, "RISPRO", "callingAeTitle")
+    : undefined;
   const timeoutSeconds = payload.timeoutSeconds !== undefined ? normalizePositiveInteger(payload.timeoutSeconds, "timeoutSeconds") : undefined;
   const isActive = payload.isActive !== undefined ? String(payload.isActive).trim().toLowerCase() !== "disabled" : undefined;
   const isDefault = payload.isDefault !== undefined ? String(payload.isDefault).trim().toLowerCase() !== "disabled" : undefined;

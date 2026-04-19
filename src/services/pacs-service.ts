@@ -1,6 +1,5 @@
-import net from "net";
-import os from "os";
 import { pool } from "../db/pool.js";
+import { createRequire } from "module";
 import { HttpError } from "../utils/http-error.js";
 import { validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
@@ -9,14 +8,24 @@ import type { UnknownRecord, OptionalUserId } from "../types/http.js";
 
 // Lazy-load native DICOM module to prevent crash on platforms where it's not built
 let dimse: any = null;
+const require = createRequire(import.meta.url);
+const FALLBACK_DIMSE_SOURCE_IP = "127.0.0.1";
+const FALLBACK_DIMSE_SOURCE_PORT = 4006;
+const AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
+const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
 
 function getDimseModule() {
   if (!dimse) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      dimse = require("dicom-dimse-native").default;
+      const loadedModule = require("dicom-dimse-native");
+      dimse = loadedModule?.default ?? loadedModule;
     } catch {
       throw new HttpError(503, "DICOM native module not available. Please rebuild dicom-dimse-native for your platform.");
+    }
+
+    if (!dimse?.echoScu || !dimse?.findScu) {
+      throw new HttpError(503, "DICOM native module is installed but incomplete. Please rebuild dicom-dimse-native for your platform.");
     }
   }
   return dimse;
@@ -76,21 +85,9 @@ function normalizeAeTitle(value: unknown, fallback = ""): string {
   return String(value || fallback).trim().toUpperCase();
 }
 
-function getDimseSourceIp(): string {
-  const interfaces = os.networkInterfaces();
-
-  for (const addresses of Object.values(interfaces)) {
-    for (const address of addresses || []) {
-      if (address && address.family === "IPv4" && !address.internal) {
-        return address.address;
-      }
-    }
-  }
-
-  return "127.0.0.1";
-}
-
 async function reserveDimseSourcePort(host: string): Promise<number> {
+  const net = await import("net");
+
   return await new Promise<number>((resolve, reject) => {
     const server = net.createServer();
 
@@ -112,6 +109,58 @@ async function reserveDimseSourcePort(host: string): Promise<number> {
 
     server.listen({ host, port: 0, exclusive: true });
   });
+}
+
+function validateAeTitle(value: string, fieldName: string): string {
+  const aeTitle = normalizeAeTitle(value);
+
+  if (!aeTitle) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+
+  if (!AE_TITLE_PATTERN.test(aeTitle)) {
+    throw new HttpError(400, `${fieldName} must be 1-16 chars using A-Z, 0-9, or underscore.`);
+  }
+
+  return aeTitle;
+}
+
+function validatePacsHost(value: string): string {
+  const host = String(value || "").trim();
+
+  if (!host) {
+    throw new HttpError(400, "PACS host is required.");
+  }
+
+  if (host.includes("://") || host.includes("/") || host.includes("?") || host.includes("#")) {
+    throw new HttpError(400, "PACS host must be a bare hostname or IP address, not a URL.");
+  }
+
+  const isIpv4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(host);
+  const isHostname = HOSTNAME_PATTERN.test(host);
+
+  if (!isIpv4 && !isHostname) {
+    throw new HttpError(400, "PACS host must be a valid IPv4 address or hostname.");
+  }
+
+  return host;
+}
+
+async function getDimseSourceNode(callingAeTitle: string): Promise<{ aet: string; ip: string; port: number }> {
+  try {
+    const reservedPort = await reserveDimseSourcePort(FALLBACK_DIMSE_SOURCE_IP);
+    return {
+      aet: callingAeTitle,
+      ip: FALLBACK_DIMSE_SOURCE_IP,
+      port: reservedPort || FALLBACK_DIMSE_SOURCE_PORT
+    };
+  } catch {
+    return {
+      aet: callingAeTitle,
+      ip: FALLBACK_DIMSE_SOURCE_IP,
+      port: FALLBACK_DIMSE_SOURCE_PORT
+    };
+  }
 }
 
 function normalizeDateForDicom(value: unknown): string {
@@ -307,21 +356,31 @@ async function loadPacsSettings(): Promise<PacsSettings> {
 
   return {
     enabled,
-    host,
+    host: validatePacsHost(host),
     port,
-    calledAeTitle,
-    callingAeTitle,
+    calledAeTitle: validateAeTitle(calledAeTitle, "calledAeTitle"),
+    callingAeTitle: validateAeTitle(callingAeTitle, "callingAeTitle"),
     timeoutSeconds
   };
 }
 
 function normalizePacsSettingsInput(input: UnknownRecord = {}): PacsSettings {
+  const host = validatePacsHost(input.host);
+  const calledAeTitle = validateAeTitle(
+    normalizeAeTitle(input.calledAeTitle || input.called_ae_title),
+    "calledAeTitle"
+  );
+  const callingAeTitle = validateAeTitle(
+    normalizeAeTitle(input.callingAeTitle || input.calling_ae_title, "RISPRO"),
+    "callingAeTitle"
+  );
+
   return {
     enabled: parseEnabled(input.enabled || "enabled"),
-    host: String(input.host || "").trim(),
+    host,
     port: parsePositiveInteger(input.port, 104),
-    calledAeTitle: normalizeAeTitle(input.calledAeTitle || input.called_ae_title),
-    callingAeTitle: normalizeAeTitle(input.callingAeTitle || input.calling_ae_title, "RISPRO"),
+    calledAeTitle,
+    callingAeTitle,
     timeoutSeconds: parsePositiveInteger(input.timeoutSeconds || input.timeout_seconds, 10)
   };
 }
@@ -355,8 +414,8 @@ async function runDimseFindScu({
   callingAeTitle: string;
   timeoutSeconds: number;
 }): Promise<PacsFindResult[]> {
-  const sourceIp = getDimseSourceIp();
-  const sourcePort = await reserveDimseSourcePort(sourceIp);
+  const dimseModule = getDimseModule();
+  const source = await getDimseSourceNode(callingAeTitle);
 
   return await new Promise((resolve, reject) => {
     const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
@@ -364,11 +423,7 @@ async function runDimseFindScu({
       reject(new Error("Timed out waiting for PACS response."));
     }, timeoutMs + 2000);
     const options = {
-      source: {
-        aet: callingAeTitle || "RISPRO",
-        ip: sourceIp,
-        port: sourcePort
-      },
+      source,
       target: {
         aet: calledAeTitle,
         ip: host,
@@ -380,7 +435,7 @@ async function runDimseFindScu({
     };
 
     try {
-      dimse.findScu(options, (result: unknown) => {
+      dimseModule.findScu(options, (result: unknown) => {
         clearTimeout(timer);
         if (!result) {
           resolve([]);
@@ -415,8 +470,8 @@ async function runDimseEchoScu({
   callingAeTitle: string;
   timeoutSeconds: number;
 }): Promise<boolean> {
-  const sourceIp = getDimseSourceIp();
-  const sourcePort = await reserveDimseSourcePort(sourceIp);
+  const dimseModule = getDimseModule();
+  const source = await getDimseSourceNode(callingAeTitle);
 
   return await new Promise((resolve, reject) => {
     const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
@@ -424,11 +479,7 @@ async function runDimseEchoScu({
       reject(new Error("Timed out waiting for PACS response."));
     }, timeoutMs + 2000);
     const options = {
-      source: {
-        aet: callingAeTitle || "RISPRO",
-        ip: sourceIp,
-        port: sourcePort
-      },
+      source,
       target: {
         aet: calledAeTitle,
         ip: host,
@@ -439,7 +490,7 @@ async function runDimseEchoScu({
     };
 
     try {
-      dimse.echoScu(options, (result: unknown) => {
+      dimseModule.echoScu(options, (result: unknown) => {
         clearTimeout(timer);
         if (!result) {
           resolve(false);
@@ -481,11 +532,11 @@ export async function searchPacsStudies({
 
   let rawResult;
   try {
-    const calledAeTitle = normalizeAeTitle(settings.calledAeTitle);
-    const callingAeTitle = normalizeAeTitle(settings.callingAeTitle, "RISPRO");
+    const calledAeTitle = validateAeTitle(settings.calledAeTitle, "calledAeTitle");
+    const callingAeTitle = validateAeTitle(settings.callingAeTitle, "callingAeTitle");
     rawResult = await runDimseFindScu({
       criteria,
-      host: settings.host,
+      host: validatePacsHost(settings.host),
       port: settings.port,
       calledAeTitle,
       callingAeTitle,
@@ -544,10 +595,10 @@ export async function testPacsConnection({
   }
 
   try {
-    const calledAeTitle = normalizeAeTitle(settings.calledAeTitle);
-    const callingAeTitle = normalizeAeTitle(settings.callingAeTitle, "RISPRO");
+    const calledAeTitle = validateAeTitle(settings.calledAeTitle, "calledAeTitle");
+    const callingAeTitle = validateAeTitle(settings.callingAeTitle, "callingAeTitle");
     await runDimseEchoScu({
-      host: settings.host,
+      host: validatePacsHost(settings.host),
       port: settings.port,
       calledAeTitle,
       callingAeTitle,
@@ -618,11 +669,11 @@ export async function searchPacsStudiesWithNode({
 
   let rawResult;
   try {
-    const calledAeTitle = normalizeAeTitle(node.called_ae_title);
-    const callingAeTitle = normalizeAeTitle(node.calling_ae_title, "RISPRO");
+    const calledAeTitle = validateAeTitle(node.called_ae_title, "calledAeTitle");
+    const callingAeTitle = validateAeTitle(node.calling_ae_title, "callingAeTitle");
     rawResult = await runDimseFindScu({
       criteria,
-      host: node.host,
+      host: validatePacsHost(node.host),
       port: Number(node.port) || 104,
       calledAeTitle,
       callingAeTitle,
@@ -659,10 +710,10 @@ export async function testPacsConnectionWithNode({
   currentUserId: OptionalUserId;
 }): Promise<{ ok: true }> {
   try {
-    const calledAeTitle = normalizeAeTitle(node.called_ae_title);
-    const callingAeTitle = normalizeAeTitle(node.calling_ae_title, "RISPRO");
+    const calledAeTitle = validateAeTitle(node.called_ae_title, "calledAeTitle");
+    const callingAeTitle = validateAeTitle(node.calling_ae_title, "callingAeTitle");
     await runDimseEchoScu({
-      host: node.host,
+      host: validatePacsHost(node.host),
       port: Number(node.port) || 104,
       calledAeTitle,
       callingAeTitle,

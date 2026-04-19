@@ -22,6 +22,8 @@ interface FixtureContext {
   cleanup: () => Promise<void>;
 }
 
+type GatewaySettingKey = "bind_host" | "worklist_source_dir" | "worklist_output_dir" | "mwl_ae_title";
+
 function uniqueSuffix(): string {
   return `${Date.now()}_${Math.floor(Math.random() * 100000)}`;
 }
@@ -34,6 +36,31 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
     t.skip("PostgreSQL is not reachable at configured DATABASE_URL.");
     return false;
   }
+}
+
+async function restoreGatewaySettings(previousMap: Map<string, string>): Promise<void> {
+  await pool.query(
+    `
+      update system_settings
+      set setting_value = case
+        when setting_key = 'bind_host' then $1::jsonb
+        when setting_key = 'worklist_source_dir' then $2::jsonb
+        when setting_key = 'worklist_output_dir' then $3::jsonb
+        when setting_key = 'mwl_ae_title' then $4::jsonb
+        else setting_value
+      end,
+      updated_by_user_id = null,
+      updated_at = now()
+      where category = 'dicom_gateway'
+        and setting_key in ('bind_host', 'worklist_source_dir', 'worklist_output_dir', 'mwl_ae_title')
+    `,
+    [
+      JSON.stringify({ value: previousMap.get("bind_host") || "0.0.0.0" }),
+      JSON.stringify({ value: previousMap.get("worklist_source_dir") || "storage/dicom/worklist-source" }),
+      JSON.stringify({ value: previousMap.get("worklist_output_dir") || "storage/dicom/worklists" }),
+      JSON.stringify({ value: previousMap.get("mwl_ae_title") || "RISPRO_MWL" })
+    ]
+  );
 }
 
 function extractTagValue(dump: string, tag: string): string {
@@ -65,119 +92,105 @@ async function createFixture(): Promise<FixtureContext> {
   const outputDir = path.join(tempRoot, "output");
   await fs.mkdir(sourceDir, { recursive: true });
   await fs.mkdir(outputDir, { recursive: true });
+  let userId: number | null = null;
+  let ctModalityId: number | null = null;
+  let mriModalityId: number | null = null;
+  let ctExamTypeId: number | null = null;
+  let mriExamTypeId: number | null = null;
+  let patientAId: number | null = null;
+  let patientBId: number | null = null;
+  let patientCId: number | null = null;
 
-  const user = await pool.query<{ id: number }>(
-    `
-      insert into users (username, full_name, password_hash, role, is_active)
-      values ($1, $2, $3, 'supervisor', true)
-      returning id
-    `,
-    [`dicom_admin_${suffix}`, `DICOM Admin ${suffix}`, passwordHash]
-  );
-  const userId = Number(user.rows[0]?.id);
-
-  const ctModality = await pool.query<{ id: number }>(
-    `
-      insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
-      values ($1, $2, $3, 10, true)
-      returning id
-    `,
-    [`CT${suffix.slice(-4)}`, `أشعة مقطعية ${suffix}`, `CT ${suffix}`]
-  );
-  const ctModalityId = Number(ctModality.rows[0]?.id);
-
-  const mriModality = await pool.query<{ id: number }>(
-    `
-      insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
-      values ($1, $2, $3, 10, true)
-      returning id
-    `,
-    [`MR${suffix.slice(-4)}`, `رنين ${suffix}`, `MRI ${suffix}`]
-  );
-  const mriModalityId = Number(mriModality.rows[0]?.id);
-
-  const ctExamType = await pool.query<{ id: number }>(
-    `
-      insert into exam_types (modality_id, name_ar, name_en, is_active)
-      values ($1, $2, $3, true)
-      returning id
-    `,
-    [ctModalityId, `فحص CT ${suffix}`, `CT Exam ${suffix}`]
-  );
-  const ctExamTypeId = Number(ctExamType.rows[0]?.id);
-
-  const mriExamType = await pool.query<{ id: number }>(
-    `
-      insert into exam_types (modality_id, name_ar, name_en, is_active)
-      values ($1, $2, $3, true)
-      returning id
-    `,
-    [mriModalityId, `فحص MRI ${suffix}`, `MRI Exam ${suffix}`]
-  );
-  const mriExamTypeId = Number(mriExamType.rows[0]?.id);
-
-  const createPatient = async (seed: string) => {
-    const result = await pool.query<{ id: number }>(
-      `
-        insert into patients (
-          national_id,
-          identifier_type,
-          identifier_value,
-          arabic_full_name,
-          english_full_name,
-          normalized_arabic_name,
-          age_years,
-          estimated_date_of_birth,
-          sex,
-          created_by_user_id,
-          updated_by_user_id
-        )
-        values ($1, 'national_id', $2, $3, $4, $5, 40, '1985-01-01', 'M', $6, $6)
-        returning id
-      `,
-      [seed, seed, `مريض ${seed}`, `Patient ${seed}`, `مريض${seed}`, userId]
-    );
-    return Number(result.rows[0]?.id);
-  };
-
-  const patientAId = await createPatient(`8${suffix.padStart(11, "0").slice(-11)}`);
-  const patientBId = await createPatient(`7${suffix.padStart(11, "0").slice(-11)}`);
-  const patientCId = await createPatient(`6${suffix.padStart(11, "0").slice(-11)}`);
-
-  const previousSettings = await pool.query<{ setting_key: string; setting_value: { value?: string } }>(
+  const previousSettings = await pool.query<{ setting_key: GatewaySettingKey; setting_value: { value?: string } }>(
     `
       select setting_key, setting_value
       from system_settings
       where category = 'dicom_gateway'
-        and setting_key in ('worklist_source_dir', 'worklist_output_dir', 'mwl_ae_title')
+        and setting_key in ('bind_host', 'worklist_source_dir', 'worklist_output_dir', 'mwl_ae_title')
     `
   );
 
   const previousMap = new Map(previousSettings.rows.map((row) => [row.setting_key, row.setting_value?.value || ""]));
 
-  await pool.query(
-    `
-      update system_settings
-      set setting_value = case
-        when setting_key = 'worklist_source_dir' then $1::jsonb
-        when setting_key = 'worklist_output_dir' then $2::jsonb
-        when setting_key = 'mwl_ae_title' then $3::jsonb
-        else setting_value
-      end,
-      updated_by_user_id = $4,
-      updated_at = now()
-      where category = 'dicom_gateway'
-        and setting_key in ('worklist_source_dir', 'worklist_output_dir', 'mwl_ae_title')
-    `,
-    [
-      JSON.stringify({ value: sourceDir }),
-      JSON.stringify({ value: outputDir }),
-      JSON.stringify({ value: "RISPRO_MWL" }),
-      userId
-    ]
-  );
+  try {
+    const user = await pool.query<{ id: number }>(
+      `
+        insert into users (username, full_name, password_hash, role, is_active)
+        values ($1, $2, $3, 'supervisor', true)
+        returning id
+      `,
+      [`dicom_admin_${suffix}`, `DICOM Admin ${suffix}`, passwordHash]
+    );
+    userId = Number(user.rows[0]?.id);
 
-  const cleanup = async () => {
+    const ctModality = await pool.query<{ id: number }>(
+      `
+        insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
+        values ($1, $2, $3, 10, true)
+        returning id
+      `,
+      [`CT${suffix.slice(-4)}`, `أشعة مقطعية ${suffix}`, `CT ${suffix}`]
+    );
+    ctModalityId = Number(ctModality.rows[0]?.id);
+
+    const mriModality = await pool.query<{ id: number }>(
+      `
+        insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
+        values ($1, $2, $3, 10, true)
+        returning id
+      `,
+      [`MR${suffix.slice(-4)}`, `رنين ${suffix}`, `MRI ${suffix}`]
+    );
+    mriModalityId = Number(mriModality.rows[0]?.id);
+
+    const ctExamType = await pool.query<{ id: number }>(
+      `
+        insert into exam_types (modality_id, name_ar, name_en, is_active)
+        values ($1, $2, $3, true)
+        returning id
+      `,
+      [ctModalityId, `فحص CT ${suffix}`, `CT Exam ${suffix}`]
+    );
+    ctExamTypeId = Number(ctExamType.rows[0]?.id);
+
+    const mriExamType = await pool.query<{ id: number }>(
+      `
+        insert into exam_types (modality_id, name_ar, name_en, is_active)
+        values ($1, $2, $3, true)
+        returning id
+      `,
+      [mriModalityId, `فحص MRI ${suffix}`, `MRI Exam ${suffix}`]
+    );
+    mriExamTypeId = Number(mriExamType.rows[0]?.id);
+
+    const createPatient = async (seed: string) => {
+      const result = await pool.query<{ id: number }>(
+        `
+          insert into patients (
+            national_id,
+            identifier_type,
+            identifier_value,
+            arabic_full_name,
+            english_full_name,
+            normalized_arabic_name,
+            age_years,
+            estimated_date_of_birth,
+            sex,
+            created_by_user_id,
+            updated_by_user_id
+          )
+          values ($1, 'national_id', $2, $3, $4, $5, 40, '1985-01-01', 'M', $6, $6)
+          returning id
+        `,
+        [seed, seed, `مريض ${seed}`, `Patient ${seed}`, `مريض${seed}`, userId]
+      );
+      return Number(result.rows[0]?.id);
+    };
+
+    patientAId = await createPatient(`8${suffix.padStart(11, "0").slice(-11)}`);
+    patientBId = await createPatient(`7${suffix.padStart(11, "0").slice(-11)}`);
+    patientCId = await createPatient(`6${suffix.padStart(11, "0").slice(-11)}`);
+
     await pool.query(
       `
         update system_settings
@@ -187,41 +200,77 @@ async function createFixture(): Promise<FixtureContext> {
           when setting_key = 'mwl_ae_title' then $3::jsonb
           else setting_value
         end,
-        updated_by_user_id = null,
+        updated_by_user_id = $4,
         updated_at = now()
         where category = 'dicom_gateway'
           and setting_key in ('worklist_source_dir', 'worklist_output_dir', 'mwl_ae_title')
       `,
       [
-        JSON.stringify({ value: previousMap.get("worklist_source_dir") || "storage/dicom/worklist-source" }),
-        JSON.stringify({ value: previousMap.get("worklist_output_dir") || "storage/dicom/worklists" }),
-        JSON.stringify({ value: previousMap.get("mwl_ae_title") || "RISPRO_MWL" })
+        JSON.stringify({ value: sourceDir }),
+        JSON.stringify({ value: outputDir }),
+        JSON.stringify({ value: "RISPRO_MWL" }),
+        userId
       ]
     );
 
-    await pool.query(`delete from dicom_devices where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
-    await pool.query(`delete from appointments where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
-    await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[ctExamTypeId, mriExamTypeId]]);
-    await pool.query(`delete from modalities where id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
-    await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId, patientCId]]);
-    await pool.query(`delete from users where id = $1`, [userId]);
-    await fs.rm(tempRoot, { recursive: true, force: true });
-  };
+    const cleanup = async () => {
+      await restoreGatewaySettings(previousMap);
 
-  return {
-    userId,
-    ctModalityId,
-    mriModalityId,
-    ctExamTypeId,
-    mriExamTypeId,
-    patientAId,
-    patientBId,
-    patientCId,
-    tempRoot,
-    sourceDir,
-    outputDir,
-    cleanup
-  };
+      if (ctModalityId && mriModalityId) {
+        await pool.query(`delete from dicom_devices where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
+        await pool.query(`delete from appointments where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
+      }
+      if (ctExamTypeId && mriExamTypeId) {
+        await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[ctExamTypeId, mriExamTypeId]]);
+      }
+      if (ctModalityId && mriModalityId) {
+        await pool.query(`delete from modalities where id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
+      }
+      if (patientAId && patientBId && patientCId) {
+        await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId, patientCId]]);
+      }
+      if (userId) {
+        await pool.query(`delete from users where id = $1`, [userId]);
+      }
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    };
+
+    return {
+      userId,
+      ctModalityId,
+      mriModalityId,
+      ctExamTypeId,
+      mriExamTypeId,
+      patientAId,
+      patientBId,
+      patientCId,
+      tempRoot,
+      sourceDir,
+      outputDir,
+      cleanup
+    };
+  } catch (error) {
+    await restoreGatewaySettings(previousMap).catch(() => undefined);
+
+    if (ctModalityId && mriModalityId) {
+      await pool.query(`delete from dicom_devices where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
+      await pool.query(`delete from appointments where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
+    }
+    if (ctExamTypeId && mriExamTypeId) {
+      await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[ctExamTypeId, mriExamTypeId]]).catch(() => undefined);
+    }
+    if (ctModalityId && mriModalityId) {
+      await pool.query(`delete from modalities where id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
+    }
+    if (patientAId && patientBId && patientCId) {
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId, patientCId]]).catch(() => undefined);
+    }
+    if (userId) {
+      await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
+    }
+    await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+    throw error;
+  }
 }
 
 test("syncAppointmentWorklistSources creates central MWL dumps without dicom_devices rows", async (t) => {
