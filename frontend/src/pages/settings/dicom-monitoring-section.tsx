@@ -1,7 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ApiError, api } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { formatDateTimeLy } from "@/lib/date-format";
+
+const MONITORING_LOAD_TIMEOUT_MS = 5000;
 
 interface DicomMonitoringSectionProps {
   onReAuthRequired: (key: string[]) => void;
@@ -17,22 +20,19 @@ interface ServiceEntry {
 }
 
 export default function DicomMonitoringSection(_props: DicomMonitoringSectionProps) {
+  const { onReAuthRequired } = _props;
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"overview" | "logs" | "actions">("overview");
   const [logFilter, setLogFilter] = useState({ status: "", accession: "", limit: "50" });
   const [actionMessage, setActionMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  const { data: overviewData, isLoading: overviewLoading, refetch: refetchOverview } = useQuery({
+  const { data: overviewData, isLoading: overviewLoading, error: overviewError, refetch: refetchOverview } = useQuery({
     queryKey: ["dicom", "overview"],
-    queryFn: async () => {
-      const response = await fetch("/api/dicom/overview");
-      if (!response.ok) throw new Error("Failed to fetch DICOM overview");
-      return response.json();
-    }
+    queryFn: () => api("/dicom/overview", {}, MONITORING_LOAD_TIMEOUT_MS)
   });
 
-  const { data: logsData, isLoading: logsLoading } = useQuery({
+  const { data: logsData, isLoading: logsLoading, error: logsError } = useQuery({
     queryKey: ["dicom", "logs", logFilter],
     queryFn: async () => {
       const params = new URLSearchParams();
@@ -40,31 +40,20 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
       if (logFilter.accession) params.set("accession", logFilter.accession);
       params.set("limit", logFilter.limit);
 
-      const response = await fetch(`/api/dicom/logs?${params}`);
-      if (!response.ok) throw new Error("Failed to fetch logs");
-      return response.json();
+      return api(`/dicom/logs?${params.toString()}`, {}, MONITORING_LOAD_TIMEOUT_MS);
     },
     enabled: activeTab === "logs"
   });
 
-  const { data: serviceStatusData, refetch: refetchServiceStatus } = useQuery({
+  const { data: serviceStatusData, refetch: refetchServiceStatus, error: serviceStatusError } = useQuery({
     queryKey: ["dicom", "service-status"],
-    queryFn: async () => {
-      const response = await fetch("/api/dicom/service-status");
-      if (!response.ok) throw new Error("Failed to fetch service status");
-      return response.json();
-    },
+    queryFn: () => api("/dicom/service-status", {}, MONITORING_LOAD_TIMEOUT_MS),
     refetchInterval: 10000 // Poll every 10 seconds
   });
 
   const serviceControlMutation = useMutation({
     mutationFn: async ({ serviceName, action }: { serviceName: string; action: "start" | "stop" | "restart" }) => {
-      const response = await fetch(`/api/dicom/service/${serviceName}/${action}`, { method: "POST" });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || `${action} failed`);
-      }
-      return response.json();
+      return api(`/dicom/service/${serviceName}/${action}`, { method: "POST" });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["dicom", "overview"] });
@@ -81,11 +70,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   });
 
   const rebuildMutation = useMutation({
-    mutationFn: async () => {
-      const response = await fetch("/api/dicom/rebuild", { method: "POST" });
-      if (!response.ok) throw new Error("Rebuild failed");
-      return response.json();
-    },
+    mutationFn: () => api("/dicom/rebuild", { method: "POST" }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["dicom", "overview"] });
       // Show success message inline instead of alert
@@ -101,9 +86,19 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   const overview = overviewData as any;
   const logs = logsData as any;
   const services = (serviceStatusData as any)?.services || {};
+  const loadError = [overviewError, logsError, serviceStatusError].find(Boolean);
 
   if (overviewLoading) {
     return <p className="text-sm text-stone-500 dark:text-stone-400">{t("settings.loading")}</p>;
+  }
+
+  if (loadError) {
+    const status = loadError instanceof ApiError ? loadError.status : undefined;
+    const message = loadError instanceof Error ? loadError.message : t("settings.failedLoad");
+    if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["dicom", "overview"])} />;
+    }
+    return <QueryError message={message} />;
   }
 
   const status = overview?.status || {};
@@ -370,9 +365,8 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
               <button
                 onClick={async () => {
                   try {
-                    const response = await fetch("/api/dicom/detect-tools", { method: "POST" });
-                    const data = await response.json();
-                    setActionMessage({ type: response.ok ? "success" : "error", text: data.message });
+                    const data = await api<{ message: string }>("/dicom/detect-tools", { method: "POST" });
+                    setActionMessage({ type: "success", text: data.message });
                     setTimeout(() => setActionMessage(null), 5000);
                   } catch (err) {
                     setActionMessage({ type: "error", text: (err as Error).message });
@@ -559,4 +553,25 @@ function statusToType(status: string | undefined, enabled: boolean): "success" |
   if (status === "running") return "success";
   if (status === "error") return "error";
   return "warning";
+}
+
+function QueryError({ message }: { message: string }) {
+  return (
+    <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+      <p className="text-sm font-medium text-red-700 dark:text-red-400">Failed to load</p>
+      <p className="text-xs text-red-600 dark:text-red-500 mt-1 font-mono break-all">{message}</p>
+    </div>
+  );
+}
+
+function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
+  return (
+    <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
+      <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Re-authentication required</p>
+      <p className="text-xs text-amber-600 dark:text-amber-400">Please re-authenticate to access DICOM monitoring.</p>
+      <button onClick={onReAuthRequired} className="btn-primary text-sm">
+        Re-authenticate
+      </button>
+    </div>
+  );
 }

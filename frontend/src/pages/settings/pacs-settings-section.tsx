@@ -1,5 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { ApiError, api } from "@/lib/api-client";
+
+const SETTINGS_LOAD_TIMEOUT_MS = 5000;
 
 interface PacsNode {
   id: number;
@@ -28,11 +31,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery<{ nodes: PacsNode[] }>({
     queryKey: ["pacs", "nodes"],
-    queryFn: async () => {
-      const resp = await fetch("/api/pacs/nodes");
-      if (!resp.ok) throw new Error("Failed to fetch PACS nodes");
-      return resp.json();
-    }
+    queryFn: () => api<{ nodes: PacsNode[] }>("/pacs/nodes", {}, SETTINGS_LOAD_TIMEOUT_MS)
   });
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -69,16 +68,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
 
   const createMutation = useMutation({
     mutationFn: async (data: PacsNodeFormState) => {
-      const resp = await fetch("/api/pacs/nodes", {
+      return api("/pacs/nodes", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toBackendPayload(data))
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to create PACS node");
-      }
-      return resp.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pacs", "nodes"] });
@@ -91,16 +84,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, data }: { id: number; data: Partial<PacsNodeFormState> }) => {
-      const resp = await fetch(`/api/pacs/nodes/${id}`, {
+      return api(`/pacs/nodes/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toBackendPayload(data))
       });
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to update PACS node");
-      }
-      return resp.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pacs", "nodes"] });
@@ -111,11 +98,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const resp = await fetch(`/api/pacs/nodes/${id}`, { method: "DELETE" });
-      if (!resp.ok) throw new Error("Failed to delete PACS node");
-      return resp.json();
-    },
+    mutationFn: (id: number) => api(`/pacs/nodes/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["pacs", "nodes"] });
       setMutationError(null);
@@ -126,13 +109,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const testMutation = useMutation({
     mutationFn: async (nodeId: number) => {
       setTestingId(nodeId);
-      const resp = await fetch("/api/pacs/test", {
+      await api("/pacs/test", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nodeId })
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.message || "Connection test failed");
       return { ok: true };
     },
     onSuccess: (_data, nodeId) => {
@@ -146,8 +126,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   });
 
   if (error) {
+    const status = error instanceof ApiError ? error.status : undefined;
     const msg = (error as Error).message;
-    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+    if (status === 401 || status === 403 || msg?.includes("re-authentication") || msg?.includes("403")) {
       return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["pacs", "nodes"])} />;
     }
     return <QueryError message={msg} />;

@@ -59,12 +59,7 @@ export function AppointmentsV3CreatePage() {
   }
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: 24, display: "grid", gap: 14 }}>
-      <h1 style={{ margin: 0, fontSize: 20 }}>Create Appointment</h1>
-      <p style={{ margin: 0, color: "var(--text-muted, #64748b)", fontSize: 13 }}>
-        Primary appointment creation workflow with evaluated capacity and exam-mix visibility.
-      </p>
-
+    <div style={{ padding: "24px 16px" }}>
       <CreateAppointmentTab
         patientLookups={{}}
         modalityOptions={lookups.data?.modalities ?? []}
@@ -77,10 +72,6 @@ export function AppointmentsV3CreatePage() {
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}
       />
-
-      <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
-        Special reason code is stored as audit metadata and does not define independent scheduling policy behavior.
-      </div>
     </div>
   );
 }

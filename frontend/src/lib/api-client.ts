@@ -25,11 +25,11 @@ export class ApiError extends Error {
 async function parseErrorResponse(response: Response): Promise<ApiError> {
   try {
     const body = await response.json();
-    const message = body?.error?.message || response.statusText;
+    const message = body?.error?.message || body?.message || response.statusText;
     return ApiError.fromResponse({
       message,
       status: response.status,
-      details: body?.error?.details
+      details: body?.error?.details ?? body?.details
     });
   } catch {
     return ApiError.fromResponse({
