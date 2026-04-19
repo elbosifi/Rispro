@@ -6,14 +6,22 @@ All components use the existing design system CSS variables and produce **zero v
 
 ---
 
+## Usage
+
+All components can be imported from the shared index:
+
+```tsx
+import { Button, Card, Input, LoadingState, EmptyState, ErrorState } from "@/components/shared";
+```
+
+---
+
 ## Available Components
 
 ### Button (`Button.tsx`)
 Standard button component wrapping the existing production-tested button classes.
 
 ```tsx
-import { Button } from "@/components/shared/Button";
-
 // Primary button (default)
 <Button onClick={handleAction}>Submit</Button>
 
@@ -41,8 +49,6 @@ import { Button } from "@/components/shared/Button";
 Standard card container component using the existing neumorphic card styles.
 
 ```tsx
-import { Card } from "@/components/shared/Card";
-
 // Default card
 <Card>Content</Card>
 
@@ -63,8 +69,6 @@ import { Card } from "@/components/shared/Card";
 Standard input component wrapping the existing premium input styles.
 
 ```tsx
-import { Input } from "@/components/shared/Input";
-
 <Input
   type="text"
   value={value}
@@ -78,12 +82,32 @@ import { Input } from "@/components/shared/Input";
 
 ---
 
+### SearchInput (`SearchInput.tsx`)
+Search input component with built-in search icon and clear button.
+
+```tsx
+<SearchInput
+  value={query}
+  onChange={(e) => setQuery(e.target.value)}
+  placeholder="Search..."
+  showClearButton
+  onClear={() => setQuery("")}
+  isLoading={isSearching}
+/>
+```
+
+**Props**:
+- `showClearButton`: boolean
+- `onClear`: () => void
+- `isLoading`: boolean
+- All standard input HTML attributes
+
+---
+
 ### Badge (`Badge.tsx`)
 Standard status badge component with standardized color variants.
 
 ```tsx
-import { Badge } from "@/components/shared/Badge";
-
 <Badge variant="success">Active</Badge>
 <Badge variant="warning">Pending</Badge>
 <Badge variant="error">Failed</Badge>
@@ -98,11 +122,49 @@ import { Badge } from "@/components/shared/Badge";
 
 ---
 
+### LoadingState (`LoadingState.tsx`)
+Standardized loading state component with spinner.
+
+```tsx
+<LoadingState message="Loading data..." />
+```
+
+**Props**:
+- `message`: string (default: "Loading...")
+
+---
+
+### EmptyState (`EmptyState.tsx`)
+Standardized empty state component.
+
+```tsx
+<EmptyState message="No results found" icon={<Search size={32} />} />
+```
+
+**Props**:
+- `message`: string (default: "No data available")
+- `icon`: React.ReactNode
+
+---
+
+### ErrorState (`ErrorState.tsx`)
+Standardized error state component with retry button.
+
+```tsx
+<ErrorState message="Failed to load data" onRetry={handleRetry} />
+```
+
+**Props**:
+- `message`: string (default: "An error occurred")
+- `onRetry`: () => void
+
+---
+
 ### Table Components (`Table.tsx`)
 Composable table components with standard styling.
 
 ```tsx
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/shared/Table";
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@/components/shared";
 
 <Table>
   <TableHeader>
@@ -134,7 +196,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "@
 Accessible dialog/modal base components with keyboard navigation and backdrop click support.
 
 ```tsx
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared";
 
 <Dialog open={isOpen} onClose={handleClose}>
   <DialogContent maxWidth="500px">
@@ -171,5 +233,11 @@ All major pages have been migrated to use these shared components:
 - ✅ Queue page
 - ✅ Settings page
 - ✅ Registration page
+
+All dialog components have been standardized:
+- ✅ CancelConfirmDialog
+- ✅ RescheduleDialog
+- ✅ PublishPolicyDialog
+- ✅ OverrideDialog
 
 All components maintain 100% backwards compatibility with existing styles and produce zero visual changes.

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Button, Card, Input } from "@/components/shared";
 import { useV2ExamTypeCatalog, useV2Lookups } from "../api";
 import type {
   PolicyCategoryDailyLimitDto,
@@ -179,6 +180,7 @@ export function PolicyDraftEditor({
   }, [examTypeCatalog.isError, examTypeCatalog.isLoading, lookups.isError, lookups.isLoading, modalityOptions.length]);
 
   const hasDraftSnapshot = snapshot != null;
+  const canSave = !lookups.isLoading && !examTypeCatalog.isLoading;
 
   async function handleSave() {
     if (!hasDraftSnapshot) return;
@@ -203,20 +205,13 @@ export function PolicyDraftEditor({
     }
   }
 
-  const inputBase =
-    "w-full rounded border border-stone-300 bg-white px-2 py-1 text-xs text-stone-900 dark:border-stone-600 dark:bg-stone-800 dark:text-stone-100";
+  // Standardized input style - matches input-premium
+  const inputBase = "input-premium text-xs";
 
   return (
-    <div
-      style={{
-        padding: 16,
-        borderRadius: 8,
-        border: "1px solid var(--border-color, #e2e8f0)",
-        backgroundColor: "var(--bg-surface, #f8fafc)",
-      }}
-    >
+    <Card>
       <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>Scheduling Policy Draft</h2>
-      <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", marginBottom: 12 }}>
+      <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 12 }}>
         Edit policy rules using structured sections, then save snapshot changes to the active draft.
       </p>
 
@@ -423,19 +418,12 @@ export function PolicyDraftEditor({
                 )}
                 {row.ruleType === "date_range" && (
                   <>
-                    <input
-                      className={inputBase}
-                      type="date"
-                      value={row.startDate ?? ""}
-                      onChange={(event) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          modalityBlockedRules: prev.modalityBlockedRules.map((item, itemIndex) =>
-                            itemIndex === index ? { ...item, startDate: event.target.value || null } : item
-                          ),
-                        }))
-                      }
-                    />
+                  <Input
+                    value={changeNote}
+                    onChange={(e) => setChangeNote(e.target.value)}
+                    placeholder="Change note (optional)"
+                    className="text-xs"
+                  />
                     <input
                       className={inputBase}
                       type="date"
@@ -1402,12 +1390,13 @@ export function PolicyDraftEditor({
         {saveValidationError && (
           <div
             style={{
-              color: "var(--color-error, #ef4444)",
+              color: "var(--accent)",
               fontSize: 12,
-              border: "1px solid #fecaca",
-              borderRadius: 6,
-              background: "#fef2f2",
-              padding: "8px 10px",
+              marginBottom: 8,
+              border: "1px solid rgba(255, 71, 87, 0.3)",
+              borderRadius: "var(--radius-md)",
+              padding: "8px 12px",
+              background: "rgba(255, 71, 87, 0.1)",
             }}
           >
             {saveValidationError}
@@ -1425,24 +1414,17 @@ export function PolicyDraftEditor({
             borderRadius: 6,
           }}
         />
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving || !hasDraftSnapshot}
-          style={{
-            padding: "8px 14px",
-            borderRadius: 6,
-            border: "none",
-            backgroundColor: "var(--color-primary, #3b82f6)",
-            color: "#fff",
-            cursor: isSaving || !hasDraftSnapshot ? "not-allowed" : "pointer",
-            opacity: isSaving || !hasDraftSnapshot ? 0.6 : 1,
-            width: "fit-content",
-          }}
-        >
-          {isSaving ? "Saving..." : "Save Draft Snapshot"}
-        </button>
+                <Button
+                  onClick={handleSave}
+                  disabled={isSaving || !canSave}
+                  style={{
+                    backgroundColor: canSave ? "var(--blue)" : "var(--border)",
+                    color: canSave ? "#fff" : "var(--text-muted)",
+                  }}
+                >
+                  {isSaving ? "Saving..." : "Save Draft"}
+                 </Button>
       </div>
-    </div>
+    </Card>
   );
 }

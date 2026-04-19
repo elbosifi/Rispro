@@ -5,8 +5,10 @@
  * Follows the established inline modal pattern from the codebase.
  */
 
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
+import { Button } from "@/components/shared/Button";
 
 interface CancelConfirmDialogProps {
   booking: {
@@ -21,118 +23,60 @@ interface CancelConfirmDialogProps {
 export function CancelConfirmDialog({ booking, onConfirm, onCancel }: CancelConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    confirmRef.current?.focus();
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      {/* Backdrop */}
-      <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)" }} />
-
-      {/* Dialog */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          maxWidth: 400,
-          margin: "0 16px",
-          padding: 24,
-          borderRadius: 12,
-          backgroundColor: "var(--bg-surface, #fff)",
-          border: "1px solid var(--border-color, #e2e8f0)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 40,
-              height: 40,
-              borderRadius: "50%",
-              backgroundColor: "var(--bg-error, #fef2f2)",
-              color: "var(--color-error, #ef4444)",
-            }}
-          >
-            <AlertTriangle size={20} />
+    <Dialog open={true} onClose={onCancel}>
+      <DialogContent maxWidth="400px">
+        <DialogHeader showClose={false}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                backgroundColor: "rgba(255, 71, 87, 0.1)",
+                color: "var(--accent)",
+              }}
+            >
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <DialogTitle>Cancel Booking</DialogTitle>
+              <DialogDescription>This action cannot be undone</DialogDescription>
+            </div>
           </div>
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Cancel Booking</h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", margin: 0 }}>
-              This action cannot be undone
-            </p>
-          </div>
-        </div>
+        </DialogHeader>
 
         {/* Details */}
         <div
           style={{
             padding: 12,
             marginBottom: 16,
-            borderRadius: 6,
-            backgroundColor: "var(--bg-surface, #f8fafc)",
-            border: "1px solid var(--border-color, #e2e8f0)",
+            borderRadius: "var(--radius-md)",
+            backgroundColor: "var(--muted)",
+            border: "1px solid var(--border)",
             fontSize: 13,
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 4 }}>{booking.patientName}</div>
-          <div style={{ color: "var(--text-muted, #64748b)" }}>{booking.date}</div>
+          <div style={{ color: "var(--text-muted)" }}>{booking.date}</div>
         </div>
 
-        {/* Actions */}
-        <div style={{ display: "flex", gap: 12, justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            onClick={onCancel}
-            style={{
-              padding: "8px 20px",
-              borderRadius: 6,
-              border: "1px solid var(--border-color, #e2e8f0)",
-              backgroundColor: "var(--bg-surface, #fff)",
-              fontSize: 14,
-              fontWeight: 500,
-              cursor: "pointer",
-            }}
-          >
+        <DialogFooter>
+          <Button variant="secondary" onClick={onCancel}>
             Keep Booking
-          </button>
-          <button
+          </Button>
+          <Button
             ref={confirmRef}
-            type="button"
             onClick={onConfirm}
-            style={{
-              padding: "8px 20px",
-              borderRadius: 6,
-              border: "none",
-              backgroundColor: "var(--color-error, #ef4444)",
-              color: "#fff",
-              fontSize: 14,
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
+            style={{ backgroundColor: "var(--accent)", color: "#fff" }}
           >
             Cancel Booking
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

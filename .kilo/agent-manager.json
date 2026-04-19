@@ -1,4 +1,20 @@
 {
-  "worktrees": {},
-  "sessions": {}
+  "worktrees": {
+    "wt-1776604625471-1": {
+      "branch": "delirious-plot",
+      "path": "/Users/serajalsaifi/Nextcloud/RISpro/.kilo/worktrees/delirious-plot",
+      "parentBranch": "main",
+      "createdAt": "2026-04-19T13:17:05.471Z",
+      "remote": "origin"
+    }
+  },
+  "sessions": {
+    "ses_25a1cc55effeneR4h11L3oynPp": {
+      "worktreeId": "wt-1776604625471-1",
+      "createdAt": "2026-04-19T13:17:05.976Z"
+    }
+  },
+  "worktreeOrder": [
+    "wt-1776604625471-1"
+  ]
 }

@@ -10,6 +10,9 @@
 import { useState, useEffect, useRef } from "react";
 import { CalendarClock } from "lucide-react";
 import { evaluateV2Scheduling } from "../api";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
+import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 import type {
   SchedulingDecisionDto,
   CaseCategory,
@@ -150,53 +153,32 @@ export function RescheduleDialog({
     .filter((item) => item.date !== booking.bookingDate);
 
   return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      {/* Backdrop */}
-      <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)" }} />
-
-      {/* Dialog */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          maxWidth: 480,
-          margin: "0 16px",
-          padding: 24,
-          borderRadius: 12,
-          backgroundColor: "var(--bg-surface, #fff)",
-          border: "1px solid var(--border-color, #e2e8f0)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 40,
-              height: 40,
-              borderRadius: "50%",
-              backgroundColor: "var(--bg-info, #dbeafe)",
-              color: "var(--color-info, #3b82f6)",
-            }}
-          >
-            <CalendarClock size={20} />
+    <Dialog open={true} onClose={onCancel}>
+      <DialogContent maxWidth="480px">
+        <DialogHeader showClose={false}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                backgroundColor: "rgba(59, 130, 246, 0.1)",
+                color: "var(--blue)",
+              }}
+            >
+              <CalendarClock size={20} />
+            </div>
+            <div>
+              <DialogTitle>Reschedule Booking</DialogTitle>
+              <DialogDescription>
+                {booking.patientEnglishName ?? `Patient #${booking.patientId}`} — {booking.bookingDate}
+              </DialogDescription>
+            </div>
           </div>
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Reschedule Booking</h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", margin: 0 }}>
-              {booking.patientEnglishName ?? `Patient #${booking.patientId}`} — {booking.bookingDate}
-            </p>
-          </div>
-        </div>
+        </DialogHeader>
 
         {/* Error */}
         {error && (
@@ -204,11 +186,11 @@ export function RescheduleDialog({
             style={{
               padding: "8px 12px",
               marginBottom: 16,
-              borderRadius: 6,
-              backgroundColor: "var(--bg-error, #fef2f2)",
-              border: "1px solid var(--border-error, #fecaca)",
+              borderRadius: "var(--radius-md)",
+              backgroundColor: "rgba(255, 71, 87, 0.1)",
+              border: "1px solid rgba(255, 71, 87, 0.3)",
               fontSize: 13,
-              color: "var(--color-error, #ef4444)",
+              color: "var(--accent)",
             }}
           >
             {error}
@@ -219,11 +201,11 @@ export function RescheduleDialog({
             style={{
               padding: "8px 12px",
               marginBottom: 16,
-              borderRadius: 6,
-              backgroundColor: "var(--bg-error, #fef2f2)",
-              border: "1px solid var(--border-error, #fecaca)",
+              borderRadius: "var(--radius-md)",
+              backgroundColor: "rgba(255, 71, 87, 0.1)",
+              border: "1px solid rgba(255, 71, 87, 0.3)",
               fontSize: 13,
-              color: "var(--color-error, #ef4444)",
+              color: "var(--accent)",
             }}
           >
             {submitError ?? evaluationError}
@@ -284,33 +266,33 @@ export function RescheduleDialog({
               </div>
             )}
 
-            {decision && !evaluating && (
-              <div
-                style={{
-                  padding: "8px 12px",
-                  borderRadius: 6,
-                  fontSize: 13,
-                  backgroundColor:
-                    decision.displayStatus === "available"
-                      ? "var(--bg-success, #dcfce7)"
-                      : decision.displayStatus === "restricted"
-                      ? "var(--bg-warning, #fef3c7)"
-                      : "var(--bg-error, #fee2e2)",
-                  border: `1px solid ${
-                    decision.displayStatus === "available"
-                      ? "var(--border-success, #bbf7d0)"
-                      : decision.displayStatus === "restricted"
-                      ? "var(--border-warning, #fde68a)"
-                      : "var(--border-error, #fecaca)"
-                  }`,
-                  color:
-                    decision.displayStatus === "available"
-                      ? "var(--color-success, #15803d)"
-                      : decision.displayStatus === "restricted"
-                      ? "var(--color-warning, #b45309)"
-                      : "var(--color-error, #dc2626)",
-                }}
-              >
+             {decision && !evaluating && (
+               <div
+                 style={{
+                   padding: "8px 12px",
+                   borderRadius: "var(--radius-md)",
+                   fontSize: 13,
+                   backgroundColor:
+                     decision.displayStatus === "available"
+                       ? "rgba(34, 197, 94, 0.1)"
+                       : decision.displayStatus === "restricted"
+                       ? "rgba(245, 158, 11, 0.1)"
+                       : "rgba(255, 71, 87, 0.1)",
+                   border: `1px solid ${
+                     decision.displayStatus === "available"
+                       ? "rgba(34, 197, 94, 0.3)"
+                       : decision.displayStatus === "restricted"
+                       ? "rgba(245, 158, 11, 0.3)"
+                       : "rgba(255, 71, 87, 0.3)"
+                   }`,
+                   color:
+                     decision.displayStatus === "available"
+                       ? "var(--green)"
+                       : decision.displayStatus === "restricted"
+                       ? "var(--amber)"
+                       : "var(--accent)",
+                 }}
+               >
                 {decision.displayStatus === "available" && (
                   <span>
                     ✅ Available — {decision.remainingStandardCapacity ?? 0} slots remaining
@@ -349,19 +331,12 @@ export function RescheduleDialog({
                   >
                     Supervisor Username
                   </label>
-                  <input
-                    type="text"
-                    value={overrideUsername}
-                    onChange={(e) => setOverrideUsername(e.target.value)}
-                    autoComplete="username"
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-color, #e2e8f0)",
-                      fontSize: 14,
-                    }}
-                  />
+                   <Input
+                     type="text"
+                     value={overrideUsername}
+                     onChange={(e) => setOverrideUsername(e.target.value)}
+                     autoComplete="username"
+                   />
                 </div>
 
                 <div>
@@ -376,20 +351,13 @@ export function RescheduleDialog({
                   >
                     Password
                   </label>
-                  <input
-                    ref={overridePasswordRef}
-                    type="password"
-                    value={overridePassword}
-                    onChange={(e) => setOverridePassword(e.target.value)}
-                    autoComplete="current-password"
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-color, #e2e8f0)",
-                      fontSize: 14,
-                    }}
-                  />
+                   <Input
+                     ref={overridePasswordRef}
+                     type="password"
+                     value={overridePassword}
+                     onChange={(e) => setOverridePassword(e.target.value)}
+                     autoComplete="current-password"
+                   />
                 </div>
 
                 <div>
@@ -404,74 +372,47 @@ export function RescheduleDialog({
                   >
                     Override Reason
                   </label>
-                  <input
-                    type="text"
-                    value={overrideReason}
-                    onChange={(e) => setOverrideReason(e.target.value)}
-                    placeholder="Why is this reschedule needed?"
-                    style={{
-                      width: "100%",
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-color, #e2e8f0)",
-                      fontSize: 14,
-                    }}
-                  />
+                   <Input
+                     type="text"
+                     value={overrideReason}
+                     onChange={(e) => setOverrideReason(e.target.value)}
+                     placeholder="Why is this reschedule needed?"
+                   />
                 </div>
               </div>
             )}
-          </div>
+           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
-            <button
-              type="button"
-              onClick={onCancel}
-              disabled={submitting}
-              style={{
-                padding: "8px 20px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #e2e8f0)",
-                backgroundColor: "var(--bg-surface, #fff)",
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: submitting ? "not-allowed" : "pointer",
-                opacity: submitting ? 0.6 : 1,
-              }}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={
-                !newDate ||
-                isBlocked ||
-                !!evaluationError ||
-                evaluating ||
-                submitting ||
-                (showOverride &&
-                  (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()))
-              }
-              style={{
-                padding: "8px 20px",
-                borderRadius: 6,
-                border: "none",
-                backgroundColor: isBlocked || !newDate ? "var(--border-color, #e2e8f0)" : "var(--color-info, #3b82f6)",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor:
-                  !newDate || isBlocked || !!evaluationError || evaluating || submitting
-                    ? "not-allowed"
-                    : "pointer",
-                opacity: !newDate || isBlocked || !!evaluationError || evaluating || submitting ? 0.6 : 1,
-              }}
-            >
-              {submitting ? "Rescheduling…" : "Reschedule"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+             <DialogFooter>
+               <Button
+                 variant="secondary"
+                 type="button"
+                 onClick={onCancel}
+                 disabled={submitting}
+               >
+                 Cancel
+               </Button>
+               <Button
+                 type="submit"
+                 disabled={
+                   !newDate ||
+                   isBlocked ||
+                   !!evaluationError ||
+                   evaluating ||
+                   submitting ||
+                   (showOverride &&
+                     (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()))
+                 }
+                 style={{
+                   backgroundColor: isBlocked || !newDate ? "var(--border)" : "var(--blue)",
+                   color: "#fff",
+                 }}
+               >
+                 {submitting ? "Rescheduling…" : "Reschedule"}
+               </Button>
+             </DialogFooter>
+           </form>
+      </DialogContent>
+    </Dialog>
   );
 }

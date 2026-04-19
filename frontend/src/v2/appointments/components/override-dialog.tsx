@@ -7,6 +7,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
+import { Button } from "@/components/shared/Button";
+import { Input } from "@/components/shared/Input";
 
 interface OverrideDialogProps {
   onSubmit: (username: string, password: string, reason: string) => void;
@@ -39,53 +42,32 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
   };
 
   return (
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center" }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onCancel();
-      }}
-    >
-      {/* Backdrop */}
-      <div style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)" }} />
-
-      {/* Dialog */}
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: "100%",
-          maxWidth: 440,
-          margin: "0 16px",
-          padding: 24,
-          borderRadius: 12,
-          backgroundColor: "var(--bg-surface, #fff)",
-          border: "1px solid var(--border-color, #e2e8f0)",
-          boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
-        }}
-      >
-        {/* Header */}
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: 40,
-              height: 40,
-              borderRadius: "50%",
-              backgroundColor: "var(--bg-warning, #fef3c7)",
-              color: "var(--color-warning, #f59e0b)",
-            }}
-          >
-            <AlertTriangle size={20} />
+    <Dialog open={true} onClose={onCancel}>
+      <DialogContent maxWidth="440px">
+        <DialogHeader showClose={false}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 40,
+                height: 40,
+                borderRadius: "50%",
+                backgroundColor: "rgba(245, 158, 11, 0.1)",
+                color: "var(--amber)",
+              }}
+            >
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <DialogTitle>Supervisor Override Required</DialogTitle>
+              <DialogDescription>
+                This booking requires supervisor approval
+              </DialogDescription>
+            </div>
           </div>
-          <div>
-            <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Supervisor Override Required</h3>
-            <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", margin: 0 }}>
-              This booking requires supervisor approval
-            </p>
-          </div>
-        </div>
+        </DialogHeader>
 
         {/* Error */}
         {error && (
@@ -93,11 +75,11 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
             style={{
               padding: "8px 12px",
               marginBottom: 16,
-              borderRadius: 6,
-              backgroundColor: "var(--bg-error, #fef2f2)",
-              border: "1px solid var(--border-error, #fecaca)",
+              borderRadius: "var(--radius-md)",
+              backgroundColor: "rgba(255, 71, 87, 0.1)",
+              border: "1px solid rgba(255, 71, 87, 0.3)",
               fontSize: 13,
-              color: "var(--color-error, #ef4444)",
+              color: "var(--accent)",
             }}
           >
             {error}
@@ -114,23 +96,16 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   fontSize: 13,
                   fontWeight: 600,
                   marginBottom: 4,
-                  color: "var(--text-primary, #1e293b)",
+                  color: "var(--text)",
                 }}
               >
                 Supervisor Username
               </label>
-              <input
+              <Input
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 autoComplete="username"
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--border-color, #e2e8f0)",
-                  fontSize: 14,
-                }}
               />
             </div>
 
@@ -141,24 +116,17 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   fontSize: 13,
                   fontWeight: 600,
                   marginBottom: 4,
-                  color: "var(--text-primary, #1e293b)",
+                  color: "var(--text)",
                 }}
               >
                 Password
               </label>
-              <input
+              <Input
                 ref={passwordRef}
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--border-color, #e2e8f0)",
-                  fontSize: 14,
-                }}
               />
             </div>
 
@@ -169,64 +137,34 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   fontSize: 13,
                   fontWeight: 600,
                   marginBottom: 4,
-                  color: "var(--text-primary, #1e293b)",
+                  color: "var(--text)",
                 }}
               >
                 Override Reason
               </label>
-              <input
+              <Input
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
                 placeholder="Why is this override needed?"
-                style={{
-                  width: "100%",
-                  padding: "8px 10px",
-                  borderRadius: 6,
-                  border: "1px solid var(--border-color, #e2e8f0)",
-                  fontSize: 14,
-                }}
               />
             </div>
           </div>
 
-          {/* Actions */}
-          <div style={{ display: "flex", gap: 12, justifyContent: "flex-end", marginTop: 24 }}>
-            <button
-              type="button"
-              onClick={onCancel}
-              style={{
-                padding: "8px 20px",
-                borderRadius: 6,
-                border: "1px solid var(--border-color, #e2e8f0)",
-                backgroundColor: "var(--bg-surface, #fff)",
-                fontSize: 14,
-                fontWeight: 500,
-                cursor: "pointer",
-              }}
-            >
+          <DialogFooter>
+            <Button variant="secondary" onClick={onCancel}>
               Cancel
-            </button>
-            <button
+            </Button>
+            <Button
               type="submit"
               disabled={!username.trim() || !password.trim() || !reason.trim()}
-              style={{
-                padding: "8px 20px",
-                borderRadius: 6,
-                border: "none",
-                backgroundColor: "var(--color-warning, #f59e0b)",
-                color: "#fff",
-                fontSize: 14,
-                fontWeight: 600,
-                cursor: !username.trim() || !password.trim() || !reason.trim() ? "not-allowed" : "pointer",
-                opacity: !username.trim() || !password.trim() || !reason.trim() ? 0.6 : 1,
-              }}
+              style={{ backgroundColor: "var(--amber)", color: "#fff" }}
             >
               Approve & Book
-            </button>
-          </div>
+            </Button>
+          </DialogFooter>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

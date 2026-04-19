@@ -6,9 +6,7 @@ import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
-import { Button } from "@/components/shared/Button";
-import { Card } from "@/components/shared/Card";
-import { Input } from "@/components/shared/Input";
+import { Button, Card, Input } from "@/components/shared";
 
 export default function QueuePage() {
   const { language, t } = useLanguage();

@@ -10,8 +10,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
-import { Button } from "@/components/shared/Button";
-import { Card } from "@/components/shared/Card";
+import { Button, Card, LoadingState } from "@/components/shared";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
 import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
@@ -231,7 +230,7 @@ export function AppointmentsV2Page() {
           Select a modality to view availability.
         </p>
       ) : availability.isLoading ? (
-        <p className="text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading availability…</p>
+        <LoadingState message="Loading availability…" />
       ) : availability.isError ? (
         <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
           Could not load availability. {(availability.error as Error).message}
@@ -272,7 +271,7 @@ export function AppointmentsV2Page() {
           <div className="mt-6">
             <h2 className="text-lg font-bold mb-4 text-embossed" style={{ color: "var(--text)" }}>Suggestions</h2>
             {suggestions.isLoading ? (
-              <p style={{ color: "var(--text-muted)" }}>Loading next available suggestions…</p>
+              <LoadingState message="Loading next available suggestions…" />
             ) : suggestions.isError ? (
               <p style={{ color: "var(--accent)" }}>
                 Could not load suggestions. {(suggestions.error as Error).message}
@@ -559,17 +558,19 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       </div>
 
       {bookings.isLoading ? (
-        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
-          Loading bookings…
-        </p>
+        <LoadingState message="Loading bookings…" />
       ) : bookings.isError ? (
-        <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
-          Could not load bookings. {(bookings.error as Error).message}
-        </p>
+        <div className="p-8 text-center">
+          <p style={{ color: "var(--accent)" }}>
+            Could not load bookings. {(bookings.error as Error).message}
+          </p>
+        </div>
       ) : bookingsList.length === 0 ? (
-        <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
-          No bookings found for the selected date range.
-        </p>
+        <div className="p-8 text-center">
+          <p style={{ color: "var(--text-muted)" }}>
+            No bookings found for the selected date range.
+          </p>
+        </div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">

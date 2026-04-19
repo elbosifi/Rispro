@@ -5,8 +5,7 @@ import { fetchQueueSnapshot, fetchAppointmentLookups, fetchStatistics } from "@/
 import { buildDashboardViewModel, type DashboardTone } from "@/lib/dashboard-view-model";
 import { formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
 import { PageContainer } from "@/components/layout/page-container";
-import { Button } from "@/components/shared/Button";
-import { Card } from "@/components/shared/Card";
+import { Button, Card } from "@/components/shared";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
