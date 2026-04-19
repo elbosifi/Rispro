@@ -28,6 +28,16 @@ The supervisor credentials are printed at the end of setup.
 
 This reads `RISPRO_DB_MODE` from the existing `.env`, pulls the latest code, rebuilds, restarts containers, and verifies health. No prompts. Volumes are preserved.
 
+The update script now force-syncs the working tree before pulling:
+
+```bash
+git reset --hard HEAD
+git clean -fd
+git pull origin <current-branch>
+```
+
+That means any local tracked changes or untracked files in the repository will be discarded during update.
+
 ---
 
 ## Database Modes

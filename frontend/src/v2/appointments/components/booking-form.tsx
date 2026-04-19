@@ -18,6 +18,7 @@ import type {
   ModalityDto,
   SchedulingDecisionDto,
 } from "../types";
+import { Card, Button } from "@/components/shared";
 
 interface Patient {
   id: number;
@@ -227,314 +228,187 @@ export function BookingForm({
 
   return (
     <>
-      <div
-        style={{
-          padding: 16,
-          borderRadius: 8,
-          backgroundColor: "var(--bg-surface, #f8fafc)",
-          border: "1px solid var(--border-color, #e2e8f0)",
-        }}
-      >
-        <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
-          <Plus size={18} />
+      <Card className="p-6">
+        <h3 className="text-xl font-semibold mb-6 flex items-center gap-3">
+          <Plus size={20} />
           New Booking
-        </h2>
+        </h3>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* Patient Search */}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          {/* Patient Search */}
+          <div>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+              Patient
+            </label>
+            <PatientSearch
+              onSelect={setSelectedPatient}
+              selectedPatient={selectedPatient}
+              onClear={handleClearPatient}
+            />
+          </div>
+
+          {/* Modality + Date row */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label
-                style={{
-                  display: "block",
-                  fontSize: 11,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  marginBottom: 4,
-                  color: "var(--text-muted, #64748b)",
-                }}
-              >
-                Patient
+              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                Modality
               </label>
-              <PatientSearch
-                onSelect={setSelectedPatient}
-                selectedPatient={selectedPatient}
-                onClear={handleClearPatient}
-              />
+              <div className="input-premium opacity-70">
+                {modality?.name ?? "—"}
+              </div>
             </div>
 
-            {/* Modality + Date row */}
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 200px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: 4,
-                    color: "var(--text-muted, #64748b)",
-                  }}
-                >
-                  Modality
-                </label>
-                <div
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-color, #e2e8f0)",
-                    fontSize: 14,
-                    backgroundColor: "var(--bg-input, #fff)",
-                    color: "var(--text-primary, #1e293b)",
-                  }}
-                >
-                  {modality?.name ?? "—"}
-                </div>
-              </div>
-
-              <div style={{ flex: "1 1 200px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: 4,
-                    color: "var(--text-muted, #64748b)",
-                  }}
-                >
-                  Booking Date
-                </label>
-                <select
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-color, #e2e8f0)",
-                    fontSize: 14,
-                  }}
-                >
-                  <option value="">Select date…</option>
-                  {availableDates.map((date) => {
-                    const day = availability.find((d) => d.date === date);
-                    const dayStatus = day?.decision.displayStatus;
-                    const isBlocked = dayStatus === "blocked";
-                    const isRestricted = dayStatus === "restricted";
-                    const totalRemaining = isBlocked ? null : Math.max(0, (day?.modalityTotalCapacity ?? day?.dailyCapacity ?? 0) - (day?.bookedTotal ?? day?.bookedCount ?? 0));
-                    const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
-                    const specialVal = special ?? 0;
-                    let label: string;
-                    if (isBlocked) {
-                      label = `${date} (Blocked)`;
+            <div>
+              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                Booking Date
+              </label>
+              <select
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="input-premium"
+              >
+                <option value="">Select date…</option>
+                {availableDates.map((date) => {
+                  const day = availability.find((d) => d.date === date);
+                  const dayStatus = day?.decision.displayStatus;
+                  const isBlocked = dayStatus === "blocked";
+                  const isRestricted = dayStatus === "restricted";
+                  const totalRemaining = isBlocked ? null : Math.max(0, (day?.modalityTotalCapacity ?? day?.dailyCapacity ?? 0) - (day?.bookedTotal ?? day?.bookedCount ?? 0));
+                  const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
+                  const specialVal = special ?? 0;
+                  let label: string;
+                  if (isBlocked) {
+                    label = `${date} (Blocked)`;
+                  } else {
+                    const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
+                    if (specialVal > 0) {
+                      label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
                     } else {
-                      const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
-                      if (specialVal > 0) {
-                        label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
-                      } else {
-                        label = `${date} (${totalRemaining} total, ${modeLabel})`;
-                      }
+                      label = `${date} (${totalRemaining} total, ${modeLabel})`;
                     }
-                    return (
-                      <option key={date} value={date}>
-                        {label}{isRestricted ? " ⚠️" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
-
-            {/* Case category + notes row */}
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <div style={{ flex: "0 1 180px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: 4,
-                    color: "var(--text-muted, #64748b)",
-                  }}
-                >
-                  Case Category
-                </label>
-                <div
-                  style={{
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-color, #e2e8f0)",
-                    fontSize: 14,
-                    backgroundColor: "var(--bg-input, #fff)",
-                    color: "var(--text-primary, #1e293b)",
-                  }}
-                >
-                  {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
-                </div>
-              </div>
-
-              <div style={{ flex: "1 1 300px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: 11,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.05em",
-                    marginBottom: 4,
-                    color: "var(--text-muted, #64748b)",
-                  }}
-                >
-                  Notes (optional)
-                </label>
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  placeholder="Additional notes…"
-                  style={{
-                    width: "100%",
-                    padding: "8px 10px",
-                    borderRadius: 6,
-                    border: "1px solid var(--border-color, #e2e8f0)",
-                    fontSize: 14,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                <input
-                  type="checkbox"
-                  checked={useSpecialQuota}
-                  onChange={(e) => {
-                    setUseSpecialQuota(e.target.checked);
-                    if (!e.target.checked) {
-                      setSpecialReasonCode("");
-                    }
-                  }}
-                />
-                Use special quota
-              </label>
-              {useSpecialQuota && (
-                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <select
-                    value={specialReasonCode}
-                    onChange={(e) => setSpecialReasonCode(e.target.value)}
-                    disabled={specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons}
-                    style={{
-                      padding: "8px 10px",
-                      borderRadius: 6,
-                      border: "1px solid var(--border-color, #e2e8f0)",
-                      fontSize: 13,
-                      minWidth: 230,
-                      opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
-                    }}
-                  >
-                    <option value="">Select special reason…</option>
-                    {specialReasons.isLoading && <option value="">Loading…</option>}
-                    {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
-                      <option key={reason.code} value={reason.code}>
-                        {reason.labelEn || reason.code}
-                      </option>
-                    ))}
-                  </select>
-                  {specialReasons.isLoading && (
-                    <span style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
-                      Loading special reasons…
-                    </span>
-                  )}
-                  {specialReasons.isError && (
-                    <span style={{ fontSize: 12, color: "var(--color-error, #ef4444)" }}>
-                      Could not load special reasons.
-                    </span>
-                  )}
-                  {specialReasonsUnavailable && (
-                    <span style={{ fontSize: 12, color: "var(--color-warning, #b45309)" }}>
-                      No active special reasons configured.
-                    </span>
-                  )}
-                  {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
-                    <span style={{ fontSize: 12, color: "var(--color-error, #ef4444)" }}>
-                      Please select a special reason to continue.
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Submit button */}
-            <div style={{ display: "flex", justifyContent: "flex-end" }}>
-              <button
-                type="submit"
-                disabled={
-                  !selectedPatient ||
-                  !selectedDate ||
-                  createBooking.isPending ||
-                  missingSpecialReasonSelection ||
-                  specialReasonsUnavailable ||
-                  (useSpecialQuota && specialReasons.isError)
-                }
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "10px 24px",
-                  borderRadius: 6,
-                  border: "none",
-                  backgroundColor:
-                    !selectedPatient ||
-                    !selectedDate ||
-                    missingSpecialReasonSelection ||
-                    specialReasonsUnavailable ||
-                    (useSpecialQuota && specialReasons.isError)
-                      ? "var(--border-color, #e2e8f0)"
-                      : "var(--color-primary, #3b82f6)",
-                  color: "#fff",
-                  fontSize: 14,
-                  fontWeight: 600,
-                  cursor:
-                    !selectedPatient ||
-                    !selectedDate ||
-                    createBooking.isPending ||
-                    missingSpecialReasonSelection ||
-                    specialReasonsUnavailable ||
-                    (useSpecialQuota && specialReasons.isError)
-                      ? "not-allowed"
-                      : "pointer",
-                  opacity:
-                    !selectedPatient ||
-                    !selectedDate ||
-                    missingSpecialReasonSelection ||
-                    specialReasonsUnavailable ||
-                    (useSpecialQuota && specialReasons.isError)
-                      ? 0.6
-                      : 1,
-                }}
-              >
-                {createBooking.isPending ? (
-                  <>
-                    <Loader2 size={16} className="animate-spin" />
-                    Booking…
-                  </>
-                ) : (
-                  <>
-                    <Calendar size={16} />
-                    Book Appointment
-                  </>
-                )}
-              </button>
+                  }
+                  return (
+                    <option key={date} value={date}>
+                      {label}{isRestricted ? " ⚠️" : ""}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
           </div>
+
+          {/* Case category + notes row */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                Case Category
+              </label>
+              <div className="input-premium opacity-70">
+                {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
+              </div>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                Notes (optional)
+              </label>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Additional notes…"
+                className="input-premium"
+              />
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-4 items-center py-2">
+            <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
+              <input
+                type="checkbox"
+                checked={useSpecialQuota}
+                onChange={(e) => {
+                  setUseSpecialQuota(e.target.checked);
+                  if (!e.target.checked) {
+                    setSpecialReasonCode("");
+                  }
+                }}
+                className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
+              />
+              <span className="text-base font-medium">Use special quota</span>
+            </label>
+            {useSpecialQuota && (
+              <div className="flex flex-col gap-2">
+                <select
+                  value={specialReasonCode}
+                  onChange={(e) => setSpecialReasonCode(e.target.value)}
+                  disabled={specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons}
+                  className="input-premium"
+                  style={{
+                    opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
+                  }}
+                >
+                  <option value="">Select special reason…</option>
+                  {specialReasons.isLoading && <option value="">Loading…</option>}
+                  {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
+                    <option key={reason.code} value={reason.code}>
+                      {reason.labelEn || reason.code}
+                    </option>
+                  ))}
+                </select>
+                {specialReasons.isLoading && (
+                  <span className="text-sm text-muted-foreground">
+                    Loading special reasons…
+                  </span>
+                )}
+                {specialReasons.isError && (
+                  <span className="text-sm text-red-500">
+                    Could not load special reasons.
+                  </span>
+                )}
+                {specialReasonsUnavailable && (
+                  <span className="text-sm text-amber-600">
+                    No active special reasons configured.
+                  </span>
+                )}
+                {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
+                  <span className="text-sm text-red-500">
+                    Please select a special reason to continue.
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Submit button */}
+          <div className="flex justify-end pt-4 border-t border-border">
+            <Button
+              type="submit"
+              disabled={
+                !selectedPatient ||
+                !selectedDate ||
+                createBooking.isPending ||
+                missingSpecialReasonSelection ||
+                specialReasonsUnavailable ||
+                (useSpecialQuota && specialReasons.isError)
+              }
+              className="flex items-center gap-2"
+            >
+              {createBooking.isPending ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Booking…
+                </>
+              ) : (
+                <>
+                  <Calendar size={16} />
+                  Book Appointment
+                </>
+              )}
+            </Button>
+          </div>
         </form>
-      </div>
+      </Card>
 
       {/* Override dialog */}
       {showOverride && (

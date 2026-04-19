@@ -310,8 +310,9 @@ export default function QueuePage() {
                        {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
                          <Button
                            size="sm"
-                           variant="ghost"
+                           variant="secondary"
                            onClick={() => handleCancel(entry.appointmentId)}
+                           style={{ color: "var(--muted-foreground)" }}
                          >
                            Cancel appointment
                          </Button>
