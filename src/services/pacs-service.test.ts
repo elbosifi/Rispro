@@ -32,6 +32,29 @@ test("testPacsConnection rejects URL-like PACS hosts with a clear error", async 
   );
 });
 
+test("testPacsConnection accepts hostnames with underscores", async () => {
+  __setDimseModuleForTests({
+    echoScu: (_options: unknown, callback: (result: string) => void) => {
+      callback(JSON.stringify({ code: 0, status: "success" }));
+    },
+    findScu: () => {}
+  });
+
+  await assert.doesNotReject(
+    testPacsConnection({
+      currentUserId: null,
+      overrides: {
+        enabled: "enabled",
+        host: "PACS_SERVER.local",
+        port: 103,
+        calledAeTitle: "OSIRIXR",
+        callingAeTitle: "RISPRO",
+        timeoutSeconds: 10
+      }
+    })
+  );
+});
+
 test("testPacsConnection rejects invalid AE title format before native DIMSE call", async () => {
   await assert.rejects(
     testPacsConnection({

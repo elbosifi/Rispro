@@ -7,7 +7,7 @@ import type { UserId, UnknownRecord } from "../types/http.js";
 import type { DbNumeric } from "../types/db.js";
 
 const PACS_AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
-const PACS_HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
+const PACS_HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-_]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-_]{0,61}[A-Z0-9])$/i;
 
 function normalizePacsHost(value: unknown): string {
   const host = normalizeOptionalText(value);

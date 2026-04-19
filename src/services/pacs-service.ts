@@ -13,7 +13,7 @@ const require = createRequire(import.meta.url);
 const FALLBACK_DIMSE_SOURCE_IP = "127.0.0.1";
 const FALLBACK_DIMSE_SOURCE_PORT = 4006;
 const AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
-const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
+const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-_]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-_]{0,61}[A-Z0-9])$/i;
 const PACS_FIND_QUERY_MODEL = "study-root";
 const PACS_QUERY_RETRIEVE_LEVEL = "STUDY";
 const DICOM_DATASET_KEYS = new Set([
