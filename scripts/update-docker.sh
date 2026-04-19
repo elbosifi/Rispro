@@ -152,34 +152,12 @@ check_git_repo() {
     exit 1
   fi
 
-  local git_status=""
-  git_status="$(git status --porcelain --untracked-files=all || true)"
-
-   if [ -n "${git_status}" ]; then
-    warn "Local git changes detected; preserving them and avoiding destructive cleanup."
-    if printf '%s\n' "${git_status}" | cut -c1-2 | grep -qxv '??'; then
-      warn "Tracked changes are present; skipping git pull to avoid overwriting local edits."
-      warn "Review with: git status --short"
-      return 0
-    fi
-
-    ok "Only untracked files are present; proceeding with git pull."
-  fi
-
-  log "Fetching latest code from origin/${current_branch}..."
+  log "Forcing repository to match origin/${current_branch}..."
   git fetch origin "${current_branch}"
-
-  local local_sha remote_sha
-  local_sha="$(git rev-parse HEAD)"
-  remote_sha="$(git rev-parse "origin/${current_branch}")"
-
-  if [ "${local_sha}" = "${remote_sha}" ]; then
-    ok "Already up to date on ${current_branch}."
-  else
-    log "Pulling latest code..."
-    git pull --rebase origin "${current_branch}"
-    ok "Git update completed."
-  fi
+  git reset --hard HEAD
+  git clean -fd
+  git pull origin "${current_branch}"
+  ok "Git update completed."
 }
 
 build_and_restart() {

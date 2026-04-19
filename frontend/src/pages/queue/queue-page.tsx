@@ -6,7 +6,7 @@ import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
-import { Button, Card, Input } from "@/components/shared";
+import { Button, Card, Input, Badge } from "@/components/shared";
 
 export default function QueuePage() {
   const { language, t } = useLanguage();
@@ -175,7 +175,7 @@ export default function QueuePage() {
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+          <h2 className="text-2xl font-bold" style={{ color: "var(--foreground)" }}>
             {t("queue.title")}
           </h2>
         </div>
@@ -184,7 +184,7 @@ export default function QueuePage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
          <div className="space-y-6">
            <Card className="p-6">
-             <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.scanAccession")}</h3>
+             <h3 className="text-lg font-semibold mb-4">{t("queue.scanAccession")}</h3>
              <form onSubmit={handleScan} className="flex gap-2">
                <Input
                  type="text"
@@ -201,7 +201,7 @@ export default function QueuePage() {
            </Card>
 
            <Card className="p-6">
-             <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.walkInPatient")}</h3>
+             <h3 className="text-lg font-semibold mb-4">{t("queue.walkInPatient")}</h3>
             <div className="relative mb-4">
                <Input
                  type="text"
@@ -211,7 +211,7 @@ export default function QueuePage() {
                  className="w-full"
                />
               {walkInResults.length > 0 && (
-                <ul className="absolute z-10 w-full mt-1 bg-white dark:bg-stone-700 border border-stone-200 dark:border-stone-600 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                <ul className="absolute z-10 w-full mt-1 bg-white border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
                   {walkInResults.map((p) => (
                     <li key={p.id}>
                       <button
@@ -221,12 +221,12 @@ export default function QueuePage() {
                           setWalkInResults([]);
                           setWalkInSearch(chooseLocalized(language, p.arabicFullName, p.englishFullName));
                         }}
-                        className="w-full text-start p-3 hover:bg-stone-50 dark:hover:bg-stone-600"
+                        className="w-full text-start p-3 hover:bg-muted"
                       >
-                        <p className="font-medium text-stone-900 dark:text-white">
+                        <p className="font-medium">
                           {chooseLocalized(language, p.arabicFullName, p.englishFullName)}
                         </p>
-                        <p className="text-xs description-center">{p.nationalId || t("queue.noId")}</p>
+                        <p className="text-xs text-muted-foreground">{p.nationalId || t("queue.noId")}</p>
                       </button>
                     </li>
                   ))}
@@ -234,8 +234,8 @@ export default function QueuePage() {
               )}
             </div>
             {selectedWalkIn && (
-              <div className="mb-4 p-3 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg">
-                <p className="text-sm font-medium text-teal-800 dark:text-teal-300 description-center">
+              <div className="mb-4 p-3 bg-accent/5 border border-accent/20 rounded-lg">
+                <p className="text-sm font-medium text-accent">
                   {t("queue.selected", { name: chooseLocalized(language, selectedWalkIn.arabicFullName, selectedWalkIn.englishFullName) })}
                 </p>
               </div>
@@ -243,7 +243,7 @@ export default function QueuePage() {
             
             {/* Modality Selector */}
             <div className="mb-4">
-              <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-2">
+              <label className="block text-sm font-medium mb-2">
                 {t("queue.selectModality")}
               </label>
               <select
@@ -268,10 +268,10 @@ export default function QueuePage() {
 
          <div className="lg:col-span-2">
            <Card className="overflow-hidden">
-             <div className="p-4 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-               <h3 className="font-semibold text-stone-900 dark:text-white">{t("queue.todayQueue")}</h3>
+             <div className="p-4 border-b border-border flex justify-between items-center">
+               <h3 className="font-semibold">{t("queue.todayQueue")}</h3>
                {queue && (
-                 <div className="flex gap-3 text-sm description-center">
+                 <div className="flex gap-3 text-sm text-muted-foreground">
                    <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
                    <span>{t("queue.noShows", { count: queue.summary.no_show_count })}</span>
                  </div>
@@ -279,42 +279,42 @@ export default function QueuePage() {
              </div>
 
              {queue?.queueEntries.length === 0 ? (
-               <div className="p-8 text-center description-center">{t("queue.empty")}</div>
+               <div className="p-8 text-center text-muted-foreground">{t("queue.empty")}</div>
              ) : (
-               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
+               <ul className="divide-y divide-border max-h-[600px] overflow-y-auto">
                  {queue?.queueEntries.map((entry) => (
-                   <li key={entry.id} className="p-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50">
+                   <li key={entry.id} className="p-4 flex items-center justify-between hover:bg-muted/50">
                      <div>
-                       <p className="font-medium text-stone-900 dark:text-white">
+                       <p className="font-medium">
                          {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
                        </p>
-                       <p className="text-sm description-center">#{entry.queueNumber} - {entry.accessionNumber}</p>
+                       <p className="text-sm text-muted-foreground">#{entry.queueNumber} - {entry.accessionNumber}</p>
                      </div>
                      <div className="flex items-center gap-2">
-                       <span
-                         className={`px-2 py-1 rounded-full text-xs font-medium ${
-                           entry.queueStatus === "waiting"
-                             ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                             : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"
-                         }`}
+                       <Badge
+                         variant={entry.queueStatus === "waiting" ? "warning" : "neutral"}
+                         size="sm"
                        >
                          {entry.queueStatus}
-                       </span>
+                       </Badge>
                        {queue.reviewActive && entry.appointmentStatus === "scheduled" && (
-                         <button
+                         <Button
+                           size="sm"
+                           variant="secondary"
                            onClick={() => handleNoShow(entry.appointmentId)}
-                           className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50"
+                           style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
                          >
                            {t("queue.markNoShow")}
-                         </button>
+                         </Button>
                        )}
                        {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
-                         <button
+                         <Button
+                           size="sm"
+                           variant="ghost"
                            onClick={() => handleCancel(entry.appointmentId)}
-                           className="px-2 py-1 bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 rounded text-xs font-medium hover:bg-stone-300 dark:hover:bg-stone-600"
                          >
                            Cancel appointment
-                         </button>
+                         </Button>
                        )}
                      </div>
                    </li>
@@ -325,5 +325,5 @@ export default function QueuePage() {
          </div>
        </div>
      </div>
-   );
- }
+  );
+}
