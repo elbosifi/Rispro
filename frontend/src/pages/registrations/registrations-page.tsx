@@ -62,7 +62,7 @@ export default function RegistrationsPage() {
   });
 
   const cancelMutation = useMutation({
-    mutationFn: cancelAppointment,
+    mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["registrations"] });
       queryClient.invalidateQueries({ queryKey: ["queue"] });
@@ -124,11 +124,11 @@ export default function RegistrationsPage() {
             <div className="p-4">
               {isLoading ? (
                 <div className="p-8 text-center text-muted-foreground">
-                  {t("registrations.loading")}
+                  {t("common.loading")}
                 </div>
               ) : appointments.length === 0 ? (
                 <div className="p-8 text-center text-muted-foreground">
-                  {t("registrations.noAppointments")}
+                  {t("queue.empty")}
                 </div>
               ) : (
                 <ul className="divide-y divide-border max-h-[500px] overflow-y-auto">
@@ -170,7 +170,7 @@ export default function RegistrationsPage() {
             <Card className="p-6">
               <div className="flex items-center justify-between gap-3 mb-6">
                 <h3 className="text-xl font-semibold">
-                  {t("registrations.appointmentDetails")}
+                  {t("calendar.title")}
                 </h3>
                 <Button
                   onClick={() =>
@@ -255,7 +255,7 @@ export default function RegistrationsPage() {
           ) : (
             <Card className="p-6 h-full flex items-center justify-center">
               <p className="text-muted-foreground text-center">
-                {t("registrations.selectPrompt")}
+                {t("doctor.selectPrompt")}
               </p>
             </Card>
           )}
