@@ -223,6 +223,14 @@ await pool.end();" "$key"
   mwl_ae_title="$(read_setting mwl_ae_title)"
   mwl_port="$(read_setting mwl_port)"
 
+  local worklist_dir="$APP_DIR/storage/dicom/worklists/$mwl_ae_title"
+  if [ ! -d "$worklist_dir" ]; then
+    log "WARNING: Worklist directory $worklist_dir does not exist."
+    log "Creating directory and ensuring permissions..."
+    sudo mkdir -p "$worklist_dir"
+    sudo chown -R "$DICOM_GATEWAY_APP_USER":"$DICOM_GATEWAY_APP_USER" "$APP_DIR/storage/dicom"
+  fi
+
   if [ -z "$mwl_ae_title" ] || [ -z "$mwl_port" ]; then
     echo "Deployment stopped: unable to read MWL AE title or port from the database."
     exit 1
@@ -230,6 +238,22 @@ await pool.end();" "$key"
 
   log "Running DICOM C-ECHO smoke test against ${mwl_ae_title}@127.0.0.1:${mwl_port}"
   echoscu -v -aec "$mwl_ae_title" 127.0.0.1 "$mwl_port"
+}
+
+test_pacs_find() {
+  # Manual test for PACS C-FIND logic
+  # Usage: ./deploy.sh test-find <NATIONAL_ID>
+  local id="${1:-}"
+  if [ -z "$id" ]; then return 0; fi
+  
+  log "Testing PACS C-FIND for ID: $id"
+  # This simulates the internal PACS service logic
+  # Replace PACS_AET, RIS_AET, IP, and PORT with your specific values or 
+  # use the read_setting function to pull them from DB
+  findscu -v -S -k "0010,0020=$id" \
+    -aec YOUR_PACS_AET \
+    -aet YOUR_RIS_AET \
+    YOUR_PACS_IP YOUR_PACS_PORT
 }
 
 main() {

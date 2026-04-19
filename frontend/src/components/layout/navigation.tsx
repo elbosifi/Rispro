@@ -106,16 +106,17 @@ function NavIconGlyph({ icon, size = 20 }: { icon: NavIcon; size?: number }) {
 function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
   return (
     <div
-      className={`rounded-xl p-4 text-white relative overflow-hidden ${isRtl ? "text-center" : ""}`}
+      className={`rounded-xl p-6 text-white relative overflow-hidden ${isRtl ? "text-center" : ""}`}
       style={{
-        background: "linear-gradient(135deg, var(--accent), #c0392b)",
-        boxShadow: "4px 4px 8px rgba(166, 50, 60, 0.3), -2px -2px 4px rgba(255, 100, 110, 0.2)"
+        background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
+        boxShadow: "var(--shadow-accent-lg)"
       }}
     >
-      <p className="text-[10px] uppercase tracking-[0.2em] opacity-80 font-mono-data">{t(language, "shell.menu")}</p>
-      <p className="mt-1 text-lg font-bold text-embossed">{t(language, "shell.reception")}</p>
-      <div className="flex items-center justify-center gap-1.5 mt-2">
-        <span className="text-[10px] uppercase tracking-[0.15em] opacity-80 font-mono-data">SYSTEM ONLINE</span>
+      <p className="text-xs uppercase tracking-[0.2em] opacity-80 font-mono">{t(language, "shell.menu")}</p>
+      <p className="mt-2 text-xl font-display">{t(language, "shell.reception")}</p>
+      <div className="flex items-center justify-center gap-2 mt-3">
+        <span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
+        <span className="text-xs uppercase tracking-[0.15em] opacity-80 font-mono">SYSTEM ONLINE</span>
       </div>
     </div>
   );
@@ -136,31 +137,30 @@ function NavButton({
 }) {
   return (
     <button
-      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150 ${
+      className={`group w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
         isRtl ? "flex-row-reverse text-end" : ""
       }`}
       style={{
-        backgroundColor: isActive ? "var(--accent)" : "var(--background)",
-        color: isActive ? "white" : "var(--text)",
-        boxShadow: isActive
-          ? "4px 4px 8px rgba(166, 50, 60, 0.4), -4px -4px 8px rgba(255, 100, 110, 0.4)"
-          : "var(--shadow-card)",
-        border: isActive ? "1px solid rgba(255,255,255,0.15)" : "1px solid var(--border)"
+        backgroundColor: isActive ? "rgba(0, 82, 255, 0.1)" : "transparent",
+        color: isActive ? "var(--accent)" : "var(--foreground)",
+        border: isActive ? "1px solid rgba(0, 82, 255, 0.3)" : "1px solid transparent",
+        boxShadow: isActive ? "var(--shadow-sm)" : "none"
       }}
       onClick={onClick}
     >
       <span
-        className="flex h-9 w-9 items-center justify-center rounded-md transition-all duration-200 group-hover:scale-105"
+        className="flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-200 group-hover:scale-105"
         style={{
-          backgroundColor: isActive ? "rgba(255,255,255,0.15)" : "var(--foreground)",
-          color: isActive ? "white" : "var(--text-muted)"
+          backgroundColor: isActive ? "var(--accent)" : "var(--muted)",
+          color: isActive ? "white" : "var(--muted-foreground)",
+          boxShadow: isActive ? "var(--shadow-accent)" : "none"
         }}
       >
         <NavIconGlyph icon={item.icon} size={18} />
       </span>
-      <span className={`flex-1 leading-tight text-xs uppercase tracking-[0.04em] ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
+      <span className={`flex-1 leading-tight text-sm uppercase tracking-[0.1em] ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
       {isActive && (
-        <span className="h-2 w-2 rounded-full bg-white/90 shadow-[0_0_6px_rgba(255,255,255,0.6)]" />
+        <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_6px_rgba(0,82,255,0.6)]" />
       )}
     </button>
   );
@@ -189,20 +189,19 @@ export function TopBar({
     <header
       className="sticky top-0 z-50 border-b"
       style={{
-        backgroundColor: "var(--foreground)",
+        backgroundColor: "var(--background)",
         borderColor: "var(--border)",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.06)"
+        boxShadow: "var(--shadow-sm)"
       }}
     >
-      <div className={`flex items-center justify-between h-16 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
+      <div className={`flex items-center justify-between h-14 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
         {/* Mobile menu button */}
         <button
-          className="lg:hidden p-2.5 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
+          className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
           style={{
-            color: "var(--text)",
-            backgroundColor: "var(--background)",
-            borderColor: "var(--border)",
-            boxShadow: "var(--shadow-card)"
+            color: "var(--foreground)",
+            backgroundColor: "transparent",
+            borderColor: "var(--border)"
           }}
           onClick={onMobileNavToggle}
           aria-label={t(language, "shell.toggleNav")}
@@ -213,10 +212,10 @@ export function TopBar({
         {/* Brand */}
         <div className={`flex items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
           <div
-            className="hidden sm:flex h-10 w-10 items-center justify-center rounded-lg text-white relative"
+            className="hidden sm:flex h-10 w-10 items-center justify-center rounded-xl text-white relative"
             style={{
-              background: "linear-gradient(135deg, var(--accent), #c0392b)",
-              boxShadow: "3px 3px 6px rgba(166, 50, 60, 0.3), -3px -3px 6px rgba(255, 100, 110, 0.2)"
+              background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
+              boxShadow: "var(--shadow-accent)"
             }}
           >
             {/* Power LED */}
@@ -224,12 +223,9 @@ export function TopBar({
             <span className="text-xs font-bold">R</span>
           </div>
           <div>
-            <h1 className="text-lg lg:text-xl font-extrabold tracking-tight text-embossed" style={{ color: "var(--accent)" }}>
+            <h1 className="text-lg font-display" style={{ color: "var(--foreground)" }}>
               {t(language, "shell.reception")}
             </h1>
-            <p className="text-[10px] uppercase tracking-[0.2em] font-mono-data" style={{ color: "var(--text-muted)" }}>
-              {t(language, "navPanel.subtitle")}
-            </p>
           </div>
         </div>
 
@@ -255,7 +251,7 @@ export function TopBar({
 
           {/* Language toggle */}
           <button
-            className="btn-ghost text-xs font-mono-data"
+            className="btn-ghost text-xs font-mono"
             onClick={onToggleLanguage}
           >
             <Languages className="w-4 h-4" />
@@ -265,27 +261,27 @@ export function TopBar({
           {/* User badge */}
           {user && (
             <div
-              className="hidden md:flex items-center gap-2.5 px-3 py-2 rounded-lg border"
+              className="hidden md:flex items-center gap-3 px-4 py-2 rounded-xl border"
               style={{
-                backgroundColor: "var(--background)",
+                backgroundColor: "var(--card)",
                 borderColor: "var(--border)",
-                boxShadow: "var(--shadow-recessed)"
+                boxShadow: "var(--shadow-sm)"
               }}
             >
               <div
-                className="flex h-8 w-8 items-center justify-center rounded-md text-white text-xs font-bold relative"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-white text-xs font-bold relative"
                 style={{
-                  background: "linear-gradient(135deg, var(--accent), #c0392b)",
-                  boxShadow: "2px 2px 4px rgba(166, 50, 60, 0.3)"
+                  background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
+                  boxShadow: "var(--shadow-accent-sm)"
                 }}
               >
                 {user.fullName?.trim()?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="leading-tight">
-                <span className="block text-xs font-semibold" style={{ color: "var(--text)" }}>
+                <span className="block text-sm font-medium" style={{ color: "var(--foreground)" }}>
                   {user.fullName}
                 </span>
-                <span className="block text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+                <span className="block text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
                   {user.role}
                 </span>
               </div>
@@ -337,7 +333,7 @@ export function SideNav({
       </div>
 
       {/* Navigation items */}
-      <div className="p-2.5 space-y-1.5 flex-1">
+      <div className="p-3 space-y-2 flex-1">
         {visibleItems.map((item) => (
           <NavButton
             key={item.route}
@@ -352,14 +348,14 @@ export function SideNav({
 
       {/* Footer status */}
       <div
-        className="p-2.5 text-center border-t"
+        className="p-3 text-center border-t"
         style={{
           borderColor: "var(--border)",
-          backgroundColor: "var(--foreground)"
+          backgroundColor: "var(--muted)"
         }}
       >
-        <div className="flex items-center justify-center gap-1.5">
-          <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+        <div className="flex items-center justify-center gap-2">
+          <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
             MWL ACTIVE
           </span>
         </div>
@@ -396,10 +392,10 @@ export function MobileDrawer({
 
       {/* Drawer panel */}
       <div
-        className={`absolute top-0 bottom-0 w-72 overflow-y-auto shadow-2xl ${isRtl ? "right-0" : "left-0"}`}
+        className={`absolute top-0 bottom-0 w-72 overflow-y-auto shadow-xl ${isRtl ? "right-0" : "left-0"}`}
         style={{
           backgroundColor: "var(--background)",
-          boxShadow: "12px 0 40px rgba(0,0,0,0.15)"
+          boxShadow: "var(--shadow-xl)"
         }}
         dir={isRtl ? "rtl" : "ltr"}
       >
@@ -409,10 +405,9 @@ export function MobileDrawer({
           <button
             className={`absolute top-3 p-2 rounded-lg border transition-all duration-150 ${isRtl ? "left-3" : "right-3"}`}
             style={{
-              color: "var(--text-muted)",
-              backgroundColor: "var(--background)",
-              borderColor: "var(--border)",
-              boxShadow: "var(--shadow-card)"
+              color: "var(--muted-foreground)",
+              backgroundColor: "transparent",
+              borderColor: "var(--border)"
             }}
             onClick={onClose}
             aria-label="Close navigation"
@@ -422,7 +417,7 @@ export function MobileDrawer({
         </div>
 
         {/* Navigation items */}
-        <div className="p-2.5 space-y-1.5">
+        <div className="p-3 space-y-2">
           {visibleItems.map((item) => (
             <NavButton
               key={item.route}
@@ -443,8 +438,8 @@ export function MobileDrawer({
           className="p-3 text-center border-t mt-2"
           style={{ borderColor: "var(--border)" }}
         >
-          <div className="flex items-center justify-center gap-1.5">
-            <span className="text-[9px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
+          <div className="flex items-center justify-center gap-2">
+            <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
               SYSTEM OPERATIONAL
             </span>
           </div>
