@@ -15,14 +15,14 @@ import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
+import { PatientSummaryCard } from "./PatientSummaryCard";
 import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
-import { SectionLabel } from "@/components/shared/SectionLabel";
-import { Button, Card } from "@/components/shared";
+import { SectionLabel, Button, Card } from "@/components/shared";
 
 interface CreateAppointmentTabProps {
   patientLookups: unknown;
@@ -449,7 +449,7 @@ export function CreateAppointmentTab({
             <p className="text-lg font-medium">{form.appointmentDate || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam mix:</span>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam mix</span>
             <p className="text-lg font-medium">
               {primaryExamMixBlocking
                 ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
@@ -507,7 +507,7 @@ export function CreateAppointmentTab({
             <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
-              onSelectPatient={(patient: SelectedPatient) => {
+              onSelectPatient={(patient: any) => {
                 actions.setPatient(patient);
                 setAvailabilitySelectedRow(null);
                 setPageError(null);
@@ -522,6 +522,10 @@ export function CreateAppointmentTab({
                 setShowSafetyModal(false);
               }}
             />
+
+            <div className="mt-6">
+              <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
+            </div>
 
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
@@ -698,9 +702,9 @@ export function CreateAppointmentTab({
       />
 
       {showSafetyModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
-          <Card className="p-6 max-w-md">
-            <h3 className="text-xl font-bold mb-4" style={{ color: "var(--amber)" }}>Safety Confirmation</h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
+          <Card className="w-full max-w-md mx-4 p-6">
+            <h3 className="text-xl font-semibold mb-4" style={{ color: "var(--amber)" }}>Safety Confirmation</h3>
             <p className="text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
             <p className="text-base mb-6">
               Have you confirmed this patient has no contraindications for {selectedModality?.name}?
@@ -708,8 +712,8 @@ export function CreateAppointmentTab({
             <div className="flex gap-4">
               <Button
                 variant="secondary"
-                className="flex-1"
                 onClick={() => setShowSafetyModal(false)}
+                className="flex-1"
               >
                 Cancel
               </Button>

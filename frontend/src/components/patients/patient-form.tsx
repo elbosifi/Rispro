@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useId, type FormEvent, type KeyboardEvent } from "react";
+import { useState, useEffect, useRef, type FormEvent, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,7 +21,7 @@ import { LIBYAN_CITIES_SORTED as LIBYAN_CITIES } from "@/lib/libyan-cities";
 import { formatDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import type { Patient } from "@/types/api";
-import { Button, Card, Badge } from "@/components/shared";
+import { Button, Card } from "@/components/shared";
 
 type IdentifierType = "national_id" | "passport" | "other";
 type PatientFormMode = "create" | "edit";
@@ -646,7 +646,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">National ID (12 digits)</label>
               <input
                 value={form.identifierValue}
-                onChange={handleIdentifierValueChange}
+                onChange={(e) => handleIdentifierValueChange(e.target.value)}
                 onKeyDown={handleEnterNavigation("identifierValue")}
                 ref={identifierValueRef}
                 maxLength={12}
@@ -661,8 +661,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </label>
               <input
                 value={form.identifierValue}
-                onChange={(v) => setForm((f) => {
-                  const nextValue = normalizeIdentifierForType(f.identifierType, v.target.value);
+                onChange={(e) => setForm((f) => {
+                  const nextValue = normalizeIdentifierForType(f.identifierType, e.target.value);
                   const nextIdentifiers = [...f.identifiers];
                   const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
                   if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {

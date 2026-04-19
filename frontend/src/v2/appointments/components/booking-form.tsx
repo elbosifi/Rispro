@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Calendar, Plus, Loader2 } from "lucide-react";
+import { Calendar, Loader2 } from "lucide-react";
 import { pushToast } from "@/lib/toast";
 import { useV2CreateBooking, evaluateV2Scheduling, useV2SpecialReasonCodes } from "../api";
 import { PatientSearch } from "./patient-search";
@@ -227,188 +227,173 @@ export function BookingForm({
   };
 
   return (
-    <>
-      <Card className="p-6">
-        <h3 className="text-xl font-semibold mb-6 flex items-center gap-3">
-          <Plus size={20} />
-          New Booking
-        </h3>
+    <Card className="p-6">
+      <form onSubmit={handleSubmit} className="space-y-6">
+        <div className="space-y-2">
+          <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Patient</label>
+          <PatientSearch
+            caseCategory={caseCategory}
+            onSelect={setSelectedPatient}
+            selectedPatient={selectedPatient}
+            onClear={handleClearPatient}
+          />
+        </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Patient Search */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-              Patient
-            </label>
-            <PatientSearch
-              onSelect={setSelectedPatient}
-              selectedPatient={selectedPatient}
-              onClear={handleClearPatient}
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Modality</label>
+            <div className="input-premium opacity-70">
+              {modality?.name ?? "—"}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Booking Date</label>
+            <select
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="input-premium input-ltr w-full"
+            >
+              <option value="">Select date…</option>
+              {availableDates.map((date) => {
+                const day = availability.find((d) => d.date === date);
+                const dayStatus = day?.decision.displayStatus;
+                const isBlocked = dayStatus === "blocked";
+                const isRestricted = dayStatus === "restricted";
+                const totalRemaining = isBlocked ? null : Math.max(0, (day?.modalityTotalCapacity ?? day?.dailyCapacity ?? 0) - (day?.bookedTotal ?? day?.bookedCount ?? 0));
+                const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
+                const specialVal = special ?? 0;
+                let label: string;
+                if (isBlocked) {
+                  label = `${date} (Blocked)`;
+                } else {
+                  const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
+                  if (specialVal > 0) {
+                    label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
+                  } else {
+                    label = `${date} (${totalRemaining} total, ${modeLabel})`;
+                  }
+                }
+                return (
+                  <option key={date} value={date}>
+                    {label}{isRestricted ? " ⚠️" : ""}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Case Category</label>
+            <div className="input-premium opacity-70">
+              {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
+            </div>
+          </div>
+
+          <div className="md:col-span-2">
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Notes (optional)</label>
+            <input
+              type="text"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="Additional notes…"
+              className="input-premium input-ltr w-full"
             />
           </div>
+        </div>
 
-          {/* Modality + Date row */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                Modality
-              </label>
-              <div className="input-premium opacity-70">
-                {modality?.name ?? "—"}
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                Booking Date
-              </label>
+        <div className="flex flex-wrap gap-4 items-center py-2">
+          <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
+            <input
+              type="checkbox"
+              checked={useSpecialQuota}
+              onChange={(e) => {
+                setUseSpecialQuota(e.target.checked);
+                if (!e.target.checked) {
+                  setSpecialReasonCode("");
+                }
+              }}
+              className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
+            />
+            <span className="text-base font-medium">Use special quota</span>
+          </label>
+          {useSpecialQuota && (
+            <div className="flex flex-col gap-2">
               <select
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="input-premium"
-              >
-                <option value="">Select date…</option>
-                {availableDates.map((date) => {
-                  const day = availability.find((d) => d.date === date);
-                  const dayStatus = day?.decision.displayStatus;
-                  const isBlocked = dayStatus === "blocked";
-                  const isRestricted = dayStatus === "restricted";
-                  const totalRemaining = isBlocked ? null : Math.max(0, (day?.modalityTotalCapacity ?? day?.dailyCapacity ?? 0) - (day?.bookedTotal ?? day?.bookedCount ?? 0));
-                  const special = isBlocked ? null : Math.max(0, day?.decision.remainingSpecialQuota ?? 0);
-                  const specialVal = special ?? 0;
-                  let label: string;
-                  if (isBlocked) {
-                    label = `${date} (Blocked)`;
-                  } else {
-                    const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
-                    if (specialVal > 0) {
-                      label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
-                    } else {
-                      label = `${date} (${totalRemaining} total, ${modeLabel})`;
-                    }
-                  }
-                  return (
-                    <option key={date} value={date}>
-                      {label}{isRestricted ? " ⚠️" : ""}
-                    </option>
-                  );
-                })}
-              </select>
-            </div>
-          </div>
-
-          {/* Case category + notes row */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                Case Category
-              </label>
-              <div className="input-premium opacity-70">
-                {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
-              </div>
-            </div>
-
-            <div className="md:col-span-2">
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                Notes (optional)
-              </label>
-              <input
-                type="text"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Additional notes…"
-                className="input-premium"
-              />
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-4 items-center py-2">
-            <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
-              <input
-                type="checkbox"
-                checked={useSpecialQuota}
-                onChange={(e) => {
-                  setUseSpecialQuota(e.target.checked);
-                  if (!e.target.checked) {
-                    setSpecialReasonCode("");
-                  }
+                value={specialReasonCode}
+                onChange={(e) => setSpecialReasonCode(e.target.value)}
+                disabled={specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons}
+                className="input-premium input-ltr"
+                style={{
+                  opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
                 }}
-                className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
-              />
-              <span className="text-base font-medium">Use special quota</span>
-            </label>
-            {useSpecialQuota && (
-              <div className="flex flex-col gap-2">
-                <select
-                  value={specialReasonCode}
-                  onChange={(e) => setSpecialReasonCode(e.target.value)}
-                  disabled={specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons}
-                  className="input-premium"
-                  style={{
-                    opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
-                  }}
-                >
-                  <option value="">Select special reason…</option>
-                  {specialReasons.isLoading && <option value="">Loading…</option>}
-                  {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
-                    <option key={reason.code} value={reason.code}>
-                      {reason.labelEn || reason.code}
-                    </option>
-                  ))}
-                </select>
-                {specialReasons.isLoading && (
-                  <span className="text-sm text-muted-foreground">
-                    Loading special reasons…
-                  </span>
-                )}
-                {specialReasons.isError && (
-                  <span className="text-sm text-red-500">
-                    Could not load special reasons.
-                  </span>
-                )}
-                {specialReasonsUnavailable && (
-                  <span className="text-sm text-amber-600">
-                    No active special reasons configured.
-                  </span>
-                )}
-                {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
-                  <span className="text-sm text-red-500">
-                    Please select a special reason to continue.
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Submit button */}
-          <div className="flex justify-end pt-4 border-t border-border">
-            <Button
-              type="submit"
-              disabled={
-                !selectedPatient ||
-                !selectedDate ||
-                createBooking.isPending ||
-                missingSpecialReasonSelection ||
-                specialReasonsUnavailable ||
-                (useSpecialQuota && specialReasons.isError)
-              }
-              className="flex items-center gap-2"
-            >
-              {createBooking.isPending ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  Booking…
-                </>
-              ) : (
-                <>
-                  <Calendar size={16} />
-                  Book Appointment
-                </>
+              >
+                <option value="">Select special reason…</option>
+                {specialReasons.isLoading && <option value="">Loading…</option>}
+                {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
+                  <option key={reason.code} value={reason.code}>
+                    {reason.labelEn || reason.code}
+                  </option>
+                ))}
+              </select>
+              {specialReasons.isLoading && (
+                <span className="text-sm text-muted-foreground">
+                  Loading special reasons…
+                </span>
               )}
-            </Button>
+              {specialReasons.isError && (
+                <span className="text-sm text-red-500">
+                  Could not load special reasons.
+                </span>
+              )}
+              {specialReasonsUnavailable && (
+                <span className="text-sm text-amber-600">
+                  No active special reasons configured.
+                </span>
+              )}
+              {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
+                <span className="text-sm text-red-500">
+                  Please select a special reason to continue.
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 pt-4 border-t border-border">
+          <Button
+            type="submit"
+            disabled={
+              !selectedPatient ||
+              !selectedDate ||
+              createBooking.isPending ||
+              missingSpecialReasonSelection ||
+              specialReasonsUnavailable ||
+              (useSpecialQuota && specialReasons.isError)
+            }
+            className="ml-auto"
+          >
+            {createBooking.isPending ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Booking…
+              </>
+            ) : (
+              <>
+                <Calendar size={16} />
+                Book Appointment
+              </>
+            )}
+          </Button>
+        </div>
+        {createBooking.isError && (
+          <div className="p-4 rounded-xl border-red-200" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
+            <p className="text-sm">{createBooking.error.message}</p>
           </div>
-        </form>
-      </Card>
+        )}
+      </form>
 
       {/* Override dialog */}
       {showOverride && (
@@ -422,6 +407,6 @@ export function BookingForm({
           error={overrideError}
         />
       )}
-    </>
+    </Card>
   );
 }
