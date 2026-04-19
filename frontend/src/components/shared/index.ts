@@ -3,6 +3,7 @@ export { Card } from "./Card";
 export { Input } from "./Input";
 export { SearchInput } from "./SearchInput";
 export { Badge } from "./Badge";
+export { SectionLabel } from "./SectionLabel";
 export { LoadingState } from "./LoadingState";
 export { EmptyState } from "./EmptyState";
 export { ErrorState } from "./ErrorState";

@@ -1,6 +1,6 @@
 import { HTMLAttributes, forwardRef } from "react";
 
-type CardVariant = "default" | "elevated" | "compact";
+type CardVariant = "default" | "elevated" | "compact" | "featured";
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
   variant?: CardVariant;
@@ -8,13 +8,27 @@ interface CardProps extends HTMLAttributes<HTMLDivElement> {
 
 export const Card = forwardRef<HTMLDivElement, CardProps>(
   ({ variant = "default", className = "", children, ...props }, ref) => {
-    const variantClass = variant === "elevated" ? "card-elevated" : "";
-    const paddingClass = variant === "compact" ? "p-4" : "";
+    const variantClasses = {
+      default: "",
+      elevated: "card-elevated",
+      compact: "p-4",
+      featured: ""
+    };
+
+    if (variant === "featured") {
+      return (
+        <div ref={ref} className={`card-featured ${className}`.trim()} {...props}>
+          <div className="card-featured-inner p-6">
+            {children}
+          </div>
+        </div>
+      );
+    }
 
     return (
       <div
         ref={ref}
-        className={`card-shell ${variantClass} ${paddingClass} ${className}`.trim()}
+        className={`card-shell ${variantClasses[variant]} ${className}`.trim()}
         {...props}
       >
         {children}

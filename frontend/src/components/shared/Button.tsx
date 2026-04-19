@@ -1,7 +1,7 @@
 import { ButtonHTMLAttributes, forwardRef } from "react";
 
 type ButtonVariant = "primary" | "secondary" | "ghost";
-type ButtonSize = "default" | "sm" | "icon";
+type ButtonSize = "default" | "sm" | "lg" | "icon";
 
 interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant;
@@ -11,12 +11,18 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
   ({ variant = "primary", size = "default", className = "", children, ...props }, ref) => {
     const baseClass = `btn-${variant}`;
-    const sizeClass = size === "sm" ? "h-8 px-2 text-xs" : size === "icon" ? "w-12 h-12" : "";
+    
+    const sizeClasses = {
+      sm: "h-10 px-3 text-sm",
+      default: "h-12 px-4",
+      lg: "h-14 px-6 text-base",
+      icon: "w-12 h-12 p-0"
+    };
 
     return (
       <button
         ref={ref}
-        className={`${baseClass} ${sizeClass} ${className}`.trim()}
+        className={`${baseClass} ${sizeClasses[size]} ${className}`.trim()}
         {...props}
       >
         {children}
