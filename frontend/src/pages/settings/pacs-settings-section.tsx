@@ -155,13 +155,13 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button type="button" onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
 
       <div className="flex justify-between items-center">
         <span className="text-sm text-stone-600 dark:text-stone-400">{data?.nodes?.length ?? 0} PACS nodes</span>
-        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">
+        <button type="button" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">
           {showCreate ? "Cancel" : "Add PACS Node"}
         </button>
       </div>
@@ -210,14 +210,16 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <button
+                    type="button"
                     onClick={() => testMutation.mutate(node.id)}
                     disabled={testingId === node.id}
                     className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
                   >
                     {testingId === node.id ? "Testing..." : "Test"}
                   </button>
-                  <button onClick={() => startEdit(node)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button type="button" onClick={() => startEdit(node)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
                   <button
+                    type="button"
                     onClick={() => { if (window.confirm(`Delete "${node.name}"?`)) deleteMutation.mutate(node.id); }}
                     className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
                   >
@@ -316,13 +318,14 @@ function PacsNodeForm({
       </div>
       <div className="flex gap-2">
         <button
+          type="button"
           onClick={onSubmit}
           disabled={isPending || !form.name || !form.host || !form.called_ae_title}
           className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors"
         >
           {isPending ? "Saving..." : "Save"}
         </button>
-        <button onClick={onCancel} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">
+        <button type="button" onClick={onCancel} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">
           Cancel
         </button>
       </div>
@@ -344,7 +347,7 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Re-authentication required</p>
       <p className="text-xs text-amber-600 dark:text-amber-400">Please re-authenticate to manage PACS nodes.</p>
-      <button onClick={onReAuthRequired} className="btn-primary text-sm">
+      <button type="button" onClick={onReAuthRequired} className="btn-primary text-sm">
         Re-authenticate
       </button>
     </div>

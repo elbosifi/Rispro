@@ -23,6 +23,22 @@ export const pacsRouter = express.Router();
 // ---------------------------------------------------------------------------
 
 pacsRouter.get(
+  "/nodes/available",
+  ...authMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    const nodes = await listPacsNodes();
+    res.json({
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        name: node.name,
+        is_active: node.is_active,
+        is_default: node.is_default
+      }))
+    });
+  })
+);
+
+pacsRouter.get(
   "/nodes",
   ...supervisorMiddleware,
   asyncRoute(async (_req: Request, res: Response) => {

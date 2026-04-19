@@ -40,12 +40,8 @@ export default function PacsPage() {
 
   // Fetch available PACS nodes
   const { data: nodesData } = useQuery<{ nodes: PacsNode[] }>({
-    queryKey: ["pacs", "nodes"],
-    queryFn: async () => {
-      const resp = await fetch("/api/pacs/nodes");
-      if (!resp.ok) throw new Error("Failed to fetch PACS nodes");
-      return resp.json();
-    }
+    queryKey: ["pacs", "available-nodes"],
+    queryFn: () => api<{ nodes: PacsNode[] }>("/pacs/nodes/available")
   });
 
   const searchMutation = useMutation({

@@ -1,6 +1,15 @@
-import test from "node:test";
+import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { testPacsConnection } from "./pacs-service.js";
+import {
+  __resetDimseModuleForTests,
+  __setDimseModuleForTests,
+  normalizeDimseStudyList,
+  testPacsConnection
+} from "./pacs-service.js";
+
+afterEach(() => {
+  __resetDimseModuleForTests();
+});
 
 test("testPacsConnection rejects URL-like PACS hosts with a clear error", async () => {
   await assert.rejects(
@@ -34,4 +43,51 @@ test("testPacsConnection rejects invalid AE title format before native DIMSE cal
     }),
     /A-Z, 0-9, or underscore/i
   );
+});
+
+test("testPacsConnection waits for the final DIMSE callback before deciding success", async () => {
+  __setDimseModuleForTests({
+    echoScu: (_options: unknown, callback: (result: string) => void) => {
+      callback(JSON.stringify({ code: 1, status: "pending", message: "Requesting Association" }));
+      callback(JSON.stringify({ code: 2, status: "failure", message: "Association Rejected: called AE title not recognized" }));
+    },
+    findScu: () => {}
+  });
+
+  await assert.rejects(
+    testPacsConnection({
+      currentUserId: null,
+      overrides: {
+        enabled: "enabled",
+        host: "192.9.101.164",
+        port: 103,
+        calledAeTitle: "OSIRIXR",
+        callingAeTitle: "RISPRO",
+        timeoutSeconds: 10
+      }
+    }),
+    /AE title rejected/i
+  );
+});
+
+test("normalizeDimseStudyList supports a single DICOM dataset object payload", () => {
+  const studies = normalizeDimseStudyList({
+    PatientID: { Value: ["123456789012"] },
+    PatientName: { Value: [{ Alphabetic: "TEST^PATIENT" }] },
+    AccessionNumber: { Value: ["ACC-42"] },
+    StudyDate: { Value: ["20260419"] },
+    Modality: { Value: ["CT"] },
+    StudyDescription: { Value: ["CT Abdomen"] }
+  });
+
+  assert.deepEqual(studies, [
+    {
+      patientId: "123456789012",
+      patientName: "TEST^PATIENT",
+      accessionNumber: "ACC-42",
+      modality: "CT",
+      studyDescription: "CT Abdomen",
+      studyDate: "20260419"
+    }
+  ]);
 });

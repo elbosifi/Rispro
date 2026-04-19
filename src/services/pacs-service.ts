@@ -13,6 +13,20 @@ const FALLBACK_DIMSE_SOURCE_IP = "127.0.0.1";
 const FALLBACK_DIMSE_SOURCE_PORT = 4006;
 const AE_TITLE_PATTERN = /^[A-Z0-9_]{1,16}$/;
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)*[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])$/i;
+const DICOM_DATASET_KEYS = new Set([
+  "00100020",
+  "00100010",
+  "00080050",
+  "00080060",
+  "00081030",
+  "00080020",
+  "PatientID",
+  "PatientName",
+  "AccessionNumber",
+  "Modality",
+  "StudyDescription",
+  "StudyDate"
+]);
 
 function getDimseModule() {
   if (!dimse) {
@@ -29,6 +43,14 @@ function getDimseModule() {
     }
   }
   return dimse;
+}
+
+export function __setDimseModuleForTests(mockModule: any): void {
+  dimse = mockModule;
+}
+
+export function __resetDimseModuleForTests(): void {
+  dimse = null;
 }
 
 export interface PacsFindResult {
@@ -125,7 +147,7 @@ function validateAeTitle(value: string, fieldName: string): string {
   return aeTitle;
 }
 
-function validatePacsHost(value: string): string {
+function validatePacsHost(value: unknown): string {
   const host = String(value || "").trim();
 
   if (!host) {
@@ -291,8 +313,26 @@ function extractStudySummary(dataset: UnknownRecord): StudySummary {
   };
 }
 
-function normalizeStudyList(rawResult: unknown): StudySummary[] {
+function looksLikeDicomDataset(dataset: UnknownRecord): boolean {
+  return Object.keys(dataset).some((key) => /^[0-9A-F]{8}$/i.test(key) || DICOM_DATASET_KEYS.has(key));
+}
+
+export function normalizeDimseStudyList(rawResult: unknown): StudySummary[] {
   const candidates: unknown[] = [];
+  const collectCandidate = (value: unknown): void => {
+    if (!value) {
+      return;
+    }
+
+    if (Array.isArray(value)) {
+      candidates.push(...value);
+      return;
+    }
+
+    if (typeof value === "object" && looksLikeDicomDataset(value as UnknownRecord)) {
+      candidates.push(value);
+    }
+  };
 
   if (Array.isArray(rawResult)) {
     candidates.push(...rawResult);
@@ -307,10 +347,12 @@ function normalizeStudyList(rawResult: unknown): StudySummary[] {
       rawRecord.responses
     ];
 
-    for (const arrayValue of possibleArrays) {
-      if (Array.isArray(arrayValue)) {
-        candidates.push(...arrayValue);
-      }
+    for (const candidateValue of possibleArrays) {
+      collectCandidate(candidateValue);
+    }
+
+    if (looksLikeDicomDataset(rawRecord)) {
+      candidates.push(rawRecord);
     }
   }
 
@@ -341,6 +383,36 @@ function parseDimseResult(result: unknown): UnknownRecord | null {
   }
 
   return parsed && typeof parsed === "object" ? (parsed as UnknownRecord) : null;
+}
+
+function isPendingDimseResult(parsed: UnknownRecord | null): boolean {
+  if (!parsed) {
+    return false;
+  }
+
+  return String(parsed.status || "").toLowerCase() === "pending" || Number(parsed.code) === 1;
+}
+
+function isFailureDimseResult(parsed: UnknownRecord | null): boolean {
+  if (!parsed) {
+    return false;
+  }
+
+  return Boolean(parsed.error) || String(parsed.status || "").toLowerCase() === "failure" || Number(parsed.code) === 2;
+}
+
+function extractDimsePayload(parsed: UnknownRecord | null): unknown {
+  if (!parsed) {
+    return null;
+  }
+
+  for (const key of ["container", "datasets", "results", "responses"] as const) {
+    if (parsed[key] !== undefined) {
+      return parsed[key];
+    }
+  }
+
+  return parsed;
 }
 
 async function loadPacsSettings(): Promise<PacsSettings> {
@@ -418,10 +490,30 @@ async function runDimseFindScu({
   const source = await getDimseSourceNode(callingAeTitle);
 
   return await new Promise((resolve, reject) => {
+    let settled = false;
     const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
     const timer = setTimeout(() => {
+      settled = true;
       reject(new Error("Timed out waiting for PACS response."));
     }, timeoutMs + 2000);
+    const settleResolve = (value: PacsFindResult[]) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const settleReject = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
     const options = {
       source,
       target: {
@@ -436,23 +528,38 @@ async function runDimseFindScu({
 
     try {
       dimseModule.findScu(options, (result: unknown) => {
-        clearTimeout(timer);
+        if (settled) {
+          return;
+        }
+
         if (!result) {
-          resolve([]);
+          settleResolve([]);
           return;
         }
 
-        const parsed = parseDimseResult(result);
-        if (parsed?.error || parsed?.status === "failure") {
+        let parsed: UnknownRecord | null;
+        try {
+          parsed = parseDimseResult(result);
+        } catch (error) {
+          settleReject(error);
+          return;
+        }
+
+        if (isPendingDimseResult(parsed)) {
+          return;
+        }
+
+        if (isFailureDimseResult(parsed)) {
           const errorMessage = String(parsed?.error || parsed?.message || "PACS query failed.");
-          reject(new Error(errorMessage));
+          settleReject(new Error(errorMessage));
           return;
         }
 
-        resolve((parsed || []) as PacsFindResult[]);
+        const payload = extractDimsePayload(parsed);
+        settleResolve((payload ?? []) as PacsFindResult[]);
       });
     } catch (error) {
-      reject(error);
+      settleReject(error);
     }
   });
 }
@@ -474,10 +581,30 @@ async function runDimseEchoScu({
   const source = await getDimseSourceNode(callingAeTitle);
 
   return await new Promise((resolve, reject) => {
+    let settled = false;
     const timeoutMs = Math.max(Number(timeoutSeconds) || 10, 1) * 1000;
     const timer = setTimeout(() => {
+      settled = true;
       reject(new Error("Timed out waiting for PACS response."));
     }, timeoutMs + 2000);
+    const settleResolve = (value: boolean) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const settleReject = (error: unknown) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    };
     const options = {
       source,
       target: {
@@ -491,23 +618,37 @@ async function runDimseEchoScu({
 
     try {
       dimseModule.echoScu(options, (result: unknown) => {
-        clearTimeout(timer);
+        if (settled) {
+          return;
+        }
+
         if (!result) {
-          resolve(false);
+          settleResolve(false);
           return;
         }
 
-        const parsed = parseDimseResult(result);
-        if (parsed?.error || parsed?.status === "failure") {
+        let parsed: UnknownRecord | null;
+        try {
+          parsed = parseDimseResult(result);
+        } catch (error) {
+          settleReject(error);
+          return;
+        }
+
+        if (isPendingDimseResult(parsed)) {
+          return;
+        }
+
+        if (isFailureDimseResult(parsed)) {
           const errorMessage = String(parsed?.error || parsed?.message || "PACS echo failed.");
-          reject(new Error(errorMessage));
+          settleReject(new Error(errorMessage));
           return;
         }
 
-        resolve(Boolean(parsed));
+        settleResolve(Boolean(parsed));
       });
     } catch (error) {
-      reject(error);
+      settleReject(error);
     }
   });
 }
@@ -547,7 +688,7 @@ export async function searchPacsStudies({
     throw new HttpError(502, `PACS connection failed. ${message}`.trim());
   }
 
-  const studies = normalizeStudyList(rawResult);
+  const studies = normalizeDimseStudyList(rawResult);
 
   await logAuditEntry({
     entityType: "integration",
@@ -684,7 +825,7 @@ export async function searchPacsStudiesWithNode({
     throw new HttpError(502, `PACS connection failed. ${message}`.trim());
   }
 
-  const studies = normalizeStudyList(rawResult);
+  const studies = normalizeDimseStudyList(rawResult);
 
   await logAuditEntry({
     entityType: "integration",
