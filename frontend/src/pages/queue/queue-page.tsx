@@ -6,6 +6,9 @@ import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
+import { Button } from "@/components/shared/Button";
+import { Card } from "@/components/shared/Card";
+import { Input } from "@/components/shared/Input";
 
 export default function QueuePage() {
   const { language, t } = useLanguage();
@@ -172,37 +175,43 @@ export default function QueuePage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t("queue.title")}</h2>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+            {t("queue.title")}
+          </h2>
+        </div>
+      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="space-y-6">
-          <div className="card-shell p-6">
-            <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.scanAccession")}</h3>
-            <form onSubmit={handleScan} className="flex gap-2">
-              <input
-                type="text"
-                value={scanValue}
-                onChange={(e) => setScanValue(e.target.value)}
-                placeholder={t("queue.scanPlaceholder")}
-                dir="ltr"
-                className="input-premium flex-1"
-              />
-              <button type="submit" disabled={scanMutation.isPending || !scanValue.trim()} className="btn-primary">
-                {t("queue.scan")}
-              </button>
-            </form>
-          </div>
+         <div className="space-y-6">
+           <Card className="p-6">
+             <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.scanAccession")}</h3>
+             <form onSubmit={handleScan} className="flex gap-2">
+               <Input
+                 type="text"
+                 value={scanValue}
+                 onChange={(e) => setScanValue(e.target.value)}
+                 placeholder={t("queue.scanPlaceholder")}
+                 dir="ltr"
+                 className="flex-1"
+               />
+               <Button type="submit" disabled={scanMutation.isPending || !scanValue.trim()}>
+                 {t("queue.scan")}
+               </Button>
+             </form>
+           </Card>
 
-          <div className="card-shell p-6">
-            <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.walkInPatient")}</h3>
+           <Card className="p-6">
+             <h3 className="text-lg font-semibold text-stone-900 dark:text-white mb-4">{t("queue.walkInPatient")}</h3>
             <div className="relative mb-4">
-              <input
-                type="text"
-                value={walkInSearch}
-                onChange={(e) => handleWalkInSearch(e.target.value)}
-                placeholder={t("queue.walkInSearch")}
-                className="input-premium w-full"
-              />
+               <Input
+                 type="text"
+                 value={walkInSearch}
+                 onChange={(e) => handleWalkInSearch(e.target.value)}
+                 placeholder={t("queue.walkInSearch")}
+                 className="w-full"
+               />
               {walkInResults.length > 0 && (
                 <ul className="absolute z-10 w-full mt-1 bg-white dark:bg-stone-700 border border-stone-200 dark:border-stone-600 rounded-lg shadow-lg max-h-40 overflow-y-auto">
                   {walkInResults.map((p) => (
@@ -253,70 +262,70 @@ export default function QueuePage() {
               </select>
             </div>
             
-            <button onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn || !selectedModalityId} className="w-full btn-secondary">
-              {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
-            </button>
-          </div>
-        </div>
+             <Button variant="secondary" onClick={handleWalkInSubmit} disabled={walkInMutation.isPending || !selectedWalkIn || !selectedModalityId} className="w-full">
+               {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
+             </Button>
+           </Card>
+         </div>
 
-        <div className="lg:col-span-2">
-          <div className="card-shell overflow-hidden">
-            <div className="p-4 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
-              <h3 className="font-semibold text-stone-900 dark:text-white">{t("queue.todayQueue")}</h3>
-              {queue && (
-                <div className="flex gap-3 text-sm description-center">
-                  <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
-                  <span>{t("queue.noShows", { count: queue.summary.no_show_count })}</span>
-                </div>
-              )}
-            </div>
+         <div className="lg:col-span-2">
+           <Card className="overflow-hidden">
+             <div className="p-4 border-b border-stone-200 dark:border-stone-700 flex justify-between items-center">
+               <h3 className="font-semibold text-stone-900 dark:text-white">{t("queue.todayQueue")}</h3>
+               {queue && (
+                 <div className="flex gap-3 text-sm description-center">
+                   <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
+                   <span>{t("queue.noShows", { count: queue.summary.no_show_count })}</span>
+                 </div>
+               )}
+             </div>
 
-            {queue?.queueEntries.length === 0 ? (
-              <div className="p-8 text-center description-center">{t("queue.empty")}</div>
-            ) : (
-              <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-                {queue?.queueEntries.map((entry) => (
-                  <li key={entry.id} className="p-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50">
-                    <div>
-                      <p className="font-medium text-stone-900 dark:text-white">
-                        {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
-                      </p>
-                      <p className="text-sm description-center">#{entry.queueNumber} - {entry.accessionNumber}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`px-2 py-1 rounded-full text-xs font-medium ${
-                          entry.queueStatus === "waiting"
-                            ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
-                            : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"
-                        }`}
-                      >
-                        {entry.queueStatus}
-                      </span>
-                      {queue.reviewActive && entry.appointmentStatus === "scheduled" && (
-                        <button
-                          onClick={() => handleNoShow(entry.appointmentId)}
-                          className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50"
-                        >
-                          {t("queue.markNoShow")}
-                        </button>
-                      )}
-                      {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
-                        <button
-                          onClick={() => handleCancel(entry.appointmentId)}
-                          className="px-2 py-1 bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 rounded text-xs font-medium hover:bg-stone-300 dark:hover:bg-stone-600"
-                        >
-                          Cancel appointment
-                        </button>
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+             {queue?.queueEntries.length === 0 ? (
+               <div className="p-8 text-center description-center">{t("queue.empty")}</div>
+             ) : (
+               <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
+                 {queue?.queueEntries.map((entry) => (
+                   <li key={entry.id} className="p-4 flex items-center justify-between hover:bg-stone-50 dark:hover:bg-stone-700/50">
+                     <div>
+                       <p className="font-medium text-stone-900 dark:text-white">
+                         {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
+                       </p>
+                       <p className="text-sm description-center">#{entry.queueNumber} - {entry.accessionNumber}</p>
+                     </div>
+                     <div className="flex items-center gap-2">
+                       <span
+                         className={`px-2 py-1 rounded-full text-xs font-medium ${
+                           entry.queueStatus === "waiting"
+                             ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400"
+                             : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"
+                         }`}
+                       >
+                         {entry.queueStatus}
+                       </span>
+                       {queue.reviewActive && entry.appointmentStatus === "scheduled" && (
+                         <button
+                           onClick={() => handleNoShow(entry.appointmentId)}
+                           className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded text-xs font-medium hover:bg-red-200 dark:hover:bg-red-900/50"
+                         >
+                           {t("queue.markNoShow")}
+                         </button>
+                       )}
+                       {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
+                         <button
+                           onClick={() => handleCancel(entry.appointmentId)}
+                           className="px-2 py-1 bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 rounded text-xs font-medium hover:bg-stone-300 dark:hover:bg-stone-600"
+                         >
+                           Cancel appointment
+                         </button>
+                       )}
+                     </div>
+                   </li>
+                 ))}
+               </ul>
+             )}
+           </Card>
+         </div>
+       </div>
+     </div>
+   );
+ }

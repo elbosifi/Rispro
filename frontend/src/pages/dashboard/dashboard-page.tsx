@@ -5,6 +5,8 @@ import { fetchQueueSnapshot, fetchAppointmentLookups, fetchStatistics } from "@/
 import { buildDashboardViewModel, type DashboardTone } from "@/lib/dashboard-view-model";
 import { formatDateTimeLy, todayIsoDateLy } from "@/lib/date-format";
 import { PageContainer } from "@/components/layout/page-container";
+import { Button } from "@/components/shared/Button";
+import { Card } from "@/components/shared/Card";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
@@ -40,7 +42,7 @@ function StatCard({
   const valueColor = tone === "good" ? "text-green-700" : tone === "warn" ? "text-amber-700" : tone === "alert" ? "text-red-700" : "";
 
   return (
-    <div className="card-shell card-elevated p-4 relative">
+    <Card variant="elevated" className="p-4 relative">
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-1.5 mb-1">
@@ -54,12 +56,12 @@ function StatCard({
         <div className="icon-housing icon-housing--sm text-[var(--text-muted)]">
           {icon}
         </div>
-      </div>
-    </div>
-  );
-}
+       </div>
+     </Card>
+   );
+ }
 
-/* --- Widget Module (bolted panel) --- */
+ /* --- Widget Module (bolted panel) --- */
 function WidgetShell({
   title,
   stale,
@@ -72,7 +74,7 @@ function WidgetShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="card-shell relative overflow-hidden">
+    <Card className="relative overflow-hidden">
       <div className="p-3 border-b flex items-center justify-between" style={{ borderColor: "var(--border)" }}>
         <h3 className="text-sm font-bold uppercase tracking-[0.08em] text-embossed" style={{ color: "var(--text)" }}>{title}</h3>
         {stale && (
@@ -81,10 +83,10 @@ function WidgetShell({
           </span>
         )}
       </div>
-      <div className="p-4">{children}</div>
-    </div>
-  );
-}
+       <div className="p-4">{children}</div>
+     </Card>
+   );
+ }
 
 /* --- Skeleton Block --- */
 function SkeletonBlock({ className }: { className: string }) {
@@ -218,14 +220,14 @@ export function DashboardPage() {
             >
               {user?.role === "supervisor" ? t("shell.supervisorMode") : t("shell.receptionMode")}
             </span>
-            <button
+            <Button
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="btn-primary text-xs"
+              className="text-xs"
             >
               <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
               {isRefreshing ? t("common.refreshing") : t("common.refreshNow")}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -259,10 +261,10 @@ export function DashboardPage() {
             { label: t("dashboard.statsUpdated"), updatedAt: statisticsQuery.dataUpdatedAt },
             { label: t("dashboard.lookupsUpdated"), updatedAt: lookupsQuery.dataUpdatedAt }
           ].map((item, i) => (
-            <div key={i} className="card-shell p-3 flex items-center justify-between">
+             <Card key={i} className="p-3 flex items-center justify-between">
               <span style={{ color: "var(--text-muted)" }}>{item.label}</span>
-              <span className="font-semibold">{item.updatedAt ? formatDateTimeLy(new Date(item.updatedAt)) : t("common.na")}</span>
-            </div>
+               <span className="font-semibold">{item.updatedAt ? formatDateTimeLy(new Date(item.updatedAt)) : t("common.na")}</span>
+             </Card>
           ))}
         </div>
 

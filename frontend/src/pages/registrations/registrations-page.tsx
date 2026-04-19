@@ -10,6 +10,8 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { pushToast } from "@/lib/toast";
+import { Card } from "@/components/shared/Card";
+import { Input } from "@/components/shared/Input";
 
 interface RegistrationsFilters {
   date: string;
@@ -81,9 +83,15 @@ export default function RegistrationsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t("registrations.title")}</h2>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+            {t("registrations.title")}
+          </h2>
+        </div>
+      </div>
 
-      <div className="card-shell p-4 space-y-4">
+      <Card className="p-4 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <DateInput
             label={t("registrations.date")}
@@ -122,13 +130,15 @@ export default function RegistrationsPage() {
               }))
             ]}
           />
-          <Input
-            label={t("registrations.search")}
-            value={filters.query}
-            onChange={(v) => handleFilterChange("query", v)}
-            placeholder={t("registrations.searchPlaceholder")}
-            dir="ltr"
-          />
+           <div>
+             <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{t("registrations.search")}</label>
+             <Input
+               value={filters.query}
+               onChange={(e) => handleFilterChange("query", e.target.value)}
+               placeholder={t("registrations.searchPlaceholder")}
+               dir="ltr"
+             />
+           </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-stone-200 dark:border-stone-700">
@@ -146,10 +156,10 @@ export default function RegistrationsPage() {
               {statusLabel(language, status)}
             </button>
           ))}
-        </div>
-      </div>
+         </div>
+       </Card>
 
-      <div className="card-shell overflow-hidden">
+       <Card className="overflow-hidden">
         <div className="p-4 border-b border-stone-200 dark:border-stone-700">
           <h3 className="font-semibold text-stone-900 dark:text-white">
             {t("registrations.results", { count: isLoading ? "..." : appointments.length })}
@@ -193,12 +203,12 @@ export default function RegistrationsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
-        )}
-      </div>
+           </table>
+         )}
+       </Card>
 
-      {selectedAppointment && (
-        <div className="card-shell p-6">
+       {selectedAppointment && (
+         <Card className="p-6">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
               <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
@@ -254,9 +264,9 @@ export default function RegistrationsPage() {
               onUpdated={(updated) => setSelectedAppointment(updated)}
               onDeleted={() => setSelectedAppointment(null)}
             />
-          </div>
-        </div>
-      )}
+           </div>
+         </Card>
+       )}
     </div>
   );
 }
@@ -277,35 +287,7 @@ async function fetchRegistrations(filters: RegistrationsFilters) {
   return fetchAppointments(params);
 }
 
-function Input({
-  label,
-  value,
-  onChange,
-  type = "text",
-  placeholder,
-  dir
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  type?: string;
-  placeholder?: string;
-  dir?: "ltr" | "rtl";
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-stone-700 dark:text-stone-300 mb-1">{label}</label>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        dir={dir}
-        className="input-premium w-full"
-      />
-    </div>
-  );
-}
+
 
 function Select({
   label,

@@ -10,6 +10,8 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
+import { Button } from "@/components/shared/Button";
+import { Card } from "@/components/shared/Card";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
 import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
@@ -60,20 +62,19 @@ export function AppointmentsV2Page() {
   if (lookups.isError) {
     return (
       <div className="max-w-7xl mx-auto p-4 lg:p-6">
-        <div className="card-shell p-8 text-center">
+        <Card className="p-8 text-center">
           <p className="text-lg font-bold mb-2" style={{ color: "var(--accent)" }}>
             Failed to load modality list
           </p>
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
             {(lookups.error as Error)?.message ?? "Unknown error"}
           </p>
-          <button
+          <Button
             onClick={() => lookups.refetch()}
-            className="btn-primary"
           >
             Retry
-          </button>
-        </div>
+          </Button>
+        </Card>
       </div>
     );
   }
@@ -115,23 +116,27 @@ export function AppointmentsV2Page() {
 
   return (
     <div className="max-w-7xl mx-auto p-4 lg:p-6">
-      <h1 className="text-2xl font-bold mb-6 text-embossed" style={{ color: "var(--text)" }}>
-        Appointments V2
-      </h1>
-      {user?.role === "supervisor" && (
-        <div className="mb-4">
-          <button
-            type="button"
-            onClick={() => navigate("/v2/appointments/admin")}
-            className="btn-secondary"
-          >
-            Open Scheduling Policy Admin
-          </button>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-embossed text">
+            Appointments V2
+          </h1>
         </div>
-      )}
+        <div className="flex flex-wrap items-center gap-2">
+          {user?.role === "supervisor" && (
+            <Button
+              variant="secondary"
+              type="button"
+              onClick={() => navigate("/v2/appointments/admin")}
+            >
+              Open Scheduling Policy Admin
+            </Button>
+          )}
+        </div>
+      </div>
 
       {/* Filters */}
-      <div className="card-shell p-4 mb-6">
+      <Card className="p-4 mb-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {/* Modality */}
           <div>
@@ -215,10 +220,10 @@ export function AppointmentsV2Page() {
               <option value={7}>7 days</option>
               <option value={14}>14 days</option>
               <option value={30}>30 days</option>
-            </select>
-          </div>
-        </div>
-      </div>
+         </select>
+           </div>
+         </div>
+       </Card>
 
       {/* Availability Table */}
       {disabled ? (
@@ -231,8 +236,8 @@ export function AppointmentsV2Page() {
         <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
           Could not load availability. {(availability.error as Error).message}
         </p>
-      ) : noPublishedPolicy ? (
-        <div className="card-shell p-6">
+       ) : noPublishedPolicy ? (
+         <Card className="p-6">
           <p className="font-bold mb-2" style={{ color: "var(--text)" }}>
             No scheduling policy has been published yet.
           </p>
@@ -245,15 +250,16 @@ export function AppointmentsV2Page() {
             </p>
           )}
           {user?.role === "supervisor" && (
-            <button
-              type="button"
-              onClick={() => navigate("/v2/appointments/admin")}
-              className="btn-secondary mt-2"
-            >
-              Publish or Update Policy
-            </button>
-          )}
-        </div>
+         <Button
+           variant="secondary"
+           type="button"
+           onClick={() => navigate("/v2/appointments/admin")}
+           className="mt-2"
+         >
+           Publish or Update Policy
+         </Button>
+       )}
+     </Card>
       ) : availability.data?.items.length === 0 ? (
         <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
           No availability found for the selected filters.
@@ -272,15 +278,15 @@ export function AppointmentsV2Page() {
                 Could not load suggestions. {(suggestions.error as Error).message}
               </p>
             ) : suggestions.data?.items.length ? (
-              <div className="card-shell p-4">
-                <ul className="space-y-2">
-                  {suggestions.data.items.slice(0, 5).map((s) => (
-                    <li key={`${s.modalityId}-${s.date}`} className="text-sm" style={{ color: "var(--text-muted)" }}>
-                      {s.date} — {s.decision.displayStatus}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+             <Card className="p-4">
+               <ul className="space-y-2">
+                 {suggestions.data.items.slice(0, 5).map((s) => (
+                   <li key={`${s.modalityId}-${s.date}`} className="text-sm" style={{ color: "var(--text-muted)" }}>
+                     {s.date} — {s.decision.displayStatus}
+                   </li>
+                 ))}
+               </ul>
+             </Card>
             ) : (
               <p className="text-sm" style={{ color: "var(--text-muted)" }}>
                 No better dates found in the selected window.
@@ -333,7 +339,7 @@ interface AvailabilityTableProps {
 
 function AvailabilityTable({ items }: AvailabilityTableProps) {
   return (
-    <div className="card-shell overflow-hidden">
+    <Card className="overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -417,12 +423,12 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
               </tr>
               );
             })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
+       </tbody>
+         </table>
+       </div>
+     </Card>
+   );
+ }
 
 // ---------------------------------------------------------------------------
 // Bookings List Component
@@ -532,17 +538,16 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
   const bookingsList = bookings.data?.bookings ?? [];
 
   return (
-    <div className="card-shell p-4">
+    <Card className="p-4">
       <div className="flex flex-wrap justify-between items-center mb-4 gap-4">
         <h2 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>
           Recent Bookings
         </h2>
 
         {/* Include cancelled toggle */}
-        <label
-          className="flex items-center gap-2 text-sm cursor-pointer user-select-none"
-          style={{ color: "var(--text-muted)" }}
-        >
+            <label
+              className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data text-muted"
+            >
           <input
             type="checkbox"
             checked={includeCancelled}
@@ -624,39 +629,41 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                   </td>
                   <td className="p-3 text-right">
                     <div className="flex gap-2 justify-end flex-wrap">
-                      <button
-                        type="button"
-                        onClick={() => setRescheduleTarget(booking)}
-                        disabled={!RESCHEDULABLE_STATUSES.includes(booking.status) || reschedulePendingForRow}
-                        title={
-                          RESCHEDULABLE_STATUSES.includes(booking.status)
-                            ? (reschedulePendingForRow ? "Rescheduling in progress" : "Reschedule this booking")
-                            : `Cannot reschedule a booking with status "${booking.status}"`
-                        }
-                        className="btn-ghost text-xs h-8 px-2"
-                      >
-                        {reschedulePendingForRow ? "Rescheduling…" : "Reschedule"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCancelTarget({
-                            id: booking.id,
-                            patientName: booking.patientEnglishName ?? `Patient #${booking.patientId}`,
-                            date: booking.bookingDate,
-                          })
-                        }
-                        disabled={!CANCELLABLE_STATUSES.includes(booking.status) || cancelPendingForRow}
-                        title={
-                          CANCELLABLE_STATUSES.includes(booking.status)
-                            ? (cancelPendingForRow ? "Cancellation in progress" : "Cancel this booking")
-                            : `Cannot cancel a booking with status "${booking.status}"`
-                        }
-                        className="btn-ghost text-xs h-8 px-2"
-                        style={{ color: "var(--accent)" }}
-                      >
-                        {cancelPendingForRow ? "Cancelling…" : "Cancel"}
-                      </button>
+                     <Button
+                       variant="ghost"
+                       size="sm"
+                       type="button"
+                       onClick={() => setRescheduleTarget(booking)}
+                       disabled={!RESCHEDULABLE_STATUSES.includes(booking.status) || reschedulePendingForRow}
+                       title={
+                         RESCHEDULABLE_STATUSES.includes(booking.status)
+                           ? (reschedulePendingForRow ? "Rescheduling in progress" : "Reschedule this booking")
+                           : `Cannot reschedule a booking with status "${booking.status}"`
+                       }
+                     >
+                       {reschedulePendingForRow ? "Rescheduling…" : "Reschedule"}
+                     </Button>
+                     <Button
+                       variant="ghost"
+                       size="sm"
+                       type="button"
+                       onClick={() =>
+                         setCancelTarget({
+                           id: booking.id,
+                           patientName: booking.patientEnglishName ?? `Patient #${booking.patientId}`,
+                           date: booking.bookingDate,
+                         })
+                       }
+                       disabled={!CANCELLABLE_STATUSES.includes(booking.status) || cancelPendingForRow}
+                       title={
+                         CANCELLABLE_STATUSES.includes(booking.status)
+                           ? (cancelPendingForRow ? "Cancellation in progress" : "Cancel this booking")
+                           : `Cannot cancel a booking with status "${booking.status}"`
+                       }
+                       style={{ color: "var(--accent)" }}
+                     >
+                       {cancelPendingForRow ? "Cancelling…" : "Cancel"}
+                     </Button>
                     </div>
                   </td>
                   </tr>
@@ -687,25 +694,25 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
           onCancel={handleRescheduleCancel}
           error={rescheduleError}
         />
-      )}
-    </div>
-  );
-}
+       )}
+     </Card>
+   );
+ }
 
-// ---------------------------------------------------------------------------
-// Booking Status Badge Component
+ // ---------------------------------------------------------------------------
+ // Booking Status Badge Component
 // ---------------------------------------------------------------------------
 
 function BookingStatusBadge({ status }: { status: string }) {
   const config: Record<string, { label: string; color: string; bg: string }> = {
-    scheduled: { label: "Scheduled", color: "#15803d", bg: "#dcfce7" },
-    arrived: { label: "Arrived", color: "#1d4ed8", bg: "#dbeafe" },
-    waiting: { label: "Waiting", color: "#a16207", bg: "#fef9c3" },
-    completed: { label: "Completed", color: "#6b7280", bg: "#f3f4f6" },
-    "no-show": { label: "No-Show", color: "#991b1b", bg: "#fee2e2" },
+    scheduled: { label: "Scheduled", color: "var(--green)", bg: "rgba(34, 197, 94, 0.1)" },
+    arrived: { label: "Arrived", color: "var(--blue)", bg: "rgba(59, 130, 246, 0.1)" },
+    waiting: { label: "Waiting", color: "var(--amber)", bg: "rgba(245, 158, 11, 0.1)" },
+    completed: { label: "Completed", color: "var(--text-muted)", bg: "var(--muted)" },
+    "no-show": { label: "No-Show", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
   };
 
-  const c = config[status] ?? { label: status, color: "#6b7280", bg: "#f3f4f6" };
+  const c = config[status] ?? { label: status, color: "var(--text-muted)", bg: "var(--muted)" };
 
   return (
     <span className="pill-soft text-xs font-bold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.bg }}>

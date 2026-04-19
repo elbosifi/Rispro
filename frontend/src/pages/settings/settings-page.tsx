@@ -30,6 +30,8 @@ import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal
 import { formatDateTimeLy } from "@/lib/date-format";
 import { chooseLocalized, type TranslationKey } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { Button } from "@/components/shared/Button";
+import { Card } from "@/components/shared/Card";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
@@ -189,21 +191,28 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t("settings.title")}</h2>
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+            {t("settings.title")}
+          </h2>
+        </div>
+      </div>
 
       {section === "menu" ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {SECTION_KEYS.map((key) => {
             const label = sectionLabel(t, key);
             return (
-              <button
+              <Button
                 key={key}
+                variant="secondary"
                 onClick={() => setSection(key)}
-                className="card-shell p-6 hover:border-teal-500 dark:hover:border-teal-500 transition-colors text-start"
+                className="p-6 h-auto hover:border-teal-500 dark:hover:border-teal-500 transition-colors text-start"
               >
                 <h3 className="text-lg font-semibold text-stone-900 dark:text-white">{label}</h3>
                 <p className="text-sm description-center mt-1">{t("settings.configureSection", { section: label })}</p>
-              </button>
+              </Button>
             );
           })}
         </div>
@@ -216,7 +225,7 @@ export default function SettingsPage() {
             {t("common.back")} - {t("settings.backToMenu")}
           </button>
 
-          <div className="card-shell p-6">
+           <Card className="p-6">
             <h3 className="text-xl font-bold text-stone-900 dark:text-white mb-4">{sectionLabel(t, section)}</h3>
 
             {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
@@ -236,7 +245,7 @@ export default function SettingsPage() {
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}
-          </div>
+          </Card>
         </div>
       )}
     </div>
@@ -279,7 +288,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       )}
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{data?.users?.length ?? 0} users</span>
-        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add User"}</button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add User"}</Button>
       </div>
 
       {showCreate && (
@@ -344,9 +353,9 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
     <div>
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm description-center">{t("settings.showingLastEntries", { count: limit })}</p>
-        <button onClick={handleExport} className="btn-secondary text-xs">
+        <Button variant="secondary" onClick={handleExport} className="text-xs">
           Export CSV
-        </button>
+        </Button>
       </div>
       {isLoading ? <p className="description-center">{t("settings.loading")}</p> : (
         <ul className="space-y-2">
@@ -445,7 +454,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       )}
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.examTypes?.length ?? 0} exam types</span>
-        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Exam Type"}</button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add Exam Type"}</Button>
       </div>
 
       {showCreate && (
@@ -620,7 +629,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       </p>
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
-        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Modality"}</button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add Modality"}</Button>
       </div>
 
       {showCreate && (

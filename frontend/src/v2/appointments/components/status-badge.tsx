@@ -17,18 +17,18 @@ interface StatusBadgeProps {
 const STATUS_CONFIG: Record<DecisionStatus, { label: string; color: string; bg: string }> = {
   available: {
     label: "Available",
-    color: "var(--color-success)",
+    color: "var(--green)",
     bg: "rgba(34, 197, 94, 0.1)",
   },
   restricted: {
     label: "Needs Approval",
-    color: "var(--color-warning)",
-    bg: "rgba(234, 179, 8, 0.1)",
+    color: "var(--amber)",
+    bg: "rgba(245, 158, 11, 0.1)",
   },
   blocked: {
     label: "Not Available",
-    color: "var(--color-error)",
-    bg: "rgba(239, 68, 68, 0.1)",
+    color: "var(--accent)",
+    bg: "rgba(255, 71, 87, 0.1)",
   },
 };
 
