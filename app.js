@@ -488,7 +488,8 @@ const copy = {
       statusLabels: {
         "scheduled": "Scheduled",
         "arrived": "Arrived",
-        "waiting": "Waiting",
+        "waiting": "Waiting for patient",
+        "in-progress": "In progress",
         "completed": "Completed",
         "no-show": "No Show",
         "cancelled": "Cancelled"
@@ -1011,7 +1012,8 @@ const copy = {
       statusLabels: {
         "scheduled": "مجدول",
         "arrived": "وصل",
-        "waiting": "منتظر",
+        "waiting": "في انتظار وصول المريض",
+        "in-progress": "بدأ الفحص",
         "completed": "مكتمل",
         "no-show": "لم يحضر",
         "cancelled": "ملغي"

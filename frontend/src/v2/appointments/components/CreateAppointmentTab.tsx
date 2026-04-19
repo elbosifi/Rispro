@@ -15,7 +15,6 @@ import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
-import { PatientSummaryCard } from "./PatientSummaryCard";
 import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
@@ -522,10 +521,6 @@ export function CreateAppointmentTab({
                 setShowSafetyModal(false);
               }}
             />
-
-            <div className="mt-6">
-              <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
-            </div>
 
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
