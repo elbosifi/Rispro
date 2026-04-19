@@ -15,7 +15,6 @@ import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
-import { PatientSummaryCard } from "./PatientSummaryCard";
 import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
@@ -450,7 +449,7 @@ export function CreateAppointmentTab({
             <p className="text-lg font-medium">{form.appointmentDate || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam mix</span>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam mix:</span>
             <p className="text-lg font-medium">
               {primaryExamMixBlocking
                 ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
@@ -507,6 +506,7 @@ export function CreateAppointmentTab({
           <Card className="p-6 lg:sticky lg:top-6 h-fit">
             <PatientSearchSection
               value={form.patient}
+              caseCategory={form.caseCategory}
               onSelectPatient={(patient: SelectedPatient) => {
                 actions.setPatient(patient);
                 setAvailabilitySelectedRow(null);
@@ -522,10 +522,6 @@ export function CreateAppointmentTab({
                 setShowSafetyModal(false);
               }}
             />
-
-            <div className="mt-6">
-              <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
-            </div>
 
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>

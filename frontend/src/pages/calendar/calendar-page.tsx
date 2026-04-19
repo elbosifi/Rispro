@@ -8,6 +8,7 @@ import { AppointmentEditor } from "@/components/appointments/appointment-editor"
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
+import { Button, Card, Badge, SectionLabel } from "@/components/shared";
 
 interface CalendarDay {
   date: string;
@@ -106,156 +107,161 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
-          {t(language, "calendar.title")}
-        </h2>
-        <div className="flex items-center gap-2">
-          <Select
-            value={modalityFilter}
-            onChange={setModalityFilter}
-            options={[
-              { value: "", label: t(language, "calendar.allModalities") },
-              ...(lookups?.modalities ?? []).map((m: any) => ({
-                value: m.id.toString(),
-                label: m.nameEn
-              }))
-            ]}
-          />
+    <div className="max-w-7xl mx-auto space-y-8">
+      {/* Header */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-4">
+          <SectionLabel>CALENDAR</SectionLabel>
+        </div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
+            Appointment <span className="gradient-text">Calendar</span>
+          </h1>
+          <div className="flex items-center gap-3">
+            <select
+              value={modalityFilter}
+              onChange={(e) => setModalityFilter(e.target.value)}
+              className="input-premium h-12 w-auto min-w-[200px]"
+            >
+              <option value="">{t(language, "calendar.allModalities")}</option>
+              {(lookups?.modalities ?? []).map((m: any) => (
+                <option key={m.id} value={m.id.toString()}>
+                  {m.nameEn}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar Grid */}
-        <div className="lg:col-span-2">
-          <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
-            {/* Header */}
-            <div className="p-4 border-b border-stone-200 dark:border-stone-700 flex items-center justify-between">
-              <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors">
+        <Card className="lg:col-span-2 overflow-hidden p-0">
+          {/* Header */}
+          <div className="p-4 border-b border-border flex items-center justify-between">
+            <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-muted transition-colors">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <h3 className="text-xl font-semibold">
+              {displayDate.toLocaleString("default", { month: "long", year: "numeric" })}
+            </h3>
+            <div className="flex gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={goToday}
+              >
+                {t(language, "calendar.today")}
+              </Button>
+              <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-muted transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
-              <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
-                {displayDate.toLocaleString("default", { month: "long", year: "numeric" })}
-              </h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={goToday}
-                  className="px-3 py-1.5 text-sm bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300 rounded-lg hover:bg-teal-100 dark:hover:bg-teal-900/40 transition-colors"
-                >
-                  {t(language, "calendar.today")}
-                </button>
-                <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            {/* Weekday Headers */}
-            <div className="grid grid-cols-7 bg-stone-50 dark:bg-stone-700/50 border-b border-stone-200 dark:border-stone-700">
-              {[t(language, "calendar.sun"), t(language, "calendar.mon"), t(language, "calendar.tue"), t(language, "calendar.wed"), t(language, "calendar.thu"), t(language, "calendar.fri"), t(language, "calendar.sat")].map((day) => (
-                <div key={day} className="p-2 text-center text-xs font-medium text-stone-500 dark:text-stone-400">
-                  {day}
-                </div>
-              ))}
-            </div>
-
-            {/* Grid */}
-            <div className="grid grid-cols-7">
-              {isLoading ? (
-                <div className="col-span-7 p-8 text-center text-stone-500">{t(language, "calendar.loading")}</div>
-              ) : (
-                gridDays.map((day) => (
-                  <button
-                    key={day.date}
-                    onClick={() => selectDay(day.date)}
-                    className={`min-h-[80px] p-2 border-b border-e border-stone-200 dark:border-stone-700 text-right transition-colors hover:bg-stone-50 dark:hover:bg-stone-700/50 relative ${
-                      !day.isCurrentMonth ? "bg-stone-50 dark:bg-stone-800/50" : ""
-                    } ${day.isSelected ? "bg-teal-50 dark:bg-teal-900/20 ring-2 ring-inset ring-teal-500" : ""}`}
-                  >
-                    <span
-                      className={`text-sm font-medium ${
-                        day.isToday
-                          ? "bg-teal-600 text-white w-6 h-6 rounded-full flex items-center justify-center mx-auto mb-1"
-                          : day.isCurrentMonth
-                          ? "text-stone-900 dark:text-white"
-                          : "text-stone-400 dark:text-stone-600"
-                      }`}
-                    >
-                      {day.dayNumber}
-                    </span>
-                    {day.count > 0 && (
-                      <div className="space-y-0.5 mt-1">
-                        {day.summary.slice(0, 2).map((s, i) => (
-                          <div key={i} className="text-[10px] text-stone-500 dark:text-stone-400 truncate">
-                            {s.modality} ({s.count})
-                          </div>
-                        ))}
-                        {day.summary.length > 2 && (
-                          <div className="text-[10px] text-stone-400 dark:text-stone-500">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                ))
-              )}
             </div>
           </div>
-        </div>
+
+          {/* Weekday Headers */}
+          <div className="grid grid-cols-7 bg-muted/50 border-b border-border">
+            {[t(language, "calendar.sun"), t(language, "calendar.mon"), t(language, "calendar.tue"), t(language, "calendar.wed"), t(language, "calendar.thu"), t(language, "calendar.fri"), t(language, "calendar.sat")].map((day) => (
+              <div key={day} className="p-3 text-center text-sm font-medium text-muted-foreground">
+                {day}
+              </div>
+            ))}
+          </div>
+
+          {/* Grid */}
+          <div className="grid grid-cols-7">
+            {isLoading ? (
+              <div className="col-span-7 p-12 text-center text-muted-foreground">{t(language, "calendar.loading")}</div>
+            ) : (
+              gridDays.map((day) => (
+                <button
+                  key={day.date}
+                  onClick={() => selectDay(day.date)}
+                  className={`min-h-[100px] p-3 border-b border-e border-border text-right transition-all duration-200 hover:bg-muted/50 relative ${
+                    !day.isCurrentMonth ? "bg-muted/30" : ""
+                  } ${day.isSelected ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
+                >
+                  <span
+                    className={`text-sm font-medium ${
+                      day.isToday
+                        ? "bg-accent text-white w-7 h-7 rounded-full flex items-center justify-center ml-auto mb-2"
+                        : day.isCurrentMonth
+                          ? ""
+                          : "text-muted-foreground opacity-50"
+                    }`}
+                  >
+                    {day.dayNumber}
+                  </span>
+                  {day.count > 0 && (
+                    <div className="space-y-1 mt-1">
+                      {day.summary.slice(0, 2).map((s, i) => (
+                        <div key={i} className="text-xs text-muted-foreground truncate text-right">
+                          {s.modality} ({s.count})
+                        </div>
+                      ))}
+                      {day.summary.length > 2 && (
+                        <div className="text-xs text-muted-foreground text-right">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
+                      )}
+                    </div>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        </Card>
 
         {/* Sidebar: Selected Day Details */}
         <div>
-          <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden sticky top-24">
-            <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-              <h3 className="font-semibold text-stone-900 dark:text-white">
+          <Card className="overflow-hidden sticky top-6">
+            <div className="p-4 border-b border-border">
+              <h3 className="font-semibold text-lg">
                 {selectedDate === formatDate(new Date()) ? t(language, "calendar.todayAppointments") : t(language, "calendar.dayAppointments", { date: formatDateDisplay(selectedDate) })}
               </h3>
-              <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
+              <p className="text-sm text-muted-foreground mt-1">
                 {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.appointmentCount", { count: 1 }) : t(language, "calendar.appointmentCountPlural", { count: selectedAppointments.length })}
               </p>
-              <div className="mt-3 flex gap-2">
-                <button
-                  type="button"
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button
+                  size="sm"
                   onClick={() => navigate(`/print?date=${selectedDate}`)}
                   disabled={selectedAppointments.length === 0}
-                  className="px-3 py-1.5 text-sm rounded-lg bg-teal-600 text-white font-medium hover:bg-teal-700 disabled:opacity-40 transition-colors"
                 >
                   {t(language, "calendar.printDayList")}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={() => navigate(`/print?date=${selectedDate}`)}
-                  className="px-3 py-1.5 text-sm rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 font-medium hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
                 >
                   {t(language, "calendar.openPrintTab")}
-                </button>
+                </Button>
               </div>
             </div>
             {selectedAppointment && (
-              <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <h4 className="font-semibold text-stone-900 dark:text-white">
+              <div className="p-4 border-b border-border bg-accent/5">
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="font-semibold text-lg">
                       {selectedAppointment.accessionNumber}
                     </h4>
                     {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
-                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
+                      <Badge variant="warning" size="sm">
                         {t(language, "appointmentEditor.edited")}
-                      </span>
+                      </Badge>
                     )}
                   </div>
                   <button
                     onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
-                    className="text-teal-700 dark:text-teal-300 underline underline-offset-2 text-xs"
+                    className="text-accent underline underline-offset-2 text-sm"
                   >
                     {t(language, "calendar.print")}
                   </button>
                 </div>
-                <div className="space-y-2 text-sm">
+                <div className="space-y-3">
                   <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
                   <Field label={t(language, "calendar.fieldModality")} value={selectedAppointment.modalityNameEn} />
                   <Field label={t(language, "calendar.fieldExam")} value={selectedAppointment.examNameEn || "—"} />
@@ -263,57 +269,56 @@ export default function CalendarPage() {
                   <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
                 </div>
                 <div className="mt-4">
-                {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
-                  <div className="mb-3 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!window.confirm("Cancel this appointment?")) return;
-                        cancelMutation.mutate(selectedAppointment.id);
-                      }}
-                      className="rounded-lg bg-stone-200 px-3 py-1.5 text-xs font-medium text-stone-700 hover:bg-stone-300 dark:bg-stone-700 dark:text-stone-200 dark:hover:bg-stone-600"
-                    >
-                      Cancel appointment
-                    </button>
-                  </div>
-                )}
-                <AppointmentEditor
-                  appointment={selectedAppointment}
-                  lookups={lookups}
-                  onUpdated={(updated) => setSelectedAppointment(updated)}
-                  onDeleted={() => setSelectedAppointment(null)}
-                />
+                  {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
+                    <div className="mb-3 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        style={{ color: "#ef4444" }}
+                        onClick={() => {
+                          if (!window.confirm("Cancel this appointment?")) return;
+                          cancelMutation.mutate(selectedAppointment.id);
+                        }}
+                      >
+                        Cancel appointment
+                      </Button>
+                    </div>
+                  )}
+                  <AppointmentEditor
+                    appointment={selectedAppointment}
+                    lookups={lookups}
+                    onUpdated={(updated) => setSelectedAppointment(updated)}
+                    onDeleted={() => setSelectedAppointment(null)}
+                  />
                 </div>
               </div>
             )}
             {isLoading ? (
-              <div className="p-4 text-center text-stone-500">{t(language, "calendar.loading")}</div>
+              <div className="p-8 text-center text-muted-foreground">{t(language, "calendar.loading")}</div>
             ) : selectedAppointments.length === 0 ? (
-              <div className="p-6 text-center text-stone-500 dark:text-stone-400 text-sm">
+              <div className="p-12 text-center text-muted-foreground">
                 {t(language, "calendar.noAppointments")}
               </div>
             ) : (
-              <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
+              <ul className="divide-y divide-border max-h-[600px] overflow-y-auto">
                 {selectedAppointments.map((apt) => (
                   <li
                     key={apt.id}
                     onClick={() => setSelectedAppointment(apt)}
-                    className={`p-4 hover:bg-stone-50 dark:hover:bg-stone-700/50 transition-colors cursor-pointer ${
-                      selectedAppointment?.id === apt.id ? "bg-teal-50 dark:bg-teal-900/20" : ""
+                    className={`p-4 hover:bg-muted/50 transition-colors cursor-pointer ${
+                      selectedAppointment?.id === apt.id ? "bg-accent/10" : ""
                     }`}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <div className="text-right flex-1">
-                        <p className="font-medium text-stone-900 dark:text-white text-sm">
-                          {apt.arabicFullName}
-                        </p>
-                        <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
+                      <div className="flex-1">
+                        <p className="font-medium">{apt.arabicFullName}</p>
+                        <p className="text-xs text-muted-foreground mt-1 font-mono">
                           {apt.accessionNumber}
                         </p>
                       </div>
                       <StatusBadge status={apt.status} />
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+                    <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                       <span>{apt.modalityNameEn}</span>
                       <div className="flex items-center gap-2">
                         <span>#{apt.dailySequence}</span>
@@ -322,7 +327,7 @@ export default function CalendarPage() {
                             e.stopPropagation();
                             navigate(`/print?appointmentId=${apt.id}`);
                           }}
-                          className="text-teal-700 dark:text-teal-300 underline underline-offset-2"
+                          className="text-accent underline underline-offset-2"
                         >
                           {t(language, "calendar.print")}
                         </button>
@@ -332,7 +337,7 @@ export default function CalendarPage() {
                 ))}
               </ul>
             )}
-          </div>
+          </Card>
         </div>
       </div>
     </div>
@@ -389,52 +394,28 @@ function formatDateDisplay(dateStr: string): string {
   return formatDateLy(dateStr);
 }
 
-function Select({
-  value,
-  onChange,
-  options
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className="w-full px-3 py-2 rounded-lg border bg-stone-50 dark:bg-stone-700 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm focus:ring-2 focus:ring-teal-500 outline-none"
-    >
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
-    </select>
-  );
-}
-
 function StatusBadge({ status }: { status: string }) {
-  const styles: Record<string, string> = {
-    scheduled: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400",
-    arrived: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400",
-    waiting: "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400",
-    completed: "bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400",
-    "no-show": "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400",
-    cancelled: "bg-stone-100 dark:bg-stone-900/30 text-stone-700 dark:text-stone-400"
+  const variantMap: Record<string, "success" | "info" | "warning" | "neutral" | "accent"> = {
+    scheduled: "info",
+    arrived: "success",
+    waiting: "warning",
+    completed: "success",
+    "no-show": "accent",
+    cancelled: "neutral"
   };
 
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[status] || styles.scheduled}`}>
+    <Badge variant={variantMap[status] || "neutral"} size="sm">
       {status}
-    </span>
+    </Badge>
   );
 }
 
 function Field({ label, value }: { label: string; value: any }) {
   return (
-    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-700/40 p-3">
-      <p className="text-stone-500 dark:text-stone-400 text-[11px] uppercase tracking-[0.14em] mb-1">{label}</p>
-      <p className="text-stone-900 dark:text-white font-semibold text-sm leading-snug break-words">{value ?? "—"}</p>
+    <div className="rounded-xl border border-border bg-muted/30 p-3">
+      <p className="text-muted-foreground text-xs uppercase tracking-[0.15em] font-mono mb-1">{label}</p>
+      <p className="font-medium leading-snug break-words">{value ?? "—"}</p>
     </div>
   );
 }

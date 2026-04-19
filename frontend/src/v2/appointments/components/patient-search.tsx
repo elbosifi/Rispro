@@ -30,6 +30,7 @@ interface PatientSearchProps {
   onSelect: (patient: Patient) => void;
   selectedPatient: Patient | null;
   onClear: () => void;
+  caseCategory: "oncology" | "non_oncology";
 }
 
 function getPrimaryIdentifier(patient: Patient): { label: string; value: string | null } {
@@ -58,7 +59,14 @@ function getPrimaryIdentifier(patient: Patient): { label: string; value: string 
   return { label: "Primary ID", value: null };
 }
 
-export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSearchProps) {
+function renderSex(sex?: string | null): string {
+  if (!sex) return "—";
+  if (sex.toUpperCase() === "M") return "Male";
+  if (sex.toUpperCase() === "F") return "Female";
+  return sex;
+}
+
+export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory }: PatientSearchProps) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Patient[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -109,22 +117,33 @@ export function PatientSearch({ onSelect, selectedPatient, onClear }: PatientSea
       <div
         style={{
           display: "flex",
-          alignItems: "center",
+          alignItems: "flex-start",
           justifyContent: "space-between",
-          padding: "10px 14px",
+          gap: 12,
+          padding: "12px 14px",
           borderRadius: "var(--radius-md)",
           backgroundColor: "rgba(34, 197, 94, 0.1)",
           border: "1px solid rgba(34, 197, 94, 0.3)",
         }}
       >
-        <div>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>
             {selectedPatient.arabicFullName}
           </div>
-          <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)" }}>
+          <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 2 }}>
             {selectedPatient.englishFullName}
-            {primaryIdentifier.value ? ` · ${primaryIdentifier.label}: ${primaryIdentifier.value}` : ""}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>
+            {primaryIdentifier.value ? `${primaryIdentifier.label}: ${primaryIdentifier.value}` : "Primary ID: —"}
             {showMrn ? ` · MRN: ${mrn}` : ""}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 6 }}>
+            <span>Sex: {renderSex(selectedPatient.sex)}</span>
+            <span>
+              Age: {selectedPatient.ageYears ?? "—"}
+              {selectedPatient.demographicsEstimated ? " (Estimated)" : ""}
+            </span>
+            <span>Category: {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}</span>
           </div>
         </div>
         <button

@@ -23,25 +23,42 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("../components/PatientSearchSection", () => ({
-  PatientSearchSection: ({ onSelectPatient }: { onSelectPatient: (p: unknown) => void }) => (
-    <button
-      type="button"
-      onClick={() =>
-        onSelectPatient({
-          id: 9,
-          arabicFullName: "Test Patient",
-          englishFullName: "Test Patient",
-          identifierType: "passport",
-          identifierValue: "P-12345",
-          nationalId: "123",
-          mrn: "MRN-9",
-          sex: "M",
-          ageYears: 30,
-        })
-      }
-    >
-      Select Test Patient
-    </button>
+  PatientSearchSection: ({
+    onSelectPatient,
+    value,
+  }: {
+    onSelectPatient: (p: unknown) => void;
+    value: { englishFullName?: string | null; arabicFullName?: string | null; identifierValue?: string | null; nationalId?: string | null; mrn?: string | null; sex?: string | null; ageYears?: number | null; demographicsEstimated?: boolean } | null;
+  }) => (
+    <div>
+      {value ? (
+        <div className="card-shell p-4">
+          <div className="font-semibold">{value.arabicFullName ?? value.englishFullName}</div>
+          <div className="text-sm text-muted-foreground">Primary ID: {value.identifierValue || value.nationalId || value.mrn || "—"}</div>
+          <div className="text-sm text-muted-foreground">
+            Sex: {value.sex ?? "—"} · Age: {value.ageYears ?? "—"}{value.demographicsEstimated ? " (Estimated)" : ""}
+          </div>
+        </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() =>
+          onSelectPatient({
+            id: 9,
+            arabicFullName: "Test Patient",
+            englishFullName: "Test Patient",
+            identifierType: "passport",
+            identifierValue: "P-12345",
+            nationalId: "123",
+            mrn: "MRN-9",
+            sex: "M",
+            ageYears: 30,
+          })
+        }
+      >
+        Select Test Patient
+      </button>
+    </div>
   ),
 }));
 
