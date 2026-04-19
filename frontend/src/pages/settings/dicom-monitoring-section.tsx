@@ -19,6 +19,15 @@ interface ServiceEntry {
   lastError: string | null;
 }
 
+interface ServiceControlResponse {
+  service: string;
+  status: ServiceEntry;
+}
+
+interface RebuildResponse {
+  message: string;
+}
+
 export default function DicomMonitoringSection(_props: DicomMonitoringSectionProps) {
   const { onReAuthRequired } = _props;
   const { t } = useLanguage();
@@ -53,7 +62,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
 
   const serviceControlMutation = useMutation({
     mutationFn: async ({ serviceName, action }: { serviceName: string; action: "start" | "stop" | "restart" }) => {
-      return api(`/dicom/service/${serviceName}/${action}`, { method: "POST" });
+      return api<ServiceControlResponse>(`/dicom/service/${serviceName}/${action}`, { method: "POST" });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["dicom", "overview"] });
@@ -70,7 +79,7 @@ export default function DicomMonitoringSection(_props: DicomMonitoringSectionPro
   });
 
   const rebuildMutation = useMutation({
-    mutationFn: () => api("/dicom/rebuild", { method: "POST" }),
+    mutationFn: () => api<RebuildResponse>("/dicom/rebuild", { method: "POST" }),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["dicom", "overview"] });
       // Show success message inline instead of alert
