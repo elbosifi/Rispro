@@ -1,0 +1,20 @@
+{
+  "appointmentId": "1319",
+  "accessionNumber": "V2-1319",
+  "modalityId": "211",
+  "modalityCode": "mr1",
+  "patientId": "244",
+  "patientMrn": "000330",
+  "patientNationalId": "123456789012",
+  "patientNameEnglish": "Validation Patient",
+  "patientNameArabic": "مريض التحقق",
+  "appointmentDate": "2026-04-25",
+  "appointmentStatus": "scheduled",
+  "scheduledProcedureStepStatus": "SCHEDULED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

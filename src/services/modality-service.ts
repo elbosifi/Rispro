@@ -4,7 +4,6 @@ import { requireRow } from "../utils/records.js";
 import { normalizePositiveInteger } from "../utils/normalize.js";
 import { getTripoliToday, validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
-import { scheduleWorklistSync } from "./dicom-service.js";
 import {
   APPOINTMENT_QUEUE_WORKING_STATUSES,
   APPOINTMENT_STATUS_COMPLETED
@@ -200,7 +199,6 @@ export async function markAppointmentCompleted(
     );
 
     await client.query("commit");
-    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

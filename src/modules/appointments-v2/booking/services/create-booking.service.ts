@@ -35,6 +35,7 @@ import { insertBooking } from "../repositories/booking.repo.js";
 import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -47,12 +48,15 @@ export async function createBooking(
   userId: number,
   policySetKey: string = "default"
 ): Promise<CreateBookingResult> {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     return createBookingInternal(client, payload, userId, policySetKey);
   }, {
     isolationLevel: "serializable",
     operationName: "create_booking",
   });
+
+  scheduleBookingWorklistSync(result.booking.id);
+  return result;
 }
 
 function normalizeCapacityResolutionMode(payload: CreateBookingPayload): CapacityResolutionMode {

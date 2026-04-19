@@ -12,13 +12,8 @@ import { logAuditEntry } from "./audit-service.js";
 import type { UserId, UnknownRecord } from "../types/http.js";
 import type { DbNumeric } from "../types/db.js";
 import type { CategorySettings, SettingsMap } from "../types/settings.js";
-import type { AppointmentStatus } from "../types/domain.js";
 import {
-  APPOINTMENT_ACTIVE_WORKLIST_STATUSES,
   APPOINTMENT_STATUS_ARRIVED,
-  APPOINTMENT_STATUS_COMPLETED,
-  APPOINTMENT_STATUS_DISCONTINUED,
-  APPOINTMENT_STATUS_IN_PROGRESS,
   APPOINTMENT_STATUS_WAITING
 } from "../constants/appointment-statuses.js";
 import { loadSettingsMap } from "./settings-service.js";
@@ -28,7 +23,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, "..", "..");
 
-const ACTIVE_WORKLIST_STATUSES = new Set(APPOINTMENT_ACTIVE_WORKLIST_STATUSES);
+const V2_ACTIVE_WORKLIST_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 
 // ---------------------------------------------------------------------------
 // Type definitions
@@ -84,7 +79,8 @@ export interface WorklistAppointmentRow {
   modality_id: number;
   accession_number: string;
   appointment_date: string;
-  status: AppointmentStatus;
+  status: string;
+  booking_time: string | null;
   scheduled_station_ae_title: string | null;
   exam_name_ar: string | null;
   exam_name_en: string | null;
@@ -118,27 +114,6 @@ export interface DicomLogSummaryRow {
   processed_count: DbNumeric;
   failed_count: DbNumeric;
   total_count: DbNumeric;
-}
-
-export interface WorklistContextRow {
-  id: number;
-  patient_id: number;
-  accession_number: string;
-  appointment_date: string;
-  status: AppointmentStatus;
-  modality_id: number;
-  exam_type_id: string | null;
-  arabic_full_name: string;
-  english_full_name: string | null;
-  sex: string | null;
-  estimated_date_of_birth: string | null;
-  mrn: string | null;
-  national_id: string | null;
-  exam_name_ar: string | null;
-  exam_name_en: string | null;
-  modality_name_ar: string | null;
-  modality_name_en: string | null;
-  modality_code: string | null;
 }
 
 export interface GatewaySettings {
@@ -381,10 +356,6 @@ function mapAppointmentToScheduledProcedureStepStatus(status: string): string {
     return "ARRIVED";
   }
 
-  if (status === APPOINTMENT_STATUS_IN_PROGRESS) {
-    return "STARTED";
-  }
-
   return "SCHEDULED";
 }
 
@@ -426,30 +397,22 @@ async function listDevicesForModality(
   return rows as DicomDeviceRow[];
 }
 
-async function getAppointmentWorklistContext(
+async function getBookingWorklistContext(
   client: Pool | PoolClient,
-  appointmentId: number | string
+  bookingId: number | string
 ): Promise<WorklistAppointmentRow | null> {
-  const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  const cleanBookingId = normalizePositiveInteger(bookingId, "bookingId");
   const { rows } = await client.query(
     `
       select
-        appointments.id,
-        appointments.patient_id,
-        appointments.modality_id,
-        appointments.exam_type_id,
-        appointments.reporting_priority_id,
-        appointments.accession_number,
-        appointments.appointment_date,
-        appointments.status,
-        appointments.notes,
-        appointments.arrived_at,
-        appointments.scan_started_at,
-        appointments.scan_finished_at,
-        appointments.cancel_reason,
-        appointments.no_show_reason,
-        appointments.scheduled_station_ae_title,
-        appointments.created_at,
+        bookings.id,
+        bookings.patient_id,
+        bookings.modality_id,
+        ('V2-' || bookings.id::text) as accession_number,
+        bookings.booking_date::text as appointment_date,
+        bookings.status,
+        bookings.booking_time::text as booking_time,
+        null::text as scheduled_station_ae_title,
         modalities.code as modality_code,
         modalities.name_ar as modality_name_ar,
         modalities.name_en as modality_name_en,
@@ -461,14 +424,14 @@ async function getAppointmentWorklistContext(
         patients.english_full_name,
         patients.estimated_date_of_birth,
         patients.sex
-      from appointments
-      join modalities on modalities.id = appointments.modality_id
-      join patients on patients.id = appointments.patient_id
-      left join exam_types on exam_types.id = appointments.exam_type_id
-      where appointments.id = $1
+      from appointments_v2.bookings
+      join modalities on modalities.id = bookings.modality_id
+      join patients on patients.id = bookings.patient_id
+      left join exam_types on exam_types.id = bookings.exam_type_id
+      where bookings.id = $1
       limit 1
     `,
-    [cleanAppointmentId]
+    [cleanBookingId]
   );
 
   return (rows[0] as WorklistAppointmentRow) || null;
@@ -501,7 +464,7 @@ export function buildWorklistDump({
   dataset: WorklistDatasetContext;
 }): string {
   const startDate = normalizeDateForDicom(appointment.appointment_date);
-  const startTime = normalizeTimeForDicom("", "080000");
+  const startTime = normalizeTimeForDicom(appointment.booking_time, "080000");
   const patientName = formatDicomPersonName(appointment.english_full_name || "", appointment.arabic_full_name);
   const requestedProcedureDescription =
     formatDicomString(appointment.exam_name_en || "", appointment.exam_name_ar || "") ||
@@ -643,7 +606,7 @@ async function writeWorklistSourceFiles(
   await removeMatchingFiles(sourceDir, sourcePrefix);
   await removeMatchingOutputFiles(outputDir, sourcePrefix);
 
-  if (!ACTIVE_WORKLIST_STATUSES.has(appointment.status)) {
+  if (!V2_ACTIVE_WORKLIST_STATUSES.has(appointment.status)) {
     return { files: [], removedOnly: true, ok: true };
   }
 
@@ -814,7 +777,7 @@ export async function createDicomDevice(
     );
 
     await client.query("commit");
-    scheduleWorklistRebuild();
+    scheduleV2WorklistRebuild();
     return createdDevice;
   } catch (error) {
     await client.query("rollback");
@@ -906,7 +869,7 @@ export async function updateDicomDevice(
     );
 
     await client.query("commit");
-    scheduleWorklistRebuild();
+    scheduleV2WorklistRebuild();
     return updatedDevice;
   } catch (error) {
     await client.query("rollback");
@@ -955,7 +918,7 @@ export async function deleteDicomDevice(
     );
 
     await client.query("commit");
-    scheduleWorklistRebuild();
+    scheduleV2WorklistRebuild();
     return { ok: true };
   } catch (error) {
     await client.query("rollback");
@@ -965,14 +928,14 @@ export async function deleteDicomDevice(
   }
 }
 
-export async function syncAppointmentWorklistSources(
-  appointmentId: number | string
+export async function syncBookingWorklistSources(
+  bookingId: number | string
 ): Promise<{ ok: boolean; removedOnly?: boolean; files?: WorklistManifestFile[] }> {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
 
   try {
-    const appointment = await getAppointmentWorklistContext(client, appointmentId);
+    const appointment = await getBookingWorklistContext(client, bookingId);
 
     if (!appointment) {
       return { ok: true, removedOnly: true };
@@ -986,7 +949,7 @@ export async function syncAppointmentWorklistSources(
   }
 }
 
-export async function rebuildAllDicomWorklistSources(): Promise<{ ok: boolean; count: number }> {
+export async function rebuildAllV2DicomWorklistSources(): Promise<{ ok: boolean; count: number }> {
   const gatewaySettings = await getDicomGatewaySettings();
   const client = await pool.connect();
 
@@ -995,13 +958,13 @@ export async function rebuildAllDicomWorklistSources(): Promise<{ ok: boolean; c
     const { rows } = await client.query(
       `
         select id
-        from appointments
-        order by appointment_date asc, daily_sequence asc
+        from appointments_v2.bookings
+        order by booking_date asc, id asc
       `
     );
 
     for (const row of rows) {
-      await syncAppointmentWorklistSources(row.id);
+      await syncBookingWorklistSources(row.id);
     }
 
     return { ok: true, count: rows.length };
@@ -1010,22 +973,20 @@ export async function rebuildAllDicomWorklistSources(): Promise<{ ok: boolean; c
   }
 }
 
-export function scheduleWorklistSync(appointmentId: UserId): void {
+export function scheduleBookingWorklistSync(bookingId: UserId): void {
   Promise.resolve()
-    .then(() => syncAppointmentWorklistSources(appointmentId))
+    .then(() => syncBookingWorklistSources(bookingId))
     .catch((error) => {
-      // Log warning but don't throw - this is fire-and-forget to not block main operations
-      // The worklist will be rebuilt on the next successful appointment mutation
       console.warn(
-        `[DICOM Worklist] Failed to sync appointment ${appointmentId}. Will retry on next mutation.`,
+        `[DICOM Worklist] Failed to sync booking ${bookingId}. Will retry on next mutation.`,
         error
       );
     });
 }
 
-export function scheduleWorklistRebuild(): void {
+export function scheduleV2WorklistRebuild(): void {
   Promise.resolve()
-    .then(() => rebuildAllDicomWorklistSources())
+    .then(() => rebuildAllV2DicomWorklistSources())
     .catch((error) => {
       console.warn(
         `[DICOM Worklist] Failed to rebuild worklist sources. Manual intervention may be required.`,

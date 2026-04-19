@@ -3,6 +3,7 @@ import { pool } from "../../../../db/pool.js";
 import { requireAuth } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
+import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 
 const router = Router();
@@ -452,6 +453,7 @@ router.post(
       return;
     }
 
+    scheduleBookingWorklistSync(bookingId);
     res.json({ ok: true, bookingId });
   })
 );
@@ -518,6 +520,7 @@ router.post(
       return;
     }
 
+    scheduleBookingWorklistSync(bookingId);
     res.json({ ok: true });
   })
 );
@@ -615,6 +618,7 @@ router.post(
       return;
     }
 
+    scheduleBookingWorklistSync(bookingId);
     res.json({ ok: true });
   })
 );

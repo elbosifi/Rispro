@@ -71,9 +71,9 @@ async function start(): Promise<void> {
     await seedDicomGatewayDefaultsIfMissing();
 
     // Auto-create directories and rebuild worklists
-    const { ensureDicomGatewayLayout, rebuildAllDicomWorklistSources } = await import("./services/dicom-service.js");
+    const { ensureDicomGatewayLayout, rebuildAllV2DicomWorklistSources } = await import("./services/dicom-service.js");
     await ensureDicomGatewayLayout();
-    await rebuildAllDicomWorklistSources();
+    await rebuildAllV2DicomWorklistSources();
 
     if (process.env.RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY === "1") {
       console.log("Embedded DICOM gateway disabled by environment. Skipping in-process gateway startup.");

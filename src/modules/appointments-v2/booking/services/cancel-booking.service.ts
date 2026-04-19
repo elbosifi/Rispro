@@ -9,9 +9,9 @@ import type { PoolClient } from "pg";
 import { withTransaction } from "../../shared/utils/transactions.js";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { findBookingById, updateBookingStatus } from "../repositories/booking.repo.js";
-import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import type { Booking } from "../models/booking.js";
 import { CANCELLABLE_STATUSES } from "../../shared/types/common.js";
+import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 
 export interface CancelBookingResult {
   booking: Booking;
@@ -22,9 +22,12 @@ export async function cancelBooking(
   bookingId: number,
   userId: number
 ): Promise<CancelBookingResult> {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     return cancelBookingInternal(client, bookingId, userId);
   });
+
+  scheduleBookingWorklistSync(bookingId);
+  return result;
 }
 
 async function cancelBookingInternal(

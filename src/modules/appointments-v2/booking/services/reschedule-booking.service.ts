@@ -39,6 +39,7 @@ import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -62,7 +63,7 @@ export async function rescheduleBooking(
   rescheduleReason: string | null = null,
   policySetKey: string = "default"
 ): Promise<RescheduleBookingResult> {
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     return rescheduleBookingInternal(
       client,
       bookingId,
@@ -83,6 +84,9 @@ export async function rescheduleBooking(
     isolationLevel: "serializable",
     operationName: "reschedule_booking",
   });
+
+  scheduleBookingWorklistSync(bookingId);
+  return result;
 }
 
 async function rescheduleBookingInternal(

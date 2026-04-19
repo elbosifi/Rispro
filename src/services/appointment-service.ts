@@ -17,7 +17,6 @@ import { requireRow } from "../utils/records.js";
 import { normalizePositiveInteger, normalizeOptionalText } from "../utils/normalize.js";
 import { getTripoliToday, TRIPOLI_TIME_ZONE, validateIsoDate } from "../utils/date.js";
 import { logAuditEntry } from "./audit-service.js";
-import { scheduleWorklistSync } from "./dicom-service.js";
 import { authenticateUser } from "./auth-service.js";
 import { evaluateSchedulingCandidateWithDb } from "../domain/scheduling/service.js";
 import type { UnknownRecord, UserId, AuthenticatedUserContext } from "../types/http.js";
@@ -2203,7 +2202,6 @@ export async function createAppointment(
     );
 
     await client.query("commit");
-    scheduleWorklistSync(createdAppointment.id);
 
     return {
       appointment: createdAppointment,
@@ -2654,7 +2652,6 @@ export async function updateAppointment(
     );
 
     await client.query("commit");
-    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return updatedAppointment as unknown as UnknownRecord;
   } catch (error) {
     console.error(
@@ -2749,7 +2746,6 @@ export async function updateAppointmentProtocol(
     );
 
     await client.query("commit");
-    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return protocolUpdatedAppointment as unknown as UnknownRecord;
   } catch (error) {
     await client.query("rollback");
@@ -2830,7 +2826,6 @@ export async function cancelAppointment(
     );
 
     await client.query("commit");
-    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");
@@ -2883,7 +2878,6 @@ export async function deleteAppointment(
     );
 
     await client.query("commit");
-    if (cleanAppointmentId) scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

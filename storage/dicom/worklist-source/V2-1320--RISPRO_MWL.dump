@@ -1,0 +1,28 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0008,0050) SH [V2-1320]
+(0008,0090) PN []
+(0010,0010) PN [Validation^Patient]
+(0010,0020) LO [000330]
+(0010,0021) LO [000330]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0032,1032) PN []
+(0032,1060) LO [mri]
+(0040,1001) SH [V2-1320]
+(0040,1003) SH [V2-1320]
+(0040,1004) LO [mri]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0060) CS [mr1]
+  (0040,0001) AE [RISPRO_MWL]
+  (0040,0002) DA [20260426]
+  (0040,0003) TM [080000]
+  (0040,0006) PN []
+  (0040,0007) LO [mri]
+  (0040,0009) SH [V2-1320-RISPRO_MWL]
+  (0040,0010) SH []
+  (0040,0011) SH []
+  (0040,0020) CS [SCHEDULED]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)

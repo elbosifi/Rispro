@@ -5,10 +5,11 @@ import fs from "fs/promises";
 import os from "os";
 import path from "path";
 import { pool } from "../db/pool.js";
-import { syncAppointmentWorklistSources } from "./dicom-service.js";
+import { syncBookingWorklistSources } from "./dicom-service.js";
 
 interface FixtureContext {
   userId: number;
+  policyVersionId: number;
   ctModalityId: number;
   mriModalityId: number;
   ctExamTypeId: number;
@@ -93,6 +94,8 @@ async function createFixture(): Promise<FixtureContext> {
   await fs.mkdir(sourceDir, { recursive: true });
   await fs.mkdir(outputDir, { recursive: true });
   let userId: number | null = null;
+  let policyVersionId: number | null = null;
+  let ownsPolicyVersion = false;
   let ctModalityId: number | null = null;
   let mriModalityId: number | null = null;
   let ctExamTypeId: number | null = null;
@@ -122,6 +125,44 @@ async function createFixture(): Promise<FixtureContext> {
       [`dicom_admin_${suffix}`, `DICOM Admin ${suffix}`, passwordHash]
     );
     userId = Number(user.rows[0]?.id);
+    const publishedPolicy = await pool.query<{ id: number }>(
+      `
+        select pv.id
+        from appointments_v2.policy_versions pv
+        join appointments_v2.policy_sets ps on ps.id = pv.policy_set_id
+        where ps.key = 'default'
+          and pv.status = 'published'
+        order by pv.published_at desc nulls last, pv.id desc
+        limit 1
+      `
+    );
+
+    if (publishedPolicy.rows[0]?.id) {
+      policyVersionId = Number(publishedPolicy.rows[0].id);
+    } else {
+      const policyVersion = await pool.query<{ id: number }>(
+        `
+          insert into appointments_v2.policy_versions (
+            policy_set_id,
+            version_no,
+            status,
+            config_hash,
+            created_by_user_id
+          )
+          values (
+            (select id from appointments_v2.policy_sets where key = 'default' limit 1),
+            9000 + floor(random() * 1000)::int,
+            'published',
+            $1,
+            $2
+          )
+          returning id
+        `,
+        [uniqueSuffix(), userId]
+      );
+      policyVersionId = Number(policyVersion.rows[0]?.id);
+      ownsPolicyVersion = true;
+    }
 
     const ctModality = await pool.query<{ id: number }>(
       `
@@ -218,7 +259,7 @@ async function createFixture(): Promise<FixtureContext> {
 
       if (ctModalityId && mriModalityId) {
         await pool.query(`delete from dicom_devices where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
-        await pool.query(`delete from appointments where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
+        await pool.query(`delete from appointments_v2.bookings where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]);
       }
       if (ctExamTypeId && mriExamTypeId) {
         await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[ctExamTypeId, mriExamTypeId]]);
@@ -229,6 +270,9 @@ async function createFixture(): Promise<FixtureContext> {
       if (patientAId && patientBId && patientCId) {
         await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId, patientCId]]);
       }
+      if (policyVersionId && ownsPolicyVersion) {
+        await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]);
+      }
       if (userId) {
         await pool.query(`delete from users where id = $1`, [userId]);
       }
@@ -237,6 +281,7 @@ async function createFixture(): Promise<FixtureContext> {
 
     return {
       userId,
+      policyVersionId,
       ctModalityId,
       mriModalityId,
       ctExamTypeId,
@@ -254,7 +299,7 @@ async function createFixture(): Promise<FixtureContext> {
 
     if (ctModalityId && mriModalityId) {
       await pool.query(`delete from dicom_devices where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
-      await pool.query(`delete from appointments where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
+      await pool.query(`delete from appointments_v2.bookings where modality_id = any($1::bigint[])`, [[ctModalityId, mriModalityId]]).catch(() => undefined);
     }
     if (ctExamTypeId && mriExamTypeId) {
       await pool.query(`delete from exam_types where id = any($1::bigint[])`, [[ctExamTypeId, mriExamTypeId]]).catch(() => undefined);
@@ -265,6 +310,9 @@ async function createFixture(): Promise<FixtureContext> {
     if (patientAId && patientBId && patientCId) {
       await pool.query(`delete from patients where id = any($1::bigint[])`, [[patientAId, patientBId, patientCId]]).catch(() => undefined);
     }
+    if (policyVersionId && ownsPolicyVersion) {
+      await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]).catch(() => undefined);
+    }
     if (userId) {
       await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
     }
@@ -273,48 +321,48 @@ async function createFixture(): Promise<FixtureContext> {
   }
 }
 
-test("syncAppointmentWorklistSources creates central MWL dumps without dicom_devices rows", async (t) => {
+test("syncBookingWorklistSources creates V2 MWL dumps and removes files for terminal status", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const fx = await createFixture();
 
   try {
-    const appointmentDate = "2030-01-15";
+    const bookingDate = "2030-01-15";
 
-    const insertAppointment = async (params: {
+    const insertBooking = async (params: {
       patientId: number;
       modalityId: number;
       examTypeId: number;
-      accessionNumber: string;
-      dailySequence: number;
-      stationAeTitle?: string | null;
+      bookingTime?: string | null;
     }) => {
       const result = await pool.query<{ id: number }>(
         `
-          insert into appointments (
+          insert into appointments_v2.bookings (
             patient_id,
             modality_id,
             exam_type_id,
-            accession_number,
-            appointment_date,
-            daily_sequence,
-            modality_slot_number,
-            status,
+            reporting_priority_id,
+            booking_date,
+            booking_time,
             case_category,
-            scheduled_station_ae_title,
+            status,
+            notes,
+            policy_version_id,
+            capacity_resolution_mode,
+            uses_special_quota,
+            is_walk_in,
             created_by_user_id,
             updated_by_user_id
           )
-          values ($1, $2, $3, $4, $5::date, $6, $6, 'scheduled', 'non_oncology', $7, $8, $8)
+          values ($1, $2, $3, null, $4::date, $5::time, 'non_oncology', 'scheduled', null, $6, 'standard', false, false, $7, $7)
           returning id
         `,
         [
           params.patientId,
           params.modalityId,
           params.examTypeId,
-          params.accessionNumber,
-          appointmentDate,
-          params.dailySequence,
-          params.stationAeTitle || null,
+          bookingDate,
+          params.bookingTime || null,
+          fx.policyVersionId,
           fx.userId
         ]
       );
@@ -322,44 +370,40 @@ test("syncAppointmentWorklistSources creates central MWL dumps without dicom_dev
       return Number(result.rows[0]?.id);
     };
 
-    const ctCentralId = await insertAppointment({
+    const ctCentralId = await insertBooking({
       patientId: fx.patientAId,
       modalityId: fx.ctModalityId,
       examTypeId: fx.ctExamTypeId,
-      accessionNumber: `ACC-${uniqueSuffix()}-CTA`,
-      dailySequence: 1
+      bookingTime: "09:15:00"
     });
-    const mriCentralId = await insertAppointment({
+    const mriCentralId = await insertBooking({
       patientId: fx.patientBId,
       modalityId: fx.mriModalityId,
       examTypeId: fx.mriExamTypeId,
-      accessionNumber: `ACC-${uniqueSuffix()}-MRI`,
-      dailySequence: 2
+      bookingTime: "10:30:00"
     });
-    const ctStationId = await insertAppointment({
+    const ctThirdId = await insertBooking({
       patientId: fx.patientCId,
       modalityId: fx.ctModalityId,
       examTypeId: fx.ctExamTypeId,
-      accessionNumber: `ACC-${uniqueSuffix()}-CTS`,
-      dailySequence: 3,
-      stationAeTitle: "CT_ROOM_1"
+      bookingTime: "11:45:00"
     });
 
-    const [ctCentral, mriCentral, ctStation] = await Promise.all([
-      syncAppointmentWorklistSources(ctCentralId),
-      syncAppointmentWorklistSources(mriCentralId),
-      syncAppointmentWorklistSources(ctStationId)
+    const [ctCentral, mriCentral, ctThird] = await Promise.all([
+      syncBookingWorklistSources(ctCentralId),
+      syncBookingWorklistSources(mriCentralId),
+      syncBookingWorklistSources(ctThirdId)
     ]);
 
     assert.equal(ctCentral.removedOnly, false);
     assert.equal(mriCentral.removedOnly, false);
-    assert.equal(ctStation.removedOnly, false);
+    assert.equal(ctThird.removedOnly, false);
     assert.equal((ctCentral.files || []).length, 1, "Expected a central MWL file even without device rows");
 
     const dumpPaths = [
       ctCentral.files?.[0]?.dumpPath || "",
       mriCentral.files?.[0]?.dumpPath || "",
-      ctStation.files?.[0]?.dumpPath || ""
+      ctThird.files?.[0]?.dumpPath || ""
     ];
     const dumps = await Promise.all(dumpPaths.map((dumpPath) => fs.readFile(dumpPath, "utf8")));
 
@@ -373,17 +417,31 @@ test("syncAppointmentWorklistSources creates central MWL dumps without dicom_dev
     const allResults = dumps.filter((dump) => matchesWorklistQuery(dump, {}));
     const ctResults = dumps.filter((dump) => matchesWorklistQuery(dump, { modality: extractTagValue(dumps[0], "(0008,0060") }));
     const mriResults = dumps.filter((dump) => matchesWorklistQuery(dump, { modality: extractTagValue(dumps[1], "(0008,0060") }));
-    const stationResults = dumps.filter((dump) => matchesWorklistQuery(dump, { stationAeTitle: "CT_ROOM_1" }));
-    const stationOnlyResults = dumps.filter((dump) => matchesWorklistQuery(dump, { stationAeTitle: "CT_ROOM_1" }));
 
     assert.equal(allResults.length, 3, "Query without modality or station AE should keep all items eligible");
     assert.equal(ctResults.length, 2, "CT query should keep only CT items");
     assert.equal(mriResults.length, 1, "MRI query should keep only MRI items");
-    assert.equal(stationResults.length, 1, "Station query should keep only matching station items");
-    assert.equal(stationOnlyResults.length, 1, "Station-only query should keep all items for that station regardless of modality");
+    assert.ok(
+      dumps.every((dump) => extractTagValue(dump, "(0040,0001") === "RISPRO_MWL"),
+      "V2 booking projection should route through central MWL AE when no explicit station override exists."
+    );
+    assert.equal(extractTagValue(dumps[0], "(0040,0003"), "091500", "SPS start time should map from booking_time");
 
-    const centralDump = dumps[0];
-    assert.equal(extractTagValue(centralDump, "(0040,0001"), "RISPRO_MWL", "Unknown-device items should fall back to the central MWL AE");
+    const dumpPathToRemove = ctThird.files?.[0]?.dumpPath || "";
+    const manifestPathToRemove = ctThird.files?.[0]?.manifestPath || "";
+    await pool.query(
+      `update appointments_v2.bookings set status = 'cancelled', updated_at = now(), updated_by_user_id = $2 where id = $1`,
+      [ctThirdId, fx.userId]
+    );
+    const removed = await syncBookingWorklistSources(ctThirdId);
+    assert.equal(removed.removedOnly, true, "Cancelled booking should remove worklist artifacts.");
+
+    const [dumpExistsAfterCancel, manifestExistsAfterCancel] = await Promise.all([
+      fs.access(dumpPathToRemove).then(() => true).catch(() => false),
+      fs.access(manifestPathToRemove).then(() => true).catch(() => false),
+    ]);
+    assert.equal(dumpExistsAfterCancel, false, "Dump file should be removed for cancelled booking.");
+    assert.equal(manifestExistsAfterCancel, false, "Manifest file should be removed for cancelled booking.");
   } finally {
     await fx.cleanup();
   }

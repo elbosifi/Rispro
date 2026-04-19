@@ -5,7 +5,7 @@ import { requireRow } from "../utils/records.js";
 import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
 import { createAppointment } from "./appointment-service.js";
 import { logAuditEntry } from "./audit-service.js";
-import { resolveScanValueToAccession, scheduleWorklistSync } from "./dicom-service.js";
+import { resolveScanValueToAccession } from "./dicom-service.js";
 import {
   APPOINTMENT_QUEUE_CLOSED_STATUSES,
   APPOINTMENT_STATUS_ARRIVED,
@@ -491,7 +491,6 @@ export async function scanAppointmentIntoQueue(
     );
 
     await client.query("commit");
-    scheduleWorklistSync(appointment.id);
 
     return {
       queueEntry,
@@ -649,7 +648,6 @@ export async function confirmNoShow(
     );
 
     await client.query("commit");
-    scheduleWorklistSync(cleanAppointmentId);
     return { ok: true };
   } catch (error) {
     await client.query("rollback");

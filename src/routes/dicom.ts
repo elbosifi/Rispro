@@ -7,8 +7,8 @@ import { pool } from "../db/pool.js";
 import {
   getDicomGatewaySettings,
   getDicomGatewayOverview,
-  rebuildAllDicomWorklistSources,
-  syncAppointmentWorklistSources,
+  rebuildAllV2DicomWorklistSources,
+  syncBookingWorklistSources,
   listDicomDevices
 } from "../services/dicom-service.js";
 import {
@@ -240,21 +240,21 @@ dicomRouter.get(
 dicomRouter.post(
   "/rebuild",
   asyncRoute(async (_req: Request, res: Response) => {
-    const result = await rebuildAllDicomWorklistSources();
-    res.json({ ok: true, count: result.count, message: `Rebuilt ${result.count} worklist(s).` });
+    const result = await rebuildAllV2DicomWorklistSources();
+    res.json({ ok: true, count: result.count, message: `Rebuilt ${result.count} booking worklist(s).` });
   })
 );
 
 dicomRouter.post(
-  "/rebuild/:appointmentId",
+  "/rebuild/:bookingId",
   asyncRoute(async (req: Request, res: Response) => {
-    const appointmentId = parseInt(req.params.appointmentId, 10);
+    const bookingId = parseInt(req.params.bookingId, 10);
 
-    if (isNaN(appointmentId) || appointmentId <= 0) {
-      throw new HttpError(400, "Invalid appointment ID.");
+    if (isNaN(bookingId) || bookingId <= 0) {
+      throw new HttpError(400, "Invalid booking ID.");
     }
 
-    const result = await syncAppointmentWorklistSources(appointmentId);
+    const result = await syncBookingWorklistSources(bookingId);
     res.json({
       ok: true,
       files: result.files?.length || 0,
@@ -268,15 +268,15 @@ dicomRouter.post(
 // ---------------------------------------------------------------------------
 
 dicomRouter.post(
-  "/test-worklist/:appointmentId",
+  "/test-worklist/:bookingId",
   asyncRoute(async (req: Request, res: Response) => {
-    const appointmentId = parseInt(req.params.appointmentId, 10);
+    const bookingId = parseInt(req.params.bookingId, 10);
 
-    if (isNaN(appointmentId) || appointmentId <= 0) {
-      throw new HttpError(400, "Invalid appointment ID.");
+    if (isNaN(bookingId) || bookingId <= 0) {
+      throw new HttpError(400, "Invalid booking ID.");
     }
 
-    const result = await syncAppointmentWorklistSources(appointmentId);
+    const result = await syncBookingWorklistSources(bookingId);
 
     res.json({
       ok: result.ok,
@@ -287,7 +287,7 @@ dicomRouter.post(
       })) || [],
       removedOnly: result.removedOnly,
       message: result.removedOnly
-        ? "Appointment is not active or has no devices. Worklist artifacts removed."
+        ? "Booking is not active or has no devices. Worklist artifacts removed."
         : `Generated ${result.files?.length || 0} worklist file(s).`
     });
   })
