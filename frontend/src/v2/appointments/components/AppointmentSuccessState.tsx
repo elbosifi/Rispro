@@ -1,5 +1,4 @@
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
-import { Button, Card } from "@/components/shared";
 
 interface Props {
   appointmentSummary: {
@@ -18,7 +17,7 @@ interface Props {
 
 export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCreateAnother, onViewDetails }: Props) {
   return (
-    <Card className="p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
+    <div className="card-shell p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
       <h3 className="text-lg font-bold mb-4" style={{ color: "var(--green)" }}>
         Appointment Created Successfully
       </h3>
@@ -40,9 +39,9 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
         </div>
       </div>
       <div className="flex flex-wrap gap-4 mb-6">
-        <Button type="button" variant="secondary" onClick={onPrintSlip}>Print Slip</Button>
-        <Button type="button" variant="secondary" onClick={onViewDetails}>View Details</Button>
-        <Button type="button" variant="primary" onClick={onCreateAnother}>Create Another</Button>
+        <button type="button" className="btn-secondary" onClick={onPrintSlip}>Print Slip</button>
+        <button type="button" className="btn-secondary" onClick={onViewDetails}>View Details</button>
+        <button type="button" className="btn-primary" onClick={onCreateAnother}>Create Another</button>
       </div>
       <div>
         <RequestDocumentsPanel
@@ -52,6 +51,6 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
           title="Attach Request (Later)"
         />
       </div>
-    </Card>
+    </div>
   );
 }

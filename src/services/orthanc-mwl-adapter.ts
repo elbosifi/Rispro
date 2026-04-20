@@ -105,14 +105,6 @@ function buildRequestedProcedureDescription(row: OrthancBookingProjection): stri
   return String(row.modality_name_en || row.modality_name_ar || "Scheduled study").trim();
 }
 
-function normalizeOrthancStationAeTitle(value: string | null | undefined): string {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (!normalized || normalized === "RISPRO_MWL") {
-    return "";
-  }
-  return normalized;
-}
-
 function buildOrthancWorklistPayload(
   row: OrthancBookingProjection,
   stableId: string,
@@ -120,10 +112,6 @@ function buildOrthancWorklistPayload(
 ): Record<string, unknown> {
   const accession = `V2-${row.id}`;
   const spsDescription = buildRequestedProcedureDescription(row);
-  const normalizedStationAeTitle = normalizeOrthancStationAeTitle(stationAeTitle);
-  const scheduledProcedureStepId = normalizedStationAeTitle
-    ? `${accession}-${normalizedStationAeTitle}`
-    : accession;
   return {
     // Keyword-style DICOM JSON (preferred by Orthanc plugins that accept JSON).
     AccessionNumber: accession,
@@ -137,11 +125,11 @@ function buildOrthancWorklistPayload(
     ScheduledProcedureStepSequence: [
       {
         Modality: row.modality_code || "",
+        ScheduledStationAETitle: stationAeTitle,
         ScheduledProcedureStepStartDate: normalizeDateForDicom(row.booking_date),
         ScheduledProcedureStepStartTime: normalizeTimeForDicom(row.booking_time),
         ScheduledProcedureStepDescription: spsDescription,
-        ScheduledProcedureStepID: scheduledProcedureStepId,
-        ...(normalizedStationAeTitle ? { ScheduledStationAETitle: normalizedStationAeTitle } : {}),
+        ScheduledProcedureStepID: `${accession}-${stationAeTitle}`,
       },
     ],
     // RISpro projection metadata for stable idempotency/reconciliation.
@@ -406,7 +394,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   }
 
   const stableId = buildStableOrthancWorklistId(bookingId);
-  const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget);
+  const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
 
   // For new worklists plugin, strip custom fields that aren't valid DICOM tags
   const { RISproProjection, ...dicomOnlyPayload } = fullPayload;

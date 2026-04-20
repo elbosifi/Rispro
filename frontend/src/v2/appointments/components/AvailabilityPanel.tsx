@@ -1,6 +1,5 @@
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
-import { Button } from "@/components/shared";
 
 interface Props {
   rows: AvailabilityRowViewModel[];
@@ -45,12 +44,12 @@ export function AvailabilityPanel({
     <div className="space-y-4">
       <div className="flex flex-wrap gap-4 items-center justify-between">
         <div className="flex gap-2 items-center">
-          <Button type="button" onClick={onPreviousPage} disabled={!canGoPrevious} variant="ghost" size="sm" className="h-8 px-2">
+          <button type="button" onClick={onPreviousPage} disabled={!canGoPrevious} className="btn-ghost text-xs h-8 px-2">
             Previous slots
-          </Button>
-          <Button type="button" onClick={onNextPage} variant="ghost" size="sm" className="h-8 px-2">
+          </button>
+          <button type="button" onClick={onNextPage} className="btn-ghost text-xs h-8 px-2">
             Next slots
-          </Button>
+          </button>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <label className="flex items-center gap-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
@@ -63,9 +62,9 @@ export function AvailabilityPanel({
             onChange={(event) => onChangeStartDate(event.target.value)}
             className="input-premium text-xs py-2 h-8 w-40"
           />
-          <Button type="button" onClick={onToggleShowFullDays} variant="ghost" size="sm" className="h-8 px-2">
+          <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
             {showFullDays ? "Hide full days" : "Show full days"}
-          </Button>
+          </button>
         </div>
       </div>
       {visibleRows.length === 0 ? (

@@ -7,7 +7,6 @@ import type { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Search, User, Save, Trash2, X, Pencil } from "lucide-react";
-import { Button } from "@/components/shared";
 import { DateInput } from "@/components/common/date-input";
 import { formatDateLy } from "@/lib/date-format";
 
@@ -98,13 +97,13 @@ export default function SearchPage() {
               }
             }}
           />
-          <Button
-
-            variant="primary" className="px-6 py-3"
+          <button
+            type="submit"
+            className="btn-primary px-6 py-3 rounded-lg font-medium flex items-center gap-2 transition-all"
           >
             <Search className="w-4 h-4" />
             {t(language, "search.searchBtn")}
-          </Button>
+          </button>
         </form>
       </div>
 
@@ -130,7 +129,7 @@ export default function SearchPage() {
               <ul className="divide-y" >
                 {patients.map((p) => (
                   <li key={p.id}>
-                    <Button
+                    <button
                       onClick={() => handleSelect(p)}
                       className={`w-full text-right p-4 transition-colors ${
                         selectedPatient?.id === p.id
@@ -162,7 +161,7 @@ export default function SearchPage() {
                         <span>•</span>
                         <span>MRN: {p.mrn || "—"}</span>
                       </div>
-                    </Button>
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -215,13 +214,13 @@ function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void
     <div className="card-shell">
       <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
         <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "search.detailsHeading")}</h3>
-        <Button
+        <button
           onClick={onEdit}
-          variant="secondary" size="sm" className="px-4 py-2"
+          className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
         >
           <Pencil className="w-3.5 h-3.5" />
           {t(language, "search.editBtn")}
-        </Button>
+        </button>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
         <Field label={t(language, "search.fieldArabicName")} value={patient.arabicFullName} />
@@ -311,8 +310,8 @@ function EditPatientForm({
       <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
         <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "patients.editTitle")}</h3>
         <div className="flex gap-2">
-          <Button
-
+          <button
+            type="button"
             onClick={() => {
               if (window.confirm(t(language, "search.deleteConfirm"))) {
                 onDelete();
@@ -324,23 +323,23 @@ function EditPatientForm({
           >
             <Trash2 className="w-3.5 h-3.5" />
             {isDeleting ? t(language, "search.deleting") : t(language, "search.deleteBtn")}
-          </Button>
-          <Button
-
+          </button>
+          <button
+            type="button"
             onClick={onCancel}
-            variant="ghost" size="sm" className="px-4 py-2"
+            className="btn-ghost px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all"
           >
             <X className="w-3.5 h-3.5" />
             Cancel
-          </Button>
-          <Button
-
+          </button>
+          <button
+            type="submit"
             disabled={isSaving}
-            variant="primary" size="sm" className="px-4 py-2"
+            className="btn-primary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             {isSaving ? t(language, "search.saving") : t(language, "search.saveBtn")}
-          </Button>
+          </button>
         </div>
       </div>
       <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
