@@ -55,6 +55,8 @@ export interface OrthancMwlReconcileResult {
     baseUrl: string;
     orthancVersion: string | null;
     worklistsRouteReachable: boolean;
+    worklistsPostSupported: boolean;
+    worklistsCreateSupported: boolean;
   } | null;
   missing: number[];
   staleExtras: number[];
@@ -260,6 +262,8 @@ export async function reconcileOrthancMwlProjection(
           baseUrl: orthancProbe.baseUrl,
           orthancVersion: orthancProbe.orthancVersion,
           worklistsRouteReachable: orthancProbe.worklistsRouteReachable,
+          worklistsPostSupported: orthancProbe.worklistsPostSupported,
+          worklistsCreateSupported: orthancProbe.worklistsCreateSupported,
         }
       : null,
     missing: toSortedUniqueIds(missing),

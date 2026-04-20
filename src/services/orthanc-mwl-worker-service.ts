@@ -148,6 +148,8 @@ export async function startOrthancMwlWorker(options?: {
         baseUrl: probe.baseUrl,
         orthancVersion: probe.orthancVersion,
         worklistsRouteReachable: probe.worklistsRouteReachable,
+        worklistsPostSupported: probe.worklistsPostSupported,
+        worklistsCreateSupported: probe.worklistsCreateSupported,
       })
     );
   }

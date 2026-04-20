@@ -26,6 +26,8 @@ export interface OrthancProbeResult {
   baseUrl: string;
   orthancVersion: string | null;
   worklistsRouteReachable: boolean;
+  worklistsPostSupported: boolean;
+  worklistsCreateSupported: boolean;
 }
 
 export interface OrthancUpsertResult {
@@ -256,11 +258,28 @@ export async function probeOrthancWorklistApi(): Promise<OrthancProbeResult> {
   const worklists = await orthancFetch("/worklists", { settings });
   const worklistsRouteReachable = [200, 401, 403].includes(worklists.status);
 
+  // Check write capabilities
+  const worklistsPost = await orthancFetch("/worklists", {
+    method: "POST",
+    body: {},
+    settings,
+  });
+  const worklistsPostSupported = worklistsPost.status !== 405;
+
+  const worklistsCreate = await orthancFetch("/worklists/create", {
+    method: "POST",
+    body: {},
+    settings,
+  });
+  const worklistsCreateSupported = worklistsCreate.status !== 405;
+
   return {
     ok: system.ok || worklistsRouteReachable,
     baseUrl: settings.baseUrl,
     orthancVersion: orthancVersion || null,
     worklistsRouteReachable,
+    worklistsPostSupported,
+    worklistsCreateSupported,
   };
 }
 
@@ -310,6 +329,25 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
         const parsed = parseExternalIdFromOrthancResponse(fallbackResult.json);
         return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
       }
+    }
+
+    // If fallback also fails with method not allowed, try alternative POST endpoint for new worklists plugin
+    if (fallbackMethod === "POST" && fallbackResult.status === 405) {
+      const altResult = await orthancFetch("/worklists/create", {
+        method: "POST",
+        body: payload,
+        settings,
+      });
+      if (altResult.ok || altResult.status === 201 || altResult.status === 204) {
+        const parsed = parseExternalIdFromOrthancResponse(altResult.json);
+        return { externalWorklistId: parsed || stableId, strategy: "post_create" };
+      }
+      const retryable = altResult.status >= 500 || altResult.status === 429;
+      throw new OrthancSyncError(
+        `Orthanc upsert failed via POST /worklists/create (status=${altResult.status}): ${altResult.text}`,
+        retryable,
+        altResult.status
+      );
     }
 
     // If fallback also fails with method not allowed, this is likely a server configuration issue
