@@ -13,6 +13,7 @@ export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
   timeout_seconds: "10",
   verify_tls: "true",
   worklist_target: "",
+  strategy_preference: "put_first",
 };
 
 export interface ResolvedOrthancSettings {
@@ -24,6 +25,7 @@ export interface ResolvedOrthancSettings {
   timeoutSeconds: number;
   verifyTls: boolean;
   worklistTarget: string;
+  strategyPreference: "put_first" | "post_first";
 }
 
 export interface OrthancSettingsEntryInput {
@@ -33,6 +35,7 @@ export interface OrthancSettingsEntryInput {
 
 const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls"]);
 const ORTHANC_ALLOWED_KEYS = new Set(Object.keys(ORTHANC_MWL_DEFAULTS));
+const ORTHANC_STRATEGY_KEYS = new Set(["strategy_preference"]);
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -122,6 +125,13 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
     }
   }
 
+  if (incoming.has("strategy_preference")) {
+    const strategy = incoming.get("strategy_preference") || "";
+    if (strategy !== "put_first" && strategy !== "post_first") {
+      throw new HttpError(400, `orthanc_mwl_sync.strategy_preference must be "put_first" or "post_first".`);
+    }
+  }
+
   if (incoming.has("timeout_seconds")) {
     const timeoutRaw = incoming.get("timeout_seconds") || "";
     const timeout = Number(timeoutRaw);
@@ -137,6 +147,13 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
   if (enabled === true && baseUrlRaw != null && !baseUrlRaw.trim()) {
     throw new HttpError(400, "orthanc_mwl_sync.base_url is required when enabled=true.");
   }
+}
+
+function parseStrategyPreference(value: string | undefined, fallback: "put_first" | "post_first"): "put_first" | "post_first" {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "post_first") return "post_first";
+  if (normalized === "put_first") return "put_first";
+  return fallback;
 }
 
 export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings> {
@@ -158,5 +175,6 @@ export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings>
     timeoutSeconds: parsePositiveInteger(db.timeout_seconds, env.orthancTimeoutSeconds),
     verifyTls: parseBoolean(db.verify_tls, env.orthancVerifyTls),
     worklistTarget: normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget,
+    strategyPreference: parseStrategyPreference(db.strategy_preference, "put_first"),
   };
 }

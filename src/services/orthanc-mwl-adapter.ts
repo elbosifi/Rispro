@@ -274,39 +274,57 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   const stableId = buildStableOrthancWorklistId(bookingId);
   const payload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
 
-  const putResult = await orthancFetch(`/worklists/${encodeURIComponent(stableId)}`, {
-    method: "PUT",
+  // Try primary method based on strategy preference
+  const primaryMethod = settings.strategyPreference === "post_first" ? "POST" : "PUT";
+  const primaryPath = primaryMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
+
+  const primaryResult = await orthancFetch(primaryPath, {
+    method: primaryMethod,
     body: payload,
     settings,
   });
-  if (putResult.ok || putResult.status === 201 || putResult.status === 204) {
-    return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
+
+  if (primaryResult.ok || primaryResult.status === 201 || primaryResult.status === 204) {
+    if (primaryMethod === "PUT") {
+      return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
+    } else {
+      const parsed = parseExternalIdFromOrthancResponse(primaryResult.json);
+      return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
+    }
   }
 
-  if ([404, 405, 501].includes(putResult.status)) {
-    const postResult = await orthancFetch("/worklists", {
-      method: "POST",
+  // Try fallback method
+  const fallbackMethod = primaryMethod === "POST" ? "PUT" : "POST";
+  const fallbackPath = fallbackMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
+
+  if ([400, 404, 405, 501].includes(primaryResult.status)) {
+    const fallbackResult = await orthancFetch(fallbackPath, {
+      method: fallbackMethod,
       body: payload,
       settings,
     });
-    if (postResult.ok || postResult.status === 201 || postResult.status === 204) {
-      const parsed = parseExternalIdFromOrthancResponse(postResult.json);
-      return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
+    if (fallbackResult.ok || fallbackResult.status === 201 || fallbackResult.status === 204) {
+      if (fallbackMethod === "PUT") {
+        return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
+      } else {
+        const parsed = parseExternalIdFromOrthancResponse(fallbackResult.json);
+        return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
+      }
     }
 
-    const retryable = postResult.status >= 500 || postResult.status === 429;
+    const retryable = fallbackResult.status >= 500 || fallbackResult.status === 429;
     throw new OrthancSyncError(
-      `Orthanc upsert failed via POST /worklists (status=${postResult.status}).`,
+      `Orthanc upsert failed via ${fallbackMethod} ${fallbackPath} (status=${fallbackResult.status}): ${fallbackResult.text}`,
       retryable,
-      postResult.status
+      fallbackResult.status
     );
   }
 
-  const retryable = putResult.status >= 500 || putResult.status === 429;
+  const retryable = primaryResult.status >= 500 || primaryResult.status === 429;
   throw new OrthancSyncError(
-    `Orthanc upsert failed via PUT /worklists/{id} (status=${putResult.status}).`,
+    `Orthanc upsert failed via ${primaryMethod} ${primaryPath} (status=${primaryResult.status}): ${primaryResult.text}`,
     retryable,
-    putResult.status
+    primaryResult.status
   );
 }
 
