@@ -146,6 +146,42 @@ docker compose up -d
 | `SESSION_HOURS` | | Session timeout | `8` |
 | `TRUST_PROXY` | | Behind reverse proxy? | `1` |
 
+### Orthanc MWL Sync (V2 Source of Truth)
+
+RISpro remains authoritative for bookings/scheduling. Orthanc MWL is a synchronized projection.
+
+Required when enabled:
+- `ORTHANC_MWL_ENABLED=true`
+- `ORTHANC_BASE_URL=http://<orthanc-host>:8042`
+
+Optional:
+- `ORTHANC_MWL_SHADOW_MODE=true`
+- `ORTHANC_USERNAME=<user>`
+- `ORTHANC_PASSWORD=<password>`
+- `ORTHANC_TIMEOUT_SECONDS=10`
+- `ORTHANC_VERIFY_TLS=true`
+- `ORTHANC_WORKLIST_TARGET=<AE_TITLE>`
+
+Recommended rollout:
+1. Enable shadow mode first (`ORTHANC_MWL_ENABLED=true`, `ORTHANC_MWL_SHADOW_MODE=true`).
+2. Keep embedded MWL active while validating Orthanc projection.
+3. Run reconciliation dry-run over active booking windows.
+4. Apply reconciliation repair only after reviewing drift.
+5. Cut modalities over to Orthanc MWL.
+6. Optionally disable embedded MWL (`RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=1`).
+
+Reconciliation CLI:
+
+```bash
+npm run gateway:reconcile-orthanc-mwl -- --date-from 2026-04-01 --date-to 2026-04-30
+npm run gateway:reconcile-orthanc-mwl -- --date-from 2026-04-01 --date-to 2026-04-30 --apply
+```
+
+Supervisor API endpoints:
+- `GET /api/dicom/orthanc-sync/summary`
+- `POST /api/dicom/orthanc-sync/reconcile`
+  - body: `{ "dateFrom": "YYYY-MM-DD", "dateTo": "YYYY-MM-DD", "apply": false, "limit": 5000 }`
+
 ## Post-Deployment Checklist
 
 - [ ] Access `http://your-server:3000`

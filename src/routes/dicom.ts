@@ -24,6 +24,10 @@ import {
   restartDicomGateway
 } from "../services/dicom-gateway-service.js";
 import {
+  getOrthancMwlSyncSummary,
+  reconcileOrthancMwlProjection
+} from "../services/orthanc-mwl-reconcile-service.js";
+import {
   getAllServiceStatuses,
   getServiceStatus
 } from "../services/dicom-gateway-registry.js";
@@ -104,6 +108,39 @@ dicomRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const services = getAllServiceStatuses();
     res.json({ services });
+  })
+);
+
+dicomRouter.get(
+  "/orthanc-sync/summary",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const summary = await getOrthancMwlSyncSummary();
+    res.json({ ok: true, summary });
+  })
+);
+
+dicomRouter.post(
+  "/orthanc-sync/reconcile",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const dateFrom = String(body.dateFrom || "").trim();
+    const dateTo = String(body.dateTo || "").trim();
+    const apply = String(body.apply || "").trim().toLowerCase() === "true" || body.apply === true;
+    const limitRaw = Number(body.limit);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000;
+
+    if (!dateFrom || !dateTo) {
+      throw new HttpError(400, "dateFrom and dateTo are required (YYYY-MM-DD).");
+    }
+
+    const result = await reconcileOrthancMwlProjection({
+      dateFrom,
+      dateTo,
+      apply,
+      limit
+    });
+
+    res.json({ ok: true, result });
   })
 );
 

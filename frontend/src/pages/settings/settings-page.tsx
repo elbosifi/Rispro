@@ -35,6 +35,7 @@ import { Card } from "@/components/shared/Card";
 import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
+import OrthancMwlSection from "./orthanc-mwl-section";
 import PacsSettingsSection from "./pacs-settings-section";
 import type { User, SchedulingEngineConfig } from "@/types/api";
 
@@ -134,6 +135,7 @@ type SettingsSection =
   | "dicom_gateway_config"
   | "dicom_gateway_devices"
   | "dicom_gateway_monitoring"
+  | "orthanc_mwl_sync"
   | "users"
   | "audit_log"
   | "exam_types"
@@ -151,6 +153,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "dicom_gateway_config",
   "dicom_gateway_devices",
   "dicom_gateway_monitoring",
+  "orthanc_mwl_sync",
   "users",
   "audit_log",
   "exam_types",
@@ -242,6 +245,7 @@ export default function SettingsPage() {
             {section === "dicom_gateway_config" && <DicomGatewaySettingsSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
+            {section === "orthanc_mwl_sync" && <OrthancMwlSection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}

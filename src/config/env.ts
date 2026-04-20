@@ -100,6 +100,14 @@ export interface EnvConfig {
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
+  orthancMwlEnabled: boolean;
+  orthancMwlShadowMode: boolean;
+  orthancBaseUrl: string;
+  orthancUsername: string;
+  orthancPassword: string;
+  orthancTimeoutSeconds: number;
+  orthancVerifyTls: boolean;
+  orthancWorklistTarget: string;
 }
 
 export const env: EnvConfig = {
@@ -122,7 +130,15 @@ export const env: EnvConfig = {
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
-  seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor"
+  seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",
+  orthancMwlEnabled: readBoolean("ORTHANC_MWL_ENABLED", false),
+  orthancMwlShadowMode: readBoolean("ORTHANC_MWL_SHADOW_MODE", false),
+  orthancBaseUrl: String(process.env.ORTHANC_BASE_URL || "").trim(),
+  orthancUsername: String(process.env.ORTHANC_USERNAME || "").trim(),
+  orthancPassword: String(process.env.ORTHANC_PASSWORD || ""),
+  orthancTimeoutSeconds: readPositiveInteger("ORTHANC_TIMEOUT_SECONDS", 10),
+  orthancVerifyTls: readBoolean("ORTHANC_VERIFY_TLS", true),
+  orthancWorklistTarget: String(process.env.ORTHANC_WORKLIST_TARGET || "").trim()
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
@@ -131,4 +147,8 @@ if (env.cookieSameSite === "none" && !env.cookieSecure) {
 
 if (isProduction && env.jwtSecret === "change-this-in-production") {
   throw new Error("JWT_SECRET must be changed before production deployment.");
+}
+
+if (env.orthancMwlEnabled && !env.orthancBaseUrl) {
+  throw new Error("ORTHANC_BASE_URL is required when ORTHANC_MWL_ENABLED=true.");
 }

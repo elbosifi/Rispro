@@ -18,6 +18,7 @@ import {
 } from "../constants/appointment-statuses.js";
 import { loadSettingsMap } from "./settings-service.js";
 import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-settings-resolver.js";
+import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -979,6 +980,15 @@ export function scheduleBookingWorklistSync(bookingId: UserId): void {
     .catch((error) => {
       console.warn(
         `[DICOM Worklist] Failed to sync booking ${bookingId}. Will retry on next mutation.`,
+        error
+      );
+    });
+
+  Promise.resolve()
+    .then(() => enqueueOrthancSyncForBooking(Number(bookingId)))
+    .catch((error) => {
+      console.warn(
+        `[Orthanc MWL] Failed to enqueue sync job for booking ${bookingId}.`,
         error
       );
     });

@@ -3,11 +3,13 @@ import { env } from "./config/env.js";
 import { createApp } from "./app.js";
 import { pool } from "./db/pool.js";
 import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
+import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
 let isShuttingDown = false;
 let dicomGateway: DicomGatewayServer | null = null;
+let orthancMwlWorker: OrthancMwlWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -27,6 +29,14 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
       await dicomGateway.stop();
     } catch (error) {
       console.error("Failed to stop DICOM gateway servers.", error);
+    }
+  }
+
+  if (orthancMwlWorker) {
+    try {
+      await orthancMwlWorker.stop();
+    } catch (error) {
+      console.error("Failed to stop Orthanc MWL worker.", error);
     }
   }
 
@@ -68,7 +78,9 @@ async function start(): Promise<void> {
   try {
     // Auto-seed DICOM gateway defaults if missing (zero-config installation)
     const { seedDicomGatewayDefaultsIfMissing } = await import("./services/dicom-settings-resolver.js");
+    const { seedOrthancMwlDefaultsIfMissing } = await import("./services/orthanc-settings-resolver.js");
     await seedDicomGatewayDefaultsIfMissing();
+    await seedOrthancMwlDefaultsIfMissing();
 
     // Auto-create directories and rebuild worklists
     const { ensureDicomGatewayLayout, rebuildAllV2DicomWorklistSources } = await import("./services/dicom-service.js");
@@ -95,6 +107,22 @@ async function start(): Promise<void> {
     console.error("DICOM gateway initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.dicom_gateway = "initialization_failed";
+  }
+
+  try {
+    const { startOrthancMwlWorker } = await import("./services/orthanc-mwl-worker-service.js");
+    const { resolveOrthancSettings } = await import("./services/orthanc-settings-resolver.js");
+    const orthancSettings = await resolveOrthancSettings();
+    orthancMwlWorker = await startOrthancMwlWorker();
+    if (orthancSettings.enabled) {
+      startupSummary.orthanc_mwl = orthancSettings.shadowMode ? "enabled_shadow_mode" : "enabled_primary_mode";
+    } else {
+      startupSummary.orthanc_mwl = "disabled";
+    }
+  } catch (error) {
+    console.error("Orthanc MWL worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.orthanc_mwl = "initialization_failed";
   }
 
   server.listen(env.port, async () => {
@@ -126,6 +154,15 @@ async function start(): Promise<void> {
     } else {
       console.log("    MWL SCP:        disabled_or_failed");
       console.log("    Worklist Bldr:  disabled_or_failed");
+    }
+
+    console.log("");
+    console.log("  Orthanc MWL:");
+    console.log(`    Mode:           ${startupSummary.orthanc_mwl || "disabled"}`);
+    const { resolveOrthancSettings } = await import("./services/orthanc-settings-resolver.js");
+    const orthancSettings = await resolveOrthancSettings().catch(() => null);
+    if (orthancSettings?.enabled) {
+      console.log(`    Base URL:       ${orthancSettings.baseUrl || "(unset)"}`);
     }
 
     console.log("========================================");
