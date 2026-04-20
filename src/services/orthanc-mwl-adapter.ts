@@ -291,15 +291,16 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   }
 
   const stableId = buildStableOrthancWorklistId(bookingId);
-  const payload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
+  const dicomPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
 
   // Try primary method based on strategy preference
   const primaryMethod = settings.strategyPreference === "post_first" ? "POST" : "PUT";
   const primaryPath = primaryMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
+  const primaryPayload = primaryMethod === "PUT" ? dicomPayload : dicomPayload; // Both use direct DICOM format
 
   const primaryResult = await orthancFetch(primaryPath, {
     method: primaryMethod,
-    body: payload,
+    body: primaryPayload,
     settings,
   });
 
@@ -316,10 +317,11 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   if ([400, 404, 405, 501].includes(primaryResult.status)) {
     const fallbackMethod = primaryMethod === "POST" ? "PUT" : "POST";
     const fallbackPath = fallbackMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
+    const fallbackPayload = fallbackMethod === "PUT" ? dicomPayload : dicomPayload; // Both use direct DICOM format
 
     const fallbackResult = await orthancFetch(fallbackPath, {
       method: fallbackMethod,
-      body: payload,
+      body: fallbackPayload,
       settings,
     });
     if (fallbackResult.ok || fallbackResult.status === 201 || fallbackResult.status === 204) {
@@ -333,9 +335,10 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
 
     // If fallback also fails with method not allowed, try alternative POST endpoint for new worklists plugin
     if (fallbackMethod === "POST" && fallbackResult.status === 405) {
+      const createPayload = { Tags: dicomPayload }; // New plugin expects { Tags: { ...dicom... } }
       const altResult = await orthancFetch("/worklists/create", {
         method: "POST",
-        body: payload,
+        body: createPayload,
         settings,
       });
       if (altResult.ok || altResult.status === 201 || altResult.status === 204) {
