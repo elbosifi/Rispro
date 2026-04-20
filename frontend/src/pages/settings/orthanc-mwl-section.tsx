@@ -221,13 +221,20 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
     return errors;
   }, [settingsError, summaryError]);
 
+  const requestOrthancReAuth = () => {
+    // Orthanc section relies on both settings and summary queries.
+    // Queue both so successful re-auth fully unblocks the page.
+    onReAuthRequired(["settings", "orthanc_mwl_sync"]);
+    onReAuthRequired(["dicom", "orthanc-sync", "summary"]);
+  };
+
   if (allErrors.length > 0) {
     const authError = allErrors.find(({ error }) => {
       const status = error instanceof ApiError ? error.status : undefined;
       return status === 401 || status === 403 || error.message.includes("re-authentication");
     });
     if (authError) {
-      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "orthanc_mwl_sync"])} />;
+      return <ReAuthPrompt onReAuthRequired={requestOrthancReAuth} />;
     }
     return <QueryError message={allErrors[0].error.message || t("settings.failedLoad")} />;
   }
