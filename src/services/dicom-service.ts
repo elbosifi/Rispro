@@ -986,22 +986,6 @@ export function scheduleBookingWorklistSync(bookingId: UserId): void {
 
   Promise.resolve()
     .then(() => enqueueOrthancSyncForBooking(Number(bookingId)))
-    .then((result) => {
-      if (!result?.enqueued) {
-        return;
-      }
-
-      return import("./orthanc-mwl-worker-service.js")
-        .then(({ kickOrthancMwlWorker }) => {
-          kickOrthancMwlWorker(1);
-        })
-        .catch((error) => {
-          console.warn(
-            `[Orthanc MWL] Failed to trigger immediate sync for booking ${bookingId}.`,
-            error
-          );
-        });
-    })
     .catch((error) => {
       console.warn(
         `[Orthanc MWL] Failed to enqueue sync job for booking ${bookingId}.`,
