@@ -119,6 +119,10 @@ async function runOrthancMwlSyncTick(batchSize: number): Promise<void> {
   }
 }
 
+export function kickOrthancMwlWorker(batchSize = 1): void {
+  void runOrthancMwlSyncTick(Math.max(1, batchSize));
+}
+
 export async function startOrthancMwlWorker(options?: {
   intervalMs?: number;
   batchSize?: number;
