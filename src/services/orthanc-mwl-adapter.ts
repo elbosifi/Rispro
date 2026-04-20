@@ -67,9 +67,7 @@ function joinUrl(baseUrl: string, suffix: string): string {
 
 function formatPersonName(englishName: string | null, arabicName: string): string {
   const en = String(englishName || "").trim();
-  const ar = String(arabicName || "").trim();
-  if (en && ar) return `${en}=${ar}`;
-  return en || ar || "UNKNOWN";
+  return en || "UNKNOWN";
 }
 
 function normalizeDateForDicom(dateValue: string | null | undefined): string {
@@ -229,7 +227,7 @@ async function loadOrthancProjection(bookingId: number): Promise<OrthancBookingP
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
-      where b.id = $1
+      where b.id = $1::bigint
       limit 1
     `,
     [bookingId]
@@ -284,6 +282,10 @@ export async function probeOrthancWorklistApi(): Promise<OrthancProbeResult> {
 }
 
 export async function upsertBookingToOrthanc(bookingId: number): Promise<OrthancUpsertResult> {
+  if (!Number.isInteger(bookingId) || bookingId <= 0) {
+    throw new OrthancSyncError(`Invalid booking ID: ${bookingId}`, false, null);
+  }
+
   const settings = await resolveOrthancSettings();
   const projection = await loadOrthancProjection(bookingId);
   if (!projection) {
