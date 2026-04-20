@@ -7,13 +7,15 @@ import { runCycle, validateDumpFile } from "../../scripts/dicom-gateway/build-wo
 
 const REQUIRED_DUMP = [
   "# test",
+  "(0008,0005) CS [ISO_IR 192]",
+  "(0010,0010) PN [PATIENT^ONE]",
+  "(0010,0020) LO [P-1]",
+  "(0010,0030) DA [19800101]",
+  "(0010,0040) CS [M]",
   "(0040,0100) SQ (Sequence with undefined length)",
   "(0008,0060) CS [CT]",
-  "(0040,0001) AE [CT_ROOM_1]",
   "(0040,0002) DA [20300101]",
-  "(0040,0003) TM [080000]",
-  "(0040,0007) LO [CT Exam]",
-  "(0040,0009) SH [ACC-1]"
+  "(0040,0007) LO [CT Exam]"
 ].join("\n");
 
 async function withTempLayout<T>(fn: (layout: { rootDir: string; sourceDir: string; outputDir: string }) => Promise<T>): Promise<T> {
@@ -51,7 +53,7 @@ test("validateDumpFile rejects dumps missing required SPS tags", async () => {
 
     const result = await validateDumpFile(sourcePath);
     assert.equal(result.ok, false);
-    assert.ok(result.missingTags.includes("(0040,0001)"));
-    assert.ok(result.missingTags.includes("(0040,0009)"));
+    assert.ok(result.missingTags.includes("(0010,0010)"));
+    assert.ok(result.missingTags.includes("(0040,0002)"));
   });
 });

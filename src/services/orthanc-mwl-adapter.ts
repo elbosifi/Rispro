@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { getOrthancSyncState } from "./mwl-sync-service.js";
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
+import { buildCanonicalMwlDataset, renderCanonicalMwlToOrthancJson } from "./mwl-dataset-builder.js";
 
 interface OrthancBookingProjection {
   id: number;
@@ -70,39 +71,8 @@ function joinUrl(baseUrl: string, suffix: string): string {
   return `${cleanBase}${cleanSuffix}`;
 }
 
-function formatPersonName(englishName: string | null, arabicName: string): string {
-  const en = String(englishName || "").trim();
-  return en || "UNKNOWN";
-}
-
-function normalizeDateForDicom(dateValue: string | null | undefined): string {
-  const v = String(dateValue || "").trim();
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.replaceAll("-", "") : "";
-}
-
-function normalizeTimeForDicom(timeValue: string | null | undefined): string {
-  const v = String(timeValue || "").trim();
-  if (!v) return "080000";
-  const match = v.match(/^(\d{2}):?(\d{2})(?::?(\d{2}))?/);
-  if (!match) return "080000";
-  return `${match[1]}${match[2]}${match[3] || "00"}`;
-}
-
-function normalizeSexForDicom(value: string | null | undefined): string {
-  const raw = String(value || "").trim().toUpperCase();
-  if (raw === "M" || raw === "MALE") return "M";
-  if (raw === "F" || raw === "FEMALE") return "F";
-  return "";
-}
-
 function buildStableOrthancWorklistId(bookingId: number): string {
   return `rispro-v2-booking-${bookingId}`;
-}
-
-function buildRequestedProcedureDescription(row: OrthancBookingProjection): string {
-  const exam = String(row.exam_name_en || row.exam_name_ar || "").trim();
-  if (exam) return exam;
-  return String(row.modality_name_en || row.modality_name_ar || "Scheduled study").trim();
 }
 
 function buildOrthancWorklistPayload(
@@ -110,34 +80,36 @@ function buildOrthancWorklistPayload(
   stableId: string,
   stationAeTitle: string
 ): Record<string, unknown> {
-  const accession = `V2-${row.id}`;
-  const spsDescription = buildRequestedProcedureDescription(row);
+  const canonicalDataset = buildCanonicalMwlDataset(
+    {
+      modalityCode: row.modality_code,
+      appointmentDate: row.booking_date,
+      patientMrn: row.mrn,
+      patientNationalId: row.national_id,
+      patientId: row.patient_id,
+      patientEnglishFullName: row.english_full_name,
+      patientArabicFullName: row.arabic_full_name,
+      patientBirthDate: row.estimated_date_of_birth,
+      patientSex: row.sex,
+      examNameEn: row.exam_name_en,
+      examNameAr: row.exam_name_ar,
+      modalityNameEn: row.modality_name_en,
+      modalityNameAr: row.modality_name_ar
+    },
+    { mwlProfile: "minimal" }
+  );
+
+  const dicomPayload = renderCanonicalMwlToOrthancJson(canonicalDataset);
+
   return {
-    // Keyword-style DICOM JSON (preferred by Orthanc plugins that accept JSON).
-    AccessionNumber: accession,
-    PatientName: formatPersonName(row.english_full_name, row.arabic_full_name),
-    PatientID: row.mrn || row.national_id || String(row.patient_id),
-    PatientBirthDate: normalizeDateForDicom(row.estimated_date_of_birth),
-    PatientSex: normalizeSexForDicom(row.sex),
-    RequestedProcedureDescription: spsDescription,
-    RequestedProcedureID: accession,
-    RequestedProcedureCodeSequence: [],
-    ScheduledProcedureStepSequence: [
-      {
-        Modality: row.modality_code || "",
-        ScheduledStationAETitle: stationAeTitle,
-        ScheduledProcedureStepStartDate: normalizeDateForDicom(row.booking_date),
-        ScheduledProcedureStepStartTime: normalizeTimeForDicom(row.booking_time),
-        ScheduledProcedureStepDescription: spsDescription,
-        ScheduledProcedureStepID: `${accession}-${stationAeTitle}`,
-      },
-    ],
+    ...dicomPayload,
     // RISpro projection metadata for stable idempotency/reconciliation.
     RISproProjection: {
       bookingId: row.id,
       stableOrthancWorklistId: stableId,
       sourceStatus: row.status,
       modalityCode: row.modality_code || "",
+      worklistTarget: stationAeTitle,
       updatedAt: new Date().toISOString(),
     },
   };

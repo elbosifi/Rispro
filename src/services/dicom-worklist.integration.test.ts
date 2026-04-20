@@ -94,6 +94,8 @@ async function createFixture(): Promise<FixtureContext> {
   await fs.mkdir(sourceDir, { recursive: true });
   await fs.mkdir(outputDir, { recursive: true });
   let userId: number | null = null;
+  let policySetId: number | null = null;
+  let ownsPolicySet = false;
   let policyVersionId: number | null = null;
   let ownsPolicyVersion = false;
   let ctModalityId: number | null = null;
@@ -140,6 +142,17 @@ async function createFixture(): Promise<FixtureContext> {
     if (publishedPolicy.rows[0]?.id) {
       policyVersionId = Number(publishedPolicy.rows[0].id);
     } else {
+      const policySet = await pool.query<{ id: number }>(
+        `
+          insert into appointments_v2.policy_sets (key, name, created_by_user_id)
+          values ($1, $2, $3)
+          returning id
+        `,
+        [`dicom_worklist_${suffix}`, `DICOM Worklist ${suffix}`, userId]
+      );
+      policySetId = Number(policySet.rows[0]?.id);
+      ownsPolicySet = true;
+
       const policyVersion = await pool.query<{ id: number }>(
         `
           insert into appointments_v2.policy_versions (
@@ -150,7 +163,7 @@ async function createFixture(): Promise<FixtureContext> {
             created_by_user_id
           )
           values (
-            (select id from appointments_v2.policy_sets where key = 'default' limit 1),
+            $3,
             9000 + floor(random() * 1000)::int,
             'published',
             $1,
@@ -158,7 +171,7 @@ async function createFixture(): Promise<FixtureContext> {
           )
           returning id
         `,
-        [uniqueSuffix(), userId]
+        [uniqueSuffix(), userId, policySetId]
       );
       policyVersionId = Number(policyVersion.rows[0]?.id);
       ownsPolicyVersion = true;
@@ -273,6 +286,9 @@ async function createFixture(): Promise<FixtureContext> {
       if (policyVersionId && ownsPolicyVersion) {
         await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]);
       }
+      if (policySetId && ownsPolicySet) {
+        await pool.query(`delete from appointments_v2.policy_sets where id = $1`, [policySetId]);
+      }
       if (userId) {
         await pool.query(`delete from users where id = $1`, [userId]);
       }
@@ -312,6 +328,9 @@ async function createFixture(): Promise<FixtureContext> {
     }
     if (policyVersionId && ownsPolicyVersion) {
       await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]).catch(() => undefined);
+    }
+    if (policySetId && ownsPolicySet) {
+      await pool.query(`delete from appointments_v2.policy_sets where id = $1`, [policySetId]).catch(() => undefined);
     }
     if (userId) {
       await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
@@ -408,11 +427,19 @@ test("syncBookingWorklistSources creates V2 MWL dumps and removes files for term
     const dumps = await Promise.all(dumpPaths.map((dumpPath) => fs.readFile(dumpPath, "utf8")));
 
     assert.ok(dumps.every((dump) => dump.includes("(0008,0060)")), "Expected SPS modality in every dump");
-    assert.ok(dumps.every((dump) => dump.includes("(0040,0001)")), "Expected SPS station AE in every dump");
+    assert.ok(dumps.every((dump) => dump.includes("(0008,0005)")), "Expected specific character set in every dump");
+    assert.ok(dumps.every((dump) => dump.includes("(0010,0010)")), "Expected patient name in every dump");
+    assert.ok(dumps.every((dump) => dump.includes("(0010,0020)")), "Expected patient ID in every dump");
+    assert.ok(dumps.every((dump) => dump.includes("(0010,0030)")), "Expected patient birth date in every dump");
+    assert.ok(dumps.every((dump) => dump.includes("(0010,0040)")), "Expected patient sex in every dump");
     assert.ok(dumps.every((dump) => dump.includes("(0040,0002)")), "Expected SPS start date in every dump");
-    assert.ok(dumps.every((dump) => dump.includes("(0040,0003)")), "Expected SPS start time in every dump");
     assert.ok(dumps.every((dump) => dump.includes("(0040,0007)")), "Expected SPS description in every dump");
-    assert.ok(dumps.every((dump) => dump.includes("(0040,0009)")), "Expected SPS ID in every dump");
+    assert.ok(dumps.every((dump) => !dump.includes("(0040,0001)")), "Expected SPS station AE to be excluded by default.");
+    assert.ok(dumps.every((dump) => !dump.includes("(0040,0003)")), "Expected SPS start time to be excluded by default.");
+    assert.ok(dumps.every((dump) => !dump.includes("(0040,0009)")), "Expected SPS ID to be excluded by default.");
+    assert.ok(dumps.every((dump) => !dump.includes("(0008,0050)")), "Expected accession number to be excluded by default.");
+    assert.ok(dumps.every((dump) => !dump.includes("(0032,1060)")), "Expected requested procedure description to be excluded by default.");
+    assert.ok(dumps.every((dump) => !dump.includes("(0040,1001)")), "Expected requested procedure ID to be excluded by default.");
 
     const allResults = dumps.filter((dump) => matchesWorklistQuery(dump, {}));
     const ctResults = dumps.filter((dump) => matchesWorklistQuery(dump, { modality: extractTagValue(dumps[0], "(0008,0060") }));
@@ -421,11 +448,7 @@ test("syncBookingWorklistSources creates V2 MWL dumps and removes files for term
     assert.equal(allResults.length, 3, "Query without modality or station AE should keep all items eligible");
     assert.equal(ctResults.length, 2, "CT query should keep only CT items");
     assert.equal(mriResults.length, 1, "MRI query should keep only MRI items");
-    assert.ok(
-      dumps.every((dump) => extractTagValue(dump, "(0040,0001") === "RISPRO_MWL"),
-      "V2 booking projection should route through central MWL AE when no explicit station override exists."
-    );
-    assert.equal(extractTagValue(dumps[0], "(0040,0003"), "091500", "SPS start time should map from booking_time");
+    assert.equal(extractTagValue(dumps[0], "(0040,0002"), "20300115", "SPS start date should map from booking date.");
 
     const dumpPathToRemove = ctThird.files?.[0]?.dumpPath || "";
     const manifestPathToRemove = ctThird.files?.[0]?.manifestPath || "";

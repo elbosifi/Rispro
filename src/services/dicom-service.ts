@@ -19,6 +19,7 @@ import {
 import { loadSettingsMap } from "./settings-service.js";
 import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-settings-resolver.js";
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
+import { buildCanonicalMwlDataset, renderCanonicalMwlToDump } from "./mwl-dataset-builder.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -458,61 +459,30 @@ async function removeMatchingFiles(directory: string, prefix: string): Promise<v
 // ---------------------------------------------------------------------------
 
 export function buildWorklistDump({
-  appointment,
-  dataset
+  appointment
 }: {
   appointment: WorklistAppointmentRow;
-  dataset: WorklistDatasetContext;
 }): string {
-  const startDate = normalizeDateForDicom(appointment.appointment_date);
-  const startTime = normalizeTimeForDicom(appointment.booking_time, "080000");
-  const patientName = formatDicomPersonName(appointment.english_full_name || "", appointment.arabic_full_name);
-  const requestedProcedureDescription =
-    formatDicomString(appointment.exam_name_en || "", appointment.exam_name_ar || "") ||
-    formatDicomString(appointment.modality_name_en || "", appointment.modality_name_ar || "") ||
-    "Scheduled study";
-  const requestedProcedureId = appointment.accession_number;
-  const scheduledProcedureStepId = `${appointment.accession_number}-${sanitizeFileToken(dataset.scheduledStationAeTitle)}`;
-  const scheduledStatus = mapAppointmentToScheduledProcedureStepStatus(appointment.status);
-
-  const scheduledProcedureStepSequence = buildSequenceDump("(0040,0100)", [
-    `(0008,0060) CS ${quoteDicomValue(appointment.modality_code || "")}`,
-    `(0040,0001) AE ${quoteDicomValue(dataset.scheduledStationAeTitle)}`,
-    `(0040,0002) DA ${quoteDicomValue(startDate)}`,
-    `(0040,0003) TM ${quoteDicomValue(startTime)}`,
-    `(0040,0006) PN ${quoteDicomValue("")}`,
-    `(0040,0007) LO ${quoteDicomValue(scheduledProcedureStepDescription(appointment))}`,
-    `(0040,0009) SH ${quoteDicomValue(scheduledProcedureStepId)}`,
-    `(0040,0010) SH ${quoteDicomValue(formatDicomString(dataset.stationName))}`,
-    `(0040,0011) SH ${quoteDicomValue(formatDicomString(dataset.stationLocation))}`,
-    `(0040,0020) CS ${quoteDicomValue(scheduledStatus)}`
-  ]);
-
-  return [
-    "# RISpro generated Modality Worklist source file",
-    `(0008,0005) CS ${quoteDicomValue("ISO_IR 192")}`,
-    `(0008,0050) SH ${quoteDicomValue(appointment.accession_number)}`,
-    `(0008,0090) PN ${quoteDicomValue("")}`,
-    `(0010,0010) PN ${quoteDicomValue(patientName)}`,
-    `(0010,0020) LO ${quoteDicomValue(appointment.mrn || appointment.national_id || appointment.patient_id)}`,
-    `(0010,0021) LO ${quoteDicomValue(appointment.mrn || "")}`,
-    `(0010,0030) DA ${quoteDicomValue(normalizeDateForDicom(appointment.estimated_date_of_birth))}`,
-    `(0010,0040) CS ${quoteDicomValue(normalizeSexForDicom(appointment.sex))}`,
-    `(0032,1032) PN ${quoteDicomValue("")}`,
-    `(0032,1060) LO ${quoteDicomValue(requestedProcedureDescription)}`,
-    `(0040,1001) SH ${quoteDicomValue(requestedProcedureId)}`,
-    `(0040,1003) SH ${quoteDicomValue(appointment.accession_number)}`,
-    `(0040,1004) LO ${quoteDicomValue(requestedProcedureDescription)}`,
-    ...scheduledProcedureStepSequence
-  ].join("\n");
-}
-
-function scheduledProcedureStepDescription(appointment: WorklistAppointmentRow): string {
-  return (
-    formatDicomString(appointment.exam_name_en || "", appointment.exam_name_ar || "") ||
-    formatDicomString(appointment.modality_name_en || "", appointment.modality_name_ar || "") ||
-    "Scheduled procedure step"
+  const canonicalDataset = buildCanonicalMwlDataset(
+    {
+      modalityCode: appointment.modality_code,
+      appointmentDate: appointment.appointment_date,
+      patientMrn: appointment.mrn,
+      patientNationalId: appointment.national_id,
+      patientId: appointment.patient_id,
+      patientEnglishFullName: appointment.english_full_name,
+      patientArabicFullName: appointment.arabic_full_name,
+      patientBirthDate: String(appointment.estimated_date_of_birth || ""),
+      patientSex: appointment.sex,
+      examNameEn: appointment.exam_name_en,
+      examNameAr: appointment.exam_name_ar,
+      modalityNameEn: appointment.modality_name_en,
+      modalityNameAr: appointment.modality_name_ar
+    },
+    { mwlProfile: "minimal" }
   );
+
+  return renderCanonicalMwlToDump(canonicalDataset);
 }
 
 function resolveWorklistDatasetContext(
@@ -615,7 +585,7 @@ async function writeWorklistSourceFiles(
   const manifestPath = path.join(sourceDir, `${fileStem}.json`);
   const dumpPath = path.join(sourceDir, `${fileStem}.dump`);
   const manifest = buildWorklistManifest({ appointment, dataset });
-  const dump = buildWorklistDump({ appointment, dataset });
+  const dump = buildWorklistDump({ appointment });
 
   await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2), "utf8");
   await fs.writeFile(dumpPath, `${dump}\n`, "utf8");
