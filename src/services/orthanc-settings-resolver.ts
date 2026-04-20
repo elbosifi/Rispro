@@ -95,6 +95,14 @@ function extractSettingString(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function normalizeWorklistTargetValue(raw: string): string {
+  const normalized = raw.trim().toUpperCase();
+  if (!normalized || normalized === "RISPRO_MWL") {
+    return "";
+  }
+  return normalized;
+}
+
 function ensureBooleanLike(raw: string, key: string): void {
   const normalized = raw.toLowerCase();
   if (!normalized) return;
@@ -149,6 +157,21 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
   }
 }
 
+export function normalizeOrthancSettingsEntries(entries: OrthancSettingsEntryInput[]): OrthancSettingsEntryInput[] {
+  return entries.map((entry) => {
+    if (String(entry.key || "").trim() !== "worklist_target") {
+      return entry;
+    }
+
+    const current = extractSettingString(entry.value);
+    const normalized = normalizeWorklistTargetValue(current);
+    return {
+      ...entry,
+      value: { value: normalized },
+    };
+  });
+}
+
 function parseStrategyPreference(value: string | undefined, fallback: "put_first" | "post_first"): "put_first" | "post_first" {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "post_first") return "post_first";
@@ -174,7 +197,7 @@ export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings>
     password: normalizeOptionalText(db.password) || env.orthancPassword,
     timeoutSeconds: parsePositiveInteger(db.timeout_seconds, env.orthancTimeoutSeconds),
     verifyTls: parseBoolean(db.verify_tls, env.orthancVerifyTls),
-    worklistTarget: normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget,
+    worklistTarget: normalizeWorklistTargetValue(normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget),
     strategyPreference: parseStrategyPreference(db.strategy_preference, "put_first"),
   };
 }

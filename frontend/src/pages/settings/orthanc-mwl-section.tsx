@@ -88,6 +88,9 @@ function isoDateDaysFromNow(offsetDays: number): string {
 
 function toInitialForm(settings: Record<string, string> | null | undefined): OrthancSettingsForm {
   const map = settings || {};
+  const worklistTarget = String(map.worklist_target || "").trim().toUpperCase() === "RISPRO_MWL"
+    ? ""
+    : (map.worklist_target || "");
   return {
     enabled: map.enabled || "false",
     shadow_mode: map.shadow_mode || "false",
@@ -96,7 +99,7 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
     password: map.password || "",
     timeout_seconds: map.timeout_seconds || "10",
     verify_tls: map.verify_tls || "true",
-    worklist_target: map.worklist_target || "",
+    worklist_target: worklistTarget,
     strategy_preference: map.strategy_preference || "put_first",
   };
 }
