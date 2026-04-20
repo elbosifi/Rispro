@@ -166,7 +166,7 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
           updated_at
         )
         values (
-          $1,
+          $1::bigint,
           'orthanc',
           'pending',
           $2,
@@ -222,7 +222,7 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
             created_at,
             updated_at
           )
-          values ($1, 'orthanc', $2, 'pending', 0, now(), $3, now(), now())
+          values ($1::bigint, 'orthanc', $2, 'pending', 0, now(), $3, now(), now())
           returning id
         `,
         [bookingId, operation, payloadHash]
@@ -338,7 +338,7 @@ export async function markOrthancOutboxSuccess(
           last_error = null,
           deleted_at = case when $3 = 'delete' then now() else null end,
           updated_at = now()
-        where booking_id = $2
+        where booking_id = $2::bigint
           and external_system = 'orthanc'
       `,
       [jobId, bookingId, operation, externalWorklistId]
