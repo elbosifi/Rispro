@@ -12,6 +12,7 @@ import {
   calculateAgeFromDob
 } from "../utils/national-id.js";
 import { ensureIdentifierValue, normalizeIdentifierValue } from "../utils/identifier.js";
+import { scheduleBookingWorklistSync } from "./dicom-service.js";
 import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
 import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
@@ -458,8 +459,8 @@ export async function getPatientNoShowSummary(patientId: UserId): Promise<{ noSh
     `
       select
         count(*) filter (where status = 'no-show') as no_show_count,
-        max(appointment_date) filter (where status = 'no-show') as last_no_show_date
-      from appointments
+        max(booking_date) filter (where status = 'no-show') as last_no_show_date
+      from appointments_v2.bookings
       where patient_id = $1
     `,
     [cleanPatientId]
@@ -593,6 +594,37 @@ function normalizeIdentifierInputs(
   }
 
   return normalized;
+}
+
+async function listV2BookingIdsForPatientSync(
+  client: PoolClient,
+  patientIds: number[],
+  options?: { activeOnly?: boolean }
+): Promise<number[]> {
+  const ids = Array.from(new Set(patientIds)).filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length === 0) return [];
+
+  const activeOnly = options?.activeOnly ?? false;
+  const statusSql = activeOnly ? `and b.status in ('scheduled', 'arrived', 'waiting')` : "";
+
+  const { rows } = await client.query<{ id: number }>(
+    `
+      select b.id
+      from appointments_v2.bookings b
+      where b.patient_id = any($1::bigint[])
+      ${statusSql}
+      order by b.id asc
+    `,
+    [ids]
+  );
+
+  return Array.from(new Set(rows.map((row) => Number(row.id)).filter((id) => Number.isInteger(id) && id > 0)));
+}
+
+function scheduleBookingSyncBatch(bookingIds: number[]): void {
+  for (const bookingId of bookingIds) {
+    scheduleBookingWorklistSync(bookingId as UserId);
+  }
 }
 
 async function replacePatientIdentifiers(
@@ -791,6 +823,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
     const client = await pool.connect();
     try {
       await client.query("begin");
+      const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [cleanPatientId], { activeOnly: true });
       const { rows } = await client.query<PersistedPatientRow>(
       `
         update patients
@@ -854,6 +887,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
       );
 
       await client.query("commit");
+      scheduleBookingSyncBatch(bookingIdsToSync);
       return updatedPatient;
     } catch (error) {
       await client.query("rollback");
@@ -1014,6 +1048,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
 
   try {
     await client.query("begin");
+    const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [targetPatientId, sourcePatientId], { activeOnly: true });
 
     const { rows } = await client.query<{ id: number; arabic_full_name: string; english_full_name: string | null }>(
       `
@@ -1030,6 +1065,11 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
     }
 
     await client.query(`update appointments set patient_id = $1, updated_by_user_id = $3, updated_at = now() where patient_id = $2`, [
+      targetPatientId,
+      sourcePatientId,
+      updatedByUserId
+    ]);
+    await client.query(`update appointments_v2.bookings set patient_id = $1, updated_by_user_id = $3, updated_at = now() where patient_id = $2`, [
       targetPatientId,
       sourcePatientId,
       updatedByUserId
@@ -1062,6 +1102,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
     );
 
     await client.query("commit");
+    scheduleBookingSyncBatch(bookingIdsToSync);
     const mergedPatient = targetPatient.rows[0];
 
     if (!mergedPatient) {

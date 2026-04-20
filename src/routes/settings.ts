@@ -41,6 +41,7 @@ import {
   getSchedulingEngineConfiguration,
   saveSchedulingEngineConfiguration
 } from "../services/scheduling-settings-service.js";
+import { validateOrthancSettingsEntries } from "../services/orthanc-settings-resolver.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -248,10 +249,16 @@ settingsRouter.put(
   "/:category",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
+    const category = asString(request.params?.category);
     const body = asUnknownRecord(request.body);
     const rawEntries = body.entries;
     const entries: Array<{ key: string; value?: unknown }> = Array.isArray(rawEntries) ? rawEntries : [];
-    const settings = await upsertSettings(asString(request.params?.category), entries, request.user.sub as UserId);
+
+    if (category === "orthanc_mwl_sync") {
+      validateOrthancSettingsEntries(entries);
+    }
+
+    const settings = await upsertSettings(category, entries, request.user.sub as UserId);
     res.json({ settings });
   })
 );

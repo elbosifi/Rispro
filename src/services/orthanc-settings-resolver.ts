@@ -1,5 +1,6 @@
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
+import { HttpError } from "../utils/http-error.js";
 import { loadSettingsMap } from "./settings-service.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
 
@@ -24,6 +25,14 @@ export interface ResolvedOrthancSettings {
   verifyTls: boolean;
   worklistTarget: string;
 }
+
+export interface OrthancSettingsEntryInput {
+  key: string;
+  value?: unknown;
+}
+
+const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls"]);
+const ORTHANC_ALLOWED_KEYS = new Set(Object.keys(ORTHANC_MWL_DEFAULTS));
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -73,6 +82,60 @@ export async function seedOrthancMwlDefaultsIfMissing(): Promise<void> {
     throw error;
   } finally {
     client.release();
+  }
+}
+
+function extractSettingString(value: unknown): string {
+  if (value && typeof value === "object" && "value" in (value as Record<string, unknown>)) {
+    return String((value as Record<string, unknown>).value ?? "").trim();
+  }
+  return String(value ?? "").trim();
+}
+
+function ensureBooleanLike(raw: string, key: string): void {
+  const normalized = raw.toLowerCase();
+  if (!normalized) return;
+  if (["true", "false", "1", "0", "yes", "no", "enabled", "disabled"].includes(normalized)) return;
+  throw new HttpError(400, `orthanc_mwl_sync.${key} must be a boolean-like value.`);
+}
+
+export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInput[]): void {
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new HttpError(400, "orthanc_mwl_sync entries must be a non-empty array.");
+  }
+
+  const incoming = new Map<string, string>();
+  for (const entry of entries) {
+    const key = String(entry.key || "").trim();
+    if (!key) {
+      throw new HttpError(400, "Each orthanc_mwl_sync entry must include a key.");
+    }
+    if (!ORTHANC_ALLOWED_KEYS.has(key)) {
+      throw new HttpError(400, `Unsupported orthanc_mwl_sync key: ${key}`);
+    }
+    incoming.set(key, extractSettingString(entry.value));
+  }
+
+  for (const key of ORTHANC_BOOLEAN_KEYS) {
+    if (incoming.has(key)) {
+      ensureBooleanLike(incoming.get(key) || "", key);
+    }
+  }
+
+  if (incoming.has("timeout_seconds")) {
+    const timeoutRaw = incoming.get("timeout_seconds") || "";
+    const timeout = Number(timeoutRaw);
+    if (!Number.isInteger(timeout) || timeout <= 0) {
+      throw new HttpError(400, "orthanc_mwl_sync.timeout_seconds must be a positive integer.");
+    }
+  }
+
+  const enabledRaw = incoming.get("enabled");
+  const enabled = enabledRaw == null ? null : parseBoolean(enabledRaw, false);
+  const baseUrlRaw = incoming.get("base_url");
+
+  if (enabled === true && baseUrlRaw != null && !baseUrlRaw.trim()) {
+    throw new HttpError(400, "orthanc_mwl_sync.base_url is required when enabled=true.");
   }
 }
 
