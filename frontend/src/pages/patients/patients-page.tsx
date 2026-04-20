@@ -7,7 +7,7 @@ import { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { ArrowLeft, UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
-import { Button, Card, SectionLabel, Badge } from "@/components/shared";
+import { Button, Card, SectionLabel, Badge, Input } from "@/components/shared";
 
 export default function PatientsPage() {
   const { language } = useLanguage();
@@ -79,12 +79,12 @@ export default function PatientsPage() {
           <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center text-muted-foreground">
             <Search size={18} strokeWidth={1.5} />
           </div>
-          <input
+          <Input
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder={t(language, "patients.searchPlaceholder")}
-            className="input-premium pl-12"
+            className="pl-12"
           />
         </div>
       </Card>

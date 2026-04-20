@@ -221,12 +221,12 @@ export default function SettingsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <Button
+          <button
             onClick={() => setSection("menu")}
             className="pill-soft text-sm font-medium"
           >
             {t("common.back")} - {t("settings.backToMenu")}
-          </Button>
+          </button>
 
            <Card className="p-6">
             <h3 className="text-xl font-bold text-stone-900 dark:text-white mb-4">{sectionLabel(t, section)}</h3>
@@ -287,7 +287,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <Button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</Button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
       <div className="flex justify-between items-center">
@@ -306,7 +306,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
               <option value="supervisor">Supervisor</option>
             </select>
           </div>
-          <Button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</Button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
         </div>
       )}
 
@@ -321,12 +321,12 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
               <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
                 {u.isActive ? t("settings.active") : t("settings.inactive")}
               </span>
-              <Button
+              <button
                 onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
                 className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
               >
                 Delete
-              </Button>
+              </button>
             </div>
           </li>
         ))}
@@ -453,7 +453,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <Button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</Button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
       <div className="flex justify-between items-center">
@@ -477,7 +477,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
               <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
             )}
           </div>
-          <Button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</Button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
         </div>
       )}
 
@@ -505,8 +505,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                   Active
                 </label>
                 <div className="flex gap-2">
-                  <Button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</Button>
-                  <Button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</Button>
+                  <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
                 </div>
               </div>
             ) : (
@@ -521,8 +521,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${et.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
                     {et.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
-                  <Button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</Button>
-                  <Button onClick={() => { if (window.confirm("Delete this exam type?")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</Button>
+                  <button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button onClick={() => { if (window.confirm("Delete this exam type?")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
                 </div>
               </div>
             )}
@@ -625,7 +625,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <Button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</Button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
       <p className="text-sm description-center">
@@ -657,7 +657,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
               <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="Safety Warning (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
             </div>
           )}
-          <Button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</Button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
         </div>
       )}
 
@@ -692,8 +692,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   </div>
                 )}
                 <div className="flex gap-2">
-                  <Button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</Button>
-                  <Button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</Button>
+                  <button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
+                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
                 </div>
               </div>
             ) : (
@@ -706,8 +706,8 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${m.is_active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
                     {m.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
-                  <Button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</Button>
-                  <Button onClick={() => { if (window.confirm("Delete this modality?")) deleteMutation.mutate(m.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</Button>
+                  <button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button onClick={() => { if (window.confirm("Delete this modality?")) deleteMutation.mutate(m.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
                 </div>
               </div>
             )}
@@ -811,7 +811,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <Button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</Button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
 
@@ -837,9 +837,9 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
           />
         </label>
         {allEntries.length > 0 && (
-          <Button onClick={handleDeleteAll} disabled={deleteAllMutation.isPending} className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50">
+          <button onClick={handleDeleteAll} disabled={deleteAllMutation.isPending} className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors disabled:opacity-50">
             {deleteAllMutation.isPending ? "Deleting…" : "Delete All"}
-          </Button>
+          </button>
         )}
       </div>
 
@@ -871,8 +871,8 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
                         </td>
                         <td className="p-2 text-center">
                           <div className="flex gap-1 justify-center">
-                            <Button onClick={() => updateMutation.mutate(editForm)} disabled={updateMutation.isPending} className="px-2 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors">Save</Button>
-                            <Button onClick={() => setEditingId(null)} className="px-2 py-0.5 text-xs bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 rounded">Cancel</Button>
+                            <button onClick={() => updateMutation.mutate(editForm)} disabled={updateMutation.isPending} className="px-2 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors">Save</button>
+                            <button onClick={() => setEditingId(null)} className="px-2 py-0.5 text-xs bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 rounded">Cancel</button>
                           </div>
                         </td>
                       </>
@@ -882,8 +882,8 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
                         <td className="p-2 text-stone-700 dark:text-stone-300 input-ltr">{e.englishText}</td>
                         <td className="p-2 text-center">
                           <div className="flex gap-1 justify-center">
-                            <Button onClick={() => { setEditingId(e.id); setEditForm({ arabicText: e.arabicText, englishText: e.englishText }); }} className="px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</Button>
-                            <Button onClick={() => { if (window.confirm(`Delete "${e.arabicText}"?`)) deleteMutation.mutate(e.id); }} className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</Button>
+                            <button onClick={() => { setEditingId(e.id); setEditForm({ arabicText: e.arabicText, englishText: e.englishText }); }} className="px-2 py-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                            <button onClick={() => { if (window.confirm(`Delete "${e.arabicText}"?`)) deleteMutation.mutate(e.id); }} className="px-2 py-0.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
                           </div>
                         </td>
                       </>
@@ -1027,7 +1027,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <Button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</Button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
         </div>
       )}
       {Object.entries(data || {}).map(([key, value]: [string, any]) => {
@@ -1212,13 +1212,13 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
               className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300 file:hover:bg-stone-200 dark:file:hover:bg-stone-600 file:cursor-pointer file:transition-colors"
               disabled={restoreBusy}
             />
-            <Button
+            <button
               onClick={handleRestore}
               disabled={restoreBusy || !restoreFile}
-
+              className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {restoreBusy ? "Restoring..." : "Restore"}
-            </Button>
+            </button>
           </div>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
             ⚠️ Restoring will delete all current data (patients, appointments, settings, etc.) and replace it with the backup.
@@ -1662,12 +1662,12 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <p className="text-[10px] text-stone-500">Restricted exams</p>
             <p className="text-[10px] text-stone-500">Checked exams are the ones this rule blocks or restricts.</p>
             <div className="flex gap-2">
-              <Button variant="secondary" size="sm" onClick={() => onChange(filteredOptions.map((opt: { value: string }) => Number(opt.value)))}>
+              <button type="button" className="btn-secondary text-[10px]" onClick={() => onChange(filteredOptions.map((opt: { value: string }) => Number(opt.value)))}>
                 Select all
-              </Button>
-              <Button variant="secondary" size="sm" onClick={() => onChange([])}>
+              </button>
+              <button type="button" className="btn-secondary text-[10px]" onClick={() => onChange([])}>
                 Clear all
-              </Button>
+              </button>
             </div>
           </>
         )}
@@ -1707,9 +1707,9 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
     <section className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-2">
       <div className="flex items-center justify-between gap-3">
         <h4 className="font-medium text-sm">{title}</h4>
-        <Button variant="secondary" size="sm" onClick={addRow}>
+        <button type="button" className="btn-secondary text-xs" onClick={addRow}>
           {ACTION_LABELS.add[key]}
-        </Button>
+        </button>
       </div>
       <details className="space-y-2" open>
         <summary className="cursor-pointer list-none text-[11px] text-stone-500 dark:text-stone-400">
@@ -1744,7 +1744,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             </select>
             <input className="input-field text-xs" type="number" min="0" placeholder="Daily limit" value={row.dailyLimit as string} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, dailyLimit: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
         )
       )}
@@ -1790,7 +1790,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isOverridable as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, isOverridable: e.target.checked } : r) }))} /> {ACTION_LABELS.overridable}</label>
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
         )
       )}
@@ -1842,7 +1842,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, examRules: prev.examRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, examRules: prev.examRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
         )
       )}
@@ -1852,10 +1852,10 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
         <div className="flex items-center justify-between gap-3">
           <h4 className="font-medium text-sm">{SECTION_TITLES.specialQuotas}</h4>
           <div className="flex items-center gap-2">
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: [...prev.specialQuotas, { examTypeId: "", dailyExtraSlots: "0", isActive: true }] }))}>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: [...prev.specialQuotas, { examTypeId: "", dailyExtraSlots: "0", isActive: true }] }))}>
               {ACTION_LABELS.add.specialQuotas}
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => {
+            </button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => {
               const existingIds = new Set(draft.specialQuotas.map(q => q.examTypeId).filter(id => id.trim()));
               const allActiveExamTypes = examTypeOptionsWithModality.filter(et => !existingIds.has(et.value));
               if (allActiveExamTypes.length === 0) {
@@ -1872,8 +1872,8 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               setQuotaNotice("");
             }}>
               Add all exams
-            </Button>
-            <Button variant="secondary" size="sm" disabled={!quotaModalityFilter} onClick={() => {
+            </button>
+            <button type="button" className="btn-secondary text-xs" disabled={!quotaModalityFilter} onClick={() => {
               if (!quotaModalityFilter) {
                 setQuotaNotice("Select a modality first");
                 return;
@@ -1894,15 +1894,15 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               setQuotaNotice("");
             }}>
               Add all for modality
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => {
+            </button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => {
               if (!confirm("Remove all special quota rows?")) return;
               setDraft(prev => ({ ...prev, specialQuotas: [] }));
               setQuotaNotice("");
             }}>
               Delete all
-            </Button>
-            <Button variant="secondary" size="sm" disabled={!quotaModalityFilter} onClick={() => {
+            </button>
+            <button type="button" className="btn-secondary text-xs" disabled={!quotaModalityFilter} onClick={() => {
               if (!quotaModalityFilter) {
                 setQuotaNotice("Select a modality first");
                 return;
@@ -1920,7 +1920,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               setQuotaNotice("");
             }}>
               Delete for modality
-            </Button>
+            </button>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -1950,7 +1950,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
                 </select>
                 <input className="input-field text-xs" type="number" min="0" placeholder="Extra slots per day" value={row.dailyExtraSlots as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, dailyExtraSlots: e.target.value } : r) }))} />
                 <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-                <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+                <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialQuotas: prev.specialQuotas.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
               </div>
             ))}
             {draft.specialQuotas.length === 0 && (
@@ -1969,7 +1969,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <input className="input-field text-xs" placeholder="English label" value={row.labelEn as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, labelEn: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Arabic label" value={row.labelAr as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, labelAr: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
         )
       )}
@@ -1983,24 +1983,24 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
             <input className="input-field text-xs" placeholder="English label" value={row.labelEn as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, labelEn: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Arabic label" value={row.labelAr as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, labelAr: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
-            <Button variant="secondary" size="sm" onClick={() => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</Button>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
         )
       )}
 
       {/* Save / Reset */}
       <div className="flex justify-between items-center pt-2">
-        <Button
-
-          variant="secondary" size="sm"
+        <button
+          type="button"
+          className="btn-secondary text-sm"
           onClick={() => {
             if (data) setDraft(normalizeConfig(data));
           }}
         >
           {ACTION_LABELS.reset}
-        </Button>
-        <Button
-
+        </button>
+        <button
+          type="button"
           disabled={saveMutation.isPending}
           className="px-6 py-2 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white font-medium rounded-xl transition-colors text-sm"
           onClick={() => {
@@ -2011,7 +2011,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           }}
         >
           {saveMutation.isPending ? ACTION_LABELS.saving : ACTION_LABELS.save}
-        </Button>
+        </button>
       </div>
 
       {validationErrors.length > 0 && (
@@ -2183,12 +2183,12 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <Button onClick={() => saveMutation.mutate()} variant="primary" size="sm" disabled={saveMutation.isPending}>
+        <button onClick={() => saveMutation.mutate()} className="btn-primary text-sm" disabled={saveMutation.isPending}>
           {saveMutation.isPending ? "Saving..." : "Save storage settings"}
-        </Button>
-        <Button onClick={() => testMutation.mutate()} variant="secondary" size="sm" disabled={testMutation.isPending}>
+        </button>
+        <button onClick={() => testMutation.mutate()} className="btn-secondary text-sm" disabled={testMutation.isPending}>
           {testMutation.isPending ? "Testing..." : "Connectivity test"}
-        </Button>
+        </button>
       </div>
 
       <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
@@ -2204,7 +2204,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button
+          <button
             className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
             onClick={() => {
               if (!window.confirm("Delete all stored request documents?")) return;
@@ -2213,8 +2213,8 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             disabled={deleteAllMutation.isPending}
           >
             {deleteAllMutation.isPending ? "Deleting..." : "Delete all documents"}
-          </Button>
-          <Button
+          </button>
+          <button
             className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
             onClick={() => {
               if (!dateFrom || !dateTo) {
@@ -2227,15 +2227,15 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             disabled={deleteRangeMutation.isPending}
           >
             {deleteRangeMutation.isPending ? "Deleting..." : "Delete by appointment period"}
-          </Button>
-          <Button
+          </button>
+          <button
             className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
             onClick={() => moveAllMutation.mutate()}
             disabled={moveAllMutation.isPending}
           >
             {moveAllMutation.isPending ? "Moving..." : "Move local fallback docs (all)"}
-          </Button>
-          <Button
+          </button>
+          <button
             className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
             onClick={() => {
               if (!dateFrom || !dateTo) {
@@ -2247,7 +2247,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             disabled={moveRangeMutation.isPending}
           >
             {moveRangeMutation.isPending ? "Moving..." : "Move local fallback docs (period)"}
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -2266,9 +2266,9 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
     <div className="p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 space-y-3">
       <p className="text-sm font-medium text-amber-800 dark:text-amber-300">{t("settings.reauthRequired")}</p>
       <p className="text-xs text-amber-600 dark:text-amber-400">{t("settings.reauthHelp")}</p>
-      <Button onClick={onReAuthRequired} variant="primary" size="sm">
+      <button onClick={onReAuthRequired} className="btn-primary text-sm">
         {t("common.reAuthenticate")}
-      </Button>
+      </button>
     </div>
   );
 }

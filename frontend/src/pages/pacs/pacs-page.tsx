@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Search, RefreshCw, Monitor, Calendar, Activity, FileText, Hash } from "lucide-react";
+import { Button } from "@/components/shared";
 
 export interface PacsStudy {
   studyDate?: string;
@@ -244,22 +245,22 @@ export default function PacsPage() {
 
           {/* Actions */}
           <div className="flex gap-3">
-            <button
-              type="submit"
+            <Button
+
               disabled={isSearching}
-              className="btn-primary flex-1 py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+              variant="primary" className="flex-1 py-2.5"
             >
               <Search className="w-4 h-4" />
               {isSearching ? t(language, "pacs.searching") : t(language, "pacs.searchBtn")}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
+
               onClick={handleReset}
-              className="btn-secondary px-6 py-2.5 rounded-lg font-medium flex items-center gap-2 transition-all"
+              variant="secondary" className="px-6 py-2.5"
             >
               <RefreshCw className="w-4 h-4" />
               {t(language, "pacs.resetBtn") || "Reset"}
-            </button>
+            </Button>
           </div>
 
           {error && (

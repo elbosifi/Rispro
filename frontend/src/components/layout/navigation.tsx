@@ -20,7 +20,7 @@ import {
   Languages,
   LogOut
 } from "lucide-react";
-
+import { Button } from "@/components/shared";
 type NavIcon =
   | "dashboard"
   | "patients"
@@ -136,7 +136,7 @@ function NavButton({
   onClick: () => void;
 }) {
   return (
-    <button
+    <Button
       className={`group w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
         isRtl ? "flex-row-reverse text-end" : ""
       }`}
@@ -162,7 +162,7 @@ function NavButton({
       {isActive && (
         <span className="h-2 w-2 rounded-full bg-accent shadow-[0_0_6px_rgba(0,82,255,0.6)]" />
       )}
-    </button>
+    </Button>
   );
 }
 
@@ -196,7 +196,7 @@ export function TopBar({
     >
       <div className={`flex items-center justify-between h-14 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
         {/* Mobile menu button */}
-        <button
+        <Button
           className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
           style={{
             color: "var(--foreground)",
@@ -207,7 +207,7 @@ export function TopBar({
           aria-label={t(language, "shell.toggleNav")}
         >
           <Menu className="w-5 h-5" />
-        </button>
+        </Button>
 
         {/* Brand */}
         <div className={`flex items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
@@ -232,31 +232,31 @@ export function TopBar({
         {/* Actions */}
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
           {/* Undo */}
-          <button
-            className="btn-ghost"
+          <Button
+            variant="ghost"
             onClick={onUndo}
             aria-label={t(language, "navPanel.undo")}
           >
             <Undo2 className="w-4 h-4" />
-          </button>
+          </Button>
 
           {/* Redo */}
-          <button
-            className="btn-ghost"
+          <Button
+            variant="ghost"
             onClick={onRedo}
             aria-label={t(language, "navPanel.redo")}
           >
             <Redo2 className="w-4 h-4" />
-          </button>
+          </Button>
 
           {/* Language toggle */}
-          <button
-            className="btn-ghost text-xs font-mono"
+          <Button
+            variant="ghost" size="sm"
             onClick={onToggleLanguage}
           >
             <Languages className="w-4 h-4" />
             {isRtl ? "EN" : "عربي"}
-          </button>
+          </Button>
 
           {/* User badge */}
           {user && (
@@ -289,13 +289,13 @@ export function TopBar({
           )}
 
           {/* Logout */}
-          <button
-            className="btn-ghost text-xs"
+          <Button
+            variant="ghost" size="sm"
             style={{ color: "var(--accent)" }}
             onClick={onLogout}
           >
             <LogOut className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
       </div>
     </header>
@@ -402,7 +402,7 @@ export function MobileDrawer({
         {/* Header with close button */}
         <div className="p-3 relative" style={{ borderBottom: "1px solid var(--border)" }}>
           <PanelHeader language={language} isRtl={isRtl} />
-          <button
+          <Button
             className={`absolute top-3 p-2 rounded-lg border transition-all duration-150 ${isRtl ? "left-3" : "right-3"}`}
             style={{
               color: "var(--muted-foreground)",
@@ -413,7 +413,7 @@ export function MobileDrawer({
             aria-label="Close navigation"
           >
             <X className="w-4 h-4" />
-          </button>
+          </Button>
         </div>
 
         {/* Navigation items */}
