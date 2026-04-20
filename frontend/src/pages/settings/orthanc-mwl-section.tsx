@@ -24,6 +24,30 @@ type SyncSummaryResponse = {
   summary: {
     syncStatus: Array<{ status: string; count: number }>;
     outboxStatus: Array<{ status: string; count: number }>;
+    recentFailures?: {
+      outbox: Array<{
+        bookingId: number;
+        operation: "upsert" | "delete";
+        attemptCount: number;
+        lastError: string;
+        nextAttemptAt: string | null;
+        updatedAt: string;
+      }>;
+      sync: Array<{
+        bookingId: number;
+        syncStatus: string;
+        lastError: string;
+        lastAttemptAt: string | null;
+        updatedAt: string;
+      }>;
+    };
+    orthancProbe?: {
+      ok: boolean;
+      baseUrl: string;
+      orthancVersion: string | null;
+      worklistsRouteReachable: boolean;
+      error: string | null;
+    } | null;
   };
 };
 
@@ -172,6 +196,8 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
 
   const syncStatus = summaryData?.summary?.syncStatus || [];
   const outboxStatus = summaryData?.summary?.outboxStatus || [];
+  const recentOutboxFailures = summaryData?.summary?.recentFailures?.outbox || [];
+  const orthancProbe = summaryData?.summary?.orthancProbe;
 
   return (
     <div className="space-y-6">
@@ -295,12 +321,50 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
 
       <div className="space-y-3">
         <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Sync Status</h4>
+        {orthancProbe && (
+          <div
+            className={`p-3 rounded-lg border text-xs ${
+              orthancProbe.ok
+                ? "bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                : "bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300"
+            }`}
+          >
+            <p>Probe: {orthancProbe.ok ? "reachable" : "failed"}</p>
+            <p>Base URL: {orthancProbe.baseUrl || "(empty)"}</p>
+            <p>Orthanc Version: {orthancProbe.orthancVersion || "(unknown)"}</p>
+            <p>Worklists Route: {orthancProbe.worklistsRouteReachable ? "reachable" : "not reachable"}</p>
+            {orthancProbe.error && <p>Error: {orthancProbe.error}</p>}
+          </div>
+        )}
         {summaryLoading ? (
           <p className="text-sm text-stone-500 dark:text-stone-400">{t("settings.loading")}</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <StatusList title="Projection Status" items={syncStatus} />
             <StatusList title="Outbox Status" items={outboxStatus} />
+          </div>
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Recent Failures</h4>
+        {recentOutboxFailures.length === 0 ? (
+          <p className="text-xs text-stone-500 dark:text-stone-400">No recent outbox failures.</p>
+        ) : (
+          <div className="space-y-2">
+            {recentOutboxFailures.map((item) => (
+              <div
+                key={`outbox-failure-${item.bookingId}-${item.updatedAt}`}
+                className="p-3 rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20 text-xs"
+              >
+                <p className="font-semibold text-red-700 dark:text-red-300">
+                  Booking #{item.bookingId} - {item.operation}
+                </p>
+                <p className="text-red-700 dark:text-red-300">Attempts: {item.attemptCount}</p>
+                <p className="text-red-700 dark:text-red-300 break-all">Error: {item.lastError || "(empty)"}</p>
+                <p className="text-red-600 dark:text-red-400">Next retry: {item.nextAttemptAt || "n/a"}</p>
+              </div>
+            ))}
           </div>
         )}
       </div>

@@ -273,8 +273,38 @@ export async function reconcileOrthancMwlProjection(
 export async function getOrthancMwlSyncSummary(): Promise<{
   syncStatus: Array<{ status: string; count: number }>;
   outboxStatus: Array<{ status: string; count: number }>;
+  recentFailures: {
+    outbox: Array<{
+      bookingId: number;
+      operation: "upsert" | "delete";
+      attemptCount: number;
+      lastError: string;
+      nextAttemptAt: string | null;
+      updatedAt: string;
+    }>;
+    sync: Array<{
+      bookingId: number;
+      syncStatus: string;
+      lastError: string;
+      lastAttemptAt: string | null;
+      updatedAt: string;
+    }>;
+  };
+  orthancProbe: {
+    ok: boolean;
+    baseUrl: string;
+    orthancVersion: string | null;
+    worklistsRouteReachable: boolean;
+    error: string | null;
+  } | null;
 }> {
-  const [syncStatusResult, outboxStatusResult] = await Promise.all([
+  const [
+    syncStatusResult,
+    outboxStatusResult,
+    outboxFailuresResult,
+    syncFailuresResult,
+    probeResult
+  ] = await Promise.all([
     pool.query<{ status: string; count: string }>(
       `
         select sync_status as status, count(*)::text as count
@@ -293,10 +323,82 @@ export async function getOrthancMwlSyncSummary(): Promise<{
         order by status asc
       `
     ),
+    pool.query<{
+      booking_id: number;
+      operation: "upsert" | "delete";
+      attempt_count: number;
+      last_error: string | null;
+      next_attempt_at: string | null;
+      updated_at: string;
+    }>(
+      `
+        select
+          booking_id,
+          operation,
+          attempt_count,
+          last_error,
+          next_attempt_at::text as next_attempt_at,
+          updated_at::text as updated_at
+        from external_mwl_outbox
+        where external_system = 'orthanc'
+          and status = 'failed'
+        order by updated_at desc
+        limit 10
+      `
+    ),
+    pool.query<{
+      booking_id: number;
+      sync_status: string;
+      last_error: string | null;
+      last_attempt_at: string | null;
+      updated_at: string;
+    }>(
+      `
+        select
+          booking_id,
+          sync_status,
+          last_error,
+          last_attempt_at::text as last_attempt_at,
+          updated_at::text as updated_at
+        from external_mwl_sync
+        where external_system = 'orthanc'
+          and sync_status = 'failed'
+        order by updated_at desc
+        limit 10
+      `
+    ),
+    probeOrthancWorklistApi().then((probe) => ({
+      ...probe,
+      error: null as string | null,
+    })).catch((error) => ({
+      ok: false,
+      baseUrl: "",
+      orthancVersion: null,
+      worklistsRouteReachable: false,
+      error: (error as Error).message || "probe_failed",
+    })),
   ]);
 
   return {
     syncStatus: syncStatusResult.rows.map((row) => ({ status: row.status, count: Number(row.count) })),
     outboxStatus: outboxStatusResult.rows.map((row) => ({ status: row.status, count: Number(row.count) })),
+    recentFailures: {
+      outbox: outboxFailuresResult.rows.map((row) => ({
+        bookingId: Number(row.booking_id),
+        operation: row.operation,
+        attemptCount: Number(row.attempt_count),
+        lastError: String(row.last_error || ""),
+        nextAttemptAt: row.next_attempt_at || null,
+        updatedAt: row.updated_at,
+      })),
+      sync: syncFailuresResult.rows.map((row) => ({
+        bookingId: Number(row.booking_id),
+        syncStatus: row.sync_status,
+        lastError: String(row.last_error || ""),
+        lastAttemptAt: row.last_attempt_at || null,
+        updatedAt: row.updated_at,
+      })),
+    },
+    orthancProbe: probeResult,
   };
 }
