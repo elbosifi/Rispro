@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
+import { markOrthancOutboxSuccess } from "./mwl-sync-service.js";
 import { mergePatients, updatePatient, type PatientPayload } from "./patient-service.js";
 
 interface OrthancSettingRow {
@@ -367,6 +368,122 @@ test("mergePatients enqueues Orthanc upsert for active source bookings only", as
     if (sourcePatientId > 0) {
       await pool.query(`delete from patient_identifiers where patient_id = $1`, [sourcePatientId]);
       await pool.query(`delete from patients where id = $1`, [sourcePatientId]);
+    }
+    await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]);
+    await pool.query(`delete from appointments_v2.policy_sets where id = $1`, [policySetId]);
+    await pool.query(`delete from modalities where id = $1`, [modalityId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [userId]);
+    await pool.query(`delete from users where id = $1`, [userId]);
+  }
+});
+
+test("markOrthancOutboxSuccess persists Orthanc success without parameter-type errors", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+
+  const { userId, modalityId, policySetId, policyVersionId } = await createCoreFixture();
+  const suffix = uniqueSuffix();
+  let patientId = 0;
+  let bookingId = 0;
+  let jobId = 0;
+
+  try {
+    const nationalId = uniqueNationalId("6");
+    const patientRes = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value, arabic_full_name, english_full_name,
+          normalized_arabic_name, age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1, 'national_id', $2, $3, $4, $5, 37, '1989-01-01', 'F', '0945678901', 'City', $6, $6)
+        returning id
+      `,
+      [nationalId, nationalId, `مريضة ${suffix}`, `Patient ${suffix}`, `مريضة${suffix}`, userId]
+    );
+    patientId = Number(patientRes.rows[0]?.id);
+
+    const bookingRes = await pool.query<{ id: number }>(
+      `
+        insert into appointments_v2.bookings (
+          patient_id, modality_id, exam_type_id, reporting_priority_id, booking_date, booking_time,
+          case_category, status, notes, policy_version_id, created_by_user_id, updated_by_user_id
+        )
+        values ($1, $2, null, null, current_date, '12:00:00', 'non_oncology', 'scheduled', 'mark-success-test', $3, $4, $4)
+        returning id
+      `,
+      [patientId, modalityId, policyVersionId, userId]
+    );
+    bookingId = Number(bookingRes.rows[0]?.id);
+
+    await pool.query(`delete from external_mwl_outbox where booking_id = $1 and external_system = 'orthanc'`, [bookingId]);
+    await pool.query(`delete from external_mwl_sync where booking_id = $1 and external_system = 'orthanc'`, [bookingId]);
+
+    const syncRes = await pool.query(
+      `
+        insert into external_mwl_sync (
+          booking_id, external_system, sync_status, payload_hash, last_error, updated_at
+        )
+        values ($1, 'orthanc', 'in_progress', 'test-hash', 'old-error', now())
+        returning booking_id
+      `,
+      [bookingId]
+    );
+    assert.equal(Number(syncRes.rows[0]?.booking_id), bookingId);
+
+    const outboxRes = await pool.query<{ id: number }>(
+      `
+        insert into external_mwl_outbox (
+          booking_id, external_system, operation, status, attempt_count, next_attempt_at, payload_hash, last_error, created_at, updated_at
+        )
+        values ($1, 'orthanc', 'upsert', 'processing', 1, now(), 'test-hash', 'old-error', now(), now())
+        returning id
+      `,
+      [bookingId]
+    );
+    jobId = Number(outboxRes.rows[0]?.id);
+
+    await markOrthancOutboxSuccess(jobId, bookingId, "upsert", "rispro-v2-booking-test");
+
+    const finalOutbox = await pool.query<{ status: string; last_error: string | null }>(
+      `
+        select status, last_error
+        from external_mwl_outbox
+        where id = $1
+      `,
+      [jobId]
+    );
+    assert.equal(finalOutbox.rows[0]?.status, "completed");
+    assert.equal(finalOutbox.rows[0]?.last_error, null);
+
+    const finalSync = await pool.query<{
+      sync_status: string;
+      external_worklist_id: string | null;
+      last_error: string | null;
+      last_synced_at: string | null;
+    }>(
+      `
+        select sync_status, external_worklist_id, last_error, last_synced_at::text as last_synced_at
+        from external_mwl_sync
+        where booking_id = $1
+          and external_system = 'orthanc'
+      `,
+      [bookingId]
+    );
+    assert.equal(finalSync.rows[0]?.sync_status, "synced");
+    assert.equal(finalSync.rows[0]?.external_worklist_id, "rispro-v2-booking-test");
+    assert.equal(finalSync.rows[0]?.last_error, null);
+    assert.ok(finalSync.rows[0]?.last_synced_at, "Expected last_synced_at to be populated.");
+  } finally {
+    if (jobId > 0) {
+      await pool.query(`delete from external_mwl_outbox where id = $1`, [jobId]);
+    }
+    if (bookingId > 0) {
+      await pool.query(`delete from external_mwl_sync where booking_id = $1`, [bookingId]);
+      await pool.query(`delete from appointments_v2.bookings where id = $1`, [bookingId]);
+    }
+    if (patientId > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = $1`, [patientId]);
+      await pool.query(`delete from patients where id = $1`, [patientId]);
     }
     await pool.query(`delete from appointments_v2.policy_versions where id = $1`, [policyVersionId]);
     await pool.query(`delete from appointments_v2.policy_sets where id = $1`, [policySetId]);

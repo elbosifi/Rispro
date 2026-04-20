@@ -123,7 +123,7 @@ async function getLegacyAppointmentSummary(cleanAppointmentId: number): Promise<
         patients.english_full_name
       from appointments
       join patients on patients.id = appointments.patient_id
-      where appointments.id = $1::bigint
+      where appointments.id = $1
       limit 1
     `,
     [cleanAppointmentId]
@@ -143,7 +143,7 @@ async function getV2BookingSummary(cleanAppointmentId: number): Promise<Appointm
         patients.english_full_name
       from appointments_v2.bookings as bookings
       join patients on patients.id = bookings.patient_id
-      where bookings.id = $1::bigint
+      where bookings.id = $1
       limit 1
     `,
     [cleanAppointmentId]

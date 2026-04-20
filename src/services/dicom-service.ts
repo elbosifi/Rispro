@@ -429,7 +429,7 @@ async function getBookingWorklistContext(
       join modalities on modalities.id = bookings.modality_id
       join patients on patients.id = bookings.patient_id
       left join exam_types on exam_types.id = bookings.exam_type_id
-      where bookings.id = $1::bigint
+      where bookings.id = $1
       limit 1
     `,
     [cleanBookingId]

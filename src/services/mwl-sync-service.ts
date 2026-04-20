@@ -331,17 +331,17 @@ export async function markOrthancOutboxSuccess(
       `
         update external_mwl_sync
         set
-          sync_status = case when $3 = 'delete' then 'deleted' else 'synced' end,
-          external_worklist_id = coalesce($4, external_worklist_id),
+          sync_status = case when $2 = 'delete' then 'deleted' else 'synced' end,
+          external_worklist_id = coalesce($3, external_worklist_id),
           last_synced_at = now(),
           last_attempt_at = now(),
           last_error = null,
-          deleted_at = case when $3 = 'delete' then now() else null end,
+          deleted_at = case when $2 = 'delete' then now() else null end,
           updated_at = now()
-        where booking_id = $2::bigint
+        where booking_id = $1::bigint
           and external_system = 'orthanc'
       `,
-      [jobId, bookingId, operation, externalWorklistId]
+      [bookingId, operation, externalWorklistId]
     );
 
     await client.query("commit");
