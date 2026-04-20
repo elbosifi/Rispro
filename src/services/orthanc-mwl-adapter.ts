@@ -291,12 +291,15 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   }
 
   const stableId = buildStableOrthancWorklistId(bookingId);
-  const dicomPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
+  const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
+
+  // For new worklists plugin, strip custom fields that aren't valid DICOM tags
+  const { RISproProjection, ...dicomOnlyPayload } = fullPayload;
 
   // Try primary method based on strategy preference
   const primaryMethod = settings.strategyPreference === "post_first" ? "POST" : "PUT";
   const primaryPath = primaryMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
-  const primaryPayload = primaryMethod === "PUT" ? dicomPayload : dicomPayload; // Both use direct DICOM format
+  const primaryPayload = primaryMethod === "PUT" ? fullPayload : fullPayload; // Both use full payload with metadata
 
   const primaryResult = await orthancFetch(primaryPath, {
     method: primaryMethod,
@@ -317,7 +320,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   if ([400, 404, 405, 501].includes(primaryResult.status)) {
     const fallbackMethod = primaryMethod === "POST" ? "PUT" : "POST";
     const fallbackPath = fallbackMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
-    const fallbackPayload = fallbackMethod === "PUT" ? dicomPayload : dicomPayload; // Both use direct DICOM format
+    const fallbackPayload = fallbackMethod === "PUT" ? fullPayload : fullPayload; // Both use full payload with metadata
 
     const fallbackResult = await orthancFetch(fallbackPath, {
       method: fallbackMethod,
@@ -335,7 +338,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
 
     // If fallback also fails with method not allowed, try alternative POST endpoint for new worklists plugin
     if (fallbackMethod === "POST" && fallbackResult.status === 405) {
-      const createPayload = { Tags: dicomPayload }; // New plugin expects { Tags: { ...dicom... } }
+      const createPayload = { Tags: dicomOnlyPayload }; // New plugin expects { Tags: { ...dicom... } } without custom fields
       const altResult = await orthancFetch("/worklists/create", {
         method: "POST",
         body: createPayload,
