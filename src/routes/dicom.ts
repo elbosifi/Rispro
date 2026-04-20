@@ -25,7 +25,8 @@ import {
 } from "../services/dicom-gateway-service.js";
 import {
   getOrthancMwlSyncSummary,
-  reconcileOrthancMwlProjection
+  reconcileOrthancMwlProjection,
+  resetOrthancMwlWindow
 } from "../services/orthanc-mwl-reconcile-service.js";
 import {
   getAllServiceStatuses,
@@ -138,6 +139,29 @@ dicomRouter.post(
       dateTo,
       apply,
       limit
+    });
+
+    res.json({ ok: true, result });
+  })
+);
+
+dicomRouter.post(
+  "/orthanc-sync/reset-window",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const dateFrom = String(body.dateFrom || "").trim();
+    const dateTo = String(body.dateTo || "").trim();
+    const limitRaw = Number(body.limit);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000;
+
+    if (!dateFrom || !dateTo) {
+      throw new HttpError(400, "dateFrom and dateTo are required (YYYY-MM-DD).");
+    }
+
+    const result = await resetOrthancMwlWindow({
+      dateFrom,
+      dateTo,
+      limit,
     });
 
     res.json({ ok: true, result });

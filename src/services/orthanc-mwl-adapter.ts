@@ -40,6 +40,11 @@ export interface OrthancDeleteResult {
   strategy: string;
 }
 
+export interface OrthancBulkDeleteResult {
+  deletedCount: number;
+  failed: Array<{ worklistId: string; error: string }>;
+}
+
 export class OrthancSyncError extends Error {
   retryable: boolean;
   statusCode: number | null;
@@ -246,6 +251,102 @@ function parseExternalIdFromOrthancResponse(payload: unknown): string | null {
   return null;
 }
 
+function extractStringCandidates(payload: unknown, values: string[]): void {
+  if (payload == null) return;
+  if (typeof payload === "string") {
+    const trimmed = payload.trim();
+    if (trimmed) values.push(trimmed);
+    return;
+  }
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      extractStringCandidates(item, values);
+    }
+    return;
+  }
+  if (typeof payload !== "object") return;
+
+  for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
+    if (
+      key === "AccessionNumber" ||
+      key === "RequestedProcedureID" ||
+      key === "PatientID" ||
+      key === "ID" ||
+      key === "Id" ||
+      key === "id" ||
+      key === "Path" ||
+      key === "stableOrthancWorklistId"
+    ) {
+      extractStringCandidates(value, values);
+      continue;
+    }
+
+    if (key === "Value" && Array.isArray(value)) {
+      extractStringCandidates(value, values);
+      continue;
+    }
+
+    if (typeof value === "object" && value !== null) {
+      extractStringCandidates(value, values);
+    }
+  }
+}
+
+function parseBookingIdFromOrthancPayload(payload: unknown): number | null {
+  const values: string[] = [];
+  extractStringCandidates(payload, values);
+
+  for (const value of values) {
+    const stableIdMatch = value.match(/rispro-v2-booking-(\d+)/i);
+    if (stableIdMatch) {
+      return Number(stableIdMatch[1]);
+    }
+
+    const accessionMatch = value.match(/\bV2-(\d+)\b/i);
+    if (accessionMatch) {
+      return Number(accessionMatch[1]);
+    }
+  }
+
+  return null;
+}
+
+async function deleteOrthancWorklistById(
+  worklistId: string,
+  settings: ResolvedOrthancSettings
+): Promise<void> {
+  const response = await orthancFetch(`/worklists/${encodeURIComponent(worklistId)}`, {
+    method: "DELETE",
+    settings,
+  });
+  if (response.ok || response.status === 204 || response.status === 404) {
+    return;
+  }
+
+  const retryable = response.status >= 500 || response.status === 429;
+  throw new OrthancSyncError(
+    `Orthanc delete failed for ${worklistId} (status=${response.status}).`,
+    retryable,
+    response.status
+  );
+}
+
+async function cleanupObsoleteOrthancEntries(
+  bookingId: number,
+  preservedWorklistId: string,
+  settings: ResolvedOrthancSettings
+): Promise<void> {
+  const stableId = buildStableOrthancWorklistId(bookingId);
+  const state = await getOrthancSyncState(bookingId);
+  const obsoleteIds = Array.from(
+    new Set([state?.externalWorklistId, stableId].filter(Boolean) as string[])
+  ).filter((candidateId) => candidateId !== preservedWorklistId);
+
+  for (const candidateId of obsoleteIds) {
+    await deleteOrthancWorklistById(candidateId, settings);
+  }
+}
+
 export async function probeOrthancWorklistApi(): Promise<OrthancProbeResult> {
   const settings = await resolveOrthancSettings();
   const system = await orthancFetch("/system", { settings });
@@ -314,7 +415,9 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
       return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
     } else {
       const parsed = parseExternalIdFromOrthancResponse(primaryResult.json);
-      return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
+      const externalWorklistId = parsed || stableId;
+      await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
+      return { externalWorklistId, strategy: "post_collection" };
     }
   }
 
@@ -334,7 +437,9 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
         return { externalWorklistId: stableId, strategy: "put_by_stable_id" };
       } else {
         const parsed = parseExternalIdFromOrthancResponse(fallbackResult.json);
-        return { externalWorklistId: parsed || stableId, strategy: "post_collection" };
+        const externalWorklistId = parsed || stableId;
+        await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
+        return { externalWorklistId, strategy: "post_collection" };
       }
     }
 
@@ -348,7 +453,9 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
       });
       if (altResult.ok || altResult.status === 201 || altResult.status === 204) {
         const parsed = parseExternalIdFromOrthancResponse(altResult.json);
-        return { externalWorklistId: parsed || stableId, strategy: "post_create" };
+        const externalWorklistId = parsed || stableId;
+        await cleanupObsoleteOrthancEntries(bookingId, externalWorklistId, settings);
+        return { externalWorklistId, strategy: "post_create" };
       }
       const retryable = altResult.status >= 500 || altResult.status === 429;
       throw new OrthancSyncError(
@@ -383,21 +490,16 @@ export async function deleteBookingFromOrthanc(bookingId: number): Promise<Ortha
 
   let lastFailure: OrthancSyncError | null = null;
   for (const candidateId of candidateIds) {
-    const response = await orthancFetch(`/worklists/${encodeURIComponent(candidateId)}`, {
-      method: "DELETE",
-      settings,
-    });
-    if (response.ok || response.status === 204 || response.status === 404) {
+    try {
+      await deleteOrthancWorklistById(candidateId, settings);
       return { externalWorklistId: candidateId, strategy: "delete_by_id" };
-    }
-    const retryable = response.status >= 500 || response.status === 429;
-    lastFailure = new OrthancSyncError(
-      `Orthanc delete failed for ${candidateId} (status=${response.status}).`,
-      retryable,
-      response.status
-    );
-    if (retryable) {
-      throw lastFailure;
+    } catch (error) {
+      lastFailure = error instanceof OrthancSyncError
+        ? error
+        : new OrthancSyncError("Orthanc delete failed.", true, null);
+      if (lastFailure.retryable) {
+        throw lastFailure;
+      }
     }
   }
 
@@ -406,4 +508,57 @@ export async function deleteBookingFromOrthanc(bookingId: number): Promise<Ortha
   }
 
   throw lastFailure || new OrthancSyncError("Orthanc delete failed.", true, null);
+}
+
+export async function deleteOrthancEntriesForBookingIds(bookingIds: number[]): Promise<OrthancBulkDeleteResult> {
+  const targetIds = new Set(
+    bookingIds.map((bookingId) => Number(bookingId)).filter((bookingId) => Number.isInteger(bookingId) && bookingId > 0)
+  );
+  if (targetIds.size === 0) {
+    return { deletedCount: 0, failed: [] };
+  }
+
+  const settings = await resolveOrthancSettings();
+  const worklists = await orthancFetch("/worklists", { settings });
+  if (!worklists.ok || !Array.isArray(worklists.json)) {
+    throw new OrthancSyncError(
+      `Orthanc worklist enumeration failed (status=${worklists.status}).`,
+      worklists.status >= 500 || worklists.status === 429,
+      worklists.status
+    );
+  }
+
+  const failed: Array<{ worklistId: string; error: string }> = [];
+  let deletedCount = 0;
+
+  for (const entry of worklists.json) {
+    const worklistId = parseExternalIdFromOrthancResponse(entry) || String(entry || "").trim();
+    if (!worklistId) continue;
+
+    const detail = await orthancFetch(`/worklists/${encodeURIComponent(worklistId)}`, { settings });
+    if (!detail.ok) {
+      failed.push({
+        worklistId,
+        error: `Failed to inspect worklist (status=${detail.status}).`,
+      });
+      continue;
+    }
+
+    const bookingId = parseBookingIdFromOrthancPayload(detail.json);
+    if (!bookingId || !targetIds.has(bookingId)) {
+      continue;
+    }
+
+    try {
+      await deleteOrthancWorklistById(worklistId, settings);
+      deletedCount += 1;
+    } catch (error) {
+      failed.push({
+        worklistId,
+        error: error instanceof Error ? error.message : "delete_failed",
+      });
+    }
+  }
+
+  return { deletedCount, failed };
 }

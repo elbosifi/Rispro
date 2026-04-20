@@ -1,6 +1,6 @@
 import { pool } from "../db/pool.js";
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
-import { probeOrthancWorklistApi } from "./orthanc-mwl-adapter.js";
+import { deleteOrthancEntriesForBookingIds, probeOrthancWorklistApi } from "./orthanc-mwl-adapter.js";
 import { createHash } from "crypto";
 
 export interface OrthancMwlReconcileInput {
@@ -66,6 +66,15 @@ export interface OrthancMwlReconcileResult {
     enqueuedBookingIds: number[];
     failedBookingIds: Array<{ bookingId: number; error: string }>;
   };
+}
+
+export interface OrthancMwlResetResult {
+  window: { dateFrom: string; dateTo: string };
+  activeBookingIds: number[];
+  deletedCount: number;
+  deleteFailures: Array<{ worklistId: string; error: string }>;
+  requeuedBookingIds: number[];
+  requeueFailures: Array<{ bookingId: number; error: string }>;
 }
 
 function normalizeDateInput(value: string): string {
@@ -404,5 +413,57 @@ export async function getOrthancMwlSyncSummary(): Promise<{
       })),
     },
     orthancProbe: probeResult,
+  };
+}
+
+export async function resetOrthancMwlWindow(
+  input: OrthancMwlReconcileInput
+): Promise<OrthancMwlResetResult> {
+  const dateFrom = normalizeDateInput(input.dateFrom);
+  const dateTo = normalizeDateInput(input.dateTo);
+  const limit = Number.isInteger(input.limit) && (input.limit as number) > 0 ? Number(input.limit) : 5000;
+
+  const activeBookingsResult = await pool.query<ActiveBookingRow>(
+    `
+      select
+        b.id as booking_id,
+        b.booking_date::text as booking_date,
+        b.status
+      from appointments_v2.bookings b
+      where b.booking_date between $1::date and $2::date
+        and b.status in ('scheduled', 'arrived', 'waiting')
+      order by b.booking_date asc, b.id asc
+      limit $3
+    `,
+    [dateFrom, dateTo, limit]
+  );
+
+  const activeBookingIds = toSortedUniqueIds(activeBookingsResult.rows.map((row) => Number(row.booking_id)));
+  const deletion = await deleteOrthancEntriesForBookingIds(activeBookingIds);
+
+  const requeuedBookingIds: number[] = [];
+  const requeueFailures: Array<{ bookingId: number; error: string }> = [];
+
+  for (const bookingId of activeBookingIds) {
+    try {
+      const result = await enqueueOrthancSyncForBooking(bookingId);
+      if (result.enqueued) {
+        requeuedBookingIds.push(bookingId);
+      }
+    } catch (error) {
+      requeueFailures.push({
+        bookingId,
+        error: error instanceof Error ? error.message : "enqueue_failed",
+      });
+    }
+  }
+
+  return {
+    window: { dateFrom, dateTo },
+    activeBookingIds,
+    deletedCount: deletion.deletedCount,
+    deleteFailures: deletion.failed,
+    requeuedBookingIds,
+    requeueFailures,
   };
 }

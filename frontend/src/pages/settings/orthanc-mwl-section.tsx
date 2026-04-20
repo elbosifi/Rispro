@@ -17,6 +17,7 @@ type OrthancSettingsForm = {
   timeout_seconds: string;
   verify_tls: string;
   worklist_target: string;
+  strategy_preference: string;
 };
 
 type SyncSummaryResponse = {
@@ -65,6 +66,17 @@ type ReconcileResponse = {
   };
 };
 
+type ResetWindowResponse = {
+  ok: boolean;
+  result: {
+    activeBookingIds: number[];
+    deletedCount: number;
+    deleteFailures: Array<{ worklistId: string; error: string }>;
+    requeuedBookingIds: number[];
+    requeueFailures: Array<{ bookingId: number; error: string }>;
+  };
+};
+
 function isoDateDaysFromNow(offsetDays: number): string {
   const date = new Date();
   date.setDate(date.getDate() + offsetDays);
@@ -85,6 +97,7 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
     timeout_seconds: map.timeout_seconds || "10",
     verify_tls: map.verify_tls || "true",
     worklist_target: map.worklist_target || "",
+    strategy_preference: map.strategy_preference || "put_first",
   };
 }
 
@@ -168,6 +181,32 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
     },
     onError: (error: Error) => {
       setStatusMessage(error.message || "Orthanc reconciliation failed.");
+      setTimeout(() => setStatusMessage(null), 5000);
+    },
+  });
+
+  const resetWindowMutation = useMutation({
+    mutationFn: async () => {
+      const parsedLimit = Number(limit);
+      return api<ResetWindowResponse>("/dicom/orthanc-sync/reset-window", {
+        method: "POST",
+        body: JSON.stringify({
+          dateFrom,
+          dateTo,
+          limit: Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 5000,
+        }),
+      });
+    },
+    onSuccess: (response) => {
+      const result = response.result;
+      setStatusMessage(
+        `Orthanc reset completed. Deleted ${result.deletedCount} entries, re-enqueued ${result.requeuedBookingIds.length} bookings.`
+      );
+      setTimeout(() => setStatusMessage(null), 5000);
+      void refetchSummary();
+    },
+    onError: (error: Error) => {
+      setStatusMessage(error.message || "Orthanc reset failed.");
       setTimeout(() => setStatusMessage(null), 5000);
     },
   });
@@ -296,6 +335,19 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             }}
             placeholder="RISPRO_MWL"
           />
+          <SettingField
+            label="Write strategy"
+            type="select"
+            value={form.strategy_preference}
+            onChange={(value) => {
+              setForm((prev) => ({ ...prev, strategy_preference: value }));
+              setDirty(true);
+            }}
+            options={[
+              { value: "put_first", label: "Update by stable ID first" },
+              { value: "post_first", label: "Create by POST first" },
+            ]}
+          />
         </div>
         <div className="flex gap-2">
           <button
@@ -380,7 +432,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
           <button
             type="button"
             className="btn-secondary text-sm disabled:opacity-50"
-            disabled={reconcileMutation.isPending}
+            disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
             onClick={() => reconcileMutation.mutate({ apply: false })}
           >
             {reconcileMutation.isPending ? "Running..." : "Dry Run Reconciliation"}
@@ -388,10 +440,18 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
           <button
             type="button"
             className="btn-primary text-sm disabled:opacity-50"
-            disabled={reconcileMutation.isPending}
+            disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
             onClick={() => reconcileMutation.mutate({ apply: true })}
           >
             {reconcileMutation.isPending ? "Applying..." : "Reconcile + Re-enqueue"}
+          </button>
+          <button
+            type="button"
+            className="btn-secondary text-sm disabled:opacity-50"
+            disabled={reconcileMutation.isPending || resetWindowMutation.isPending}
+            onClick={() => resetWindowMutation.mutate()}
+          >
+            {resetWindowMutation.isPending ? "Resetting..." : "Delete in Window + Resync"}
           </button>
         </div>
       </div>
