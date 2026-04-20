@@ -293,11 +293,11 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
     }
   }
 
-  // Try fallback method
-  const fallbackMethod = primaryMethod === "POST" ? "PUT" : "POST";
-  const fallbackPath = fallbackMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
-
+  // Try fallback method for client-like errors
   if ([400, 404, 405, 501].includes(primaryResult.status)) {
+    const fallbackMethod = primaryMethod === "POST" ? "PUT" : "POST";
+    const fallbackPath = fallbackMethod === "POST" ? "/worklists" : `/worklists/${encodeURIComponent(stableId)}`;
+
     const fallbackResult = await orthancFetch(fallbackPath, {
       method: fallbackMethod,
       body: payload,
@@ -312,6 +312,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
       }
     }
 
+    // If fallback also fails with method not allowed, this is likely a server configuration issue
     const retryable = fallbackResult.status >= 500 || fallbackResult.status === 429;
     throw new OrthancSyncError(
       `Orthanc upsert failed via ${fallbackMethod} ${fallbackPath} (status=${fallbackResult.status}): ${fallbackResult.text}`,
