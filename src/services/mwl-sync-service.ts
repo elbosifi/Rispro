@@ -99,7 +99,7 @@ async function loadBookingSyncSnapshot(
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
-      where b.id = $1
+      where b.id = $1::bigint
       limit 1
     `,
     [bookingId]
@@ -197,7 +197,7 @@ export async function enqueueOrthancSyncForBooking(bookingId: number): Promise<O
           payload_hash = $3,
           last_error = null,
           updated_at = now()
-        where booking_id = $1
+        where booking_id = $1::bigint
           and external_system = 'orthanc'
           and status in ('pending', 'processing', 'failed')
         returning id
@@ -387,7 +387,7 @@ export async function markOrthancOutboxFailure(
           last_attempt_at = now(),
           last_error = $2,
           updated_at = now()
-        where booking_id = $1
+        where booking_id = $1::bigint
           and external_system = 'orthanc'
       `,
       [bookingId, errorMessage]
@@ -417,7 +417,7 @@ export async function getOrthancSyncState(bookingId: number): Promise<OrthancSyn
         payload_hash
       from external_mwl_sync
       where external_system = 'orthanc'
-        and booking_id = $1
+        and booking_id = $1::bigint
       limit 1
     `,
     [bookingId]
