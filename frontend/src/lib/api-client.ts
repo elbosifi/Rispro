@@ -67,6 +67,15 @@ export async function api<T>(
     }
 
     return response.json() as Promise<T>;
+  } catch (error) {
+    // Surface a clearer message when client-side timeout aborts a long request.
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw ApiError.fromResponse({
+        message: `Request timed out after ${Math.round(timeoutMs / 1000)}s.`,
+        status: 408
+      });
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

@@ -29,6 +29,9 @@ import type { DictionaryEntry } from "@/lib/name-generation";
 
 // Generic raw response type for API responses that are passed through mappers
 type RawRecord = Record<string, unknown>;
+const IMPORT_WORKBOOK_TIMEOUT_MS = 60_000;
+const IMPORT_PREVIEW_TIMEOUT_MS = 180_000;
+const IMPORT_CONFIRM_TIMEOUT_MS = 180_000;
 
 export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
 
@@ -655,7 +658,7 @@ export async function previewPatientImport(payload: {
   return api("/settings/patient-import/preview", {
     method: "POST",
     body: JSON.stringify(payload)
-  });
+  }, IMPORT_PREVIEW_TIMEOUT_MS);
 }
 
 export async function inspectPatientImportWorkbook(payload: {
@@ -665,7 +668,7 @@ export async function inspectPatientImportWorkbook(payload: {
   return api("/settings/patient-import/workbook", {
     method: "POST",
     body: JSON.stringify(payload)
-  });
+  }, IMPORT_WORKBOOK_TIMEOUT_MS);
 }
 
 export async function fetchPatientImportBatch(batchId: number): Promise<PatientImportBatch> {
@@ -688,7 +691,7 @@ export async function selectPatientImportRows(batchId: number, rowIds: number[],
 export async function confirmPatientImportBatch(batchId: number): Promise<{ migrated: number; skipped: number }> {
   return api<{ migrated: number; skipped: number }>(`/settings/patient-import/batches/${batchId}/confirm`, {
     method: "POST"
-  });
+  }, IMPORT_CONFIRM_TIMEOUT_MS);
 }
 
 // -- PACS --

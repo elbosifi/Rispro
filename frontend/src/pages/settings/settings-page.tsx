@@ -1247,6 +1247,22 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
     }
   });
 
+  const handleInspectWorkbook = async () => {
+    if (!fileContentBase64) {
+      setLocalError("Please upload an Excel file first.");
+      return;
+    }
+    try {
+      const result = await inspectMutation.mutateAsync({ fileContentBase64, sheetName: selectedSheetName || undefined });
+      const workbook = result.workbook;
+      if (workbook.selectedSheetName) {
+        setSelectedSheetName(workbook.selectedSheetName);
+      }
+    } catch {
+      // handled in mutation
+    }
+  };
+
   const handlePickFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1257,11 +1273,10 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
     try {
       const base64 = await fileToBase64(file);
       setFileContentBase64(base64);
-      const result = await inspectMutation.mutateAsync({ fileContentBase64: base64 });
-      const workbook = result.workbook;
-      if (workbook.selectedSheetName) {
-        setSelectedSheetName(workbook.selectedSheetName);
-      }
+      setSheetNames([]);
+      setHeaders([]);
+      setSelectedSheetName("");
+      setLocalError(null);
     } catch {
       // handled in mutation
     } finally {
@@ -1328,12 +1343,30 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
     ((previewMutation.error as Error | undefined)?.message ?? null) ||
     ((confirmMutation.error as Error | undefined)?.message ?? null);
 
+  const inProgressMessage = inspectMutation.isPending
+    ? (language === "ar" ? "جاري قراءة الملف واستخراج الأعمدة..." : "Reading workbook and extracting headers...")
+    : previewMutation.isPending
+      ? (language === "ar" ? "جاري تجهيز الصفوف والتحقق من البيانات..." : "Staging rows and validating data...")
+      : selectMutation.isPending
+        ? (language === "ar" ? "جاري تحديث اختيار الصفوف..." : "Updating row selection...")
+        : confirmMutation.isPending
+          ? (language === "ar" ? "جاري ترحيل الصفوف المحددة إلى المرضى..." : "Migrating selected rows to live patients...")
+          : (batchLoading || rowsLoading)
+            ? (language === "ar" ? "جاري تحديث بيانات الدفعة..." : "Refreshing batch data...")
+            : null;
+
   if (errorText?.includes("re-authentication") || errorText?.includes("403")) {
     return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["patient-import"])} />;
   }
 
   return (
     <div className="space-y-4">
+      {inProgressMessage && (
+        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm">
+          {inProgressMessage}
+        </div>
+      )}
+
       {errorText && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {errorText}
@@ -1346,12 +1379,21 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
         </h4>
         <input type="file" accept=".xlsx,.xls" onChange={handlePickFile} />
         {fileName ? <p className="text-xs text-stone-500">{fileName}</p> : null}
+        <Button
+          onClick={() => void handleInspectWorkbook()}
+          disabled={!fileContentBase64 || inspectMutation.isPending}
+          className="text-sm"
+        >
+          {inspectMutation.isPending
+            ? (language === "ar" ? "جاري قراءة الأعمدة..." : "Reading headers...")
+            : (language === "ar" ? "2) قراءة الأعمدة" : "2) Read workbook headers")}
+        </Button>
       </div>
 
       {sheetNames.length > 0 && (
         <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 space-y-3">
           <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-            {language === "ar" ? "2) اختيار الورقة + ربط الأعمدة" : "2) Select sheet + map columns"}
+            {language === "ar" ? "3) اختيار الورقة + ربط الأعمدة" : "3) Select sheet + map columns"}
           </h4>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1418,7 +1460,7 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
           >
             {previewMutation.isPending
               ? (language === "ar" ? "جاري الاستيراد إلى المرحلة..." : "Staging import...")
-              : (language === "ar" ? "3) استيراد إلى المرحلة (Preview)" : "3) Stage import (Preview)")}
+              : (language === "ar" ? "4) استيراد إلى المرحلة (Preview)" : "4) Stage import (Preview)")}
           </Button>
         </div>
       )}
@@ -1426,7 +1468,7 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
       {batchId !== null && (
         <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 space-y-4">
           <h4 className="text-sm font-semibold text-stone-900 dark:text-stone-100">
-            {language === "ar" ? "4) مراجعة الصفوف" : "4) Review staged rows"}
+            {language === "ar" ? "5) مراجعة الصفوف" : "5) Review staged rows"}
           </h4>
 
           {batchLoading ? (
@@ -1454,7 +1496,7 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
             >
               {confirmMutation.isPending
                 ? (language === "ar" ? "جاري ترحيل البيانات..." : "Migrating...")
-                : (language === "ar" ? "5) تأكيد الترحيل إلى المرضى" : "5) Confirm migration to live patients")}
+                : (language === "ar" ? "6) تأكيد الترحيل إلى المرضى" : "6) Confirm migration to live patients")}
             </Button>
           </div>
 

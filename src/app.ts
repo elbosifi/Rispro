@@ -48,10 +48,9 @@ export function createApp(): Application {
   app.use(securityHeaders);
 
   // ---- Conditional JSON parser ------------------------------------------
-  // The Legacy Access viewer upload endpoint accepts base64-encoded MDB files
-  // that can easily exceed the default 8 MB body limit (a 30 MB .mdb file
-  // becomes ~40 MB as base64).  We skip the global parser for that single
-  // endpoint and let the route itself apply its own 100 MB parser.
+  // Some upload endpoints accept base64-encoded files that can exceed the
+  // normal global body limit. We skip the global parser for those endpoints
+  // and let route-specific parsers apply larger limits.
   //
   // Middleware flow for /api/legacy-access-viewer/upload:
   //   1. securityHeaders          → applied
@@ -65,9 +64,10 @@ export function createApp(): Application {
   // All other routes go through the normal global parser.
   // -----------------------------------------------------------------------
   const LEGACY_UPLOAD_PATH = "/api/legacy-access-viewer/upload";
+  const PATIENT_IMPORT_PREFIX = "/api/settings/patient-import";
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    if (req.path === LEGACY_UPLOAD_PATH) {
-      // Let the route's own body parser handle it.
+    if (req.path === LEGACY_UPLOAD_PATH || req.path.startsWith(PATIENT_IMPORT_PREFIX)) {
+      // Let route-specific body parsers handle it.
       return next();
     }
     // Normal global parser for everything else.

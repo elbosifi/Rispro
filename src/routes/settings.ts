@@ -113,6 +113,7 @@ settingsRouter.delete(
 
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
 
 settingsRouter.get(
   "/",
