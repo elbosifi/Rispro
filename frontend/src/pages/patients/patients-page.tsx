@@ -55,22 +55,21 @@ export default function PatientsPage() {
         <div className="flex items-center gap-4">
           <SectionLabel>{t(language, "patients.title")}</SectionLabel>
         </div>
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
-              {t(language, "patients.title")}
-            </h1>
-            <p className="mt-2 text-muted-foreground">
-              {language === "ar" ? "ابحث عن سجلات المرضى واعرضها وأدرها" : "Search, view, and manage patient records"}
-            </p>
-          </div>
-          <Button
-            onClick={() => navigate("/patients/new")}
-          >
-            <UserPlus size={16} />
-            {t(language, "patients.registerTitle")}
-          </Button>
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
+            {t(language, "patients.title")}
+          </h1>
+          <p className="mt-2 text-muted-foreground">
+            {language === "ar" ? "ابحث عن سجلات المرضى واعرضها وأدرها" : "Search, view, and manage patient records"}
+          </p>
         </div>
+      </div>
+
+      <div className="flex justify-start lg:justify-end">
+        <Button onClick={() => navigate("/patients/new")}>
+          <UserPlus size={16} />
+          {t(language, "patients.registerTitle")}
+        </Button>
       </div>
 
       {/* Search */}
