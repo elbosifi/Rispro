@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createPatient,
   searchPatients,
+  fetchPatientMrnPreview,
   fetchNameDictionary,
   upsertNameDictionaryEntry,
   fetchPatientById,
@@ -123,7 +124,7 @@ interface PatientFormProps {
 }
 
 export default function PatientForm({ mode, patientId, onSuccess, onCancel }: PatientFormProps) {
-  const { language } = useLanguage();
+  const { language, t } = useLanguage();
   const isEdit = mode === "edit";
   const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
   // Track original national ID to know if it was edited (edit mode only)
@@ -197,6 +198,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     enabled: !isEdit && dupQuery.length > 1,
     staleTime: 1000 * 30
   });
+  const { data: mrnPreview, isLoading: mrnPreviewLoading } = useQuery({
+    queryKey: ["patient-mrn-preview"],
+    queryFn: fetchPatientMrnPreview,
+    enabled: !isEdit,
+    staleTime: 1000 * 15
+  });
   useEffect(() => {
     if (potentialDuplicates && potentialDuplicates.length > 0) {
       const filtered = isEdit ? potentialDuplicates.filter((p) => p.id !== patientId) : potentialDuplicates;
@@ -218,6 +225,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setAddTokenError(null);
       prevArabicTokenCountRef.current = 0;
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
+      queryClient.invalidateQueries({ queryKey: ["patient-mrn-preview"] });
       showToast(language === "ar"
         ? `تم تسجيل المريض: ${patient.arabicFullName} (MRN: ${patient.mrn})`
         : `Patient registered: ${patient.arabicFullName} (MRN: ${patient.mrn})`);
@@ -551,7 +559,27 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Shared form fields JSX (rendered in both create and edit)
   // ============================================================
   const formFields = (
-    <form id="patient-form" onSubmit={handleSubmit} className="space-y-5">
+    <form id="patient-form" onSubmit={handleSubmit} noValidate className="space-y-5">
+      {!isEdit && (
+        <Card className="p-3 sm:p-4">
+          <div className="space-y-2">
+            <label className="block text-sm font-semibold text-foreground">
+              {t("patients.autoMrn")}
+            </label>
+            <input
+              value={mrnPreviewLoading ? "…" : (mrnPreview?.mrn || "—")}
+              readOnly
+              disabled
+              aria-readonly="true"
+              className="input-premium input-ltr w-full cursor-not-allowed bg-muted/60 text-muted-foreground font-mono"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("patients.autoMrnHint")}
+            </p>
+          </div>
+        </Card>
+      )}
+
       {/* Identity */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
@@ -561,6 +589,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <div>
             <label className={`${fieldLabelClass} ${isDuplicateField("arabicFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}</label>
             <input
+              aria-label={language === "ar" ? "الاسم العربي" : "Arabic Full Name"}
               value={form.arabicFullName}
               onChange={(e) => {
                 setDuplicateFocusField("arabicFullName");
@@ -577,6 +606,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <div>
             <label className={`${fieldLabelClass} ${isDuplicateField("englishFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}</label>
             <input
+              aria-label={language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}
               value={form.englishFullName}
               onChange={(e) => {
                 setDuplicateFocusField("englishFullName");
@@ -658,6 +688,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           {form.identifiers.map((entry, idx) => (
             <div key={`identifier-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center mb-2">
               <select
+                aria-label={language === "ar" ? "نوع المعرف" : "Identifier Type"}
                 value={entry.typeCode}
                 ref={idx === 0 ? identifierTypeRef : undefined}
                 onChange={(e) =>
@@ -680,6 +711,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 <option value="other">{language === "ar" ? "أخرى" : "Other"}</option>
               </select>
               <input
+                aria-label={
+                  entry.typeCode === "passport"
+                    ? (language === "ar" ? "رقم الجواز" : "Passport Number")
+                    : entry.typeCode === "national_id"
+                      ? (language === "ar" ? "رقم الهوية" : "National ID")
+                      : (language === "ar" ? "قيمة المعرف" : "Identifier Value")
+                }
                 value={entry.value}
                 ref={idx === 0 ? identifierValueRef : undefined}
                 onChange={(e) =>
@@ -750,6 +788,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <div className="mt-3">
               <label className={fieldLabelClass}>{language === "ar" ? "تأكيد رقم الهوية" : "Confirm National ID"}</label>
               <input
+                aria-label={language === "ar" ? "تأكيد رقم الهوية" : "National ID Confirmation"}
                 value={form.nationalIdConfirmation}
                 onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.target.value.replace(/\D/g, "") }))}
                 onKeyDown={handleEnterNavigation("nationalIdConfirmation")}
@@ -776,6 +815,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <div>
             <label className={fieldLabelClass}>{language === "ar" ? "الجنس" : "Sex"}</label>
             <select
+              aria-label={language === "ar" ? "الجنس" : "Sex"}
               value={form.sex}
               onChange={(v) => setForm((f) => ({ ...f, sex: v.target.value }))}
               onKeyDown={handleEnterNavigation("sex")}
@@ -801,6 +841,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <div>
             <label className={fieldLabelClass}>{language === "ar" ? "العمر (سنوات)" : "Age (years)"}</label>
             <input
+              aria-label={language === "ar" ? "العمر (سنوات)" : "Age (years)"}
               value={form.ageYears}
               onChange={(v) => setForm((f) => ({ ...f, ageYears: v.target.value.replace(/\D/g, "").slice(0, 3) }))}
               onKeyDown={handleEnterNavigation("ageYears")}
@@ -834,8 +875,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label className={`${fieldLabelClass} ${isDuplicateField("phone1") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الهاتف 1 (مطلوب)" : "Phone 1 (Required)"}</label>
-            <input
-              value={form.phone1}
+          <input
+            aria-label={language === "ar" ? "الهاتف 1" : "Phone 1"}
+            value={form.phone1}
               onChange={(v) => {
                 setDuplicateFocusField("phone1");
                 setForm((f) => ({ ...f, phone1: normalizePhoneInput(v.target.value) }));
@@ -849,8 +891,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </div>
           <div>
             <label className={fieldLabelClass}>{language === "ar" ? "الهاتف 2 (اختياري)" : "Phone 2 (Optional)"}</label>
-            <input
-              value={form.phone2}
+          <input
+            aria-label={language === "ar" ? "الهاتف 2" : "Phone 2"}
+            value={form.phone2}
               onChange={(v) => setForm((f) => ({ ...f, phone2: normalizePhoneInput(v.target.value) }))}
               onKeyDown={handleEnterNavigation("phone2")}
               ref={phone2Ref}
@@ -860,8 +903,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </div>
           <div className="md:col-span-2">
             <label className={fieldLabelClass}>{language === "ar" ? "المدينة" : "City"}</label>
-            <select
-              value={form.address}
+          <select
+            aria-label={language === "ar" ? "المدينة" : "City"}
+            value={form.address}
               onChange={(v) => setForm((f) => ({ ...f, address: v.target.value }))}
               onKeyDown={handleEnterNavigation("address")}
               ref={addressRef}

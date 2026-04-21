@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
+import { invalidateAllCache } from "../utils/cache.js";
 import {
   searchPatients,
   createPatient,
@@ -192,6 +193,71 @@ test("createPatient: persists demographics_estimated flag", async (t) => {
     assert.ok(found, "search should include created patient");
     assert.equal(found?.demographics_estimated, true, "search should include demographics_estimated");
   } finally {
+    await pool.query(`delete from patients where national_id = $1`, [nationalId]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
+test("createPatient: applies configured MRN prefix", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const mrnPrefix = `PRE-${suffix}-`;
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_mrn_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const nationalId = uniqueNationalId("1");
+
+  try {
+    await pool.query(
+      `
+        update system_settings
+        set setting_value = jsonb_build_object('value', $1::text),
+            updated_by_user_id = $2
+        where category = 'patient_registration' and setting_key = 'mrn_prefix'
+      `,
+      [mrnPrefix, receptionistUserId]
+    );
+    invalidateAllCache();
+
+    const created = await createPatient(
+      {
+        nationalId,
+        nationalIdConfirmation: nationalId,
+        identifierType: "national_id",
+        identifierValue: nationalId,
+        arabicFullName: `مريض بادئة ${suffix}`,
+        englishFullName: `Prefix ${suffix}`,
+        ageYears: 31,
+        demographicsEstimated: false,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city"
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn?.startsWith(mrnPrefix), `Expected MRN to start with ${mrnPrefix}`);
+    const fetched = await getPatientById(created.id);
+    assert.equal(fetched.mrn?.startsWith(mrnPrefix), true, "Fetched patient MRN should keep the prefix");
+  } finally {
+    await pool.query(
+      `
+        update system_settings
+        set setting_value = jsonb_build_object('value', ''),
+            updated_by_user_id = null
+        where category = 'patient_registration' and setting_key = 'mrn_prefix'
+      `
+    ).catch(() => undefined);
+    invalidateAllCache();
     await pool.query(`delete from patients where national_id = $1`, [nationalId]);
     await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
     await pool.query(`delete from users where id = $1`, [receptionistUserId]);

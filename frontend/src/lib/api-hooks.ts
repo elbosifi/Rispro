@@ -224,6 +224,10 @@ export async function searchPatients(query: string): Promise<Patient[]> {
   return mapPatients(raw.patients);
 }
 
+export async function fetchPatientMrnPreview(): Promise<{ mrn: string }> {
+  return api<{ mrn: string }>("/patients/mrn-preview");
+}
+
 // -- Patient CRUD --
 export async function fetchPatientById(id: number): Promise<Patient> {
   const raw = await api<{ patient: RawRecord }>(`/patients/${id}`);

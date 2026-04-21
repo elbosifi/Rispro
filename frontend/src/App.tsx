@@ -139,14 +139,15 @@ function AppContent() {
             type="button"
             onClick={() => navigate("/patients")}
             aria-label={language === "ar" ? "رجوع" : "Back"}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-full border text-white shadow-sm transition-all hover:shadow-md active:scale-95 sm:w-auto sm:px-3 sm:gap-2 sm:text-xs whitespace-nowrap"
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-full border px-3 text-xs font-medium whitespace-nowrap shadow-sm transition-all hover:shadow-md active:scale-95 flex-shrink-0"
             style={{
               backgroundColor: "var(--accent)",
-              borderColor: "var(--accent)"
+              borderColor: "var(--accent)",
+              color: "white"
             }}
           >
-            <ArrowLeft size={16} strokeWidth={2.5} />
-            <span className="hidden sm:inline leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
+            <ArrowLeft size={16} strokeWidth={2.75} />
+            <span className="leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
           </button>
         ) : undefined}
         onUndo={() => navigate(-1)}

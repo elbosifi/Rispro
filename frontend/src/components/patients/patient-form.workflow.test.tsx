@@ -12,6 +12,7 @@ import {
   fetchNameDictionary,
   upsertNameDictionaryEntry,
   fetchPatientById,
+  fetchPatientMrnPreview,
   updatePatient,
   deletePatient
 } from "@/lib/api-hooks";
@@ -22,6 +23,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchNameDictionary: vi.fn(),
   upsertNameDictionaryEntry: vi.fn(),
   fetchPatientById: vi.fn(),
+  fetchPatientMrnPreview: vi.fn(),
   updatePatient: vi.fn(),
   deletePatient: vi.fn()
 }));
@@ -72,6 +74,7 @@ describe("PatientForm workflow hardening", () => {
     vi.mocked(fetchNameDictionary).mockResolvedValue({ entries: [] } as any);
     vi.mocked(searchPatients).mockResolvedValue([]);
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
+    vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
     vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد ثالث", mrn: "MRN-100" }));
     vi.mocked(fetchPatientById).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: true }));
     vi.mocked(updatePatient).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: false }));
@@ -104,6 +107,13 @@ describe("PatientForm workflow hardening", () => {
     await user.type(screen.getByLabelText(/Phone 1/i), "09");
 
     await waitFor(() => expect(screen.getByText("مريض مطابق")).toBeTruthy());
+  });
+
+  it("shows a read-only auto-generated MRN preview on create", async () => {
+    renderPatientForm({ mode: "create" });
+
+    const mrnInput = await screen.findByDisplayValue("000123");
+    expect((mrnInput as HTMLInputElement).disabled).toBe(true);
   });
 
   it("blocks submit for missing sex, then missing DOB/age", async () => {

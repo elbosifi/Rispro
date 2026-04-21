@@ -9,6 +9,7 @@ import {
   getPatientById,
   getPatientNoShowSummary,
   mergePatients,
+  previewNextPatientMrn,
   searchPatients,
   updatePatient
 } from "../services/patient-service.js";
@@ -51,6 +52,14 @@ patientsRouter.post(
     const userId: UserId = request.user.sub;
     const patient = await createPatient(request.body ?? {}, userId);
     res.status(201).json({ patient });
+  })
+);
+
+patientsRouter.get(
+  "/mrn-preview",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const mrn = await previewNextPatientMrn();
+    res.json({ mrn });
   })
 );
 

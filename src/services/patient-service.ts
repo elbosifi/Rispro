@@ -2,7 +2,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, normalizeArabicName, normalizeLibyanPhone } from "../utils/normalize.js";
 import { validateIsoDate } from "../utils/date.js";
-import { getCached, setCached, invalidateCache } from "../utils/cache.js";
+import { getCached, setCached } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
 import { generateEnglishFromDictionary, NameDictionaryLookup } from "../utils/name-generation.js";
 import {
@@ -22,6 +22,7 @@ export interface PatientRegistrationRules {
   nationalIdRule: string;
   phoneRule: string;
   dobRule: string;
+  mrnPrefix: string;
 }
 
 export interface PatientRow {
@@ -245,11 +246,61 @@ async function loadPatientRegistrationSettings(): Promise<PatientRegistrationRul
   const result: PatientRegistrationRules = {
     nationalIdRule: settings.national_id_required || "required_with_confirmation",
     phoneRule: settings.phone1_required || "required",
-    dobRule: settings.dob_or_age_rule || "age_or_dob_required"
+    dobRule: settings.dob_or_age_rule || "age_or_dob_required",
+    mrnPrefix: String(settings.mrn_prefix || "").trim()
   };
   
   setCached(cacheKey, result, 5 * 60 * 1000); // 5 minutes
   return result;
+}
+
+function formatPatientMrn(sequenceValue: number, prefix: string): string {
+  const numericPart = String(sequenceValue).padStart(6, "0");
+  return `${prefix}${numericPart}`;
+}
+
+async function readPatientMrnSequencePreview(client: { query: PoolClient["query"] }): Promise<number> {
+  const { rows } = await client.query<{ last_value: string | number; is_called: boolean; increment_by: string | number }>(
+    `
+      select last_value, is_called, increment_by
+      from patient_mrn_seq
+    `
+  );
+
+  const row = rows[0];
+  if (!row) {
+    throw new HttpError(500, "Unable to read patient MRN sequence.");
+  }
+
+  const lastValue = Number(row.last_value);
+  const incrementBy = Number(row.increment_by || 1);
+  if (!Number.isFinite(lastValue) || !Number.isFinite(incrementBy) || incrementBy <= 0) {
+    throw new HttpError(500, "Invalid patient MRN sequence state.");
+  }
+
+  return row.is_called ? lastValue + incrementBy : lastValue;
+}
+
+async function allocateNextPatientMrn(client: PoolClient, prefix: string): Promise<string> {
+  const { rows } = await client.query<{ next_value: string | number }>(
+    `
+      select nextval('patient_mrn_seq') as next_value
+    `
+  );
+
+  const row = rows[0];
+  const nextValue = Number(row?.next_value);
+  if (!Number.isFinite(nextValue) || nextValue <= 0) {
+    throw new HttpError(500, "Unable to allocate patient MRN.");
+  }
+
+  return formatPatientMrn(nextValue, prefix);
+}
+
+export async function previewNextPatientMrn(client?: { query: PoolClient["query"] }): Promise<string> {
+  const rules = await loadPatientRegistrationSettings();
+  const sequenceValue = await readPatientMrnSequencePreview(client ?? pool);
+  return formatPatientMrn(sequenceValue, rules.mrnPrefix);
 }
 
 async function loadNameDictionary(): Promise<NameDictionaryLookup[]> {
@@ -713,61 +764,65 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
     const client = await pool.connect();
     try {
       await client.query("begin");
+      const allocatedMrn = await allocateNextPatientMrn(client, rules.mrnPrefix);
       const { rows } = await client.query<PersistedPatientRow>(
-      `
-        insert into patients (
-          national_id,
-          identifier_type,
-          identifier_value,
-          arabic_full_name,
-          english_full_name,
-          normalized_arabic_name,
-          age_years,
-          demographics_estimated,
-          estimated_date_of_birth,
-          sex,
-          phone_1,
-          phone_2,
-          address,
-          created_by_user_id,
-          updated_by_user_id
-        )
-        values (
-          nullif($1, ''),
-          $2,
-          nullif($3, ''),
-          $4,
-          nullif($5, ''),
-          $6,
-          $7,
-          $8,
-          $9,
-          $10,
-          nullif($11, ''),
-          nullif($12, ''),
-          nullif($13, ''),
-          $14,
-          $14
-        )
-        returning *
-      `,
-      [
-        validated.cleanNationalId,
-        validated.identifierType,
-        validated.cleanIdentifierValue,
-        validated.arabicFullName,
-        validated.englishFullName,
-        validated.normalizedArabicName,
-        validated.parsedAge,
-        validated.demographicsEstimated,
-        validated.estimatedDob,
-        validated.sex,
-        validated.cleanPhone1,
-        validated.cleanPhone2,
-        validated.address,
-        createdByUserId
-      ]
-    );
+        `
+          insert into patients (
+            mrn,
+            national_id,
+            identifier_type,
+            identifier_value,
+            arabic_full_name,
+            english_full_name,
+            normalized_arabic_name,
+            age_years,
+            demographics_estimated,
+            estimated_date_of_birth,
+            sex,
+            phone_1,
+            phone_2,
+            address,
+            created_by_user_id,
+            updated_by_user_id
+          )
+          values (
+            $1,
+            nullif($2, ''),
+            $3,
+            nullif($4, ''),
+            $5,
+            nullif($6, ''),
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            nullif($12, ''),
+            nullif($13, ''),
+            nullif($14, ''),
+            $15,
+            $15
+          )
+          returning *
+        `,
+        [
+          allocatedMrn,
+          validated.cleanNationalId,
+          validated.identifierType,
+          validated.cleanIdentifierValue,
+          validated.arabicFullName,
+          validated.englishFullName,
+          validated.normalizedArabicName,
+          validated.parsedAge,
+          validated.demographicsEstimated,
+          validated.estimatedDob,
+          validated.sex,
+          validated.cleanPhone1,
+          validated.cleanPhone2,
+          validated.address,
+          createdByUserId
+        ]
+      );
 
       const createdPatient = rows[0];
 

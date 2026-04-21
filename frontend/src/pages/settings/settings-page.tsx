@@ -994,6 +994,13 @@ function inferSettingControl(key: string, value: any): SettingControl {
   return { label: key.replace(/_/g, " "), type: "text" };
 }
 
+function friendlySettingLabel(category: string, key: string, t: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
+  if (category === "patient_registration" && key === "mrn_prefix") {
+    return t("settings.patientRegistration.mrnPrefix");
+  }
+  return key.replace(/_/g, " ");
+}
+
 function SimpleSettingsSection({ category, onReAuthRequired }: { category: string; onReAuthRequired: (key: string[]) => void }) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
@@ -1024,6 +1031,11 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
   return (
     <div className="space-y-3">
+      {category === "patient_registration" && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
+          {t("settings.patientRegistration.mrnPrefixHint")}
+        </div>
+      )}
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
@@ -1032,10 +1044,11 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
       )}
       {Object.entries(data || {}).map(([key, value]: [string, any]) => {
         const control = inferSettingControl(key, value);
+        const label = friendlySettingLabel(category, key, t);
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
         return (
           <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">
-            <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{control.label}</span>
+            <span className="text-stone-700 dark:text-stone-300 font-medium text-sm">{label}</span>
             <div className="flex items-center gap-2">
               {control.type === "dropdown" && control.options && (
                 <select
