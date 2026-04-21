@@ -1017,6 +1017,9 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
     mutationFn: (payload: { entries: { key: string; value: any }[] }) => saveSettings(category, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["settings", category] });
+      if (category === "patient_registration") {
+        queryClient.invalidateQueries({ queryKey: ["patient-mrn-preview"] });
+      }
       if (category === "scheduling_and_capacity") {
         queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
       }
