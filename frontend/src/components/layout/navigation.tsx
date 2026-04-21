@@ -236,7 +236,7 @@ export function TopBar({
 
         {/* Center page banner */}
         {pageTitle && (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+          <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 lg:block">
             <div
               className="max-w-[88vw] overflow-hidden rounded-full border px-3 py-1.5 text-center shadow-sm sm:max-w-[42vw] sm:px-4"
               style={{
