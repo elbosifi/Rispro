@@ -747,26 +747,54 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ arabicText: "", englishText: "" });
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const isReauthError = (err: unknown): boolean => {
+    const message = err instanceof Error ? err.message : String(err || "");
+    return message.includes("re-authentication") || message.includes("403");
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteNameDictionaryEntry(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+    onError: (err: any) => {
+      if (isReauthError(err)) {
+        onReAuthRequired(["name-dictionary"]);
+        return;
+      }
+      setMutationError(err?.message || "Delete failed");
+    }
   });
   const deleteAllMutation = useMutation({
     mutationFn: async (ids: number[]) => { for (const id of ids) await deleteNameDictionaryEntry(id); },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Delete all failed"); }
+    onError: (err: any) => {
+      if (isReauthError(err)) {
+        onReAuthRequired(["name-dictionary"]);
+        return;
+      }
+      setMutationError(err?.message || "Delete all failed");
+    }
   });
   const updateMutation = useMutation({
     mutationFn: (_data: { arabicText: string; englishText: string }) => upsertNameDictionaryEntry(_data.arabicText, _data.englishText),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setEditingId(null); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+    onError: (err: any) => {
+      if (isReauthError(err)) {
+        onReAuthRequired(["name-dictionary"]);
+        return;
+      }
+      setMutationError(err?.message || "Update failed");
+    }
   });
   const importMutation = useMutation({
     mutationFn: (entries: { arabicText: string; englishText: string }[]) => importNameDictionary(entries),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Import failed"); }
+    onError: (err: any) => {
+      if (isReauthError(err)) {
+        onReAuthRequired(["name-dictionary"]);
+        return;
+      }
+      setMutationError(err?.message || "Import failed");
+    }
   });
 
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
