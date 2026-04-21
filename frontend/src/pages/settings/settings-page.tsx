@@ -1007,6 +1007,12 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   const { data, isLoading, error } = useQuery({ queryKey: ["settings", category], queryFn: () => fetchSettings(category) });
 
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [mrnPrefix, setMrnPrefix] = useState("");
+  useEffect(() => {
+    if (category === "patient_registration") {
+      setMrnPrefix(String(data?.mrn_prefix ?? ""));
+    }
+  }, [category, data]);
   const saveMutation = useMutation({
     mutationFn: (payload: { entries: { key: string; value: any }[] }) => saveSettings(category, payload),
     onSuccess: () => {
@@ -1032,8 +1038,33 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
   return (
     <div className="space-y-3">
       {category === "patient_registration" && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-800">
-          {t("settings.patientRegistration.mrnPrefixHint")}
+        <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold text-amber-800">{t("settings.patientRegistration.mrnPrefix")}</p>
+            <p className="text-sm text-amber-700 mt-1">{t("settings.patientRegistration.mrnPrefixHint")}</p>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-amber-700 mb-1.5">
+                {t("settings.patientRegistration.mrnPrefix")}
+              </label>
+              <input
+                type="text"
+                value={mrnPrefix}
+                onChange={(e) => setMrnPrefix(e.target.value)}
+                placeholder={t("settings.patientRegistration.mrnPrefix")}
+                className="w-full px-3 py-2 text-sm rounded-lg border border-amber-200 bg-white text-stone-900 outline-none focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+            <Button
+              type="button"
+              onClick={() => saveMutation.mutate({ entries: [{ key: "mrn_prefix", value: mrnPrefix }] })}
+              disabled={saveMutation.isPending}
+              className="sm:min-w-32"
+            >
+              {saveMutation.isPending ? t("settings.loading") : t("common.save")}
+            </Button>
+          </div>
         </div>
       )}
       {mutationError && (
@@ -1042,7 +1073,9 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
           <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
-      {Object.entries(data || {}).map(([key, value]: [string, any]) => {
+      {Object.entries(data || {})
+        .filter(([key]) => !(category === "patient_registration" && key === "mrn_prefix"))
+        .map(([key, value]: [string, any]) => {
         const control = inferSettingControl(key, value);
         const label = friendlySettingLabel(category, key, t);
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
