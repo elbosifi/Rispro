@@ -41,27 +41,28 @@ export default function PatientsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <Button
-        onClick={() => navigate("/patients/new")}
-        className="fixed z-50 shadow-2xl rounded-full px-5 sm:top-[6.5rem] sm:right-6 sm:bottom-auto bottom-4 right-4"
-      >
-        <UserPlus size={16} />
-        {t(language, "patients.registerTitle")}
-      </Button>
-
       {/* Search */}
-      <Card className="p-6">
-        <div className="relative">
-          <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center text-muted-foreground">
-            <Search size={18} strokeWidth={1.5} />
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <Button
+            onClick={() => navigate("/patients/new")}
+            className="w-full lg:w-auto shrink-0 rounded-2xl px-4 text-sm sm:text-[0.95rem]"
+          >
+            <UserPlus size={16} />
+            <span className="leading-none">{t(language, "patients.registerTitle")}</span>
+          </Button>
+          <div className="relative flex-1">
+            <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center text-muted-foreground">
+              <Search size={18} strokeWidth={1.5} />
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder={t(language, "patients.searchPlaceholder")}
+              className="input-premium pl-12 h-11 sm:h-12"
+            />
           </div>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={t(language, "patients.searchPlaceholder")}
-            className="input-premium pl-12"
-          />
         </div>
       </Card>
 
