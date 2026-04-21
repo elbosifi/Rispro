@@ -150,6 +150,78 @@ test("searchPatients: finds patient by normalized identifier variant", async (t)
   }
 });
 
+test("searchPatients: ranks first-token matches before later-token matches for single token query", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_rank_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const token = `muhammadrank${Math.floor(Math.random() * 100000)}`;
+  const createdPatientIds: number[] = [];
+
+  const insertPatient = async (englishFullName: string) => {
+    const nationalId = uniqueNationalId("1");
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, 'national_id', $1::text, $2, $3, $2, 30, '1996-01-01', 'M', '0912345678', 'city', $4, $4)
+        returning id
+      `,
+      [nationalId, `مريض ${suffix} ${englishFullName}`, englishFullName, receptionistUserId]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const exactFirstA = await insertPatient(`${token} Ali Saleh`);
+    const exactFirstB = await insertPatient(`${token} Omar`);
+    const prefixFirst = await insertPatient(`${token}x Kareem`);
+    const laterTokenA = await insertPatient(`Ali ${token} Saleh`);
+    const laterTokenB = await insertPatient(`Omar bin ${token}`);
+
+    const results = await searchPatients(token);
+    const rankedIds = results.map((row) => Number(row.id));
+
+    const idxExactFirstA = rankedIds.indexOf(exactFirstA);
+    const idxExactFirstB = rankedIds.indexOf(exactFirstB);
+    const idxPrefixFirst = rankedIds.indexOf(prefixFirst);
+    const idxLaterA = rankedIds.indexOf(laterTokenA);
+    const idxLaterB = rankedIds.indexOf(laterTokenB);
+
+    assert.ok(idxExactFirstA >= 0, "Exact first-token match A should appear");
+    assert.ok(idxExactFirstB >= 0, "Exact first-token match B should appear");
+    assert.ok(idxPrefixFirst >= 0, "Prefix first-token match should appear");
+    assert.ok(idxLaterA >= 0, "Later-token match A should appear");
+    assert.ok(idxLaterB >= 0, "Later-token match B should appear");
+
+    assert.ok(idxExactFirstA < idxLaterA, "Exact first-token match should rank before later-token match");
+    assert.ok(idxExactFirstB < idxLaterB, "Exact first-token match should rank before later-token match");
+    assert.ok(idxExactFirstA < idxPrefixFirst, "Exact first-token match should rank before prefix first-token match");
+    assert.ok(idxExactFirstB < idxPrefixFirst, "Exact first-token match should rank before prefix first-token match");
+  } finally {
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
 test("createPatient: persists demographics_estimated flag", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const suffix = uniqueSuffix();

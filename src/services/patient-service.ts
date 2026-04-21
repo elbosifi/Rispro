@@ -545,11 +545,17 @@ export async function getPatientNoShowSummary(patientId: UserId): Promise<{ noSh
 export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
   const term = searchTerm.trim();
   const pattern = `%${term}%`;
-  const normalizedPattern = `%${normalizeArabicName(term)}%`;
+  const normalizedArabicTerm = normalizeArabicName(term);
+  const normalizedPattern = `%${normalizedArabicTerm}%`;
   const normalizedIdentifierPattern = `%${normalizeIdentifierValue(term)}%`;
+  const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
+  const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
+  const normalizedEnglishPrefixPattern = `${normalizedEnglishTerm}%`;
+  const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
+  const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
   const query = `
-    select distinct
+    select
       p.id,
       p.mrn,
       case
@@ -579,20 +585,42 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       order by pi.is_primary desc, pi.id asc
       limit 1
     ) as primary_identifier on true
-    left join patient_identifiers pi on pi.patient_id = p.id
     where
       $1 = ''
       or p.mrn ilike $2
       or p.national_id ilike $2
       or p.identifier_value ilike $2
-      or pi.value ilike $2
-      or pi.normalized_value ilike $4
+      or exists (
+        select 1
+        from patient_identifiers pi
+        where
+          pi.patient_id = p.id
+          and (
+            pi.value ilike $2
+            or pi.normalized_value ilike $4
+          )
+      )
       or p.phone_1 ilike $2
       or p.phone_2 ilike $2
       or p.arabic_full_name ilike $2
       or p.normalized_arabic_name ilike $3
       or p.english_full_name ilike $2
-    order by p.id desc
+    order by
+      case
+        when $1 = '' then 99
+        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 1
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 1
+        when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 2
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 2
+        when p.normalized_arabic_name = $5 then 3
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 3
+        when p.normalized_arabic_name like $7 then 4
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 4
+        when p.normalized_arabic_name like $9 then 5
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 5
+        else 6
+      end asc,
+      p.id desc
     limit 25
   `;
 
@@ -600,7 +628,13 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     term,
     pattern,
     normalizedPattern,
-    normalizedIdentifierPattern
+    normalizedIdentifierPattern,
+    normalizedArabicTerm,
+    normalizedEnglishTerm,
+    normalizedArabicPrefixPattern,
+    normalizedEnglishPrefixPattern,
+    normalizedArabicLaterTokenPattern,
+    normalizedEnglishLaterTokenPattern
   ]);
   return rows;
 }
