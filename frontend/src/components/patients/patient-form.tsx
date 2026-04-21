@@ -543,29 +543,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // ============================================================
   const formFields = (
     <form id="patient-form" onSubmit={handleSubmit} className="space-y-5">
-      {!isEdit && (
-        <div className="sticky top-4 z-20 -mx-0 sm:-mx-0">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-border bg-card/95 backdrop-blur px-4 py-3 shadow-sm">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">
-                {language === "ar" ? "الحفظ والتسجيل" : "Save and register"}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {language === "ar" ? "أكمل البيانات ثم اضغط تسجيل المريض." : "Complete the form, then submit the patient."}
-              </p>
-            </div>
-            <div className="flex-1" />
-            <Button
-              type="submit"
-              disabled={mutation.isPending}
-              className="w-full sm:w-auto"
-            >
-              {submitLabel}
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Identity */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
@@ -639,99 +616,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </Card>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "نوع المعرف" : "Identifier Type"}</label>
-            <select
-              value={form.identifierType}
-              onKeyDown={handleEnterNavigation("identifierType")}
-              ref={identifierTypeRef}
-              required
-              onChange={(v) => setForm((f) => {
-                const nextType = v.target.value as IdentifierType;
-                const nextValue = normalizeIdentifierForType(nextType, f.identifierValue);
-                const nextIdentifiers = [...f.identifiers];
-                const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
-                if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
-                  nextIdentifiers.push({ typeCode: nextType, value: nextValue, isPrimary: true });
-                } else {
-                  nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: nextType, value: nextValue, isPrimary: true };
-                }
-                return {
-                  ...f,
-                  identifierType: nextType,
-                  identifierValue: nextValue,
-                  identifiers: nextIdentifiers,
-                  nationalIdConfirmation: ""
-                };
-              })}
-              className="input-premium input-ltr w-full"
-            >
-              <option value="national_id">{language === "ar" ? "رقم الهوية (ليبي)" : "National ID (Libyan)"}</option>
-              <option value="passport">{language === "ar" ? "جواز سفر" : "Passport"}</option>
-              <option value="other">{language === "ar" ? "أخرى" : "Other"}</option>
-            </select>
-          </div>
-          {isNationalId ? (
-            <div>
-              <label className={fieldLabelClass}>{language === "ar" ? "رقم الهوية (12 رقم)" : "National ID (12 digits)"}</label>
-              <input
-                value={form.identifierValue}
-                onChange={(e) => handleIdentifierValueChange(e.target.value)}
-                onKeyDown={handleEnterNavigation("identifierValue")}
-                ref={identifierValueRef}
-                maxLength={12}
-                placeholder="1xxxxxxxxxxx"
-                className="input-premium input-ltr w-full"
-              />
-            </div>
-          ) : (
-            <div>
-              <label className={fieldLabelClass}>
-                {form.identifierType === "passport" ? (language === "ar" ? "رقم الجواز" : "Passport Number") : (language === "ar" ? "قيمة المعرف" : "Identifier Value")}
-              </label>
-              <input
-                value={form.identifierValue}
-                onChange={(e) => setForm((f) => {
-                  const nextValue = normalizeIdentifierForType(f.identifierType, e.target.value);
-                  const nextIdentifiers = [...f.identifiers];
-                  const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
-                  if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
-                    nextIdentifiers.push({ typeCode: f.identifierType, value: nextValue, isPrimary: true });
-                  } else {
-                    nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: f.identifierType, value: nextValue, isPrimary: true };
-                  }
-                  return { ...f, identifierValue: nextValue, identifiers: nextIdentifiers };
-                })}
-                onKeyDown={handleEnterNavigation("identifierValue")}
-                ref={identifierValueRef}
-                placeholder={form.identifierType === "passport" ? "AB1234567" : ""}
-                className="input-premium input-ltr w-full"
-              />
-            </div>
-          )}
-          {showConfirmation && (
-            <div className="md:col-start-2">
-              <label className={fieldLabelClass}>{language === "ar" ? "تأكيد رقم الهوية" : "Confirm National ID"}</label>
-              <input
-                value={form.nationalIdConfirmation}
-                onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.target.value.replace(/\D/g, "") }))}
-                onKeyDown={handleEnterNavigation("nationalIdConfirmation")}
-                maxLength={12}
-                ref={nationalIdConfirmationRef}
-                onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                placeholder={language === "ar" ? "أعد كتابة رقم الهوية" : "Re-type the National ID"}
-                required={nationalIdWasEdited}
-                className="input-premium input-ltr w-full"
-              />
-            </div>
-          )}
-        </div>
         <Card className="p-3 sm:p-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-foreground">{language === "ar" ? "معرفات إضافية" : "Additional Identifiers"}</p>
+            <p className="text-sm font-semibold text-foreground">{language === "ar" ? "المعرف" : "Identifier"}</p>
             <button
               type="button"
               className="text-sm text-accent underline"
@@ -752,6 +639,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <div key={`identifier-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center mb-2">
               <select
                 value={entry.typeCode}
+                ref={idx === 0 ? identifierTypeRef : undefined}
                 onChange={(e) =>
                   setForm((f) => {
                     const next = [...f.identifiers];
@@ -772,6 +660,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </select>
               <input
                 value={entry.value}
+                ref={idx === 0 ? identifierValueRef : undefined}
                 onChange={(e) =>
                   setForm((f) => {
                     const next = [...f.identifiers];
@@ -835,6 +724,24 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               </div>
             </div>
           ))}
+          {showConfirmation && (
+            <div className="mt-3">
+              <label className={fieldLabelClass}>{language === "ar" ? "تأكيد رقم الهوية" : "Confirm National ID"}</label>
+              <input
+                value={form.nationalIdConfirmation}
+                onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.target.value.replace(/\D/g, "") }))}
+                onKeyDown={handleEnterNavigation("nationalIdConfirmation")}
+                maxLength={12}
+                ref={nationalIdConfirmationRef}
+                onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                placeholder={language === "ar" ? "أعد كتابة رقم الهوية" : "Re-type the National ID"}
+                required={nationalIdWasEdited}
+                className="input-premium input-ltr w-full"
+              />
+            </div>
+          )}
         </Card>
       </div>
 

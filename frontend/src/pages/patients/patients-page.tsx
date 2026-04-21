@@ -6,7 +6,7 @@ import PatientForm from "@/components/patients/patient-form";
 import { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
-import { ArrowLeft, UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
+import { UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
 
 export default function PatientsPage() {
@@ -26,14 +26,6 @@ export default function PatientsPage() {
   if (isNewRoute) {
     return (
       <div className="max-w-4xl mx-auto space-y-5">
-        <Button
-          variant="secondary"
-          onClick={() => navigate("/patients")}
-          className="self-start"
-        >
-          <ArrowLeft size={16} />
-          {t(language, "common.back")}
-        </Button>
         <PatientForm mode="create" />
       </div>
     );

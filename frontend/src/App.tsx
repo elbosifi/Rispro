@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useState, useCallback } from "react";
+import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { LoginPage } from "@/pages/auth/login-page";
@@ -22,6 +23,7 @@ import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
+import { Button } from "@/components/shared";
 
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
@@ -70,12 +72,19 @@ function AppContent() {
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
-  const pageTitle = (() => {
-    switch (currentRoute) {
-      case "dashboard":
-        return language === "ar" ? "لوحة التحكم" : "Dashboard";
-      case "patients":
-        return language === "ar" ? "المرضى" : "Patients";
+  const isPatientCreate = location.pathname === "/patients/new";
+  const isPatientEdit = /^\/patients\/\d+\/edit$/.test(location.pathname);
+
+  const pageTitle = isPatientCreate
+    ? (language === "ar" ? "تسجيل مريض" : "Register Patient")
+    : isPatientEdit
+      ? (language === "ar" ? "تعديل مريض" : "Edit Patient")
+      : (() => {
+      switch (currentRoute) {
+        case "dashboard":
+          return language === "ar" ? "لوحة التحكم" : "Dashboard";
+        case "patients":
+          return language === "ar" ? "المرضى" : "Patients";
       case "appointments":
         return language === "ar" ? "إنشاء موعد" : "Create Appointment";
       case "calendar":
@@ -104,8 +113,8 @@ function AppContent() {
         return language === "ar" ? "إدارة المواعيد" : "Appointment Admin";
       default:
         return null;
-    }
-  })();
+      }
+    })();
 
   if (isLoading) {
     return (
@@ -126,6 +135,17 @@ function AppContent() {
         language={language}
         isRtl={isArabic}
         pageTitle={pageTitle ?? undefined}
+        pageAction={isPatientCreate || isPatientEdit ? (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => navigate("/patients")}
+            className="h-8 rounded-full px-3 text-xs whitespace-nowrap"
+          >
+            <ArrowLeft size={14} />
+            <span>{language === "ar" ? "رجوع" : "Back"}</span>
+          </Button>
+        ) : undefined}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}

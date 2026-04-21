@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { User } from "@/types/api";
 import { t, type Language } from "@/lib/i18n";
 import {
@@ -171,6 +172,7 @@ export function TopBar({
   language,
   isRtl,
   pageTitle,
+  pageAction,
   onUndo,
   onRedo,
   onToggleLanguage,
@@ -181,6 +183,7 @@ export function TopBar({
   language: Language;
   isRtl: boolean;
   pageTitle?: string;
+  pageAction?: ReactNode;
   onUndo: () => void;
   onRedo: () => void;
   onToggleLanguage: () => void;
@@ -233,14 +236,15 @@ export function TopBar({
 
         {/* Center page banner */}
         {pageTitle && (
-          <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 lg:block">
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
             <div
-              className="max-w-[42vw] overflow-hidden rounded-full border px-4 py-1.5 text-center shadow-sm"
+              className="flex max-w-[88vw] items-center gap-2 overflow-hidden rounded-full border px-3 py-1.5 text-center shadow-sm sm:max-w-[42vw] sm:px-4"
               style={{
                 backgroundColor: "var(--card)",
                 borderColor: "var(--border)"
               }}
             >
+              {pageAction && <div className="pointer-events-auto shrink-0">{pageAction}</div>}
               <span className="block truncate text-sm font-semibold text-foreground">
                 {pageTitle}
               </span>
