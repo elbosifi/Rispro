@@ -112,8 +112,8 @@ describe("PatientForm workflow hardening", () => {
   it("shows a read-only auto-generated MRN preview on create", async () => {
     renderPatientForm({ mode: "create" });
 
-    const mrnInput = await screen.findByDisplayValue("000123");
-    expect((mrnInput as HTMLInputElement).disabled).toBe(true);
+    expect(await screen.findByText(/Auto-generated MRN:/i)).toBeTruthy();
+    expect(await screen.findByText("000123")).toBeTruthy();
   });
 
   it("blocks submit for missing sex, then missing DOB/age", async () => {

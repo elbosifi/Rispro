@@ -202,7 +202,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     queryKey: ["patient-mrn-preview"],
     queryFn: fetchPatientMrnPreview,
     enabled: !isEdit,
-    staleTime: 1000 * 15
+    staleTime: 1000 * 15,
+    retry: 2,
+    refetchOnMount: "always",
+    refetchOnReconnect: true
   });
   useEffect(() => {
     if (potentialDuplicates && potentialDuplicates.length > 0) {
@@ -593,26 +596,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // ============================================================
   const formFields = (
     <form id="patient-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} noValidate className="space-y-5">
-      {!isEdit && (
-        <Card className="p-3 sm:p-4">
-          <div className="space-y-2">
-            <label className="block text-sm font-semibold text-foreground">
-              {t("patients.autoMrn")}
-            </label>
-            <input
-              value={mrnPreviewLoading ? "…" : (mrnPreview?.mrn || "—")}
-              readOnly
-              disabled
-              aria-readonly="true"
-              className="input-premium input-ltr w-full cursor-not-allowed bg-muted/60 text-muted-foreground font-mono"
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("patients.autoMrnHint")}
-            </p>
-          </div>
-        </Card>
-      )}
-
       {/* Identity */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
@@ -700,8 +683,18 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         )}
 
         <Card className="p-3 sm:p-4">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-semibold text-foreground">{language === "ar" ? "المعرف" : "Identifier"}</p>
+          <div className="flex items-start justify-between gap-3 mb-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">{language === "ar" ? "المعرف" : "Identifier"}</p>
+              {!isEdit && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  <span className="font-semibold">{t("patients.autoMrn")}:</span>{" "}
+                  <span className="font-mono text-foreground">
+                    {mrnPreviewLoading || !mrnPreview?.mrn ? t("patients.autoMrnGenerating") : mrnPreview.mrn}
+                  </span>
+                </p>
+              )}
+            </div>
             <button
               type="button"
               className="text-sm text-accent underline"
