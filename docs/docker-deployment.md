@@ -249,6 +249,33 @@ This validates:
 - Required MWL DCMTK tools availability
 - DICOM directory health
 
+### MPPS Smoke Test
+
+When `RISPRO_MPPS_MODE=internal_bridge`:
+
+```bash
+docker compose exec mpps-bridge sh /app/scripts/dicom-gateway/mpps-smoke-test.sh
+```
+
+This validates:
+- TCP reachability on the MPPS SCP port
+- the bridge admin health endpoint
+- the `/events` endpoint with or without optional auth
+
+### Deployment Mode Matrix Validation
+
+To verify the supported compose combinations without bringing containers up:
+
+```bash
+./scripts/validate-docker-modes.sh
+```
+
+This renders compose config for:
+- embedded MWL + internal DB
+- internal Orthanc + internal DB
+- external Orthanc + external DB
+- internal Orthanc + internal DB + MPPS bridge
+
 ### Manual DICOM Verification
 
 ```bash
