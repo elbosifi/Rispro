@@ -747,6 +747,8 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({ arabicText: "", englishText: "" });
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [csvImportStage, setCsvImportStage] = useState<"idle" | "reading" | "parsing" | "uploading">("idle");
+  const [csvImportCount, setCsvImportCount] = useState(0);
   const isReauthError = (err: unknown): boolean => {
     const message = err instanceof Error ? err.message : String(err || "");
     return message.includes("re-authentication") || message.includes("403");
@@ -787,22 +789,32 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
   });
   const importMutation = useMutation({
     mutationFn: (entries: { arabicText: string; englishText: string }[]) => importNameDictionary(entries),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["name-dictionary"] }); setMutationError(null); },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
+      setMutationError(null);
+      setCsvImportStage("idle");
+      setCsvImportCount(0);
+    },
     onError: (err: any) => {
       if (isReauthError(err)) {
+        setCsvImportStage("idle");
         onReAuthRequired(["name-dictionary"]);
         return;
       }
       setMutationError(err?.message || "Import failed");
+      setCsvImportStage("idle");
     }
   });
 
   const handleCsvImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setCsvImportStage("reading");
+    setCsvImportCount(0);
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
+        setCsvImportStage("parsing");
         const text = ev.target?.result as string;
         const lines = text.split(/\r?\n/).filter(Boolean);
         // Skip header row if present; expect: arabic,english per line
@@ -817,14 +829,24 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
           .filter(Boolean) as { arabicText: string; englishText: string }[];
         if (entries.length === 0) {
           setMutationError("No valid entries found in CSV. Expected format: arabic,english per line.");
+          setCsvImportStage("idle");
           return;
         }
+        setCsvImportCount(entries.length);
         if (window.confirm(`Import ${entries.length} entries from CSV? This will upsert (update existing or create new).`)) {
+          setCsvImportStage("uploading");
           importMutation.mutate(entries);
+        } else {
+          setCsvImportStage("idle");
         }
       } catch {
         setMutationError("Failed to parse CSV file.");
+        setCsvImportStage("idle");
       }
+    };
+    reader.onerror = () => {
+      setMutationError("Failed to read CSV file.");
+      setCsvImportStage("idle");
     };
     reader.readAsText(file);
     // Reset file input
@@ -852,9 +874,33 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
         e.englishText?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : allEntries;
+  const importStatusMessage =
+    csvImportStage === "reading"
+      ? "Reading CSV file..."
+      : csvImportStage === "parsing"
+        ? "Parsing CSV entries..."
+        : csvImportStage === "uploading"
+          ? `Importing ${csvImportCount} entries...`
+          : null;
 
   return (
     <div className="space-y-4">
+      {importStatusMessage && (
+        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm space-y-2">
+          <p>{importStatusMessage}</p>
+          <div className="h-2 w-full rounded bg-blue-100 dark:bg-blue-800/40 overflow-hidden" aria-hidden>
+            {csvImportStage === "uploading" ? (
+              <div className="h-full w-1/2 bg-blue-500 dark:bg-blue-400 animate-pulse" />
+            ) : (
+              <div
+                className="h-full bg-blue-500 dark:bg-blue-400 transition-all duration-300"
+                style={{ width: csvImportStage === "reading" ? "35%" : "70%" }}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
@@ -880,7 +926,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
             accept=".csv,.txt"
             onChange={handleCsvImport}
             className="hidden"
-            disabled={importMutation.isPending}
+            disabled={importMutation.isPending || csvImportStage === "reading" || csvImportStage === "parsing"}
           />
         </label>
         {allEntries.length > 0 && (
