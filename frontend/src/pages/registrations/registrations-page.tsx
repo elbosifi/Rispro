@@ -14,7 +14,7 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { pushToast } from "@/lib/toast";
-import { Card, Button } from "@/components/shared";
+import { Card, Button, SearchInput } from "@/components/shared";
 
 interface RegistrationsFilters {
   date: string;
@@ -83,6 +83,52 @@ export default function RegistrationsPage() {
     },
   });
 
+  const modalities = lookups?.modalities ?? [];
+
+  const handleFilterChange = <K extends keyof RegistrationsFilters>(
+    key: K,
+    value: RegistrationsFilters[K],
+  ) => {
+    setFilters((current) => ({ ...current, [key]: value }));
+  };
+
+  const handleDateChange = (key: "date" | "dateFrom" | "dateTo", value: string) => {
+    setFilters((current) => {
+      if (key === "date") {
+        return {
+          ...current,
+          date: value,
+          dateFrom: "",
+          dateTo: "",
+        };
+      }
+
+      return {
+        ...current,
+        [key]: value,
+        date: "",
+      };
+    });
+  };
+
+  const handleStatusToggle = (status: string) => {
+    setFilters((current) => {
+      const nextStatuses = current.statuses.includes(status)
+        ? current.statuses.filter((entry) => entry !== status)
+        : [...current.statuses, status];
+
+      return {
+        ...current,
+        statuses: nextStatuses.length > 0 ? nextStatuses : current.statuses,
+      };
+    });
+  };
+
+  const handleResetFilters = () => {
+    setFilters(DEFAULT_FILTERS);
+    setSelectedAppointment(null);
+  };
+
   function Field({ label, value }: { label: string; value: any }) {
     return (
       <div className="p-3 rounded-xl border border-border bg-muted/30">
@@ -115,6 +161,99 @@ export default function RegistrationsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
+          <Card className="p-6">
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold">
+                    {t("registrations.filters")}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("registrations.searchPlaceholder")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={handleResetFilters}
+                >
+                  {t("registrations.reset")}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+                <DateInput
+                  label={t("registrations.date")}
+                  value={filters.date}
+                  onChange={(value) => handleDateChange("date", value)}
+                />
+                <DateInput
+                  label={t("registrations.dateFrom")}
+                  value={filters.dateFrom}
+                  onChange={(value) => handleDateChange("dateFrom", value)}
+                />
+                <DateInput
+                  label={t("registrations.dateTo")}
+                  value={filters.dateTo}
+                  onChange={(value) => handleDateChange("dateTo", value)}
+                />
+                <div>
+                  <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                    {t("registrations.modality")}
+                  </label>
+                  <select
+                    value={filters.modalityId}
+                    onChange={(e) => handleFilterChange("modalityId", e.target.value)}
+                    className="input-premium input-ltr w-full"
+                  >
+                    <option value="">{t("registrations.all")}</option>
+                    {modalities.map((modality: any) => (
+                      <option key={modality.id} value={String(modality.id)}>
+                        {modality.nameEn ?? modality.name ?? modality.code ?? `#${modality.id}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                    {t("registrations.search")}
+                  </label>
+                  <SearchInput
+                    placeholder={t("registrations.searchPlaceholder")}
+                    value={filters.query}
+                    onChange={(e) => handleFilterChange("query", e.target.value)}
+                    showClearButton
+                    onClear={() => handleFilterChange("query", "")}
+                    className="w-full"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border">
+                <span className="text-sm font-medium text-muted-foreground">
+                  {t("registrations.status")}
+                </span>
+                {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
+                  (status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => handleStatusToggle(status)}
+                      className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                        filters.statuses.includes(status)
+                          ? "bg-accent text-accent-foreground"
+                          : "bg-muted text-muted-foreground hover:bg-muted/80"
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  ),
+                )}
+              </div>
+            </div>
+          </Card>
+
           <Card className="overflow-hidden">
             <div className="p-4 border-b border-border">
               <h3 className="text-xl font-semibold">

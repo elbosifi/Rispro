@@ -110,6 +110,7 @@ const en = {
   "queue.walkInError": "Walk-in Error",
 
   "registrations.title": "Daily Registrations",
+  "registrations.filters": "Filters",
   "registrations.date": "Date",
   "registrations.dateFrom": "From Date",
   "registrations.dateTo": "To Date",
@@ -118,6 +119,7 @@ const en = {
   "registrations.search": "Search",
   "registrations.searchPlaceholder": "Name, MRN, Accession...",
   "registrations.status": "Status:",
+  "registrations.reset": "Reset",
   "registrations.results": "Results ({count})",
   "registrations.noAppointmentsFound": "No appointments found",
   "registrations.accession": "Accession",
@@ -588,6 +590,7 @@ const ar = {
   "queue.walkInError": "خطأ في الحضور المباشر",
 
   "registrations.title": "التسجيلات اليومية",
+  "registrations.filters": "الفلاتر",
   "registrations.date": "التاريخ",
   "registrations.dateFrom": "من تاريخ",
   "registrations.dateTo": "إلى تاريخ",
@@ -596,6 +599,7 @@ const ar = {
   "registrations.search": "بحث",
   "registrations.searchPlaceholder": "الاسم أو MRN أو رقم الوصول...",
   "registrations.status": "الحالة:",
+  "registrations.reset": "إعادة تعيين",
   "registrations.results": "النتائج ({count})",
   "registrations.noAppointmentsFound": "لم يتم العثور على مواعيد",
   "registrations.accession": "رقم الوصول",
