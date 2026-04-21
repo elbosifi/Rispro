@@ -140,10 +140,11 @@ function AppContent() {
             variant="secondary"
             size="sm"
             onClick={() => navigate("/patients")}
-            className="h-8 w-8 sm:w-auto rounded-full px-0 sm:px-3 text-xs whitespace-nowrap"
+            className="h-10 w-10 sm:h-8 sm:w-auto rounded-full px-0 sm:px-3 text-xs whitespace-nowrap"
+            aria-label={language === "ar" ? "رجوع" : "Back"}
           >
-            <ArrowLeft size={14} />
-            <span className="hidden sm:inline">{language === "ar" ? "رجوع" : "Back"}</span>
+            <ArrowLeft size={16} strokeWidth={2.25} />
+            <span className="hidden sm:inline leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
           </Button>
         ) : undefined}
         onUndo={() => navigate(-1)}
