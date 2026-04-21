@@ -359,3 +359,40 @@ export interface SchedulingEngineConfig {
   specialReasons: SchedulingSpecialReason[];
   identifierTypes: SchedulingIdentifierType[];
 }
+
+export interface PatientImportBatch {
+  id: number;
+  source_filename: string;
+  source_sheet_name?: string | null;
+  imported_by_user_id?: number | null;
+  imported_at: string;
+  status: "uploaded" | "staged" | "reviewed" | "migrated" | "failed";
+  total_rows: number;
+  valid_rows: number;
+  invalid_rows: number;
+  duplicate_rows: number;
+  migrated_rows: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PatientImportStagingRow {
+  id: number;
+  batch_id: number;
+  row_number: number;
+  arabic_full_name?: string | null;
+  english_full_name?: string | null;
+  national_id?: string | null;
+  phone?: string | null;
+  derived_birth_date?: string | null;
+  derived_age_years?: number | null;
+  derived_sex?: string | null;
+  validation_status: "valid" | "invalid" | "duplicate" | "migrated" | "skipped";
+  validation_message?: string | null;
+  matched_existing_patient_id?: number | null;
+  is_selected_for_migration: boolean;
+  migrated_patient_id?: number | null;
+  raw_row_json?: Record<string, unknown> | null;
+  created_at: string;
+  updated_at: string;
+}

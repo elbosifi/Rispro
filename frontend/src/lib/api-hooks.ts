@@ -21,7 +21,9 @@ import type {
   AppointmentStatistics,
   DicomDevice,
   AuditEntry,
-  SchedulingEngineConfig
+  SchedulingEngineConfig,
+  PatientImportBatch,
+  PatientImportStagingRow
 } from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
@@ -634,6 +636,59 @@ export async function deleteDicomDevice(id: number) {
 export async function fetchPacsConnection(): Promise<RawRecord> {
   const raw = await api<RawRecord>("/settings/pacs_connection");
   return raw;
+}
+
+export async function previewPatientImport(payload: {
+  fileName: string;
+  fileContentBase64: string;
+  sheetName?: string;
+  mapping: {
+    arabic_full_name: string;
+    national_id: string;
+    phone?: string;
+  };
+}): Promise<{
+  batch: PatientImportBatch;
+  summary: Record<string, number>;
+  workbook: { sheetNames: string[]; selectedSheetName: string; headers: string[] };
+}> {
+  return api("/settings/patient-import/preview", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function inspectPatientImportWorkbook(payload: {
+  fileContentBase64: string;
+  sheetName?: string;
+}): Promise<{ workbook: { sheetNames: string[]; selectedSheetName: string; headers: string[] } }> {
+  return api("/settings/patient-import/workbook", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function fetchPatientImportBatch(batchId: number): Promise<PatientImportBatch> {
+  const raw = await api<{ batch: PatientImportBatch }>(`/settings/patient-import/batches/${batchId}`);
+  return raw.batch;
+}
+
+export async function fetchPatientImportRows(batchId: number): Promise<PatientImportStagingRow[]> {
+  const raw = await api<{ rows: PatientImportStagingRow[] }>(`/settings/patient-import/batches/${batchId}/rows`);
+  return raw.rows || [];
+}
+
+export async function selectPatientImportRows(batchId: number, rowIds: number[], selected: boolean): Promise<{ updated: number }> {
+  return api<{ updated: number }>(`/settings/patient-import/batches/${batchId}/select`, {
+    method: "POST",
+    body: JSON.stringify({ rowIds, selected })
+  });
+}
+
+export async function confirmPatientImportBatch(batchId: number): Promise<{ migrated: number; skipped: number }> {
+  return api<{ migrated: number; skipped: number }>(`/settings/patient-import/batches/${batchId}/confirm`, {
+    method: "POST"
+  });
 }
 
 // -- PACS --

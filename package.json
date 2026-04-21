@@ -29,7 +29,8 @@
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
     "mdb-reader": "^3.2.0",
-    "pg": "^8.13.3"
+    "pg": "^8.13.3",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

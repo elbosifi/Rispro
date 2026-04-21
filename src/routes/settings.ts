@@ -42,6 +42,14 @@ import {
   saveSchedulingEngineConfiguration
 } from "../services/scheduling-settings-service.js";
 import {
+  parseWorkbookBase64,
+  createImportBatchFromParsedRows,
+  listImportBatch,
+  listImportRows,
+  updateRowSelection,
+  confirmBatchMigration
+} from "../services/patient-import-service.js";
+import {
   normalizeOrthancSettingsEntries,
   validateOrthancSettingsEntries
 } from "../services/orthanc-settings-resolver.js";
@@ -57,6 +65,7 @@ interface SettingsRequest {
     modalityId?: string;
     examTypeId?: string;
     deviceId?: string;
+    batchId?: string;
   };
 }
 
@@ -236,6 +245,111 @@ settingsRouter.put(
     const request = req as SettingsRequest;
     const config = await saveSchedulingEngineConfiguration(asUnknownRecord(request.body ?? {}), request.user.sub as UserId);
     res.json({ config });
+  })
+);
+
+settingsRouter.post(
+  "/patient-import/workbook",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const fileContentBase64 = asString(body.fileContentBase64).trim();
+    const selectedSheetName = asString(body.sheetName || body.selectedSheetName).trim();
+
+    const parsed = await parseWorkbookBase64(fileContentBase64, selectedSheetName || undefined);
+
+    res.json({
+      workbook: {
+        sheetNames: parsed.sheetNames,
+        selectedSheetName: parsed.selectedSheetName,
+        headers: parsed.headers
+      }
+    });
+  })
+);
+
+settingsRouter.post(
+  "/patient-import/preview",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const sourceFilename = asString(body.fileName || body.sourceFilename).trim();
+    const fileContentBase64 = asString(body.fileContentBase64).trim();
+    const selectedSheetName = asString(body.sheetName || body.selectedSheetName).trim();
+    const mapping = asUnknownRecord(body.mapping ?? {});
+    const mappingArabic = asString(mapping.arabic_full_name || mapping.arabicFullName).trim();
+    const mappingNationalId = asString(mapping.national_id || mapping.nationalId).trim();
+    const mappingPhone = asString(mapping.phone).trim();
+
+    const parsed = await parseWorkbookBase64(fileContentBase64, selectedSheetName || undefined);
+
+    const { batch, summary } = await createImportBatchFromParsedRows(
+      {
+        sourceFilename: sourceFilename || "patient-import.xlsx",
+        sourceSheetName: parsed.selectedSheetName,
+        rows: parsed.rows,
+        mapping: {
+          arabic_full_name: mappingArabic,
+          national_id: mappingNationalId,
+          phone: mappingPhone || undefined
+        }
+      },
+      request.user.sub as UserId
+    );
+
+    res.status(201).json({
+      batch,
+      summary,
+      workbook: {
+        sheetNames: parsed.sheetNames,
+        selectedSheetName: parsed.selectedSheetName,
+        headers: parsed.headers
+      }
+    });
+  })
+);
+
+settingsRouter.get(
+  "/patient-import/batches/:batchId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const batchId = Number(asString(request.params?.batchId));
+    const batch = await listImportBatch(batchId);
+    res.json({ batch });
+  })
+);
+
+settingsRouter.get(
+  "/patient-import/batches/:batchId/rows",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const batchId = Number(asString(request.params?.batchId));
+    const rows = await listImportRows(batchId);
+    res.json({ rows });
+  })
+);
+
+settingsRouter.post(
+  "/patient-import/batches/:batchId/select",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const batchId = Number(asString(request.params?.batchId));
+    const body = asUnknownRecord(request.body ?? {});
+    const selected = String(body.selected || "").trim() !== "false";
+    const rowIdsRaw = Array.isArray(body.rowIds) ? body.rowIds : [];
+    const rowIds = rowIdsRaw.map((id) => Number(id)).filter((id) => Number.isInteger(id) && id > 0);
+    const result = await updateRowSelection(batchId, rowIds, selected, request.user.sub as UserId);
+    res.json(result);
+  })
+);
+
+settingsRouter.post(
+  "/patient-import/batches/:batchId/confirm",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const batchId = Number(asString(request.params?.batchId));
+    const result = await confirmBatchMigration(batchId, request.user.sub as UserId);
+    res.json(result);
   })
 );
 
