@@ -188,11 +188,13 @@ export default function SettingsPage() {
   const [section, setSection] = useState<SettingsSection>("menu");
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[]>([]);
+  const [reauthVersion, setReauthVersion] = useState(0);
   const queryClient = useQueryClient();
   const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
 
   const handleReAuthSuccess = () => {
     setShowReAuthModal(false);
+    setReauthVersion((prev) => prev + 1);
     // Notify backup/restore section to retry after re-auth
     backupRestoreRef.current?.onReAuthSuccess();
     for (const key of pendingReAuthKeys) {
@@ -252,7 +254,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
-            {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} />}
+            {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_registration" && <SimpleSettingsSection category="patient_registration" onReAuthRequired={requestReAuth} />}
@@ -1164,7 +1166,13 @@ async function fileToBase64(file: File): Promise<string> {
   return btoa(binary);
 }
 
-function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+function PatientImportSection({
+  onReAuthRequired,
+  reauthVersion
+}: {
+  onReAuthRequired: (key: string[]) => void;
+  reauthVersion: number;
+}) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const [fileName, setFileName] = useState("");
@@ -1179,6 +1187,18 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
   });
   const [batchId, setBatchId] = useState<number | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [pendingRetry, setPendingRetry] = useState<
+    | { kind: "inspect" }
+    | { kind: "preview" }
+    | { kind: "confirm" }
+    | { kind: "select"; rowIds: number[]; selected: boolean }
+    | null
+  >(null);
+
+  const isReauthError = (err: unknown): boolean => {
+    const message = err instanceof Error ? err.message : String(err || "");
+    return message.includes("re-authentication") || message.includes("403");
+  };
 
   const inspectMutation = useMutation({
     mutationFn: inspectPatientImportWorkbook,
@@ -1190,6 +1210,11 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
       setLocalError(null);
     },
     onError: (err: unknown) => {
+      if (isReauthError(err)) {
+        setPendingRetry({ kind: "inspect" });
+        onReAuthRequired(["patient-import"]);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Failed to inspect workbook.";
       setLocalError(message);
     }
@@ -1204,6 +1229,11 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
       queryClient.invalidateQueries({ queryKey: ["patient-import-rows", Number(result.batch.id)] });
     },
     onError: (err: unknown) => {
+      if (isReauthError(err)) {
+        setPendingRetry({ kind: "preview" });
+        onReAuthRequired(["patient-import"]);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Failed to stage import.";
       setLocalError(message);
     }
@@ -1229,6 +1259,10 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
       await queryClient.invalidateQueries({ queryKey: ["patient-import-batch", batchId] });
     },
     onError: (err: unknown) => {
+      if (isReauthError(err)) {
+        onReAuthRequired(["patient-import"]);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Failed to update selection.";
       setLocalError(message);
     }
@@ -1242,10 +1276,44 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
       setLocalError(null);
     },
     onError: (err: unknown) => {
+      if (isReauthError(err)) {
+        setPendingRetry({ kind: "confirm" });
+        onReAuthRequired(["patient-import"]);
+        return;
+      }
       const message = err instanceof Error ? err.message : "Failed to confirm migration.";
       setLocalError(message);
     }
   });
+
+  useEffect(() => {
+    if (!pendingRetry) return;
+
+    if (pendingRetry.kind === "inspect") {
+      setPendingRetry(null);
+      void handleInspectWorkbook();
+      return;
+    }
+
+    if (pendingRetry.kind === "preview") {
+      setPendingRetry(null);
+      void handleStagePreview();
+      return;
+    }
+
+    if (pendingRetry.kind === "confirm") {
+      setPendingRetry(null);
+      confirmMutation.mutate();
+      return;
+    }
+
+    if (pendingRetry.kind === "select") {
+      const payload = pendingRetry;
+      setPendingRetry(null);
+      selectMutation.mutate({ rowIds: payload.rowIds, selected: payload.selected });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reauthVersion]);
 
   const handleInspectWorkbook = async () => {
     if (!fileContentBase64) {
@@ -1329,19 +1397,40 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
 
   const handleSelectAllValid = () => {
     if (validRowIds.length === 0) return;
-    selectMutation.mutate({ rowIds: validRowIds, selected: true });
+    selectMutation.mutate(
+      { rowIds: validRowIds, selected: true },
+      {
+        onError: (err: unknown) => {
+          if (isReauthError(err)) {
+            setPendingRetry({ kind: "select", rowIds: validRowIds, selected: true });
+            onReAuthRequired(["patient-import"]);
+          }
+        }
+      }
+    );
   };
 
   const handleClearSelection = () => {
     if (validRowIds.length === 0) return;
-    selectMutation.mutate({ rowIds: validRowIds, selected: false });
+    selectMutation.mutate(
+      { rowIds: validRowIds, selected: false },
+      {
+        onError: (err: unknown) => {
+          if (isReauthError(err)) {
+            setPendingRetry({ kind: "select", rowIds: validRowIds, selected: false });
+            onReAuthRequired(["patient-import"]);
+          }
+        }
+      }
+    );
   };
 
-  const errorText =
+  const rawErrorText =
     localError ||
     ((inspectMutation.error as Error | undefined)?.message ?? null) ||
     ((previewMutation.error as Error | undefined)?.message ?? null) ||
     ((confirmMutation.error as Error | undefined)?.message ?? null);
+  const errorText = rawErrorText && isReauthError(rawErrorText) ? null : rawErrorText;
 
   const inProgressMessage = inspectMutation.isPending
     ? (language === "ar" ? "جاري قراءة الملف واستخراج الأعمدة..." : "Reading workbook and extracting headers...")
@@ -1354,10 +1443,6 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
           : (batchLoading || rowsLoading)
             ? (language === "ar" ? "جاري تحديث بيانات الدفعة..." : "Refreshing batch data...")
             : null;
-
-  if (errorText?.includes("re-authentication") || errorText?.includes("403")) {
-    return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["patient-import"])} />;
-  }
 
   return (
     <div className="space-y-4">
@@ -1539,10 +1624,24 @@ function PatientImportSection({ onReAuthRequired }: { onReAuthRequired: (key: st
                           checked={row.is_selected_for_migration}
                           disabled={row.validation_status !== "valid" || selectMutation.isPending}
                           onChange={(event) =>
-                            selectMutation.mutate({
-                              rowIds: [Number(row.id)],
-                              selected: event.target.checked
-                            })
+                            selectMutation.mutate(
+                              {
+                                rowIds: [Number(row.id)],
+                                selected: event.target.checked
+                              },
+                              {
+                                onError: (err: unknown) => {
+                                  if (isReauthError(err)) {
+                                    setPendingRetry({
+                                      kind: "select",
+                                      rowIds: [Number(row.id)],
+                                      selected: event.target.checked
+                                    });
+                                    onReAuthRequired(["patient-import"]);
+                                  }
+                                }
+                              }
+                            )
                           }
                         />
                       </td>
