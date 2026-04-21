@@ -42,27 +42,27 @@ export function AppointmentsV3CreatePage() {
     : null;
 
   if (lookups.isLoading) {
-    return <div style={{ padding: 24 }}>{t(language, "appointments.create.loadingLookups")}</div>;
+    return <div style={{ padding: "24px 16px" }}>{t(language, "appointments.create.loadingLookups")}</div>;
   }
 
   if (lookups.isError) {
-    return <div style={{ padding: 24, color: "#dc2626" }}>{t(language, "appointments.create.failedLoadLookups")}: {(lookups.error as Error)?.message}</div>;
+    return <div style={{ padding: "24px 16px", color: "#dc2626" }}>{t(language, "appointments.create.failedLoadLookups")}: {(lookups.error as Error)?.message}</div>;
   }
 
   if (priorities.isLoading) {
-    return <div style={{ padding: 24 }}>{t(language, "appointments.create.loadingPriorities")}</div>;
+    return <div style={{ padding: "24px 16px" }}>{t(language, "appointments.create.loadingPriorities")}</div>;
   }
 
   if (priorities.isError) {
     return (
-      <div style={{ padding: 24, color: "#dc2626" }}>
+      <div style={{ padding: "24px 16px", color: "#dc2626" }}>
         {t(language, "appointments.create.failedLoadPriorities")}: {(priorities.error as Error)?.message}
       </div>
     );
   }
 
   return (
-    <div style={{ padding: "24px 16px" }}>
+    <div style={{ padding: "20px 12px" }}>
       <CreateAppointmentTab
         patientLookups={{}}
         modalityOptions={lookups.data?.modalities ?? []}

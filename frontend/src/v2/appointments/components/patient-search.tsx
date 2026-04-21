@@ -35,17 +35,17 @@ interface PatientSearchProps {
   caseCategory: "oncology" | "non_oncology";
 }
 
-function getPrimaryIdentifier(patient: Patient): { label: string; value: string | null } {
+function getPrimaryIdentifier(patient: Patient, language: "ar" | "en"): { label: string; value: string | null } {
   if (patient.identifierValue) {
     return {
-      label: "Primary ID",
+      label: t(language, "appointments.create.primaryId"),
       value: patient.identifierValue,
     };
   }
 
   if (patient.nationalId) {
     return {
-      label: "Primary ID",
+      label: t(language, "appointments.create.primaryId"),
       value: patient.nationalId,
     };
   }
@@ -53,18 +53,18 @@ function getPrimaryIdentifier(patient: Patient): { label: string; value: string 
   const mrn = patient.mrn || patient.medicalRecordNo || null;
   if (mrn) {
     return {
-      label: "MRN",
+      label: t(language, "appointments.create.mrn"),
       value: mrn,
     };
   }
 
-  return { label: "Primary ID", value: null };
+  return { label: t(language, "appointments.create.primaryId"), value: null };
 }
 
-function renderSex(sex?: string | null): string {
+function renderSex(sex?: string | null, language: "ar" | "en" = "en"): string {
   if (!sex) return "—";
-  if (sex.toUpperCase() === "M") return "Male";
-  if (sex.toUpperCase() === "F") return "Female";
+  if (sex.toUpperCase() === "M") return t(language, "appointments.create.male");
+  if (sex.toUpperCase() === "F") return t(language, "appointments.create.female");
   return sex;
 }
 
@@ -112,9 +112,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
   }, []);
 
   if (selectedPatient) {
-    const primaryIdentifier = getPrimaryIdentifier(selectedPatient);
+    const primaryIdentifier = getPrimaryIdentifier(selectedPatient, language);
     const mrn = selectedPatient.mrn || selectedPatient.medicalRecordNo || null;
-    const showMrn = mrn != null && !(primaryIdentifier.label === "MRN" && primaryIdentifier.value === mrn);
+    const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
 
     return (
       <div
@@ -131,20 +131,20 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>
-            {selectedPatient.arabicFullName}
+            {language === "ar" ? selectedPatient.arabicFullName : (selectedPatient.englishFullName || selectedPatient.arabicFullName)}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 2 }}>
-            {selectedPatient.englishFullName}
+            {language === "ar" ? selectedPatient.englishFullName : selectedPatient.arabicFullName}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>
             {primaryIdentifier.value ? `${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : `${t(language, "appointments.create.primaryId")}: —`}
             {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 6 }}>
-            <span>{t(language, "appointments.create.sex")}: {selectedPatient.sex?.toUpperCase() === "M" ? t(language, "appointments.create.male") : selectedPatient.sex?.toUpperCase() === "F" ? t(language, "appointments.create.female") : renderSex(selectedPatient.sex)}</span>
+            <span>{t(language, "appointments.create.sex")}: {renderSex(selectedPatient.sex, language)}</span>
             <span>
               {t(language, "appointments.create.age")}: {selectedPatient.ageYears ?? "—"}
-              {selectedPatient.demographicsEstimated ? " (Estimated)" : ""}
+              {selectedPatient.demographicsEstimated ? ` ${language === "ar" ? "(مقدّر)" : "(Estimated)"}` : ""}
             </span>
             <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>
           </div>
@@ -196,9 +196,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
           }}
         >
           {results.map((patient) => {
-            const primaryIdentifier = getPrimaryIdentifier(patient);
+            const primaryIdentifier = getPrimaryIdentifier(patient, language);
             const mrn = patient.mrn || patient.medicalRecordNo || null;
-            const showMrn = mrn != null && !(primaryIdentifier.label === "MRN" && primaryIdentifier.value === mrn);
+            const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
 
             return (
               <li key={patient.id}>
@@ -222,9 +222,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
                     (e.currentTarget.style.backgroundColor = "transparent")
                   }
                 >
-                  <div style={{ fontWeight: 500 }}>{patient.arabicFullName}</div>
+                  <div style={{ fontWeight: 500 }}>{language === "ar" ? patient.arabicFullName : (patient.englishFullName || patient.arabicFullName)}</div>
                   <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
-                    {patient.englishFullName}
+                    {language === "ar" ? patient.englishFullName : patient.arabicFullName}
                     {primaryIdentifier.value ? ` · ${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : ""}
                     {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
                   </div>

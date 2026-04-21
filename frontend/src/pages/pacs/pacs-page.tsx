@@ -22,6 +22,61 @@ interface PacsNode {
   is_default: boolean;
 }
 
+function modalityLabel(code: string, language: "ar" | "en"): string {
+  const normalized = code.toUpperCase();
+  if (language === "ar") {
+    switch (normalized) {
+      case "CT":
+        return "CT";
+      case "MR":
+        return "MRI";
+      case "CR":
+        return "الأشعة الرقمية";
+      case "DX":
+        return "الأشعة التشخيصية";
+      case "US":
+        return "الألتراساوند";
+      case "RF":
+        return "الأشعة التداخلية";
+      case "MG":
+        return "تصوير الثدي";
+      case "PT":
+        return "PET";
+      case "NM":
+        return "الطب النووي";
+      case "XA":
+        return "الأوعية بالأشعة";
+      default:
+        return code;
+    }
+  }
+
+  switch (normalized) {
+    case "CT":
+      return "CT";
+    case "MR":
+      return "MRI";
+    case "CR":
+      return "CR";
+    case "DX":
+      return "DX";
+    case "US":
+      return "Ultrasound";
+    case "RF":
+      return "RF";
+    case "MG":
+      return "Mammography";
+    case "PT":
+      return "PET";
+    case "NM":
+      return "Nuclear Medicine";
+    case "XA":
+      return "X-Ray Angio";
+    default:
+      return code;
+  }
+}
+
 export default function PacsPage() {
   const { language } = useLanguage();
 
@@ -207,16 +262,16 @@ export default function PacsPage() {
                 style={{ color: "var(--text)" }}
               >
                 <option value="">{t(language, "pacs.allModalities")}</option>
-                <option value="CT">CT</option>
-                <option value="MR">MRI</option>
-                <option value="CR">CR</option>
-                <option value="DX">DX</option>
-                <option value="US">Ultrasound</option>
-                <option value="RF">RF</option>
-                <option value="MG">Mammography</option>
-                <option value="PT">PET</option>
-                <option value="NM">Nuclear Medicine</option>
-                <option value="XA">X-Ray Angio</option>
+                <option value="CT">{modalityLabel("CT", language)}</option>
+                <option value="MR">{modalityLabel("MR", language)}</option>
+                <option value="CR">{modalityLabel("CR", language)}</option>
+                <option value="DX">{modalityLabel("DX", language)}</option>
+                <option value="US">{modalityLabel("US", language)}</option>
+                <option value="RF">{modalityLabel("RF", language)}</option>
+                <option value="MG">{modalityLabel("MG", language)}</option>
+                <option value="PT">{modalityLabel("PT", language)}</option>
+                <option value="NM">{modalityLabel("NM", language)}</option>
+                <option value="XA">{modalityLabel("XA", language)}</option>
               </select>
             </div>
           </div>
@@ -234,7 +289,7 @@ export default function PacsPage() {
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
                 style={{ color: "var(--text)" }}
               >
-                <option value="">{defaultNode ? `${defaultNode.name} (default)` : t(language, "pacs.defaultNode")}</option>
+                <option value="">{defaultNode ? `${defaultNode.name} ${language === "ar" ? "(افتراضي)" : "(default)"}` : t(language, "pacs.defaultNode")}</option>
                 {activeNodes.filter((n) => !n.is_default).map((node) => (
                   <option key={node.id} value={node.id}>{node.name}</option>
                 ))}

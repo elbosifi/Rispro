@@ -44,8 +44,8 @@ export function AvailabilityPanel({
   }
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap gap-4 items-center justify-between">
+    <div className="space-y-3 sm:space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex gap-2 items-center">
           <button type="button" onClick={onPreviousPage} disabled={!canGoPrevious} className="btn-ghost text-xs h-8 px-2">
             {t(language, "appointments.create.previousSlots")}
@@ -54,8 +54,8 @@ export function AvailabilityPanel({
             {t(language, "appointments.create.nextSlots")}
           </button>
         </div>
-        <div className="flex flex-wrap gap-2 items-center">
-          <label className="flex items-center gap-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 sm:items-center">
+          <label className="flex items-center gap-2 text-xs sm:text-sm font-medium" style={{ color: "var(--text-muted)" }}>
             {t(language, "appointments.create.startDate")}
           </label>
           <input
@@ -63,7 +63,7 @@ export function AvailabilityPanel({
             type="date"
             value={startDate}
             onChange={(event) => onChangeStartDate(event.target.value)}
-            className="input-premium text-xs py-2 h-8 w-40"
+            className="input-premium text-xs py-2 h-8 w-full sm:w-40"
           />
           <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
             {showFullDays ? t(language, "appointments.create.hideFullDays") : t(language, "appointments.create.showFullDays")}

@@ -13,6 +13,8 @@ import { evaluateV2Scheduling } from "../api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
+import { chooseLocalized, t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import type {
   SchedulingDecisionDto,
   CaseCategory,
@@ -44,6 +46,7 @@ export function RescheduleDialog({
   onCancel,
   error,
 }: RescheduleDialogProps) {
+  const { language } = useLanguage();
   const [newDate, setNewDate] = useState("");
   const [decision, setDecision] = useState<SchedulingDecisionDto | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
@@ -101,8 +104,8 @@ export function RescheduleDialog({
       })
       .catch((err) => {
         setDecision(null);
-        const message = err instanceof Error ? err.message : "Could not evaluate this date";
-        setEvaluationError(`Could not evaluate selected date: ${message}`);
+        const message = err instanceof Error ? err.message : t(language, "appointments.v2.unknownError");
+        setEvaluationError(`${language === "ar" ? "تعذر تقييم التاريخ المحدد:" : "Could not evaluate selected date:"} ${message}`);
       })
       .finally(() => {
         setEvaluating(false);
@@ -134,8 +137,8 @@ export function RescheduleDialog({
 
       await onReschedule(newDate, null, override);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Reschedule failed";
-      setSubmitError(`Could not reschedule booking: ${message}`);
+      const message = err instanceof Error ? err.message : t(language, "appointments.v2.unknownError");
+      setSubmitError(`${language === "ar" ? "تعذر إعادة جدولة الحجز:" : "Could not reschedule booking:"} ${message}`);
     } finally {
       setSubmitting(false);
     }
@@ -172,9 +175,9 @@ export function RescheduleDialog({
               <CalendarClock size={20} />
             </div>
             <div>
-              <DialogTitle>Reschedule Booking</DialogTitle>
+              <DialogTitle>{t(language, "appointments.v2.rescheduleBooking")}</DialogTitle>
               <DialogDescription>
-                {booking.patientEnglishName ?? `Patient #${booking.patientId}`} — {booking.bookingDate}
+                {chooseLocalized(language, booking.patientArabicName, booking.patientEnglishName) || `Patient #${booking.patientId}`} — {booking.bookingDate}
               </DialogDescription>
             </div>
           </div>
@@ -225,7 +228,7 @@ export function RescheduleDialog({
                   color: "var(--text-primary, #1e293b)",
                 }}
               >
-                New Date
+                {t(language, "appointments.v2.newDate")}
               </label>
               {isDateAvailable ? (
                 <select
@@ -239,7 +242,7 @@ export function RescheduleDialog({
                     fontSize: 14,
                   }}
                 >
-                  <option value="">Select a date…</option>
+                  <option value="">{t(language, "appointments.v2.selectaDate")}</option>
                   {selectableDates.map((item) => {
                     const isRestricted = item.decision.displayStatus === "restricted";
                     const label = isRestricted
@@ -254,7 +257,7 @@ export function RescheduleDialog({
                 </select>
               ) : (
                 <p style={{ fontSize: 13, color: "var(--text-muted, #64748b)", fontStyle: "italic" }}>
-                  No available dates to select from.
+                  {t(language, "appointments.v2.noAvailableDates")}
                 </p>
               )}
             </div>
@@ -262,7 +265,7 @@ export function RescheduleDialog({
             {/* Decision Status */}
             {evaluating && (
               <div style={{ fontSize: 13, color: "var(--text-muted, #64748b)" }}>
-                Evaluating selected date…
+                {language === "ar" ? "جاري تقييم التاريخ المحدد…" : "Evaluating selected date…"}
               </div>
             )}
 
@@ -295,14 +298,14 @@ export function RescheduleDialog({
                >
                 {decision.displayStatus === "available" && (
                   <span>
-                    ✅ Available — {decision.remainingStandardCapacity ?? 0} slots remaining
+                    ✅ {language === "ar" ? "متاح" : "Available"} — {decision.remainingStandardCapacity ?? 0} {language === "ar" ? "خانة متبقية" : "slots remaining"}
                   </span>
                 )}
                 {decision.displayStatus === "restricted" && decision.requiresSupervisorOverride && (
-                  <span>⚠️ Supervisor approval is required for this date.</span>
+                  <span>⚠️ {language === "ar" ? "مطلوب اعتماد المشرف لهذا التاريخ." : "Supervisor approval is required for this date."}</span>
                 )}
                 {decision.displayStatus === "blocked" && (
-                  <span>❌ Date is blocked for this modality.</span>
+                  <span>❌ {language === "ar" ? "التاريخ محجوب لهذا الجهاز." : "Date is blocked for this modality."}</span>
                 )}
                 {decision.reasons.length > 0 && (
                   <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
@@ -329,7 +332,7 @@ export function RescheduleDialog({
                       color: "var(--text-primary, #1e293b)",
                     }}
                   >
-                    Supervisor Username
+                    {t(language, "appointments.create.supervisorUsername")}
                   </label>
                    <Input
                      type="text"
@@ -349,7 +352,7 @@ export function RescheduleDialog({
                       color: "var(--text-primary, #1e293b)",
                     }}
                   >
-                    Password
+                    {t(language, "appointments.create.password")}
                   </label>
                    <Input
                      ref={overridePasswordRef}
@@ -370,13 +373,13 @@ export function RescheduleDialog({
                       color: "var(--text-primary, #1e293b)",
                     }}
                   >
-                    Override Reason
+                    {t(language, "appointments.create.overrideReason")}
                   </label>
                    <Input
                      type="text"
                      value={overrideReason}
                      onChange={(e) => setOverrideReason(e.target.value)}
-                     placeholder="Why is this reschedule needed?"
+                     placeholder={t(language, "appointments.create.overrideReasonPlaceholder")}
                    />
                 </div>
               </div>
@@ -390,7 +393,7 @@ export function RescheduleDialog({
                  onClick={onCancel}
                  disabled={submitting}
                >
-                 Cancel
+                 {t(language, "appointments.v2.keepBooking")}
                </Button>
                <Button
                  type="submit"
@@ -408,7 +411,7 @@ export function RescheduleDialog({
                    color: "#fff",
                  }}
                >
-                 {submitting ? "Rescheduling…" : "Reschedule"}
+                 {submitting ? t(language, "appointments.v2.rescheduling") : t(language, "appointments.v2.reschedule")}
                </Button>
              </DialogFooter>
            </form>

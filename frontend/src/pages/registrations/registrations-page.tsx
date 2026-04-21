@@ -142,7 +142,7 @@ export default function RegistrationsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-3 rounded-full border border-accent/30 bg-accent/5 px-5 py-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
@@ -152,7 +152,7 @@ export default function RegistrationsPage() {
           </span>
         </div>
         <h1
-          className="text-3xl font-display"
+          className="text-2xl sm:text-3xl font-display"
           style={{ color: "var(--foreground)" }}
         >
           <span className="gradient-text">{t("registrations.pageTitle")}</span>
@@ -169,7 +169,7 @@ export default function RegistrationsPage() {
                     {t("registrations.filters")}
                   </h3>
                   <p className="text-sm text-muted-foreground max-w-xl">
-                    Use a date or date range, then narrow by modality, status, or a quick text search.
+                    {t("registrations.filtersDescription")}
                   </p>
                 </div>
                 <Button

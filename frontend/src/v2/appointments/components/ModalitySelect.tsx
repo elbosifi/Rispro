@@ -13,7 +13,7 @@ export function ModalitySelect({ options, value, onChange, disabled }: Props) {
   const { language } = useLanguage();
   return (
     <div>
-      <label className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data" style={{ color: "var(--text-muted)" }}>
+      <label className="block text-sm font-semibold mb-2 text-foreground">
         {t(language, "appointments.create.modality")}
       </label>
       <select

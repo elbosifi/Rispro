@@ -70,6 +70,43 @@ function AppContent() {
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
+  const pageTitle = (() => {
+    switch (currentRoute) {
+      case "dashboard":
+        return language === "ar" ? "لوحة التحكم" : "Dashboard";
+      case "patients":
+        return language === "ar" ? "المرضى" : "Patients";
+      case "appointments":
+        return language === "ar" ? "إنشاء موعد" : "Create Appointment";
+      case "calendar":
+        return language === "ar" ? "التقويم" : "Calendar";
+      case "registrations":
+        return language === "ar" ? "التسجيلات" : "Registrations";
+      case "queue":
+        return language === "ar" ? "قائمة الانتظار" : "Queue";
+      case "modality":
+        return language === "ar" ? "الأجهزة" : "Modality";
+      case "doctor":
+        return language === "ar" ? "واجهة الطبيب" : "Doctor";
+      case "print":
+        return language === "ar" ? "الطباعة" : "Print";
+      case "statistics":
+        return language === "ar" ? "الإحصاءات" : "Statistics";
+      case "search":
+        return language === "ar" ? "البحث" : "Search";
+      case "pacs":
+        return language === "ar" ? "PACS" : "PACS";
+      case "settings":
+        return language === "ar" ? "الإعدادات" : "Settings";
+      case "legacy":
+        return language === "ar" ? "واجهة الاستقبال القديمة" : "Legacy Reception";
+      case "v2.appointments.admin":
+        return language === "ar" ? "إدارة المواعيد" : "Appointment Admin";
+      default:
+        return null;
+    }
+  })();
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: "var(--background)" }}>
@@ -88,6 +125,7 @@ function AppContent() {
         user={user}
         language={language}
         isRtl={isArabic}
+        pageTitle={pageTitle ?? undefined}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}

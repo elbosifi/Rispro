@@ -107,14 +107,14 @@ export default function CalendarPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <SectionLabel>{t(language, "calendar.sectionLabel")}</SectionLabel>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
+          <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
             <span className="gradient-text">{t(language, "calendar.title")}</span>
           </h1>
           <div className="flex items-center gap-3">

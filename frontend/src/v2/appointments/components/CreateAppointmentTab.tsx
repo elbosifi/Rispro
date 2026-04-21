@@ -415,46 +415,46 @@ export function CreateAppointmentTab({
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
       {/* Page Header */}
-      <div className="space-y-4 mb-6">
-        <div className="flex items-center gap-4">
+      <div className="space-y-2 sm:space-y-3 mb-3 sm:mb-4 lg:hidden">
+        <div className="flex items-center gap-3">
           <SectionLabel pulsing>{t(language, "appointments.create.sectionLabel")}</SectionLabel>
         </div>
-        <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
+        <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
           {t(language, "appointments.create.title")}
         </h1>
-        <p className="text-muted-foreground">
+        <p className="text-sm sm:text-base text-muted-foreground max-w-3xl">
           {t(language, "appointments.create.subtitle")}
         </p>
       </div>
 
       {/* Appointment Summary Card */}
-      <Card className="p-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <Card className="p-4 sm:p-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.patient")}</span>
-            <p className="text-lg font-medium">{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</p>
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.patient")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.modality")}</span>
-            <p className="text-lg font-medium">{chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—"}</p>
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.modality")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">{chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.examType")}</span>
-            <p className="text-lg font-medium">{effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</p>
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.examType")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">{effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.category")}</span>
-            <p className="text-lg font-medium">{form.caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</p>
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.category")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">{form.caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.date")}</span>
-            <p className="text-lg font-medium">{form.appointmentDate || "—"}</p>
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.date")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">{form.appointmentDate || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.examMix")}</span>
-            <p className="text-lg font-medium">
+            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.examMix")}</span>
+            <p className="text-base sm:text-lg font-medium text-foreground">
               {primaryExamMixBlocking
                 ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
                 : t(language, "appointments.create.noMatchingGroup")}
@@ -464,14 +464,14 @@ export function CreateAppointmentTab({
       </Card>
 
       {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 sm:gap-5">
         {/* Availability Panel */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-4">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3">
             <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
           </div>
-          <Card className="p-6">
-            <h3 className="text-xl font-semibold mb-6" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
+          <Card className="p-4 sm:p-5">
+            <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-5" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
             <AvailabilityPanel
               rows={availability.rows}
               selectedDate={form.appointmentDate}
@@ -503,11 +503,11 @@ export function CreateAppointmentTab({
         </div>
 
         {/* Patient & Form Panel */}
-        <div className="space-y-4">
-          <div className="flex items-center gap-4">
+        <div className="space-y-3 sm:space-y-4">
+          <div className="flex items-center gap-3">
             <SectionLabel>{t(language, "appointments.create.patientDetails")}</SectionLabel>
           </div>
-          <Card className="p-6 lg:sticky lg:top-6 h-fit">
+          <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
             <PatientSearchSection
               value={form.patient}
               caseCategory={form.caseCategory}
@@ -527,13 +527,13 @@ export function CreateAppointmentTab({
               }}
             />
 
-            <div className="mt-6">
+            <div className="mt-4 sm:mt-5">
               <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
             </div>
 
             {form.patientId != null && patientNoShows.length > 0 && (
-              <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
-                <div className="text-xs uppercase tracking-[0.15em] font-bold font-mono mb-3" style={{ color: "var(--amber)" }}>
+              <div className="mt-4 sm:mt-5 p-3 sm:p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
+                <div className="text-sm font-bold mb-3" style={{ color: "var(--amber)" }}>
                   {t(language, "appointments.create.previousNoShows")}
                 </div>
                 {noShowLoading ? (
@@ -541,7 +541,7 @@ export function CreateAppointmentTab({
                 ) : (
                   <ul className="space-y-2">
                     {patientNoShows.map((item) => (
-                      <li key={item.id} className="text-sm font-mono text-muted-foreground">
+                      <li key={item.id} className="text-sm text-muted-foreground">
                         {item.appointmentDate} — {item.examTypeName} ({item.status})
                       </li>
                     ))}
@@ -550,7 +550,7 @@ export function CreateAppointmentTab({
               </div>
             )}
 
-            <div className="space-y-5 mt-6">
+            <div className="space-y-4 mt-4 sm:mt-5">
               <ModalitySelect
                 options={modalityOptions}
                 value={form.modalityId}
@@ -574,7 +574,7 @@ export function CreateAppointmentTab({
               />
 
               <div>
-                <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.caseCategory")}
                 </label>
                 <select
@@ -589,7 +589,7 @@ export function CreateAppointmentTab({
               </div>
 
               <div>
-                <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.priority")}
                 </label>
                 <select
@@ -605,7 +605,7 @@ export function CreateAppointmentTab({
                 </select>
               </div>
 
-              <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">
+              <label className="flex items-center gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50">
                 <input
                   type="checkbox"
                   id="isWalkIn"
@@ -613,11 +613,11 @@ export function CreateAppointmentTab({
                   onChange={(e) => actions.setIsWalkIn(e.target.checked)}
                   className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
-                <span className="text-base font-medium">{t(language, "appointments.create.walkIn")}</span>
+                <span className="text-sm sm:text-base font-semibold text-foreground">{t(language, "appointments.create.walkIn")}</span>
               </label>
 
               <div>
-                <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.appointmentDate")}
                 </label>
                 <input
@@ -630,13 +630,13 @@ export function CreateAppointmentTab({
               </div>
 
               <div>
-                <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+                <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.notes")}
                 </label>
                 <textarea
                   value={form.notes}
                   onChange={(e) => actions.setNotes(e.target.value)}
-                  rows={3}
+                  rows={2}
                   className="input-premium"
                 />
               </div>
@@ -659,18 +659,18 @@ export function CreateAppointmentTab({
               />
 
               {form.overrideRequired && (
-                <div className="text-sm font-mono border border-amber-200 p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
+                <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
                   {t(language, "appointments.create.overrideRequired")}
                 </div>
               )}
 
               {pageError && (
-                <div className="p-4 border border-red-200 rounded-lg" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
+                <div className="p-3 sm:p-4 border border-red-200 rounded-lg" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
                   <span className="text-sm font-medium">{pageError}</span>
                 </div>
               )}
 
-              <div className="flex justify-end gap-4 pt-4 border-t border-border mt-6">
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-4 border-t border-border mt-5">
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -707,13 +707,13 @@ export function CreateAppointmentTab({
 
       {showSafetyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
-          <Card className="w-full max-w-md mx-4 p-6">
-            <h3 className="text-xl font-semibold mb-4" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.safetyConfirmation")}</h3>
-            <p className="text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
-            <p className="text-base mb-6">
+          <Card className="w-full max-w-md mx-4 p-4 sm:p-5">
+            <h3 className="text-lg sm:text-xl font-semibold mb-3" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.safetyConfirmation")}</h3>
+            <p className="text-sm sm:text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
+            <p className="text-sm sm:text-base mb-5">
               {t(language, "appointments.create.confirmNoContraindications", { modality: chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—" })}
             </p>
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-3">
               <Button
                 variant="secondary"
                 onClick={() => setShowSafetyModal(false)}

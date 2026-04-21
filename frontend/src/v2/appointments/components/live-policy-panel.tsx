@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import type { PolicySnapshotDto } from "../types";
+import { useLanguage } from "@/providers/language-provider";
 
 interface LivePolicyPanelProps {
   snapshot: PolicySnapshotDto;
@@ -43,6 +44,7 @@ function ReadOnlyField({ label, value }: { label: string; value: string | number
 }
 
 export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
+  const { language } = useLanguage();
   const [copied, setCopied] = useState(false);
 
   const handleCopyJson = async () => {
@@ -73,7 +75,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Live Policy</h2>
+        <h2 style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>{language === "ar" ? "السياسة المباشرة" : "Live Policy"}</h2>
         <button
           type="button"
           onClick={handleCopyJson}
@@ -85,17 +87,17 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
             fontSize: 12,
             cursor: "pointer",
           }}
-          title="Copy live policy snapshot as JSON"
+          title={language === "ar" ? "نسخ لقطة السياسة المباشرة كـ JSON" : "Copy live policy snapshot as JSON"}
         >
-          {copied ? "✓ Copied" : "Copy JSON"}
+          {copied ? (language === "ar" ? "✓ تم النسخ" : "✓ Copied") : (language === "ar" ? "نسخ JSON" : "Copy JSON")}
         </button>
       </div>
 
       <div style={{ display: "grid", gap: 10 }}>
         {/* Daily category limits */}
-        <AccordionSection title="Daily category limits" defaultOpen>
+        <AccordionSection title={language === "ar" ? "حدود الفئات اليومية" : "Daily category limits"} defaultOpen>
           {snapshot.categoryDailyLimits.length === 0 ? (
-            <EmptyMessage message="No daily category limits configured." />
+            <EmptyMessage message={language === "ar" ? "لا توجد حدود فئات يومية." : "No daily category limits configured."} />
           ) : (
             snapshot.categoryDailyLimits.map((row, index) => (
               <div
@@ -110,27 +112,27 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                   gap: 8,
                 }}
               >
-                <ReadOnlyField label="Modality" value={`ID: ${row.modalityId}`} />
-                <ReadOnlyField label="Category" value={row.caseCategory === "oncology" ? "Oncology" : "Non-oncology"} />
-                <ReadOnlyField label="Daily limit" value={row.dailyLimit} />
-                <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
+                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label={language === "ar" ? "الفئة" : "Category"} value={row.caseCategory === "oncology" ? (language === "ar" ? "أورام" : "Oncology") : (language === "ar" ? "غير أورام" : "Non-oncology")} />
+                <ReadOnlyField label={language === "ar" ? "الحد اليومي" : "Daily limit"} value={row.dailyLimit} />
+                <ReadOnlyField label={language === "ar" ? "الحالة" : "Status"} value={row.isActive ? (language === "ar" ? "نشط" : "Active") : (language === "ar" ? "غير نشط" : "Inactive")} />
               </div>
             ))
           )}
         </AccordionSection>
 
         {/* Blocked dates */}
-        <AccordionSection title="Blocked dates">
+        <AccordionSection title={language === "ar" ? "التواريخ المحجوبة" : "Blocked dates"}>
           {snapshot.modalityBlockedRules.length === 0 ? (
-            <EmptyMessage message="No blocked dates configured." />
+            <EmptyMessage message={language === "ar" ? "لا توجد تواريخ محجوبة." : "No blocked dates configured."} />
           ) : (
             snapshot.modalityBlockedRules.map((row, index) => {
               const ruleTypeLabel =
                 row.ruleType === "specific_date"
-                  ? "Specific date"
+                  ? (language === "ar" ? "تاريخ محدد" : "Specific date")
                   : row.ruleType === "date_range"
-                  ? "Date range"
-                  : "Yearly recurrence";
+                  ? (language === "ar" ? "نطاق تاريخ" : "Date range")
+                  : (language === "ar" ? "تكرار سنوي" : "Yearly recurrence");
 
               let dateDisplay = "—";
               if (row.ruleType === "specific_date") {
@@ -158,13 +160,13 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                     gap: 8,
                   }}
                 >
-                  <ReadOnlyField label="Modality" value={`ID: ${row.modalityId}`} />
-                  <ReadOnlyField label="Rule type" value={ruleTypeLabel} />
-                  <ReadOnlyField label="Date(s)" value={dateDisplay} />
-                  <ReadOnlyField label="Overridable" value={row.isOverridable ? "Yes" : "No"} />
-                  <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
-                  {row.title && <ReadOnlyField label="Title" value={row.title} />}
-                  {row.notes && <ReadOnlyField label="Notes" value={row.notes} />}
+                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label={language === "ar" ? "نوع القاعدة" : "Rule type"} value={ruleTypeLabel} />
+                <ReadOnlyField label={language === "ar" ? "التاريخ/التواريخ" : "Date(s)"} value={dateDisplay} />
+                <ReadOnlyField label={language === "ar" ? "قابل للتجاوز" : "Overridable"} value={row.isOverridable ? (language === "ar" ? "نعم" : "Yes") : (language === "ar" ? "لا" : "No")} />
+                <ReadOnlyField label={language === "ar" ? "الحالة" : "Status"} value={row.isActive ? (language === "ar" ? "نشط" : "Active") : (language === "ar" ? "غير نشط" : "Inactive")} />
+                {row.title && <ReadOnlyField label={language === "ar" ? "العنوان" : "Title"} value={row.title} />}
+                {row.notes && <ReadOnlyField label={language === "ar" ? "الملاحظات" : "Notes"} value={row.notes} />}
                 </div>
               );
             })
@@ -172,17 +174,17 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
         </AccordionSection>
 
         {/* Exam date rules */}
-        <AccordionSection title="Exam date rules">
+        <AccordionSection title={language === "ar" ? "قواعد تواريخ الفحص" : "Exam date rules"}>
           {snapshot.examTypeRules.length === 0 ? (
-            <EmptyMessage message="No exam date rules configured." />
+            <EmptyMessage message={language === "ar" ? "لا توجد قواعد لتواريخ الفحص." : "No exam date rules configured."} />
           ) : (
             snapshot.examTypeRules.map((row, index) => {
               const ruleTypeLabel =
                 row.ruleType === "specific_date"
-                  ? "Specific date"
+                  ? (language === "ar" ? "تاريخ محدد" : "Specific date")
                   : row.ruleType === "date_range"
-                  ? "Date range"
-                  : "Weekly recurrence";
+                  ? (language === "ar" ? "نطاق تاريخ" : "Date range")
+                  : (language === "ar" ? "تكرار أسبوعي" : "Weekly recurrence");
 
               let dateDisplay = "—";
               if (row.ruleType === "specific_date") {
@@ -196,7 +198,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
               }
 
               const effectLabel =
-                row.effectMode === "hard_restriction" ? "Hard restriction" : "Overridable restriction";
+                row.effectMode === "hard_restriction" ? (language === "ar" ? "تقييد صارم" : "Hard restriction") : (language === "ar" ? "تقييد قابل للتجاوز" : "Overridable restriction");
 
               return (
                 <div

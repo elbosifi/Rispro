@@ -18,7 +18,7 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
   const { language } = useLanguage();
   if (!patient) {
     return (
-      <div className="card-shell p-4">
+      <div className="card-shell p-3 sm:p-4">
         <p style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.noPatientSelected")}</p>
       </div>
     );
@@ -28,10 +28,10 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
   const primaryIdentifier = patient.identifierValue || patient.nationalId || patient.mrn || "—";
 
   return (
-    <div className="card-shell p-4">
-      <div className="font-bold" style={{ color: "var(--text)" }}>{fullName}</div>
-      <div className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.primaryId")}: {primaryIdentifier}</div>
-      <div className="flex flex-wrap gap-3 mt-2 text-xs" style={{ color: "var(--text-muted)" }}>
+    <div className="card-shell p-3 sm:p-4">
+      <div className="font-bold text-foreground">{fullName}</div>
+      <div className="text-xs sm:text-sm mt-1 text-muted-foreground">{t(language, "appointments.create.primaryId")}: {primaryIdentifier}</div>
+      <div className="flex flex-wrap gap-2 sm:gap-3 mt-2 text-xs sm:text-sm text-muted-foreground">
         <span>{t(language, "appointments.create.sex")}: {renderSex(patient.sex, language)}</span>
         <span>{t(language, "appointments.create.age")}: {patient.ageYears ?? "—"}{patient.demographicsEstimated ? (language === "ar" ? " (مقدّر)" : " (Estimated)") : ""}</span>
         <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>

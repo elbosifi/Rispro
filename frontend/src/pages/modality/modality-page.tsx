@@ -58,9 +58,9 @@ export default function ModalityPage() {
   const modalities = lookups?.modalities ?? [];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold text-stone-900 dark:text-white">{t(language, "modality.title")}</h2>
+    <div className="max-w-7xl mx-auto space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:hidden">
+        <h2 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white">{t(language, "modality.title")}</h2>
         <button
           onClick={handleRefresh}
           className="px-4 py-2 bg-stone-100 dark:bg-stone-700 hover:bg-stone-200 dark:hover:bg-stone-600 text-stone-700 dark:text-stone-300 font-medium rounded-lg transition-colors text-sm"

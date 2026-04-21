@@ -172,15 +172,15 @@ export default function QueuePage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
         </div>
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
+            <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
               <span className="gradient-text">{t("queue.pageTitle")}</span>
             </h1>
             <p className="mt-2 text-muted-foreground">
@@ -190,10 +190,10 @@ export default function QueuePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-         <div className="space-y-6">
-           <Card className="p-6">
-             <h3 className="text-xl font-semibold mb-4">{t("queue.scanAccession")}</h3>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+         <div className="space-y-4">
+           <Card className="p-4 sm:p-5">
+             <h3 className="text-lg font-semibold mb-4">{t("queue.scanAccession")}</h3>
              <form onSubmit={handleScan} className="flex gap-2">
                <Input
                  type="text"
@@ -209,8 +209,8 @@ export default function QueuePage() {
              </form>
            </Card>
 
-           <Card className="p-6">
-             <h3 className="text-xl font-semibold mb-4">{t("queue.walkInPatient")}</h3>
+           <Card className="p-4 sm:p-5">
+             <h3 className="text-lg font-semibold mb-4">{t("queue.walkInPatient")}</h3>
             <div className="relative mb-4">
                <Input
                  type="text"
@@ -252,7 +252,7 @@ export default function QueuePage() {
             
             {/* Modality Selector */}
             <div className="mb-4">
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
+              <label className="block text-sm font-semibold mb-2 text-foreground">
                 {t("queue.selectModality")}
               </label>
               <select
@@ -278,7 +278,7 @@ export default function QueuePage() {
          <div className="lg:col-span-2">
            <Card className="overflow-hidden">
              <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-               <h3 className="text-xl font-semibold">{t("queue.todayQueue")}</h3>
+               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")}</h3>
                {queue && (
                  <div className="flex gap-4 text-sm text-muted-foreground">
                    <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>

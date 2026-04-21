@@ -169,9 +169,9 @@ export default function PrintPage() {
   const modalities = lookups?.modalities ?? [];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <h2 className="text-2xl font-bold">{t(language, "print.title")}</h2>
+    <div className="max-w-7xl mx-auto space-y-5">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:hidden">
+        <h2 className="text-xl sm:text-2xl font-bold">{t(language, "print.title")}</h2>
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={todayList}>
             {t(language, "print.today")}

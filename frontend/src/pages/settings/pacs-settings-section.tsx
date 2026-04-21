@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ApiError, api } from "@/lib/api-client";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 const SETTINGS_LOAD_TIMEOUT_MS = 5000;
 
@@ -28,6 +30,7 @@ type PacsNodeFormState = {
 };
 
 export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+  const { language } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery<{ nodes: PacsNode[] }>({
     queryKey: ["pacs", "nodes"],
@@ -116,7 +119,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       return { ok: true };
     },
     onSuccess: (_data, nodeId) => {
-      setTestResult({ id: nodeId, ok: true, message: "Connection successful" });
+      setTestResult({ id: nodeId, ok: true, message: t(language, "settings.pacs.connectionSuccessful") });
       setTestingId(null);
     },
     onError: (err: Error, nodeId) => {
@@ -134,7 +137,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     return <QueryError message={msg} />;
   }
 
-  if (isLoading) return <p className="text-sm text-stone-500 dark:text-stone-400">Loading...</p>;
+  if (isLoading) return <p className="text-sm text-stone-500 dark:text-stone-400">{t(language, "common.loading")}</p>;
 
   const startEdit = (node: PacsNode) => {
     setEditingId(node.id);
@@ -155,14 +158,14 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button type="button" onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button type="button" onClick={() => setMutationError(null)} className="ml-2 underline">{t(language, "common.dismiss")}</button>
         </div>
       )}
 
       <div className="flex justify-between items-center">
-        <span className="text-sm text-stone-600 dark:text-stone-400">{data?.nodes?.length ?? 0} PACS nodes</span>
+        <span className="text-sm text-stone-600 dark:text-stone-400">{data?.nodes?.length ?? 0} {t(language, "settings.pacs.nodes")}</span>
         <button type="button" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">
-          {showCreate ? "Cancel" : "Add PACS Node"}
+          {showCreate ? t(language, "common.cancel") : t(language, "settings.pacs.addNode")}
         </button>
       </div>
 
@@ -193,10 +196,10 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-stone-900 dark:text-white">{node.name}</span>
                     {node.is_default && (
-                      <span className="px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded">Default</span>
+                      <span className="px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded">{t(language, "settings.pacs.default")}</span>
                     )}
                     {!node.is_active && (
-                      <span className="px-1.5 py-0.5 text-xs bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400 rounded">Inactive</span>
+                      <span className="px-1.5 py-0.5 text-xs bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400 rounded">{t(language, "settings.pacs.inactive")}</span>
                     )}
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
@@ -215,15 +218,15 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     disabled={testingId === node.id}
                     className="px-2 py-1 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
                   >
-                    {testingId === node.id ? "Testing..." : "Test"}
+                    {testingId === node.id ? t(language, "settings.pacs.testing") : t(language, "settings.pacs.test")}
                   </button>
-                  <button type="button" onClick={() => startEdit(node)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
+                  <button type="button" onClick={() => startEdit(node)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">{t(language, "common.edit")}</button>
                   <button
                     type="button"
-                    onClick={() => { if (window.confirm(`Delete "${node.name}"?`)) deleteMutation.mutate(node.id); }}
+                    onClick={() => { if (window.confirm(`${t(language, "common.delete")} "${node.name}"?`)) deleteMutation.mutate(node.id); }}
                     className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
                   >
-                    Delete
+                    {t(language, "common.delete")}
                   </button>
                 </div>
               </div>
@@ -234,7 +237,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
 
       {data?.nodes?.length === 0 && !showCreate && (
         <p className="text-sm text-stone-500 dark:text-stone-400 text-center py-8">
-          No PACS nodes configured. Click "Add PACS Node" to get started.
+          {language === "ar"
+            ? "لا توجد عقد PACS مكوّنة. اضغط على \"إضافة عقدة PACS\" للبدء."
+            : "No PACS nodes configured. Click \"Add PACS Node\" to get started."}
         </p>
       )}
     </div>

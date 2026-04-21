@@ -14,7 +14,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
   const { language } = useLanguage();
   return (
     <div>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t(language, "appointments.create.patient")}</label>
+      <label className="block text-sm font-semibold mb-2 text-foreground">{t(language, "appointments.create.patient")}</label>
       <PatientSearch
         caseCategory={caseCategory}
         onSelect={(patient) => {

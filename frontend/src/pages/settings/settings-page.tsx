@@ -44,66 +44,66 @@ import type { User, SchedulingEngineConfig } from "@/types/api";
 // ---------------------------------------------------------------------------
 
 const RULE_TYPE_LABELS: Record<string, string> = {
-  specific_date: "Specific date",
-  date_range: "Date range",
-  yearly_recurrence: "Yearly recurrence",
-  weekly_recurrence: "Weekly recurrence"
+  specific_date: "تاريخ محدد",
+  date_range: "نطاق تاريخ",
+  yearly_recurrence: "تكرار سنوي",
+  weekly_recurrence: "تكرار أسبوعي"
 };
 
 const EFFECT_MODE_LABELS: Record<string, string> = {
-  restriction_overridable: "Restricted unless supervisor approves",
-  hard_restriction: "Hard restriction"
+  restriction_overridable: "مقيد ما لم يوافق المشرف",
+  hard_restriction: "تقييد صارم"
 };
 
 const CASE_CATEGORY_LABELS: Record<string, string> = {
-  oncology: "Oncology",
-  non_oncology: "Non-oncology"
+  oncology: "أورام",
+  non_oncology: "غير أورام"
 };
 
 const WEEKDAY_LABELS: Record<string, string> = {
-  "0": "Sunday",
-  "1": "Monday",
-  "2": "Tuesday",
-  "3": "Wednesday",
-  "4": "Thursday",
-  "5": "Friday",
-  "6": "Saturday"
+  "0": "الأحد",
+  "1": "الاثنين",
+  "2": "الثلاثاء",
+  "3": "الأربعاء",
+  "4": "الخميس",
+  "5": "الجمعة",
+  "6": "السبت"
 };
 
 const SECTION_HELPERS: Record<string, string> = {
-  categoryLimits: "Set the daily limit for oncology and non-oncology cases.",
-  blockedRules: "Block full dates or date ranges for a modality.",
-  examRules: "Checked exams are the ones this rule blocks or restricts.",
-  specialQuotas: "Add a few extra slots for selected exam types.",
-  specialReasons: "Reasons staff can choose when using a special quota.",
-  identifierTypes: "Extra patient ID types available during registration."
+  categoryLimits: "اضبط الحد اليومي لحالات الأورام وغير الأورام.",
+  blockedRules: "احجب التواريخ الكاملة أو نطاقات التواريخ لجهاز معين.",
+  examRules: "الفحوصات المحددة هي التي تحجبها هذه القاعدة أو تقيدها.",
+  specialQuotas: "أضف عدداً قليلاً من الخانات الإضافية لأنواع فحص محددة.",
+  specialReasons: "الأسباب التي يمكن للموظفين اختيارها عند استخدام حصة خاصة.",
+  identifierTypes: "أنواع هوية إضافية للمريض متاحة أثناء التسجيل."
 };
 
 const SECTION_TITLES: Record<string, string> = {
-  categoryLimits: "Category Daily Limits",
-  blockedRules: "Blocked Dates",
-  examRules: "Exam Restriction Rules",
-  specialQuotas: "Special Quotas",
-  specialReasons: "Special Reason Codes",
-  identifierTypes: "Patient Identifier Types"
+  categoryLimits: "الحدود اليومية للفئات",
+  blockedRules: "التواريخ المحجوبة",
+  examRules: "قواعد تقييد الفحص",
+  specialQuotas: "الحصص الخاصة",
+  specialReasons: "رموز الأسباب الخاصة",
+  identifierTypes: "أنواع هوية المريض"
 };
 
 const ACTION_LABELS = {
   add: {
-    categoryLimits: "Add Limit",
-    blockedRules: "Add Rule",
-    examRules: "Add Rule",
-    specialQuotas: "Add Quota",
-    specialReasons: "Add Reason",
-    identifierTypes: "Add Type"
+    categoryLimits: "إضافة حد",
+    blockedRules: "إضافة قاعدة",
+    examRules: "إضافة قاعدة",
+    specialQuotas: "إضافة حصة",
+    specialReasons: "إضافة سبب",
+    identifierTypes: "إضافة نوع"
   },
-  remove: "Remove",
-  active: "Active",
-  overridable: "Supervisor can override",
-  alternateWeeks: "Alternate weeks only",
-  save: "Save Scheduling Config",
-  reset: "Reset to Server Values",
-  saving: "Saving…"
+  remove: "إزالة",
+  active: "مفعل",
+  overridable: "يمكن للمشرف التجاوز",
+  alternateWeeks: "أسابيع متناوبة فقط",
+  save: "حفظ إعدادات الجدولة",
+  reset: "إعادة القيم من الخادم",
+  saving: "جاري الحفظ…"
 } as const;
 
 function _friendlyRuleType(value: string): string {
@@ -193,10 +193,10 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
+    <div className="max-w-7xl mx-auto space-y-5">
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-4 lg:hidden">
         <div>
-          <h2 className="text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
+          <h2 className="text-xl sm:text-2xl font-bold text-embossed" style={{ color: "var(--text)" }}>
             {t("settings.title")}
           </h2>
         </div>
@@ -287,26 +287,26 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{data?.users?.length ?? 0} users</span>
-        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add User"}</Button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة مستخدم"}</Button>
       </div>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
-            <input value={createForm.username} onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })} placeholder="Username" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.fullName} onChange={(e) => setCreateForm({ ...createForm, fullName: e.target.value })} placeholder="Full Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input type="password" value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} placeholder="Password" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.username} onChange={(e) => setCreateForm({ ...createForm, username: e.target.value })} placeholder="اسم المستخدم" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.fullName} onChange={(e) => setCreateForm({ ...createForm, fullName: e.target.value })} placeholder="الاسم الكامل" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input type="password" value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} placeholder="كلمة المرور" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             <select value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
-              <option value="receptionist">Receptionist</option>
-              <option value="supervisor">Supervisor</option>
+              <option value="receptionist">موظف استقبال</option>
+              <option value="supervisor">مشرف</option>
             </select>
           </div>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
 
@@ -453,19 +453,19 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.examTypes?.length ?? 0} exam types</span>
-        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add Exam Type"}</Button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة نوع فحص"}</Button>
       </div>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
-            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="Name (EN)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="الاسم الإنجليزي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="الاسم العربي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
             {modalityOptions.length > 0 ? (
               <select value={createForm.modalityId} onChange={(e) => setCreateForm({ ...createForm, modalityId: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
                 <option value="">{t("settings.selectModality")}</option>
@@ -474,10 +474,10 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
             ) : modalitiesLoading ? (
               <p className="text-sm text-stone-500">{t("settings.loading")}</p>
             ) : (
-              <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
+              <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
             )}
           </div>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
 
@@ -498,15 +498,15 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 ) : modalitiesLoading ? (
                   <p className="text-sm text-stone-500">{t("settings.loading")}</p>
                 ) : (
-                  <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "No modalities available" : "Failed to load modalities"}</p>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
                 )}
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
-                  Active
+                  مفعل
                 </label>
                 <div className="flex gap-2">
-                  <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
-                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                  <button onClick={() => updateMutation.mutate({ id: et.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">حفظ</button>
+                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>
                 </div>
               </div>
             ) : (
@@ -625,7 +625,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
       <p className="text-sm description-center">
@@ -633,37 +633,37 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
       </p>
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
-        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "Cancel" : "Add Modality"}</Button>
+        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة جهاز"}</Button>
       </div>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
-            <input value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="Code" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="Name (EN)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="Name (AR)" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="Daily Capacity" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.code} onChange={(e) => setCreateForm({ ...createForm, code: e.target.value })} placeholder="الرمز" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_en} onChange={(e) => setCreateForm({ ...createForm, name_en: e.target.value })} placeholder="الاسم الإنجليزي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.name_ar} onChange={(e) => setCreateForm({ ...createForm, name_ar: e.target.value })} placeholder="الاسم العربي" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input type="number" value={createForm.daily_capacity} onChange={(e) => setCreateForm({ ...createForm, daily_capacity: parseInt(e.target.value) || 0 })} placeholder="السعة اليومية" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <textarea value={createForm.general_instruction_ar} onChange={(e) => setCreateForm({ ...createForm, general_instruction_ar: e.target.value })} placeholder="Modality Notes (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-            <textarea value={createForm.general_instruction_en} onChange={(e) => setCreateForm({ ...createForm, general_instruction_en: e.target.value })} placeholder="Modality Notes (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+            <textarea value={createForm.general_instruction_ar} onChange={(e) => setCreateForm({ ...createForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+            <textarea value={createForm.general_instruction_en} onChange={(e) => setCreateForm({ ...createForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
           </div>
           <div className="flex items-center gap-3 pt-1">
-            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={createForm.safety_warning_enabled} onChange={(e) => setCreateForm({ ...createForm, safety_warning_enabled: e.target.checked })} className="rounded" /> Safety Warning Enabled</label>
+            <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={createForm.safety_warning_enabled} onChange={(e) => setCreateForm({ ...createForm, safety_warning_enabled: e.target.checked })} className="rounded" /> تحذير السلامة مفعل</label>
           </div>
           {createForm.safety_warning_enabled && (
             <div className="grid grid-cols-2 gap-2">
-              <textarea value={createForm.safety_warning_ar} onChange={(e) => setCreateForm({ ...createForm, safety_warning_ar: e.target.value })} placeholder="Safety Warning (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-              <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="Safety Warning (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+              <textarea value={createForm.safety_warning_ar} onChange={(e) => setCreateForm({ ...createForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+              <textarea value={createForm.safety_warning_en} onChange={(e) => setCreateForm({ ...createForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
             </div>
           )}
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.code || !createForm.name_en} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
 
       {((data as any)?.modalities?.length ?? 0) === 0 ? (
         <div className="rounded-lg border border-dashed border-stone-300 dark:border-stone-700 p-4 text-sm text-stone-500 dark:text-stone-400">
-          No modalities are configured yet.
+          لم يتم تكوين أي أجهزة بعد.
         </div>
       ) : (
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
@@ -678,22 +678,22 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                   <input type="number" value={editForm.daily_capacity} onChange={(e) => setEditForm({ ...editForm, daily_capacity: parseInt(e.target.value) || 0 })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <textarea value={editForm.general_instruction_ar} onChange={(e) => setEditForm({ ...editForm, general_instruction_ar: e.target.value })} placeholder="Modality Notes (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-                  <textarea value={editForm.general_instruction_en} onChange={(e) => setEditForm({ ...editForm, general_instruction_en: e.target.value })} placeholder="Modality Notes (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                  <textarea value={editForm.general_instruction_ar} onChange={(e) => setEditForm({ ...editForm, general_instruction_ar: e.target.value })} placeholder="ملاحظات الجهاز (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+                  <textarea value={editForm.general_instruction_en} onChange={(e) => setEditForm({ ...editForm, general_instruction_en: e.target.value })} placeholder="ملاحظات الجهاز (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
                 </div>
                 <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.safety_warning_enabled} onChange={(e) => setEditForm({ ...editForm, safety_warning_enabled: e.target.checked })} className="rounded" /> Safety Warning Enabled</label>
-                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" /> Active</label>
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.safety_warning_enabled} onChange={(e) => setEditForm({ ...editForm, safety_warning_enabled: e.target.checked })} className="rounded" /> تحذير السلامة مفعل</label>
+                  <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" /> مفعل</label>
                 </div>
                 {editForm.safety_warning_enabled && (
                   <div className="grid grid-cols-2 gap-2">
-                    <textarea value={editForm.safety_warning_ar} onChange={(e) => setEditForm({ ...editForm, safety_warning_ar: e.target.value })} placeholder="Safety Warning (Arabic)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
-                    <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="Safety Warning (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                    <textarea value={editForm.safety_warning_ar} onChange={(e) => setEditForm({ ...editForm, safety_warning_ar: e.target.value })} placeholder="تحذير السلامة (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+                    <textarea value={editForm.safety_warning_en} onChange={(e) => setEditForm({ ...editForm, safety_warning_en: e.target.value })} placeholder="تحذير السلامة (إنجليزي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
                   </div>
                 )}
                 <div className="flex gap-2">
                   <button onClick={() => updateMutation.mutate({ id: m.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
-                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                  <button onClick={() => setEditingId(null)} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">إلغاء</button>
                 </div>
               </div>
             ) : (
@@ -811,7 +811,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
 
@@ -872,7 +872,7 @@ function NameDictionarySection({ onReAuthRequired }: { onReAuthRequired: (key: s
                         <td className="p-2 text-center">
                           <div className="flex gap-1 justify-center">
                             <button onClick={() => updateMutation.mutate(editForm)} disabled={updateMutation.isPending} className="px-2 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded hover:bg-teal-200 dark:hover:bg-teal-900/50 transition-colors">Save</button>
-                            <button onClick={() => setEditingId(null)} className="px-2 py-0.5 text-xs bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 rounded">Cancel</button>
+                            <button onClick={() => setEditingId(null)} className="px-2 py-0.5 text-xs bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 rounded">إلغاء</button>
                           </div>
                         </td>
                       </>
@@ -912,58 +912,58 @@ interface SettingControl {
 const SETTINGS_CATALOG: Record<string, SettingControl> = {
   // Patient Registration
   phone1_required: { label: "Phone 1 Required", type: "dropdown", options: [
-    { value: "required", label: "Required" },
-    { value: "optional", label: "Optional" }
+    { value: "required", label: "مطلوب" },
+    { value: "optional", label: "اختياري" }
   ]},
   dob_or_age_rule: { label: "DOB / Age Rule", type: "dropdown", options: [
-    { value: "age_or_dob_required", label: "Age or DOB Required" },
-    { value: "age_required", label: "Age Required" },
-    { value: "dob_required", label: "DOB Required" }
+    { value: "age_or_dob_required", label: "العمر أو تاريخ الميلاد مطلوب" },
+    { value: "age_required", label: "العمر مطلوب" },
+    { value: "dob_required", label: "تاريخ الميلاد مطلوب" }
   ]},
-  national_id_required: { label: "National ID Required", type: "dropdown", options: [
-    { value: "required", label: "Required" },
-    { value: "optional", label: "Optional" }
+  national_id_required: { label: "رقم الهوية مطلوب", type: "dropdown", options: [
+    { value: "required", label: "مطلوب" },
+    { value: "optional", label: "اختياري" }
   ]},
-  custom_fields_scope: { label: "Custom Fields Scope", type: "dropdown", options: [
-    { value: "all_patients", label: "All Patients" },
-    { value: "disabled", label: "Disabled" }
+  custom_fields_scope: { label: "نطاق الحقول المخصصة", type: "dropdown", options: [
+    { value: "all_patients", label: "جميع المرضى" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
 
   // Scheduling & Capacity
-  capacity_mode: { label: "Capacity Mode", type: "dropdown", options: [
-    { value: "per_modality_per_day", label: "Per Modality Per Day" },
-    { value: "global", label: "Global" }
+  capacity_mode: { label: "وضع السعة", type: "dropdown", options: [
+    { value: "per_modality_per_day", label: "لكل جهاز في اليوم" },
+    { value: "global", label: "إجمالي" }
   ]},
-  calendar_window_days: { label: "Calendar Window (Days)", type: "number", min: "1", max: "90" },
-  double_booking_prevention: { label: "Double Booking Prevention", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  calendar_window_days: { label: "نافذة التقويم (أيام)", type: "number", min: "1", max: "90" },
+  double_booking_prevention: { label: "منع الحجز المزدوج", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
-  overbooking_reason_required: { label: "Overbooking Reason Required", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  overbooking_reason_required: { label: "اشتراط سبب للتجاوز", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
-  allow_friday_appointments: { label: "Allow Friday Appointments", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  allow_friday_appointments: { label: "السماح بمواعيد الجمعة", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
-  allow_saturday_appointments: { label: "Allow Saturday Appointments", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  allow_saturday_appointments: { label: "السماح بمواعيد السبت", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
   // Queue & Arrival
-  barcode_check_in: { label: "Barcode Check-In", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  barcode_check_in: { label: "تسجيل الوصول بالباركود", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
-  walk_in_queue: { label: "Walk-In Queue", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  walk_in_queue: { label: "طابور الدخول المباشر", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]},
-  no_show_review_time: { label: "No-Show Review Time", type: "time" },
-  no_show_confirmation_required: { label: "No-Show Confirmation Required", type: "dropdown", options: [
-    { value: "enabled", label: "Enabled" },
-    { value: "disabled", label: "Disabled" }
+  no_show_review_time: { label: "وقت مراجعة الغياب", type: "time" },
+  no_show_confirmation_required: { label: "اشتراط تأكيد الغياب", type: "dropdown", options: [
+    { value: "enabled", label: "مفعل" },
+    { value: "disabled", label: "غير مفعل" }
   ]}
 };
 
@@ -1027,7 +1027,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
       {Object.entries(data || {}).map(([key, value]: [string, any]) => {
@@ -1739,10 +1739,10 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           <div key={`cl-${idx}`} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
             <ModalitySelect value={row.modalityId as string} onChange={(v) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, modalityId: v } : r) }))} />
             <select className="input-field text-xs" value={row.caseCategory as string} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, caseCategory: e.target.value as "oncology" | "non_oncology" } : r) }))}>
-              <option value="non_oncology">Non-oncology</option>
-              <option value="oncology">Oncology</option>
+              <option value="non_oncology">غير أورام</option>
+              <option value="oncology">أورام</option>
             </select>
-            <input className="input-field text-xs" type="number" min="0" placeholder="Daily limit" value={row.dailyLimit as string} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, dailyLimit: e.target.value } : r) }))} />
+            <input className="input-field text-xs" type="number" min="0" placeholder="الحد اليومي" value={row.dailyLimit as string} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, dailyLimit: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
             <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, categoryLimits: prev.categoryLimits.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
@@ -1764,12 +1764,12 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               ))}
             </select>
             {row.ruleType === "specific_date" && (
-              <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
+              <input className="input-field text-xs" type="date" placeholder="تاريخ محدد" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
             )}
             {row.ruleType === "date_range" && (
               <>
-                <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
-                <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="تاريخ البداية" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="تاريخ النهاية" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
               </>
             )}
             {row.ruleType === "yearly_recurrence" && (
@@ -1777,17 +1777,17 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
                 <div className="flex gap-2">
                   <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurStartMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartMonth: e.target.value } : r) }))} />
                   <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurStartDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurStartDay: e.target.value } : r) }))} />
-                  <span className="text-[10px] text-stone-400 self-center">Recur start</span>
+                  <span className="text-[10px] text-stone-400 self-center">بداية التكرار</span>
                 </div>
                 <div className="flex gap-2">
                   <input className="input-field text-xs w-12" type="number" min="1" max="12" placeholder="MM" value={row.recurEndMonth as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndMonth: e.target.value } : r) }))} />
                   <input className="input-field text-xs w-12" type="number" min="1" max="31" placeholder="DD" value={row.recurEndDay as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, recurEndDay: e.target.value } : r) }))} />
-                  <span className="text-[10px] text-stone-400 self-center">Recur end</span>
+                  <span className="text-[10px] text-stone-400 self-center">نهاية التكرار</span>
                 </div>
               </>
             )}
-            <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
-            <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="العنوان (اختياري)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="ملاحظات (اختياري)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isOverridable as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, isOverridable: e.target.checked } : r) }))} /> {ACTION_LABELS.overridable}</label>
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
             <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, blockedRules: prev.blockedRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
@@ -1821,26 +1821,26 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
               />
             </div>
             {row.ruleType === "specific_date" && (
-              <input className="input-field text-xs" type="date" placeholder="Specific date" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
+              <input className="input-field text-xs" type="date" placeholder="تاريخ محدد" value={row.specificDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, specificDate: e.target.value } : r) }))} />
             )}
             {row.ruleType === "date_range" && (
               <>
-                <input className="input-field text-xs" type="date" placeholder="Start date" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
-                <input className="input-field text-xs" type="date" placeholder="End date" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="تاريخ البداية" value={row.startDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, startDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="تاريخ النهاية" value={row.endDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, endDate: e.target.value } : r) }))} />
               </>
             )}
             {row.ruleType === "weekly_recurrence" && (
               <>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-stone-500">Weekday</p>
+                  <p className="text-[10px] text-stone-500">اليوم</p>
                   <WeekdaySelect value={row.weekday as string} onChange={(v) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, weekday: v } : r) }))} />
                 </div>
-                <input className="input-field text-xs" type="date" placeholder="Recurrence anchor date" value={row.recurrenceAnchorDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, recurrenceAnchorDate: e.target.value } : r) }))} />
+                <input className="input-field text-xs" type="date" placeholder="تاريخ مرساة التكرار" value={row.recurrenceAnchorDate as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, recurrenceAnchorDate: e.target.value } : r) }))} />
                 <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.alternateWeeks as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, alternateWeeks: e.target.checked } : r) }))} /> {ACTION_LABELS.alternateWeeks}</label>
               </>
             )}
-            <input className="input-field text-xs" placeholder="Title (optional)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
-            <input className="input-field text-xs" placeholder="Notes (optional)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="العنوان (اختياري)" value={row.title as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, title: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="ملاحظات (اختياري)" value={row.notes as string} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, notes: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, examRules: prev.examRules.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
             <button type="button" className="btn-secondary text-xs" onClick={() => setDraft((prev) => ({ ...prev, examRules: prev.examRules.filter((_, i) => i !== idx) }))}>{ACTION_LABELS.remove}</button>
           </div>
@@ -1965,7 +1965,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
         () => setDraft((prev) => ({ ...prev, specialReasons: [...prev.specialReasons, { code: "", labelEn: "", labelAr: "", isActive: true }] })),
         (row, idx) => (
           <div key={`sr-${idx}`} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
-            <input className="input-field text-xs" placeholder="Code" value={row.code as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, code: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="الرمز" value={row.code as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, code: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="English label" value={row.labelEn as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, labelEn: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Arabic label" value={row.labelAr as string} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, labelAr: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, specialReasons: prev.specialReasons.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
@@ -1979,7 +1979,7 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
         () => setDraft((prev) => ({ ...prev, identifierTypes: [...prev.identifierTypes, { code: "", labelEn: "", labelAr: "", isActive: true }] })),
         (row, idx) => (
           <div key={`it-${idx}`} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-center">
-            <input className="input-field text-xs" placeholder="Code" value={row.code as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, code: e.target.value } : r) }))} />
+            <input className="input-field text-xs" placeholder="الرمز" value={row.code as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, code: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="English label" value={row.labelEn as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, labelEn: e.target.value } : r) }))} />
             <input className="input-field text-xs" placeholder="Arabic label" value={row.labelAr as string} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, labelAr: e.target.value } : r) }))} />
             <label className="text-xs flex items-center gap-2"><input type="checkbox" checked={row.isActive as boolean} onChange={(e) => setDraft((prev) => ({ ...prev, identifierTypes: prev.identifierTypes.map((r, i) => i === idx ? { ...r, isActive: e.target.checked } : r) }))} /> {ACTION_LABELS.active}</label>
@@ -2049,6 +2049,7 @@ function QueryError({ message }: { message: string }) {
 
 function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const queryClient = useQueryClient();
+  const { t, language } = useLanguage();
   const [storagePath, setStoragePath] = useState("");
   const [authUsername, setAuthUsername] = useState("");
   const [authPassword, setAuthPassword] = useState("");
@@ -2085,61 +2086,69 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
         ],
       }),
     onSuccess: () => {
-      setResultMessage("Storage settings saved.");
+      setResultMessage(t("settings.documents.saved"));
       queryClient.invalidateQueries({ queryKey: ["settings", "documents_and_uploads"] });
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Failed to save storage settings.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.saveFailed"));
     },
   });
 
   const testMutation = useMutation({
     mutationFn: adminTestDocumentStorageConnectivity,
     onSuccess: (result) => {
-      setResultMessage(result.ok ? `Connectivity OK: ${result.message}` : `Connectivity failed: ${result.message}`);
+      setResultMessage(result.ok ? t("settings.documents.connectivityOk", { message: result.message }) : t("settings.documents.connectivityFailed", { message: result.message }));
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Connectivity test failed.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.connectivityTestFailed"));
     },
   });
 
   const deleteAllMutation = useMutation({
     mutationFn: () => adminBulkDeleteDocuments({ mode: "all" }),
     onSuccess: (result) => {
-      setResultMessage(`Deleted ${result.deletedCount} documents. Failed: ${result.failedCount}.`);
+      setResultMessage(language === "ar"
+        ? `تم حذف ${result.deletedCount} وثيقة. فشل: ${result.failedCount}.`
+        : `Deleted ${result.deletedCount} documents. Failed: ${result.failedCount}.`);
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Bulk delete failed.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.deleteAllFailed"));
     },
   });
 
   const deleteRangeMutation = useMutation({
     mutationFn: () => adminBulkDeleteDocuments({ mode: "appointment_date_range", dateFrom, dateTo }),
     onSuccess: (result) => {
-      setResultMessage(`Deleted ${result.deletedCount} documents in range. Failed: ${result.failedCount}.`);
+      setResultMessage(language === "ar"
+        ? `تم حذف ${result.deletedCount} وثيقة ضمن النطاق. فشل: ${result.failedCount}.`
+        : `Deleted ${result.deletedCount} documents in range. Failed: ${result.failedCount}.`);
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Range delete failed.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.deleteRangeFailed"));
     },
   });
 
   const moveAllMutation = useMutation({
     mutationFn: () => adminMoveDocumentsToStorage({ mode: "all" }),
     onSuccess: (result) => {
-      setResultMessage(`Moved ${result.movedCount} docs. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
+      setResultMessage(language === "ar"
+        ? `تم نقل ${result.movedCount} وثيقة. تم التجاوز: ${result.skippedCount}. فشل: ${result.failedCount}.`
+        : `Moved ${result.movedCount} docs. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Move job failed.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.moveAllFailed"));
     },
   });
 
   const moveRangeMutation = useMutation({
     mutationFn: () => adminMoveDocumentsToStorage({ mode: "appointment_date_range", dateFrom, dateTo }),
     onSuccess: (result) => {
-      setResultMessage(`Moved ${result.movedCount} docs in range. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
+      setResultMessage(language === "ar"
+        ? `تم نقل ${result.movedCount} وثيقة ضمن النطاق. تم التجاوز: ${result.skippedCount}. فشل: ${result.failedCount}.`
+        : `Moved ${result.movedCount} docs in range. Skipped: ${result.skippedCount}. Failed: ${result.failedCount}.`);
     },
     onError: (err: unknown) => {
-      setResultMessage(err instanceof Error ? err.message : "Range move job failed.");
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.moveRangeFailed"));
     },
   });
 
@@ -2152,54 +2161,54 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
   }
 
   if (isLoading) {
-    return <p className="description-center">Loading documents settings...</p>;
+    return <p className="description-center">{t("settings.documents.loading")}</p>;
   }
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
-          <label className="block text-sm font-medium mb-1">Storage path (UNC/local/relative)</label>
+          <label className="block text-sm font-medium mb-1">{t("settings.documents.storagePath")}</label>
           <input value={storagePath} onChange={(e) => setStoragePath(e.target.value)} className="input-premium w-full" />
         </div>
         <div className="flex items-end">
           <label className="inline-flex items-center gap-2 text-sm">
             <input type="checkbox" checked={fallbackEnabled} onChange={(e) => setFallbackEnabled(e.target.checked)} />
-            Enable local fallback when preferred path is unavailable
+            {t("settings.documents.enableFallback")}
           </label>
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Network username</label>
+          <label className="block text-sm font-medium mb-1">{t("settings.documents.networkUsername")}</label>
           <input value={authUsername} onChange={(e) => setAuthUsername(e.target.value)} className="input-premium w-full" />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Network password</label>
+          <label className="block text-sm font-medium mb-1">{t("settings.documents.networkPassword")}</label>
           <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} className="input-premium w-full" />
         </div>
         <div>
-          <label className="block text-sm font-medium mb-1">Network domain (optional)</label>
+          <label className="block text-sm font-medium mb-1">{t("settings.documents.networkDomain")}</label>
           <input value={authDomain} onChange={(e) => setAuthDomain(e.target.value)} className="input-premium w-full" />
         </div>
       </div>
 
       <div className="flex flex-wrap gap-2">
         <button onClick={() => saveMutation.mutate()} className="btn-primary text-sm" disabled={saveMutation.isPending}>
-          {saveMutation.isPending ? "Saving..." : "Save storage settings"}
+          {saveMutation.isPending ? t("common.loading") : t("settings.documents.save")}
         </button>
         <button onClick={() => testMutation.mutate()} className="btn-secondary text-sm" disabled={testMutation.isPending}>
-          {testMutation.isPending ? "Testing..." : "Connectivity test"}
+          {testMutation.isPending ? t("common.loading") : t("settings.documents.testing")}
         </button>
       </div>
 
       <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
-        <h4 className="font-medium text-sm">Bulk cleanup and move jobs</h4>
+        <h4 className="font-medium text-sm">{t("settings.documents.bulkJobs")}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <div>
-            <label className="block text-xs mb-1">From date</label>
+            <label className="block text-xs mb-1">{t("settings.documents.fromDate")}</label>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="input-premium w-full" />
           </div>
           <div>
-            <label className="block text-xs mb-1">To date</label>
+            <label className="block text-xs mb-1">{t("settings.documents.toDate")}</label>
             <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="input-premium w-full" />
           </div>
         </div>
@@ -2207,46 +2216,46 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           <button
             className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
             onClick={() => {
-              if (!window.confirm("Delete all stored request documents?")) return;
+              if (!window.confirm(t("settings.documents.deleteAllConfirm"))) return;
               deleteAllMutation.mutate();
             }}
             disabled={deleteAllMutation.isPending}
           >
-            {deleteAllMutation.isPending ? "Deleting..." : "Delete all documents"}
+            {deleteAllMutation.isPending ? t("common.loading") : t("settings.documents.deleteAll")}
           </button>
           <button
             className="px-3 py-1.5 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded"
             onClick={() => {
               if (!dateFrom || !dateTo) {
-                setResultMessage("Please select both dateFrom and dateTo.");
+                setResultMessage(t("settings.documents.selectBothDates"));
                 return;
               }
-              if (!window.confirm("Delete documents in selected appointment date range?")) return;
+              if (!window.confirm(t("settings.documents.deleteRangeConfirm"))) return;
               deleteRangeMutation.mutate();
             }}
             disabled={deleteRangeMutation.isPending}
           >
-            {deleteRangeMutation.isPending ? "Deleting..." : "Delete by appointment period"}
+            {deleteRangeMutation.isPending ? t("common.loading") : t("settings.documents.deleteRange")}
           </button>
           <button
             className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
             onClick={() => moveAllMutation.mutate()}
             disabled={moveAllMutation.isPending}
           >
-            {moveAllMutation.isPending ? "Moving..." : "Move local fallback docs (all)"}
+            {moveAllMutation.isPending ? t("common.loading") : t("settings.documents.moveAll")}
           </button>
           <button
             className="px-3 py-1.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-300 rounded"
             onClick={() => {
               if (!dateFrom || !dateTo) {
-                setResultMessage("Please select both dateFrom and dateTo.");
+                setResultMessage(t("settings.documents.selectBothDates"));
                 return;
               }
               moveRangeMutation.mutate();
             }}
             disabled={moveRangeMutation.isPending}
           >
-            {moveRangeMutation.isPending ? "Moving..." : "Move local fallback docs (period)"}
+            {moveRangeMutation.isPending ? t("common.loading") : t("settings.documents.moveRange")}
           </button>
         </div>
       </div>

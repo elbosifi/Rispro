@@ -63,7 +63,7 @@ export function DateInput({
 
   return (
     <div>
-      <label htmlFor={inputId} className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5" style={{ color: "var(--text-muted)" }}>
+      <label htmlFor={inputId} className="block text-sm font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>
         {label}
       </label>
       <div className="relative">

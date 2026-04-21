@@ -9,6 +9,8 @@ import { useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
 import { Button } from "@/components/shared/Button";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface CancelConfirmDialogProps {
   booking: {
@@ -21,6 +23,7 @@ interface CancelConfirmDialogProps {
 }
 
 export function CancelConfirmDialog({ booking, onConfirm, onCancel }: CancelConfirmDialogProps) {
+  const { language } = useLanguage();
   const confirmRef = useRef<HTMLButtonElement>(null);
 
   return (
@@ -43,8 +46,8 @@ export function CancelConfirmDialog({ booking, onConfirm, onCancel }: CancelConf
               <AlertTriangle size={20} />
             </div>
             <div>
-              <DialogTitle>Cancel Booking</DialogTitle>
-              <DialogDescription>This action cannot be undone</DialogDescription>
+              <DialogTitle>{t(language, "appointments.v2.cancelBookingTitle")}</DialogTitle>
+              <DialogDescription>{t(language, "appointments.v2.cannotUndo")}</DialogDescription>
             </div>
           </div>
         </DialogHeader>
@@ -66,14 +69,14 @@ export function CancelConfirmDialog({ booking, onConfirm, onCancel }: CancelConf
 
         <DialogFooter>
           <Button variant="secondary" onClick={onCancel}>
-            Keep Booking
+            {t(language, "appointments.v2.keepBooking")}
           </Button>
           <Button
             ref={confirmRef}
             onClick={onConfirm}
             style={{ backgroundColor: "var(--accent)", color: "#fff" }}
           >
-            Cancel Booking
+            {t(language, "appointments.v2.cancelBooking")}
           </Button>
         </DialogFooter>
       </DialogContent>

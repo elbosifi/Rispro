@@ -38,8 +38,8 @@ export default function DoctorPage() {
   const typedAppointments = appointments as DoctorAppointment[];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
-      <h2 className="text-2xl font-bold text-stone-900 dark:text-white">
+    <div className="max-w-7xl mx-auto space-y-5">
+      <h2 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white lg:hidden">
         {t(language, "doctor.title")}
       </h2>
 

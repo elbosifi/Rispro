@@ -9,6 +9,8 @@
 import { useState, useEffect } from "react";
 import { Calendar, Loader2 } from "lucide-react";
 import { pushToast } from "@/lib/toast";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import { useV2CreateBooking, evaluateV2Scheduling, useV2SpecialReasonCodes } from "../api";
 import { PatientSearch } from "./patient-search";
 import { OverrideDialog } from "./override-dialog";
@@ -46,6 +48,7 @@ export function BookingForm({
   caseCategory,
   onBookingSuccess,
 }: BookingFormProps) {
+  const { language } = useLanguage();
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -86,8 +89,8 @@ export function BookingForm({
     if (!selectedPatient || !selectedModalityId || !selectedDate) {
       pushToast({
         type: "error",
-        title: "Validation Error",
-        message: "Please select a patient, modality, and date.",
+        title: t(language, "common.validationError"),
+        message: t(language, "appointments.booking.selectPatientModalityDate"),
       });
       return;
     }
@@ -95,8 +98,8 @@ export function BookingForm({
     if (useSpecialQuota && specialReasons.isError) {
       pushToast({
         type: "error",
-        title: "Special Quota Unavailable",
-        message: "Special reason codes could not be loaded. Try again before submitting.",
+        title: t(language, "appointments.booking.specialQuotaUnavailable"),
+        message: t(language, "appointments.booking.specialQuotaLoadFailed"),
       });
       return;
     }
@@ -104,8 +107,8 @@ export function BookingForm({
     if (specialReasonsUnavailable) {
       pushToast({
         type: "error",
-        title: "Special Quota Unavailable",
-        message: "No active special reason codes are configured. Contact a supervisor.",
+        title: t(language, "appointments.booking.specialQuotaUnavailable"),
+        message: t(language, "appointments.booking.specialQuotaNoActive"),
       });
       return;
     }
@@ -113,8 +116,8 @@ export function BookingForm({
     if (missingSpecialReasonSelection) {
       pushToast({
         type: "error",
-        title: "Validation Error",
-        message: "Select a special reason before creating a special quota booking.",
+        title: t(language, "common.validationError"),
+        message: t(language, "appointments.booking.specialReasonRequired"),
       });
       return;
     }
@@ -152,15 +155,15 @@ export function BookingForm({
         setOverrideError(null);
         pushToast({
           type: "error",
-          title: "Supervisor Override Required",
-          message: "This booking needs supervisor approval before it can be saved.",
+          title: t(language, "appointments.booking.supervisorOverrideRequired"),
+          message: t(language, "appointments.booking.supervisorApprovalNeeded"),
         });
         return;
       }
 
       if (!decision.isAllowed) {
-        const reason = decision.reasons[0]?.message ?? "Booking not allowed for the selected date.";
-        pushToast({ type: "error", title: "Booking Not Allowed", message: reason });
+        const reason = decision.reasons[0]?.message ?? t(language, "appointments.booking.bookingNotAllowed");
+        pushToast({ type: "error", title: t(language, "appointments.booking.bookingNotAllowed"), message: reason });
         return;
       }
 
@@ -168,8 +171,8 @@ export function BookingForm({
       await createBooking.mutateAsync(request);
       pushToast({
         type: "success",
-        title: "Booking Created",
-        message: `${selectedPatient.englishFullName} was booked for ${selectedDate}.`,
+        title: t(language, "appointments.booking.bookingCreated"),
+        message: `${selectedPatient.arabicFullName || selectedPatient.englishFullName || `Patient #${selectedPatient.id}`} ${language === "ar" ? "تم حجزه في" : "was booked for"} ${selectedDate}.`,
       });
       resetForm();
       onBookingSuccess();
@@ -177,8 +180,8 @@ export function BookingForm({
       const fallbackName = selectedPatient.englishFullName || selectedPatient.arabicFullName || `Patient #${selectedPatient.id}`;
       pushToast({
         type: "error",
-        title: "Booking Failed",
-        message: err instanceof Error ? `${fallbackName}: ${err.message}` : `${fallbackName}: Unable to create booking.`,
+        title: t(language, "appointments.booking.bookingFailed"),
+        message: err instanceof Error ? `${fallbackName}: ${err.message}` : `${fallbackName}: ${t(language, "appointments.booking.unableToCreate")}.`,
       });
     }
   };
@@ -199,8 +202,8 @@ export function BookingForm({
       await createBooking.mutateAsync(requestWithOverride);
       pushToast({
         type: "success",
-        title: "Booking Created (Override)",
-        message: `${selectedPatient?.englishFullName ?? selectedPatient?.arabicFullName ?? "Patient"} was booked for ${pendingBooking.bookingDate} with supervisor override.`,
+        title: t(language, "appointments.booking.bookingCreatedOverride"),
+        message: `${selectedPatient?.arabicFullName ?? selectedPatient?.englishFullName ?? (language === "ar" ? "المريض" : "Patient")} ${language === "ar" ? "تم حجزه في" : "was booked for"} ${pendingBooking.bookingDate} ${language === "ar" ? "مع تجاوز المشرف." : "with supervisor override."}`,
       });
       setShowOverride(false);
       setPendingBooking(null);
@@ -208,8 +211,8 @@ export function BookingForm({
       resetForm();
       onBookingSuccess();
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Authentication failed";
-      setOverrideError(`Override failed: ${message}`);
+      const message = err instanceof Error ? err.message : t(language, "appointments.booking.authenticationFailed");
+      setOverrideError(`${t(language, "appointments.booking.overrideFailed")}: ${message}`);
     }
   };
 
@@ -230,7 +233,7 @@ export function BookingForm({
     <Card className="p-6">
       <form onSubmit={handleSubmit} className="space-y-6">
         <div className="space-y-2">
-          <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Patient</label>
+          <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{language === "ar" ? "المريض" : "Patient"}</label>
           <PatientSearch
             caseCategory={caseCategory}
             onSelect={setSelectedPatient}
@@ -241,20 +244,20 @@ export function BookingForm({
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Modality</label>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">{language === "ar" ? "الجهاز" : "Modality"}</label>
             <div className="input-premium opacity-70">
               {modality?.name ?? "—"}
             </div>
           </div>
 
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Booking Date</label>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">{language === "ar" ? "تاريخ الحجز" : "Booking Date"}</label>
             <select
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
               className="input-premium input-ltr w-full"
             >
-              <option value="">Select date…</option>
+              <option value="">{t(language, "appointments.v2.selectaDate")}</option>
               {availableDates.map((date) => {
                 const day = availability.find((d) => d.date === date);
                 const dayStatus = day?.decision.displayStatus;
@@ -265,13 +268,13 @@ export function BookingForm({
                 const specialVal = special ?? 0;
                 let label: string;
                 if (isBlocked) {
-                  label = `${date} (Blocked)`;
+                  label = `${date} (${language === "ar" ? "محجوب" : "Blocked"})`;
                 } else {
-                  const modeLabel = day?.bucketMode === "partitioned" ? "partitioned" : "total-only";
+                  const modeLabel = day?.bucketMode === "partitioned" ? (language === "ar" ? "مجزأ" : "partitioned") : (language === "ar" ? "إجمالي فقط" : "total-only");
                   if (specialVal > 0) {
-                    label = `${date} (${totalRemaining} total, ${specialVal} special, ${modeLabel})`;
+                    label = `${date} (${totalRemaining} ${language === "ar" ? "إجمالي" : "total"}, ${specialVal} ${language === "ar" ? "خاص" : "special"}, ${modeLabel})`;
                   } else {
-                    label = `${date} (${totalRemaining} total, ${modeLabel})`;
+                    label = `${date} (${totalRemaining} ${language === "ar" ? "إجمالي" : "total"}, ${modeLabel})`;
                   }
                 }
                 return (
@@ -286,19 +289,19 @@ export function BookingForm({
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Case Category</label>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">{language === "ar" ? "فئة الحالة" : "Case Category"}</label>
             <div className="input-premium opacity-70">
-              {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
+              {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}
             </div>
           </div>
 
           <div className="md:col-span-2">
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">Notes (optional)</label>
+            <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">{language === "ar" ? "ملاحظات (اختياري)" : "Notes (optional)"}</label>
             <input
               type="text"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Additional notes…"
+              placeholder={language === "ar" ? "ملاحظات إضافية…" : "Additional notes…"}
               className="input-premium input-ltr w-full"
             />
           </div>
@@ -317,7 +320,7 @@ export function BookingForm({
               }}
               className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
             />
-            <span className="text-base font-medium">Use special quota</span>
+            <span className="text-base font-medium">{language === "ar" ? "استخدام حصة خاصة" : "Use special quota"}</span>
           </label>
           {useSpecialQuota && (
             <div className="flex flex-col gap-2">
@@ -330,32 +333,32 @@ export function BookingForm({
                   opacity: specialReasons.isLoading || specialReasons.isError || !hasSpecialReasons ? 0.7 : 1,
                 }}
               >
-                <option value="">Select special reason…</option>
-                {specialReasons.isLoading && <option value="">Loading…</option>}
+                <option value="">{language === "ar" ? "اختر السبب الخاص…" : "Select special reason…"}</option>
+                {specialReasons.isLoading && <option value="">{language === "ar" ? "جاري التحميل…" : "Loading…"}</option>}
                 {!specialReasons.isLoading && specialReasons.data?.map((reason) => (
                   <option key={reason.code} value={reason.code}>
-                    {reason.labelEn || reason.code}
+                    {language === "ar" ? reason.labelAr || reason.labelEn || reason.code : reason.labelEn || reason.labelAr || reason.code}
                   </option>
                 ))}
               </select>
               {specialReasons.isLoading && (
                 <span className="text-sm text-muted-foreground">
-                  Loading special reasons…
+                  {language === "ar" ? "جاري تحميل الأسباب الخاصة…" : "Loading special reasons…"}
                 </span>
               )}
               {specialReasons.isError && (
                 <span className="text-sm text-red-500">
-                  Could not load special reasons.
+                  {language === "ar" ? "تعذر تحميل الأسباب الخاصة." : "Could not load special reasons."}
                 </span>
               )}
               {specialReasonsUnavailable && (
                 <span className="text-sm text-amber-600">
-                  No active special reasons configured.
+                  {language === "ar" ? "لا توجد أسباب خاصة مفعلة." : "No active special reasons configured."}
                 </span>
               )}
               {submitAttempted && missingSpecialReasonSelection && !specialReasons.isLoading && !specialReasons.isError && hasSpecialReasons && (
                 <span className="text-sm text-red-500">
-                  Please select a special reason to continue.
+                  {language === "ar" ? "يرجى اختيار سبب خاص للمتابعة." : "Please select a special reason to continue."}
                 </span>
               )}
             </div>
@@ -378,12 +381,12 @@ export function BookingForm({
             {createBooking.isPending ? (
               <>
                 <Loader2 size={16} className="animate-spin" />
-                Booking…
+                {language === "ar" ? "جاري الحجز…" : "Booking…"}
               </>
             ) : (
               <>
                 <Calendar size={16} />
-                Book Appointment
+                {language === "ar" ? "حجز الموعد" : "Book Appointment"}
               </>
             )}
           </Button>

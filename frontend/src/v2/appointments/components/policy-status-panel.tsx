@@ -1,4 +1,5 @@
 import type { PolicyStatusDto, PolicySnapshotDto } from "../types";
+import { useLanguage } from "@/providers/language-provider";
 
 function countRules(snapshot: PolicySnapshotDto): number {
   // specialReasonCodes are global/live config — not part of versioned rule counts.
@@ -28,6 +29,7 @@ function snapshotsDiffer(published: PolicySnapshotDto, draft: PolicySnapshotDto)
 }
 
 export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefined }) {
+  const { language } = useLanguage();
   const publishedRuleCount = status?.publishedSnapshot ? countRules(status.publishedSnapshot) : 0;
   const draftRuleCount = status?.draftSnapshot ? countRules(status.draftSnapshot) : 0;
   const hasDraft = status?.draft != null;
@@ -44,16 +46,16 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
         backgroundColor: "var(--bg-surface, #f8fafc)",
       }}
     >
-      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>Policy Status</h2>
+      <h2 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>{language === "ar" ? "حالة السياسة" : "Policy Status"}</h2>
       <div style={{ display: "grid", gap: 8, fontSize: 14 }}>
-        <div><strong>Policy set:</strong> {status?.policySet?.name ?? "—"}</div>
+        <div><strong>{language === "ar" ? "مجموعة السياسة:" : "Policy set:"}</strong> {status?.policySet?.name ?? "—"}</div>
         <div>
-          <strong>Live version:</strong>{" "}
-          {status?.published ? `v${status.published.versionNo} (${status.published.configHash.slice(0, 8)})` : "none"}
+          <strong>{language === "ar" ? "الإصدار المباشر:" : "Live version:"}</strong>{" "}
+          {status?.published ? `v${status.published.versionNo} (${status.published.configHash.slice(0, 8)})` : (language === "ar" ? "لا يوجد" : "none")}
         </div>
         <div>
-          <strong>Working draft:</strong>{" "}
-          {status?.draft ? `v${status.draft.versionNo} (${status.draft.configHash.slice(0, 8)})` : "none"}
+          <strong>{language === "ar" ? "المسودة الحالية:" : "Working draft:"}</strong>{" "}
+          {status?.draft ? `v${status.draft.versionNo} (${status.draft.configHash.slice(0, 8)})` : (language === "ar" ? "لا يوجد" : "none")}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
           <div
@@ -64,7 +66,7 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
               border: "1px solid var(--border-color, #e2e8f0)",
             }}
           >
-            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>Live rules</div>
+            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>{language === "ar" ? "القواعد المباشرة" : "Live rules"}</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{publishedRuleCount}</div>
           </div>
           <div
@@ -77,7 +79,7 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
                 : "1px solid var(--border-color, #e2e8f0)",
             }}
           >
-            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>Working draft</div>
+            <div style={{ fontSize: 12, color: "var(--color-muted, #64748b)", marginBottom: 4 }}>{language === "ar" ? "المسودة الحالية" : "Working draft"}</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>{draftRuleCount}</div>
           </div>
         </div>
@@ -97,7 +99,7 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
             }}
           >
             <span style={{ fontSize: 16 }}>⚠️</span>
-            <span>Draft has unpublished changes</span>
+            <span>{language === "ar" ? "للمسودة تغييرات غير منشورة" : "Draft has unpublished changes"}</span>
           </div>
         )}
 
@@ -113,7 +115,7 @@ export function PolicyStatusPanel({ status }: { status: PolicyStatusDto | undefi
               textAlign: "center",
             }}
           >
-            No working draft. Click "Create Draft" to start editing.
+            {language === "ar" ? "لا توجد مسودة. اضغط \"إنشاء مسودة\" للبدء." : "No working draft. Click \"Create Draft\" to start editing."}
           </div>
         )}
       </div>

@@ -170,6 +170,7 @@ export function TopBar({
   user,
   language,
   isRtl,
+  pageTitle,
   onUndo,
   onRedo,
   onToggleLanguage,
@@ -179,6 +180,7 @@ export function TopBar({
   user: User | null;
   language: Language;
   isRtl: boolean;
+  pageTitle?: string;
   onUndo: () => void;
   onRedo: () => void;
   onToggleLanguage: () => void;
@@ -194,7 +196,7 @@ export function TopBar({
         boxShadow: "var(--shadow-sm)"
       }}
     >
-      <div className={`flex items-center justify-between h-14 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
+      <div className={`relative flex items-center justify-between h-14 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
         {/* Mobile menu button */}
         <button
           className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
@@ -228,6 +230,23 @@ export function TopBar({
             </h1>
           </div>
         </div>
+
+        {/* Center page banner */}
+        {pageTitle && (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 lg:block">
+            <div
+              className="max-w-[42vw] overflow-hidden rounded-full border px-4 py-1.5 text-center shadow-sm"
+              style={{
+                backgroundColor: "var(--card)",
+                borderColor: "var(--border)"
+              }}
+            >
+              <span className="block truncate text-sm font-semibold text-foreground">
+                {pageTitle}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Actions */}
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>

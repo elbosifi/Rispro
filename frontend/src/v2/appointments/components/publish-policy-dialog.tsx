@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
+import { useLanguage } from "@/providers/language-provider";
 
 export function PublishPolicyDialog({
   isOpen,
@@ -14,6 +15,7 @@ export function PublishPolicyDialog({
   onPublish: (changeNote: string | null) => Promise<void>;
   isPublishing: boolean;
 }) {
+  const { language } = useLanguage();
   const [changeNote, setChangeNote] = useState("");
 
   if (!isOpen) return null;
@@ -22,15 +24,15 @@ export function PublishPolicyDialog({
     <Dialog open={isOpen} onClose={onClose}>
       <DialogContent maxWidth="540px">
         <DialogHeader showClose={false}>
-          <DialogTitle>Publish Draft Policy</DialogTitle>
+          <DialogTitle>{language === "ar" ? "نشر مسودة السياسة" : "Publish Draft Policy"}</DialogTitle>
           <DialogDescription>
-            This publishes the draft and makes it active for V2 scheduling.
+            {language === "ar" ? "سيتم نشر المسودة وجعلها فعالة لجدولة V2." : "This publishes the draft and makes it active for V2 scheduling."}
           </DialogDescription>
         </DialogHeader>
 
         <Input
           type="text"
-          placeholder="Publish note (optional)"
+          placeholder={language === "ar" ? "ملاحظة النشر (اختياري)" : "Publish note (optional)"}
           value={changeNote}
           onChange={(e) => setChangeNote(e.target.value)}
           className="mb-4"
@@ -38,18 +40,17 @@ export function PublishPolicyDialog({
 
         <DialogFooter>
           <Button variant="secondary" onClick={onClose}>
-            Cancel
+            {language === "ar" ? "إلغاء" : "Cancel"}
           </Button>
           <Button
             disabled={isPublishing}
             onClick={() => onPublish(changeNote.trim() || null)}
             style={{ backgroundColor: "var(--blue)", color: "#fff" }}
           >
-            {isPublishing ? "Publishing..." : "Publish"}
+            {isPublishing ? (language === "ar" ? "جاري النشر..." : "Publishing...") : (language === "ar" ? "نشر" : "Publish")}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-

@@ -8,7 +8,7 @@ interface DicomGatewaySectionProps {
 }
 
 export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomGatewaySectionProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings", "dicom_gateway"],
@@ -32,11 +32,11 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
       setIsEditing(false);
       setForm({});
       setMutationError(null);
-      setStatusMessage("Settings saved successfully.");
+      setStatusMessage(language === "ar" ? "تم حفظ الإعدادات بنجاح." : "Settings saved successfully.");
       setTimeout(() => setStatusMessage(null), 3000);
     },
     onError: (err: Error) => {
-      setMutationError(err.message || "Save failed");
+      setMutationError(err.message || (language === "ar" ? "فشل الحفظ" : "Save failed"));
     }
   });
 
@@ -62,11 +62,11 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
       });
 
       if (!response.ok) {
-        throw new Error("Failed to reset defaults");
+        throw new Error(language === "ar" ? "فشل إعادة الضبط" : "Failed to reset defaults");
       }
 
       queryClient.invalidateQueries({ queryKey: ["settings", "dicom_gateway"] });
-      setStatusMessage("Settings reset to defaults.");
+      setStatusMessage(language === "ar" ? "تمت إعادة الإعدادات إلى القيم الافتراضية." : "Settings reset to defaults.");
       setTimeout(() => setStatusMessage(null), 3000);
     } catch (err) {
       setMutationError((err as Error).message);
@@ -74,7 +74,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
   };
 
   const handleRotateSecret = async () => {
-    if (!confirm("Are you sure you want to rotate the callback secret? This may break existing DICOM connections.")) {
+    if (!confirm(language === "ar" ? "هل تريد تدوير سر الاستدعاء؟ قد يؤدي ذلك إلى تعطيل اتصالات DICOM الحالية." : "Are you sure you want to rotate the callback secret? This may break existing DICOM connections.")) {
       return;
     }
 
@@ -85,11 +85,11 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
       });
 
       if (!response.ok) {
-        throw new Error("Failed to rotate secret");
+        throw new Error(language === "ar" ? "فشل تدوير السر" : "Failed to rotate secret");
       }
 
       queryClient.invalidateQueries({ queryKey: ["settings", "dicom_gateway"] });
-      setStatusMessage("Callback secret rotated.");
+      setStatusMessage(language === "ar" ? "تم تدوير سر الاستدعاء." : "Callback secret rotated.");
       setTimeout(() => setStatusMessage(null), 3000);
     } catch (err) {
       setMutationError((err as Error).message);
@@ -120,7 +120,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">{language === "ar" ? "إخفاء" : "Dismiss"}</button>
         </div>
       )}
 
@@ -132,26 +132,29 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
 
       {/* Gateway Settings */}
       <div className="space-y-4">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">DICOM Gateway</h4>
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">{language === "ar" ? "بوابة DICOM" : "DICOM Gateway"}</h4>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SettingField
-            label="Enabled"
+            label={language === "ar" ? "مفعّل" : "Enabled"}
             type="select"
-            options={[{ value: "enabled", label: "Enabled" }, { value: "disabled", label: "Disabled" }]}
+            options={[
+              { value: "enabled", label: language === "ar" ? "مفعّل" : "Enabled" },
+              { value: "disabled", label: language === "ar" ? "معطّل" : "Disabled" }
+            ]}
             value={getField("enabled")}
             onChange={(v) => updateField("enabled", v)}
           />
 
           <SettingField
-            label="Bind Host"
+            label={language === "ar" ? "عنوان الربط" : "Bind Host"}
             value={getField("bind_host")}
             onChange={(v) => updateField("bind_host", v)}
             placeholder="127.0.0.1"
           />
 
           <SettingField
-            label="Worklist AE Title"
+            label={language === "ar" ? "عنوان AE لقائمة العمل" : "Worklist AE Title"}
             value={getField("mwl_ae_title")}
             onChange={(v) => updateField("mwl_ae_title", v.toUpperCase())}
             placeholder="RISPRO_MWL"
@@ -159,7 +162,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
           />
 
           <SettingField
-            label="Worklist Port"
+            label={language === "ar" ? "منفذ قائمة العمل" : "Worklist Port"}
             type="number"
             value={getField("mwl_port")}
             onChange={(v) => updateField("mwl_port", v)}
@@ -167,18 +170,18 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
           />
 
           <SettingField
-            label="Rebuild Behavior"
+            label={language === "ar" ? "سلوك إعادة البناء" : "Rebuild Behavior"}
             type="select"
             options={[
-              { value: "incremental_on_write", label: "Incremental on Write" },
-              { value: "full_rebuild", label: "Full Rebuild" }
+              { value: "incremental_on_write", label: language === "ar" ? "تدريجي عند الكتابة" : "Incremental on Write" },
+              { value: "full_rebuild", label: language === "ar" ? "إعادة بناء كاملة" : "Full Rebuild" }
             ]}
             value={getField("rebuild_behavior")}
             onChange={(v) => updateField("rebuild_behavior", v)}
           />
 
           <div className="space-y-2">
-            <label className="text-sm font-medium text-stone-700 dark:text-stone-300">Callback Secret</label>
+            <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{language === "ar" ? "سر الاستدعاء" : "Callback Secret"}</label>
             <div className="flex gap-2">
               <input
                 type="password"
@@ -190,7 +193,7 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
                 onClick={handleRotateSecret}
                 className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-sm rounded transition-colors"
               >
-                Rotate
+                {language === "ar" ? "تدوير" : "Rotate"}
               </button>
             </div>
           </div>
@@ -199,18 +202,18 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
 
       {/* Storage Paths */}
       <div className="space-y-4">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Storage Paths</h4>
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">{language === "ar" ? "مسارات التخزين" : "Storage Paths"}</h4>
 
         <div className="grid grid-cols-1 gap-4">
           <SettingField
-            label="Worklist Source Directory"
+            label={language === "ar" ? "مجلد مصدر قائمة العمل" : "Worklist Source Directory"}
             value={getField("worklist_source_dir")}
             onChange={(v) => updateField("worklist_source_dir", v)}
             placeholder="storage/dicom/worklist-source"
           />
 
           <SettingField
-            label="Worklist Output Directory"
+            label={language === "ar" ? "مجلد إخراج قائمة العمل" : "Worklist Output Directory"}
             value={getField("worklist_output_dir")}
             onChange={(v) => updateField("worklist_output_dir", v)}
             placeholder="storage/dicom/worklists"
@@ -220,18 +223,18 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
 
       {/* External Tools */}
       <div className="space-y-4">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">External Tools</h4>
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">{language === "ar" ? "الأدوات الخارجية" : "External Tools"}</h4>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SettingField
-            label="dump2dcm Command"
+            label={language === "ar" ? "أمر dump2dcm" : "dump2dcm Command"}
             value={getField("dump2dcm_command")}
             onChange={(v) => updateField("dump2dcm_command", v)}
             placeholder="dump2dcm"
           />
 
           <SettingField
-            label="dcmdump Command"
+            label={language === "ar" ? "أمر dcmdump" : "dcmdump Command"}
             value={getField("dcmdump_command")}
             onChange={(v) => updateField("dcmdump_command", v)}
             placeholder="dcmdump"
@@ -244,14 +247,14 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
             disabled={saveMutation.isPending || !isEditing}
             className="btn-primary text-sm disabled:opacity-50"
           >
-            {saveMutation.isPending ? "Saving..." : "Save Settings"}
+            {saveMutation.isPending ? (language === "ar" ? "جاري الحفظ..." : "Saving...") : (language === "ar" ? "حفظ الإعدادات" : "Save Settings")}
           </button>
 
           <button
             onClick={handleResetDefaults}
             className="btn-secondary text-sm"
           >
-            Reset to Defaults
+            {language === "ar" ? "إعادة الضبط للقيم الافتراضية" : "Reset to Defaults"}
           </button>
         </div>
       </div>

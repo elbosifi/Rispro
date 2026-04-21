@@ -25,8 +25,8 @@ export default function PatientsPage() {
 
   if (isNewRoute) {
     return (
-      <div className="max-w-4xl mx-auto space-y-6">
-        <div className="space-y-4">
+      <div className="max-w-4xl mx-auto space-y-5">
+        <div className="space-y-3 sm:space-y-4 lg:hidden">
           <div className="flex items-center gap-4">
             <Button
               variant="secondary"
@@ -37,10 +37,10 @@ export default function PatientsPage() {
             </Button>
           </div>
           <div className="flex items-center gap-4">
-            <SectionLabel>PATIENT REGISTRATION</SectionLabel>
+            <SectionLabel>{t(language, "patients.registerTitle")}</SectionLabel>
           </div>
-          <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
-            Register <span className="gradient-text">Patient</span>
+          <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
+            {t(language, "patients.registerTitle")}
           </h1>
         </div>
         <PatientForm mode="create" />
@@ -49,19 +49,19 @@ export default function PatientsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="max-w-7xl mx-auto space-y-5">
       {/* Header */}
-      <div className="space-y-4">
+      <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
-          <SectionLabel>PATIENT MANAGEMENT</SectionLabel>
+          <SectionLabel>{t(language, "patients.title")}</SectionLabel>
         </div>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
-              Patient <span className="gradient-text">Directory</span>
+            <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
+              {t(language, "patients.title")}
             </h1>
             <p className="mt-2 text-muted-foreground">
-              Search, view, and manage patient records
+              {language === "ar" ? "ابحث عن سجلات المرضى واعرضها وأدرها" : "Search, view, and manage patient records"}
             </p>
           </div>
           <Button
@@ -110,8 +110,8 @@ export default function PatientsPage() {
             <Search size={48} strokeWidth={1} className="mx-auto mb-4 text-muted-foreground opacity-30" />
             <p className="text-lg font-medium mb-2">
               {searchQuery.length < 2
-                ? "Start typing to search"
-                : "No patients found"}
+                ? t(language, "patients.typeToSearch")
+                : t(language, "patients.noResults")}
             </p>
             <p className="text-sm text-muted-foreground">
               {searchQuery.length < 2

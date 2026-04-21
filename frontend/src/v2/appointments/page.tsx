@@ -11,6 +11,8 @@ import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
 import { Button, Card, LoadingState } from "@/components/shared";
+import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
 import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
@@ -25,16 +27,16 @@ import { RescheduleDialog } from "./components/reschedule-dialog";
 
 function describeReason(code: string): string {
   const map: Record<string, string> = {
-    modality_not_found: "Modality not found",
-    exam_type_not_found: "Exam type not found",
-    exam_type_modality_mismatch: "Exam type not valid for modality",
-    malformed_rule_configuration: "Rule configuration error",
-    modality_blocked_rule_match: "Date blocked for this modality",
-    modality_blocked_overridable: "Date blocked — needs supervisor approval",
-    exam_type_not_allowed_for_rule: "Exam type not allowed on this date",
-    standard_capacity_exhausted: "Daily capacity reached",
-    special_quota_exhausted: "Special quota reached",
-    no_published_policy: "No scheduling policy published",
+    modality_not_found: "appointments.v2.modalityNotFound",
+    exam_type_not_found: "appointments.v2.examTypeNotFound",
+    exam_type_modality_mismatch: "appointments.v2.examTypeInvalid",
+    malformed_rule_configuration: "appointments.v2.ruleError",
+    modality_blocked_rule_match: "appointments.v2.blockedForModality",
+    modality_blocked_overridable: "appointments.v2.blockedNeedsApproval",
+    exam_type_not_allowed_for_rule: "appointments.v2.examTypeNotAllowed",
+    standard_capacity_exhausted: "appointments.v2.capacityReached",
+    special_quota_exhausted: "appointments.v2.specialQuotaReached",
+    no_published_policy: "appointments.v2.noPolicyPublished",
   };
   return map[code] ?? code;
 }
@@ -51,6 +53,7 @@ function formatDate(dateStr: string): string {
 export function AppointmentsV2Page() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { language } = useLanguage();
   const lookups = useV2Lookups();
   const [modalityId, setModalityId] = useState<number | null>(null);
   const [examTypeId, setExamTypeId] = useState<number | null>(null);
@@ -63,15 +66,15 @@ export function AppointmentsV2Page() {
       <div className="max-w-7xl mx-auto p-4 lg:p-6">
         <Card className="p-8 text-center">
           <p className="text-lg font-bold mb-2" style={{ color: "var(--accent)" }}>
-            Failed to load modality list
+            {t(language, "appointments.create.failedLoadLookups")}
           </p>
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-            {(lookups.error as Error)?.message ?? "Unknown error"}
+            {(lookups.error as Error)?.message ?? t(language, "appointments.v2.unknownError")}
           </p>
           <Button
             onClick={() => lookups.refetch()}
           >
-            Retry
+            {t(language, "appointments.create.retry")}
           </Button>
         </Card>
       </div>
@@ -118,7 +121,7 @@ export function AppointmentsV2Page() {
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-embossed text">
-            Appointments V2
+            {t(language, "appointments.v2.title")}
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -128,7 +131,7 @@ export function AppointmentsV2Page() {
               type="button"
               onClick={() => navigate("/v2/appointments/admin")}
             >
-              Open Scheduling Policy Admin
+              {t(language, "appointments.v2.openAdmin")}
             </Button>
           )}
         </div>
@@ -143,7 +146,7 @@ export function AppointmentsV2Page() {
               className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
               style={{ color: "var(--text-muted)" }}
             >
-              Modality
+              {t(language, "appointments.v2.modality")}
             </label>
             <select
               value={modalityId ?? ""}
@@ -153,10 +156,10 @@ export function AppointmentsV2Page() {
               }}
               className="input-premium"
             >
-              <option value="">Select modality…</option>
-              {lookups.data?.modalities.map((m: { id: number; name: string }) => (
+              <option value="">{t(language, "appointments.v2.selectModality")}</option>
+              {lookups.data?.modalities.map((m: { id: number; name: string; nameAr?: string; nameEn?: string }) => (
                 <option key={m.id} value={m.id}>
-                  {m.name}
+                  {chooseLocalized(language, m.nameAr, m.nameEn) || m.name}
                 </option>
               ))}
             </select>
@@ -168,7 +171,7 @@ export function AppointmentsV2Page() {
               className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
               style={{ color: "var(--text-muted)" }}
             >
-              Exam Type (optional)
+              {t(language, "appointments.v2.examType")}
             </label>
             <select
               value={examTypeId ?? ""}
@@ -176,10 +179,10 @@ export function AppointmentsV2Page() {
               disabled={!modalityId}
               className="input-premium"
             >
-              <option value="">All exam types</option>
-              {examTypes.data?.map((et: { id: number; name: string }) => (
+              <option value="">{t(language, "appointments.v2.allExamTypes")}</option>
+              {examTypes.data?.map((et: { id: number; name: string; nameAr?: string; nameEn?: string }) => (
                 <option key={et.id} value={et.id}>
-                  {et.name}
+                  {chooseLocalized(language, et.nameAr, et.nameEn) || et.name}
                 </option>
               ))}
             </select>
@@ -191,15 +194,15 @@ export function AppointmentsV2Page() {
               className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
               style={{ color: "var(--text-muted)" }}
             >
-              Case Category
+              {t(language, "appointments.v2.caseCategory")}
             </label>
             <select
               value={caseCategory}
               onChange={(e) => setCaseCategory(e.target.value as CaseCategory)}
               className="input-premium"
             >
-              <option value="non_oncology">Non-Oncology</option>
-              <option value="oncology">Oncology</option>
+              <option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option>
+              <option value="oncology">{t(language, "appointments.create.oncology")}</option>
             </select>
           </div>
 
@@ -209,16 +212,16 @@ export function AppointmentsV2Page() {
               className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data"
               style={{ color: "var(--text-muted)" }}
             >
-              Days
+              {t(language, "appointments.v2.days")}
             </label>
             <select
               value={days}
               onChange={(e) => setDays(Number(e.target.value))}
               className="input-premium"
             >
-              <option value={7}>7 days</option>
-              <option value={14}>14 days</option>
-              <option value={30}>30 days</option>
+              <option value={7}>{t(language, "appointments.v2.daysOption", { count: 7 })}</option>
+              <option value={14}>{t(language, "appointments.v2.daysOption", { count: 14 })}</option>
+              <option value={30}>{t(language, "appointments.v2.daysOption", { count: 30 })}</option>
          </select>
            </div>
          </div>
@@ -227,25 +230,25 @@ export function AppointmentsV2Page() {
       {/* Availability Table */}
       {disabled ? (
         <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
-          Select a modality to view availability.
+          {t(language, "appointments.v2.selectModalityHint")}
         </p>
       ) : availability.isLoading ? (
-        <LoadingState message="Loading availability…" />
+        <LoadingState message={t(language, "appointments.v2.loadingAvailability")} />
       ) : availability.isError ? (
         <p className="text-center text-sm" style={{ color: "var(--accent)" }}>
-          Could not load availability. {(availability.error as Error).message}
+          {language === "ar" ? "تعذر تحميل التوفر." : "Could not load availability."} {(availability.error as Error).message}
         </p>
        ) : noPublishedPolicy ? (
          <Card className="p-6">
           <p className="font-bold mb-2" style={{ color: "var(--text)" }}>
-            No scheduling policy has been published yet.
+            {t(language, "appointments.create.noSchedulePolicy")}
           </p>
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
-            Availability is empty because no published policy exists for V2 scheduling.
+            {t(language, "appointments.create.emptyAvailabilityPolicy")}
           </p>
           {user?.role !== "supervisor" && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Ask a supervisor to publish a policy before booking.
+              {t(language, "appointments.create.askSupervisorPublish")}
             </p>
           )}
           {user?.role === "supervisor" && (
@@ -255,13 +258,13 @@ export function AppointmentsV2Page() {
            onClick={() => navigate("/v2/appointments/admin")}
            className="mt-2"
          >
-           Publish or Update Policy
+           {t(language, "appointments.create.publishOrUpdatePolicy")}
          </Button>
        )}
      </Card>
       ) : availability.data?.items.length === 0 ? (
         <p className="text-center text-sm italic" style={{ color: "var(--text-muted)" }}>
-          No availability found for the selected filters.
+          {t(language, "appointments.v2.selectModalityHint")}
         </p>
       ) : (
         <>
@@ -269,19 +272,19 @@ export function AppointmentsV2Page() {
 
           {/* Suggestions */}
           <div className="mt-6">
-            <h2 className="text-lg font-bold mb-4 text-embossed" style={{ color: "var(--text)" }}>Suggestions</h2>
+            <h2 className="text-lg font-bold mb-4 text-embossed" style={{ color: "var(--text)" }}>{t(language, "appointments.v2.suggestions")}</h2>
             {suggestions.isLoading ? (
-              <LoadingState message="Loading next available suggestions…" />
+              <LoadingState message={t(language, "appointments.v2.loadingSuggestions")} />
             ) : suggestions.isError ? (
               <p style={{ color: "var(--accent)" }}>
-                Could not load suggestions. {(suggestions.error as Error).message}
+                {language === "ar" ? "تعذر تحميل الاقتراحات." : "Could not load suggestions."} {(suggestions.error as Error).message}
               </p>
             ) : suggestions.data?.items.length ? (
              <Card className="p-4">
                <ul className="space-y-2">
                  {suggestions.data.items.slice(0, 5).map((s) => (
-                   <li key={`${s.modalityId}-${s.date}`} className="text-sm" style={{ color: "var(--text-muted)" }}>
-                     {s.date} — {s.decision.displayStatus}
+                  <li key={`${s.modalityId}-${s.date}`} className="text-sm" style={{ color: "var(--text-muted)" }}>
+                     {s.date} — {statusLabel(language, s.decision.displayStatus)}
                    </li>
                  ))}
                </ul>
@@ -306,12 +309,12 @@ export function AppointmentsV2Page() {
                 availability.refetch();
                 bookings.refetch();
               }}
-            />
-          </div>
+              />
+            </div>
 
           {/* Recent Bookings */}
           {modalityId != null && (
-            <div className="mt-8">
+          <div className="mt-8">
               <BookingsList
                 modalityId={modalityId}
                 availabilityItems={availability.data?.items ?? []}
@@ -384,25 +387,27 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
                 <td className="text-center p-3">
                   {isBlocked ? (
                     <span className="font-bold" style={{ color: "var(--accent)" }}>
-                      Blocked
+                      {language === "ar" ? "محجوب" : "Blocked"}
                     </span>
                   ) : (
                     <>
                       <div className="font-medium" style={{ color: standard <= 0 ? "var(--accent)" : "var(--text)" }}>
-                        {totalRemaining} total
+                        {totalRemaining} {language === "ar" ? "إجمالي" : "total"}
                       </div>
                       {day.bucketMode === "partitioned" ? (
                         <div className="text-xs font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
-                          Onc {day.oncology.filled}/{day.oncology.reserved ?? 0}, Non-onc {day.nonOncology.filled}/{day.nonOncology.reserved ?? 0}
+                          {language === "ar"
+                            ? `أورام ${day.oncology.filled}/${day.oncology.reserved ?? 0}، غير أورام ${day.nonOncology.filled}/${day.nonOncology.reserved ?? 0}`
+                            : `Onc ${day.oncology.filled}/${day.oncology.reserved ?? 0}, Non-onc ${day.nonOncology.filled}/${day.nonOncology.reserved ?? 0}`}
                         </div>
                       ) : (
                         <div className="text-xs font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
-                          Total-only mode (no category reserves)
+                          {language === "ar" ? "نمط الإجمالي فقط (بدون حصص فئات)" : "Total-only mode (no category reserves)"}
                         </div>
                       )}
                       {(day.specialQuotaSummary?.remaining ?? special) > 0 && (
                         <div className="text-xs font-mono-data mt-1" style={{ color: "var(--amber)", fontWeight: "600" }}>
-                          Special remaining: {day.specialQuotaSummary?.remaining ?? special}
+                          {language === "ar" ? "المتبقي الخاص" : "Special remaining"}: {day.specialQuotaSummary?.remaining ?? special}
                         </div>
                       )}
                     </>
@@ -440,6 +445,7 @@ interface BookingsListProps {
 }
 
 function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: BookingsListProps) {
+  const { language } = useLanguage();
   const cancelMutation = useV2CancelBooking();
   const rescheduleMutation = useV2RescheduleBooking();
   const [cancelTarget, setCancelTarget] = useState<{
@@ -471,7 +477,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       await cancelMutation.mutateAsync(cancelTarget.id);
       pushToast({
         type: "success",
-        title: "Booking Cancelled",
+        title: t(language, "appointments.v2.bookingCancelled"),
         message: `${cancelTarget.patientName} — ${cancelTarget.date}`,
       });
       setCancelTarget(null);
@@ -479,8 +485,8 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
     } catch (err) {
       pushToast({
         type: "error",
-        title: "Cancel Failed",
-        message: err instanceof Error ? err.message : "Unknown error",
+        title: t(language, "appointments.v2.cancelFailed"),
+        message: err instanceof Error ? err.message : t(language, "appointments.v2.unknownError"),
       });
     } finally {
       setCancelPendingBookingId(null);
@@ -515,13 +521,13 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
       });
       pushToast({
         type: "success",
-        title: "Booking Rescheduled",
+        title: t(language, "appointments.v2.bookingRescheduled"),
         message: `${rescheduleTarget.patientEnglishName ?? `Patient #${rescheduleTarget.patientId}`} — ${rescheduleTarget.bookingDate} → ${newDate}`,
       });
       setRescheduleTarget(null);
       onBookingCancelled();
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown error";
+      const msg = err instanceof Error ? err.message : t(language, "appointments.v2.unknownError");
       setRescheduleError(msg);
       throw err; // Re-throw so the dialog can show it
     } finally {
@@ -540,7 +546,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
     <Card className="p-4">
       <div className="flex flex-wrap justify-between items-center mb-4 gap-4">
         <h2 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>
-          Recent Bookings
+          {t(language, "appointments.v2.recentBookings")}
         </h2>
 
         {/* Include cancelled toggle */}
@@ -553,22 +559,22 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
             onChange={(e) => setIncludeCancelled(e.target.checked)}
             className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
           />
-          Include cancelled
+          {language === "ar" ? "تضمين الملغاة" : "Include cancelled"}
         </label>
       </div>
 
       {bookings.isLoading ? (
-        <LoadingState message="Loading bookings…" />
+        <LoadingState message={t(language, "appointments.v2.loadingBookings")} />
       ) : bookings.isError ? (
         <div className="p-8 text-center">
           <p style={{ color: "var(--accent)" }}>
-            Could not load bookings. {(bookings.error as Error).message}
+            {language === "ar" ? "تعذر تحميل الحجوزات." : "Could not load bookings."} {(bookings.error as Error).message}
           </p>
         </div>
       ) : bookingsList.length === 0 ? (
         <div className="p-8 text-center">
           <p style={{ color: "var(--text-muted)" }}>
-            No bookings found for the selected date range.
+            {language === "ar" ? "لا توجد حجوزات في نطاق التاريخ المحدد." : "No bookings found for the selected date range."}
           </p>
         </div>
       ) : (
@@ -577,19 +583,19 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
             <thead>
               <tr className="border-b" style={{ borderColor: "var(--border)" }}>
                 <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                  Patient
+                  {t(language, "appointments.v2.patient")}
                 </th>
                 <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                  Date
+                  {t(language, "common.date")}
                 </th>
                 <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                  Category
+                  {t(language, "appointments.v2.caseCategory")}
                 </th>
                 <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                  Status
+                  {t(language, "appointments.v2.status")}
                 </th>
                 <th className="text-right p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                  Action
+                  {t(language, "common.actions")}
                 </th>
               </tr>
             </thead>
@@ -609,7 +615,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                     }}
                   >
                   <td className="p-3">
-                    <div className="font-medium" style={{ color: "var(--text)" }}>{booking.patientEnglishName}</div>
+                    <div className="font-medium" style={{ color: "var(--text)" }}>{booking.patientEnglishName ?? booking.patientArabicName ?? `Patient #${booking.patientId}`}</div>
                     {booking.patientNationalId && (
                       <div className="text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
                         {booking.patientNationalId}
@@ -622,7 +628,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                   </td>
                   <td className="p-3">
                     <span className="text-xs">
-                      {booking.caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}
+                      {booking.caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}
                     </span>
                   </td>
                   <td className="p-3">
@@ -638,11 +644,13 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                        disabled={!RESCHEDULABLE_STATUSES.includes(booking.status) || reschedulePendingForRow}
                        title={
                          RESCHEDULABLE_STATUSES.includes(booking.status)
-                           ? (reschedulePendingForRow ? "Rescheduling in progress" : "Reschedule this booking")
-                           : `Cannot reschedule a booking with status "${booking.status}"`
+                           ? (reschedulePendingForRow ? t(language, "appointments.v2.rescheduleInProgress") : t(language, "appointments.v2.rescheduleThisBooking"))
+                           : (language === "ar"
+                             ? `لا يمكن إعادة جدولة حجز بالحالة "${booking.status}"`
+                             : `Cannot reschedule a booking with status "${booking.status}"`)
                        }
-                     >
-                       {reschedulePendingForRow ? "Rescheduling…" : "Reschedule"}
+                   >
+                       {reschedulePendingForRow ? t(language, "appointments.v2.rescheduling") : t(language, "appointments.v2.reschedule")}
                      </Button>
                      <Button
                        variant="ghost"
@@ -651,19 +659,21 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                        onClick={() =>
                          setCancelTarget({
                            id: booking.id,
-                           patientName: booking.patientEnglishName ?? `Patient #${booking.patientId}`,
+                           patientName: booking.patientEnglishName ?? booking.patientArabicName ?? `Patient #${booking.patientId}`,
                            date: booking.bookingDate,
                          })
                        }
                        disabled={!CANCELLABLE_STATUSES.includes(booking.status) || cancelPendingForRow}
                        title={
                          CANCELLABLE_STATUSES.includes(booking.status)
-                           ? (cancelPendingForRow ? "Cancellation in progress" : "Cancel this booking")
-                           : `Cannot cancel a booking with status "${booking.status}"`
+                           ? (cancelPendingForRow ? t(language, "appointments.v2.cancelInProgress") : t(language, "appointments.v2.cancelThisBooking"))
+                           : (language === "ar"
+                             ? `لا يمكن إلغاء حجز بالحالة "${booking.status}"`
+                             : `Cannot cancel a booking with status "${booking.status}"`)
                        }
                        style={{ color: "var(--accent)" }}
                      >
-                       {cancelPendingForRow ? "Cancelling…" : "Cancel"}
+                       {cancelPendingForRow ? t(language, "appointments.v2.cancelling") : t(language, "appointments.v2.cancel")}
                      </Button>
                     </div>
                   </td>
@@ -705,18 +715,19 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
 // ---------------------------------------------------------------------------
 
 function BookingStatusBadge({ status }: { status: string }) {
+  const { language } = useLanguage();
   const config: Record<string, { label: string; color: string; bg: string }> = {
-    scheduled: { label: "Scheduled", color: "var(--green)", bg: "rgba(34, 197, 94, 0.1)" },
-    arrived: { label: "Arrived", color: "var(--blue)", bg: "rgba(59, 130, 246, 0.1)" },
-    waiting: { label: "Waiting", color: "var(--amber)", bg: "rgba(245, 158, 11, 0.1)" },
-    completed: { label: "Completed", color: "var(--text-muted)", bg: "var(--muted)" },
-    "no-show": { label: "No-Show", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
+    scheduled: { label: language === "ar" ? "مجدول" : "Scheduled", color: "var(--green)", bg: "rgba(34, 197, 94, 0.1)" },
+    arrived: { label: language === "ar" ? "وصل" : "Arrived", color: "var(--blue)", bg: "rgba(59, 130, 246, 0.1)" },
+    waiting: { label: language === "ar" ? "بانتظار" : "Waiting", color: "var(--amber)", bg: "rgba(245, 158, 11, 0.1)" },
+    completed: { label: language === "ar" ? "مكتمل" : "Completed", color: "var(--text-muted)", bg: "var(--muted)" },
+    "no-show": { label: language === "ar" ? "لم يحضر" : "No-Show", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
   };
 
   const c = config[status] ?? { label: status, color: "var(--text-muted)", bg: "var(--muted)" };
 
   return (
-    <span className="pill-soft text-xs font-bold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.bg }}>
+      <span className="pill-soft text-xs font-bold" style={{ backgroundColor: c.bg, color: c.color, borderColor: c.bg }}>
       {c.label}
     </span>
   );

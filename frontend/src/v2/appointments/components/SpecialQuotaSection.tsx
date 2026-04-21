@@ -37,8 +37,8 @@ export function SpecialQuotaSection({
   if (!supervisorMode) return null;
 
   return (
-    <div className="card-shell p-4">
-      <label className="block text-xs uppercase tracking-[0.08em] mb-3 font-mono-data" style={{ color: "var(--text-muted)" }}>
+    <div className="card-shell p-3 sm:p-4">
+      <label className="block text-sm font-semibold mb-2 text-foreground">
         {t(language, "appointments.create.capacityAction")}
       </label>
       <select
@@ -54,16 +54,16 @@ export function SpecialQuotaSection({
         </option>
       </select>
       {!specialQuotaAvailable && (
-        <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+        <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
           {t(language, "appointments.create.specialQuotaUnavailable")}
         </div>
       )}
       {categoryOverrideEnabled && (
-        <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+        <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
           {t(language, "appointments.create.categoryReserveNote")}
         </div>
       )}
-      <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
+      <div className="mt-2 text-xs sm:text-sm" style={{ color: "var(--text-muted)" }}>
         {t(language, "appointments.create.specialReasonAudit")}
       </div>
 
@@ -84,12 +84,12 @@ export function SpecialQuotaSection({
             <input
               type="checkbox"
               checked={specialReasonConfirmed}
-            onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
-            className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
-          />
-          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+              onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
+              className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
+            />
+            <span className="text-sm text-muted-foreground">
               {t(language, "appointments.create.specialReasonConfirm")}
-          </span>
+            </span>
           </label>
           <input
             value={specialReasonNote}

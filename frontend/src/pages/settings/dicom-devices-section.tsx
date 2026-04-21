@@ -8,7 +8,7 @@ interface DicomDevicesSectionProps {
 }
 
 export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSectionProps) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({ queryKey: ["dicom-devices"], queryFn: fetchDicomDevices });
 
@@ -21,7 +21,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteDicomDevice(id),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل الحذف" : "Delete failed")); }
   });
 
   const updateMutation = useMutation({
@@ -36,7 +36,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setEditingId(null); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Update failed"); }
+    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل التحديث" : "Update failed")); }
   });
 
   const createMutation = useMutation({
@@ -52,7 +52,7 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       isActive: data.is_active ? "enabled" : "disabled"
     }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["dicom-devices"] }); setShowCreate(false); setMutationError(null); },
-    onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
+    onError: (err: any) => { setMutationError(err?.message || (language === "ar" ? "فشل الإنشاء" : "Create failed")); }
   });
 
   if (error) {
@@ -82,31 +82,31 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
-          <button onClick={() => setMutationError(null)} className="ml-2 underline">Dismiss</button>
+          <button onClick={() => setMutationError(null)} className="ml-2 underline">{language === "ar" ? "إخفاء" : "Dismiss"}</button>
         </div>
       )}
 
       <div className="flex justify-between items-center">
-        <span className="text-sm text-stone-600 dark:text-stone-400">{data?.devices?.length ?? 0} devices</span>
-        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? "Cancel" : "Add Device"}</button>
+        <span className="text-sm text-stone-600 dark:text-stone-400">{data?.devices?.length ?? 0} {language === "ar" ? "أجهزة" : "devices"}</span>
+        <button onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="btn-secondary text-xs">{showCreate ? (language === "ar" ? "إلغاء" : "Cancel") : (language === "ar" ? "إضافة جهاز" : "Add Device")}</button>
       </div>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
           <div className="grid grid-cols-2 gap-2">
-            <input value={createForm.modality_id} onChange={(e) => setCreateForm({ ...createForm, modality_id: e.target.value })} placeholder="Modality ID" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.device_name} onChange={(e) => setCreateForm({ ...createForm, device_name: e.target.value })} placeholder="Device Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.modality_ae_title} onChange={(e) => setCreateForm({ ...createForm, modality_ae_title: e.target.value })} placeholder="AE Title" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.scheduled_station_ae_title} onChange={(e) => setCreateForm({ ...createForm, scheduled_station_ae_title: e.target.value })} placeholder="Scheduled Station AE Title" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.station_name} onChange={(e) => setCreateForm({ ...createForm, station_name: e.target.value })} placeholder="Station Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.station_location} onChange={(e) => setCreateForm({ ...createForm, station_location: e.target.value })} placeholder="Station Location" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-            <input value={createForm.source_ip} onChange={(e) => setCreateForm({ ...createForm, source_ip: e.target.value })} placeholder="Source IP" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.modality_id} onChange={(e) => setCreateForm({ ...createForm, modality_id: e.target.value })} placeholder={language === "ar" ? "معرّف الجهاز" : "Modality ID"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.device_name} onChange={(e) => setCreateForm({ ...createForm, device_name: e.target.value })} placeholder={language === "ar" ? "اسم الجهاز" : "Device Name"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.modality_ae_title} onChange={(e) => setCreateForm({ ...createForm, modality_ae_title: e.target.value })} placeholder={language === "ar" ? "عنوان AE" : "AE Title"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.scheduled_station_ae_title} onChange={(e) => setCreateForm({ ...createForm, scheduled_station_ae_title: e.target.value })} placeholder={language === "ar" ? "عنوان AE للمحطة المجدولة" : "Scheduled Station AE Title"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.station_name} onChange={(e) => setCreateForm({ ...createForm, station_name: e.target.value })} placeholder={language === "ar" ? "اسم المحطة" : "Station Name"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.station_location} onChange={(e) => setCreateForm({ ...createForm, station_location: e.target.value })} placeholder={language === "ar" ? "موقع المحطة" : "Station Location"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+            <input value={createForm.source_ip} onChange={(e) => setCreateForm({ ...createForm, source_ip: e.target.value })} placeholder={language === "ar" ? "عنوان IP المصدر" : "Source IP"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
           </div>
           <div className="flex gap-3 text-sm">
-            <label><input type="checkbox" checked={createForm.mwl_enabled} onChange={(e) => setCreateForm({ ...createForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL Enabled</label>
-            <label><input type="checkbox" checked={createForm.is_active} onChange={(e) => setCreateForm({ ...createForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
+            <label><input type="checkbox" checked={createForm.mwl_enabled} onChange={(e) => setCreateForm({ ...createForm, mwl_enabled: e.target.checked })} className="mr-1" /> {language === "ar" ? "مفعّل MWL" : "MWL Enabled"}</label>
+            <label><input type="checkbox" checked={createForm.is_active} onChange={(e) => setCreateForm({ ...createForm, is_active: e.target.checked })} className="mr-1" /> {language === "ar" ? "نشط" : "Active"}</label>
           </div>
-          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.modality_id || !createForm.device_name} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">Create</button>
+          <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.modality_id || !createForm.device_name} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">{language === "ar" ? "إنشاء" : "Create"}</button>
         </div>
       )}
 
@@ -116,19 +116,19 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
             {editingId === d.id ? (
               <div className="space-y-2 text-sm">
                 <div className="grid grid-cols-2 gap-2">
-                  <input value={editForm.device_name} onChange={(e) => setEditForm({ ...editForm, device_name: e.target.value })} placeholder="Device Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.modality_ae_title} onChange={(e) => setEditForm({ ...editForm, modality_ae_title: e.target.value })} placeholder="AE Title" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.station_name} onChange={(e) => setEditForm({ ...editForm, station_name: e.target.value })} placeholder="Station Name" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.station_location} onChange={(e) => setEditForm({ ...editForm, station_location: e.target.value })} placeholder="Location" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
-                  <input value={editForm.source_ip} onChange={(e) => setEditForm({ ...editForm, source_ip: e.target.value })} placeholder="Source IP" className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.device_name} onChange={(e) => setEditForm({ ...editForm, device_name: e.target.value })} placeholder={language === "ar" ? "اسم الجهاز" : "Device Name"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.modality_ae_title} onChange={(e) => setEditForm({ ...editForm, modality_ae_title: e.target.value })} placeholder={language === "ar" ? "عنوان AE" : "AE Title"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.station_name} onChange={(e) => setEditForm({ ...editForm, station_name: e.target.value })} placeholder={language === "ar" ? "اسم المحطة" : "Station Name"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.station_location} onChange={(e) => setEditForm({ ...editForm, station_location: e.target.value })} placeholder={language === "ar" ? "الموقع" : "Location"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
+                  <input value={editForm.source_ip} onChange={(e) => setEditForm({ ...editForm, source_ip: e.target.value })} placeholder={language === "ar" ? "عنوان IP المصدر" : "Source IP"} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm" />
                 </div>
                 <div className="flex gap-3">
-                  <label><input type="checkbox" checked={editForm.mwl_enabled} onChange={(e) => setEditForm({ ...editForm, mwl_enabled: e.target.checked })} className="mr-1" /> MWL</label>
-                  <label><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="mr-1" /> Active</label>
+                  <label><input type="checkbox" checked={editForm.mwl_enabled} onChange={(e) => setEditForm({ ...editForm, mwl_enabled: e.target.checked })} className="mr-1" /> {language === "ar" ? "MWL" : "MWL"}</label>
+                  <label><input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="mr-1" /> {language === "ar" ? "نشط" : "Active"}</label>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => updateMutation.mutate({ id: d.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">Save</button>
-                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">Cancel</button>
+                  <button onClick={() => updateMutation.mutate({ id: d.id, data: editForm })} disabled={updateMutation.isPending} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded">{language === "ar" ? "حفظ" : "Save"}</button>
+                  <button onClick={() => { setEditingId(null); setMutationError(null); }} className="px-3 py-1.5 bg-stone-100 dark:bg-stone-600 text-stone-700 dark:text-stone-300 text-sm rounded">{language === "ar" ? "إلغاء" : "Cancel"}</button>
                 </div>
               </div>
             ) : (
@@ -136,15 +136,15 @@ export default function DicomDevicesSection({ onReAuthRequired }: DicomDevicesSe
                 <div className="text-start">
                   <p className="font-medium text-stone-900 dark:text-white">{d.deviceName}</p>
                   <p className="text-sm text-stone-600 dark:text-stone-400">
-                    AE: {d.modalityAeTitle} | Modality: {d.modalityCode} | MWL: {d.mwlEnabled ? "Yes" : "No"}
+                    AE: {d.modalityAeTitle} | {language === "ar" ? "الجهاز" : "Modality"}: {d.modalityCode} | MWL: {d.mwlEnabled ? (language === "ar" ? "نعم" : "Yes") : (language === "ar" ? "لا" : "No")}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className={`px-2 py-1 rounded-full text-xs font-medium ${d.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-                    {d.isActive ? "Active" : "Inactive"}
+                    {d.isActive ? (language === "ar" ? "نشط" : "Active") : (language === "ar" ? "غير نشط" : "Inactive")}
                   </span>
-                  <button onClick={() => startEdit(d)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
-                  <button onClick={() => { if (window.confirm("Delete this DICOM device?")) deleteMutation.mutate(d.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                  <button onClick={() => startEdit(d)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">{language === "ar" ? "تعديل" : "Edit"}</button>
+                  <button onClick={() => { if (window.confirm(language === "ar" ? "هل تريد حذف هذا الجهاز DICOM؟" : "Delete this DICOM device?")) deleteMutation.mutate(d.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">{language === "ar" ? "حذف" : "Delete"}</button>
                 </div>
               </div>
             )}

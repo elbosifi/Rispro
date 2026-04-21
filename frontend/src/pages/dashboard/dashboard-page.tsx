@@ -198,15 +198,15 @@ export function DashboardPage() {
 
   return (
     <PageContainer>
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* Header */}
-        <div className="space-y-4">
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+        <div className="space-y-3 sm:space-y-4 lg:hidden">
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-4">
                 <SectionLabel pulsing>DASHBOARD</SectionLabel>
               </div>
-              <h1 className="text-3xl font-display mt-2" style={{ color: "var(--foreground)" }}>
+              <h1 className="text-2xl sm:text-3xl font-display mt-2" style={{ color: "var(--foreground)" }}>
                 Welcome, <span className="gradient-text">{user?.fullName ?? ""}</span>
               </h1>
               <p className="mt-2 text-muted-foreground">{t("dashboard.subtitle")}</p>

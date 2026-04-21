@@ -22,6 +22,8 @@ import { formatDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import type { Patient } from "@/types/api";
 import { Button, Card } from "@/components/shared";
+import { chooseLocalized, t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 type IdentifierType = "national_id" | "passport" | "other";
 type PatientFormMode = "create" | "edit";
@@ -121,6 +123,7 @@ interface PatientFormProps {
 }
 
 export default function PatientForm({ mode, patientId, onSuccess, onCancel }: PatientFormProps) {
+  const { language } = useLanguage();
   const isEdit = mode === "edit";
   const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
   // Track original national ID to know if it was edited (edit mode only)
@@ -152,6 +155,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const phone2Ref = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLSelectElement>(null);
   const navigate = useNavigate();
+  const sectionTitleClass = "text-xl sm:text-2xl font-bold text-foreground";
+  const fieldLabelClass = "block text-sm font-semibold mb-2 text-foreground";
+  const helperTextClass = "mt-2 text-sm text-muted-foreground";
 
   // Dictionary
   const { data: dictData } = useQuery({
@@ -210,7 +216,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setAddTokenError(null);
       prevArabicTokenCountRef.current = 0;
       queryClient.invalidateQueries({ queryKey: ["duplicates"] });
-      showToast(`Patient registered: ${patient.arabicFullName} (MRN: ${patient.mrn})`);
+      showToast(language === "ar"
+        ? `تم تسجيل المريض: ${patient.arabicFullName} (MRN: ${patient.mrn})`
+        : `Patient registered: ${patient.arabicFullName} (MRN: ${patient.mrn})`);
       if (!isEdit) {
         setPostCreatePatient(patient);
       }
@@ -221,19 +229,19 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     mutationFn: (data: Partial<Patient>) => updatePatient(patientId!, data),
     onSuccess: (patient) => {
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
-      showToast(`Patient updated: ${patient.arabicFullName}`);
+      showToast(language === "ar" ? `تم تحديث المريض: ${patient.arabicFullName}` : `Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
     }
   });
   const deleteMutation = useMutation({
     mutationFn: () => deletePatient(patientId!),
     onSuccess: () => {
-      showToast("Patient deleted");
+      showToast(language === "ar" ? "تم حذف المريض" : "Patient deleted");
       queryClient.invalidateQueries();
       onCancel?.();
     },
     onError: (err: any) => {
-      showToast(err?.message || "Could not delete patient", "error");
+      showToast(err?.message || (language === "ar" ? "تعذر حذف المريض" : "Could not delete patient"), "error");
     }
   });
   const mutation = isEdit ? updateMutation : createMutation;
@@ -397,7 +405,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setForm((f) => ({ ...f, englishFullName: r.englishName }));
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
     } catch (err: any) {
-      setAddTokenError(err?.message || "Failed to add token to dictionary");
+      setAddTokenError(err?.message || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
     } finally {
       setAddingToken(null);
     }
@@ -440,22 +448,22 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     e.preventDefault();
     const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     if (!isEdit && arabicNameParts.length < 3) {
-      showToast("Arabic full name must include at least 3 names before registering.", "error");
+      showToast(language === "ar" ? "يجب أن يحتوي الاسم العربي على 3 أجزاء على الأقل قبل التسجيل." : "Arabic full name must include at least 3 names before registering.", "error");
       arabicFullNameRef.current?.focus();
       return;
     }
     const primaryCount = form.identifiers.filter((entry) => entry.isPrimary).length;
     if (primaryCount !== 1) {
-      showToast("Exactly one primary identifier is required.", "error");
+      showToast(language === "ar" ? "يجب تحديد معرف أساسي واحد فقط." : "Exactly one primary identifier is required.", "error");
       return;
     }
     if (!form.sex) {
-      showToast("Sex is required.", "error");
+      showToast(language === "ar" ? "الجنس مطلوب." : "Sex is required.", "error");
       sexRef.current?.focus();
       return;
     }
     if (!form.estimatedDateOfBirth && !form.ageYears.trim()) {
-      showToast("Please provide either Date of Birth or Age.", "error");
+      showToast(language === "ar" ? "يرجى إدخال تاريخ الميلاد أو العمر." : "Please provide either Date of Birth or Age.", "error");
       dobRef.current?.focus();
       return;
     }
@@ -464,12 +472,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
     if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
-      showToast("Please confirm the national ID.", "error");
+      showToast(language === "ar" ? "يرجى تأكيد رقم الهوية." : "Please confirm the national ID.", "error");
       nationalIdConfirmationRef.current?.focus();
       return;
     }
     if (requiresNationalIdConfirmation && form.identifierValue !== form.nationalIdConfirmation) {
-      showToast("National ID confirmation does not match.", "error");
+      showToast(language === "ar" ? "تأكيد رقم الهوية لا يطابق." : "National ID confirmation does not match.", "error");
       nationalIdConfirmationRef.current?.focus();
       return;
     }
@@ -519,13 +527,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const nationalIdWasEdited = isEdit ? form.identifierValue !== originalNationalId : true;
   const showConfirmation = isNationalId && nationalIdWasEdited && isValidNationalId(form.identifierValue);
   const submitLabel = mutation.isPending
-    ? (isEdit ? "Updating…" : "Registering…")
-    : (isEdit ? "Update Patient" : "Register Patient");
+    ? (isEdit ? (language === "ar" ? "جاري التحديث…" : "Updating…") : (language === "ar" ? "جاري التسجيل…" : "Registering…"))
+    : (isEdit ? (language === "ar" ? "تحديث المريض" : "Update Patient") : (language === "ar" ? "تسجيل المريض" : "Register Patient"));
 
   if (isEdit && loadingPatient) {
     return (
       <Card className="p-12 text-center">
-        <p className="text-muted-foreground">Loading patient data…</p>
+        <p className="text-muted-foreground">{language === "ar" ? "جاري تحميل بيانات المريض…" : "Loading patient data…"}</p>
       </Card>
     );
   }
@@ -534,15 +542,15 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Shared form fields JSX (rendered in both create and edit)
   // ============================================================
   const formFields = (
-    <form onSubmit={handleSubmit} className="space-y-8">
+    <form onSubmit={handleSubmit} className="space-y-5">
       {/* Identity */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <h3 className="text-xl font-semibold">Identity</h3>
+          <h3 className={sectionTitleClass}>{language === "ar" ? "الهوية" : "Identity"}</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Arabic Full Name</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}</label>
             <input
               value={form.arabicFullName}
               onChange={(e) => handleArabicNameChange(e.target.value)}
@@ -555,7 +563,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">English Full Name</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}</label>
             <input
               value={form.englishFullName}
               onChange={(e) => handleEnglishNameChange(e.target.value)}
@@ -565,25 +573,25 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               className="input-premium input-ltr w-full"
             />
             {form.arabicFullName && !englishNameManuallyEdited && (
-              <p className="mt-2 text-sm text-muted-foreground">
-                Generated from name dictionary.
-                <button type="button" onClick={handleRegenerateEnglishName} className="ml-2 text-accent hover:underline">Regenerate</button>
+              <p className={helperTextClass}>
+                {language === "ar" ? "مُولّد من قاموس الأسماء." : "Generated from name dictionary."}
+                <button type="button" onClick={handleRegenerateEnglishName} className="ml-2 text-accent hover:underline">{language === "ar" ? "إعادة توليد" : "Regenerate"}</button>
               </p>
             )}
             {englishNameManuallyEdited && (
-              <p className="mt-2 text-sm text-amber-600">Manually edited. Changes to Arabic name will not override this.</p>
+              <p className="mt-2 text-sm font-medium text-amber-600">{language === "ar" ? "تم التحرير يدوياً. لن تؤثر التغييرات على الاسم العربي." : "Manually edited. Changes to Arabic name will not override this."}</p>
             )}
           </div>
         </div>
         {hasShortArabicNameWarning && (
-          <p className="text-sm text-amber-600">
-            Warning: patient name usually includes at least 3 parts.
+          <p className="text-sm font-semibold text-amber-600">
+            {language === "ar" ? "تنبيه: الاسم العربي عادة يتكون من 3 أجزاء على الأقل." : "Warning: patient name usually includes at least 3 parts."}
           </p>
         )}
 
         {currentMissingTokens.length > 0 && (
-          <Card className="p-4 border-amber-200" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
-            <p className="text-sm font-medium text-amber-600 mb-4">Unrecognized name tokens — add to dictionary:</p>
+          <Card className="p-3 sm:p-4 border-amber-200" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
+            <p className="text-sm font-semibold text-amber-700 mb-3">{language === "ar" ? "رموز اسم غير معروفة - أضفها إلى القاموس:" : "Unrecognized name tokens — add to dictionary:"}</p>
             {currentMissingTokens.map((token) => (
               <div key={token} className="flex items-center gap-3 mb-2">
                 <span className="text-sm font-mono" dir="rtl">{token}</span>
@@ -591,7 +599,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   type="text"
                   value={missingTokenInputs[token] ?? ""}
                   onChange={(e) => setMissingTokenInputs((p) => ({ ...p, [token]: e.target.value }))}
-                  placeholder="English translation…"
+                  placeholder={language === "ar" ? "الترجمة الإنجليزية…" : "English translation…"}
                   className="flex-1 input-premium h-10 text-sm"
                 />
                 <Button
@@ -600,7 +608,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   disabled={!missingTokenInputs[token]?.trim() || addingToken === token}
                   onClick={() => handleAddTokenToDictionary(token)}
                 >
-                  {addingToken === token ? "Adding…" : "Add"}
+                  {addingToken === token ? (language === "ar" ? "جاري الإضافة…" : "Adding…") : (language === "ar" ? "إضافة" : "Add")}
                 </Button>
               </div>
             ))}
@@ -608,9 +616,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           </Card>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Identifier Type</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "نوع المعرف" : "Identifier Type"}</label>
             <select
               value={form.identifierType}
               onKeyDown={handleEnterNavigation("identifierType")}
@@ -636,14 +644,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               })}
               className="input-premium input-ltr w-full"
             >
-              <option value="national_id">National ID (Libyan)</option>
-              <option value="passport">Passport</option>
-              <option value="other">Other</option>
+              <option value="national_id">{language === "ar" ? "رقم الهوية (ليبي)" : "National ID (Libyan)"}</option>
+              <option value="passport">{language === "ar" ? "جواز سفر" : "Passport"}</option>
+              <option value="other">{language === "ar" ? "أخرى" : "Other"}</option>
             </select>
           </div>
           {isNationalId ? (
             <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">National ID (12 digits)</label>
+              <label className={fieldLabelClass}>{language === "ar" ? "رقم الهوية (12 رقم)" : "National ID (12 digits)"}</label>
               <input
                 value={form.identifierValue}
                 onChange={(e) => handleIdentifierValueChange(e.target.value)}
@@ -656,8 +664,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             </div>
           ) : (
             <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                {form.identifierType === "passport" ? "Passport Number" : "Identifier Value"}
+              <label className={fieldLabelClass}>
+                {form.identifierType === "passport" ? (language === "ar" ? "رقم الجواز" : "Passport Number") : (language === "ar" ? "قيمة المعرف" : "Identifier Value")}
               </label>
               <input
                 value={form.identifierValue}
@@ -680,8 +688,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             </div>
           )}
           {showConfirmation && (
-            <div>
-              <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Confirm National ID</label>
+            <div className="md:col-start-2">
+              <label className={fieldLabelClass}>{language === "ar" ? "تأكيد رقم الهوية" : "Confirm National ID"}</label>
               <input
                 value={form.nationalIdConfirmation}
                 onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.target.value.replace(/\D/g, "") }))}
@@ -691,16 +699,16 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                placeholder="Re-type the National ID"
+                placeholder={language === "ar" ? "أعد كتابة رقم الهوية" : "Re-type the National ID"}
                 required={nationalIdWasEdited}
                 className="input-premium input-ltr w-full"
               />
             </div>
           )}
         </div>
-        <Card className="p-4">
+        <Card className="p-3 sm:p-4">
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium">Additional Identifiers</p>
+            <p className="text-sm font-semibold text-foreground">{language === "ar" ? "معرفات إضافية" : "Additional Identifiers"}</p>
             <button
               type="button"
               className="text-sm text-accent underline"
@@ -714,11 +722,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 }))
               }
             >
-              Add identifier
+              {language === "ar" ? "إضافة معرف" : "Add identifier"}
             </button>
           </div>
           {form.identifiers.map((entry, idx) => (
-            <div key={`identifier-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-center mb-2">
+            <div key={`identifier-${idx}`} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-center mb-2">
               <select
                 value={entry.typeCode}
                 onChange={(e) =>
@@ -735,9 +743,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 }
                 className="input-premium h-10 text-sm"
               >
-                <option value="national_id">National ID</option>
-                <option value="passport">Passport</option>
-                <option value="other">Other</option>
+                <option value="national_id">{language === "ar" ? "رقم الهوية" : "National ID"}</option>
+                <option value="passport">{language === "ar" ? "جواز سفر" : "Passport"}</option>
+                <option value="other">{language === "ar" ? "أخرى" : "Other"}</option>
               </select>
               <input
                 value={entry.value}
@@ -752,7 +760,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     return { ...f, identifiers: next };
                   })
                 }
-                placeholder="Identifier value"
+                placeholder={language === "ar" ? "قيمة المعرف" : "Identifier value"}
                 className="md:col-span-2 input-premium h-10 text-sm"
               />
               <div className="flex items-center gap-2">
@@ -776,7 +784,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                       })
                     }
                   />
-                  Primary
+                  {language === "ar" ? "أساسي" : "Primary"}
                 </label>
                 {idx > 0 && (
                   <button
@@ -798,7 +806,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                       })
                     }
                   >
-                    Remove
+                    {language === "ar" ? "إزالة" : "Remove"}
                   </button>
                 )}
               </div>
@@ -808,13 +816,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       </div>
 
       {/* Demographics */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <h3 className="text-xl font-semibold">Demographics</h3>
+          <h3 className={sectionTitleClass}>{language === "ar" ? "البيانات الديموغرافية" : "Demographics"}</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Sex</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الجنس" : "Sex"}</label>
             <select
               value={form.sex}
               onChange={(v) => setForm((f) => ({ ...f, sex: v.target.value }))}
@@ -823,14 +831,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               required
               className="input-premium input-ltr w-full"
             >
-              <option value="">Select...</option>
-              <option value="M">Male</option>
-              <option value="F">Female</option>
+              <option value="">{language === "ar" ? "اختر..." : "Select..."}</option>
+              <option value="M">{language === "ar" ? "ذكر" : "Male"}</option>
+              <option value="F">{language === "ar" ? "أنثى" : "Female"}</option>
             </select>
           </div>
           <div>
             <DateInput
-              label="Date of Birth"
+              label={language === "ar" ? "تاريخ الميلاد" : "Date of Birth"}
               value={form.estimatedDateOfBirth}
               onChange={handleDobChange}
               onKeyDown={handleEnterNavigation("estimatedDateOfBirth")}
@@ -839,7 +847,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Age (years)</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "العمر (سنوات)" : "Age (years)"}</label>
             <input
               value={form.ageYears}
               onChange={(v) => setForm((f) => ({ ...f, ageYears: v.target.value.replace(/\D/g, "").slice(0, 3) }))}
@@ -859,21 +867,21 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             onChange={(event) => setForm((f) => ({ ...f, demographicsEstimated: event.target.checked }))}
             className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
           />
-          <span className="text-base font-medium">Estimated (uncertain DOB/age)</span>
+          <span className="text-base font-semibold">{language === "ar" ? "تقديري (تاريخ/عمر غير مؤكد)" : "Estimated (uncertain DOB/age)"}</span>
         </label>
         {isNationalId && isValidNationalId(form.identifierValue) && (
-          <p className="text-sm text-accent">Demographics auto-derived from National ID. You can override them manually.</p>
+          <p className="text-sm font-semibold text-accent">{language === "ar" ? "تم استنتاج البيانات تلقائياً من رقم الهوية. يمكنك تعديلها يدوياً." : "Demographics auto-derived from National ID. You can override them manually."}</p>
         )}
       </div>
 
       {/* Contact */}
-      <div className="space-y-6">
+      <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <h3 className="text-xl font-semibold">Contact</h3>
+          <h3 className={sectionTitleClass}>{language === "ar" ? "التواصل" : "Contact"}</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Phone 1 (Required)</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الهاتف 1 (مطلوب)" : "Phone 1 (Required)"}</label>
             <input
               value={form.phone1}
               onChange={(v) => setForm((f) => ({ ...f, phone1: normalizePhoneInput(v.target.value) }))}
@@ -885,7 +893,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
           </div>
           <div>
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">Phone 2 (Optional)</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "الهاتف 2 (اختياري)" : "Phone 2 (Optional)"}</label>
             <input
               value={form.phone2}
               onChange={(v) => setForm((f) => ({ ...f, phone2: normalizePhoneInput(v.target.value) }))}
@@ -896,7 +904,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
           </div>
           <div className="md:col-span-2">
-            <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">City</label>
+            <label className={fieldLabelClass}>{language === "ar" ? "المدينة" : "City"}</label>
             <select
               value={form.address}
               onChange={(v) => setForm((f) => ({ ...f, address: v.target.value }))}
@@ -904,7 +912,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               ref={addressRef}
               className="input-premium input-ltr w-full"
             >
-              <option value="">Select a city...</option>
+              <option value="">{language === "ar" ? "اختر مدينة..." : "Select a city..."}</option>
               {LIBYAN_CITIES.map((c) => (
                 <option key={c.code} value={c.code}>
                   {c.nameAr} / {c.nameEn}
@@ -916,20 +924,20 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       </div>
 
       {/* Actions */}
-      <div className="flex gap-4 pt-6 border-t border-border">
+      <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
         {isEdit && (
           <Button
             type="button"
             variant="secondary"
             onClick={() => {
-              if (window.confirm("Delete this patient? This cannot be undone.")) {
+              if (window.confirm(language === "ar" ? "هل تريد حذف هذا المريض؟ لا يمكن التراجع عن ذلك." : "Delete this patient? This cannot be undone.")) {
                 deleteMutation.mutate();
               }
             }}
             disabled={deleteMutation.isPending || mutation.isPending}
             style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
           >
-            {deleteMutation.isPending ? "Deleting..." : "Delete Patient"}
+            {deleteMutation.isPending ? (language === "ar" ? "جاري الحذف…" : "Deleting...") : (language === "ar" ? "حذف المريض" : "Delete Patient")}
           </Button>
         )}
         {isEdit && onCancel && (
@@ -938,7 +946,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             variant="secondary"
             onClick={onCancel}
           >
-            Cancel
+            {language === "ar" ? "إلغاء" : "Cancel"}
           </Button>
         )}
         <Button
@@ -962,19 +970,19 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // ============================================================
   if (!isEdit) {
     return (
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 p-6">{formFields}</Card>
-        <div className="space-y-6">
-          <Card className="p-6" style={{ background: "rgba(245, 158, 11, 0.05)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.85fr)] gap-4 xl:gap-5">
+        <Card className="p-4 sm:p-5">{formFields}</Card>
+        <div className="space-y-4">
+          <Card className="p-4" style={{ background: "rgba(245, 158, 11, 0.05)", borderColor: "rgba(245, 158, 11, 0.3)" }}>
             <h3 className="text-sm font-semibold text-amber-600 mb-4">
-              Possible Duplicates {dupQuery.length > 1 ? `(${duplicates.length})` : ""}
+              {language === "ar" ? "التطابقات المحتملة" : "Possible Duplicates"} {dupQuery.length > 1 ? `(${duplicates.length})` : ""}
             </h3>
             {dupQuery.length <= 1 ? (
-              <p className="text-sm text-amber-700">Type at least 2 characters in phone, name, or identifier to check matches.</p>
+              <p className="text-sm font-medium text-amber-700">{language === "ar" ? "اكتب حرفين على الأقل في الهاتف أو الاسم أو المعرف للتحقق من التطابقات." : "Type at least 2 characters in phone, name, or identifier to check matches."}</p>
             ) : duplicatesLoading ? (
-              <p className="text-sm text-amber-700">Checking possible matches…</p>
+              <p className="text-sm text-amber-700">{language === "ar" ? "جاري التحقق من التطابقات المحتملة…" : "Checking possible matches…"}</p>
             ) : duplicates.length === 0 ? (
-              <p className="text-sm text-amber-700">No possible matches found.</p>
+              <p className="text-sm text-amber-700">{language === "ar" ? "لم يتم العثور على تطابقات محتملة." : "No possible matches found."}</p>
             ) : (
               <ul className="space-y-3">
                 {duplicates.slice(0, 5).map((p) => (
@@ -984,13 +992,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                       onClick={() => setPreviewPatient(p)}
                       className="w-full p-4 space-y-1 text-right hover:bg-muted/50 transition-colors"
                     >
-                      <p className="font-medium">{p.arabicFullName}</p>
+                      <p className="font-semibold text-foreground">{p.arabicFullName}</p>
                       {p.englishFullName && <p className="text-xs text-muted-foreground">{p.englishFullName}</p>}
-                      <p className="text-xs text-muted-foreground">
-                        {p.identifierValue || p.nationalId || "No ID"}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}MRN: {p.mrn || "—"}
+                      <p className="text-xs font-medium text-muted-foreground">
+                        {p.identifierValue || p.nationalId || (language === "ar" ? "لا يوجد معرف" : "No ID")}{p.identifierType && p.identifierType !== "national_id" && ` (${p.identifierType})`}{" • "}{language === "ar" ? "رقم الملف" : "MRN"}: {p.mrn || "—"}
                       </p>
-                      {p.phone1 && <p className="text-xs text-muted-foreground">Phone: {p.phone1}</p>}
-                      {p.address && <p className="text-xs text-muted-foreground">City: {LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn || p.address}</p>}
+                      {p.phone1 && <p className="text-xs text-muted-foreground">{language === "ar" ? "الهاتف:" : "Phone:"} {p.phone1}</p>}
+                      {p.address && <p className="text-xs text-muted-foreground">{language === "ar" ? "المدينة:" : "City:"} {chooseLocalized(language, LIBYAN_CITIES.find((c) => c.code === p.address)?.nameAr, LIBYAN_CITIES.find((c) => c.code === p.address)?.nameEn) || p.address}</p>}
                     </button>
                     <div className="flex gap-2 border-t border-border">
                       <button
@@ -998,14 +1006,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                         onClick={() => navigate(`/patients/${p.id}/edit`)}
                         className="flex-1 text-center py-3 px-2 text-amber-700 text-xs font-medium hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors"
                       >
-                        Edit Patient
+                        {language === "ar" ? "تعديل المريض" : "Edit Patient"}
                       </button>
                       <button
                         type="button"
                         onClick={() => navigate(`/appointments?patientId=${p.id}`)}
                         className="flex-1 text-center py-3 px-2 text-accent text-xs font-medium hover:bg-accent/5 transition-colors"
                       >
-                        Create Appointment
+                        {language === "ar" ? "إنشاء موعد" : "Create Appointment"}
                       </button>
                     </div>
                   </li>
@@ -1019,20 +1027,20 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setPreviewPatient(null); }}>
               <Card className="w-full max-w-md mx-4 p-6">
                 <div className="flex items-center justify-between mb-6">
-                  <h3 className="text-xl font-semibold">Patient Details</h3>
+                  <h3 className={sectionTitleClass}>{language === "ar" ? "تفاصيل المريض" : "Patient Details"}</h3>
                   <button onClick={() => setPreviewPatient(null)} className="text-muted-foreground hover:text-foreground">✕</button>
                 </div>
                 <div className="space-y-3">
-                  <Field label="Arabic Name" value={previewPatient.arabicFullName} />
-                  {previewPatient.englishFullName && <Field label="English Name" value={previewPatient.englishFullName} />}
-                  <Field label="Identifier" value={`${previewPatient.identifierValue || previewPatient.nationalId || "No ID"}${previewPatient.identifierType && previewPatient.identifierType !== "national_id" ? ` (${previewPatient.identifierType})` : ""}`} />
-                  <Field label="MRN" value={previewPatient.mrn || "—"} />
-                  <Field label="Sex" value={previewPatient.sex === "M" ? "Male" : previewPatient.sex === "F" ? "Female" : previewPatient.sex} />
-                  <Field label="Age" value={previewPatient.ageYears ? `${previewPatient.ageYears} years${previewPatient.demographicsEstimated ? " (Estimated)" : ""}` : "—"} />
-                  <Field label="DOB" value={previewPatient.estimatedDateOfBirth ? formatDateLy(previewPatient.estimatedDateOfBirth) : "—"} />
-                  <Field label="Phone" value={previewPatient.phone1 || "—"} />
-                  {previewPatient.phone2 && <Field label="Phone 2" value={previewPatient.phone2} />}
-                  {previewPatient.address && <Field label="City" value={LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn || previewPatient.address} />}
+                  <Field label={language === "ar" ? "الاسم العربي" : "Arabic Name"} value={previewPatient.arabicFullName} />
+                  {previewPatient.englishFullName && <Field label={language === "ar" ? "الاسم الإنجليزي" : "English Name"} value={previewPatient.englishFullName} />}
+                  <Field label={language === "ar" ? "المعرف" : "Identifier"} value={`${previewPatient.identifierValue || previewPatient.nationalId || (language === "ar" ? "لا يوجد معرف" : "No ID")}${previewPatient.identifierType && previewPatient.identifierType !== "national_id" ? ` (${previewPatient.identifierType})` : ""}`} />
+                  <Field label={language === "ar" ? "رقم الملف" : "MRN"} value={previewPatient.mrn || "—"} />
+                  <Field label={language === "ar" ? "الجنس" : "Sex"} value={previewPatient.sex === "M" ? (language === "ar" ? "ذكر" : "Male") : previewPatient.sex === "F" ? (language === "ar" ? "أنثى" : "Female") : previewPatient.sex} />
+                  <Field label={language === "ar" ? "العمر" : "Age"} value={previewPatient.ageYears ? `${previewPatient.ageYears} ${language === "ar" ? "سنة" : "years"}${previewPatient.demographicsEstimated ? (language === "ar" ? " (تقديري)" : " (Estimated)") : ""}` : "—"} />
+                  <Field label={language === "ar" ? "تاريخ الميلاد" : "DOB"} value={previewPatient.estimatedDateOfBirth ? formatDateLy(previewPatient.estimatedDateOfBirth) : "—"} />
+                  <Field label={language === "ar" ? "الهاتف" : "Phone"} value={previewPatient.phone1 || "—"} />
+                  {previewPatient.phone2 && <Field label={language === "ar" ? "الهاتف 2" : "Phone 2"} value={previewPatient.phone2} />}
+                  {previewPatient.address && <Field label={language === "ar" ? "المدينة" : "City"} value={chooseLocalized(language, LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameAr, LIBYAN_CITIES.find((c) => c.code === previewPatient.address)?.nameEn) || previewPatient.address} />}
                 </div>
                 <div className="flex gap-3 pt-4 border-t border-border mt-4">
                   <Button
@@ -1040,13 +1048,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     onClick={() => navigate(`/patients/${previewPatient.id}/edit`)}
                     className="flex-1"
                   >
-                    Edit
+                    {language === "ar" ? "تعديل" : "Edit"}
                   </Button>
                   <Button
                     onClick={() => navigate(`/appointments?patientId=${previewPatient.id}`)}
                     className="flex-1"
                   >
-                    Create Appointment
+                    {language === "ar" ? "إنشاء موعد" : "Create Appointment"}
                   </Button>
                 </div>
               </Card>
@@ -1070,9 +1078,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                     </svg>
                   </div>
-                  <h3 className="text-2xl font-display">Patient registered</h3>
+                  <h3 className="text-2xl font-display font-bold">{language === "ar" ? "تم تسجيل المريض" : "Patient registered"}</h3>
                   <p className="text-muted-foreground">
-                    Choose what to do next for {postCreatePatient.arabicFullName}.
+                    {language === "ar" ? "اختر ما تريد فعله بعد ذلك لـ" : "Choose what to do next for"} {postCreatePatient.arabicFullName}.
                   </p>
                 </div>
                 <div className="flex flex-col gap-3">
@@ -1081,7 +1089,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     onClick={() => navigate(`/appointments?patientId=${postCreatePatient.id}`)}
                     className="w-full"
                   >
-                    Create appointment for this patient
+                    {language === "ar" ? "إنشاء موعد لهذا المريض" : "Create appointment for this patient"}
                   </Button>
                   <Button
                     type="button"
@@ -1092,7 +1100,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     }}
                     className="w-full"
                   >
-                    Register another patient
+                      {language === "ar" ? "تسجيل مريض آخر" : "Register another patient"}
                   </Button>
                   <Button
                     type="button"
@@ -1100,7 +1108,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     onClick={() => setPostCreatePatient(null)}
                     className="w-full"
                   >
-                    Close
+                    {language === "ar" ? "إغلاق" : "Close"}
                   </Button>
                 </div>
               </Card>
@@ -1114,7 +1122,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Edit mode: form only (toast handles success)
   return (
     <div className="max-w-4xl mx-auto">
-      <Card className="p-6">{formFields}</Card>
+      <Card className="p-4 sm:p-5">{formFields}</Card>
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );
@@ -1125,7 +1133,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 function Field({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between items-baseline py-2 border-b border-border last:border-b-0">
-      <span className="text-muted-foreground text-xs font-mono uppercase tracking-[0.15em]">{label}</span>
+      <span className="text-sm font-semibold text-foreground">{label}</span>
       <span className="text-sm font-medium text-right">{value}</span>
     </div>
   );

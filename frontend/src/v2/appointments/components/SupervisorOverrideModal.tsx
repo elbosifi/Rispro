@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { Button } from "@/components/shared";
 
 interface Props {
   open: boolean;
@@ -34,28 +35,32 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
 
   return (
     <div
-      style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)", zIndex: 60 }}
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/45 p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) onClose();
       }}
     >
-      <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" }}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
-        <p style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
+      <div className="w-full max-w-md rounded-xl border border-border bg-card p-4 sm:p-5 shadow-lg">
+        <h3 className="text-lg font-semibold text-foreground">{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
+        <p className="mt-1.5 text-sm text-muted-foreground">{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          <input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
-          <input type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
-          <input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
+        <div className="grid gap-3 mt-4">
+          <input className="input-premium" value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
+          <input className="input-premium" type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
+          <input className="input-premium" value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
         </div>
 
         {(localError || authError) && (
-          <div style={{ marginTop: 10, color: "#dc2626", fontSize: 12 }}>{localError || authError}</div>
+          <div className="mt-3 text-sm text-red-600">{localError || authError}</div>
         )}
 
-        <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose} disabled={loading}>{t(language, "appointments.create.cancel")}</button>
-          <button type="button" onClick={handleConfirm} disabled={loading}>{loading ? t(language, "appointments.create.validating") : t(language, "appointments.create.approveBook")}</button>
+        <div className="mt-4 flex flex-col sm:flex-row justify-end gap-3">
+          <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
+            {t(language, "appointments.create.cancel")}
+          </Button>
+          <Button type="button" onClick={handleConfirm} disabled={loading}>
+            {loading ? t(language, "appointments.create.validating") : t(language, "appointments.create.approveBook")}
+          </Button>
         </div>
       </div>
     </div>
