@@ -6,6 +6,7 @@ import {
   createPatient,
   searchPatients,
   fetchPatientMrnPreview,
+  fetchPatientIdentifierTypes,
   fetchNameDictionary,
   upsertNameDictionaryEntry,
   fetchPatientById,
@@ -21,12 +22,12 @@ import {
 import { LIBYAN_CITIES_SORTED as LIBYAN_CITIES } from "@/lib/libyan-cities";
 import { formatDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
-import type { Patient } from "@/types/api";
+import type { Patient, PatientIdentifierTypeOption } from "@/types/api";
 import { Button, Card } from "@/components/shared";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 
-type IdentifierType = "national_id" | "passport" | "other";
+type IdentifierType = string;
 type PatientFormMode = "create" | "edit";
 
 interface PatientFormState {
@@ -60,6 +61,12 @@ const DEFAULT_FORM: PatientFormState = {
   address: "benghazi",
   identifiers: [{ typeCode: "national_id", value: "", isPrimary: true }]
 };
+
+const BUILTIN_IDENTIFIER_TYPES: PatientIdentifierTypeOption[] = [
+  { code: "national_id", labelAr: "رقم الهوية", labelEn: "National ID" },
+  { code: "passport", labelAr: "جواز سفر", labelEn: "Passport" },
+  { code: "other", labelAr: "أخرى", labelEn: "Other" }
+];
 
 type FormFieldKey =
   | "arabicFullName"
@@ -207,6 +214,31 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     refetchOnMount: "always",
     refetchOnReconnect: true
   });
+  const { data: identifierTypesData } = useQuery({
+    queryKey: ["patient-identifier-types"],
+    queryFn: fetchPatientIdentifierTypes,
+    staleTime: 1000 * 60 * 5
+  });
+  const identifierTypeOptions = (() => {
+    const incoming = Array.isArray(identifierTypesData) ? identifierTypesData.filter((row) => row.code) : [];
+    if (incoming.length === 0) return BUILTIN_IDENTIFIER_TYPES;
+
+    const byCode = new Map<string, PatientIdentifierTypeOption>();
+    for (const row of incoming) {
+      byCode.set(row.code, row);
+    }
+    for (const builtin of BUILTIN_IDENTIFIER_TYPES) {
+      if (!byCode.has(builtin.code)) byCode.set(builtin.code, builtin);
+    }
+    for (const entry of form.identifiers) {
+      const code = String(entry.typeCode || "").trim();
+      if (!code) continue;
+      if (!byCode.has(code)) {
+        byCode.set(code, { code, labelAr: code, labelEn: code });
+      }
+    }
+    return Array.from(byCode.values());
+  })();
   useEffect(() => {
     if (potentialDuplicates && potentialDuplicates.length > 0) {
       const filtered = isEdit ? potentialDuplicates.filter((p) => p.id !== patientId) : potentialDuplicates;
@@ -732,9 +764,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 }
                 className={`input-premium h-10 text-sm ${idx === 0 && isDuplicateField("identifierValue") ? duplicateFocusClass : ""}`}
               >
-                <option value="national_id">{language === "ar" ? "رقم الهوية" : "National ID"}</option>
-                <option value="passport">{language === "ar" ? "جواز سفر" : "Passport"}</option>
-                <option value="other">{language === "ar" ? "أخرى" : "Other"}</option>
+                {identifierTypeOptions.map((type) => (
+                  <option key={type.code} value={type.code}>
+                    {chooseLocalized(language, type.labelAr, type.labelEn)}
+                  </option>
+                ))}
               </select>
               <input
                 aria-label={

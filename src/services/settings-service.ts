@@ -27,7 +27,15 @@ export interface SettingsRow {
 interface SettingsMapRow {
   category: string;
   setting_key: string;
-  setting_value: { value?: unknown } | null;
+  setting_value: unknown;
+}
+
+function extractSettingScalar(settingValue: unknown): string {
+  if (settingValue && typeof settingValue === "object" && !Array.isArray(settingValue)) {
+    const record = settingValue as { value?: unknown };
+    return String(record.value ?? "");
+  }
+  return String(settingValue ?? "");
 }
 
 export async function loadSettingsMap(categories: string[]): Promise<SettingsMap> {
@@ -47,7 +55,7 @@ export async function loadSettingsMap(categories: string[]): Promise<SettingsMap
       accumulator[row.category] = {} as CategorySettings;
     }
 
-    accumulator[row.category][row.setting_key] = String(row.setting_value?.value ?? "");
+    accumulator[row.category][row.setting_key] = extractSettingScalar(row.setting_value);
     return accumulator;
   }, {} as SettingsMap);
 }
@@ -137,7 +145,16 @@ export async function upsertSettings(
             updated_at = now()
           returning id, category, setting_key, setting_value, updated_at
         `,
-        [category, entry.key, JSON.stringify(entry.value ?? {}), updatedByUserId]
+        [
+          category,
+          entry.key,
+          JSON.stringify(
+            entry.value && typeof entry.value === "object" && !Array.isArray(entry.value) && "value" in (entry.value as Record<string, unknown>)
+              ? entry.value
+              : { value: entry.value ?? "" }
+          ),
+          updatedByUserId
+        ]
       );
       const savedRow = rows[0] as SettingsRow | undefined;
 

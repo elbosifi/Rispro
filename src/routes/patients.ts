@@ -4,6 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import {
+  listActivePatientIdentifierTypes,
   createPatient,
   deletePatient,
   getPatientById,
@@ -24,6 +25,14 @@ type PatientsRequest = Request & {
 export const patientsRouter: Router = express.Router();
 
 patientsRouter.use(requireAuth);
+
+patientsRouter.get(
+  "/identifier-types",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const items = await listActivePatientIdentifierTypes();
+    res.json({ items });
+  })
+);
 
 patientsRouter.get(
   "/",

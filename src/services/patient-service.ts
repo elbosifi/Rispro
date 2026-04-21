@@ -92,7 +92,7 @@ export interface ValidatedPatientPayload {
 
 interface PatientSettingRow {
   setting_key: string;
-  setting_value?: { value?: unknown } | null;
+  setting_value?: unknown;
 }
 
 interface PatientNoShowSummaryRow {
@@ -110,6 +110,12 @@ interface PatientIdentifierInput {
   typeCode?: unknown;
   value?: unknown;
   isPrimary?: unknown;
+}
+
+export interface PatientIdentifierTypeOption {
+  code: string;
+  label_ar: string;
+  label_en: string;
 }
 
 export type PersistedPatientRow = PatientRow & { id: UserId };
@@ -239,7 +245,12 @@ async function loadPatientRegistrationSettings(): Promise<PatientRegistrationRul
   );
 
   const settings = rows.reduce<CategorySettings>((accumulator, row) => {
-    accumulator[row.setting_key] = String(row.setting_value?.value ?? "");
+    const raw = row.setting_value;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      accumulator[row.setting_key] = String((raw as { value?: unknown }).value ?? "");
+    } else {
+      accumulator[row.setting_key] = String(raw ?? "");
+    }
     return accumulator;
   }, {});
 
@@ -636,6 +647,25 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     normalizedArabicLaterTokenPattern,
     normalizedEnglishLaterTokenPattern
   ]);
+  return rows;
+}
+
+export async function listActivePatientIdentifierTypes(): Promise<PatientIdentifierTypeOption[]> {
+  const { rows } = await pool.query<PatientIdentifierTypeOption>(
+    `
+      select code, label_ar, label_en
+      from patient_identifier_types
+      where is_active = true
+      order by
+        case code
+          when 'national_id' then 1
+          when 'passport' then 2
+          when 'other' then 3
+          else 4
+        end asc,
+        id asc
+    `
+  );
   return rows;
 }
 

@@ -23,7 +23,8 @@ import type {
   AuditEntry,
   SchedulingEngineConfig,
   PatientImportBatch,
-  PatientImportStagingRow
+  PatientImportStagingRow,
+  PatientIdentifierTypeOption
 } from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
@@ -227,6 +228,15 @@ export async function searchPatients(query: string): Promise<Patient[]> {
   if (query) params.set("q", query);
   const raw = await api<{ patients: RawRecord[] }>(`/patients?${params.toString()}`);
   return mapPatients(raw.patients);
+}
+
+export async function fetchPatientIdentifierTypes(): Promise<PatientIdentifierTypeOption[]> {
+  const raw = await api<{ items: RawRecord[] }>("/patients/identifier-types");
+  return (raw.items || []).map((row) => ({
+    code: String(row.code ?? ""),
+    labelAr: String(row.label_ar ?? row.labelAr ?? row.code ?? ""),
+    labelEn: String(row.label_en ?? row.labelEn ?? row.code ?? "")
+  }));
 }
 
 export async function fetchPatientMrnPreview(): Promise<{ mrn: string }> {
