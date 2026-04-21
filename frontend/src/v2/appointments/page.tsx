@@ -268,7 +268,7 @@ export function AppointmentsV2Page() {
         </p>
       ) : (
         <>
-          <AvailabilityTable items={availability.data?.items ?? []} />
+          <AvailabilityTable items={availability.data?.items ?? []} language={language} />
 
           {/* Suggestions */}
           <div className="mt-6">
@@ -337,9 +337,10 @@ export function AppointmentsV2Page() {
 
 interface AvailabilityTableProps {
   items: AvailabilityDayDto[];
+  language: "ar" | "en";
 }
 
-function AvailabilityTable({ items }: AvailabilityTableProps) {
+function AvailabilityTable({ items, language }: AvailabilityTableProps) {
   return (
     <Card className="overflow-hidden">
       <div className="overflow-x-auto">
@@ -347,19 +348,19 @@ function AvailabilityTable({ items }: AvailabilityTableProps) {
           <thead>
             <tr className="border-b" style={{ borderColor: "var(--border)" }}>
               <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                Date
+                {language === "ar" ? "التاريخ" : "Date"}
               </th>
               <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                Capacity
+                {language === "ar" ? "السعة" : "Capacity"}
               </th>
               <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                Booked
+                {language === "ar" ? "محجوز" : "Booked"}
               </th>
               <th className="text-center p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                Availability
+                {language === "ar" ? "التوفر" : "Availability"}
               </th>
               <th className="text-left p-3 font-bold text-xs uppercase tracking-[0.08em]" style={{ color: "var(--text-muted)" }}>
-                Status
+                {language === "ar" ? "الحالة" : "Status"}
               </th>
             </tr>
           </thead>
