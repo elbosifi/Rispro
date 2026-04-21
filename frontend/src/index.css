@@ -1,5 +1,5 @@
 /* Add Google Fonts import */
-@import url('https://fonts.googleapis.com/css2?family=Calistoga&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
 
 @import "tailwindcss";
 
@@ -105,9 +105,9 @@
   --radius-full: 9999px;
   
   /* --- Font Families --- */
-  --font-display: "Calistoga", Georgia, serif;
-  --font-body: "Inter", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", monospace;
+  --font-display: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+  --font-body: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+  --font-mono: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
 }
 
 /* --- Typography & Base --- */
@@ -118,16 +118,19 @@ body,
 }
 
 html {
-  font-family: var(--font-body), "IBM Plex Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+  font-family: var(--font-body);
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 .font-display {
   font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .font-mono {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 body {
@@ -399,7 +402,7 @@ body::before {
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   padding: 0.75rem 1.25rem;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 0.875rem;
   outline: none;
   transition: all 200ms ease-out;
@@ -444,7 +447,7 @@ body::before {
   padding: 0.35rem 0.75rem;
   font-size: 0.75rem;
   font-weight: 500;
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   text-transform: uppercase;
   letter-spacing: 0.15em;
   display: inline-flex;
@@ -471,7 +474,7 @@ body::before {
 }
 
 .section-label-text {
-  font-family: var(--font-mono);
+  font-family: var(--font-body);
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.15em;
@@ -512,6 +515,7 @@ body::before {
 /* --- Monospace Data Display --- */
 .font-mono-data {
   font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 
 /* --- Loading Spinner --- */
@@ -568,4 +572,3 @@ body::before {
   background-size: 32px 32px;
   opacity: 0.03;
 }
-
