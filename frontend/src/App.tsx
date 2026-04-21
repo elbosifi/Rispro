@@ -23,7 +23,6 @@ import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
-import { Button } from "@/components/shared";
 
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
@@ -136,16 +135,19 @@ function AppContent() {
         isRtl={isArabic}
         pageTitle={pageTitle ?? undefined}
         pageAction={isPatientCreate || isPatientEdit ? (
-          <Button
-            variant="secondary"
-            size="sm"
+          <button
+            type="button"
             onClick={() => navigate("/patients")}
-            className="h-10 w-10 sm:h-8 sm:w-auto rounded-full px-0 sm:px-3 text-xs whitespace-nowrap"
             aria-label={language === "ar" ? "رجوع" : "Back"}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-full border text-white shadow-sm transition-all hover:shadow-md active:scale-95 sm:w-auto sm:px-3 sm:gap-2 sm:text-xs whitespace-nowrap"
+            style={{
+              backgroundColor: "var(--accent)",
+              borderColor: "var(--accent)"
+            }}
           >
-            <ArrowLeft size={16} strokeWidth={2.25} />
+            <ArrowLeft size={16} strokeWidth={2.5} />
             <span className="hidden sm:inline leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
-          </Button>
+          </button>
         ) : undefined}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}

@@ -129,6 +129,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Track original national ID to know if it was edited (edit mode only)
   const [originalNationalId, setOriginalNationalId] = useState("");
   const [duplicates, setDuplicates] = useState<Patient[]>([]);
+  const [duplicateFocusField, setDuplicateFocusField] = useState<FormFieldKey | null>(null);
   const [previewPatient, setPreviewPatient] = useState<Patient | null>(null);
   const [englishNameManuallyEdited, setEnglishNameManuallyEdited] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -211,6 +212,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     onSuccess: (patient) => {
       setForm(DEFAULT_FORM);
       setEnglishNameManuallyEdited(false);
+      setDuplicateFocusField(null);
       setMissingTokenInputs({});
       setLocalDictionary([]);
       setAddTokenError(null);
@@ -529,6 +531,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const submitLabel = mutation.isPending
     ? (isEdit ? (language === "ar" ? "جاري التحديث…" : "Updating…") : (language === "ar" ? "جاري التسجيل…" : "Registering…"))
     : (isEdit ? (language === "ar" ? "تحديث المريض" : "Update Patient") : (language === "ar" ? "تسجيل المريض" : "Register Patient"));
+  const hasPotentialDuplicates = !isEdit && dupQuery.length > 1 && duplicates.length > 0;
+  const duplicateWarningText = language === "ar"
+    ? "يوجد تطابق محتمل أسفل الصفحة. راجع القائمة قبل المتابعة."
+    : "Possible matches are listed below. Please review them before continuing.";
+  const duplicateFocusClass = "border-amber-400 bg-amber-50/80 shadow-[0_0_0_1px_rgba(245,158,11,0.20)]";
+  const duplicateLabelClass = "text-amber-700";
+  const isDuplicateField = (field: FormFieldKey) => hasPotentialDuplicates && duplicateFocusField === field;
 
   if (isEdit && loadingPatient) {
     return (
@@ -550,27 +559,33 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}</label>
+            <label className={`${fieldLabelClass} ${isDuplicateField("arabicFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم العربي" : "Arabic Full Name"}</label>
             <input
               value={form.arabicFullName}
-              onChange={(e) => handleArabicNameChange(e.target.value)}
+              onChange={(e) => {
+                setDuplicateFocusField("arabicFullName");
+                handleArabicNameChange(e.target.value);
+              }}
               onBlur={() => { if (form.arabicFullName && !form.arabicFullName.endsWith(" ")) handleArabicNameChange(form.arabicFullName + " "); }}
               onKeyDown={handleEnterNavigation("arabicFullName")}
               required
               dir="rtl"
               ref={arabicFullNameRef}
-              className="input-premium input-rtl w-full"
+              className={`input-premium input-rtl w-full ${isDuplicateField("arabicFullName") ? duplicateFocusClass : ""}`}
             />
           </div>
           <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}</label>
+            <label className={`${fieldLabelClass} ${isDuplicateField("englishFullName") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الاسم الإنجليزي" : "English Full Name"}</label>
             <input
               value={form.englishFullName}
-              onChange={(e) => handleEnglishNameChange(e.target.value)}
+              onChange={(e) => {
+                setDuplicateFocusField("englishFullName");
+                handleEnglishNameChange(e.target.value);
+              }}
               onKeyDown={handleEnterNavigation("englishFullName")}
               dir="ltr"
               ref={englishFullNameRef}
-              className="input-premium input-ltr w-full"
+              className={`input-premium input-ltr w-full ${isDuplicateField("englishFullName") ? duplicateFocusClass : ""}`}
             />
             {form.arabicFullName && !englishNameManuallyEdited && (
               <p className={helperTextClass}>
@@ -587,6 +602,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <p className="text-sm font-semibold text-amber-600">
             {language === "ar" ? "تنبيه: الاسم العربي عادة يتكون من 3 أجزاء على الأقل." : "Warning: patient name usually includes at least 3 parts."}
           </p>
+        )}
+        {hasPotentialDuplicates && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-800 shadow-sm">
+            <p className="text-sm font-semibold">{duplicateWarningText}</p>
+          </div>
         )}
 
         {currentMissingTokens.length > 0 && (
@@ -642,6 +662,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 ref={idx === 0 ? identifierTypeRef : undefined}
                 onChange={(e) =>
                   setForm((f) => {
+                    if (idx === 0) setDuplicateFocusField("identifierValue");
                     const next = [...f.identifiers];
                     const nextType = e.target.value as IdentifierType;
                     const nextValue = normalizeIdentifierForType(nextType, next[idx]?.value || "");
@@ -652,7 +673,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     return { ...f, identifiers: next };
                   })
                 }
-                className="input-premium h-10 text-sm"
+                className={`input-premium h-10 text-sm ${idx === 0 && isDuplicateField("identifierValue") ? duplicateFocusClass : ""}`}
               >
                 <option value="national_id">{language === "ar" ? "رقم الهوية" : "National ID"}</option>
                 <option value="passport">{language === "ar" ? "جواز سفر" : "Passport"}</option>
@@ -663,6 +684,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 ref={idx === 0 ? identifierValueRef : undefined}
                 onChange={(e) =>
                   setForm((f) => {
+                    if (idx === 0) setDuplicateFocusField("identifierValue");
                     const next = [...f.identifiers];
                     const nextValue = normalizeIdentifierForType(next[idx]?.typeCode || "other", e.target.value);
                     next[idx] = { ...next[idx], value: nextValue };
@@ -673,7 +695,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   })
                 }
                 placeholder={language === "ar" ? "قيمة المعرف" : "Identifier value"}
-                className="md:col-span-2 input-premium h-10 text-sm"
+                className={`md:col-span-2 input-premium h-10 text-sm ${idx === 0 && isDuplicateField("identifierValue") ? duplicateFocusClass : ""}`}
               />
               <div className="flex items-center gap-2">
                 <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -811,15 +833,18 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "الهاتف 1 (مطلوب)" : "Phone 1 (Required)"}</label>
+            <label className={`${fieldLabelClass} ${isDuplicateField("phone1") ? duplicateLabelClass : ""}`}>{language === "ar" ? "الهاتف 1 (مطلوب)" : "Phone 1 (Required)"}</label>
             <input
               value={form.phone1}
-              onChange={(v) => setForm((f) => ({ ...f, phone1: normalizePhoneInput(v.target.value) }))}
+              onChange={(v) => {
+                setDuplicateFocusField("phone1");
+                setForm((f) => ({ ...f, phone1: normalizePhoneInput(v.target.value) }));
+              }}
               onKeyDown={handleEnterNavigation("phone1")}
               ref={phone1Ref}
               maxLength={10}
               required
-              className="input-premium input-ltr w-full"
+              className={`input-premium input-ltr w-full ${isDuplicateField("phone1") ? duplicateFocusClass : ""}`}
             />
           </div>
           <div>
