@@ -183,8 +183,8 @@ export default function RegistrationsPage() {
                 </Button>
               </div>
 
-              <div className="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-5">
-                <div className="space-y-3 rounded-2xl border border-border bg-muted/20 p-4">
+              <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-5">
+                <div className="space-y-4 rounded-2xl border border-border bg-muted/20 p-4">
                   <div>
                     <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
                       {t("registrations.dateFilters")}
@@ -193,22 +193,38 @@ export default function RegistrationsPage() {
                       {t("registrations.dateFiltersHint")}
                     </p>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <DateInput
-                      label={t("registrations.date")}
-                      value={filters.date}
-                      onChange={(value) => handleDateChange("date", value)}
-                    />
-                    <DateInput
-                      label={t("registrations.dateFrom")}
-                      value={filters.dateFrom}
-                      onChange={(value) => handleDateChange("dateFrom", value)}
-                    />
-                    <DateInput
-                      label={t("registrations.dateTo")}
-                      value={filters.dateTo}
-                      onChange={(value) => handleDateChange("dateTo", value)}
-                    />
+
+                  <div className="space-y-4">
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <DateInput
+                        label={t("registrations.date")}
+                        value={filters.date}
+                        onChange={(value) => handleDateChange("date", value)}
+                      />
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background p-3">
+                      <div className="mb-3">
+                        <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
+                          {t("registrations.dateFrom")} / {t("registrations.dateTo")}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {t("registrations.rangeHint")}
+                        </p>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <DateInput
+                          label={t("registrations.dateFrom")}
+                          value={filters.dateFrom}
+                          onChange={(value) => handleDateChange("dateFrom", value)}
+                        />
+                        <DateInput
+                          label={t("registrations.dateTo")}
+                          value={filters.dateTo}
+                          onChange={(value) => handleDateChange("dateTo", value)}
+                        />
+                      </div>
+                    </div>
                   </div>
                 </div>
 
