@@ -542,7 +542,30 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Shared form fields JSX (rendered in both create and edit)
   // ============================================================
   const formFields = (
-    <form onSubmit={handleSubmit} className="space-y-5">
+    <form id="patient-form" onSubmit={handleSubmit} className="space-y-5">
+      {!isEdit && (
+        <div className="sticky top-4 z-20 -mx-0 sm:-mx-0">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-border bg-card/95 backdrop-blur px-4 py-3 shadow-sm">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">
+                {language === "ar" ? "الحفظ والتسجيل" : "Save and register"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {language === "ar" ? "أكمل البيانات ثم اضغط تسجيل المريض." : "Complete the form, then submit the patient."}
+              </p>
+            </div>
+            <div className="flex-1" />
+            <Button
+              type="submit"
+              disabled={mutation.isPending}
+              className="w-full sm:w-auto"
+            >
+              {submitLabel}
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Identity */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
