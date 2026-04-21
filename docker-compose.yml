@@ -2,7 +2,7 @@
 # RISpro Reception - Docker Compose (Base)
 # =============================================================================
 # This file defines the core RISpro application service.
-# It expects DATABASE_URL to be set in the .env file.
+# It expects deployment mode variables and DATABASE_URL to be set in the .env file.
 #
 # For a complete stack with an internal PostgreSQL database, also include
 # the override file:
@@ -14,8 +14,8 @@
 
 services:
   # -----------------------------------------------------------------------
-  # RISpro Application (embedded DICOM gateway: MWL only)
-  # -----------------------------------------------------------------------
+# RISpro Application
+# -----------------------------------------------------------------------
   app:
     build:
       context: .
@@ -27,7 +27,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
     ports:
       - "3000:3000"   # Web application
-      - "11112:11112" # DICOM MWL SCP
+      - "11112:11112" # Embedded DICOM MWL SCP (used only in embedded mode)
     volumes:
       - rispro-storage:/app/storage
     healthcheck:

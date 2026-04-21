@@ -134,6 +134,7 @@ async function start(): Promise<void> {
     console.log(`  Backend:        http://localhost:${env.port}`);
     console.log(`  Environment:    ${env.nodeEnv}`);
     console.log(`  Database:       ${env.databaseUrl.split("@")[1]?.split("/")[0] || "configured"}`);
+    console.log(`  Deploy Modes:   DB=${env.risproDbMode} DICOM=${env.risproDicomMode} MPPS=${env.risproMppsMode}`);
 
     // DICOM Gateway status
     const { getAllServiceStatuses } = await import("./services/dicom-gateway-registry.js");
@@ -163,6 +164,13 @@ async function start(): Promise<void> {
     const orthancSettings = await resolveOrthancSettings().catch(() => null);
     if (orthancSettings?.enabled) {
       console.log(`    Base URL:       ${orthancSettings.baseUrl || "(unset)"}`);
+    }
+
+    if (env.risproMppsMode === "internal_bridge") {
+      console.log("");
+      console.log("  MPPS Bridge:");
+      console.log(`    AE Title:       ${env.mppsBridgeAeTitle}`);
+      console.log(`    Port:           ${env.mppsBridgePort}`);
     }
 
     console.log("========================================");

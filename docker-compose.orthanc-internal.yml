@@ -1,0 +1,28 @@
+services:
+  app:
+    depends_on:
+      orthanc:
+        condition: service_started
+    environment:
+      RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY: "1"
+      ORTHANC_MWL_ENABLED: "true"
+      ORTHANC_BASE_URL: "http://orthanc:8042"
+
+  orthanc:
+    image: jodogne/orthanc-plugins:latest
+    container_name: rispro-orthanc
+    env_file:
+      - .env
+    volumes:
+      - orthanc-data:/var/lib/orthanc/db
+      - ./docker/orthanc/generated/orthanc.json:/etc/orthanc/orthanc.json:ro
+    ports:
+      - "8042:8042"
+      - "4242:4242"
+    restart: unless-stopped
+    networks:
+      - rispro-network
+
+volumes:
+  orthanc-data:
+    driver: local

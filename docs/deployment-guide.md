@@ -146,6 +146,27 @@ docker compose up -d
 | `SESSION_HOURS` | | Session timeout | `8` |
 | `TRUST_PROXY` | | Behind reverse proxy? | `1` |
 
+### Orthanc and MPPS Deployment Modes
+
+For Docker deployments, prefer the interactive scripts:
+
+```bash
+./scripts/setup-docker.sh
+./scripts/update-docker.sh
+```
+
+They manage these mode variables automatically:
+
+- `RISPRO_DB_MODE=internal|external`
+- `RISPRO_DICOM_MODE=embedded|orthanc_internal|orthanc_external`
+- `RISPRO_MPPS_MODE=disabled|internal_bridge`
+
+Default behavior is zero-touch:
+
+- `ORTHANC_AUTH_ENABLED=false`
+- `MPPS_AUTH_ENABLED=false`
+- credentials are only prompted if auth is explicitly enabled
+
 ### Orthanc MWL Sync (V2 Source of Truth)
 
 RISpro remains authoritative for bookings/scheduling. Orthanc MWL is a synchronized projection.
@@ -156,6 +177,7 @@ Required when enabled:
 
 Optional:
 - `ORTHANC_MWL_SHADOW_MODE=true`
+- `ORTHANC_AUTH_ENABLED=true`
 - `ORTHANC_USERNAME=<user>`
 - `ORTHANC_PASSWORD=<password>`
 - `ORTHANC_TIMEOUT_SECONDS=10`
@@ -169,6 +191,18 @@ Recommended rollout:
 4. Apply reconciliation repair only after reviewing drift.
 5. Cut modalities over to Orthanc MWL.
 6. Optionally disable embedded MWL (`RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=1`).
+
+### MPPS Bridge
+
+When `RISPRO_MPPS_MODE=internal_bridge`, Docker Compose deploys a separate Python MPPS SCP bridge that uses `pynetdicom` for `N-CREATE` and `N-SET` handling.
+
+Relevant variables:
+
+- `MPPS_BRIDGE_PORT=11113`
+- `MPPS_BRIDGE_AE_TITLE=RISPRO_MPPS`
+- `MPPS_AUTH_ENABLED=false`
+- `MPPS_USERNAME=...` only when auth is enabled
+- `MPPS_PASSWORD=...` only when auth is enabled
 
 Reconciliation CLI:
 

@@ -83,6 +83,9 @@ export interface EnvConfig {
   nodeEnv: string;
   isProduction: boolean;
   port: number;
+  risproDbMode: "internal" | "external";
+  risproDicomMode: "embedded" | "orthanc_internal" | "orthanc_external";
+  risproMppsMode: "disabled" | "internal_bridge";
   databaseUrl: string;
   databaseSsl: boolean;
   databaseSslRejectUnauthorized: boolean;
@@ -100,6 +103,7 @@ export interface EnvConfig {
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
+  orthancAuthEnabled: boolean;
   orthancMwlEnabled: boolean;
   orthancMwlShadowMode: boolean;
   orthancBaseUrl: string;
@@ -108,12 +112,34 @@ export interface EnvConfig {
   orthancTimeoutSeconds: number;
   orthancVerifyTls: boolean;
   orthancWorklistTarget: string;
+  mppsBridgePort: number;
+  mppsBridgeAeTitle: string;
+  mppsAuthEnabled: boolean;
+  mppsUsername: string;
+  mppsPassword: string;
+}
+
+function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const rawValue = String(process.env[name] || fallback).trim() as T;
+
+  if (!allowed.includes(rawValue)) {
+    throw new Error(`${name} must be one of: ${allowed.join(", ")}.`);
+  }
+
+  return rawValue;
 }
 
 export const env: EnvConfig = {
   nodeEnv,
   isProduction,
   port: readPositiveInteger("PORT", 3000),
+  risproDbMode: readDeploymentEnum("RISPRO_DB_MODE", ["internal", "external"], "external"),
+  risproDicomMode: readDeploymentEnum(
+    "RISPRO_DICOM_MODE",
+    ["embedded", "orthanc_internal", "orthanc_external"],
+    "embedded"
+  ),
+  risproMppsMode: readDeploymentEnum("RISPRO_MPPS_MODE", ["disabled", "internal_bridge"], "disabled"),
   databaseUrl: requireEnv("DATABASE_URL"),
   databaseSsl: readBoolean("DATABASE_SSL", isProduction),
   databaseSslRejectUnauthorized: readBoolean("DATABASE_SSL_REJECT_UNAUTHORIZED", false),
@@ -131,6 +157,7 @@ export const env: EnvConfig = {
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
   seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",
+  orthancAuthEnabled: readBoolean("ORTHANC_AUTH_ENABLED", false),
   orthancMwlEnabled: readBoolean("ORTHANC_MWL_ENABLED", false),
   orthancMwlShadowMode: readBoolean("ORTHANC_MWL_SHADOW_MODE", false),
   orthancBaseUrl: String(process.env.ORTHANC_BASE_URL || "").trim(),
@@ -138,7 +165,12 @@ export const env: EnvConfig = {
   orthancPassword: String(process.env.ORTHANC_PASSWORD || ""),
   orthancTimeoutSeconds: readPositiveInteger("ORTHANC_TIMEOUT_SECONDS", 10),
   orthancVerifyTls: readBoolean("ORTHANC_VERIFY_TLS", true),
-  orthancWorklistTarget: String(process.env.ORTHANC_WORKLIST_TARGET || "").trim()
+  orthancWorklistTarget: String(process.env.ORTHANC_WORKLIST_TARGET || "").trim(),
+  mppsBridgePort: readPositiveInteger("MPPS_BRIDGE_PORT", 11113),
+  mppsBridgeAeTitle: String(process.env.MPPS_BRIDGE_AE_TITLE || "RISPRO_MPPS").trim(),
+  mppsAuthEnabled: readBoolean("MPPS_AUTH_ENABLED", false),
+  mppsUsername: String(process.env.MPPS_USERNAME || "").trim(),
+  mppsPassword: String(process.env.MPPS_PASSWORD || ""),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
@@ -151,4 +183,16 @@ if (isProduction && env.jwtSecret === "change-this-in-production") {
 
 if (env.orthancMwlEnabled && !env.orthancBaseUrl) {
   throw new Error("ORTHANC_BASE_URL is required when ORTHANC_MWL_ENABLED=true.");
+}
+
+if (env.orthancAuthEnabled && (!env.orthancUsername || !env.orthancPassword)) {
+  throw new Error("ORTHANC_USERNAME and ORTHANC_PASSWORD are required when ORTHANC_AUTH_ENABLED=true.");
+}
+
+if (env.risproMppsMode === "internal_bridge" && !env.mppsBridgeAeTitle) {
+  throw new Error("MPPS_BRIDGE_AE_TITLE is required when RISPRO_MPPS_MODE=internal_bridge.");
+}
+
+if (env.mppsAuthEnabled && (!env.mppsUsername || !env.mppsPassword)) {
+  throw new Error("MPPS_USERNAME and MPPS_PASSWORD are required when MPPS_AUTH_ENABLED=true.");
 }

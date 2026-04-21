@@ -41,7 +41,7 @@ Not enabled yet:
 
 - direct printer bridge execution
 - local scanner bridge execution
-- MPPS support is not included in this release
+- Docker deployment now supports optional separate MPPS bridge mode
 
 ## Local run
 
@@ -160,17 +160,29 @@ Setup details are in `/Users/seraj/Nextcloud/RISpro/docs/production-rollout.md`.
 
 ## DICOM MWL Gateway
 
-This repository includes embedded MWL (Modality Worklist) support only:
+This repository supports three Docker DICOM deployment modes:
+
+- `RISPRO_DICOM_MODE=embedded`
+- `RISPRO_DICOM_MODE=orthanc_internal`
+- `RISPRO_DICOM_MODE=orthanc_external`
+
+It also supports an optional separate MPPS bridge:
+
+- `RISPRO_MPPS_MODE=disabled`
+- `RISPRO_MPPS_MODE=internal_bridge`
+
+Embedded compatibility mode still includes:
 
 - MWL source file generation inside `storage/dicom/worklist-source`
 - DICOM device mapping in supervisor settings
 - DCMTK `wlmscpfs` binary bundled in the Docker image
 - Node worker to convert `.dump` worklist source files into `.wl` files
 - Worklists are served from AE-specific subdirectories with a lockfile
-- MWL startup is nearly zero-touch in Docker; only port `11112` is used for DICOM
+- MWL startup is nearly zero-touch in Docker; embedded mode uses port `11112`
 
 Important:
 
+- use `./scripts/setup-docker.sh` or `./scripts/update-docker.sh` to switch DB / Orthanc / MPPS deployment modes without manual compose edits
 - run `npm run migrate` before starting the app
 - map each real modality device in Settings → DICOM Gateway before testing MWL
-- MPPS is not included in this release
+- Orthanc and MPPS auth are optional and disabled by default

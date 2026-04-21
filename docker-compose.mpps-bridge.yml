@@ -1,0 +1,23 @@
+services:
+  mpps-bridge:
+    build:
+      context: .
+      dockerfile: docker/mpps-bridge/Dockerfile
+    container_name: rispro-mpps-bridge
+    env_file:
+      - .env
+    environment:
+      MPPS_STORAGE_DIR: /data/dicom/mpps-bridge
+    ports:
+      - "${MPPS_BRIDGE_PORT:-11113}:${MPPS_BRIDGE_PORT:-11113}"
+    volumes:
+      - rispro-storage:/data
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import os, socket; s=socket.create_connection(('127.0.0.1', int(os.environ.get('MPPS_BRIDGE_PORT', '11113'))), 2); s.close()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - rispro-network

@@ -4,7 +4,7 @@
 
 ### First-Time Setup
 
-Run the interactive setup script. It asks whether to use an internal or external database, generates secure credentials, and starts everything:
+Run the interactive setup script. It asks for database mode, DICOM mode, and whether to enable the separate MPPS bridge, then generates the required configuration and starts everything:
 
 ```bash
 ./scripts/setup-docker.sh
@@ -12,11 +12,7 @@ Run the interactive setup script. It asks whether to use an internal or external
 
 Press Enter at every prompt to accept all defaults for a zero-touch install.
 
-After the script finishes:
-
-- **Web UI**: `http://localhost:3000`
-- **DICOM MWL**: `127.0.0.1:11112` (AE: `RISPRO_MWL`)
-- **Note**: This release is MWL-only. MPPS is not included.
+After the script finishes, the summary shows the active deployment endpoints for the selected mode.
 
 The supervisor credentials are printed at the end of setup.
 
@@ -26,7 +22,7 @@ The supervisor credentials are printed at the end of setup.
 ./scripts/update-docker.sh
 ```
 
-This reads `RISPRO_DB_MODE` from the existing `.env`, pulls the latest code, rebuilds, restarts containers, and verifies health. No prompts. Volumes are preserved.
+This pulls the latest code, re-prompts with the current deployment values as defaults, rewrites `.env` if needed, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved.
 
 The update script now force-syncs the working tree before pulling:
 
@@ -40,9 +36,17 @@ That means any local tracked changes or untracked files in the repository will b
 
 ---
 
-## Database Modes
+## Deployment Modes
 
-The setup mode is stored in `.env` as `RISPRO_DB_MODE`. The update script reads this value and picks the correct compose files automatically.
+The deployment scripts write the selected modes into `.env` and choose compose overrides automatically.
+
+| Variable | Supported Values | Purpose |
+|----------|------------------|---------|
+| `RISPRO_DB_MODE` | `internal`, `external` | Database source |
+| `RISPRO_DICOM_MODE` | `embedded`, `orthanc_internal`, `orthanc_external` | MWL / DICOM target mode |
+| `RISPRO_MPPS_MODE` | `disabled`, `internal_bridge` | Whether to deploy the separate MPPS bridge |
+
+### Database Modes
 
 ### Mode 1: Internal PostgreSQL (Default)
 
@@ -63,7 +67,7 @@ docker compose -f docker-compose.yml -f docker-compose.internal-db.yml up -d --b
 
 | Container | Purpose | Ports | Volume |
 |-----------|---------|-------|--------|
-| `rispro-app` | RISpro app + embedded DICOM (MWL only) | 3000, 11112 | `rispro-storage` |
+| `rispro-app` | RISpro app | 3000, 11112 in embedded mode | `rispro-storage` |
 | `rispro-db`  | PostgreSQL 16 | 5432 (internal only) | `postgres-data` |
 
 > **Note:** Internal Docker PostgreSQL does not support SSL. The setup script writes `DATABASE_SSL=false` and `DATABASE_SSL_REJECT_UNAUTHORIZED=false` automatically.
@@ -85,11 +89,55 @@ Connect to an existing PostgreSQL server. Docker never creates, manages, or dele
 docker compose -f docker-compose.yml up -d --build
 ```
 
+### Compose Override Selection
+
+The scripts choose overrides automatically, but the manual mapping is:
+
+| Mode Choice | Compose Files |
+|------------|---------------|
+| Internal DB | `docker-compose.yml` + `docker-compose.internal-db.yml` |
+| Internal Orthanc | add `docker-compose.orthanc-internal.yml` |
+| Internal MPPS bridge | add `docker-compose.mpps-bridge.yml` |
+
 ---
 
 ## DICOM Architecture
 
-### Embedded Gateway (Default Design)
+### Mode 1: Embedded RISpro MWL
+
+This is the compatibility/default path. The RISpro app container includes the source-built DCMTK toolchain and runs the MWL gateway internally.
+
+### Mode 2: Internal Orthanc
+
+The deployment scripts add an `orthanc` container automatically, generate its config at `docker/orthanc/generated/orthanc.json`, disable the embedded RISpro MWL listener, and point RISpro at `http://orthanc:8042`.
+
+| Container | Purpose | Ports |
+|-----------|---------|-------|
+| `rispro-orthanc` | Internal Orthanc MWL / DICOM target | 8042, 4242 |
+
+Authentication is off by default. If you explicitly enable Orthanc auth during setup/update, the scripts prompt for credentials and bake them into the generated Orthanc config.
+
+### Mode 3: External Orthanc
+
+No Orthanc container is deployed. The scripts only ask for the minimum external connection settings:
+
+- `ORTHANC_BASE_URL`
+- optional TLS verification choice
+- optional HTTP auth toggle
+
+RISpro remains the source of truth in all three modes.
+
+### Optional MPPS Bridge
+
+When `RISPRO_MPPS_MODE=internal_bridge`, Docker Compose adds a separate `mpps-bridge` container. It is implemented in Python with `pynetdicom` and `pydicom`, listens as an MPPS SCP, and stores received `N-CREATE` / `N-SET` payloads under the shared storage volume.
+
+| Container | Purpose | Ports |
+|-----------|---------|-------|
+| `rispro-mpps-bridge` | Separate MPPS SCP bridge | `MPPS_BRIDGE_PORT` (default `11113`) |
+
+Authentication is off by default. If explicitly enabled, the bridge protects its optional admin `/events` endpoint with HTTP Basic auth. DICOM associations remain zero-touch.
+
+### Embedded Gateway (Compatibility Design)
 
 The RISpro app container includes a source-built DCMTK toolchain from the official OFFIS 3.6.9 release tarball, verified by SHA256 during image build, and runs the MWL gateway internally:
 
@@ -98,7 +146,7 @@ The RISpro app container includes a source-built DCMTK toolchain from the offici
 | **MWL SCP** | `wlmscpfs` | Serves modality worklist files to modalities |
 | **Worklist Builder** | Node.js worker | Generates `.wl` files from appointments |
 
-The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container. MPPS is intentionally omitted from this release.
+The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs` is available without a separate gateway container when `RISPRO_DICOM_MODE=embedded`.
 
 **No separate gateway container is needed.** Everything runs inside the single `rispro-app` container.
 
@@ -118,6 +166,7 @@ The final image bundles the MWL DCMTK binary needed for this build, so `wlmscpfs
 | Volume | Contents |
 |--------|----------|
 | `rispro-storage` | DICOM worklists, uploads |
+| `orthanc-data` | Orthanc data (internal Orthanc mode only) |
 | `postgres-data` | PostgreSQL data (internal DB mode only). Never removed by update scripts. |
 
 ---
@@ -135,8 +184,9 @@ The app then:
 - Seeds DICOM gateway defaults if missing
 - Creates DICOM directories
 - Rebuilds worklist sources
-- Starts embedded MWL SCP (`wlmscpfs`)
-- Starts the worklist builder worker
+- Starts embedded MWL SCP (`wlmscpfs`) only in `embedded` mode
+- Starts the worklist builder worker when embedded MWL is active
+- Starts the Orthanc MWL worker when Orthanc projection is enabled
 
 ### Startup Summary Output
 
@@ -152,6 +202,14 @@ The app then:
     MWL SCP:        running (RISPRO_MWL @ 0.0.0.0:11112)
     Worklist Bldr:  running
     Worklist Dir:   /app/storage/dicom/worklists
+
+  Orthanc MWL:
+    Mode:           enabled_primary_mode
+    Base URL:       http://orthanc:8042
+
+  MPPS Bridge:
+    AE Title:       RISPRO_MPPS
+    Port:           11113
 ========================================
 ```
 
@@ -187,7 +245,7 @@ docker compose exec app sh /app/scripts/dicom-gateway/smoke-test.sh
 
 This validates:
 - Backend health and readiness
-- DICOM C-ECHO to the MWL SCP
+- DICOM C-ECHO to the embedded MWL SCP when embedded mode is active
 - Required MWL DCMTK tools availability
 - DICOM directory health
 
@@ -210,6 +268,8 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `PORT` | `3000` | HTTP port for web app |
 | `DATABASE_URL` | (see .env.example) | PostgreSQL connection string |
 | `RISPRO_DB_MODE` | (written by setup) | `internal` or `external` — used by update script |
+| `RISPRO_DICOM_MODE` | (written by setup) | `embedded`, `orthanc_internal`, or `orthanc_external` |
+| `RISPRO_MPPS_MODE` | (written by setup) | `disabled` or `internal_bridge` |
 | `DATABASE_SSL` | `false` | Must be `false` for internal Docker PostgreSQL. Set `true` only if your external server requires it. |
 | `DATABASE_SSL_REJECT_UNAUTHORIZED` | `false` | Whether to reject self-signed SSL certificates. |
 | `JWT_SECRET` | (required) | Secret for session tokens |
@@ -218,24 +278,30 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `DB_WAIT_RETRIES` | `30` | Max attempts to wait for PostgreSQL |
 | `DB_WAIT_INTERVAL` | `2` | Seconds between retry attempts |
 
-### DICOM Settings
+### Orthanc / MPPS Variables
 
-DICOM gateway settings are stored in the database and managed via the **Settings → DICOM Gateway** UI:
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ORTHANC_BASE_URL` | blank or auto-generated | Orthanc HTTP base URL |
+| `ORTHANC_VERIFY_TLS` | `true` | Whether RISpro verifies Orthanc TLS certificates |
+| `ORTHANC_TIMEOUT_SECONDS` | `10` | Orthanc request timeout |
+| `ORTHANC_AUTH_ENABLED` | `false` | Prompt for Orthanc credentials only when true |
+| `ORTHANC_USERNAME` | blank | Optional Orthanc username |
+| `ORTHANC_PASSWORD` | blank | Optional Orthanc password |
+| `MPPS_BRIDGE_PORT` | `11113` | MPPS SCP listening port |
+| `MPPS_BRIDGE_AE_TITLE` | `RISPRO_MPPS` | MPPS SCP AE Title |
+| `MPPS_AUTH_ENABLED` | `false` | Protect bridge admin endpoint with Basic auth |
+| `MPPS_USERNAME` | blank | Optional bridge admin username |
+| `MPPS_PASSWORD` | blank | Optional bridge admin password |
 
-- AE title and port for MWL
-- Bind host
-- Worklist directories
+### Preflight Validation
 
-### Disabling Embedded Gateway
+Before startup, the setup/update scripts validate:
 
-If you prefer to disable the embedded DICOM gateway:
-
-```env
-# In .env
-RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=1
-```
-
-The app will skip starting embedded DICOM services. This repository no longer ships a separate gateway container, and the released build remains MWL-only.
+- deployment mode combinations
+- required Orthanc URL/auth fields for external/internal Orthanc modes
+- required MPPS bridge values when enabled
+- compose rendering with the selected override set
 
 ---
 
