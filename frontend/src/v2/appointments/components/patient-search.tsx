@@ -9,6 +9,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { X } from "lucide-react";
 import { SearchInput } from "@/components/shared/SearchInput";
 import { searchPatients } from "@/lib/api-hooks";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface Patient {
   id: number;
@@ -67,6 +69,7 @@ function renderSex(sex?: string | null): string {
 }
 
 export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory }: PatientSearchProps) {
+  const { language } = useLanguage();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Patient[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -134,16 +137,16 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
             {selectedPatient.englishFullName}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>
-            {primaryIdentifier.value ? `${primaryIdentifier.label}: ${primaryIdentifier.value}` : "Primary ID: —"}
-            {showMrn ? ` · MRN: ${mrn}` : ""}
+            {primaryIdentifier.value ? `${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : `${t(language, "appointments.create.primaryId")}: —`}
+            {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 6 }}>
-            <span>Sex: {renderSex(selectedPatient.sex)}</span>
+            <span>{t(language, "appointments.create.sex")}: {selectedPatient.sex?.toUpperCase() === "M" ? t(language, "appointments.create.male") : selectedPatient.sex?.toUpperCase() === "F" ? t(language, "appointments.create.female") : renderSex(selectedPatient.sex)}</span>
             <span>
-              Age: {selectedPatient.ageYears ?? "—"}
+              {t(language, "appointments.create.age")}: {selectedPatient.ageYears ?? "—"}
               {selectedPatient.demographicsEstimated ? " (Estimated)" : ""}
             </span>
-            <span>Category: {caseCategory === "oncology" ? "Oncology" : "Non-Oncology"}</span>
+            <span>{t(language, "appointments.create.categoryLabel")}: {caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</span>
           </div>
         </div>
         <button
@@ -156,7 +159,7 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
             padding: 4,
             color: "var(--text-muted, #64748b)",
           }}
-          title="Clear selection"
+          title={t(language, "appointments.create.clearSelection")}
         >
           <X size={18} />
         </button>
@@ -169,7 +172,7 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
       <SearchInput
         value={query}
         onChange={(e) => handleSearch(e.target.value)}
-        placeholder="Search patient by name, national ID, or MRN…"
+        placeholder={t(language, "appointments.create.searchPatientPlaceholder")}
         isLoading={isSearching}
       />
 
@@ -222,8 +225,8 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
                   <div style={{ fontWeight: 500 }}>{patient.arabicFullName}</div>
                   <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
                     {patient.englishFullName}
-                    {primaryIdentifier.value ? ` · ${primaryIdentifier.label}: ${primaryIdentifier.value}` : ""}
-                    {showMrn ? ` · MRN: ${mrn}` : ""}
+                    {primaryIdentifier.value ? ` · ${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : ""}
+                    {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
                   </div>
                 </button>
               </li>
@@ -249,7 +252,7 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
             textAlign: "center",
           }}
         >
-          No patients found
+          {t(language, "appointments.create.noPatientsFound")}
         </div>
       )}
     </div>

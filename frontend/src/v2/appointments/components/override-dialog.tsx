@@ -10,6 +10,8 @@ import { AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface OverrideDialogProps {
   onSubmit: (username: string, password: string, reason: string) => void;
@@ -18,6 +20,7 @@ interface OverrideDialogProps {
 }
 
 export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProps) {
+  const { language } = useLanguage();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [reason, setReason] = useState("");
@@ -37,7 +40,9 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim() || !reason.trim()) return;
+    if (!username.trim() || !password.trim() || !reason.trim()) {
+      return;
+    }
     onSubmit(username.trim(), password, reason.trim());
   };
 
@@ -61,9 +66,9 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
               <AlertTriangle size={20} />
             </div>
             <div>
-              <DialogTitle>Supervisor Override Required</DialogTitle>
+              <DialogTitle>{t(language, "appointments.create.supervisorOverrideRequired")}</DialogTitle>
               <DialogDescription>
-                This booking requires supervisor approval
+                {t(language, "appointments.create.supervisorApprovalNeeded")}
               </DialogDescription>
             </div>
           </div>
@@ -99,7 +104,7 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   color: "var(--text)",
                 }}
               >
-                Supervisor Username
+                {t(language, "appointments.create.supervisorUsername")}
               </label>
               <Input
                 type="text"
@@ -119,7 +124,7 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   color: "var(--text)",
                 }}
               >
-                Password
+                {t(language, "appointments.create.password")}
               </label>
               <Input
                 ref={passwordRef}
@@ -140,27 +145,27 @@ export function OverrideDialog({ onSubmit, onCancel, error }: OverrideDialogProp
                   color: "var(--text)",
                 }}
               >
-                Override Reason
+                {t(language, "appointments.create.overrideReason")}
               </label>
               <Input
                 type="text"
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder="Why is this override needed?"
+                placeholder={t(language, "appointments.create.overrideReasonPlaceholder")}
               />
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="secondary" onClick={onCancel}>
-              Cancel
+              {t(language, "appointments.create.cancel")}
             </Button>
             <Button
               type="submit"
               disabled={!username.trim() || !password.trim() || !reason.trim()}
               style={{ backgroundColor: "var(--amber)", color: "#fff" }}
             >
-              Approve & Book
+              {t(language, "appointments.create.approveBook")}
             </Button>
           </DialogFooter>
         </form>

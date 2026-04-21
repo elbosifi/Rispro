@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface Props {
   open: boolean;
@@ -9,6 +11,7 @@ interface Props {
 }
 
 export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, authError }: Props) {
+  const { language } = useLanguage();
   const [supervisorUsername, setSupervisorUsername] = useState("");
   const [supervisorPassword, setSupervisorPassword] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
@@ -18,7 +21,7 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
 
   async function handleConfirm() {
     if (!supervisorUsername.trim() || !supervisorPassword.trim() || !overrideReason.trim()) {
-      setLocalError("All fields are required.");
+      setLocalError(t(language, "appointments.create.allFieldsRequired"));
       return;
     }
     setLocalError(null);
@@ -37,13 +40,13 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
       }}
     >
       <div style={{ width: "100%", maxWidth: 420, background: "#fff", borderRadius: 10, padding: 16, border: "1px solid #e2e8f0" }}>
-        <h3 style={{ margin: 0, fontSize: 16 }}>Supervisor Override Required</h3>
-        <p style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>Enter supervisor credentials and a required override reason.</p>
+        <h3 style={{ margin: 0, fontSize: 16 }}>{t(language, "appointments.create.supervisorOverrideRequired")}</h3>
+        <p style={{ marginTop: 6, fontSize: 13, color: "#64748b" }}>{t(language, "appointments.create.supervisorApprovalNeeded")}</p>
 
         <div style={{ display: "grid", gap: 10 }}>
-          <input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder="Supervisor username" />
-          <input type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder="Supervisor password" />
-          <input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder="Override reason" />
+          <input value={supervisorUsername} onChange={(e) => setSupervisorUsername(e.target.value)} placeholder={t(language, "appointments.create.supervisorUsername")} />
+          <input type="password" value={supervisorPassword} onChange={(e) => setSupervisorPassword(e.target.value)} placeholder={t(language, "appointments.create.password")} />
+          <input value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)} placeholder={t(language, "appointments.create.overrideReason")} />
         </div>
 
         {(localError || authError) && (
@@ -51,8 +54,8 @@ export function SupervisorOverrideModal({ open, onClose, onConfirm, loading, aut
         )}
 
         <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button type="button" onClick={onClose} disabled={loading}>Cancel</button>
-          <button type="button" onClick={handleConfirm} disabled={loading}>{loading ? "Validating..." : "Confirm Override"}</button>
+          <button type="button" onClick={onClose} disabled={loading}>{t(language, "appointments.create.cancel")}</button>
+          <button type="button" onClick={handleConfirm} disabled={loading}>{loading ? t(language, "appointments.create.validating") : t(language, "appointments.create.approveBook")}</button>
         </div>
       </div>
     </div>

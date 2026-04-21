@@ -1,4 +1,6 @@
 import type { AvailabilityRowStatus } from "../hooks/useAppointmentAvailability";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface Props {
   date: string;
@@ -160,6 +162,7 @@ export function AvailabilityDateRow({
   selected,
   onClick,
 }: Props) {
+  const { language } = useLanguage();
   const isClickable =
     status === "available" ||
     status === "restricted" ||
@@ -202,7 +205,7 @@ export function AvailabilityDateRow({
          background: selected ? "rgba(59, 130, 246, 0.1)" : "var(--background)",
          cursor: isClickable ? "pointer" : "not-allowed",
          opacity: isClickable ? 1 : 0.9,
-       }}
+      }}
       aria-label={`${date} ${status}`}
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
@@ -211,7 +214,15 @@ export function AvailabilityDateRow({
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{date}</div>
         </div>
         <div style={{ fontSize: 12, fontWeight: 700, color: statusColor, textTransform: "capitalize" }}>
-          {status === "blocked" ? "Blocked" : status}
+          {status === "blocked"
+            ? t(language, "appointments.create.notAvailable")
+            : status === "available"
+            ? t(language, "appointments.create.available")
+            : status === "restricted"
+            ? t(language, "appointments.create.needsApproval")
+            : status === "full"
+            ? (language === "ar" ? "مكتمل" : "Full")
+            : status}
         </div>
       </div>
       <div style={{ marginTop: 8, marginBottom: 4 }}>
@@ -228,7 +239,7 @@ export function AvailabilityDateRow({
           {slotSegments.map((segment) => (
             <span
               key={segment.key}
-              title={`${segment.category === "oncology" ? "Oncology" : segment.category === "non_oncology" ? "Non-oncology" : "Uncategorized"} ${segment.isFilled ? "filled" : "remaining"} slot`}
+              title={`${segment.category === "oncology" ? t(language, "appointments.create.oncology") : segment.category === "non_oncology" ? t(language, "appointments.create.nonOncology") : (language === "ar" ? "غير مصنّف" : "Uncategorized")} ${segment.isFilled ? (language === "ar" ? "ممتلئ" : "filled") : (language === "ar" ? "متبقٍ" : "remaining")} ${language === "ar" ? "خانة" : "slot"}`}
               style={{
                 height: 8,
                 borderRadius: 2,
@@ -240,48 +251,48 @@ export function AvailabilityDateRow({
       </div>
 
        {isBlockedLike ? (
-         <div style={{ marginTop: 8, fontSize: 12, color: "var(--accent)" }}>Blocked</div>
+         <div style={{ marginTop: 8, fontSize: 12, color: "var(--accent)" }}>{language === "ar" ? "محجوب" : "Blocked"}</div>
        ) : (
          <div style={{ marginTop: 8, fontSize: 12, color: "var(--text-muted)", display: "grid", gap: 2 }}>
           <div>
-            Total: {remainingCapacity ?? 0} / {dailyCapacity ?? 0} remaining
+            {language === "ar" ? "الإجمالي" : "Total"}: {remainingCapacity ?? 0} / {dailyCapacity ?? 0} {language === "ar" ? "متبقٍ" : "remaining"}
           </div>
           {bucketMode === "partitioned" ? (
             <>
               <div>
-                Oncology: {oncologyFilled} filled, {oncologyRemaining ?? 0} remaining
-                {oncologyReserved != null ? ` (reserved ${oncologyReserved})` : ""}
+                {t(language, "appointments.create.oncology")}: {oncologyFilled} {language === "ar" ? "ممتلئ" : "filled"}, {oncologyRemaining ?? 0} {language === "ar" ? "متبقٍ" : "remaining"}
+                {oncologyReserved != null ? ` (${language === "ar" ? "محجوز" : "reserved"} ${oncologyReserved})` : ""}
               </div>
               <div>
-                Non-oncology: {nonOncologyFilled} filled, {nonOncologyRemaining ?? 0} remaining
-                {nonOncologyReserved != null ? ` (reserved ${nonOncologyReserved})` : ""}
+                {t(language, "appointments.create.nonOncology")}: {nonOncologyFilled} {language === "ar" ? "ممتلئ" : "filled"}, {nonOncologyRemaining ?? 0} {language === "ar" ? "متبقٍ" : "remaining"}
+                {nonOncologyReserved != null ? ` (${language === "ar" ? "محجوز" : "reserved"} ${nonOncologyReserved})` : ""}
               </div>
             </>
           ) : (
             <>
-              <div>Mode: Total-capacity only</div>
-              <div>Booked by category: Oncology {oncologyFilled}, Non-oncology {nonOncologyFilled}</div>
+              <div>{language === "ar" ? "الوضع" : "Mode"}: {language === "ar" ? "الإجمالي فقط" : "Total-capacity only"}</div>
+              <div>{language === "ar" ? "محجوز حسب الفئة" : "Booked by category"}: {t(language, "appointments.create.oncology")} {oncologyFilled}, {t(language, "appointments.create.nonOncology")} {nonOncologyFilled}</div>
             </>
           )}
           {specialQuotaRemaining != null && (
-            <div>Special quota remaining: {specialQuotaRemaining}</div>
+            <div>{language === "ar" ? "الحصة الخاصة المتبقية" : "Special quota remaining"}: {specialQuotaRemaining}</div>
           )}
            {primaryExamMixBlocking && (
              <div style={{ color: "var(--accent)", fontWeight: 600 }}>
-               Primary mix block: {primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ({primaryExamMixBlocking.consumed}/{primaryExamMixBlocking.dailyLimit})
+               {language === "ar" ? "حظر المزيج الأساسي" : "Primary mix block"}: {primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ({primaryExamMixBlocking.consumed}/{primaryExamMixBlocking.dailyLimit})
              </div>
            )}
            {(examMixQuotaSummaries ?? []).length > 0 && (
              <div>
-               Exam mix groups:{" "}
+               {language === "ar" ? "مجموعات مزيج الفحوصات" : "Exam mix groups"}:{" "}
                {(examMixQuotaSummaries ?? [])
-                 .map((group) => `${group.title ?? `#${group.ruleId}`} ${group.consumed}/${group.dailyLimit}${group.isPrimaryBlocking ? " (primary)" : ""}`)
+                 .map((group) => `${group.title ?? `#${group.ruleId}`} ${group.consumed}/${group.dailyLimit}${group.isPrimaryBlocking ? (language === "ar" ? " (أساسي)" : " (primary)") : ""}`)
                  .join(" • ")}
              </div>
            )}
            {matchedExamRuleSummary && (
              <div style={{ color: matchedExamRuleSummary.isBlocking ? "var(--accent)" : "var(--amber)", fontWeight: 600 }}>
-               Exam rule: {matchedExamRuleSummary.title} ({matchedExamRuleSummary.effectLabel})
+               {language === "ar" ? "قاعدة الفحص" : "Exam rule"}: {matchedExamRuleSummary.title} ({matchedExamRuleSummary.effectLabel})
              </div>
            )}
         </div>

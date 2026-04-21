@@ -4,12 +4,15 @@ import { useAuth } from "@/providers/auth-provider";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchPatientById } from "@/lib/api-hooks";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import type { SelectedPatient } from "./hooks/useCreateAppointmentForm";
 
 export function AppointmentsV3CreatePage() {
   const [searchParams] = useSearchParams();
   const urlPatientId = searchParams.get("patientId");
   const { user } = useAuth();
+  const { language } = useLanguage();
   const lookups = useV2Lookups();
   const specialReasons = useV2SpecialReasonCodes();
   const priorities = useV2Priorities();
@@ -39,21 +42,21 @@ export function AppointmentsV3CreatePage() {
     : null;
 
   if (lookups.isLoading) {
-    return <div style={{ padding: 24 }}>Loading booking lookups...</div>;
+    return <div style={{ padding: 24 }}>{t(language, "appointments.create.loadingLookups")}</div>;
   }
 
   if (lookups.isError) {
-    return <div style={{ padding: 24, color: "#dc2626" }}>Failed to load lookups: {(lookups.error as Error)?.message}</div>;
+    return <div style={{ padding: 24, color: "#dc2626" }}>{t(language, "appointments.create.failedLoadLookups")}: {(lookups.error as Error)?.message}</div>;
   }
 
   if (priorities.isLoading) {
-    return <div style={{ padding: 24 }}>Loading priorities...</div>;
+    return <div style={{ padding: 24 }}>{t(language, "appointments.create.loadingPriorities")}</div>;
   }
 
   if (priorities.isError) {
     return (
       <div style={{ padding: 24, color: "#dc2626" }}>
-        Failed to load priorities: {(priorities.error as Error)?.message}
+        {t(language, "appointments.create.failedLoadPriorities")}: {(priorities.error as Error)?.message}
       </div>
     );
   }

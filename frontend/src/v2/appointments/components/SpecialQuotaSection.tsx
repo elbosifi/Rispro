@@ -1,3 +1,5 @@
+import { chooseLocalized, t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import type { SpecialReasonCodeDto } from "../types";
 import type { CapacityResolutionMode } from "../types";
 
@@ -28,6 +30,7 @@ export function SpecialQuotaSection({
   onChangeSpecialReasonNote,
   options,
 }: Props) {
+  const { language } = useLanguage();
   const specialQuotaEnabled = capacityResolutionMode === "special_quota_extra";
   const categoryOverrideEnabled = capacityResolutionMode === "category_override";
 
@@ -36,62 +39,62 @@ export function SpecialQuotaSection({
   return (
     <div className="card-shell p-4">
       <label className="block text-xs uppercase tracking-[0.08em] mb-3 font-mono-data" style={{ color: "var(--text-muted)" }}>
-        Capacity Resolution Action (Supervisor)
+        {t(language, "appointments.create.capacityAction")}
       </label>
       <select
-        aria-label="Capacity Resolution Action"
+        aria-label={t(language, "appointments.create.capacityAction")}
         value={capacityResolutionMode}
         onChange={(e) => onChangeCapacityResolutionMode(e.target.value as CapacityResolutionMode)}
         className="input-premium"
       >
-        <option value="standard">Standard booking (normal capacity rules)</option>
-        <option value="category_override">Override category reserve (stay within daily total)</option>
+        <option value="standard">{t(language, "appointments.create.standardBooking")}</option>
+        <option value="category_override">{t(language, "appointments.create.categoryOverride")}</option>
         <option value="special_quota_extra" disabled={!specialQuotaAvailable}>
-          Use special quota extra slot
+          {t(language, "appointments.create.specialQuotaExtra")}
         </option>
       </select>
       {!specialQuotaAvailable && (
         <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
-          Special quota extra slot unavailable for selected exam type.
+          {t(language, "appointments.create.specialQuotaUnavailable")}
         </div>
       )}
       {categoryOverrideEnabled && (
         <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
-          Category reserve bypass only. Modality daily total remains a hard ceiling.
+          {t(language, "appointments.create.categoryReserveNote")}
         </div>
       )}
       <div className="mt-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
-        Special reason is justification/audit metadata only; it is not an independent policy bypass.
+        {t(language, "appointments.create.specialReasonAudit")}
       </div>
 
       {specialQuotaEnabled && (
         <div className="space-y-3 mt-4">
           <select
-            aria-label="Special Reason"
+            aria-label={t(language, "appointments.create.specialReason")}
             value={specialReasonCode}
             onChange={(e) => onChangeSpecialReasonCode(e.target.value)}
             className="input-premium"
           >
-            <option value="">Select special reason (required)...</option>
+            <option value="">{t(language, "appointments.create.specialReasonPlaceholder")}</option>
             {options.filter((o) => o.isActive !== false).map((o) => (
-              <option key={o.code} value={o.code}>{o.labelEn || o.code}</option>
+              <option key={o.code} value={o.code}>{chooseLocalized(language, o.labelAr, o.labelEn) || o.code}</option>
             ))}
           </select>
           <label className="flex items-center gap-2 cursor-pointer user-select-none">
             <input
               type="checkbox"
               checked={specialReasonConfirmed}
-              onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
-              className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
-            />
-            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-              I confirm the selected special reason is correct
-            </span>
+            onChange={(e) => onChangeSpecialReasonConfirmed(e.target.checked)}
+            className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
+          />
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+              {t(language, "appointments.create.specialReasonConfirm")}
+          </span>
           </label>
           <input
             value={specialReasonNote}
             onChange={(e) => onChangeSpecialReasonNote(e.target.value)}
-            placeholder="Optional note"
+            placeholder={t(language, "appointments.create.optionalNote")}
             className="input-premium"
           />
         </div>

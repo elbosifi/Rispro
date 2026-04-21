@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
 import { fetchAppointments } from "@/lib/api-hooks";
+import { chooseLocalized, t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import type {
   BookingResponse,
   CapacityResolutionMode,
@@ -109,6 +111,7 @@ export function CreateAppointmentTab({
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
   const { form, actions } = useCreateAppointmentForm();
+  const { language } = useLanguage();
   const navigate = useNavigate();
   const [availabilitySelectedRow, setAvailabilitySelectedRow] = useState<AvailabilityRowViewModel | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -138,7 +141,7 @@ export function CreateAppointmentTab({
   const selectedModality = modalityOptions.find((m) => m.id === form.modalityId);
   const hasSafetyWarning = selectedModality?.safetyWarningEnabled && 
     !!(selectedModality.safetyWarningEn || selectedModality.safetyWarningAr);
-  const safetyMessage = selectedModality?.safetyWarningEn || selectedModality?.safetyWarningAr || "";
+  const safetyMessage = chooseLocalized(language, selectedModality?.safetyWarningAr, selectedModality?.safetyWarningEn) || "";
 
   const filteredExamTypes = useMemo(
     () => examTypeOptions.filter((et) => form.modalityId != null && et.modalityId === form.modalityId),
@@ -240,15 +243,15 @@ export function CreateAppointmentTab({
   }
 
   function validateBaseFields(): string | null {
-    if (!form.patientId) return "Missing patient";
-    if (!form.modalityId) return "Missing modality";
-    if (!form.examTypeId) return "Missing exam type";
-    if (!form.appointmentDate) return "Selected date unavailable";
+    if (!form.patientId) return t(language, "appointments.create.missingPatient");
+    if (!form.modalityId) return t(language, "appointments.create.missingModality");
+    if (!form.examTypeId) return t(language, "appointments.create.missingExamType");
+    if (!form.appointmentDate) return t(language, "appointments.create.selectedDateUnavailable");
     if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonCode) {
-      return "Special reason code required";
+      return t(language, "appointments.create.specialReasonRequired");
     }
     if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonConfirmed) {
-      return "Confirm special reason selection";
+      return t(language, "appointments.create.confirmSpecialReason");
     }
     return null;
   }
@@ -280,12 +283,13 @@ export function CreateAppointmentTab({
     };
 
     const response = await onCreateAppointment(request);
-    const modalityName = modalityOptions.find((m) => m.id === form.modalityId)?.name || "—";
+    const modalityRecord = modalityOptions.find((m) => m.id === form.modalityId);
+    const modalityName = chooseLocalized(language, modalityRecord?.nameAr, modalityRecord?.nameEn) || modalityRecord?.name || "—";
     const examTypeName = effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name || null;
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,
-      patientName: form.patient?.englishFullName || form.patient?.arabicFullName || `Patient #${form.patientId}`,
+      patientName: chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || `Patient #${form.patientId}`,
       bookingDate: response.booking.bookingDate,
       modalityName,
       examTypeName,
@@ -295,8 +299,8 @@ export function CreateAppointmentTab({
     if (decision.consumedCapacityMode === "special") {
       pushToast({
         type: "success",
-        title: "Special quota consumed",
-        message: "Booking saved with special quota justification metadata.",
+        title: t(language, "appointments.create.specialQuotaConsumed"),
+        message: t(language, "appointments.create.specialQuotaSaved"),
       });
     }
   }
@@ -331,12 +335,12 @@ export function CreateAppointmentTab({
       });
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked")) {
-        setPageError("Availability changed before save");
+        setPageError(t(language, "appointments.create.availabilityChanged"));
         return;
       }
 
       if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
-        setPageError("Selected date unavailable");
+        setPageError(t(language, "appointments.create.selectedDateNotAllowed"));
         return;
       }
 
@@ -354,7 +358,7 @@ export function CreateAppointmentTab({
 
       await createWithDecision(decision);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : "Failed to create appointment");
+      setPageError(error instanceof Error ? error.message : t(language, "appointments.create.failedCreate"));
     } finally {
       setSubmitLoading(false);
     }
@@ -366,12 +370,12 @@ export function CreateAppointmentTab({
 
     try {
       if (!pendingDecision) {
-        setOverrideError("Availability must be evaluated before override.");
+        setOverrideError(t(language, "appointments.create.overrideBeforeEvaluation"));
         return;
       }
 
       if (!payload.overrideReason.trim()) {
-        setOverrideError("Override reason required");
+        setOverrideError(t(language, "appointments.create.overrideReasonRequired"));
         return;
       }
 
@@ -384,7 +388,7 @@ export function CreateAppointmentTab({
       setShowOverrideModal(false);
       setPendingDecision(null);
     } catch (error) {
-      setOverrideError(error instanceof Error ? `Supervisor authentication failed: ${error.message}` : "Supervisor authentication failed");
+      setOverrideError(error instanceof Error ? `${t(language, "appointments.create.supervisorAuthFailed")}: ${error.message}` : t(language, "appointments.create.supervisorAuthFailed"));
     } finally {
       setOverrideLoading(false);
     }
@@ -415,13 +419,13 @@ export function CreateAppointmentTab({
       {/* Page Header */}
       <div className="space-y-4 mb-6">
         <div className="flex items-center gap-4">
-          <SectionLabel pulsing>APPOINTMENT SCHEDULING</SectionLabel>
+          <SectionLabel pulsing>{t(language, "appointments.create.sectionLabel")}</SectionLabel>
         </div>
         <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
-          Create <span className="gradient-text">Appointment</span>
+          {t(language, "appointments.create.title")}
         </h1>
         <p className="text-muted-foreground">
-          Primary appointment creation workflow with evaluated capacity and exam-mix visibility.
+          {t(language, "appointments.create.subtitle")}
         </p>
       </div>
 
@@ -429,31 +433,31 @@ export function CreateAppointmentTab({
       <Card className="p-6">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Patient</span>
-            <p className="text-lg font-medium">{form.patient?.englishFullName ?? form.patient?.arabicFullName ?? "—"}</p>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.patient")}</span>
+            <p className="text-lg font-medium">{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Modality</span>
-            <p className="text-lg font-medium">{selectedModality?.name ?? "—"}</p>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.modality")}</span>
+            <p className="text-lg font-medium">{chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam Type</span>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.examType")}</span>
             <p className="text-lg font-medium">{effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Category</span>
-            <p className="text-lg font-medium">{form.caseCategory === "oncology" ? "Oncology" : "Non-oncology"}</p>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.category")}</span>
+            <p className="text-lg font-medium">{form.caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Date</span>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.date")}</span>
             <p className="text-lg font-medium">{form.appointmentDate || "—"}</p>
           </div>
           <div className="space-y-1">
-            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">Exam mix</span>
+            <span className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground">{t(language, "appointments.create.examMix")}</span>
             <p className="text-lg font-medium">
               {primaryExamMixBlocking
                 ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
-                : "No matching group"}
+                : t(language, "appointments.create.noMatchingGroup")}
             </p>
           </div>
         </div>
@@ -464,10 +468,10 @@ export function CreateAppointmentTab({
         {/* Availability Panel */}
         <div className="space-y-4">
           <div className="flex items-center gap-4">
-            <SectionLabel>AVAILABILITY</SectionLabel>
+            <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
           </div>
           <Card className="p-6">
-            <h3 className="text-xl font-semibold mb-6" style={{ color: "var(--foreground)" }}>Evaluated Availability</h3>
+            <h3 className="text-xl font-semibold mb-6" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
             <AvailabilityPanel
               rows={availability.rows}
               selectedDate={form.appointmentDate}
@@ -491,8 +495,8 @@ export function CreateAppointmentTab({
               canGoPrevious={availabilityOffset > 0}
               emptyMessage={
                 availability.enabled
-                  ? "No evaluated availability rows returned by backend evaluator."
-                  : "Select patient, modality, and exam type to load evaluated availability."
+                  ? t(language, "appointments.create.noAvailabilityRows")
+                  : t(language, "appointments.create.loadAvailabilityHint")
               }
             />
           </Card>
@@ -501,7 +505,7 @@ export function CreateAppointmentTab({
         {/* Patient & Form Panel */}
         <div className="space-y-4">
           <div className="flex items-center gap-4">
-            <SectionLabel>PATIENT DETAILS</SectionLabel>
+            <SectionLabel>{t(language, "appointments.create.patientDetails")}</SectionLabel>
           </div>
           <Card className="p-6 lg:sticky lg:top-6 h-fit">
             <PatientSearchSection
@@ -530,10 +534,10 @@ export function CreateAppointmentTab({
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-6 p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
                 <div className="text-xs uppercase tracking-[0.15em] font-bold font-mono mb-3" style={{ color: "var(--amber)" }}>
-                  Previous No-Shows / Cancelled
+                  {t(language, "appointments.create.previousNoShows")}
                 </div>
                 {noShowLoading ? (
-                  <div className="text-sm" style={{ color: "var(--amber)" }}>Loading no-show history...</div>
+                  <div className="text-sm" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.loadingNoShows")}</div>
                 ) : (
                   <ul className="space-y-2">
                     {patientNoShows.map((item) => (
@@ -571,32 +575,32 @@ export function CreateAppointmentTab({
 
               <div>
                 <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                  Case Category
+                  {t(language, "appointments.create.caseCategory")}
                 </label>
                 <select
-                  aria-label="Case Category"
+                  aria-label={t(language, "appointments.create.caseCategory")}
                   value={form.caseCategory}
                   onChange={(e) => actions.setCaseCategory(e.target.value as "oncology" | "non_oncology")}
                   className="input-premium"
                 >
-                  <option value="non_oncology">Non-Oncology</option>
-                  <option value="oncology">Oncology</option>
+                  <option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option>
+                  <option value="oncology">{t(language, "appointments.create.oncology")}</option>
                 </select>
               </div>
 
               <div>
                 <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                  Priority
+                  {t(language, "appointments.create.priority")}
                 </label>
                 <select
-                  aria-label="Priority"
+                  aria-label={t(language, "appointments.create.priority")}
                   value={form.reportingPriorityId ?? ""}
                   onChange={(e) => actions.setReportingPriorityId(e.target.value ? Number(e.target.value) : null)}
                   className="input-premium"
                 >
-                  <option value="" hidden>Routine (default)</option>
+                  <option value="" hidden>{t(language, "appointments.create.routineDefault")}</option>
                   {filteredPriorityOptions.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nameEn}</option>
+                    <option key={p.id} value={p.id}>{chooseLocalized(language, p.nameAr, p.nameEn)}</option>
                   ))}
                 </select>
               </div>
@@ -609,15 +613,15 @@ export function CreateAppointmentTab({
                   onChange={(e) => actions.setIsWalkIn(e.target.checked)}
                   className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
-                <span className="text-base font-medium">Walk-in patient</span>
+                <span className="text-base font-medium">{t(language, "appointments.create.walkIn")}</span>
               </label>
 
               <div>
                 <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                  Appointment Date
+                  {t(language, "appointments.create.appointmentDate")}
                 </label>
                 <input
-                  aria-label="Appointment Date"
+                  aria-label={t(language, "appointments.create.appointmentDate")}
                   type="date"
                   value={form.appointmentDate}
                   onChange={(e) => actions.setAppointmentDate(e.target.value, form.overrideRequired)}
@@ -627,7 +631,7 @@ export function CreateAppointmentTab({
 
               <div>
                 <label className="block text-xs uppercase tracking-[0.15em] font-mono mb-2 text-muted-foreground">
-                  Notes
+                  {t(language, "appointments.create.notes")}
                 </label>
                 <textarea
                   value={form.notes}
@@ -656,7 +660,7 @@ export function CreateAppointmentTab({
 
               {form.overrideRequired && (
                 <div className="text-sm font-mono border border-amber-200 p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
-                  Selected date requires supervisor override.
+                  {t(language, "appointments.create.overrideRequired")}
                 </div>
               )}
 
@@ -676,13 +680,13 @@ export function CreateAppointmentTab({
                   }}
                   disabled={submitLoading}
                 >
-                  Reset
+                  {t(language, "appointments.create.reset")}
                 </Button>
                 <Button
                   onClick={runSubmitFlow}
                   disabled={submitLoading || !schedulingEngineEnabled}
                 >
-                  {submitLoading ? "Creating..." : "Create Appointment"}
+                  {submitLoading ? t(language, "appointments.create.creating") : t(language, "appointments.create.create")}
                 </Button>
               </div>
             </div>
@@ -704,10 +708,10 @@ export function CreateAppointmentTab({
       {showSafetyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={(e) => { if (e.target === e.currentTarget) setShowSafetyModal(false); }}>
           <Card className="w-full max-w-md mx-4 p-6">
-            <h3 className="text-xl font-semibold mb-4" style={{ color: "var(--amber)" }}>Safety Confirmation</h3>
+            <h3 className="text-xl font-semibold mb-4" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.safetyConfirmation")}</h3>
             <p className="text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
             <p className="text-base mb-6">
-              Have you confirmed this patient has no contraindications for {selectedModality?.name}?
+              {t(language, "appointments.create.confirmNoContraindications", { modality: chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—" })}
             </p>
             <div className="flex gap-4">
               <Button
@@ -715,7 +719,7 @@ export function CreateAppointmentTab({
                 onClick={() => setShowSafetyModal(false)}
                 className="flex-1"
               >
-                Cancel
+                {t(language, "appointments.create.cancel")}
               </Button>
               <Button
                 className="flex-1"
@@ -730,14 +734,14 @@ export function CreateAppointmentTab({
                     try {
                       await createWithDecision(decision);
                     } catch (error) {
-                      setPageError(error instanceof Error ? error.message : "Failed to create appointment");
+                      setPageError(error instanceof Error ? error.message : t(language, "appointments.create.failedCreate"));
                     } finally {
                       setSubmitLoading(false);
                     }
                   }
                 }}
               >
-                Confirm
+                {t(language, "appointments.create.confirm")}
               </Button>
             </div>
           </Card>

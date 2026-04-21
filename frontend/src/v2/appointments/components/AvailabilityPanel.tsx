@@ -1,5 +1,7 @@
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 
 interface Props {
   rows: AvailabilityRowViewModel[];
@@ -30,10 +32,11 @@ export function AvailabilityPanel({
   onNextPage,
   canGoPrevious,
 }: Props) {
+  const { language } = useLanguage();
   const visibleRows = showFullDays ? rows : rows.filter((row) => row.status !== "full");
 
   if (loading) {
-    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>Loading evaluated availability...</div>;
+    return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
   }
 
   if (rows.length === 0) {
@@ -45,31 +48,31 @@ export function AvailabilityPanel({
       <div className="flex flex-wrap gap-4 items-center justify-between">
         <div className="flex gap-2 items-center">
           <button type="button" onClick={onPreviousPage} disabled={!canGoPrevious} className="btn-ghost text-xs h-8 px-2">
-            Previous slots
+            {t(language, "appointments.create.previousSlots")}
           </button>
           <button type="button" onClick={onNextPage} className="btn-ghost text-xs h-8 px-2">
-            Next slots
+            {t(language, "appointments.create.nextSlots")}
           </button>
         </div>
         <div className="flex flex-wrap gap-2 items-center">
           <label className="flex items-center gap-2 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
-            Start date
+            {t(language, "appointments.create.startDate")}
           </label>
           <input
-            aria-label="Availability Start Date"
+            aria-label={t(language, "appointments.create.startDate")}
             type="date"
             value={startDate}
             onChange={(event) => onChangeStartDate(event.target.value)}
             className="input-premium text-xs py-2 h-8 w-40"
           />
           <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
-            {showFullDays ? "Hide full days" : "Show full days"}
+            {showFullDays ? t(language, "appointments.create.hideFullDays") : t(language, "appointments.create.showFullDays")}
           </button>
         </div>
       </div>
       {visibleRows.length === 0 ? (
         <div className="text-sm text-center" style={{ color: "var(--text-muted)" }}>
-          No non-full days in this window. Click "Show full days" to view all dates.
+          {t(language, "appointments.create.noNonFullDays")}
         </div>
       ) : visibleRows.map((row) => (
         <AvailabilityDateRow

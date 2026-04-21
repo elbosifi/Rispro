@@ -1,3 +1,5 @@
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import { PatientSearch } from "./patient-search";
 import type { SelectedPatient } from "../hooks/useCreateAppointmentForm";
 
@@ -9,9 +11,10 @@ interface Props {
 }
 
 export function PatientSearchSection({ value, onSelectPatient, onClearPatient, caseCategory }: Props) {
+  const { language } = useLanguage();
   return (
     <div>
-      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Patient</label>
+      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 6 }}>{t(language, "appointments.create.patient")}</label>
       <PatientSearch
         caseCategory={caseCategory}
         onSelect={(patient) => {
