@@ -25,7 +25,7 @@ export default function PatientsPage() {
 
   if (isNewRoute) {
     return (
-      <div className="max-w-4xl mx-auto space-y-5">
+      <div className="w-full max-w-none space-y-5">
         <PatientForm mode="create" />
       </div>
     );

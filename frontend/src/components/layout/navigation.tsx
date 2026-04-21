@@ -238,13 +238,12 @@ export function TopBar({
         {pageTitle && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
             <div
-              className="flex max-w-[88vw] items-center gap-2 overflow-hidden rounded-full border px-3 py-1.5 text-center shadow-sm sm:max-w-[42vw] sm:px-4"
+              className="max-w-[88vw] overflow-hidden rounded-full border px-3 py-1.5 text-center shadow-sm sm:max-w-[42vw] sm:px-4"
               style={{
                 backgroundColor: "var(--card)",
                 borderColor: "var(--border)"
               }}
             >
-              {pageAction && <div className="pointer-events-auto shrink-0">{pageAction}</div>}
               <span className="block truncate text-sm font-semibold text-foreground">
                 {pageTitle}
               </span>
@@ -254,23 +253,28 @@ export function TopBar({
 
         {/* Actions */}
         <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
-          {/* Undo */}
-          <button
-            className="btn-ghost"
-            onClick={onUndo}
-            aria-label={t(language, "navPanel.undo")}
-          >
-            <Undo2 className="w-4 h-4" />
-          </button>
+          {pageAction && <div className="pointer-events-auto">{pageAction}</div>}
 
-          {/* Redo */}
-          <button
-            className="btn-ghost"
-            onClick={onRedo}
-            aria-label={t(language, "navPanel.redo")}
-          >
-            <Redo2 className="w-4 h-4" />
-          </button>
+          {/* Undo */}
+          {!pageAction && (
+            <>
+              <button
+                className="btn-ghost"
+                onClick={onUndo}
+                aria-label={t(language, "navPanel.undo")}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+
+              <button
+                className="btn-ghost"
+                onClick={onRedo}
+                aria-label={t(language, "navPanel.redo")}
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </>
+          )}
 
           {/* Language toggle */}
           <button
