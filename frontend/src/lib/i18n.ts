@@ -111,6 +111,11 @@ const en = {
 
   "registrations.title": "Daily Registrations",
   "registrations.filters": "Filters",
+  "registrations.dateFilters": "Date filters",
+  "registrations.searchFilters": "Search filters",
+  "registrations.dateFiltersHint": "Pick a single day or switch to a date range.",
+  "registrations.searchFiltersHint": "Search by name, MRN, or accession number.",
+  "registrations.statusHint": "Tap to refine the list",
   "registrations.date": "Date",
   "registrations.dateFrom": "From Date",
   "registrations.dateTo": "To Date",
@@ -591,6 +596,11 @@ const ar = {
 
   "registrations.title": "التسجيلات اليومية",
   "registrations.filters": "الفلاتر",
+  "registrations.dateFilters": "فلاتر التاريخ",
+  "registrations.searchFilters": "فلاتر البحث",
+  "registrations.dateFiltersHint": "اختر يوماً واحداً أو نطاقاً زمنياً.",
+  "registrations.searchFiltersHint": "ابحث بالاسم أو MRN أو رقم الوصول.",
+  "registrations.statusHint": "اضغط لتصفية القائمة",
   "registrations.date": "التاريخ",
   "registrations.dateFrom": "من تاريخ",
   "registrations.dateTo": "إلى تاريخ",
