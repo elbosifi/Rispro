@@ -260,25 +260,42 @@ function formatPatientMrn(sequenceValue: number, prefix: string): string {
 }
 
 async function readPatientMrnSequencePreview(client: { query: PoolClient["query"] }): Promise<number> {
-  const { rows } = await client.query<{ last_value: string | number; is_called: boolean; increment_by: string | number }>(
-    `
-      select last_value, is_called, increment_by
-      from patient_mrn_seq
-    `
-  );
+  try {
+    const { rows } = await client.query<{ last_value: string | number; is_called: boolean; increment_by: string | number }>(
+      `
+        select last_value, is_called, increment_by
+        from patient_mrn_seq
+      `
+    );
 
-  const row = rows[0];
-  if (!row) {
-    throw new HttpError(500, "Unable to read patient MRN sequence.");
+    const row = rows[0];
+    if (!row) {
+      throw new HttpError(500, "Unable to read patient MRN sequence.");
+    }
+
+    const lastValue = Number(row.last_value);
+    const incrementBy = Number(row.increment_by || 1);
+    if (!Number.isFinite(lastValue) || !Number.isFinite(incrementBy) || incrementBy <= 0) {
+      throw new HttpError(500, "Invalid patient MRN sequence state.");
+    }
+
+    return row.is_called ? lastValue + incrementBy : lastValue;
+  } catch {
+    const { rows } = await client.query<{ next_mrn: string | number | null }>(
+      `
+        select coalesce(max((mrn)::bigint), 0) + 1 as next_mrn
+        from patients
+        where mrn ~ '^[0-9]+$'
+      `
+    );
+
+    const fallback = Number(rows[0]?.next_mrn ?? 1);
+    if (!Number.isFinite(fallback) || fallback <= 0) {
+      throw new HttpError(500, "Unable to determine next patient MRN.");
+    }
+
+    return fallback;
   }
-
-  const lastValue = Number(row.last_value);
-  const incrementBy = Number(row.increment_by || 1);
-  if (!Number.isFinite(lastValue) || !Number.isFinite(incrementBy) || incrementBy <= 0) {
-    throw new HttpError(500, "Invalid patient MRN sequence state.");
-  }
-
-  return row.is_called ? lastValue + incrementBy : lastValue;
 }
 
 async function allocateNextPatientMrn(client: PoolClient, prefix: string): Promise<string> {

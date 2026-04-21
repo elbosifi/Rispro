@@ -356,6 +356,39 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     focusNextField(currentField);
   };
 
+  const getFieldKeyFromElement = (element: EventTarget | null): FormFieldKey | null => {
+    if (!(element instanceof HTMLElement)) return null;
+    if (element === arabicFullNameRef.current) return "arabicFullName";
+    if (element === englishFullNameRef.current) return "englishFullName";
+    if (element === identifierTypeRef.current) return "identifierType";
+    if (element === identifierValueRef.current) return "identifierValue";
+    if (element === nationalIdConfirmationRef.current) return "nationalIdConfirmation";
+    if (element === sexRef.current) return "sex";
+    if (element === dobRef.current) return "estimatedDateOfBirth";
+    if (element === ageRef.current) return "ageYears";
+    if (element === phone1Ref.current) return "phone1";
+    if (element === phone2Ref.current) return "phone2";
+    if (element === addressRef.current) return "address";
+    return null;
+  };
+
+  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key !== "Enter") return;
+
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+
+    const tagName = target.tagName.toLowerCase();
+    if (tagName === "button") return;
+    if (target.getAttribute("role") === "button") return;
+
+    const fieldKey = getFieldKeyFromElement(target);
+    if (!fieldKey) return;
+
+    event.preventDefault();
+    focusNextField(fieldKey);
+  };
+
   // Handlers
   const handleArabicNameChange = (value: string) => {
     const prevEndsWithSpace = form.arabicFullName.endsWith(" ");
@@ -559,7 +592,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   // Shared form fields JSX (rendered in both create and edit)
   // ============================================================
   const formFields = (
-    <form id="patient-form" onSubmit={handleSubmit} noValidate className="space-y-5">
+    <form id="patient-form" onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} noValidate className="space-y-5">
       {!isEdit && (
         <Card className="p-3 sm:p-4">
           <div className="space-y-2">

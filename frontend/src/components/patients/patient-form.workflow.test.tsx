@@ -157,6 +157,21 @@ describe("PatientForm workflow hardening", () => {
     expect(createPatient).not.toHaveBeenCalled();
   });
 
+  it("uses Enter for sequential navigation in edit mode and does not submit early", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "edit", patientId: 9 });
+
+    await waitFor(() => expect(screen.getByLabelText(/Arabic Full Name/i)).toBeTruthy());
+    const arabicInput = screen.getByLabelText(/Arabic Full Name/i);
+    const phone2Input = screen.getByLabelText(/Phone 2/i);
+
+    arabicInput.focus();
+    await user.keyboard("{Enter}");
+
+    expect(document.activeElement).toBe(phone2Input);
+    expect(updatePatient).not.toHaveBeenCalled();
+  });
+
   it("enforces phone cap, uppercases passport id, and submits estimated flag", async () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
