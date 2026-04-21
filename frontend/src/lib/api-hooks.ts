@@ -29,7 +29,7 @@ import type { DictionaryEntry } from "@/lib/name-generation";
 
 // Generic raw response type for API responses that are passed through mappers
 type RawRecord = Record<string, unknown>;
-const IMPORT_WORKBOOK_TIMEOUT_MS = 60_000;
+const IMPORT_WORKBOOK_TIMEOUT_MS = 180_000;
 const IMPORT_PREVIEW_TIMEOUT_MS = 180_000;
 const IMPORT_CONFIRM_TIMEOUT_MS = 180_000;
 

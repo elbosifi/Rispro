@@ -1447,8 +1447,11 @@ function PatientImportSection({
   return (
     <div className="space-y-4">
       {inProgressMessage && (
-        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm">
-          {inProgressMessage}
+        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-sm space-y-2">
+          <p>{inProgressMessage}</p>
+          <div className="h-2 w-full rounded bg-blue-100 dark:bg-blue-800/40 overflow-hidden" aria-hidden>
+            <div className="h-full w-1/2 bg-blue-500 dark:bg-blue-400 animate-pulse" />
+          </div>
         </div>
       )}
 
