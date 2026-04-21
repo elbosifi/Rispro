@@ -124,15 +124,15 @@ export default function QueuePage() {
       queryClient.invalidateQueries({ queryKey: ["registrations"] });
       pushToast({
         type: "success",
-        title: "Appointment cancelled",
-        message: "Appointment status changed to cancelled."
+        title: t("queue.cancelledTitle"),
+        message: t("queue.cancelledMessage")
       });
     },
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: "Cancel failed",
-        message: err?.message || "Could not cancel appointment."
+        title: t("queue.cancelFailedTitle"),
+        message: err?.message || t("queue.cancelFailedMessage")
       });
     }
   });
@@ -167,7 +167,7 @@ export default function QueuePage() {
   };
 
   const handleCancel = (appointmentId: number) => {
-    if (!window.confirm("Cancel this appointment?")) return;
+    if (!window.confirm(t("common.confirmCancelAppointment"))) return;
     cancelMutation.mutate({ appointmentId });
   };
 
@@ -176,15 +176,15 @@ export default function QueuePage() {
       {/* Header */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <SectionLabel pulsing>QUEUE MANAGEMENT</SectionLabel>
+          <SectionLabel pulsing>{t("queue.managementLabel")}</SectionLabel>
         </div>
         <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div>
             <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
-              Today's <span className="gradient-text">Queue</span>
+              <span className="gradient-text">{t("queue.pageTitle")}</span>
             </h1>
             <p className="mt-2 text-muted-foreground">
-              Scan patients into queue and manage today's appointments
+              {t("queue.pageSubtitle")}
             </p>
           </div>
         </div>
@@ -317,13 +317,13 @@ export default function QueuePage() {
                          </Button>
                        )}
                        {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
-                         <Button
-                           size="sm"
-                           variant="secondary"
-                           onClick={() => handleCancel(entry.appointmentId)}
-                         >
-                           Cancel appointment
-                         </Button>
+                       <Button
+                         size="sm"
+                         variant="secondary"
+                         onClick={() => handleCancel(entry.appointmentId)}
+                       >
+                          {t("queue.cancelAppointment")}
+                       </Button>
                        )}
                      </div>
                    </li>

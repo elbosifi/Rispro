@@ -69,16 +69,16 @@ export default function RegistrationsPage() {
       queryClient.invalidateQueries({ queryKey: ["calendar"] });
       pushToast({
         type: "success",
-        title: "Appointment cancelled",
-        message: "Appointment status changed to cancelled.",
+        title: t("registrations.cancelledTitle"),
+        message: t("registrations.cancelledMessage"),
       });
       setSelectedAppointment(null);
     },
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: "Cancel failed",
-        message: err?.message || "Could not cancel appointment.",
+        title: t("registrations.cancelFailedTitle"),
+        message: err?.message || t("registrations.cancelFailedMessage"),
       });
     },
   });
@@ -147,7 +147,7 @@ export default function RegistrationsPage() {
           <span className="inline-flex items-center gap-3 rounded-full border border-accent/30 bg-accent/5 px-5 py-2">
             <span className="h-2 w-2 rounded-full bg-accent" />
             <span className="font-mono text-xs uppercase tracking-[0.15em] text-accent">
-              REGISTRATIONS
+              {t("registrations.sectionLabel")}
             </span>
           </span>
         </div>
@@ -155,7 +155,7 @@ export default function RegistrationsPage() {
           className="text-3xl font-display"
           style={{ color: "var(--foreground)" }}
         >
-          Appointment <span className="gradient-text">Registrations</span>
+          <span className="gradient-text">{t("registrations.pageTitle")}</span>
         </h1>
       </div>
 
@@ -365,7 +365,7 @@ export default function RegistrationsPage() {
                     navigate(`/print?appointmentId=${selectedAppointment.id}`)
                   }
                 >
-                  Print
+                  {t("registrations.print")}
                 </Button>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
@@ -411,7 +411,7 @@ export default function RegistrationsPage() {
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
                   appointmentRefType="v2_booking"
-                  title="Request Documents"
+                  title={t("registrations.requestDocuments")}
                 />
               </div>
               <div className="mt-6">
@@ -424,11 +424,11 @@ export default function RegistrationsPage() {
                       variant="ghost"
                       style={{ color: "#ef4444" }}
                       onClick={() => {
-                        if (!window.confirm("Cancel this appointment?")) return;
+                        if (!window.confirm(t("common.confirmCancelAppointment"))) return;
                         cancelMutation.mutate(selectedAppointment.id);
                       }}
                     >
-                      Cancel appointment
+                      {t("registrations.cancelAppointment")}
                     </Button>
                   </div>
                 )}

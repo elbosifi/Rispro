@@ -330,7 +330,7 @@ function EditPatientForm({
             className="btn-ghost px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition-all"
           >
             <X className="w-3.5 h-3.5" />
-            Cancel
+            {t(language, "common.cancel")}
           </button>
           <button
             type="submit"

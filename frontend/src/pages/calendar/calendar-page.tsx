@@ -37,16 +37,16 @@ export default function CalendarPage() {
       queryClient.invalidateQueries({ queryKey: ["queue"] });
       pushToast({
         type: "success",
-        title: "Appointment cancelled",
-        message: "Appointment status changed to cancelled."
+        title: t(language, "queue.cancelledTitle"),
+        message: t(language, "queue.cancelledMessage")
       });
       setSelectedAppointment(null);
     },
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: "Cancel failed",
-        message: err?.message || "Could not cancel appointment."
+        title: t(language, "queue.cancelFailedTitle"),
+        message: err?.message || t(language, "queue.cancelFailedMessage")
       });
     }
   });
@@ -111,11 +111,11 @@ export default function CalendarPage() {
       {/* Header */}
       <div className="space-y-4">
         <div className="flex items-center gap-4">
-          <SectionLabel>CALENDAR</SectionLabel>
+          <SectionLabel>{t(language, "calendar.sectionLabel")}</SectionLabel>
         </div>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <h1 className="text-3xl font-display" style={{ color: "var(--foreground)" }}>
-            Appointment <span className="gradient-text">Calendar</span>
+            <span className="gradient-text">{t(language, "calendar.title")}</span>
           </h1>
           <div className="flex items-center gap-3">
             <select
@@ -276,11 +276,11 @@ export default function CalendarPage() {
                         variant="ghost"
                         style={{ color: "#ef4444" }}
                         onClick={() => {
-                          if (!window.confirm("Cancel this appointment?")) return;
+                          if (!window.confirm(t(language, "common.confirmCancelAppointment"))) return;
                           cancelMutation.mutate(selectedAppointment.id);
                         }}
                       >
-                        Cancel appointment
+                        {t(language, "queue.cancelAppointment")}
                       </Button>
                     </div>
                   )}

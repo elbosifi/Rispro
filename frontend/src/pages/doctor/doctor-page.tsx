@@ -119,7 +119,7 @@ export default function DoctorPage() {
                   onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
-                  Print
+                  {t(language, "common.print")}
                 </button>
               </div>
               <div className="space-y-3 text-sm">
@@ -136,7 +136,7 @@ export default function DoctorPage() {
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
                   appointmentRefType="v2_booking"
-                  title="Doctor Request Documents"
+                  title={t(language, "documents.title")}
                   enablePreviewModal
                 />
               </div>

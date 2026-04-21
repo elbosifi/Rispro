@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useLanguage } from "@/providers/language-provider";
 import {
   deleteAppointmentDocument,
   listAppointmentDocuments,
@@ -32,13 +33,15 @@ export function RequestDocumentsPanel({
   appointmentId,
   patientId,
   appointmentRefType = "auto",
-  title = "Request Documents",
+  title,
   enablePreviewModal = false,
 }: RequestDocumentsPanelProps) {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [file, setFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState("referral_request");
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
+  const resolvedTitle = title ?? t("documents.title");
 
   const queryKey = useMemo(
     () => ["appointment-documents", appointmentRefType, appointmentId],
@@ -52,7 +55,7 @@ export function RequestDocumentsPanel({
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
-      if (!file) throw new Error("Choose a file first.");
+      if (!file) throw new Error(t("documents.chooseFileFirst"));
       const fileContentBase64 = await fileToBase64(file);
       return uploadAppointmentDocument({
         patientId,
@@ -69,15 +72,15 @@ export function RequestDocumentsPanel({
       queryClient.invalidateQueries({ queryKey });
       pushToast({
         type: "success",
-        title: "Uploaded",
-        message: "Request document uploaded successfully.",
+        title: t("documents.uploadedTitle"),
+        message: t("documents.uploadedMessage"),
       });
     },
     onError: (err: unknown) => {
       pushToast({
         type: "error",
-        title: "Upload failed",
-        message: err instanceof Error ? err.message : "Could not upload document.",
+        title: t("documents.uploadFailedTitle"),
+        message: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
       });
     },
   });
@@ -88,15 +91,15 @@ export function RequestDocumentsPanel({
       queryClient.invalidateQueries({ queryKey });
       pushToast({
         type: "success",
-        title: "Deleted",
-        message: "Request document deleted.",
+        title: t("documents.deletedTitle"),
+        message: t("documents.deletedMessage"),
       });
     },
     onError: (err: unknown) => {
       pushToast({
         type: "error",
-        title: "Delete failed",
-        message: err instanceof Error ? err.message : "Could not delete document.",
+        title: t("documents.deleteFailedTitle"),
+        message: err instanceof Error ? err.message : t("documents.deleteFailedMessage"),
       });
     },
   });
@@ -113,15 +116,15 @@ export function RequestDocumentsPanel({
       const preparation = (result as { preparation?: { sessionCode?: string; guidance?: string } }).preparation;
       pushToast({
         type: "success",
-        title: "Scan prepared",
+        title: t("documents.scanPreparedTitle"),
         message: `${preparation?.sessionCode || ""} ${preparation?.guidance || ""}`.trim(),
       });
     },
     onError: (err: unknown) => {
       pushToast({
         type: "error",
-        title: "Prepare scan failed",
-        message: err instanceof Error ? err.message : "Unable to prepare scan session.",
+        title: t("documents.prepareFailedTitle"),
+        message: err instanceof Error ? err.message : t("documents.prepareFailedMessage"),
       });
     },
   });
@@ -129,7 +132,7 @@ export function RequestDocumentsPanel({
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{title}</h4>
+        <h4 className="text-sm font-semibold text-stone-900 dark:text-white">{resolvedTitle}</h4>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
@@ -137,7 +140,7 @@ export function RequestDocumentsPanel({
           type="text"
           value={documentType}
           onChange={(e) => setDocumentType(e.target.value)}
-          placeholder="Document type"
+          placeholder={t("documents.documentType")}
           className="input-premium"
         />
         <input
@@ -152,7 +155,7 @@ export function RequestDocumentsPanel({
             className="px-3 py-2 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm"
             disabled={prepareMutation.isPending}
           >
-            {prepareMutation.isPending ? "Preparing..." : "Prepare Scan"}
+            {prepareMutation.isPending ? t("documents.preparing") : t("documents.prepareScan")}
           </button>
           <button
             type="button"
@@ -160,17 +163,17 @@ export function RequestDocumentsPanel({
             className="px-3 py-2 rounded-lg bg-teal-600 text-white text-sm"
             disabled={!file || uploadMutation.isPending}
           >
-            {uploadMutation.isPending ? "Uploading..." : "Attach Request"}
+            {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
           </button>
         </div>
       </div>
 
       {isLoading ? (
-        <p className="text-sm text-stone-500">Loading documents...</p>
+        <p className="text-sm text-stone-500">{t("documents.loading")}</p>
       ) : error ? (
-        <p className="text-sm text-red-600">{error instanceof Error ? error.message : "Failed to load documents."}</p>
+        <p className="text-sm text-red-600">{error instanceof Error ? error.message : t("documents.failedLoad")}</p>
       ) : documents.length === 0 ? (
-        <p className="text-sm text-stone-500">No request documents yet.</p>
+        <p className="text-sm text-stone-500">{t("documents.noDocuments")}</p>
       ) : (
         <ul className="space-y-2">
           {documents.map((doc) => (
@@ -189,7 +192,7 @@ export function RequestDocumentsPanel({
                       onClick={() => setSelectedPreview(doc)}
                       className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
                     >
-                      View
+                      {t("documents.view")}
                     </button>
                   ) : (
                     <a
@@ -198,19 +201,19 @@ export function RequestDocumentsPanel({
                       rel="noopener noreferrer"
                       className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
                     >
-                      Open
+                      {t("documents.open")}
                     </a>
                   )}
                   <button
                     type="button"
                     onClick={() => {
-                      if (!window.confirm("Delete this request document?")) return;
+                      if (!window.confirm(t("documents.deleteConfirm"))) return;
                       deleteMutation.mutate(doc.id);
                     }}
                     className="px-2 py-1 text-xs rounded bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                     disabled={deleteMutation.isPending}
                   >
-                    Delete
+                    {t("documents.delete")}
                   </button>
                 </div>
               </div>
@@ -236,14 +239,14 @@ export function RequestDocumentsPanel({
                   rel="noopener noreferrer"
                   className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
                 >
-                  Open in new tab
+                  {t("documents.openInNewTab")}
                 </a>
                 <button
                   type="button"
                   onClick={() => setSelectedPreview(null)}
                   className="px-2 py-1 text-xs rounded bg-stone-100 dark:bg-stone-700"
                 >
-                  Close
+                  {t("documents.close")}
                 </button>
               </div>
             </div>
