@@ -1062,7 +1062,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
               disabled={saveMutation.isPending}
               className="sm:min-w-32"
             >
-              {saveMutation.isPending ? t("settings.loading") : t("common.save")}
+              {saveMutation.isPending ? t("settings.loading") : t("settings.save")}
             </Button>
           </div>
         </div>
