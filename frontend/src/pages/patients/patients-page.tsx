@@ -7,7 +7,7 @@ import { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { ArrowLeft, UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
-import { Button, Card, SectionLabel, Badge } from "@/components/shared";
+import { Button, Card, Badge } from "@/components/shared";
 
 export default function PatientsPage() {
   const { language } = useLanguage();
@@ -26,23 +26,14 @@ export default function PatientsPage() {
   if (isNewRoute) {
     return (
       <div className="max-w-4xl mx-auto space-y-5">
-        <div className="space-y-3 sm:space-y-4 lg:hidden">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="secondary"
-              onClick={() => navigate("/patients")}
-            >
-              <ArrowLeft size={16} />
-              {t(language, "common.back")}
-            </Button>
-          </div>
-          <div className="flex items-center gap-4">
-            <SectionLabel>{t(language, "patients.registerTitle")}</SectionLabel>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
-            {t(language, "patients.registerTitle")}
-          </h1>
-        </div>
+        <Button
+          variant="secondary"
+          onClick={() => navigate("/patients")}
+          className="self-start"
+        >
+          <ArrowLeft size={16} />
+          {t(language, "common.back")}
+        </Button>
         <PatientForm mode="create" />
       </div>
     );
@@ -50,27 +41,13 @@ export default function PatientsPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="space-y-3 sm:space-y-4 lg:hidden">
-        <div className="flex items-center gap-4">
-          <SectionLabel>{t(language, "patients.title")}</SectionLabel>
-        </div>
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
-            {t(language, "patients.title")}
-          </h1>
-          <p className="mt-2 text-muted-foreground">
-            {language === "ar" ? "ابحث عن سجلات المرضى واعرضها وأدرها" : "Search, view, and manage patient records"}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex justify-start lg:justify-end">
-        <Button onClick={() => navigate("/patients/new")}>
-          <UserPlus size={16} />
-          {t(language, "patients.registerTitle")}
-        </Button>
-      </div>
+      <Button
+        onClick={() => navigate("/patients/new")}
+        className="fixed z-50 shadow-2xl rounded-full px-5 sm:top-[6.5rem] sm:right-6 sm:bottom-auto bottom-4 right-4"
+      >
+        <UserPlus size={16} />
+        {t(language, "patients.registerTitle")}
+      </Button>
 
       {/* Search */}
       <Card className="p-6">
