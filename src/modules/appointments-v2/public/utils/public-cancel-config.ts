@@ -13,8 +13,13 @@ function readPositiveInteger(name: string): number | null {
 }
 
 export function getPublicCancelTokenSecret(): string | null {
-  const value = String(process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET || "").trim();
-  return value.length > 0 ? value : null;
+  const explicitValue = String(process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET || "").trim();
+  if (explicitValue.length > 0) {
+    return explicitValue;
+  }
+
+  const jwtSecretFallback = String(process.env.JWT_SECRET || "").trim();
+  return jwtSecretFallback.length > 0 ? jwtSecretFallback : null;
 }
 
 export function getPublicCancelTokenTtlSeconds(): number {
