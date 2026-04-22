@@ -17,7 +17,6 @@ import { useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
-import { PatientSummaryCard } from "./PatientSummaryCard";
 import { ModalitySelect } from "./ModalitySelect";
 import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
@@ -412,7 +411,7 @@ export function CreateAppointmentTab({
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 sm:space-y-5">
+    <div className="max-w-[1600px] mx-auto space-y-4 sm:space-y-5">
       {/* Page Header */}
       <div className="space-y-2 sm:space-y-3 mb-3 sm:mb-4 lg:hidden">
         <div className="flex items-center gap-3">
@@ -427,7 +426,7 @@ export function CreateAppointmentTab({
       </div>
 
       {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4 sm:gap-5">
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
         <div className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <div className="flex items-center gap-3">
@@ -453,10 +452,6 @@ export function CreateAppointmentTab({
               }}
             />
 
-            <div className="mt-4 sm:mt-5">
-              <PatientSummaryCard patient={form.patient} caseCategory={form.caseCategory} />
-            </div>
-
             {form.patientId != null && patientNoShows.length > 0 && (
               <div className="mt-4 sm:mt-5 p-3 sm:p-4 border border-amber-200 rounded-xl" style={{ background: "rgba(245, 158, 11, 0.05)" }}>
                 <div className="text-sm font-bold mb-3" style={{ color: "var(--amber)" }}>
@@ -476,7 +471,7 @@ export function CreateAppointmentTab({
               </div>
             )}
 
-            <div className="space-y-4 mt-4 sm:mt-5">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 sm:gap-5 mt-4 sm:mt-5">
               <ModalitySelect
                 options={modalityOptions}
                 value={form.modalityId}
@@ -531,7 +526,7 @@ export function CreateAppointmentTab({
                 </select>
               </div>
 
-              <label className="flex items-center gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50">
+              <label className="flex items-center gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50 xl:col-span-2">
                 <input
                   type="checkbox"
                   id="isWalkIn"
@@ -555,7 +550,7 @@ export function CreateAppointmentTab({
                 />
               </div>
 
-              <div>
+              <div className="xl:col-span-2">
                 <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.notes")}
                 </label>
@@ -567,36 +562,38 @@ export function CreateAppointmentTab({
                 />
               </div>
 
-              <SpecialQuotaSection
-                capacityResolutionMode={form.capacityResolutionMode}
-                onChangeCapacityResolutionMode={(mode) => {
-                  if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
-                  actions.setCapacityResolutionMode(mode);
-                }}
-                specialQuotaAvailable={hasSpecialQuotaAvailable}
-                supervisorMode={canUseNonStandardCapacityModes}
-                specialReasonCode={form.specialReasonCode}
-                onChangeSpecialReasonCode={actions.setSpecialReasonCode}
-                specialReasonConfirmed={form.specialReasonConfirmed}
-                onChangeSpecialReasonConfirmed={actions.setSpecialReasonConfirmed}
-                specialReasonNote={form.specialReasonNote}
-                onChangeSpecialReasonNote={actions.setSpecialReasonNote}
-                options={specialReasonOptions}
-              />
+              <div className="xl:col-span-2">
+                <SpecialQuotaSection
+                  capacityResolutionMode={form.capacityResolutionMode}
+                  onChangeCapacityResolutionMode={(mode) => {
+                    if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
+                    actions.setCapacityResolutionMode(mode);
+                  }}
+                  specialQuotaAvailable={hasSpecialQuotaAvailable}
+                  supervisorMode={canUseNonStandardCapacityModes}
+                  specialReasonCode={form.specialReasonCode}
+                  onChangeSpecialReasonCode={actions.setSpecialReasonCode}
+                  specialReasonConfirmed={form.specialReasonConfirmed}
+                  onChangeSpecialReasonConfirmed={actions.setSpecialReasonConfirmed}
+                  specialReasonNote={form.specialReasonNote}
+                  onChangeSpecialReasonNote={actions.setSpecialReasonNote}
+                  options={specialReasonOptions}
+                />
+              </div>
 
               {form.overrideRequired && (
-                <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
+                <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
                   {t(language, "appointments.create.overrideRequired")}
                 </div>
               )}
 
               {pageError && (
-                <div className="p-3 sm:p-4 border border-red-200 rounded-lg" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
+                <div className="p-3 sm:p-4 border border-red-200 rounded-lg xl:col-span-2" style={{ background: "rgba(239, 68, 68, 0.05)", color: "#ef4444" }}>
                   <span className="text-sm font-medium">{pageError}</span>
                 </div>
               )}
 
-              <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-4 border-t border-border mt-5">
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 sm:gap-4 pt-4 border-t border-border mt-1 xl:col-span-2">
                 <Button
                   variant="secondary"
                   onClick={() => {
