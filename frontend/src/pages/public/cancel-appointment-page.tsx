@@ -112,6 +112,19 @@ export default function PublicCancelAppointmentPage() {
   }
 
   const preview = previewQuery.data;
+  if (!preview) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-10">
+        <div className="mx-auto w-full max-w-md space-y-4">
+          <StatusCard
+            tone="danger"
+            title="Invalid cancellation link"
+            message="Unable to load appointment details for this link."
+          />
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10">
