@@ -24,7 +24,6 @@ import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
-import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { SectionLabel, Button, Card } from "@/components/shared";
 
 interface CreateAppointmentTabProps {
@@ -167,9 +166,6 @@ export function CreateAppointmentTab({
       item.date === form.appointmentDate &&
       (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
-  const selectedRawItem = (availability.rawItems ?? []).find((item) => item.date === form.appointmentDate) ?? null;
-  const primaryExamMixBlocking =
-    selectedRawItem?.examMixQuotaSummaries?.find((row) => row.isPrimaryBlocking) ?? null;
   const filteredPriorityOptions = useMemo(
     () => priorityOptions.filter((p) => !isRoutinePriority(p)),
     [priorityOptions]
@@ -430,84 +426,10 @@ export function CreateAppointmentTab({
         </p>
       </div>
 
-      {/* Appointment Summary Card */}
-      <Card className="p-4 sm:p-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.patient")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground flex items-center gap-2">
-              <span>{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</span>
-              <PatientCategoryBadge category={form.patient?.category} showWhenUnset={Boolean(form.patient)} />
-            </p>
-          </div>
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.modality")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">{chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—"}</p>
-          </div>
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.examType")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">{effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name ?? "—"}</p>
-          </div>
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.category")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">{form.caseCategory === "oncology" ? t(language, "appointments.create.oncology") : t(language, "appointments.create.nonOncology")}</p>
-          </div>
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.date")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">{form.appointmentDate || "—"}</p>
-          </div>
-          <div className="space-y-1">
-            <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.examMix")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">
-              {primaryExamMixBlocking
-                ? `${primaryExamMixBlocking.title ?? `Group #${primaryExamMixBlocking.ruleId}`} ${primaryExamMixBlocking.consumed}/${primaryExamMixBlocking.dailyLimit}`
-                : t(language, "appointments.create.noMatchingGroup")}
-            </p>
-          </div>
-        </div>
-      </Card>
-
       {/* Main Grid Layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] gap-4 sm:gap-5">
-        {/* Availability Panel */}
-        <div className="space-y-3 sm:space-y-4">
-          <div className="flex items-center gap-3">
-            <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
-          </div>
-          <Card className="p-4 sm:p-5">
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-5" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
-            <AvailabilityPanel
-              rows={availability.rows}
-              selectedDate={form.appointmentDate}
-              onSelectDate={handleSelectAvailabilityRow}
-              loading={availability.isLoading}
-              showFullDays={showFullDays}
-              onToggleShowFullDays={() => setShowFullDays((current) => !current)}
-              startDate={startDateFromOffset(availabilityOffset)}
-              onChangeStartDate={(nextDate) => {
-                setAvailabilityOffset(offsetFromStartDate(nextDate));
-                setAvailabilitySelectedRow(null);
-              }}
-              onPreviousPage={() => {
-                setAvailabilityOffset((current) => Math.max(0, current - AVAILABILITY_WINDOW_DAYS));
-                setAvailabilitySelectedRow(null);
-              }}
-              onNextPage={() => {
-                setAvailabilityOffset((current) => current + AVAILABILITY_WINDOW_DAYS);
-                setAvailabilitySelectedRow(null);
-              }}
-              canGoPrevious={availabilityOffset > 0}
-              emptyMessage={
-                availability.enabled
-                  ? t(language, "appointments.create.noAvailabilityRows")
-                  : t(language, "appointments.create.loadAvailabilityHint")
-              }
-            />
-          </Card>
-        </div>
-
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
-        <div className="space-y-3 sm:space-y-4">
+        <div className="space-y-3 sm:space-y-4 order-1 xl:order-2">
           <div className="flex items-center gap-3">
             <SectionLabel>{t(language, "appointments.create.patientDetails")}</SectionLabel>
           </div>
@@ -696,6 +618,44 @@ export function CreateAppointmentTab({
             </div>
           </Card>
         </div>
+
+        {/* Availability Panel */}
+        <div className="space-y-3 sm:space-y-4 order-2 xl:order-1">
+          <div className="flex items-center gap-3">
+            <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
+          </div>
+          <Card className="p-4 sm:p-5">
+            <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-5" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
+            <AvailabilityPanel
+              rows={availability.rows}
+              selectedDate={form.appointmentDate}
+              onSelectDate={handleSelectAvailabilityRow}
+              loading={availability.isLoading}
+              showFullDays={showFullDays}
+              onToggleShowFullDays={() => setShowFullDays((current) => !current)}
+              startDate={startDateFromOffset(availabilityOffset)}
+              onChangeStartDate={(nextDate) => {
+                setAvailabilityOffset(offsetFromStartDate(nextDate));
+                setAvailabilitySelectedRow(null);
+              }}
+              onPreviousPage={() => {
+                setAvailabilityOffset((current) => Math.max(0, current - AVAILABILITY_WINDOW_DAYS));
+                setAvailabilitySelectedRow(null);
+              }}
+              onNextPage={() => {
+                setAvailabilityOffset((current) => current + AVAILABILITY_WINDOW_DAYS);
+                setAvailabilitySelectedRow(null);
+              }}
+              canGoPrevious={availabilityOffset > 0}
+              emptyMessage={
+                availability.enabled
+                  ? t(language, "appointments.create.noAvailabilityRows")
+                  : t(language, "appointments.create.loadAvailabilityHint")
+              }
+            />
+          </Card>
+        </div>
+
       </div>
 
       <SupervisorOverrideModal
