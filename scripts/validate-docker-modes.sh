@@ -39,6 +39,15 @@ write_orthanc_config() {
   "DicomServerEnabled": true,
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
+  "DicomModalities": {},
+  "DicomCheckCalledAet": false,
+  "DicomCheckModalityHost": false,
+  "DicomAlwaysAllowEcho": true,
+  "DicomAlwaysAllowStore": true,
+  "DicomAlwaysAllowFind": true,
+  "DicomAlwaysAllowFindWorklist": true,
+  "DicomAlwaysAllowGet": true,
+  "DicomAlwaysAllowMove": true,
   "HttpPort": 8042,
   "Plugins": ["/usr/share/orthanc/plugins/"],
   "Worklists": {
@@ -109,7 +118,6 @@ ORTHANC_TIMEOUT_SECONDS=10
 ORTHANC_AUTH_ENABLED=false
 ORTHANC_USERNAME=
 ORTHANC_PASSWORD=
-ORTHANC_INTERNAL_PERMISSIVE=false
 ORTHANC_WORKLIST_TARGET=
 MPPS_BRIDGE_PORT=11113
 MPPS_BRIDGE_AE_TITLE=RISPRO_MPPS

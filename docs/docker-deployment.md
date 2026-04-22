@@ -123,8 +123,7 @@ The internal Orthanc image is now pinned through [docker/orthanc/Dockerfile](/Us
 |-----------|---------|-------|
 | `rispro-orthanc` | Internal Orthanc MWL / DICOM target | 8042, 4242 |
 
-Authentication is off by default. If you explicitly enable Orthanc auth during setup/update, the scripts prompt for credentials and bake them into the generated Orthanc config.
-For lab setup, internal Orthanc now also supports a permissive mode (`ORTHANC_INTERNAL_PERMISSIVE=true`) that disables auth and allows unknown modality AEs without pre-registering them.
+Authentication is off by default. Internal Orthanc now generates a permissive MWL runtime config so unknown modality AEs can query worklists without being listed in `DicomModalities`.
 
 The generated internal Orthanc config now sets:
 - `Plugins=["/usr/share/orthanc/plugins/"]`
@@ -339,7 +338,6 @@ docker compose exec app echoscu -v -aec RISPRO_MWL 127.0.0.1 11112
 | `ORTHANC_AUTH_ENABLED` | `false` | Prompt for Orthanc credentials only when true |
 | `ORTHANC_USERNAME` | blank | Optional Orthanc username |
 | `ORTHANC_PASSWORD` | blank | Optional Orthanc password |
-| `ORTHANC_INTERNAL_PERMISSIVE` | `false` | Internal Orthanc only. Lab mode: disable auth and allow unregistered modality AEs |
 | `MPPS_BRIDGE_PORT` | `11113` | MPPS SCP listening port |
 | `MPPS_BRIDGE_AE_TITLE` | `RISPRO_MPPS` | MPPS SCP AE Title |
 | `MPPS_AUTH_ENABLED` | `false` | Protect bridge admin endpoint with Basic auth |

@@ -183,7 +183,6 @@ load_existing_config() {
   CURRENT_ORTHANC_AUTH_ENABLED="$(read_env_value ORTHANC_AUTH_ENABLED)"
   CURRENT_ORTHANC_USERNAME="$(read_env_value ORTHANC_USERNAME)"
   CURRENT_ORTHANC_PASSWORD="$(read_env_value ORTHANC_PASSWORD)"
-  CURRENT_ORTHANC_INTERNAL_PERMISSIVE="$(read_env_value ORTHANC_INTERNAL_PERMISSIVE)"
   CURRENT_MPPS_BRIDGE_PORT="$(read_env_value MPPS_BRIDGE_PORT)"
   CURRENT_MPPS_BRIDGE_AE_TITLE="$(read_env_value MPPS_BRIDGE_AE_TITLE)"
   CURRENT_MPPS_AUTH_ENABLED="$(read_env_value MPPS_AUTH_ENABLED)"
@@ -235,10 +234,9 @@ hydrate_deployment_config_from_current_env() {
   ORTHANC_TIMEOUT_SECONDS="${CURRENT_ORTHANC_TIMEOUT_SECONDS:-10}"
   ORTHANC_BASE_URL="${CURRENT_ORTHANC_BASE_URL:-}"
   ORTHANC_VERIFY_TLS="${CURRENT_ORTHANC_VERIFY_TLS:-true}"
-  ORTHANC_AUTH_ENABLED="${CURRENT_ORTHANC_AUTH_ENABLED:-false}"
-  ORTHANC_USERNAME="${CURRENT_ORTHANC_USERNAME:-}"
-  ORTHANC_PASSWORD="${CURRENT_ORTHANC_PASSWORD:-}"
-  ORTHANC_INTERNAL_PERMISSIVE="${CURRENT_ORTHANC_INTERNAL_PERMISSIVE:-false}"
+  ORTHANC_AUTH_ENABLED="false"
+  ORTHANC_USERNAME=""
+  ORTHANC_PASSWORD=""
 
   MPPS_BRIDGE_PORT="${CURRENT_MPPS_BRIDGE_PORT:-11113}"
   MPPS_BRIDGE_AE_TITLE="${CURRENT_MPPS_BRIDGE_AE_TITLE:-RISPRO_MPPS}"
@@ -271,7 +269,6 @@ hydrate_deployment_config_from_current_env() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
-      ORTHANC_INTERNAL_PERMISSIVE="false"
       ;;
     orthanc_internal)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
@@ -279,18 +276,14 @@ hydrate_deployment_config_from_current_env() {
       ORTHANC_MWL_ENABLED="true"
       ORTHANC_BASE_URL="${ORTHANC_BASE_URL:-http://orthanc:8042}"
       ORTHANC_VERIFY_TLS="${ORTHANC_VERIFY_TLS:-false}"
-      ORTHANC_INTERNAL_PERMISSIVE="${ORTHANC_INTERNAL_PERMISSIVE:-false}"
-      if [ "$ORTHANC_INTERNAL_PERMISSIVE" = "true" ]; then
-        ORTHANC_AUTH_ENABLED="false"
-        ORTHANC_USERNAME=""
-        ORTHANC_PASSWORD=""
-      fi
+      ORTHANC_AUTH_ENABLED="false"
+      ORTHANC_USERNAME=""
+      ORTHANC_PASSWORD=""
       ;;
     orthanc_external)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
       ORTHANC_MWL_ENABLED="${CURRENT_ORTHANC_MWL_ENABLED:-true}"
       ORTHANC_MWL_ENABLED="true"
-      ORTHANC_INTERNAL_PERMISSIVE="false"
       ;;
   esac
 
@@ -298,11 +291,6 @@ hydrate_deployment_config_from_current_env() {
     MPPS_AUTH_ENABLED="false"
     MPPS_USERNAME=""
     MPPS_PASSWORD=""
-  fi
-
-  if [ "$ORTHANC_AUTH_ENABLED" != "true" ]; then
-    ORTHANC_USERNAME=""
-    ORTHANC_PASSWORD=""
   fi
 
   if [ "$MPPS_AUTH_ENABLED" != "true" ]; then
@@ -367,10 +355,9 @@ collect_deployment_config() {
   MPPS_AUTH_ENABLED="${CURRENT_MPPS_AUTH_ENABLED:-false}"
   MPPS_USERNAME="${CURRENT_MPPS_USERNAME:-}"
   MPPS_PASSWORD="${CURRENT_MPPS_PASSWORD:-}"
-  ORTHANC_AUTH_ENABLED="${CURRENT_ORTHANC_AUTH_ENABLED:-false}"
-  ORTHANC_USERNAME="${CURRENT_ORTHANC_USERNAME:-}"
-  ORTHANC_PASSWORD="${CURRENT_ORTHANC_PASSWORD:-}"
-  ORTHANC_INTERNAL_PERMISSIVE="${CURRENT_ORTHANC_INTERNAL_PERMISSIVE:-false}"
+  ORTHANC_AUTH_ENABLED="false"
+  ORTHANC_USERNAME=""
+  ORTHANC_PASSWORD=""
 
   if [ "$RISPRO_DB_MODE" = "internal" ]; then
     DB_USER="${CURRENT_DB_USER:-rispro}"
@@ -409,35 +396,21 @@ collect_deployment_config() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
-      ORTHANC_INTERNAL_PERMISSIVE="false"
       ;;
     orthanc_internal)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
       ORTHANC_MWL_ENABLED="true"
       ORTHANC_BASE_URL="http://orthanc:8042"
       ORTHANC_VERIFY_TLS="false"
-      ORTHANC_INTERNAL_PERMISSIVE="$(prompt_yes_no 'Enable permissive internal Orthanc lab mode (allow unknown modality AEs)?' "$(printf '%s' "${CURRENT_ORTHANC_INTERNAL_PERMISSIVE:-false}" | tr '[:upper:]' '[:lower:]')")"
-      if [ "$ORTHANC_INTERNAL_PERMISSIVE" = "true" ]; then
-        ORTHANC_AUTH_ENABLED="false"
-        ORTHANC_USERNAME=""
-        ORTHANC_PASSWORD=""
-      else
-        ORTHANC_AUTH_ENABLED="$(prompt_yes_no 'Enable Orthanc HTTP auth for the internal Orthanc service?' "$(printf '%s' "${CURRENT_ORTHANC_AUTH_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')")"
-        if [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
-          ORTHANC_USERNAME="$(prompt 'Orthanc username' "${CURRENT_ORTHANC_USERNAME:-orthanc}")"
-          ORTHANC_PASSWORD="$(prompt_hidden 'Orthanc password' "${CURRENT_ORTHANC_PASSWORD:-orthanc}")"
-        else
-          ORTHANC_USERNAME=""
-          ORTHANC_PASSWORD=""
-        fi
-      fi
+      ORTHANC_AUTH_ENABLED="false"
+      ORTHANC_USERNAME=""
+      ORTHANC_PASSWORD=""
       ;;
     orthanc_external)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
       ORTHANC_MWL_ENABLED="true"
       ORTHANC_BASE_URL="$(prompt 'External Orthanc base URL' "${CURRENT_ORTHANC_BASE_URL:-http://localhost:8042}")"
       ORTHANC_VERIFY_TLS="$(prompt_yes_no 'Verify TLS certificate for external Orthanc?' "$(printf '%s' "${CURRENT_ORTHANC_VERIFY_TLS:-true}" | tr '[:upper:]' '[:lower:]')")"
-      ORTHANC_INTERNAL_PERMISSIVE="false"
       ORTHANC_AUTH_ENABLED="$(prompt_yes_no 'Enable Orthanc HTTP auth?' "$(printf '%s' "${CURRENT_ORTHANC_AUTH_ENABLED:-false}" | tr '[:upper:]' '[:lower:]')")"
       if [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
         ORTHANC_USERNAME="$(prompt 'Orthanc username' "${CURRENT_ORTHANC_USERNAME:-orthanc}")"
@@ -481,14 +454,6 @@ preflight_validate_env() {
   case "$RISPRO_DB_MODE" in internal|external) ;; *) err "Invalid RISPRO_DB_MODE: ${RISPRO_DB_MODE}"; return 1 ;; esac
   case "$RISPRO_DICOM_MODE" in embedded|orthanc_internal|orthanc_external) ;; *) err "Invalid RISPRO_DICOM_MODE: ${RISPRO_DICOM_MODE}"; return 1 ;; esac
   case "$RISPRO_MPPS_MODE" in disabled|internal_bridge) ;; *) err "Invalid RISPRO_MPPS_MODE: ${RISPRO_MPPS_MODE}"; return 1 ;; esac
-
-  if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
-    ORTHANC_INTERNAL_PERMISSIVE="false"
-  elif [ "${ORTHANC_INTERNAL_PERMISSIVE:-false}" = "true" ]; then
-    ORTHANC_AUTH_ENABLED="false"
-    ORTHANC_USERNAME=""
-    ORTHANC_PASSWORD=""
-  fi
 
   if [ "$RISPRO_DICOM_MODE" = "orthanc_external" ]; then
     case "$ORTHANC_BASE_URL" in
@@ -571,7 +536,6 @@ ORTHANC_TIMEOUT_SECONDS=${ORTHANC_TIMEOUT_SECONDS}
 ORTHANC_AUTH_ENABLED=${ORTHANC_AUTH_ENABLED}
 ORTHANC_USERNAME=${ORTHANC_USERNAME}
 ORTHANC_PASSWORD=${ORTHANC_PASSWORD}
-ORTHANC_INTERNAL_PERMISSIVE=${ORTHANC_INTERNAL_PERMISSIVE}
 ORTHANC_WORKLIST_TARGET=${ORTHANC_WORKLIST_TARGET}
 
 # -- MPPS Bridge --
@@ -593,17 +557,13 @@ render_orthanc_config() {
 
   local auth_enabled_json='false'
   local users_block='{}'
-  local permissive_dicom_block=''
+  local orthanc_dicom_block=''
 
-  if [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
+  if [ "$RISPRO_DICOM_MODE" = "orthanc_internal" ]; then
+    orthanc_dicom_block=$'  "DicomModalities": {},\n  "DicomCheckCalledAet": false,\n  "DicomCheckModalityHost": false,\n  "DicomAlwaysAllowEcho": true,\n  "DicomAlwaysAllowStore": true,\n  "DicomAlwaysAllowFind": true,\n  "DicomAlwaysAllowFindWorklist": true,\n  "DicomAlwaysAllowGet": true,\n  "DicomAlwaysAllowMove": true,'
+  elif [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
     auth_enabled_json='true'
     users_block="{\"$(json_escape "$ORTHANC_USERNAME")\": \"$(json_escape "$ORTHANC_PASSWORD")\"}"
-  fi
-
-  if [ "${ORTHANC_INTERNAL_PERMISSIVE:-false}" = "true" ]; then
-    auth_enabled_json='false'
-    users_block='{}'
-    permissive_dicom_block=$'  "DicomModalities": {},\n  "DicomCheckModalityHost": false,\n  "DicomAlwaysAllowEcho": true,\n  "DicomAlwaysAllowStore": true,\n  "DicomAlwaysAllowFind": true,\n  "DicomAlwaysAllowFindWorklist": true,\n  "DicomAlwaysAllowMove": true,\n  "DicomAlwaysAllowGet": true,'
   fi
 
   cat > "${ORTHANC_CONFIG_FILE}" <<EOF_ORTHANC
@@ -617,7 +577,7 @@ render_orthanc_config() {
   "DicomServerEnabled": true,
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
-${permissive_dicom_block}
+${orthanc_dicom_block}
   "HttpPort": 8042,
   "Plugins": ["/usr/share/orthanc/plugins/"],
   "Worklists": {
