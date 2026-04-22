@@ -20,6 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: ${RISPRO_APP_IMAGE_TARGET:-production}
     container_name: rispro-app
     env_file:
       - .env

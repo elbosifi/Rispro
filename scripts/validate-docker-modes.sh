@@ -69,6 +69,7 @@ write_env_file() {
   local orthanc_enabled="false"
   local orthanc_base_url=""
   local orthanc_verify_tls="true"
+  local app_image_target="production"
 
   if [ "${dicom_mode}" != "embedded" ]; then
     disable_embedded="1"
@@ -79,9 +80,11 @@ write_env_file() {
     orthanc_internal)
       orthanc_base_url="http://orthanc:8042"
       orthanc_verify_tls="false"
+      app_image_target="production-orthanc"
       ;;
     orthanc_external)
       orthanc_base_url="http://external-orthanc:8042"
+      app_image_target="production-orthanc"
       ;;
   esac
 
@@ -93,6 +96,7 @@ RISPRO_DB_MODE=${db_mode}
 RISPRO_DICOM_MODE=${dicom_mode}
 RISPRO_MPPS_MODE=${mpps_mode}
 RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=${disable_embedded}
+RISPRO_APP_IMAGE_TARGET=${app_image_target}
 DATABASE_URL=postgresql://rispro:rispro@postgres:5432/rispro
 DB_USER=rispro
 DB_PASSWORD=rispro

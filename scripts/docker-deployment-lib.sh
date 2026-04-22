@@ -228,6 +228,7 @@ hydrate_deployment_config_from_current_env() {
   SUPERVISOR_REAUTH_MINUTES="10"
   REQUEST_BODY_LIMIT="8mb"
   UPLOADS_DIR="storage/uploads"
+  RISPRO_APP_IMAGE_TARGET="production"
 
   ORTHANC_MWL_SHADOW_MODE="${CURRENT_ORTHANC_MWL_SHADOW_MODE:-false}"
   ORTHANC_WORKLIST_TARGET="${CURRENT_ORTHANC_WORKLIST_TARGET:-}"
@@ -269,6 +270,7 @@ hydrate_deployment_config_from_current_env() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
+      RISPRO_APP_IMAGE_TARGET="production"
       ;;
     orthanc_internal)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
@@ -279,11 +281,13 @@ hydrate_deployment_config_from_current_env() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
+      RISPRO_APP_IMAGE_TARGET="production-orthanc"
       ;;
     orthanc_external)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
       ORTHANC_MWL_ENABLED="${CURRENT_ORTHANC_MWL_ENABLED:-true}"
       ORTHANC_MWL_ENABLED="true"
+      RISPRO_APP_IMAGE_TARGET="production-orthanc"
       ;;
   esac
 
@@ -347,6 +351,7 @@ collect_deployment_config() {
   SUPERVISOR_REAUTH_MINUTES="10"
   REQUEST_BODY_LIMIT="8mb"
   UPLOADS_DIR="storage/uploads"
+  RISPRO_APP_IMAGE_TARGET="production"
   ORTHANC_MWL_SHADOW_MODE="false"
   ORTHANC_WORKLIST_TARGET=""
   ORTHANC_TIMEOUT_SECONDS="${CURRENT_ORTHANC_TIMEOUT_SECONDS:-10}"
@@ -396,6 +401,7 @@ collect_deployment_config() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
+      RISPRO_APP_IMAGE_TARGET="production"
       ;;
     orthanc_internal)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
@@ -405,6 +411,7 @@ collect_deployment_config() {
       ORTHANC_AUTH_ENABLED="false"
       ORTHANC_USERNAME=""
       ORTHANC_PASSWORD=""
+      RISPRO_APP_IMAGE_TARGET="production-orthanc"
       ;;
     orthanc_external)
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY="1"
@@ -419,6 +426,7 @@ collect_deployment_config() {
         ORTHANC_USERNAME=""
         ORTHANC_PASSWORD=""
       fi
+      RISPRO_APP_IMAGE_TARGET="production-orthanc"
       ;;
   esac
 
@@ -497,6 +505,7 @@ RISPRO_DB_MODE=${RISPRO_DB_MODE}
 RISPRO_DICOM_MODE=${RISPRO_DICOM_MODE}
 RISPRO_MPPS_MODE=${RISPRO_MPPS_MODE}
 RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY=${RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY}
+RISPRO_APP_IMAGE_TARGET=${RISPRO_APP_IMAGE_TARGET}
 
 # -- Database --
 DATABASE_URL=${DATABASE_URL}
