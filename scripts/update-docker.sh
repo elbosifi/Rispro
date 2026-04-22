@@ -39,10 +39,10 @@ check_git_repo() {
   fi
 
   log "Forcing repository to match origin/${current_branch}..."
-  git fetch origin "${current_branch}"
   git reset --hard HEAD
   git clean -fd
-  git pull origin "${current_branch}"
+  git fetch origin "${current_branch}"
+  git pull
   ok 'Git update completed.'
 }
 
@@ -51,6 +51,17 @@ build_and_restart() {
   log 'Building and restarting containers...'
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" up -d --build
   ok 'Containers rebuilt and restarted.'
+}
+
+should_reconfigure() {
+  case "${1:-}" in
+    --reconfigure|reconfigure)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 main() {
@@ -67,7 +78,15 @@ main() {
   load_existing_config
   check_git_repo
   load_existing_config
-  collect_deployment_config
+
+  if should_reconfigure "${1:-}"; then
+    warn 'Reconfigure mode enabled. Prompting for deployment settings.'
+    collect_deployment_config
+  else
+    log 'Reusing existing deployment configuration from .env'
+    hydrate_deployment_config_from_current_env
+  fi
+
   run_compose_preflight
   ok "Updated ${ENV_FILE}"
   build_and_restart
