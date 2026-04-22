@@ -108,55 +108,53 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
         <style>
           @page { size: A5 portrait; margin: 6mm; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #efefef; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .sheet {
-            width: 136mm;
-            height: 198mm;
+            width: 100%;
             margin: 0 auto;
-            border: 1px solid #c9c9c9;
-            border-radius: 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
             padding: 5mm;
-            background: #efefef;
-            overflow: hidden;
+            background: #ffffff;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .top { display: grid; grid-template-columns: 1fr 40mm; gap: 4mm; align-items: start; }
-          .brand-wrap { display: flex; gap: 3mm; align-items: center; }
-          .logo { width: 22mm; height: 22mm; object-fit: contain; }
-          .brand-title { color: #b11116; margin: 0; font-size: 7.5mm; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
-          .brand-sub { margin: 1mm 0 0; font-size: 4.2mm; color: #24272c; }
-          .rule { margin-top: 1.5mm; display: flex; align-items: center; gap: 2.4mm; }
+          .top { display: grid; grid-template-columns: 1fr 118px; gap: 12px; align-items: start; }
+          .brand-wrap { display: flex; gap: 10px; align-items: center; }
+          .logo { width: 64px; height: 64px; object-fit: contain; }
+          .brand-title { color: #b11116; margin: 0; font-size: 19px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
+          .brand-sub { margin: 2px 0 0; font-size: 13px; color: #24272c; }
+          .rule { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
           .rule-line { flex: 1; height: 0.35mm; background: #d34f53; opacity: 0.8; }
-          .rule-dot { width: 2.2mm; height: 2.2mm; border-radius: 50%; background: #b11116; }
-          .slip-title { margin: 2.4mm 0 0; color: #b11116; letter-spacing: 1.5mm; text-transform: uppercase; font-size: 7mm; font-weight: 500; }
-          .qr-card { border: 0.45mm solid #e2676d; border-radius: 3mm; background: #f8f8f8; padding: 2mm; }
+          .rule-dot { width: 8px; height: 8px; border-radius: 50%; background: #b11116; }
+          .slip-title { margin: 8px 0 0; color: #b11116; letter-spacing: 4px; text-transform: uppercase; font-size: 28px; font-weight: 500; }
+          .qr-card { border: 1px solid #e2676d; border-radius: 10px; background: #ffffff; padding: 6px; }
           .qr-card img { width: 100%; display: block; border-radius: 2px; }
-          .qr-title { margin-top: 2.2mm; color: #b11116; text-transform: uppercase; font-size: 3.9mm; font-weight: 800; line-height: 1.35; }
-          .qr-note { margin-top: 1.6mm; font-size: 2.7mm; color: #2f3135; line-height: 1.35; }
-          .rows { margin-top: 3mm; border-top: 0.3mm solid #d3d4d6; }
+          .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
+          .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
+          .rows { margin-top: 10px; border-top: 1px solid #d3d4d6; }
           .info-row {
             display: grid;
-            grid-template-columns: 42mm 4mm 1fr;
+            grid-template-columns: 170px 18px 1fr;
             align-items: center;
-            height: 9.3mm;
-            border-bottom: 0.3mm solid #d3d4d6;
+            height: 38px;
+            border-bottom: 1px solid #d3d4d6;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .info-label-wrap { display: flex; align-items: center; gap: 2.2mm; color: #25282d; }
-          .info-icon { min-width: 7mm; display: inline-flex; align-items: center; justify-content: center; height: 7mm; border-radius: 1.6mm; background: #b11116; color: white; font-weight: 800; font-size: 2.3mm; letter-spacing: 0.02em; }
+          .info-label-wrap { display: flex; align-items: center; gap: 8px; color: #25282d; }
+          .info-icon { min-width: 22px; display: inline-flex; align-items: center; justify-content: center; height: 22px; border-radius: 5px; background: #b11116; color: white; font-weight: 800; font-size: 10px; letter-spacing: 0.02em; }
           .info-label {
-            font-size: 4mm;
+            font-size: 13px;
             color: #22262b;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          .pipe { text-align: center; color: #9ca3af; font-size: 4.6mm; }
+          .pipe { text-align: center; color: #9ca3af; font-size: 15px; }
           .info-value {
-            font-size: 4.4mm;
+            font-size: 15px;
             font-weight: 700;
             color: #0f1115;
             line-height: 1.1;
@@ -166,23 +164,24 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
           }
           .info-value.highlight { color: #b11116; }
           .notes {
-            margin-top: 2.2mm;
+            margin-top: 8px;
             display: grid;
-            grid-template-columns: 8.5mm 1fr;
-            gap: 2mm;
-            background: #e8e1e2;
-            border-radius: 2.4mm;
-            padding: 2mm;
-            max-height: 25mm;
+            grid-template-columns: 34px 1fr;
+            gap: 8px;
+            background: #ffffff;
+            border: 1px solid #d1d5db;
+            border-radius: 8px;
+            padding: 8px;
+            max-height: 92px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .notes-icon { width: 8.5mm; height: 8.5mm; border-radius: 1.4mm; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 2.8mm; }
-          .notes-title { margin: 0; color: #b11116; font-size: 4.7mm; font-weight: 800; }
+          .notes-icon { width: 34px; height: 34px; border-radius: 6px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
+          .notes-title { margin: 0; color: #b11116; font-size: 15px; font-weight: 800; }
           .notes-text {
-            margin: 1mm 0 0;
-            font-size: 3.5mm;
+            margin: 3px 0 0;
+            font-size: 12px;
             line-height: 1.28;
             color: #20242a;
             display: -webkit-box;
@@ -190,41 +189,41 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             -webkit-line-clamp: 3;
             overflow: hidden;
           }
-          .mid-divider { margin: 1.8mm 0 1.4mm; display: flex; align-items: center; gap: 2.4mm; }
+          .mid-divider { margin: 8px 0 6px; display: flex; align-items: center; gap: 8px; }
           .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
           .meta-item {
             display: flex;
             align-items: center;
-            gap: 1.7mm;
-            padding: 1.2mm 1mm;
-            border-right: 0.3mm solid #c7c8cb;
-            min-height: 13mm;
+            gap: 6px;
+            padding: 4px;
+            border-right: 1px solid #c7c8cb;
+            min-height: 48px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
           .meta-item:last-child { border-right: none; }
-          .meta-icon { width: 6.8mm; height: 6.8mm; border-radius: 50%; border: 0.45mm solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 2.6mm; }
+          .meta-icon { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px; }
           .meta-text {
-            font-size: 3.5mm;
+            font-size: 12px;
             line-height: 1.2;
             color: #20242a;
             overflow: hidden;
           }
           .meta-text strong { color: #b11116; }
           .queue {
-            margin-top: 1.8mm;
-            border: 0.45mm solid #e2676d;
-            border-radius: 2.4mm;
-            padding: 1.8mm;
-            background: #f3f3f3;
+            margin-top: 8px;
+            border: 1px solid #e2676d;
+            border-radius: 8px;
+            padding: 8px;
+            background: #ffffff;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .queue-title { text-align: center; margin: 0 0 1.1mm; color: #b11116; text-transform: uppercase; font-size: 4.8mm; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
-          .queue img { width: 100%; height: 11mm; display: block; }
-          .queue-label { text-align: center; margin: 1mm 0 0; font-size: 3mm; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .small-muted { color: #6b7280; font-size: 2.6mm; }
+          .queue-title { text-align: center; margin: 0 0 4px; color: #b11116; text-transform: uppercase; font-size: 14px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
+          .queue img { width: 100%; height: 42px; display: block; }
+          .queue-label { text-align: center; margin: 4px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .small-muted { color: #6b7280; font-size: 10px; }
           .rtl { direction: rtl; text-align: right; }
         </style>
       </head>
