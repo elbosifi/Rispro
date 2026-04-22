@@ -49,6 +49,7 @@ main() {
       MPPS_PASSWORD="${CURRENT_MPPS_PASSWORD:-}"
       run_compose_preflight
       bring_up_stack
+      wait_for_internal_orthanc_worklists
       wait_for_app_health || true
       print_deployment_summary 'RISpro is running.'
       exit 0
@@ -59,6 +60,7 @@ main() {
   run_compose_preflight
   ok "Wrote ${ENV_FILE}"
   bring_up_stack
+  wait_for_internal_orthanc_worklists
   wait_for_app_health || true
   print_deployment_summary 'RISpro is ready.'
 }

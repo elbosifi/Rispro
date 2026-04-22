@@ -80,6 +80,7 @@ function buildOrthancWorklistPayload(
   stableId: string,
   stationAeTitle: string
 ): Record<string, unknown> {
+  const accessionNumber = `V2-${row.id}`;
   const canonicalDataset = buildCanonicalMwlDataset(
     {
       modalityCode: row.modality_code,
@@ -94,7 +95,10 @@ function buildOrthancWorklistPayload(
       examNameEn: row.exam_name_en,
       examNameAr: row.exam_name_ar,
       modalityNameEn: row.modality_name_en,
-      modalityNameAr: row.modality_name_ar
+      modalityNameAr: row.modality_name_ar,
+      accessionNumber,
+      requestedProcedureId: stableId,
+      scheduledStationAeTitle: stationAeTitle,
     },
     { mwlProfile: "minimal" }
   );

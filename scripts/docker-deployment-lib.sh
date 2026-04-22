@@ -582,9 +582,12 @@ render_orthanc_config() {
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
   "HttpPort": 8042,
-  "Plugins": ["/usr/share/orthanc/plugins"],
+  "Plugins": ["/usr/share/orthanc/plugins/"],
   "Worklists": {
-    "Enable": true
+    "Enable": true,
+    "Directory": "/var/lib/orthanc/worklists",
+    "SaveInOrthancDatabase": false,
+    "SetStudyInstanceUidIfMissing": true
   }
 }
 EOF_ORTHANC
@@ -631,6 +634,29 @@ wait_for_app_health() {
   done
 
   warn 'Application did not become healthy within the expected time window.'
+  return 1
+}
+
+wait_for_internal_orthanc_worklists() {
+  if [ "$RISPRO_DICOM_MODE" != "orthanc_internal" ]; then
+    return 0
+  fi
+
+  local attempts=30
+  local attempt=1
+
+  log 'Waiting for internal Orthanc Worklists readiness...'
+  while [ "$attempt" -le "$attempts" ]; do
+    if "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" exec -T orthanc /usr/local/bin/check-worklists-ready.sh >/dev/null 2>&1; then
+      ok 'Internal Orthanc Worklists plugin is ready.'
+      return 0
+    fi
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+
+  err 'Internal Orthanc Worklists readiness check failed.'
+  "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" logs orthanc || true
   return 1
 }
 

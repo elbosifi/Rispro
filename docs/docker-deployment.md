@@ -22,7 +22,13 @@ The supervisor credentials are printed at the end of setup.
 ./scripts/update-docker.sh
 ```
 
-This pulls the latest code, re-prompts with the current deployment values as defaults, rewrites `.env` if needed, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved.
+This pulls the latest code, reuses the current `.env` deployment settings by default, validates the stack, rebuilds, restarts containers, and verifies health. Volumes are preserved.
+
+If you want to change deployment settings during an update, run:
+
+```bash
+./scripts/update-docker.sh --reconfigure
+```
 
 The update script now force-syncs the working tree before pulling:
 
@@ -111,11 +117,28 @@ This is the compatibility/default path. The RISpro app container includes the so
 
 The deployment scripts add an `orthanc` container automatically, generate its config at `docker/orthanc/generated/orthanc.json`, disable the embedded RISpro MWL listener, and point RISpro at `http://orthanc:8042`.
 
+The internal Orthanc image is now pinned through [docker/orthanc/Dockerfile](/Users/serajalsaifi/Nextcloud/RISpro/docker/orthanc/Dockerfile), which builds from `orthancteam/orthanc:26.4.0`. The Orthanc Team image explicitly documents that its default `26.4.0` image includes the Worklists plugin, which makes it a safer MWL target than the old unpinned `jodogne/orthanc-plugins:latest` setup.
+
 | Container | Purpose | Ports |
 |-----------|---------|-------|
 | `rispro-orthanc` | Internal Orthanc MWL / DICOM target | 8042, 4242 |
 
 Authentication is off by default. If you explicitly enable Orthanc auth during setup/update, the scripts prompt for credentials and bake them into the generated Orthanc config.
+
+The generated internal Orthanc config now sets:
+- `Plugins=["/usr/share/orthanc/plugins/"]`
+- `Worklists.Enable=true`
+- `Worklists.Directory=/var/lib/orthanc/worklists`
+
+The deployment also mounts a dedicated `orthanc-worklists` volume at `/var/lib/orthanc/worklists`.
+
+Before RISpro considers the stack healthy, the internal Orthanc deployment now verifies:
+- the plugin binary exists at `/usr/share/orthanc/plugins/libOrthancWorklists.so`
+- the generated config contains the required Worklists settings
+- the configured worklist directory exists
+- the runtime `/worklists` route responds without `404` or `405`
+
+This readiness probe lives in [docker/orthanc/check-worklists-ready.sh](/Users/serajalsaifi/Nextcloud/RISpro/docker/orthanc/check-worklists-ready.sh), is wired into the Orthanc container healthcheck, and is also run explicitly by setup/update after `docker compose up -d --build`.
 
 ### Mode 3: External Orthanc
 

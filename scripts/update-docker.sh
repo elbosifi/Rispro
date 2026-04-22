@@ -90,6 +90,7 @@ main() {
   run_compose_preflight
   ok "Updated ${ENV_FILE}"
   build_and_restart
+  wait_for_internal_orthanc_worklists
   wait_for_app_health || true
   print_deployment_summary 'Update complete.'
 }

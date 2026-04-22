@@ -18,6 +18,12 @@ export interface CanonicalMwlDataset {
   scheduledProcedureStepSequence: [CanonicalScheduledProcedureStep];
 }
 
+interface CanonicalMwlDatasetWithOptionalIds extends CanonicalMwlDataset {
+  accessionNumber?: string;
+  requestedProcedureId?: string;
+  scheduledStationAeTitle?: string;
+}
+
 export interface CanonicalMwlInput {
   modalityCode: string | null | undefined;
   appointmentDate: string | null | undefined;
@@ -32,6 +38,9 @@ export interface CanonicalMwlInput {
   examNameAr: string | null | undefined;
   modalityNameEn: string | null | undefined;
   modalityNameAr: string | null | undefined;
+  accessionNumber?: string | null | undefined;
+  requestedProcedureId?: string | null | undefined;
+  scheduledStationAeTitle?: string | null | undefined;
 }
 
 function assertMinimalProfile(profile: string): asserts profile is MwlProfile {
@@ -136,6 +145,15 @@ function buildSequenceDump(tag: string, lines: string[]): string[] {
 
 export function renderCanonicalMwlToDump(dataset: CanonicalMwlDataset): string {
   const sps = dataset.scheduledProcedureStepSequence[0];
+  const extended = dataset as CanonicalMwlDatasetWithOptionalIds;
+  const sequenceLines = [
+    extended.accessionNumber ? `(0008,0050) SH ${quoteDicomValue(extended.accessionNumber)}` : null,
+    `(0008,0060) CS ${quoteDicomValue(sps.modality)}`,
+    extended.scheduledStationAeTitle ? `(0040,0001) AE ${quoteDicomValue(extended.scheduledStationAeTitle)}` : null,
+    extended.requestedProcedureId ? `(0040,0009) SH ${quoteDicomValue(extended.requestedProcedureId)}` : null,
+    `(0040,0002) DA ${quoteDicomValue(sps.scheduledProcedureStepStartDate)}`,
+    `(0040,0007) LO ${quoteDicomValue(sps.scheduledProcedureStepDescription)}`,
+  ].filter((line): line is string => Boolean(line));
 
   return [
     "# RISpro generated Modality Worklist source file",
@@ -144,16 +162,13 @@ export function renderCanonicalMwlToDump(dataset: CanonicalMwlDataset): string {
     `(0010,0020) LO ${quoteDicomValue(dataset.patientId)}`,
     `(0010,0030) DA ${quoteDicomValue(dataset.patientBirthDate)}`,
     `(0010,0040) CS ${quoteDicomValue(dataset.patientSex)}`,
-    ...buildSequenceDump("(0040,0100)", [
-      `(0008,0060) CS ${quoteDicomValue(sps.modality)}`,
-      `(0040,0002) DA ${quoteDicomValue(sps.scheduledProcedureStepStartDate)}`,
-      `(0040,0007) LO ${quoteDicomValue(sps.scheduledProcedureStepDescription)}`,
-    ]),
+    ...buildSequenceDump("(0040,0100)", sequenceLines),
   ].join("\n");
 }
 
 export function renderCanonicalMwlToOrthancJson(dataset: CanonicalMwlDataset): Record<string, unknown> {
   const sps = dataset.scheduledProcedureStepSequence[0];
+  const extended = dataset as CanonicalMwlDatasetWithOptionalIds;
 
   return {
     SpecificCharacterSet: dataset.specificCharacterSet,
@@ -161,9 +176,13 @@ export function renderCanonicalMwlToOrthancJson(dataset: CanonicalMwlDataset): R
     PatientID: dataset.patientId,
     PatientBirthDate: dataset.patientBirthDate,
     PatientSex: dataset.patientSex,
+    ...(extended.accessionNumber ? { AccessionNumber: extended.accessionNumber } : {}),
+    ...(extended.requestedProcedureId ? { RequestedProcedureID: extended.requestedProcedureId } : {}),
     ScheduledProcedureStepSequence: [
       {
         Modality: sps.modality,
+        ...(extended.scheduledStationAeTitle ? { ScheduledStationAETitle: extended.scheduledStationAeTitle } : {}),
+        ...(extended.requestedProcedureId ? { ScheduledProcedureStepID: extended.requestedProcedureId } : {}),
         ScheduledProcedureStepStartDate: sps.scheduledProcedureStepStartDate,
         ScheduledProcedureStepDescription: sps.scheduledProcedureStepDescription,
       },

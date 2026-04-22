@@ -2,27 +2,40 @@ services:
   app:
     depends_on:
       orthanc:
-        condition: service_started
+        condition: service_healthy
     environment:
       RISPRO_DISABLE_EMBEDDED_DICOM_GATEWAY: "1"
       ORTHANC_MWL_ENABLED: "true"
       ORTHANC_BASE_URL: "http://orthanc:8042"
 
   orthanc:
-    image: jodogne/orthanc-plugins:latest
+    build:
+      context: ./docker/orthanc
+    image: rispro-orthanc-internal:26.4.0
     container_name: rispro-orthanc
     env_file:
       - .env
+    environment:
+      WORKLISTS_PLUGIN_ENABLED: "true"
     volumes:
       - orthanc-data:/var/lib/orthanc/db
+      - orthanc-worklists:/var/lib/orthanc/worklists
       - ./docker/orthanc/generated/orthanc.json:/etc/orthanc/orthanc.json:ro
     ports:
       - "8042:8042"
       - "4242:4242"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/check-worklists-ready.sh", "--healthcheck"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
     networks:
       - rispro-network
 
 volumes:
   orthanc-data:
+    driver: local
+  orthanc-worklists:
     driver: local

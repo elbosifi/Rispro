@@ -40,9 +40,12 @@ write_orthanc_config() {
   "DicomAet": "RISPRO_ORTHANC",
   "DicomPort": 4242,
   "HttpPort": 8042,
-  "Plugins": ["/usr/share/orthanc/plugins"],
+  "Plugins": ["/usr/share/orthanc/plugins/"],
   "Worklists": {
-    "Enable": true
+    "Enable": true,
+    "Directory": "/var/lib/orthanc/worklists",
+    "SaveInOrthancDatabase": false,
+    "SetStudyInstanceUidIfMissing": true
   }
 }
 EOF_ORTHANC
