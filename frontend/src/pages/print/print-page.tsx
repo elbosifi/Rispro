@@ -8,10 +8,8 @@ import {
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
-import { printAppointmentSlip } from "@/lib/print-utils";
+import { printAppointmentList, printAppointmentSlip } from "@/lib/print-utils";
 import { DateInput } from "@/components/common/date-input";
-import { AppointmentEditor } from "@/components/appointments/appointment-editor";
-import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Button, Card } from "@/components/shared";
@@ -32,11 +30,9 @@ export default function PrintPage() {
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
   const autoprintParam = searchParams.get("autoprint") === "1";
-  const printTargetKey = `appointment:${appointmentIdParam ?? ""}`;
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -82,7 +78,7 @@ export default function PrintPage() {
     appointments: AppointmentWithDetails[],
     date: string,
   ) {
-    // Print list functionality
+    printAppointmentList(appointments, date);
   }
 
   function todayList() {
@@ -168,6 +164,23 @@ export default function PrintPage() {
 
   const modalities = lookups?.modalities ?? [];
 
+  useEffect(() => {
+    if (appointments.length === 0) {
+      setSelectedAppointment(null);
+      return;
+    }
+
+    if (!selectedAppointment) {
+      setSelectedAppointment(appointments[0]);
+      return;
+    }
+
+    const exists = appointments.some((appointment) => appointment.id === selectedAppointment.id);
+    if (!exists) {
+      setSelectedAppointment(appointments[0]);
+    }
+  }, [appointments, selectedAppointment]);
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:hidden">
@@ -238,6 +251,75 @@ export default function PrintPage() {
                 {t(language, "print.printSlip")}
               </Button>
             </div>
+          </div>
+
+          <div className="p-4">
+            {isLoading ? (
+              <div className="p-6 text-center text-muted-foreground">
+                {t(language, "print.loading")}
+              </div>
+            ) : appointments.length === 0 ? (
+              <div className="p-6 text-center text-muted-foreground">
+                {t(language, "print.empty")}
+              </div>
+            ) : (
+              <ul className="divide-y divide-border max-h-[520px] overflow-y-auto">
+                {appointments.map((appointment) => (
+                  <li
+                    key={appointment.id}
+                    className={`p-3 cursor-pointer transition-colors ${
+                      selectedAppointment?.id === appointment.id ? "bg-accent/10" : "hover:bg-muted/40"
+                    }`}
+                    onClick={() => setSelectedAppointment(appointment)}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate">
+                          {appointment.englishFullName || appointment.arabicFullName}
+                        </p>
+                        <p className="text-sm text-muted-foreground truncate">
+                          {appointment.accessionNumber} • {appointment.modalityNameEn || "—"} • {formatDateLy(appointment.appointmentDate)}
+                        </p>
+                      </div>
+                      {selectedAppointment?.id === appointment.id ? <EditedBadge /> : null}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <div className="p-4 border-b border-border">
+            <h3 className="font-semibold">{t(language, "print.slipPreview")}</h3>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {!selectedAppointment ? (
+              <div className="p-6 text-center text-muted-foreground">
+                {t(language, "print.selectPrompt")}
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <Field label="Patient" value={selectedAppointment.englishFullName || selectedAppointment.arabicFullName} />
+                  <Field label="Accession" value={selectedAppointment.accessionNumber} />
+                  <Field label="MRN" value={selectedAppointment.mrn || "—"} />
+                  <Field label={t(language, "common.date")} value={formatDateLy(selectedAppointment.appointmentDate)} />
+                  <Field label={t(language, "common.modality")} value={selectedAppointment.modalityNameEn || "—"} />
+                  <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
+                  <Field label="Status" value={selectedAppointment.status || "—"} />
+                  <Field label="Walk-In" value={selectedAppointment.isWalkIn ? t(language, "print.walkInYes") : t(language, "print.walkInNo")} />
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" onClick={() => handlePrintSlip(selectedAppointment)}>
+                    {t(language, "print.printSelected")}
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </Card>
       </div>

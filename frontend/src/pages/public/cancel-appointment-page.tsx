@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApiError } from "@/lib/api-client";
@@ -26,6 +26,19 @@ function classifyLinkError(error: unknown): LinkErrorState {
   return "invalid";
 }
 
+function formatBookingStatusAr(status: string): string {
+  const map: Record<string, string> = {
+    scheduled: "مجدول",
+    arrived: "وصل",
+    waiting: "في الانتظار",
+    completed: "مكتمل",
+    cancelled: "ملغي",
+    "no-show": "لم يحضر",
+    discontinued: "متوقف",
+  };
+  return map[status] ?? status;
+}
+
 function StatusCard(props: { title: string; message: string; tone?: "neutral" | "success" | "danger" }) {
   const tone = props.tone ?? "neutral";
   const toneClass =
@@ -36,10 +49,22 @@ function StatusCard(props: { title: string; message: string; tone?: "neutral" | 
         : "border-slate-200 bg-white text-slate-900";
 
   return (
-    <div className={`rounded-2xl border p-4 ${toneClass}`}>
-      <h2 className="text-lg font-semibold">{props.title}</h2>
-      <p className="mt-1 text-sm leading-6">{props.message}</p>
+    <div className={`rounded-2xl border p-4 shadow-sm ${toneClass}`}>
+      <h2 className="text-base font-bold">{props.title}</h2>
+      <p className="mt-1 text-sm leading-7">{props.message}</p>
     </div>
+  );
+}
+
+function PublicPageFrame(props: { children: ReactNode }) {
+  return (
+    <main
+      dir="rtl"
+      className="min-h-screen bg-gradient-to-b from-rose-50 via-white to-slate-50 px-4 py-8 text-slate-900"
+      style={{ fontFamily: "'Tajawal', 'Cairo', 'Noto Kufi Arabic', sans-serif" }}
+    >
+      <div className="mx-auto w-full max-w-xl space-y-4">{props.children}</div>
+    </main>
   );
 }
 
@@ -65,25 +90,23 @@ export default function PublicCancelAppointmentPage() {
 
   if (!token) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-10">
-        <div className="mx-auto w-full max-w-md space-y-4">
-          <StatusCard
-            tone="danger"
-            title="Invalid cancellation link"
-            message="This link is missing required information."
-          />
-        </div>
-      </main>
+      <PublicPageFrame>
+        <StatusCard
+          tone="danger"
+          title="رابط الإلغاء غير صالح"
+          message="الرابط لا يحتوي على معلومات كافية."
+        />
+      </PublicPageFrame>
     );
   }
 
   if (previewQuery.isLoading) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-10">
-        <div className="mx-auto w-full max-w-md rounded-2xl border border-slate-200 bg-white p-4">
-          <p className="text-sm text-slate-600">Loading appointment details...</p>
+      <PublicPageFrame>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <p className="text-sm text-slate-600">جاري تحميل بيانات الموعد...</p>
         </div>
-      </main>
+      </PublicPageFrame>
     );
   }
 
@@ -91,107 +114,107 @@ export default function PublicCancelAppointmentPage() {
     const state = classifyLinkError(previewQuery.error);
     const title =
       state === "expired"
-        ? "Cancellation link expired"
+        ? "انتهت صلاحية رابط الإلغاء"
         : state === "unavailable"
-          ? "Cancellation temporarily unavailable"
-          : "Invalid cancellation link";
+          ? "خدمة الإلغاء غير متاحة مؤقتًا"
+          : "رابط الإلغاء غير صالح";
     const message =
       state === "expired"
-        ? "This link has expired. Please contact the hospital to cancel your appointment."
+        ? "انتهت صلاحية هذا الرابط. يرجى التواصل مع الاستقبال لإلغاء الموعد."
         : state === "unavailable"
-          ? "Please contact the hospital reception desk for help."
-          : "This link is invalid or has been tampered with.";
+          ? "يرجى التواصل مع قسم الاستقبال للمساعدة."
+          : "الرابط غير صالح أو تم التلاعب به.";
 
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-10">
-        <div className="mx-auto w-full max-w-md space-y-4">
-          <StatusCard tone="danger" title={title} message={message} />
-        </div>
-      </main>
+      <PublicPageFrame>
+        <StatusCard tone="danger" title={title} message={message} />
+      </PublicPageFrame>
     );
   }
 
   const preview = previewQuery.data;
   if (!preview) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-10">
-        <div className="mx-auto w-full max-w-md space-y-4">
-          <StatusCard
-            tone="danger"
-            title="Invalid cancellation link"
-            message="Unable to load appointment details for this link."
-          />
-        </div>
-      </main>
+      <PublicPageFrame>
+        <StatusCard
+          tone="danger"
+          title="تعذر تحميل بيانات الموعد"
+          message="لا يمكن عرض معلومات الموعد لهذا الرابط."
+        />
+      </PublicPageFrame>
     );
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-10">
-      <div className="mx-auto w-full max-w-md space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5">
-          <h1 className="text-xl font-bold text-slate-900">Cancel Appointment</h1>
-          <p className="mt-1 text-sm text-slate-600">Please review your appointment before confirmation.</p>
-
-          {result ? (
-            <div className="mt-4 space-y-3">
-              {result.alreadyCancelled ? (
-                <StatusCard
-                  title="Appointment already cancelled"
-                  message="This appointment was already cancelled earlier."
-                  tone="neutral"
-                />
-              ) : (
-                <StatusCard
-                  title="Appointment cancelled"
-                  message="Your appointment has been cancelled successfully."
-                  tone="success"
-                />
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                <p><strong>Patient:</strong> {preview.patientDisplayName}</p>
-                <p><strong>Date:</strong> {preview.bookingDate}</p>
-                <p><strong>Modality:</strong> {preview.modalityName}</p>
-                <p><strong>Exam:</strong> {preview.examName}</p>
-                <p><strong>Status:</strong> {preview.currentStatus}</p>
-              </div>
-
-              <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-                Warning: cancellation cannot be undone.
-              </p>
-
-              {cancelMutation.isError ? (
-                <StatusCard
-                  tone="danger"
-                  title="Cancellation failed"
-                  message="Please try again or contact the hospital reception desk."
-                />
-              ) : null}
-
-              <div className="mt-4 flex gap-2">
-                <button
-                  type="button"
-                  className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
-                  onClick={() => navigate(-1)}
-                >
-                  Back
-                </button>
-                <button
-                  type="button"
-                  className="flex-1 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  disabled={cancelMutation.isPending}
-                  onClick={() => cancelMutation.mutate()}
-                >
-                  {cancelMutation.isPending ? "Cancelling..." : "Confirm cancellation"}
-                </button>
-              </div>
-            </>
-          )}
+    <PublicPageFrame>
+      <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lg shadow-slate-200/60">
+        <div className="mb-4 flex items-center gap-3 border-b border-slate-100 pb-4">
+          <img src="/assets/nccb-logo.png" alt="NCCB Logo" className="h-14 w-14 rounded-xl object-contain" />
+          <div>
+            <p className="text-sm font-bold text-rose-700">المركز الوطني لعلاج الأورام - بنغازي</p>
+            <h1 className="text-lg font-extrabold text-slate-900">إلغاء الموعد</h1>
+            <p className="text-xs text-slate-500">قسم الأشعة التشخيصية</p>
+          </div>
         </div>
+
+        {result ? (
+          <div className="mt-4 space-y-3">
+            {result.alreadyCancelled ? (
+              <StatusCard
+                title="تم إلغاء الموعد مسبقًا"
+                message="هذا الموعد تم إلغاؤه من قبل."
+                tone="neutral"
+              />
+            ) : (
+              <StatusCard
+                title="تم إلغاء الموعد بنجاح"
+                message="تم تسجيل طلب الإلغاء بنجاح."
+                tone="success"
+              />
+            )}
+          </div>
+        ) : (
+          <>
+            <div className="mt-4 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              <p><strong>اسم المريض:</strong> {preview.patientDisplayName}</p>
+              <p><strong>تاريخ الموعد:</strong> {preview.bookingDate}</p>
+              <p><strong>الجهاز:</strong> {preview.modalityName}</p>
+              <p><strong>نوع الفحص:</strong> {preview.examName}</p>
+              <p><strong>الحالة الحالية:</strong> {formatBookingStatusAr(preview.currentStatus)}</p>
+            </div>
+
+            <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              تنبيه: لا يمكن التراجع عن الإلغاء بعد التأكيد.
+            </p>
+
+            {cancelMutation.isError ? (
+              <StatusCard
+                tone="danger"
+                title="تعذر إلغاء الموعد"
+                message="يرجى المحاولة مرة أخرى أو التواصل مع الاستقبال."
+              />
+            ) : null}
+
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+                onClick={() => navigate(-1)}
+              >
+                رجوع
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                disabled={cancelMutation.isPending}
+                onClick={() => cancelMutation.mutate()}
+              >
+                {cancelMutation.isPending ? "جاري الإلغاء..." : "تأكيد الإلغاء"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
-    </main>
+    </PublicPageFrame>
   );
 }

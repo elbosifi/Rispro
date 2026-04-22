@@ -56,7 +56,7 @@ describe("PublicCancelAppointmentPage", () => {
   it("loads preview from token", async () => {
     renderPage();
 
-    expect(await screen.findByText("Cancel Appointment")).toBeTruthy();
+    expect(await screen.findByText("إلغاء الموعد")).toBeTruthy();
     expect(await screen.findByText(/Test Patient/i)).toBeTruthy();
     expect(fetchPublicAppointmentCancelPreview).toHaveBeenCalledWith("test-token");
   });
@@ -65,13 +65,13 @@ describe("PublicCancelAppointmentPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText("Cancel Appointment");
-    await user.click(screen.getByRole("button", { name: /Confirm cancellation/i }));
+    await screen.findByText("إلغاء الموعد");
+    await user.click(screen.getByRole("button", { name: /تأكيد الإلغاء/i }));
 
     await waitFor(() => {
       expect(cancelPublicAppointment).toHaveBeenCalledWith("test-token");
     });
-    expect(await screen.findByText(/Appointment cancelled/i)).toBeTruthy();
+    expect(await screen.findByText(/تم إلغاء الموعد بنجاح/i)).toBeTruthy();
   });
 
   it("shows expired-link state", async () => {
@@ -81,6 +81,6 @@ describe("PublicCancelAppointmentPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText(/Cancellation link expired/i)).toBeTruthy();
+    expect(await screen.findByText(/انتهت صلاحية رابط الإلغاء/i)).toBeTruthy();
   });
 });
