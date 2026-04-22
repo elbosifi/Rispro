@@ -8,6 +8,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { X } from "lucide-react";
 import { SearchInput } from "@/components/shared/SearchInput";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { searchPatients } from "@/lib/api-hooks";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -16,6 +17,7 @@ interface Patient {
   id: number;
   arabicFullName: string;
   englishFullName?: string | null;
+  category?: "oncology" | "non_oncology" | null;
   identifierType?: string | null;
   identifierValue?: string | null;
   nationalId?: string | null;
@@ -131,7 +133,10 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>
-            {language === "ar" ? selectedPatient.arabicFullName : (selectedPatient.englishFullName || selectedPatient.arabicFullName)}
+            <span>{language === "ar" ? selectedPatient.arabicFullName : (selectedPatient.englishFullName || selectedPatient.arabicFullName)}</span>
+            <span style={{ marginInlineStart: 8 }}>
+              <PatientCategoryBadge category={selectedPatient.category} showWhenUnset />
+            </span>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 2 }}>
             {language === "ar" ? selectedPatient.englishFullName : selectedPatient.arabicFullName}
@@ -223,6 +228,9 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
                   }
                 >
                   <div style={{ fontWeight: 500 }}>{language === "ar" ? patient.arabicFullName : (patient.englishFullName || patient.arabicFullName)}</div>
+                  <div style={{ marginTop: 4 }}>
+                    <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
+                  </div>
                   <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
                     {language === "ar" ? patient.englishFullName : patient.arabicFullName}
                     {primaryIdentifier.value ? ` · ${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : ""}

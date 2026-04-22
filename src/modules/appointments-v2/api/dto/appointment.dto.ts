@@ -11,7 +11,7 @@ export interface CreateAppointmentDto {
   reportingPriorityId?: number | null;
   bookingDate: string;
   bookingTime?: string | null;
-  caseCategory: CaseCategory;
+  caseCategory?: CaseCategory;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;

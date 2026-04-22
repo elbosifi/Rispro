@@ -106,9 +106,9 @@ router.post(
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const body = req.body as CreateAppointmentDto;
 
-    if (!body.patientId || !body.modalityId || !body.bookingDate || !body.caseCategory) {
+    if (!body.patientId || !body.modalityId || !body.bookingDate) {
       res.status(400).json({
-        error: "patientId, modalityId, bookingDate, and caseCategory are required",
+        error: "patientId, modalityId, and bookingDate are required",
       });
       return;
     }

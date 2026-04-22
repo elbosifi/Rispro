@@ -22,6 +22,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
             id: patient.id,
             arabicFullName: patient.arabicFullName,
             englishFullName: patient.englishFullName,
+            category: patient.category,
             identifierType: patient.identifierType,
             identifierValue: patient.identifierValue,
             nationalId: patient.nationalId,

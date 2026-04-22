@@ -31,6 +31,7 @@ export interface PatientRow {
   national_id: string | null;
   identifier_type: string | null;
   identifier_value: string | null;
+  category: "oncology" | "non_oncology" | null;
   identifiers?: Array<{
     id: number;
     type_id: number;
@@ -55,6 +56,7 @@ export interface PatientPayload {
   nationalIdConfirmation?: unknown;
   identifierType?: string;
   identifierValue?: unknown;
+  category?: unknown;
   arabicFullName?: string;
   englishFullName?: string;
   ageYears?: number;
@@ -78,6 +80,7 @@ export interface ValidatedPatientPayload {
   cleanNationalId: string | null;
   identifierType: string;
   cleanIdentifierValue: string | null;
+  category: "oncology" | "non_oncology" | null;
   arabicFullName: string;
   englishFullName: string;
   normalizedArabicName: string;
@@ -203,6 +206,22 @@ function normalizeBoolean(value: unknown): boolean {
   if (raw === "true" || raw === "1" || raw === "yes") return true;
   if (raw === "false" || raw === "0" || raw === "no" || raw === "") return false;
   return false;
+}
+
+function normalizePatientCategory(value: unknown): "oncology" | "non_oncology" | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) {
+    return null;
+  }
+  if (raw === "oncology" || raw === "non_oncology") {
+    return raw;
+  }
+
+  throw new HttpError(400, "category must be one of: oncology, non_oncology.");
 }
 
 function calculateAgeYearsFromDob(dob: string): number | null {
@@ -362,6 +381,7 @@ async function validatePatientPayload(
     nationalIdConfirmation,
     identifierType,
     identifierValue,
+    category,
     arabicFullName,
     englishFullName,
     ageYears,
@@ -457,6 +477,7 @@ async function validatePatientPayload(
     cleanNationalId,
     identifierType: resolvedIdentifierType,
     cleanIdentifierValue: cleanIdentifierValue,
+    category: normalizePatientCategory(category),
     arabicFullName: arabicFullName.trim(),
     englishFullName: finalEnglishName,
     normalizedArabicName: normalizeArabicName(arabicFullName),
@@ -484,6 +505,7 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
         end as national_id,
         coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
         coalesce(primary_identifier.identifier_value, p.identifier_value) as identifier_value,
+        p.category,
         p.arabic_full_name,
         p.english_full_name,
         p.age_years,
@@ -576,6 +598,7 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
       end as national_id,
       coalesce(primary_identifier.identifier_type, p.identifier_type) as identifier_type,
       coalesce(primary_identifier.identifier_value, p.identifier_value) as identifier_value,
+      p.category,
       p.arabic_full_name,
       p.english_full_name,
       p.age_years,
@@ -863,6 +886,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
             phone_1,
             phone_2,
             address,
+            category,
             created_by_user_id,
             updated_by_user_id
           )
@@ -882,7 +906,8 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
             nullif($13, ''),
             nullif($14, ''),
             $15,
-            $15
+            $16,
+            $16
           )
           returning *
         `,
@@ -901,6 +926,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
           validated.cleanPhone1,
           validated.cleanPhone2,
           validated.address,
+          validated.category,
           createdByUserId
         ]
       );
@@ -977,7 +1003,8 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
           phone_1 = nullif($12, ''),
           phone_2 = nullif($13, ''),
           address = nullif($14, ''),
-          updated_by_user_id = $15,
+          category = $15,
+          updated_by_user_id = $16,
           updated_at = now()
         where id = $1
         returning *
@@ -997,6 +1024,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
         validated.cleanPhone1,
         validated.cleanPhone2,
         validated.address,
+        validated.category,
         updatedByUserId
       ]
     );
@@ -1217,7 +1245,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
 
     const targetPatient = await client.query<PatientRow>(
       `
-        select id, mrn, national_id, arabic_full_name, english_full_name, age_years, demographics_estimated, sex, phone_1, phone_2, address, estimated_date_of_birth
+        select id, mrn, national_id, arabic_full_name, english_full_name, age_years, demographics_estimated, sex, phone_1, phone_2, address, estimated_date_of_birth, category
         from patients
         where id = $1
         limit 1

@@ -27,7 +27,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           type="text"
           value={value}
           onChange={onChange}
-          className={`input-premium pl-8 ${showClearButton && value ? "pr-8" : ""} ${className}`}
+          className={`input-premium pl-10 ${showClearButton && value ? "pr-10" : ""} ${className}`}
           {...props}
         />
         {showClearButton && value && !isLoading && (

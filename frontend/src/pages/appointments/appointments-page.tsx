@@ -144,7 +144,11 @@ export default function AppointmentsPage() {
       setForm((f) => ({
         ...f,
         patientId: urlPatient.id.toString(),
-        patientSearch: urlPatient.arabicFullName
+        patientSearch: urlPatient.arabicFullName,
+        caseCategory:
+          urlPatient.category === "oncology" || urlPatient.category === "non_oncology"
+            ? urlPatient.category
+            : "non_oncology"
       }));
     }
   }, [urlPatient]);
@@ -334,7 +338,11 @@ export default function AppointmentsPage() {
     setForm((f) => ({
       ...f,
       patientId: patient.id.toString(),
-      patientSearch: patient.arabicFullName
+      patientSearch: patient.arabicFullName,
+      caseCategory:
+        patient.category === "oncology" || patient.category === "non_oncology"
+          ? patient.category
+          : "non_oncology"
     }));
     setPatientResults([]);
   };

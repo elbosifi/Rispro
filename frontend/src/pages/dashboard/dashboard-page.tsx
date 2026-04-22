@@ -271,6 +271,12 @@ export function DashboardPage() {
         {/* Stat Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
           <StatCard
+            label={t("dashboard.registeredPatients")}
+            value={statisticsQuery.isLoading && !statisticsQuery.data ? "..." : viewModel.kpis.totalRegisteredPatients}
+            icon={<Users size={20} />}
+            tone="default"
+          />
+          <StatCard
             label={t("dashboard.totalAppointments")}
             value={statisticsQuery.isLoading && !statisticsQuery.data ? "..." : viewModel.kpis.totalAppointments}
             icon={<Settings2 size={20} />}

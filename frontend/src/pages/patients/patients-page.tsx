@@ -6,6 +6,7 @@ import PatientForm from "@/components/patients/patient-form";
 import { Patient } from "@/types/api";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { UserPlus, Search, Pencil, CalendarPlus } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
 
@@ -106,7 +107,12 @@ export default function PatientsPage() {
               <tbody className="divide-y divide-border">
                 {patients.map((patient: Patient) => (
                   <tr key={patient.id} className="transition-colors duration-150 hover:bg-muted/50">
-                    <td className="p-4 font-medium">{patient.arabicFullName}</td>
+                    <td className="p-4 font-medium">
+                      <div className="flex items-center gap-2">
+                        <span>{patient.arabicFullName}</span>
+                        <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
+                      </div>
+                    </td>
                     <td className="p-4 text-muted-foreground">{patient.englishFullName || "—"}</td>
                     <td className="p-4 text-muted-foreground font-mono">{patient.nationalId || "—"}</td>
                     <td className="p-4 text-muted-foreground font-mono">{patient.mrn || "—"}</td>

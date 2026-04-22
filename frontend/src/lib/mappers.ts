@@ -126,6 +126,10 @@ export function mapPatient(raw: RawRecord): Patient {
     nationalId: strOrNull(raw, 'national_id') ?? strOrNull(raw, 'nationalId'),
     identifierType: (strOrNull(raw, 'identifier_type') ?? strOrNull(raw, 'identifierType')) as IdentifierType | null,
     identifierValue: strOrNull(raw, 'identifier_value') ?? strOrNull(raw, 'identifierValue'),
+    category: (() => {
+      const value = strOrNull(raw, "category");
+      return value === "oncology" || value === "non_oncology" ? value : null;
+    })(),
     identifiers: rawIdentifiers.map((entry) => ({
       id: num(entry, "id"),
       typeId: num(entry, "type_id") || num(entry, "typeId"),
@@ -375,7 +379,13 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
   const summaryRaw: RawRecord = (raw.summary ?? {}) as RawRecord;
   return {
     summary: {
+      totalRegisteredPatients: num(summaryRaw, 'total_registered_patients') || num(summaryRaw, 'totalRegisteredPatients'),
+      oncologyPatients: num(summaryRaw, 'oncology_patients') || num(summaryRaw, 'oncologyPatients'),
+      nonOncologyPatients: num(summaryRaw, 'non_oncology_patients') || num(summaryRaw, 'nonOncologyPatients'),
+      uncategorizedPatients: num(summaryRaw, 'uncategorized_patients') || num(summaryRaw, 'uncategorizedPatients'),
       totalAppointments: num(summaryRaw, 'total_appointments') || num(summaryRaw, 'totalAppointments'),
+      oncologyAppointments: num(summaryRaw, 'oncology_appointments') || num(summaryRaw, 'oncologyAppointments'),
+      nonOncologyAppointments: num(summaryRaw, 'non_oncology_appointments') || num(summaryRaw, 'nonOncologyAppointments'),
       uniquePatients: num(summaryRaw, 'unique_patients') || num(summaryRaw, 'uniquePatients'),
       uniqueModalities: num(summaryRaw, 'unique_modalities') || num(summaryRaw, 'uniqueModalities'),
       scheduledCount: num(summaryRaw, 'scheduled_count') || num(summaryRaw, 'scheduledCount'),

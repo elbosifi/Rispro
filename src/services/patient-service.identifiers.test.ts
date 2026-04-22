@@ -245,6 +245,7 @@ test("createPatient: persists demographics_estimated flag", async (t) => {
         nationalIdConfirmation: nationalId,
         identifierType: "national_id",
         identifierValue: nationalId,
+        category: "oncology",
         arabicFullName: `مريض تقديري ${suffix}`,
         englishFullName: `Estimated ${suffix}`,
         ageYears: 40,
@@ -257,13 +258,16 @@ test("createPatient: persists demographics_estimated flag", async (t) => {
     );
 
     assert.equal(created.demographics_estimated, true, "create should persist demographics_estimated");
+    assert.equal(created.category, "oncology", "create should persist patient category");
     const fetched = await getPatientById(created.id);
     assert.equal(fetched.demographics_estimated, true, "read should include demographics_estimated");
+    assert.equal(fetched.category, "oncology", "read should include patient category");
 
     const searchResults = await searchPatients(nationalId);
     const found = searchResults.find((row) => Number(row.id) === Number(created.id));
     assert.ok(found, "search should include created patient");
     assert.equal(found?.demographics_estimated, true, "search should include demographics_estimated");
+    assert.equal(found?.category, "oncology", "search should include patient category");
   } finally {
     await pool.query(`delete from patients where national_id = $1`, [nationalId]);
     await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
@@ -626,6 +630,7 @@ test("updatePatient: works with inactive identifier type", async (t) => {
       nationalIdConfirmation: natId,
       identifierType: "national_id",
       identifierValue: natId,
+      category: "non_oncology",
       arabicFullName: `مريض محدث ${suffix}`,
       englishFullName: `Updated Patient ${suffix}`,
       ageYears: 26,
@@ -642,16 +647,19 @@ test("updatePatient: works with inactive identifier type", async (t) => {
     const updated = await updatePatient(patientId, payload, receptionistUserId);
     assert.equal(updated.arabic_full_name, `مريض محدث ${suffix}`);
     assert.equal(updated.demographics_estimated, true, "demographics_estimated should persist true");
+    assert.equal(updated.category, "non_oncology", "category should persist on update");
 
     const toggled = await updatePatient(
       patientId,
       {
         ...payload,
-        demographicsEstimated: false
+        demographicsEstimated: false,
+        category: "oncology"
       },
       receptionistUserId
     );
     assert.equal(toggled.demographics_estimated, false, "demographics_estimated should be editable later");
+    assert.equal(toggled.category, "oncology", "category should be editable later");
 
     // Verify the inactive identifier is still present
     const identifiersAfter = await pool.query(

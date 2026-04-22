@@ -58,6 +58,7 @@ const en = {
   "dashboard.staleData": "Some widgets are showing cached data because the latest refresh failed.",
   "dashboard.noShowOpens": "No-show review opens at {time} (Tripoli time).",
   "dashboard.totalAppointments": "Total Appointments",
+  "dashboard.registeredPatients": "Registered Patients",
   "dashboard.arrivedInQueue": "Arrived / In Queue",
   "dashboard.waiting": "Waiting: {count}",
   "dashboard.completedToday": "Completed Today",
@@ -655,6 +656,8 @@ const en = {
 
   "statistics.title": "Statistics",
   "statistics.all": "All",
+  "statistics.registeredPatients": "Registered Patients",
+  "statistics.totalAppointments": "Total Appointments",
   "statistics.byStatus": "By Status",
   "statistics.byModality": "By Modality",
   "statistics.dailyTrend": "Daily Trend",
@@ -832,6 +835,7 @@ const ar = {
   "dashboard.staleData": "بعض العناصر تعرض بيانات مخزنة مؤقتاً لأن آخر تحديث فشل.",
   "dashboard.noShowOpens": "مراجعة عدم الحضور تفتح عند {time} (بتوقيت طرابلس).",
   "dashboard.totalAppointments": "إجمالي المواعيد",
+  "dashboard.registeredPatients": "المرضى المسجلون",
   "dashboard.arrivedInQueue": "تم الوصول / داخل الانتظار",
   "dashboard.waiting": "الانتظار: {count}",
   "dashboard.completedToday": "المكتمل اليوم",
@@ -1429,6 +1433,8 @@ const ar = {
 
   "statistics.title": "الإحصائيات",
   "statistics.all": "الكل",
+  "statistics.registeredPatients": "المرضى المسجلون",
+  "statistics.totalAppointments": "إجمالي المواعيد",
   "statistics.byStatus": "حسب الحالة",
   "statistics.byModality": "حسب الجهاز",
   "statistics.dailyTrend": "الاتجاه اليومي",

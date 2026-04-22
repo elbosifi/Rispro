@@ -49,6 +49,7 @@ export interface Patient {
   nationalId?: string | null;
   identifierType?: IdentifierType | null;
   identifierValue?: string | null;
+  category?: "oncology" | "non_oncology" | null;
   identifiers?: PatientIdentifier[];
   arabicFullName: string;
   englishFullName?: string | null;
@@ -183,7 +184,13 @@ export interface QueueSnapshot {
 }
 
 export interface AppointmentStatisticsSummary {
+  totalRegisteredPatients: number;
+  oncologyPatients: number;
+  nonOncologyPatients: number;
+  uncategorizedPatients: number;
   totalAppointments: number;
+  oncologyAppointments: number;
+  nonOncologyAppointments: number;
   uniquePatients: number;
   uniqueModalities: number;
   scheduledCount: number;

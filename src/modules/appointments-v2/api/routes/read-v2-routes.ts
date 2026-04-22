@@ -230,6 +230,10 @@ router.get(
       pool.query(
         `
           select
+            (select count(*)::int from patients) as total_registered_patients,
+            (select count(*)::int from patients where category = 'oncology') as oncology_patients,
+            (select count(*)::int from patients where category = 'non_oncology') as non_oncology_patients,
+            (select count(*)::int from patients where category is null) as uncategorized_patients,
             count(*)::int as total_appointments,
             count(distinct b.patient_id)::int as unique_patients,
             count(distinct b.modality_id)::int as unique_modalities,
@@ -239,7 +243,9 @@ router.get(
             count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count,
             count(*) filter (where b.status = 'cancelled')::int as cancelled_count,
-            count(*) filter (where b.is_walk_in = true)::int as walk_in_count
+            count(*) filter (where b.is_walk_in = true)::int as walk_in_count,
+            count(*) filter (where b.case_category = 'oncology')::int as oncology_appointments,
+            count(*) filter (where b.case_category = 'non_oncology')::int as non_oncology_appointments
           from appointments_v2.bookings b
           ${whereClause}
         `,
@@ -297,6 +303,7 @@ router.get(
     ]);
 
     const summaryRow = summary.rows[0] ?? {
+      total_registered_patients: 0,
       total_appointments: 0,
       unique_patients: 0,
       unique_modalities: 0,
@@ -307,13 +314,22 @@ router.get(
       no_show_count: 0,
       cancelled_count: 0,
       walk_in_count: 0,
+      oncology_patients: 0,
+      non_oncology_patients: 0,
+      uncategorized_patients: 0,
+      oncology_appointments: 0,
+      non_oncology_appointments: 0,
     };
 
     res.json({
       summary: {
+        totalRegisteredPatients: summaryRow.total_registered_patients,
         totalAppointments: summaryRow.total_appointments,
         uniquePatients: summaryRow.unique_patients,
         uniqueModalities: summaryRow.unique_modalities,
+        oncologyPatients: summaryRow.oncology_patients,
+        nonOncologyPatients: summaryRow.non_oncology_patients,
+        uncategorizedPatients: summaryRow.uncategorized_patients,
         scheduledCount: summaryRow.scheduled_count,
         inQueueCount: summaryRow.in_queue_count,
         completedCount: summaryRow.completed_count,
@@ -321,6 +337,8 @@ router.get(
         noShowCount: summaryRow.no_show_count,
         cancelledCount: summaryRow.cancelled_count,
         walkInCount: summaryRow.walk_in_count,
+        oncologyAppointments: summaryRow.oncology_appointments,
+        nonOncologyAppointments: summaryRow.non_oncology_appointments,
       },
       statusBreakdown: statusBreakdown.rows.map((r) => ({ status: r.status, count: r.total_count })),
       modalityBreakdown: modalityBreakdown.rows.map((r) => ({

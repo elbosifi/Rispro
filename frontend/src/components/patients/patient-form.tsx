@@ -22,6 +22,7 @@ import {
 import { LIBYAN_CITIES_SORTED as LIBYAN_CITIES } from "@/lib/libyan-cities";
 import { formatDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { Patient, PatientIdentifierTypeOption } from "@/types/api";
 import { Button, Card } from "@/components/shared";
 import { chooseLocalized, t } from "@/lib/i18n";
@@ -35,6 +36,7 @@ interface PatientFormState {
   englishFullName: string;
   identifierType: IdentifierType;
   identifierValue: string;
+  category: "" | "oncology" | "non_oncology";
   nationalIdConfirmation: string;
   sex: string;
   estimatedDateOfBirth: string;
@@ -51,6 +53,7 @@ const DEFAULT_FORM: PatientFormState = {
   englishFullName: "",
   identifierType: "national_id",
   identifierValue: "",
+  category: "",
   nationalIdConfirmation: "",
   sex: "",
   estimatedDateOfBirth: "",
@@ -111,6 +114,7 @@ function patientToForm(p: Patient): PatientFormState {
     englishFullName: p.englishFullName || "",
     identifierType: primary?.typeCode || "national_id",
     identifierValue: primary?.value || "",
+    category: p.category === "oncology" || p.category === "non_oncology" ? p.category : "",
     nationalIdConfirmation: "",
     sex,
     estimatedDateOfBirth: dob,
@@ -564,6 +568,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       englishFullName: form.englishFullName || undefined,
       identifierType: form.identifierType,
       identifierValue: form.identifierValue || undefined,
+      category: form.category || undefined,
       nationalId: isNat ? form.identifierValue : undefined,
       nationalIdConfirmation: isNat ? form.nationalIdConfirmation : undefined,
       sex: form.sex || undefined,
@@ -632,6 +637,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       <div className="space-y-4">
         <div className="flex items-center gap-4">
           <h3 className={sectionTitleClass}>{language === "ar" ? "الهوية" : "Identity"}</h3>
+          <PatientCategoryBadge category={form.category || null} showWhenUnset />
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div>
@@ -871,7 +877,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         <div className="flex items-center gap-4">
           <h3 className={sectionTitleClass}>{language === "ar" ? "البيانات الديموغرافية" : "Demographics"}</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div>
             <label className={fieldLabelClass}>{language === "ar" ? "الجنس" : "Sex"}</label>
             <select
@@ -911,6 +917,24 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
               max="130"
               className="input-premium input-ltr w-full"
             />
+          </div>
+          <div>
+            <label className={fieldLabelClass}>{language === "ar" ? "تصنيف الحالة" : "Patient Category"}</label>
+            <select
+              aria-label={language === "ar" ? "تصنيف الحالة" : "Patient Category"}
+              value={form.category}
+              onChange={(event) =>
+                setForm((f) => ({
+                  ...f,
+                  category: (event.target.value as "" | "oncology" | "non_oncology") || "",
+                }))
+              }
+              className="input-premium input-ltr w-full"
+            >
+              <option value="">{language === "ar" ? "غير محدد" : "Not set"}</option>
+              <option value="oncology">{language === "ar" ? "أورام" : "Oncology"}</option>
+              <option value="non_oncology">{language === "ar" ? "غير أورام" : "Non-oncology"}</option>
+            </select>
           </div>
         </div>
         <label className="flex items-center gap-3 cursor-pointer user-select-none p-2 rounded-lg hover:bg-muted/50">

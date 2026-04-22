@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
+import { LanguageProvider } from "@/providers/language-provider";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
 
@@ -47,6 +48,7 @@ vi.mock("../components/PatientSearchSection", () => ({
             id: 9,
             arabicFullName: "Test Patient",
             englishFullName: "Test Patient",
+            category: "oncology",
             identifierType: "passport",
             identifierValue: "P-12345",
             nationalId: "123",
@@ -258,27 +260,29 @@ function setup(
   }));
 
   render(
-    <MemoryRouter initialEntries={["/v3/appointments/create"]}>
-      <Routes>
-        <Route path="/v3/appointments/create" element={
-          <CreateAppointmentTab
-            patientLookups={{}}
-            modalityOptions={[
-              { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-              { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-            ]}
-            examTypeOptions={[]}
-            specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
-            priorityOptions={priorityOptions}
-            schedulingEngineEnabled
-            canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
-            onCreateAppointment={onCreateAppointment}
-            onEvaluateAvailability={onEvaluateAvailability}
-          />
-        } />
-        <Route path="/print" element={<PrintPlaceholder />} />
-      </Routes>
-    </MemoryRouter>
+    <LanguageProvider>
+      <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+        <Routes>
+          <Route path="/v3/appointments/create" element={
+            <CreateAppointmentTab
+              patientLookups={{}}
+              modalityOptions={[
+                { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+                { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+              ]}
+              examTypeOptions={[]}
+              specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
+              priorityOptions={priorityOptions}
+              schedulingEngineEnabled
+              canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
+              onCreateAppointment={onCreateAppointment}
+              onEvaluateAvailability={onEvaluateAvailability}
+            />
+          } />
+          <Route path="/print" element={<PrintPlaceholder />} />
+        </Routes>
+      </MemoryRouter>
+    </LanguageProvider>
   );
 
   return { onCreateAppointment, onEvaluateAvailability };
@@ -291,6 +295,7 @@ function PrintPlaceholder() {
 
 describe("CreateAppointmentTab UI interactions", () => {
   beforeEach(() => {
+    localStorage.setItem("rispro-language", "en");
     mockFetchAppointments.mockReset();
     mockFetchAppointments.mockResolvedValue([]);
     mockRawItemsRef.current = [
@@ -372,6 +377,23 @@ describe("CreateAppointmentTab UI interactions", () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     expect(screen.getByText("Primary ID: P-12345")).toBeTruthy();
+  });
+
+  it("defaults case category from selected patient category and preserves manual override", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+
+    const categorySelect = screen.getByLabelText("Case Category") as HTMLSelectElement;
+    expect(categorySelect.value).toBe("oncology");
+
+    fireEvent.change(categorySelect, { target: { value: "non_oncology" } });
+    expect(categorySelect.value).toBe("non_oncology");
+
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+
+    expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("non_oncology");
   });
 
   it("shows previous no-shows list with date and exam type", async () => {
@@ -601,26 +623,28 @@ describe("CreateAppointmentTab UI interactions", () => {
       }));
 
       render(
-        <MemoryRouter initialEntries={["/v3/appointments/create"]}>
-          <Routes>
-            <Route path="/v3/appointments/create" element={
-              <CreateAppointmentTab
-                patientLookups={{}}
-                modalityOptions={[
-                  { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-                ]}
-                examTypeOptions={[]}
-                specialReasonOptions={[]}
-                priorityOptions={[]}
-                schedulingEngineEnabled
-                canUseNonStandardCapacityModes
-                onCreateAppointment={onCreateAppointment}
-                onEvaluateAvailability={onEvaluateAvailability}
-              />
-            } />
-            <Route path="/print" element={<PrintPlaceholder />} />
-          </Routes>
-        </MemoryRouter>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+            <Routes>
+              <Route path="/v3/appointments/create" element={
+                <CreateAppointmentTab
+                  patientLookups={{}}
+                  modalityOptions={[
+                    { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+                  ]}
+                  examTypeOptions={[]}
+                  specialReasonOptions={[]}
+                  priorityOptions={[]}
+                  schedulingEngineEnabled
+                  canUseNonStandardCapacityModes
+                  onCreateAppointment={onCreateAppointment}
+                  onEvaluateAvailability={onEvaluateAvailability}
+                />
+              } />
+              <Route path="/print" element={<PrintPlaceholder />} />
+            </Routes>
+          </MemoryRouter>
+        </LanguageProvider>
       );
 
       return { onCreateAppointment, onEvaluateAvailability };
@@ -727,27 +751,29 @@ describe("safety modal interactions", () => {
       }));
 
       render(
-        <MemoryRouter initialEntries={["/v3/appointments/create"]}>
-          <Routes>
-            <Route path="/v3/appointments/create" element={
-              <CreateAppointmentTab
-                patientLookups={{}}
-                modalityOptions={[
-                  { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
-                  { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
-                ]}
-                examTypeOptions={[]}
-                specialReasonOptions={[]}
-                priorityOptions={[{ id: 1, nameEn: "Urgent", nameAr: "Urgent" }]}
-                schedulingEngineEnabled
-                canUseNonStandardCapacityModes
-                onCreateAppointment={onCreateAppointment}
-                onEvaluateAvailability={onEvaluateAvailability}
-              />
-            } />
-            <Route path="/print" element={<PrintPlaceholder />} />
-          </Routes>
-        </MemoryRouter>
+        <LanguageProvider>
+          <MemoryRouter initialEntries={["/v3/appointments/create"]}>
+            <Routes>
+              <Route path="/v3/appointments/create" element={
+                <CreateAppointmentTab
+                  patientLookups={{}}
+                  modalityOptions={[
+                    { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
+                    { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
+                  ]}
+                  examTypeOptions={[]}
+                  specialReasonOptions={[]}
+                  priorityOptions={[{ id: 1, nameEn: "Urgent", nameAr: "Urgent" }]}
+                  schedulingEngineEnabled
+                  canUseNonStandardCapacityModes
+                  onCreateAppointment={onCreateAppointment}
+                  onEvaluateAvailability={onEvaluateAvailability}
+                />
+              } />
+              <Route path="/print" element={<PrintPlaceholder />} />
+            </Routes>
+          </MemoryRouter>
+        </LanguageProvider>
       );
 
       return { onCreateAppointment, onEvaluateAvailability };

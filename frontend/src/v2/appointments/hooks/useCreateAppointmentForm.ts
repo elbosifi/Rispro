@@ -5,6 +5,7 @@ export interface SelectedPatient {
   id: number;
   arabicFullName: string;
   englishFullName?: string | null;
+  category?: "oncology" | "non_oncology" | null;
   identifierType?: string | null;
   identifierValue?: string | null;
   nationalId?: string | null;
@@ -55,10 +56,15 @@ export function useCreateAppointmentForm() {
 
   const actions = useMemo(() => ({
     setPatient(patient: SelectedPatient | null) {
+      const defaultCategory =
+        patient?.category === "oncology" || patient?.category === "non_oncology"
+          ? patient.category
+          : "non_oncology";
       setForm((prev) => ({
         ...prev,
         patientId: patient?.id ?? null,
         patient,
+        caseCategory: defaultCategory,
         modalityId: null,
         examTypeId: null,
         appointmentDate: "",

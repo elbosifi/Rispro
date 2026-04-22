@@ -20,6 +20,7 @@ const STATUS_ORDER: AppointmentStatus[] = [
 ];
 
 export interface DashboardKpis {
+  totalRegisteredPatients: number;
   totalAppointments: number;
   arrivedCount: number;
   inQueueCount: number;
@@ -78,6 +79,7 @@ export function buildDashboardViewModel(
   lookups: AppointmentLookups | undefined
 ): DashboardViewModel {
   const summary = statistics?.summary;
+  const totalRegisteredPatients = summary?.totalRegisteredPatients ?? 0;
   const totalAppointments = summary?.totalAppointments ?? 0;
   const completedCount = summary?.completedCount ?? 0;
   const inQueueCount = summary?.inQueueCount ?? 0;
@@ -108,6 +110,7 @@ export function buildDashboardViewModel(
 
   return {
     kpis: {
+      totalRegisteredPatients,
       totalAppointments,
       arrivedCount,
       inQueueCount,

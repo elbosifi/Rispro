@@ -149,6 +149,7 @@ interface PatientLookupRow {
   id: number;
   mrn: string | null;
   national_id: string | null;
+  category: CaseCategory | null;
   arabic_full_name: string;
   english_full_name: string | null;
   age_years: number;
@@ -208,6 +209,7 @@ export interface AppointmentCreateResult {
 }
 
 interface AppointmentStatsSummaryRow {
+  total_registered_patients: DbNumeric;
   total_appointments: DbNumeric;
   unique_patients: DbNumeric;
   unique_modalities: DbNumeric;
@@ -718,7 +720,7 @@ async function getPatientById(
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
   const { rows } = await client.query(
     `
-      select id, mrn, national_id, arabic_full_name, english_full_name, age_years, demographics_estimated, estimated_date_of_birth, sex, phone_1, phone_2, address
+      select id, mrn, national_id, category, arabic_full_name, english_full_name, age_years, demographics_estimated, estimated_date_of_birth, sex, phone_1, phone_2, address
       from patients
       where id = $1
       limit 1
@@ -1059,6 +1061,7 @@ export async function listAppointmentStatistics(
   const [summaryResult, modalityResult, statusResult, dailyResult] = await Promise.all([
     pool.query(`
       select
+        (select count(*)::int from patients) as total_registered_patients,
         count(*) as total_appointments,
         count(distinct patient_id) as unique_patients,
         count(distinct modality_id) as unique_modalities,
@@ -1116,6 +1119,7 @@ export async function listAppointmentStatistics(
   ]);
 
   const summary = (summaryResult.rows[0] as AppointmentStatsSummaryRow | undefined) || {
+    total_registered_patients: 0,
     total_appointments: 0,
     unique_patients: 0,
     unique_modalities: 0,
@@ -1136,13 +1140,14 @@ export async function listAppointmentStatistics(
       modalityId: modalityId ? String(modalityId) : ""
     },
     summary: {
+      total_registered_patients: Number(summary.total_registered_patients || 0),
       total_appointments: Number(summary.total_appointments || 0),
       unique_patients: Number(summary.unique_patients || 0),
       unique_modalities: Number(summary.unique_modalities || 0),
       scheduled_count: Number(summary.scheduled_count || 0),
       in_queue_count: Number(summary.in_queue_count || 0),
       completed_count: Number(summary.completed_count || 0),
-      discontinued_count: Number((summary as Record<string, unknown>).discontinued_count || 0),
+      discontinued_count: Number(summary.discontinued_count || 0),
       no_show_count: Number(summary.no_show_count || 0),
       cancelled_count: Number(summary.cancelled_count || 0),
       walk_in_count: Number(summary.walk_in_count || 0)
@@ -1156,7 +1161,7 @@ export async function listAppointmentStatistics(
       scheduled_count: Number(row.scheduled_count || 0),
       in_queue_count: Number(row.in_queue_count || 0),
       completed_count: Number(row.completed_count || 0),
-      discontinued_count: Number((row as Record<string, unknown>).discontinued_count || 0),
+      discontinued_count: Number(row.discontinued_count || 0),
       no_show_count: Number(row.no_show_count || 0),
       cancelled_count: Number(row.cancelled_count || 0)
     })),
@@ -1168,7 +1173,7 @@ export async function listAppointmentStatistics(
       appointment_date: row.appointment_date,
       total_count: Number(row.total_count || 0),
       completed_count: Number(row.completed_count || 0),
-      discontinued_count: Number((row as Record<string, unknown>).discontinued_count || 0),
+      discontinued_count: Number(row.discontinued_count || 0),
       cancelled_count: Number(row.cancelled_count || 0),
       no_show_count: Number(row.no_show_count || 0)
     }))
@@ -1861,7 +1866,6 @@ export async function createAppointment(
   });
   const appointmentDate = normalizeAppointmentDate(payload.appointmentDate);
   const notes = String(payload.notes || "").trim();
-  const caseCategory = normalizeCaseCategory(payload.caseCategory);
   const useSpecialQuota = Boolean(payload.useSpecialQuota);
   const specialReasonCode = String(payload.specialReasonCode || "").trim() || null;
   const specialReasonNote = String(payload.specialReasonNote || "").trim() || null;
@@ -1881,6 +1885,11 @@ export async function createAppointment(
 
   try {
     await client.query("begin");
+    const patient = await getPatientById(client, patientId);
+    const caseCategory =
+      payload.caseCategory === undefined || payload.caseCategory === null || payload.caseCategory === ""
+        ? normalizeCaseCategory(patient.category)
+        : normalizeCaseCategory(payload.caseCategory);
     await requireAppointmentDayEnabled(client, appointmentDate);
     await client.query("select pg_advisory_xact_lock(hashtext($1))", [
       `appointment-sequence:${appointmentDate}`
@@ -1897,7 +1906,6 @@ export async function createAppointment(
       ]);
     }
 
-    const patient = await getPatientById(client, patientId);
     const modality = await getModalityById(client, modalityId);
     const examType = examTypeId
       ? await getExamTypeById(client, examTypeId, modalityId)

@@ -1,5 +1,6 @@
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import type { SelectedPatient } from "../hooks/useCreateAppointmentForm";
 
 interface Props {
@@ -29,7 +30,10 @@ export function PatientSummaryCard({ patient, caseCategory }: Props) {
 
   return (
     <div className="card-shell p-3 sm:p-4">
-      <div className="font-bold text-foreground">{fullName}</div>
+      <div className="font-bold text-foreground flex items-center gap-2">
+        <span>{fullName}</span>
+        <PatientCategoryBadge category={patient.category} showWhenUnset />
+      </div>
       <div className="text-xs sm:text-sm mt-1 text-muted-foreground">{t(language, "appointments.create.primaryId")}: {primaryIdentifier}</div>
       <div className="flex flex-wrap gap-2 sm:gap-3 mt-2 text-xs sm:text-sm text-muted-foreground">
         <span>{t(language, "appointments.create.sex")}: {renderSex(patient.sex, language)}</span>

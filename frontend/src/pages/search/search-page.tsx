@@ -8,6 +8,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Search, User, Save, Trash2, X, Pencil } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { formatDateLy } from "@/lib/date-format";
 
 export default function SearchPage() {
@@ -153,6 +154,9 @@ export default function SearchPage() {
                       <p className="font-medium" style={{ color: "var(--text)" }}>
                         {p.arabicFullName}
                       </p>
+                      <div className="mt-1">
+                        <PatientCategoryBadge category={p.category} showWhenUnset={false} />
+                      </div>
                       <p className="text-sm font-mono-data mt-1" style={{ color: "var(--text-muted)" }}>
                         {p.englishFullName || "—"}
                       </p>
@@ -213,7 +217,10 @@ function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void
   return (
     <div className="card-shell">
       <div className="p-6 flex justify-between items-center" style={{ borderBottom: "1px solid var(--border)" }}>
-        <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "search.detailsHeading")}</h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-lg font-bold text-embossed" style={{ color: "var(--text)" }}>{t(language, "search.detailsHeading")}</h3>
+          <PatientCategoryBadge category={patient.category} showWhenUnset />
+        </div>
         <button
           onClick={onEdit}
           className="btn-secondary px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all"
@@ -227,6 +234,16 @@ function PatientView({ patient, onEdit }: { patient: Patient; onEdit: () => void
         <Field label={t(language, "search.fieldEnglishName")} value={patient.englishFullName} />
         <Field label={t(language, "search.fieldNationalId")} value={patient.nationalId} />
         <Field label={t(language, "search.fieldMRN")} value={patient.mrn} />
+        <Field
+          label={language === "ar" ? "تصنيف الحالة" : "Patient Category"}
+          value={
+            patient.category === "oncology"
+              ? (language === "ar" ? "أورام" : "Oncology")
+              : patient.category === "non_oncology"
+                ? (language === "ar" ? "غير أورام" : "Non-oncology")
+                : "—"
+          }
+        />
         <Field label={t(language, "search.fieldSex")} value={patient.sex} />
         <Field
           label={t(language, "search.fieldAge")}
@@ -266,6 +283,7 @@ function EditPatientForm({
     ageYears: patient.ageYears?.toString() || "",
     estimatedDateOfBirth: patient.estimatedDateOfBirth || "",
     demographicsEstimated: Boolean(patient.demographicsEstimated),
+    category: patient.category ?? "",
     phone1: patient.phone1 || "",
     address: patient.address || ""
   });
@@ -296,6 +314,7 @@ function EditPatientForm({
       ageYears: form.ageYears ? Number(form.ageYears) : undefined,
       estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
       demographicsEstimated: form.demographicsEstimated,
+      category: form.category || undefined,
       phone1: form.phone1 || undefined,
       address: form.address || undefined
     };
@@ -400,6 +419,16 @@ function EditPatientForm({
           onChange={(v) => setForm((f) => ({ ...f, phone1: normalizePhoneInput(v) }))}
           maxLength={10}
           required
+        />
+        <SelectField
+          label={language === "ar" ? "تصنيف الحالة" : "Patient Category"}
+          value={form.category}
+          onChange={(v) => setForm((f) => ({ ...f, category: v }))}
+          options={[
+            { value: "", label: language === "ar" ? "غير محدد" : "Not set" },
+            { value: "oncology", label: language === "ar" ? "أورام" : "Oncology" },
+            { value: "non_oncology", label: language === "ar" ? "غير أورام" : "Non-oncology" }
+          ]}
         />
         <InputField
           label={t(language, "search.fieldAddress")}

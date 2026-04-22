@@ -4,6 +4,7 @@ import { fetchStatistics as fetchStats, fetchAppointmentLookups } from "@/lib/ap
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
+import { Card } from "@/components/shared";
 import { useLanguage } from "@/providers/language-provider";
 import { statusLabel, t } from "@/lib/i18n";
 import { BarChart3 } from "lucide-react";
@@ -49,6 +50,50 @@ export default function StatisticsPage() {
             {t(language, "statistics.dailyTrend")}
           </p>
         </div>
+      </div>
+
+      {/* Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-5">
+          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+            {t(language, "statistics.registeredPatients")}
+          </p>
+          <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
+            {stats?.summary.totalRegisteredPatients ?? 0}
+          </p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+            {t(language, "statistics.totalAppointments")}
+          </p>
+          <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
+            {stats?.summary.totalAppointments ?? 0}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {(language === "ar" ? "أورام" : "Oncology")}: {stats?.summary.oncologyAppointments ?? 0}
+            {" · "}
+            {(language === "ar" ? "غير أورام" : "Non-oncology")}: {stats?.summary.nonOncologyAppointments ?? 0}
+          </p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+            {language === "ar" ? "مرضى الأورام" : "Oncology Patients"}
+          </p>
+          <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
+            {stats?.summary.oncologyPatients ?? 0}
+          </p>
+        </Card>
+        <Card className="p-5">
+          <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">
+            {language === "ar" ? "مرضى غير الأورام" : "Non-oncology Patients"}
+          </p>
+          <p className="text-3xl font-bold" style={{ color: "var(--text)" }}>
+            {stats?.summary.nonOncologyPatients ?? 0}
+          </p>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {language === "ar" ? "غير محدد" : "Uncategorized"}: {stats?.summary.uncategorizedPatients ?? 0}
+          </p>
+        </Card>
       </div>
 
       {/* Filters */}

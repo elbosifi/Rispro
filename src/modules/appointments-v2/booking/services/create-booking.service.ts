@@ -64,6 +64,29 @@ function normalizeCapacityResolutionMode(payload: CreateBookingPayload): Capacit
   return payload.useSpecialQuota === true ? "special_quota_extra" : "standard";
 }
 
+async function resolveBookingCaseCategory(
+  client: PoolClient,
+  patientId: number,
+  incomingCategory: CreateBookingPayload["caseCategory"]
+): Promise<"oncology" | "non_oncology"> {
+  if (incomingCategory === "oncology" || incomingCategory === "non_oncology") {
+    return incomingCategory;
+  }
+
+  const result = await client.query<{ category: string | null }>(
+    `
+      select category
+      from patients
+      where id = $1
+      limit 1
+    `,
+    [patientId]
+  );
+
+  const normalized = String(result.rows[0]?.category || "").trim().toLowerCase();
+  return normalized === "oncology" ? "oncology" : "non_oncology";
+}
+
 async function createBookingInternal(
   client: PoolClient,
   payload: CreateBookingPayload,
@@ -71,6 +94,7 @@ async function createBookingInternal(
   policySetKey: string
 ): Promise<CreateBookingResult> {
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
+  const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -174,7 +198,7 @@ async function createBookingInternal(
     client,
     payload.modalityId,
     payload.bookingDate,
-    payload.caseCategory
+    caseCategory
   );
   const bookedCounts = await getBookedCountsByCategoryForDate(
     client,
@@ -229,7 +253,7 @@ async function createBookingInternal(
     modalityId: payload.modalityId,
     examTypeId: payload.examTypeId ?? null,
     scheduledDate: payload.bookingDate,
-    caseCategory: payload.caseCategory,
+    caseCategory,
     capacityResolutionMode,
     useSpecialQuota: capacityResolutionMode === "special_quota_extra",
     // `specialReasonCode` is metadata/audit justification and is not a
@@ -244,7 +268,7 @@ async function createBookingInternal(
     type: "appointments_v2_booking_decision",
     modalityId: payload.modalityId,
     bookingDate: payload.bookingDate,
-    caseCategory: payload.caseCategory,
+    caseCategory,
     examTypeId: payload.examTypeId ?? null,
     displayStatus: decision.displayStatus,
     requiresSupervisorOverride: decision.requiresSupervisorOverride,
@@ -311,7 +335,7 @@ async function createBookingInternal(
     reportingPriorityId: payload.reportingPriorityId ?? null,
     bookingDate: payload.bookingDate,
     bookingTime: payload.bookingTime ?? null,
-    caseCategory: payload.caseCategory,
+    caseCategory,
     status: "scheduled",
     notes: payload.notes ?? null,
     policyVersionId: publishedVersion.id,

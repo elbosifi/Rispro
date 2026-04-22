@@ -13,6 +13,7 @@ import {
   upsertNameDictionaryEntry,
   fetchPatientById,
   fetchPatientMrnPreview,
+  fetchPatientIdentifierTypes,
   updatePatient,
   deletePatient
 } from "@/lib/api-hooks";
@@ -24,6 +25,7 @@ vi.mock("@/lib/api-hooks", () => ({
   upsertNameDictionaryEntry: vi.fn(),
   fetchPatientById: vi.fn(),
   fetchPatientMrnPreview: vi.fn(),
+  fetchPatientIdentifierTypes: vi.fn(),
   updatePatient: vi.fn(),
   deletePatient: vi.fn()
 }));
@@ -35,6 +37,7 @@ function makePatient(overrides: Partial<Patient> = {}): Patient {
     nationalId: "123456789012",
     identifierType: "national_id",
     identifierValue: "123456789012",
+    category: "non_oncology",
     arabicFullName: "محمد علي حسن",
     englishFullName: "Mohamed Ali Hassan",
     ageYears: 30,
@@ -75,6 +78,7 @@ describe("PatientForm workflow hardening", () => {
     vi.mocked(searchPatients).mockResolvedValue([]);
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
+    vi.mocked(fetchPatientIdentifierTypes).mockResolvedValue([]);
     vi.mocked(createPatient).mockResolvedValue(makePatient({ id: 100, arabicFullName: "مريض جديد ثالث", mrn: "MRN-100" }));
     vi.mocked(fetchPatientById).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: true }));
     vi.mocked(updatePatient).mockResolvedValue(makePatient({ id: 9, demographicsEstimated: false }));
@@ -186,6 +190,7 @@ describe("PatientForm workflow hardening", () => {
     expect(phoneInput.value).toBe("0912345678");
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "34");
     await user.click(screen.getByLabelText(/Estimated \(uncertain DOB\/age\)/i));
@@ -196,6 +201,7 @@ describe("PatientForm workflow hardening", () => {
     expect(payload.identifierValue).toBe("AB12CD");
     expect(payload.phone1).toBe("0912345678");
     expect(payload.demographicsEstimated).toBe(true);
+    expect(payload.category).toBe("oncology");
   });
 
   it("allows editing estimated flag later in edit mode", async () => {
@@ -207,11 +213,13 @@ describe("PatientForm workflow hardening", () => {
     expect(estimated.checked).toBe(true);
 
     await user.click(estimated);
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.click(screen.getByRole("button", { name: /Update Patient/i }));
 
     await waitFor(() => expect(updatePatient).toHaveBeenCalled());
     const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(updatePayload.demographicsEstimated).toBe(false);
+    expect(updatePayload.category).toBe("oncology");
   });
 
   it("submits identifierType/identifierValue from the selected primary identifier row", async () => {

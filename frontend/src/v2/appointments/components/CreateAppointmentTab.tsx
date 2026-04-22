@@ -24,6 +24,7 @@ import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { SectionLabel, Button, Card } from "@/components/shared";
 
 interface CreateAppointmentTabProps {
@@ -434,7 +435,10 @@ export function CreateAppointmentTab({
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           <div className="space-y-1">
             <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.patient")}</span>
-            <p className="text-base sm:text-lg font-medium text-foreground">{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</p>
+            <p className="text-base sm:text-lg font-medium text-foreground flex items-center gap-2">
+              <span>{chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || "—"}</span>
+              <PatientCategoryBadge category={form.patient?.category} showWhenUnset={Boolean(form.patient)} />
+            </p>
           </div>
           <div className="space-y-1">
             <span className="block text-sm font-semibold text-muted-foreground">{t(language, "appointments.create.modality")}</span>

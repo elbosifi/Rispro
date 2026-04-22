@@ -28,6 +28,7 @@ export interface Patient {
   nationalId?: string | null;
   identifierType?: string | null;
   identifierValue?: string | null;
+  category?: "oncology" | "non_oncology" | null;
   identifiers?: Array<{
     id?: number;
     typeId?: number;
