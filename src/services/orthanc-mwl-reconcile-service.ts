@@ -26,6 +26,7 @@ interface SyncRow {
 interface ExpectedHashRow {
   booking_id: number;
   patient_id: number;
+  patient_primary_id: string | null;
   modality_id: number;
   exam_type_id: number | null;
   reporting_priority_id: number | null;
@@ -93,6 +94,7 @@ function computeExpectedPayloadHash(row: ExpectedHashRow): string {
   const payload = {
     bookingId: row.booking_id,
     patientId: row.patient_id,
+    patientPrimaryId: row.patient_primary_id,
     modalityId: row.modality_id,
     examTypeId: row.exam_type_id,
     reportingPriorityId: row.reporting_priority_id,
@@ -159,6 +161,7 @@ export async function reconcileOrthancMwlProjection(
         select
           b.id as booking_id,
           b.patient_id,
+          p.identifier_value as patient_primary_id,
           b.modality_id,
           b.exam_type_id,
           b.reporting_priority_id,

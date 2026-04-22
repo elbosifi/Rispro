@@ -1,7 +1,7 @@
 # RISpro generated Modality Worklist source file
 (0008,0005) CS [ISO_IR 192]
 (0010,0010) PN [Validation Patient]
-(0010,0020) LO [000330]
+(0010,0020) LO [123456789012]
 (0010,0030) DA []
 (0010,0040) CS [M]
 (0040,0100) SQ (Sequence with undefined length)

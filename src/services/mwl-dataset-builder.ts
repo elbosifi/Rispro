@@ -27,6 +27,7 @@ interface CanonicalMwlDatasetWithOptionalIds extends CanonicalMwlDataset {
 export interface CanonicalMwlInput {
   modalityCode: string | null | undefined;
   appointmentDate: string | null | undefined;
+  patientPrimaryId: string | null | undefined;
   patientMrn: string | null | undefined;
   patientNationalId: string | null | undefined;
   patientId: string | number;
@@ -88,11 +89,11 @@ function buildPersonName(englishName: string | null | undefined, arabicName: str
 }
 
 function buildPatientId(input: CanonicalMwlInput): string {
+  const primaryId = normalizeOptionalText(input.patientPrimaryId);
+  if (primaryId) return primaryId;
+
   const mrn = normalizeOptionalText(input.patientMrn);
   if (mrn) return mrn;
-
-  const nationalId = normalizeOptionalText(input.patientNationalId);
-  if (nationalId) return nationalId;
 
   return String(input.patientId);
 }

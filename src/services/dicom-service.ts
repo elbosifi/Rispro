@@ -78,6 +78,7 @@ export interface DicomDeviceListRow {
 export interface WorklistAppointmentRow {
   id: number;
   patient_id: number;
+  patient_primary_id: string | null;
   modality_id: number;
   accession_number: string;
   appointment_date: string;
@@ -409,6 +410,7 @@ async function getBookingWorklistContext(
       select
         bookings.id,
         bookings.patient_id,
+        patients.identifier_value as patient_primary_id,
         bookings.modality_id,
         ('V2-' || bookings.id::text) as accession_number,
         bookings.booking_date::text as appointment_date,
@@ -467,6 +469,7 @@ export function buildWorklistDump({
     {
       modalityCode: appointment.modality_code,
       appointmentDate: appointment.appointment_date,
+      patientPrimaryId: appointment.patient_primary_id,
       patientMrn: appointment.mrn,
       patientNationalId: appointment.national_id,
       patientId: appointment.patient_id,

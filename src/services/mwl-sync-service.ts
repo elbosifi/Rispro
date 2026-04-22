@@ -10,6 +10,7 @@ type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-sho
 interface BookingSyncSnapshot {
   id: number;
   patient_id: number;
+  patient_primary_id: string | null;
   modality_id: number;
   exam_type_id: number | null;
   reporting_priority_id: number | null;
@@ -73,10 +74,11 @@ async function loadBookingSyncSnapshot(
 ): Promise<BookingSyncSnapshot | null> {
   const { rows } = await client.query<BookingSyncSnapshot>(
     `
-      select
-        b.id,
-        b.patient_id,
-        b.modality_id,
+        select
+          b.id,
+          b.patient_id,
+          p.identifier_value as patient_primary_id,
+          b.modality_id,
         b.exam_type_id,
         b.reporting_priority_id,
         b.booking_date::text as booking_date,
@@ -113,6 +115,7 @@ function computePayloadHash(snapshot: BookingSyncSnapshot | null): string | null
   const payload = {
     bookingId: snapshot.id,
     patientId: snapshot.patient_id,
+    patientPrimaryId: snapshot.patient_primary_id,
     modalityId: snapshot.modality_id,
     examTypeId: snapshot.exam_type_id,
     reportingPriorityId: snapshot.reporting_priority_id,

@@ -1013,7 +1013,7 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "age_required", label: "العمر مطلوب" },
     { value: "dob_required", label: "تاريخ الميلاد مطلوب" }
   ]},
-  national_id_required: { label: "رقم الهوية مطلوب", type: "dropdown", options: [
+  national_id_required: { label: "الرقم الوطني مطلوب", type: "dropdown", options: [
     { value: "required", label: "مطلوب" },
     { value: "optional", label: "اختياري" }
   ]},

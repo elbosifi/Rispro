@@ -11,6 +11,7 @@ function baseInput(overrides: Partial<CanonicalMwlInput> = {}): CanonicalMwlInpu
   return {
     modalityCode: "MRI",
     appointmentDate: "2030-01-15",
+    patientPrimaryId: "PRIMARY-123",
     patientMrn: "MRN-123",
     patientNationalId: "NAT-456",
     patientId: 99,
@@ -32,7 +33,7 @@ test("buildCanonicalMwlDataset produces minimal canonical dataset", () => {
   assert.deepEqual(dataset, {
     specificCharacterSet: "ISO_IR 192",
     patientName: "John Smith",
-    patientId: "MRN-123",
+    patientId: "PRIMARY-123",
     patientBirthDate: "19800320",
     patientSex: "M",
     scheduledProcedureStepSequence: [
@@ -104,6 +105,12 @@ test("parity regression: dump and Orthanc JSON render from the same canonical da
   assert.equal(dump.includes(`(0008,0060) CS [${dataset.scheduledProcedureStepSequence[0].modality}]`), true);
   assert.equal(dump.includes(`(0040,0002) DA [${dataset.scheduledProcedureStepSequence[0].scheduledProcedureStepStartDate}]`), true);
   assert.equal(dump.includes(`(0040,0007) LO [${dataset.scheduledProcedureStepSequence[0].scheduledProcedureStepDescription}]`), true);
+});
+
+test("buildCanonicalMwlDataset falls back to MRN when no primary identifier is selected", () => {
+  const dataset = buildCanonicalMwlDataset(baseInput({ patientPrimaryId: null }), { mwlProfile: "minimal" });
+
+  assert.equal(dataset.patientId, "MRN-123");
 });
 
 test("renderers include Orthanc-friendly identifiers when provided", () => {

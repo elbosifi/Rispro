@@ -6,6 +6,7 @@ import { buildCanonicalMwlDataset, renderCanonicalMwlToOrthancJson } from "./mwl
 interface OrthancBookingProjection {
   id: number;
   patient_id: number;
+  patient_primary_id: string | null;
   booking_date: string;
   booking_time: string | null;
   status: string;
@@ -85,6 +86,7 @@ function buildOrthancWorklistPayload(
     {
       modalityCode: row.modality_code,
       appointmentDate: row.booking_date,
+      patientPrimaryId: row.patient_primary_id,
       patientMrn: row.mrn,
       patientNationalId: row.national_id,
       patientId: row.patient_id,
@@ -190,6 +192,7 @@ async function loadOrthancProjection(bookingId: number): Promise<OrthancBookingP
       select
         b.id,
         b.patient_id,
+        p.identifier_value as patient_primary_id,
         b.booking_date::text as booking_date,
         b.booking_time::text as booking_time,
         b.status,

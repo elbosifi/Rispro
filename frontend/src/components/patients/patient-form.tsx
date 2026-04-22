@@ -66,7 +66,7 @@ const DEFAULT_FORM: PatientFormState = {
 };
 
 const BUILTIN_IDENTIFIER_TYPES: PatientIdentifierTypeOption[] = [
-  { code: "national_id", labelAr: "رقم الهوية", labelEn: "National ID" },
+  { code: "national_id", labelAr: "الرقم الوطني", labelEn: "National ID" },
   { code: "passport", labelAr: "جواز سفر", labelEn: "Passport" },
   { code: "other", labelAr: "أخرى", labelEn: "Other" }
 ];
@@ -554,12 +554,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const requiresNationalIdConfirmation = isNat && nationalIdWasEdited && isNationalIdComplete;
     // Confirmation is mandatory when it's shown (create mode or national ID was edited)
     if (requiresNationalIdConfirmation && form.nationalIdConfirmation.length === 0) {
-      showToast(language === "ar" ? "يرجى تأكيد رقم الهوية." : "Please confirm the national ID.", "error");
+      showToast(language === "ar" ? "يرجى تأكيد الرقم الوطني." : "Please confirm the national ID.", "error");
       nationalIdConfirmationRef.current?.focus();
       return;
     }
     if (requiresNationalIdConfirmation && form.identifierValue !== form.nationalIdConfirmation) {
-      showToast(language === "ar" ? "تأكيد رقم الهوية لا يطابق." : "National ID confirmation does not match.", "error");
+      showToast(language === "ar" ? "تأكيد الرقم الوطني لا يطابق." : "National ID confirmation does not match.", "error");
       nationalIdConfirmationRef.current?.focus();
       return;
     }
@@ -781,7 +781,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   entry.typeCode === "passport"
                     ? (language === "ar" ? "رقم الجواز" : "Passport Number")
                     : entry.typeCode === "national_id"
-                      ? (language === "ar" ? "رقم الهوية" : "National ID")
+                      ? (language === "ar" ? "الرقم الوطني" : "National ID")
                       : (language === "ar" ? "قيمة المعرف" : "Identifier Value")
                 }
                 value={entry.value}
@@ -852,9 +852,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           ))}
           {showConfirmation && (
             <div className="mt-3">
-              <label className={fieldLabelClass}>{language === "ar" ? "تأكيد رقم الهوية" : "Confirm National ID"}</label>
+              <label className={fieldLabelClass}>{language === "ar" ? "تأكيد الرقم الوطني" : "Confirm National ID"}</label>
               <input
-                aria-label={language === "ar" ? "تأكيد رقم الهوية" : "National ID Confirmation"}
+                aria-label={language === "ar" ? "تأكيد الرقم الوطني" : "National ID Confirmation"}
                 value={form.nationalIdConfirmation}
                 onChange={(v) => setForm((f) => ({ ...f, nationalIdConfirmation: v.target.value.replace(/\D/g, "") }))}
                 onKeyDown={handleEnterNavigation("nationalIdConfirmation")}
@@ -863,7 +863,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                 onPaste={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
                 onDrop={(e) => { e.preventDefault(); e.stopPropagation(); }}
-                placeholder={language === "ar" ? "أعد كتابة رقم الهوية" : "Re-type the National ID"}
+                placeholder={language === "ar" ? "أعد كتابة الرقم الوطني" : "Re-type the National ID"}
                 required={nationalIdWasEdited}
                 className="input-premium input-ltr w-full"
               />
@@ -947,7 +947,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
           <span className="text-base font-semibold">{language === "ar" ? "تقديري (تاريخ/عمر غير مؤكد)" : "Estimated (uncertain DOB/age)"}</span>
         </label>
         {isNationalId && isValidNationalId(form.identifierValue) && (
-          <p className="text-sm font-semibold text-accent">{language === "ar" ? "تم استنتاج البيانات تلقائياً من رقم الهوية. يمكنك تعديلها يدوياً." : "Demographics auto-derived from National ID. You can override them manually."}</p>
+          <p className="text-sm font-semibold text-accent">{language === "ar" ? "تم استنتاج البيانات تلقائياً من الرقم الوطني. يمكنك تعديلها يدوياً." : "Demographics auto-derived from National ID. You can override them manually."}</p>
         )}
       </div>
 
