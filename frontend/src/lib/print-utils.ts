@@ -106,47 +106,125 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
       <head>
         <title>Appointment Slip</title>
         <style>
-          @page { size: A4 portrait; margin: 8mm; }
+          @page { size: A5 portrait; margin: 6mm; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #efefef; }
-          .sheet { width: 100%; border: 1px solid #c9c9c9; border-radius: 14px; padding: 22px 24px; background: #efefef; }
-          .top { display: grid; grid-template-columns: 1fr 250px; gap: 22px; align-items: start; }
-          .brand-wrap { display: flex; gap: 16px; align-items: center; }
-          .logo { width: 126px; height: 126px; object-fit: contain; }
-          .brand-title { color: #b11116; margin: 0; font-size: 56px; font-weight: 800; line-height: 1.08; letter-spacing: -0.4px; }
-          .brand-sub { margin: 6px 0 0; font-size: 24px; color: #24272c; }
-          .rule { margin-top: 14px; display: flex; align-items: center; gap: 14px; }
-          .rule-line { flex: 1; height: 2px; background: #d34f53; opacity: 0.8; }
-          .rule-dot { width: 14px; height: 14px; border-radius: 50%; background: #b11116; }
-          .slip-title { margin: 16px 0 0; color: #b11116; letter-spacing: 10px; text-transform: uppercase; font-size: 52px; font-weight: 500; }
-          .qr-card { border: 1.8px solid #e2676d; border-radius: 16px; background: #f8f8f8; padding: 12px; }
+          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #efefef; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .sheet {
+            width: 136mm;
+            height: 198mm;
+            margin: 0 auto;
+            border: 1px solid #c9c9c9;
+            border-radius: 10px;
+            padding: 5mm;
+            background: #efefef;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
+          .top { display: grid; grid-template-columns: 1fr 40mm; gap: 4mm; align-items: start; }
+          .brand-wrap { display: flex; gap: 3mm; align-items: center; }
+          .logo { width: 22mm; height: 22mm; object-fit: contain; }
+          .brand-title { color: #b11116; margin: 0; font-size: 7.5mm; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
+          .brand-sub { margin: 1mm 0 0; font-size: 4.2mm; color: #24272c; }
+          .rule { margin-top: 1.5mm; display: flex; align-items: center; gap: 2.4mm; }
+          .rule-line { flex: 1; height: 0.35mm; background: #d34f53; opacity: 0.8; }
+          .rule-dot { width: 2.2mm; height: 2.2mm; border-radius: 50%; background: #b11116; }
+          .slip-title { margin: 2.4mm 0 0; color: #b11116; letter-spacing: 1.5mm; text-transform: uppercase; font-size: 7mm; font-weight: 500; }
+          .qr-card { border: 0.45mm solid #e2676d; border-radius: 3mm; background: #f8f8f8; padding: 2mm; }
           .qr-card img { width: 100%; display: block; border-radius: 2px; }
-          .qr-title { margin-top: 12px; color: #b11116; text-transform: uppercase; font-size: 18px; font-weight: 800; line-height: 1.45; }
-          .qr-note { margin-top: 12px; font-size: 13px; color: #2f3135; line-height: 1.45; }
-          .rows { margin-top: 26px; border-top: 1px solid #d3d4d6; }
-          .info-row { display: grid; grid-template-columns: 330px 24px 1fr; align-items: center; min-height: 74px; border-bottom: 1px solid #d3d4d6; }
-          .info-label-wrap { display: flex; align-items: center; gap: 14px; font-size: 38px; color: #25282d; }
-          .info-icon { min-width: 52px; display: inline-flex; align-items: center; justify-content: center; height: 52px; border-radius: 12px; background: #b11116; color: white; font-weight: 800; font-size: 18px; letter-spacing: 0.02em; }
-          .info-label { font-size: 42px; color: #22262b; }
-          .pipe { text-align: center; color: #9ca3af; font-size: 42px; }
-          .info-value { font-size: 47px; font-weight: 700; color: #0f1115; }
+          .qr-title { margin-top: 2.2mm; color: #b11116; text-transform: uppercase; font-size: 3.9mm; font-weight: 800; line-height: 1.35; }
+          .qr-note { margin-top: 1.6mm; font-size: 2.7mm; color: #2f3135; line-height: 1.35; }
+          .rows { margin-top: 3mm; border-top: 0.3mm solid #d3d4d6; }
+          .info-row {
+            display: grid;
+            grid-template-columns: 42mm 4mm 1fr;
+            align-items: center;
+            height: 9.3mm;
+            border-bottom: 0.3mm solid #d3d4d6;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
+          .info-label-wrap { display: flex; align-items: center; gap: 2.2mm; color: #25282d; }
+          .info-icon { min-width: 7mm; display: inline-flex; align-items: center; justify-content: center; height: 7mm; border-radius: 1.6mm; background: #b11116; color: white; font-weight: 800; font-size: 2.3mm; letter-spacing: 0.02em; }
+          .info-label {
+            font-size: 4mm;
+            color: #22262b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
+          .pipe { text-align: center; color: #9ca3af; font-size: 4.6mm; }
+          .info-value {
+            font-size: 4.4mm;
+            font-weight: 700;
+            color: #0f1115;
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }
           .info-value.highlight { color: #b11116; }
-          .notes { margin-top: 16px; display: grid; grid-template-columns: 72px 1fr; gap: 12px; background: #e8e1e2; border-radius: 14px; padding: 14px; }
-          .notes-icon { width: 58px; height: 58px; border-radius: 10px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
-          .notes-title { margin: 0; color: #b11116; font-size: 44px; font-weight: 800; }
-          .notes-text { margin: 6px 0 0; font-size: 39px; line-height: 1.45; color: #20242a; }
-          .mid-divider { margin: 18px 0 12px; display: flex; align-items: center; gap: 14px; }
-          .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 0; border-bottom: 1px solid transparent; }
-          .meta-item { display: flex; align-items: center; gap: 10px; padding: 8px 8px; border-right: 1px solid #c7c8cb; }
+          .notes {
+            margin-top: 2.2mm;
+            display: grid;
+            grid-template-columns: 8.5mm 1fr;
+            gap: 2mm;
+            background: #e8e1e2;
+            border-radius: 2.4mm;
+            padding: 2mm;
+            max-height: 25mm;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
+          .notes-icon { width: 8.5mm; height: 8.5mm; border-radius: 1.4mm; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 2.8mm; }
+          .notes-title { margin: 0; color: #b11116; font-size: 4.7mm; font-weight: 800; }
+          .notes-text {
+            margin: 1mm 0 0;
+            font-size: 3.5mm;
+            line-height: 1.28;
+            color: #20242a;
+            display: -webkit-box;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 3;
+            overflow: hidden;
+          }
+          .mid-divider { margin: 1.8mm 0 1.4mm; display: flex; align-items: center; gap: 2.4mm; }
+          .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
+          .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 1.7mm;
+            padding: 1.2mm 1mm;
+            border-right: 0.3mm solid #c7c8cb;
+            min-height: 13mm;
+            overflow: hidden;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
           .meta-item:last-child { border-right: none; }
-          .meta-icon { width: 48px; height: 48px; border-radius: 50%; border: 3px solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 18px; }
-          .meta-text { font-size: 35px; line-height: 1.32; color: #20242a; }
+          .meta-icon { width: 6.8mm; height: 6.8mm; border-radius: 50%; border: 0.45mm solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 2.6mm; }
+          .meta-text {
+            font-size: 3.5mm;
+            line-height: 1.2;
+            color: #20242a;
+            overflow: hidden;
+          }
           .meta-text strong { color: #b11116; }
-          .queue { margin-top: 16px; border: 1.8px solid #e2676d; border-radius: 14px; padding: 16px; background: #f3f3f3; }
-          .queue-title { text-align: center; margin: 0 0 10px; color: #b11116; text-transform: uppercase; font-size: 50px; font-weight: 800; letter-spacing: 1px; }
-          .queue img { width: 100%; height: 95px; display: block; }
-          .queue-label { text-align: center; margin: 10px 0 0; font-size: 26px; letter-spacing: 0.08em; color: #1f2937; }
-          .small-muted { color: #6b7280; font-size: 12px; }
+          .queue {
+            margin-top: 1.8mm;
+            border: 0.45mm solid #e2676d;
+            border-radius: 2.4mm;
+            padding: 1.8mm;
+            background: #f3f3f3;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
+          .queue-title { text-align: center; margin: 0 0 1.1mm; color: #b11116; text-transform: uppercase; font-size: 4.8mm; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
+          .queue img { width: 100%; height: 11mm; display: block; }
+          .queue-label { text-align: center; margin: 1mm 0 0; font-size: 3mm; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .small-muted { color: #6b7280; font-size: 2.6mm; }
           .rtl { direction: rtl; text-align: right; }
         </style>
       </head>
