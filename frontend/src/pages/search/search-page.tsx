@@ -314,7 +314,10 @@ function EditPatientForm({
       ageYears: form.ageYears ? Number(form.ageYears) : undefined,
       estimatedDateOfBirth: form.estimatedDateOfBirth || undefined,
       demographicsEstimated: form.demographicsEstimated,
-      category: form.category || undefined,
+      category:
+        form.category === "oncology" || form.category === "non_oncology"
+          ? form.category
+          : undefined,
       phone1: form.phone1 || undefined,
       address: form.address || undefined
     };
