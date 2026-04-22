@@ -1,9 +1,11 @@
 import express, { Request, Response } from "express";
+import * as crypto from "crypto";
 import { requireAuth, requireSupervisor, requireRecentSupervisorReauth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { HttpError } from "../utils/http-error.js";
 import { pool } from "../db/pool.js";
+import { env } from "../config/env.js";
 import {
   getDicomGatewaySettings,
   getDicomGatewayOverview,
@@ -33,10 +35,41 @@ import {
   getServiceStatus
 } from "../services/dicom-gateway-registry.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
+import { ingestMppsEvent } from "../services/mpps-service.js";
 import fs from "fs/promises";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 export const dicomRouter = express.Router();
+
+function hasValidInternalMppsSecret(req: Request): boolean {
+  const provided = String(req.headers["x-rispro-mpps-secret"] || "");
+  const expected = String(env.jwtSecret || "");
+
+  if (!provided || !expected) {
+    return false;
+  }
+
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+dicomRouter.post(
+  "/mpps/events",
+  asyncRoute(async (req: Request, res: Response) => {
+    if (!hasValidInternalMppsSecret(req)) {
+      throw new HttpError(401, "Invalid internal MPPS secret.");
+    }
+
+    const body = asUnknownRecord(req.body);
+    const result = await ingestMppsEvent(body);
+    res.status(202).json({ ok: true, result });
+  })
+);
 
 // All routes require authentication and supervisor role
 dicomRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);

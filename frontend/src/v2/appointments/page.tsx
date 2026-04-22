@@ -550,7 +550,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
           {t(language, "appointments.v2.recentBookings")}
         </h2>
 
-        {/* Include cancelled toggle */}
+        {/* Include inactive toggle */}
             <label
               className="block text-xs uppercase tracking-[0.08em] mb-2 font-mono-data text-muted"
             >
@@ -560,7 +560,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
             onChange={(e) => setIncludeCancelled(e.target.checked)}
             className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
           />
-          {language === "ar" ? "تضمين الملغاة" : "Include cancelled"}
+          {language === "ar" ? "تضمين الملغاة والمتوقفة" : "Include cancelled/discontinued"}
         </label>
       </div>
 
@@ -612,7 +612,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                     className="border-b transition-colors hover:bg-[var(--muted)]"
                     style={{
                       borderColor: "var(--border)",
-                      opacity: booking.status === "cancelled" ? 0.6 : 1,
+                      opacity: booking.status === "cancelled" || booking.status === "discontinued" ? 0.6 : 1,
                     }}
                   >
                   <td className="p-3">
@@ -722,6 +722,8 @@ function BookingStatusBadge({ status }: { status: string }) {
     arrived: { label: language === "ar" ? "وصل" : "Arrived", color: "var(--blue)", bg: "rgba(59, 130, 246, 0.1)" },
     waiting: { label: language === "ar" ? "بانتظار" : "Waiting", color: "var(--amber)", bg: "rgba(245, 158, 11, 0.1)" },
     completed: { label: language === "ar" ? "مكتمل" : "Completed", color: "var(--text-muted)", bg: "var(--muted)" },
+    discontinued: { label: language === "ar" ? "متوقف" : "Discontinued", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.12)" },
+    cancelled: { label: language === "ar" ? "ملغي" : "Cancelled", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.08)" },
     "no-show": { label: language === "ar" ? "لم يحضر" : "No-Show", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
   };
 

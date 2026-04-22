@@ -5,7 +5,7 @@ import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 
 export type OrthancMwlOperation = "upsert" | "delete";
 
-type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled";
+type BookingStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued";
 
 interface BookingSyncSnapshot {
   id: number;

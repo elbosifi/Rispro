@@ -542,6 +542,7 @@ const en = {
   "status.waiting": "Waiting",
   "status.in-progress": "In Progress",
   "status.completed": "Completed",
+  "status.discontinued": "Discontinued",
   "status.no-show": "No-show",
   "status.cancelled": "Cancelled",
 
@@ -1315,6 +1316,7 @@ const ar = {
   "status.waiting": "بانتظار",
   "status.in-progress": "قيد التنفيذ",
   "status.completed": "مكتمل",
+  "status.discontinued": "متوقف",
   "status.no-show": "عدم حضور",
   "status.cancelled": "ملغي",
 

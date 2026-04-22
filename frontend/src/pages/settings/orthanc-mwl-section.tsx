@@ -11,6 +11,7 @@ interface OrthancMwlSectionProps {
 type OrthancSettingsForm = {
   enabled: string;
   shadow_mode: string;
+  connection_mode: string;
   base_url: string;
   username: string;
   password: string;
@@ -94,6 +95,7 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
   return {
     enabled: map.enabled || "false",
     shadow_mode: map.shadow_mode || "false",
+    connection_mode: map.connection_mode || "external",
     base_url: map.base_url || "",
     username: map.username || "",
     password: map.password || "",
@@ -247,6 +249,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
   const outboxStatus = summaryData?.summary?.outboxStatus || [];
   const recentOutboxFailures = summaryData?.summary?.recentFailures?.outbox || [];
   const orthancProbe = summaryData?.summary?.orthancProbe;
+  const isInternalMode = form.connection_mode === "internal";
 
   return (
     <div className="space-y-6">
@@ -286,6 +289,27 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             ]}
           />
           <SettingField
+            label="Orthanc connection"
+            type="select"
+            value={form.connection_mode}
+            onChange={(value) => {
+              setForm((prev) => ({ ...prev, connection_mode: value }));
+              setDirty(true);
+            }}
+            options={[
+              { value: "external", label: "External Orthanc" },
+              { value: "internal", label: "Internal Orthanc" },
+            ]}
+          />
+          {isInternalMode ? (
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-sm font-medium text-stone-700 dark:text-stone-300">Internal Orthanc routing</label>
+              <div className="w-full px-3 py-2 rounded border bg-stone-50 dark:bg-stone-900 border-stone-300 dark:border-stone-600 text-stone-600 dark:text-stone-300 text-sm">
+                RISpro will use the internal Orthanc service configured by deployment. The resolved base URL appears in the probe section below.
+              </div>
+            </div>
+          ) : (
+          <SettingField
             label="Orthanc Base URL"
             value={form.base_url}
             onChange={(value) => {
@@ -294,6 +318,7 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             }}
             placeholder="https://orthanc.example.local:8042"
           />
+          )}
           <SettingField
             label="Timeout (seconds)"
             type="number"
@@ -304,25 +329,29 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             }}
             placeholder="10"
           />
-          <SettingField
-            label="Username"
-            value={form.username}
-            onChange={(value) => {
-              setForm((prev) => ({ ...prev, username: value }));
-              setDirty(true);
-            }}
-            placeholder="orthanc-user"
-          />
-          <SettingField
-            label="Password"
-            type="password"
-            value={form.password}
-            onChange={(value) => {
-              setForm((prev) => ({ ...prev, password: value }));
-              setDirty(true);
-            }}
-            placeholder="********"
-          />
+          {!isInternalMode && (
+            <>
+              <SettingField
+                label="Username"
+                value={form.username}
+                onChange={(value) => {
+                  setForm((prev) => ({ ...prev, username: value }));
+                  setDirty(true);
+                }}
+                placeholder="orthanc-user"
+              />
+              <SettingField
+                label="Password"
+                type="password"
+                value={form.password}
+                onChange={(value) => {
+                  setForm((prev) => ({ ...prev, password: value }));
+                  setDirty(true);
+                }}
+                placeholder="********"
+              />
+            </>
+          )}
           <SettingField
             label="Verify TLS"
             type="select"

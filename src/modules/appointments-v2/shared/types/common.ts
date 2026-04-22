@@ -12,7 +12,8 @@ export type BookingStatus =
   | "waiting"
   | "completed"
   | "no-show"
-  | "cancelled";
+  | "cancelled"
+  | "discontinued";
 
 export type CapacityResolutionMode =
   | "standard"

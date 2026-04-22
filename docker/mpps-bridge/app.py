@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 import json
 import os
@@ -7,6 +9,8 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib import error as urlerror
+from urllib import request as urlrequest
 
 from pydicom.dataset import Dataset
 from pynetdicom import AE, evt
@@ -19,6 +23,8 @@ MPPS_AUTH_ENABLED = os.environ.get("MPPS_AUTH_ENABLED", "false").strip().lower()
 MPPS_USERNAME = os.environ.get("MPPS_USERNAME", "")
 MPPS_PASSWORD = os.environ.get("MPPS_PASSWORD", "")
 MPPS_ADMIN_PORT = int(os.environ.get("MPPS_ADMIN_PORT", "18080"))
+RISPRO_BASE_URL = os.environ.get("RISPRO_BASE_URL", "http://app:3000").rstrip("/")
+RISPRO_MPPS_SECRET = os.environ.get("RISPRO_INTERNAL_SECRET", os.environ.get("JWT_SECRET", ""))
 
 STATE = {
     "started_at": datetime.now(timezone.utc).isoformat(),
@@ -34,15 +40,104 @@ def dataset_to_json(dataset: Dataset | None) -> Any:
     return dataset.to_json_dict()
 
 
+def normalize_ae_title(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("ascii", errors="ignore").strip()
+    return str(value).strip()
+
+
+def dataset_value(dataset: Dataset | None, keyword: str, default: str = "") -> str:
+    if dataset is None:
+        return default
+    value = dataset.get(keyword, default)
+    if value is None:
+        return default
+    if hasattr(value, "value"):
+        value = value.value
+    return str(value).strip()
+
+
+def sequence_dataset_value(dataset: Dataset | None, sequence_keyword: str, item_keyword: str, default: str = "") -> str:
+    if dataset is None:
+        return default
+    sequence = dataset.get(sequence_keyword)
+    if not sequence:
+        return default
+    try:
+        first_item = sequence[0]
+    except Exception:
+        return default
+    return dataset_value(first_item, item_keyword, default)
+
+
+def normalize_mpps_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> dict[str, Any]:
+    return {
+        "eventType": event_type,
+        "sourceAeTitle": calling_ae_title,
+        "patientId": dataset_value(dataset, "PatientID"),
+        "accessionNumber": dataset_value(dataset, "AccessionNumber"),
+        "studyInstanceUid": dataset_value(dataset, "StudyInstanceUID"),
+        "mppsInstanceUid": sop_instance_uid,
+        "performedStepStatus": dataset_value(dataset, "PerformedProcedureStepStatus"),
+        "requestedProcedureId": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "RequestedProcedureID"),
+        "scheduledProcedureStepId": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepID"),
+        "modality": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "Modality"),
+        "scheduledStartDate": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepStartDate")
+            or dataset_value(dataset, "PerformedProcedureStepStartDate"),
+        "scheduledStartTime": sequence_dataset_value(dataset, "ScheduledStepAttributesSequence", "ScheduledProcedureStepStartTime")
+            or dataset_value(dataset, "PerformedProcedureStepStartTime"),
+        "rawDatasetJson": dataset_to_json(dataset) or {},
+    }
+
+
+def deliver_to_rispro(payload: dict[str, Any]) -> dict[str, Any]:
+    if not RISPRO_MPPS_SECRET:
+        raise RuntimeError("RISPRO_INTERNAL_SECRET or JWT_SECRET is required for MPPS bridge delivery.")
+
+    body = json.dumps(payload).encode("utf-8")
+    request = urlrequest.Request(
+        f"{RISPRO_BASE_URL}/api/dicom/mpps/events",
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-RISPRO-MPPS-SECRET": RISPRO_MPPS_SECRET,
+        },
+        method="POST",
+    )
+
+    try:
+        with urlrequest.urlopen(request, timeout=10) as response:
+            raw = response.read().decode("utf-8")
+    except urlerror.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"RISpro MPPS intake returned HTTP {exc.code}: {raw or exc.reason}") from exc
+    except urlerror.URLError as exc:
+        raise RuntimeError(f"RISpro MPPS intake request failed: {exc.reason}") from exc
+
+    return json.loads(raw or "{}")
+
+
 def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None, calling_ae_title: str) -> None:
     MPPS_STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+    normalized_payload = normalize_mpps_event(event_type, sop_instance_uid, dataset, calling_ae_title)
     payload = {
         "event_type": event_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "sop_instance_uid": sop_instance_uid,
         "calling_ae_title": calling_ae_title,
         "dataset": dataset_to_json(dataset),
+        "normalized_payload": normalized_payload,
     }
+
+    delivery_error = None
+    try:
+        payload["rispro_delivery"] = deliver_to_rispro(normalized_payload)
+    except Exception as exc:
+        delivery_error = str(exc)
+        payload["rispro_delivery_error"] = delivery_error
+
     filename = f"{payload['timestamp'].replace(':', '-')}-{event_type}-{sop_instance_uid}.json"
     (MPPS_STORAGE_DIR / filename).write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -54,24 +149,36 @@ def record_event(event_type: str, sop_instance_uid: str, dataset: Dataset | None
                 "timestamp": payload["timestamp"],
                 "sop_instance_uid": sop_instance_uid,
                 "calling_ae_title": calling_ae_title,
+                "delivery_error": delivery_error,
             }
         )
         STATE["events"] = STATE["events"][-25:]
+
+    if delivery_error:
+        raise RuntimeError(delivery_error)
 
 
 def handle_n_create(event: evt.Event):
     sop_instance_uid = getattr(event.request, "AffectedSOPInstanceUID", "unknown")
     dataset = event.attribute_list if hasattr(event, "attribute_list") else None
-    calling_ae_title = getattr(event.assoc.requestor, "ae_title", b"").decode("ascii", errors="ignore").strip()
-    record_event("n-create", sop_instance_uid, dataset, calling_ae_title)
+    calling_ae_title = normalize_ae_title(getattr(event.assoc.requestor, "ae_title", b""))
+    try:
+        record_event("n-create", sop_instance_uid, dataset, calling_ae_title)
+    except Exception as exc:
+        print(f"MPPS bridge N-CREATE failed: {exc}", flush=True)
+        return 0x0110, None
     return 0x0000, dataset
 
 
 def handle_n_set(event: evt.Event):
     sop_instance_uid = getattr(event.request, "RequestedSOPInstanceUID", "unknown")
     dataset = event.modification_list if hasattr(event, "modification_list") else None
-    calling_ae_title = getattr(event.assoc.requestor, "ae_title", b"").decode("ascii", errors="ignore").strip()
-    record_event("n-set", sop_instance_uid, dataset, calling_ae_title)
+    calling_ae_title = normalize_ae_title(getattr(event.assoc.requestor, "ae_title", b""))
+    try:
+        record_event("n-set", sop_instance_uid, dataset, calling_ae_title)
+    except Exception as exc:
+        print(f"MPPS bridge N-SET failed: {exc}", flush=True)
+        return 0x0110, None
     return 0x0000, dataset
 
 

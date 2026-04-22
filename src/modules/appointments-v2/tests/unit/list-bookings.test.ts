@@ -89,6 +89,7 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
       "arrived",
       "waiting",
       "completed",
+      "discontinued",
       "no-show",
       "cancelled",
     ] as const;
@@ -266,7 +267,7 @@ describe("List bookings — includeCancelled", () => {
     const repoPath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/booking.repo.ts";
     const content = await fs.readFile(repoPath, "utf-8");
     assert.ok(content.includes("includeCancelled: boolean"));
-    assert.ok(content.includes("($4 = true or b.status <> 'cancelled')"));
+    assert.ok(content.includes("($4 = true or b.status not in ('cancelled', 'discontinued'))"));
     assert.ok(content.includes("params.includeCancelled"));
   });
 
@@ -283,7 +284,7 @@ describe("List bookings — includeCancelled", () => {
     const routePath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/api/routes/appointments-v2-routes.ts";
     const content = await fs.readFile(routePath, "utf-8");
     assert.ok(content.includes("includeCancelled"));
-    assert.ok(content.includes("includeCancelled (optional, default false)"));
+    assert.ok(content.includes("include cancelled and discontinued bookings in results"));
   });
 
   it("frontend API includes includeCancelled in params", async () => {
@@ -308,7 +309,7 @@ describe("List bookings — includeCancelled", () => {
     const content = await fs.readFile(pagePath, "utf-8");
     assert.ok(content.includes("includeCancelled"));
     assert.ok(content.includes("setIncludeCancelled"));
-    assert.ok(content.includes("Include cancelled"));
+    assert.ok(content.includes("Include cancelled/discontinued"));
     assert.ok(content.includes('type="checkbox"'));
   });
 
@@ -316,7 +317,7 @@ describe("List bookings — includeCancelled", () => {
     const fs = await import("node:fs/promises");
     const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
     const content = await fs.readFile(pagePath, "utf-8");
-    assert.ok(content.includes('booking.status === "cancelled"'));
+    assert.ok(content.includes('booking.status === "cancelled" || booking.status === "discontinued"'));
     assert.ok(content.includes("opacity"));
   });
 });

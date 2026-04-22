@@ -7,6 +7,7 @@ import { normalizeOptionalText } from "../utils/normalize.js";
 export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
   enabled: "false",
   shadow_mode: "false",
+  connection_mode: "external",
   base_url: "",
   username: "",
   password: "",
@@ -19,6 +20,7 @@ export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
 export interface ResolvedOrthancSettings {
   enabled: boolean;
   shadowMode: boolean;
+  connectionMode: "internal" | "external";
   baseUrl: string;
   username: string;
   password: string;
@@ -35,8 +37,6 @@ export interface OrthancSettingsEntryInput {
 
 const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls"]);
 const ORTHANC_ALLOWED_KEYS = new Set(Object.keys(ORTHANC_MWL_DEFAULTS));
-const ORTHANC_STRATEGY_KEYS = new Set(["strategy_preference"]);
-
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) return fallback;
@@ -140,6 +140,13 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
     }
   }
 
+  if (incoming.has("connection_mode")) {
+    const mode = incoming.get("connection_mode") || "";
+    if (mode !== "internal" && mode !== "external") {
+      throw new HttpError(400, `orthanc_mwl_sync.connection_mode must be "internal" or "external".`);
+    }
+  }
+
   if (incoming.has("timeout_seconds")) {
     const timeoutRaw = incoming.get("timeout_seconds") || "";
     const timeout = Number(timeoutRaw);
@@ -150,25 +157,35 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
 
   const enabledRaw = incoming.get("enabled");
   const enabled = enabledRaw == null ? null : parseBoolean(enabledRaw, false);
+  const connectionMode = incoming.get("connection_mode") || "external";
   const baseUrlRaw = incoming.get("base_url");
 
-  if (enabled === true && baseUrlRaw != null && !baseUrlRaw.trim()) {
+  if (enabled === true && connectionMode === "external" && baseUrlRaw != null && !baseUrlRaw.trim()) {
     throw new HttpError(400, "orthanc_mwl_sync.base_url is required when enabled=true.");
   }
 }
 
 export function normalizeOrthancSettingsEntries(entries: OrthancSettingsEntryInput[]): OrthancSettingsEntryInput[] {
   return entries.map((entry) => {
-    if (String(entry.key || "").trim() !== "worklist_target") {
-      return entry;
+    const key = String(entry.key || "").trim();
+    if (key === "worklist_target") {
+      const current = extractSettingString(entry.value);
+      const normalized = normalizeWorklistTargetValue(current);
+      return {
+        ...entry,
+        value: { value: normalized },
+      };
     }
 
-    const current = extractSettingString(entry.value);
-    const normalized = normalizeWorklistTargetValue(current);
-    return {
-      ...entry,
-      value: { value: normalized },
-    };
+    if (key === "connection_mode") {
+      const current = extractSettingString(entry.value).toLowerCase();
+      return {
+        ...entry,
+        value: { value: current === "internal" ? "internal" : "external" },
+      };
+    }
+
+    return entry;
   });
 }
 
@@ -179,11 +196,28 @@ function parseStrategyPreference(value: string | undefined, fallback: "put_first
   return fallback;
 }
 
+function parseConnectionMode(value: string | undefined, fallback: "internal" | "external"): "internal" | "external" {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "internal") return "internal";
+  if (normalized === "external") return "external";
+  return fallback;
+}
+
 export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings> {
   const map = await loadSettingsMap(["orthanc_mwl_sync"]);
   const db = map.orthanc_mwl_sync || {};
   const enabled = parseBoolean(db.enabled, env.orthancMwlEnabled);
-  const baseUrl = normalizeOptionalText(db.base_url) || env.orthancBaseUrl;
+  const defaultConnectionMode = env.risproDicomMode === "orthanc_internal" ? "internal" : "external";
+  const connectionMode = parseConnectionMode(db.connection_mode, defaultConnectionMode);
+  const internalBaseUrl = normalizeOptionalText(env.orthancBaseUrl) || "http://orthanc:8042";
+  const externalBaseUrlFallback = env.risproDicomMode === "orthanc_external" ? env.orthancBaseUrl : "";
+  const baseUrl = connectionMode === "internal"
+    ? internalBaseUrl
+    : (normalizeOptionalText(db.base_url) || externalBaseUrlFallback);
+
+  if (enabled && connectionMode === "internal" && env.risproDicomMode !== "orthanc_internal") {
+    throw new Error("Orthanc MWL is set to internal mode but RISPRO_DICOM_MODE is not orthanc_internal.");
+  }
 
   if (enabled && !baseUrl) {
     throw new Error("Orthanc MWL is enabled but base_url is empty.");
@@ -192,9 +226,10 @@ export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings>
   return {
     enabled,
     shadowMode: parseBoolean(db.shadow_mode, env.orthancMwlShadowMode),
+    connectionMode,
     baseUrl,
-    username: env.orthancAuthEnabled ? normalizeOptionalText(db.username) || env.orthancUsername : "",
-    password: env.orthancAuthEnabled ? normalizeOptionalText(db.password) || env.orthancPassword : "",
+    username: connectionMode === "external" && env.orthancAuthEnabled ? normalizeOptionalText(db.username) || env.orthancUsername : "",
+    password: connectionMode === "external" && env.orthancAuthEnabled ? normalizeOptionalText(db.password) || env.orthancPassword : "",
     timeoutSeconds: parsePositiveInteger(db.timeout_seconds, env.orthancTimeoutSeconds),
     verifyTls: parseBoolean(db.verify_tls, env.orthancVerifyTls),
     worklistTarget: normalizeWorklistTargetValue(normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget),

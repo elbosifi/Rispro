@@ -12,6 +12,7 @@ export type BookingStatus =
   | "arrived"
   | "waiting"
   | "completed"
+  | "discontinued"
   | "no-show"
   | "cancelled";
 

@@ -230,7 +230,7 @@ const LIST_BOOKINGS_SQL = `
   where b.modality_id = $1
     and b.booking_date >= $2
     and b.booking_date <= $3
-    and ($4 = true or b.status <> 'cancelled')
+    and ($4 = true or b.status not in ('cancelled', 'discontinued'))
   order by b.booking_date asc, b.booking_time asc nulls first, b.created_at desc
   limit $5
   offset $6
@@ -303,7 +303,7 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
       from appointments_v2.bookings slot
       where slot.modality_id = bb.modality_id
         and slot.booking_date = bb.appointment_date::date
-        and slot.status <> 'cancelled'
+        and slot.status not in ('cancelled', 'discontinued')
         and slot.id <= bb.id
     )::int as modality_slot_number,
     bb.status,

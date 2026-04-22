@@ -39,7 +39,7 @@ function isNonStandardCapacityResolutionMode(mode: CapacityResolutionMode): bool
  * - dateTo (required) — ISO yyyy-mm-dd
  * - limit (optional, default 50)
  * - offset (optional, default 0)
- * - includeCancelled (optional, default false) — include cancelled bookings in results
+ * - includeCancelled (optional, default false) — include cancelled and discontinued bookings in results
  */
 router.get(
   "/",

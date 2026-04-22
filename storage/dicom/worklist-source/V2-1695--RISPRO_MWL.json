@@ -1,0 +1,20 @@
+{
+  "appointmentId": "1695",
+  "accessionNumber": "V2-1695",
+  "modalityId": "806",
+  "modalityCode": "MPPS_85f6eb73CT",
+  "patientId": "616",
+  "patientMrn": "000702",
+  "patientNationalId": "1f6327292a5d",
+  "patientNameEnglish": "MPPS_85f6eb73Test Patient",
+  "patientNameArabic": "MPPS_85f6eb73مريض اختبار",
+  "appointmentDate": "2026-04-22",
+  "appointmentStatus": "waiting",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

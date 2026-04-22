@@ -14,6 +14,7 @@ const STATUS_ORDER: AppointmentStatus[] = [
   "waiting",
   "in-progress",
   "completed",
+  "discontinued",
   "no-show",
   "cancelled"
 ];
@@ -131,4 +132,3 @@ export function buildDashboardViewModel(
     }
   };
 }
-

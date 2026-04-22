@@ -5,7 +5,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { useLanguage } from "@/providers/language-provider";
-import { t } from "@/lib/i18n";
+import { statusLabel, t } from "@/lib/i18n";
 import { BarChart3 } from "lucide-react";
 import type {
   AppointmentStatisticsStatusRow,
@@ -89,7 +89,7 @@ export default function StatisticsPage() {
           <tbody className="divide-y" >
             {statusBreakdown.map((row) => (
               <tr key={row.status} className="hover:bg-[var(--foreground)] transition-colors">
-                <td className="p-3" style={{ color: "var(--text)" }}>{row.status}</td>
+                <td className="p-3" style={{ color: "var(--text)" }}>{statusLabel(language, row.status)}</td>
                 <td className="p-3 text-right" style={{ color: "var(--text-muted)" }}>{row.count}</td>
               </tr>
             ))}
@@ -137,6 +137,7 @@ export default function StatisticsPage() {
               <th className="text-right p-3 border-b" style={{ borderColor: "var(--border)" }}>{t(language, "statistics.dateCol")}</th>
               <th className="text-right p-3 border-b" style={{ borderColor: "var(--border)" }}>{t(language, "statistics.totalCol")}</th>
               <th className="text-right p-3 border-b" style={{ borderColor: "var(--border)" }}>{t(language, "status.completed")}</th>
+              <th className="text-right p-3 border-b" style={{ borderColor: "var(--border)" }}>{t(language, "status.discontinued")}</th>
               <th className="text-right p-3 border-b" style={{ borderColor: "var(--border)" }}>{t(language, "status.no-show")}</th>
             </tr>
           </thead>
@@ -146,6 +147,7 @@ export default function StatisticsPage() {
                 <td className="p-3" style={{ color: "var(--text)" }}>{formatDateLy(row.appointmentDate)}</td>
                 <td className="p-3 text-right" style={{ color: "var(--text-muted)" }}>{row.totalCount}</td>
                 <td className="p-3 text-right" style={{ color: "var(--text-muted)" }}>{row.completedCount}</td>
+                <td className="p-3 text-right" style={{ color: "var(--text-muted)" }}>{row.discontinuedCount}</td>
                 <td className="p-3 text-right" style={{ color: "var(--text-muted)" }}>{row.noShowCount}</td>
               </tr>
             ))}

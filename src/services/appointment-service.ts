@@ -214,6 +214,7 @@ interface AppointmentStatsSummaryRow {
   scheduled_count: DbNumeric;
   in_queue_count: DbNumeric;
   completed_count: DbNumeric;
+  discontinued_count: DbNumeric;
   no_show_count: DbNumeric;
   cancelled_count: DbNumeric;
   walk_in_count: DbNumeric;
@@ -264,6 +265,7 @@ interface ModalityBreakdownRow {
   scheduled_count: DbNumeric;
   in_queue_count: DbNumeric;
   completed_count: DbNumeric;
+  discontinued_count: DbNumeric;
   no_show_count: DbNumeric;
   cancelled_count: DbNumeric;
 }
@@ -277,6 +279,7 @@ interface DailyBreakdownRow {
   appointment_date: string;
   total_count: DbNumeric;
   completed_count: DbNumeric;
+  discontinued_count: DbNumeric;
   cancelled_count: DbNumeric;
   no_show_count: DbNumeric;
 }
@@ -651,7 +654,7 @@ async function nextModalitySlotNumber(
 
   const { rows } = await client.query(`
     select
-      count(*) filter (where status <> 'cancelled') as booked_count,
+      count(*) filter (where status not in ('cancelled', 'discontinued')) as booked_count,
       coalesce(max(modality_slot_number), 0) as last_slot_number
     from appointments
     where modality_id = $1
@@ -1010,6 +1013,7 @@ export async function listAppointmentStatistics(
     scheduled_count: number;
     in_queue_count: number;
     completed_count: number;
+    discontinued_count: number;
     no_show_count: number;
     cancelled_count: number;
   }>;
@@ -1018,6 +1022,7 @@ export async function listAppointmentStatistics(
     appointment_date: string;
     total_count: number;
     completed_count: number;
+    discontinued_count: number;
     cancelled_count: number;
     no_show_count: number;
   }>;
@@ -1060,6 +1065,7 @@ export async function listAppointmentStatistics(
         count(*) filter (where status = 'scheduled') as scheduled_count,
         count(*) filter (where status in ('arrived', 'waiting', 'in-progress')) as in_queue_count,
         count(*) filter (where status = 'completed') as completed_count,
+        count(*) filter (where status = 'discontinued') as discontinued_count,
         count(*) filter (where status = 'no-show') as no_show_count,
         count(*) filter (where status = 'cancelled') as cancelled_count,
         count(*) filter (where is_walk_in = true) as walk_in_count
@@ -1076,6 +1082,7 @@ export async function listAppointmentStatistics(
         count(*) filter (where appointments.status = 'scheduled') as scheduled_count,
         count(*) filter (where appointments.status in ('arrived', 'waiting', 'in-progress')) as in_queue_count,
         count(*) filter (where appointments.status = 'completed') as completed_count,
+        count(*) filter (where appointments.status = 'discontinued') as discontinued_count,
         count(*) filter (where appointments.status = 'no-show') as no_show_count,
         count(*) filter (where appointments.status = 'cancelled') as cancelled_count
       from appointments
@@ -1098,6 +1105,7 @@ export async function listAppointmentStatistics(
         appointment_date,
         count(*) as total_count,
         count(*) filter (where status = 'completed') as completed_count,
+        count(*) filter (where status = 'discontinued') as discontinued_count,
         count(*) filter (where status = 'cancelled') as cancelled_count,
         count(*) filter (where status = 'no-show') as no_show_count
       from appointments
@@ -1113,9 +1121,10 @@ export async function listAppointmentStatistics(
     unique_modalities: 0,
     scheduled_count: 0,
     in_queue_count: 0,
-    completed_count: 0,
-    no_show_count: 0,
-    cancelled_count: 0,
+      completed_count: 0,
+      discontinued_count: 0,
+      no_show_count: 0,
+      cancelled_count: 0,
     walk_in_count: 0
   };
 
@@ -1133,6 +1142,7 @@ export async function listAppointmentStatistics(
       scheduled_count: Number(summary.scheduled_count || 0),
       in_queue_count: Number(summary.in_queue_count || 0),
       completed_count: Number(summary.completed_count || 0),
+      discontinued_count: Number((summary as Record<string, unknown>).discontinued_count || 0),
       no_show_count: Number(summary.no_show_count || 0),
       cancelled_count: Number(summary.cancelled_count || 0),
       walk_in_count: Number(summary.walk_in_count || 0)
@@ -1146,6 +1156,7 @@ export async function listAppointmentStatistics(
       scheduled_count: Number(row.scheduled_count || 0),
       in_queue_count: Number(row.in_queue_count || 0),
       completed_count: Number(row.completed_count || 0),
+      discontinued_count: Number((row as Record<string, unknown>).discontinued_count || 0),
       no_show_count: Number(row.no_show_count || 0),
       cancelled_count: Number(row.cancelled_count || 0)
     })),
@@ -1157,6 +1168,7 @@ export async function listAppointmentStatistics(
       appointment_date: row.appointment_date,
       total_count: Number(row.total_count || 0),
       completed_count: Number(row.completed_count || 0),
+      discontinued_count: Number((row as Record<string, unknown>).discontinued_count || 0),
       cancelled_count: Number(row.cancelled_count || 0),
       no_show_count: Number(row.no_show_count || 0)
     }))
@@ -1261,7 +1273,7 @@ export async function listAvailability(
     bookings as (
       select
         appointment_date,
-        count(*) filter (where status <> 'cancelled') as booked_count,
+        count(*) filter (where status not in ('cancelled', 'discontinued')) as booked_count,
         max(modality_slot_number) as last_slot_number
       from appointments
       where modality_id = $1
@@ -1900,7 +1912,7 @@ export async function createAppointment(
 
     const bookingStats = await client.query(`
       select
-        count(*) filter (where status <> 'cancelled') as booked_count,
+        count(*) filter (where status not in ('cancelled', 'discontinued')) as booked_count,
         coalesce(max(modality_slot_number), 0) as last_slot_number,
         coalesce(max(daily_sequence), 0) as last_daily_sequence
       from appointments

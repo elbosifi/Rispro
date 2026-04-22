@@ -1,0 +1,13 @@
+# RISpro generated Modality Worklist source file
+(0008,0005) CS [ISO_IR 192]
+(0010,0010) PN [BRIDGE_E2E_11699b60Test Patient]
+(0010,0020) LO [000710]
+(0010,0030) DA []
+(0010,0040) CS [M]
+(0040,0100) SQ (Sequence with undefined length)
+(fffe,e000) na (Item with undefined length)
+  (0008,0060) CS [BRIDGE_E2E_11699B60CT]
+  (0040,0002) DA [20260422]
+  (0040,0007) LO [BRIDGE_E2E_11699b60 CT Head]
+(fffe,e00d) na (ItemDelimitationItem)
+(fffe,e0dd) na (SequenceDelimitationItem)

@@ -236,6 +236,7 @@ router.get(
             count(*) filter (where b.status = 'scheduled')::int as scheduled_count,
             count(*) filter (where b.status in ('arrived', 'waiting'))::int as in_queue_count,
             count(*) filter (where b.status = 'completed')::int as completed_count,
+            count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count,
             count(*) filter (where b.status = 'cancelled')::int as cancelled_count,
             count(*) filter (where b.is_walk_in = true)::int as walk_in_count
@@ -265,6 +266,7 @@ router.get(
             count(*) filter (where b.status = 'scheduled')::int as scheduled_count,
             count(*) filter (where b.status in ('arrived', 'waiting'))::int as in_queue_count,
             count(*) filter (where b.status = 'completed')::int as completed_count,
+            count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count,
             count(*) filter (where b.status = 'cancelled')::int as cancelled_count
           from appointments_v2.bookings b
@@ -281,6 +283,7 @@ router.get(
             b.booking_date::text as appointment_date,
             count(*)::int as total_count,
             count(*) filter (where b.status = 'completed')::int as completed_count,
+            count(*) filter (where b.status = 'discontinued')::int as discontinued_count,
             count(*) filter (where b.status = 'cancelled')::int as cancelled_count,
             count(*) filter (where b.status = 'no-show')::int as no_show_count
           from appointments_v2.bookings b
@@ -300,6 +303,7 @@ router.get(
       scheduled_count: 0,
       in_queue_count: 0,
       completed_count: 0,
+      discontinued_count: 0,
       no_show_count: 0,
       cancelled_count: 0,
       walk_in_count: 0,
@@ -313,6 +317,7 @@ router.get(
         scheduledCount: summaryRow.scheduled_count,
         inQueueCount: summaryRow.in_queue_count,
         completedCount: summaryRow.completed_count,
+        discontinuedCount: summaryRow.discontinued_count,
         noShowCount: summaryRow.no_show_count,
         cancelledCount: summaryRow.cancelled_count,
         walkInCount: summaryRow.walk_in_count,
@@ -327,6 +332,7 @@ router.get(
         scheduledCount: r.scheduled_count,
         inQueueCount: r.in_queue_count,
         completedCount: r.completed_count,
+        discontinuedCount: r.discontinued_count,
         noShowCount: r.no_show_count,
         cancelledCount: r.cancelled_count,
       })),
@@ -334,6 +340,7 @@ router.get(
         appointmentDate: r.appointment_date,
         totalCount: r.total_count,
         completedCount: r.completed_count,
+        discontinuedCount: r.discontinued_count,
         cancelledCount: r.cancelled_count,
         noShowCount: r.no_show_count,
       })),

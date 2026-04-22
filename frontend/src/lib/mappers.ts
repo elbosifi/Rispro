@@ -381,6 +381,7 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
       scheduledCount: num(summaryRaw, 'scheduled_count') || num(summaryRaw, 'scheduledCount'),
       inQueueCount: num(summaryRaw, 'in_queue_count') || num(summaryRaw, 'inQueueCount'),
       completedCount: num(summaryRaw, 'completed_count') || num(summaryRaw, 'completedCount'),
+      discontinuedCount: num(summaryRaw, 'discontinued_count') || num(summaryRaw, 'discontinuedCount'),
       noShowCount: num(summaryRaw, 'no_show_count') || num(summaryRaw, 'noShowCount'),
       cancelledCount: num(summaryRaw, 'cancelled_count') || num(summaryRaw, 'cancelledCount'),
       walkInCount: num(summaryRaw, 'walk_in_count') || num(summaryRaw, 'walkInCount')
@@ -404,6 +405,7 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
           scheduledCount: num(item, 'scheduled_count') || num(item, 'scheduledCount'),
           inQueueCount: num(item, 'in_queue_count') || num(item, 'inQueueCount'),
           completedCount: num(item, 'completed_count') || num(item, 'completedCount'),
+          discontinuedCount: num(item, 'discontinued_count') || num(item, 'discontinuedCount'),
           noShowCount: num(item, 'no_show_count') || num(item, 'noShowCount'),
           cancelledCount: num(item, 'cancelled_count') || num(item, 'cancelledCount')
         }))
@@ -416,6 +418,7 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
           scheduledCount: num(item, 'scheduled_count') || num(item, 'scheduledCount'),
           inQueueCount: num(item, 'in_queue_count') || num(item, 'inQueueCount'),
           completedCount: num(item, 'completed_count') || num(item, 'completedCount'),
+          discontinuedCount: num(item, 'discontinued_count') || num(item, 'discontinuedCount'),
           noShowCount: num(item, 'no_show_count') || num(item, 'noShowCount'),
           cancelledCount: num(item, 'cancelled_count') || num(item, 'cancelledCount')
         })),
@@ -424,6 +427,7 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
           appointmentDate: normalizeIsoDate(item.appointment_date ?? item.appointmentDate ?? ""),
           totalCount: num(item, 'total_count') || num(item, 'totalCount'),
           completedCount: num(item, 'completed_count') || num(item, 'completedCount'),
+          discontinuedCount: num(item, 'discontinued_count') || num(item, 'discontinuedCount'),
           cancelledCount: num(item, 'cancelled_count') || num(item, 'cancelledCount'),
           noShowCount: num(item, 'no_show_count') || num(item, 'noShowCount')
         }))
@@ -431,6 +435,7 @@ export function mapStatistics(raw: RawRecord): AppointmentStatistics {
           appointmentDate: normalizeIsoDate(item.appointment_date ?? item.appointmentDate ?? ""),
           totalCount: num(item, 'total_count') || num(item, 'totalCount'),
           completedCount: num(item, 'completed_count') || num(item, 'completedCount'),
+          discontinuedCount: num(item, 'discontinued_count') || num(item, 'discontinuedCount'),
           cancelledCount: num(item, 'cancelled_count') || num(item, 'cancelledCount'),
           noShowCount: num(item, 'no_show_count') || num(item, 'noShowCount')
         }))

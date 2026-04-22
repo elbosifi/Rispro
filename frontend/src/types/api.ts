@@ -189,6 +189,7 @@ export interface AppointmentStatisticsSummary {
   scheduledCount: number;
   inQueueCount: number;
   completedCount: number;
+  discontinuedCount: number;
   noShowCount: number;
   cancelledCount: number;
   walkInCount: number;
@@ -208,6 +209,7 @@ export interface AppointmentStatisticsModalityRow {
   scheduledCount: number;
   inQueueCount: number;
   completedCount: number;
+  discontinuedCount: number;
   noShowCount: number;
   cancelledCount: number;
 }
@@ -216,6 +218,7 @@ export interface AppointmentStatisticsDailyRow {
   appointmentDate: string;
   totalCount: number;
   completedCount: number;
+  discontinuedCount: number;
   cancelledCount: number;
   noShowCount: number;
 }

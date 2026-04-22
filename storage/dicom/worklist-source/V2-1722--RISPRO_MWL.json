@@ -1,0 +1,20 @@
+{
+  "appointmentId": "1722",
+  "accessionNumber": "V2-1722",
+  "modalityId": "813",
+  "modalityCode": "MPPS_ac713bacCT",
+  "patientId": "623",
+  "patientMrn": "000709",
+  "patientNationalId": "13a238e7ae35",
+  "patientNameEnglish": "MPPS_ac713bacTest Patient",
+  "patientNameArabic": "MPPS_ac713bacمريض اختبار",
+  "appointmentDate": "2026-04-22",
+  "appointmentStatus": "waiting",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

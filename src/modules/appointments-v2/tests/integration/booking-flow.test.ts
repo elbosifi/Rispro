@@ -193,7 +193,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
 
       const booking = (response.bookings as Record<string, unknown>[])[0];
       assert.equal(Number(booking.modalityId), testData.modalityId);
-      assert.ok(["scheduled", "arrived", "waiting", "completed", "no-show"].includes(booking.status as string));
+      assert.ok(["scheduled", "arrived", "waiting", "completed", "discontinued", "no-show"].includes(booking.status as string));
     });
 
     it("should exclude cancelled bookings by default", async () => {

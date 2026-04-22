@@ -1,0 +1,20 @@
+{
+  "appointmentId": "1752",
+  "accessionNumber": "V2-1752",
+  "modalityId": "814",
+  "modalityCode": "BRIDGE_E2E_11699b60CT",
+  "patientId": "624",
+  "patientMrn": "000710",
+  "patientNationalId": "1e4c67e0912d",
+  "patientNameEnglish": "BRIDGE_E2E_11699b60Test Patient",
+  "patientNameArabic": "BRIDGE_E2E_11699b60مريض اختبار",
+  "appointmentDate": "2026-04-22",
+  "appointmentStatus": "waiting",
+  "scheduledProcedureStepStatus": "ARRIVED",
+  "worklist": {
+    "scheduledStationAeTitle": "RISPRO_MWL",
+    "stationName": "",
+    "stationLocation": ""
+  },
+  "device": null
+}

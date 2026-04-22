@@ -70,10 +70,10 @@ describe("Capacity repository — SQL query verification", () => {
     );
   });
 
-  it("excludes cancelled bookings with status <> 'cancelled'", () => {
+  it("excludes cancelled and discontinued bookings from active capacity", () => {
     assert.ok(
-      source.includes("status <> 'cancelled'"),
-      "Should exclude cancelled bookings"
+      source.includes("status not in ('cancelled', 'discontinued')"),
+      "Should exclude cancelled and discontinued bookings"
     );
   });
 
@@ -114,8 +114,8 @@ describe("Capacity repository — integration wiring", () => {
     const source = fsReadFileSync(servicePath, "utf-8");
 
     assert.ok(
-      source.includes("getBookedCountForDate"),
-      "Should import getBookedCountForDate"
+      source.includes("getBookedCountsByCategoryForDate"),
+      "Should import getBookedCountsByCategoryForDate"
     );
     assert.ok(
       source.includes("../../scheduler/repositories/capacity.repo.js"),
