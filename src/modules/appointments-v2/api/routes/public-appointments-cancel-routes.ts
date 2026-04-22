@@ -38,8 +38,8 @@ router.get(
           englishName: booking.english_full_name ?? null,
         }),
         bookingDate: booking.appointment_date,
-        modalityName: booking.modality_name_en || booking.modality_name_ar || "—",
-        examName: booking.exam_name_en || booking.exam_name_ar || "—",
+        modalityName: booking.modality_name_ar || booking.modality_name_en || "—",
+        examName: booking.exam_name_ar || booking.exam_name_en || "—",
         currentStatus: booking.status,
       },
     });

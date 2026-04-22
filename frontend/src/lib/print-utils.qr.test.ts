@@ -2,14 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { printAppointmentSlip } from "./print-utils";
 
-const toDataURLMock = vi.hoisted(() => vi.fn().mockResolvedValue("data:image/png;base64,qr-image"));
-
-vi.mock("qrcode", () => ({
-  default: {
-    toDataURL: toDataURLMock,
-  },
-}));
-
 function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): AppointmentWithDetails {
   return {
     id: 45,
@@ -55,12 +47,12 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
   };
 }
 
-describe("printAppointmentSlip QR", () => {
+describe("printAppointmentSlip A5 preprinted template", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("generates QR code for public cancellation link", async () => {
+  it("renders required preprinted fields and queue barcode caption", async () => {
     let writtenHtml = "";
     const documentMock = {
       write: vi.fn((html: string) => {
@@ -78,11 +70,14 @@ describe("printAppointmentSlip QR", () => {
     printAppointmentSlip(makeAppointment());
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(toDataURLMock).toHaveBeenCalledWith(
-      "http://localhost:3000/public/cancel-appointment?t=signed-token",
-      { width: 120, margin: 1 }
-    );
-    expect(writtenHtml).toContain("Scan to cancel this appointment");
-    expect(writtenHtml).toContain("data:image/png;base64,qr-image");
+    expect(writtenHtml).toContain("@page { size: 148mm 210mm; margin: 0; }");
+    expect(writtenHtml).toContain("Patient Name");
+    expect(writtenHtml).toContain("MRN / Patient ID");
+    expect(writtenHtml).toContain("Appointment No.");
+    expect(writtenHtml).toContain("Modality");
+    expect(writtenHtml).toContain("Exam");
+    expect(writtenHtml).toContain("Date");
+    expect(writtenHtml).toContain("Scan to Enter The Queue");
+    expect(writtenHtml).toContain("Queue barcode");
   });
 });

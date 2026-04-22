@@ -1,18 +1,8 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
-import QRCode from "qrcode";
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function slipField(label: string, value: unknown, rtl = false): string {
-  return `
-    <div class="field ${rtl ? "rtl" : ""}">
-      <span class="label">${escapeHtml(label)}</span>
-      <span class="value">${escapeHtml(value ? String(value) : "—")}</span>
-    </div>
-  `;
 }
 
 function formatSlipDate(isoDate: string): string {
@@ -26,14 +16,6 @@ function formatSlipDate(isoDate: string): string {
     month: "long",
     year: "numeric",
   });
-}
-
-function toTitleCase(input: string): string {
-  return input
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
 }
 
 function generateBarcodeDataUri(value: string): string {
@@ -70,244 +52,188 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
   const printWindow = window.open("", "_blank");
   if (!printWindow) return;
 
-  const token = String(apt.publicCancelToken || "").trim();
-  const cancelUrl =
-    token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : null;
-  let qrDataUrl: string | null = null;
-  if (cancelUrl) {
-    try {
-      qrDataUrl = await QRCode.toDataURL(cancelUrl, { width: 120, margin: 1 });
-    } catch {
-      qrDataUrl = null;
-    }
-  }
-  const logoUrl = `${window.location.origin}/assets/nccb-logo.png`;
   const barcodeUrl = generateBarcodeDataUri(apt.accessionNumber || `V2-${apt.id}`);
-  const now = new Date().toLocaleString();
-  const rawCaseCategory = (apt as { caseCategory?: string }).caseCategory;
-  const categoryLabel = rawCaseCategory ? toTitleCase(rawCaseCategory) : "—";
+
+  const CALIBRATION = {
+    pageWidthMm: 148,
+    pageHeightMm: 210,
+    offsetXmm: 0,
+    offsetYmm: 0,
+    topBlankMm: 58,
+    bottomBlankMm: 56,
+    leftInsetMm: 10,
+    rightInsetMm: 10,
+    contentPaddingMm: 3,
+  } as const;
+
+  const contentWidthMm = CALIBRATION.pageWidthMm - CALIBRATION.leftInsetMm - CALIBRATION.rightInsetMm;
+  const contentHeightMm = CALIBRATION.pageHeightMm - CALIBRATION.topBlankMm - CALIBRATION.bottomBlankMm;
   const rows = [
-    { icon: "P", label: "Patient Name", value: apt.englishFullName || apt.arabicFullName || "—" },
-    { icon: "ID", label: "MRN / Patient ID", value: apt.mrn || apt.nationalId || "—" },
-    { icon: "No", label: "Appointment No.", value: apt.accessionNumber || `V2-${apt.id}` },
-    { icon: "M", label: "Modality", value: apt.modalityNameEn || "—" },
-    { icon: "E", label: "Exam", value: apt.examNameEn || "—" },
-    { icon: "D", label: "Date", value: formatSlipDate(apt.appointmentDate), highlight: true },
-    { icon: "C", label: "Category", value: categoryLabel },
+    { label: "Patient Name", value: apt.englishFullName || apt.arabicFullName || "—" },
+    { label: "MRN / Patient ID", value: apt.mrn || apt.nationalId || "—" },
+    { label: "Appointment No.", value: apt.accessionNumber || `V2-${apt.id}` },
+    { label: "Modality", value: apt.modalityNameAr || apt.modalityNameEn || "—" },
+    { label: "Exam", value: apt.examNameAr || apt.examNameEn || "—" },
+    { label: "Date", value: formatSlipDate(apt.appointmentDate) },
   ];
   const notesText =
     apt.notes ||
     apt.modalityGeneralInstructionEn ||
-    apt.modalityGeneralInstructionAr ||
-    "Please arrive 15 minutes before your appointment. Bring previous imaging and referral form.";
+    apt.modalityGeneralInstructionAr;
 
   printWindow.document.write(`
     <html>
       <head>
         <title>Appointment Slip</title>
         <style>
-          @page { size: A5 portrait; margin: 6mm; }
+          :root {
+            --page-width-mm: ${CALIBRATION.pageWidthMm}mm;
+            --page-height-mm: ${CALIBRATION.pageHeightMm}mm;
+            --offset-x-mm: ${CALIBRATION.offsetXmm}mm;
+            --offset-y-mm: ${CALIBRATION.offsetYmm}mm;
+            --top-blank-mm: ${CALIBRATION.topBlankMm}mm;
+            --bottom-blank-mm: ${CALIBRATION.bottomBlankMm}mm;
+            --left-inset-mm: ${CALIBRATION.leftInsetMm}mm;
+            --right-inset-mm: ${CALIBRATION.rightInsetMm}mm;
+            --content-width-mm: ${contentWidthMm}mm;
+            --content-height-mm: ${contentHeightMm}mm;
+            --content-padding-mm: ${CALIBRATION.contentPaddingMm}mm;
+          }
+          @page { size: 148mm 210mm; margin: 0; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .sheet {
+          html, body {
+            margin: 0;
+            width: var(--page-width-mm);
+            height: var(--page-height-mm);
+            font-family: Arial, Helvetica, sans-serif;
+            color: #000000;
+            background: #ffffff;
+          }
+          .page {
+            position: relative;
+            width: var(--page-width-mm);
+            height: var(--page-height-mm);
+            overflow: hidden;
+          }
+          .content-box {
+            position: absolute;
+            left: calc(var(--left-inset-mm) + var(--offset-x-mm));
+            top: calc(var(--top-blank-mm) + var(--offset-y-mm));
+            width: var(--content-width-mm);
+            height: var(--content-height-mm);
+            padding: var(--content-padding-mm);
+            overflow: hidden;
+            color: #000000;
+          }
+          .content-inner {
             width: 100%;
-            margin: 0 auto;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 5mm;
-            background: #ffffff;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .top { display: grid; grid-template-columns: 1fr 118px; gap: 12px; align-items: start; }
-          .brand-wrap { display: flex; gap: 10px; align-items: center; }
-          .logo { width: 64px; height: 64px; object-fit: contain; }
-          .brand-title { color: #b11116; margin: 0; font-size: 19px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
-          .brand-sub { margin: 2px 0 0; font-size: 13px; color: #24272c; }
-          .rule { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
-          .rule-line { flex: 1; height: 0.35mm; background: #d34f53; opacity: 0.8; }
-          .rule-dot { width: 8px; height: 8px; border-radius: 50%; background: #b11116; }
-          .slip-title { margin: 8px 0 0; color: #b11116; letter-spacing: 4px; text-transform: uppercase; font-size: 28px; font-weight: 500; }
-          .qr-card { border: 1px solid #e2676d; border-radius: 10px; background: #ffffff; padding: 6px; }
-          .qr-card img { width: 100%; display: block; border-radius: 2px; }
-          .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
-          .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
-          .rows { margin-top: 10px; border-top: 1px solid #d3d4d6; }
-          .info-row {
+            height: 100%;
             display: grid;
-            grid-template-columns: 170px 18px 1fr;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 1.3mm;
+          }
+          .row-list {
+            display: grid;
+            grid-template-rows: repeat(6, 1fr);
+            gap: 0.9mm;
+            min-height: 37mm;
+          }
+          .row {
+            display: grid;
+            grid-template-columns: 36mm 1fr;
             align-items: center;
-            height: 38px;
-            border-bottom: 1px solid #d3d4d6;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
+            min-height: 5.4mm;
+            border-bottom: 0.2mm solid #d7d7d7;
           }
-          .info-label-wrap { display: flex; align-items: center; gap: 8px; color: #25282d; }
-          .info-icon { min-width: 22px; display: inline-flex; align-items: center; justify-content: center; height: 22px; border-radius: 5px; background: #b11116; color: white; font-weight: 800; font-size: 10px; letter-spacing: 0.02em; }
-          .info-label {
-            font-size: 13px;
-            color: #22262b;
+          .label {
+            font-size: 3.1mm;
+            font-weight: 600;
+            color: #000000;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            padding-right: 2mm;
           }
-          .pipe { text-align: center; color: #9ca3af; font-size: 15px; }
-          .info-value {
-            font-size: 15px;
+          .value {
+            font-size: 3.3mm;
             font-weight: 700;
-            color: #0f1115;
-            line-height: 1.1;
+            color: #000000;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          .info-value.highlight { color: #b11116; }
           .notes {
-            margin-top: 8px;
-            display: grid;
-            grid-template-columns: 34px 1fr;
-            gap: 8px;
-            background: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 8px;
-            max-height: 92px;
+            border: 0.2mm solid #d7d7d7;
+            padding: 1.6mm;
+            min-height: 12mm;
+            max-height: 16mm;
             overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
           }
-          .notes-icon { width: 34px; height: 34px; border-radius: 6px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
-          .notes-title { margin: 0; color: #b11116; font-size: 15px; font-weight: 800; }
+          .notes-title {
+            margin: 0 0 0.8mm;
+            font-size: 3.1mm;
+            font-weight: 700;
+          }
           .notes-text {
-            margin: 3px 0 0;
-            font-size: 12px;
-            line-height: 1.28;
-            color: #20242a;
+            margin: 0;
+            font-size: 2.9mm;
+            line-height: 1.25;
             display: -webkit-box;
             -webkit-box-orient: vertical;
             -webkit-line-clamp: 3;
             overflow: hidden;
           }
-          .mid-divider { margin: 8px 0 6px; display: flex; align-items: center; gap: 8px; }
-          .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
-          .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 4px;
-            border-right: 1px solid #c7c8cb;
-            min-height: 48px;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
+          .barcode-block {
+            align-self: end;
+            width: 100%;
           }
-          .meta-item:last-child { border-right: none; }
-          .meta-icon { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px; }
-          .meta-text {
-            font-size: 12px;
-            line-height: 1.2;
-            color: #20242a;
-            overflow: hidden;
+          .barcode-caption {
+            margin: 0 0 1mm;
+            text-align: center;
+            font-size: 3.4mm;
+            font-weight: 700;
+            text-transform: none;
           }
-          .meta-text strong { color: #b11116; }
-          .queue {
-            margin-top: 8px;
-            border: 1px solid #e2676d;
-            border-radius: 8px;
-            padding: 8px;
-            background: #ffffff;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
+          .barcode {
+            width: 100%;
+            height: 13mm;
+            display: block;
+            border: 0.2mm solid #d7d7d7;
           }
-          .queue-title { text-align: center; margin: 0 0 4px; color: #b11116; text-transform: uppercase; font-size: 14px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
-          .queue img { width: 100%; height: 42px; display: block; }
-          .queue-label { text-align: center; margin: 4px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .small-muted { color: #6b7280; font-size: 10px; }
-          .rtl { direction: rtl; text-align: right; }
         </style>
       </head>
       <body>
-        <div class="sheet">
-          <div class="top">
-            <div>
-              <div class="brand-wrap">
-                <img class="logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo" />
-                <div>
-                  <p class="brand-title">National Cancer Center Benghazi</p>
-                  <p class="brand-sub">Diagnostic Radiology Department</p>
-                  <div class="rule">
-                    <div class="rule-line"></div>
-                    <div class="rule-dot"></div>
-                    <div class="rule-line"></div>
-                  </div>
-                  <h1 class="slip-title">Appointment Slip</h1>
+        <div class="page">
+          <div class="content-box">
+            <div class="content-inner">
+              <div class="row-list">
+                ${rows
+                  .map(
+                    (row) => `
+                      <div class="row">
+                        <div class="label">${escapeHtml(row.label)}</div>
+                        <div class="value">${escapeHtml(row.value)}</div>
+                      </div>
+                    `
+                  )
+                  .join("")}
+              </div>
+              ${
+                notesText
+                  ? `
+                <div class="notes">
+                  <p class="notes-title">Notes / Preparation</p>
+                  <p class="notes-text">${escapeHtml(notesText)}</p>
                 </div>
+              `
+                  : ``
+              }
+              <div></div>
+              <div class="barcode-block">
+                <p class="barcode-caption">Scan to Enter The Queue</p>
+                <img class="barcode" src="${escapeHtml(barcodeUrl)}" alt="Queue barcode" />
               </div>
             </div>
-            <div>
-              <div class="qr-card">
-                ${
-                  qrDataUrl
-                    ? `<img src="${escapeHtml(qrDataUrl)}" alt="Cancellation QR Code" />`
-                    : `<div class="small-muted">QR unavailable</div>`
-                }
-              </div>
-              <div class="qr-title">Scan to cancel this appointment</div>
-              <div class="qr-note">This link is unique to you and your appointment.</div>
-            </div>
-          </div>
-
-          <div class="rows">
-            ${rows
-              .map(
-                (row) => `
-                  <div class="info-row">
-                    <div class="info-label-wrap">
-                      <span class="info-icon">${escapeHtml(row.icon)}</span>
-                      <span class="info-label">${escapeHtml(row.label)}</span>
-                    </div>
-                    <div class="pipe">|</div>
-                    <div class="info-value ${row.highlight ? "highlight" : ""}">${escapeHtml(row.value)}</div>
-                  </div>
-                `
-              )
-              .join("")}
-          </div>
-
-          <div class="notes">
-            <div class="notes-icon">N</div>
-            <div>
-              <p class="notes-title">Notes / Preparation:</p>
-              <p class="notes-text">${escapeHtml(notesText)}</p>
-            </div>
-          </div>
-
-          <div class="mid-divider">
-            <div class="rule-line"></div>
-            <div class="rule-dot"></div>
-            <div class="rule-line"></div>
-          </div>
-
-          <div class="meta-strip">
-            <div class="meta-item">
-              <span class="meta-icon">T</span>
-              <div class="meta-text">Please arrive <strong>15 minutes</strong> before your appointment</div>
-            </div>
-            <div class="meta-item">
-              <span class="meta-icon">P</span>
-              <div class="meta-text">Phone <strong>${escapeHtml(apt.phone1 || "—")}</strong></div>
-            </div>
-            <div class="meta-item">
-              <span class="meta-icon">R</span>
-              <div class="meta-text">Generated by RISpro<br />Printed: ${escapeHtml(now)}</div>
-            </div>
-          </div>
-
-          <div class="queue">
-            <p class="queue-title">Scan to enter the queue</p>
-            <img src="${escapeHtml(barcodeUrl)}" alt="Queue barcode" />
-            <p class="queue-label">${escapeHtml(apt.accessionNumber || `V2-${apt.id}`)}</p>
           </div>
         </div>
       </body>
