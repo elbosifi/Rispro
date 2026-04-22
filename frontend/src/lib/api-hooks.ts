@@ -347,6 +347,53 @@ export async function getV2AppointmentPrintDetails(bookingId: number) {
   return mapAppointmentWithDetails(raw.appointment);
 }
 
+export interface PublicAppointmentCancelPreview {
+  bookingId: number;
+  patientDisplayName: string;
+  bookingDate: string;
+  modalityName: string;
+  examName: string;
+  currentStatus: string;
+}
+
+export interface PublicAppointmentCancelResult {
+  ok: boolean;
+  alreadyCancelled: boolean;
+  bookingId: number;
+  status: string;
+  previousStatus?: string;
+}
+
+export async function fetchPublicAppointmentCancelPreview(token: string): Promise<PublicAppointmentCancelPreview> {
+  const query = new URLSearchParams({ t: token });
+  const raw = await api<{ preview: RawRecord }>(`/public/appointments/cancel-preview?${query.toString()}`);
+  const preview = raw.preview ?? {};
+
+  return {
+    bookingId: Number(preview.bookingId ?? preview.booking_id ?? 0),
+    patientDisplayName: String(preview.patientDisplayName ?? preview.patient_display_name ?? ""),
+    bookingDate: String(preview.bookingDate ?? preview.booking_date ?? ""),
+    modalityName: String(preview.modalityName ?? preview.modality_name ?? "—"),
+    examName: String(preview.examName ?? preview.exam_name ?? "—"),
+    currentStatus: String(preview.currentStatus ?? preview.current_status ?? ""),
+  };
+}
+
+export async function cancelPublicAppointment(token: string): Promise<PublicAppointmentCancelResult> {
+  const query = new URLSearchParams({ t: token });
+  const raw = await api<RawRecord>(`/public/appointments/cancel?${query.toString()}`, {
+    method: "POST",
+  });
+
+  return {
+    ok: Boolean(raw.ok),
+    alreadyCancelled: Boolean(raw.alreadyCancelled ?? raw.already_cancelled),
+    bookingId: Number(raw.bookingId ?? raw.booking_id ?? 0),
+    status: String(raw.status ?? ""),
+    previousStatus: raw.previousStatus == null ? undefined : String(raw.previousStatus),
+  };
+}
+
 export async function updateAppointment(id: number, payload: RawRecord) {
   try {
     await api<{ booking: RawRecord }>(`/v2/appointments/${id}`, {

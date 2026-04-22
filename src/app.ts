@@ -20,6 +20,7 @@ import { dicomRouter } from "./routes/dicom.js";
 import { pacsRouter } from "./routes/pacs.js";
 import { legacyAccessViewerRouter } from "./routes/legacy-access-viewer.js";
 import { createAppointmentsV2Router } from "./modules/appointments-v2/index.js";
+import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
 
@@ -112,6 +113,7 @@ export function createApp(): Application {
   // ---- Appointments V2 (parallel module) ----
   const v2Router = createAppointmentsV2Router();
   app.use("/api/v2", v2Router);
+  app.use("/api/public/appointments", publicAppointmentsCancelRouter);
 
   app.use("/api", notFoundHandler);
 

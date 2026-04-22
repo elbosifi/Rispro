@@ -1,5 +1,6 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
+import QRCode from "qrcode";
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -15,10 +16,26 @@ function slipField(label: string, value: unknown, rtl = false): string {
 }
 
 export function printAppointmentSlip(apt: AppointmentWithDetails): void {
+  void printAppointmentSlipInternal(apt);
+}
+
+async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
   const printWindow = window.open("", "_blank");
   if (!printWindow) return;
 
+  const token = String(apt.publicCancelToken || "").trim();
+  const cancelUrl =
+    token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : null;
+  let qrDataUrl: string | null = null;
+  if (cancelUrl) {
+    try {
+      qrDataUrl = await QRCode.toDataURL(cancelUrl, { width: 120, margin: 1 });
+    } catch {
+      qrDataUrl = null;
+    }
+  }
   const now = new Date().toLocaleString();
+
   printWindow.document.write(`
     <html>
       <head>
@@ -36,7 +53,10 @@ export function printAppointmentSlip(apt: AppointmentWithDetails): void {
           .field.full { grid-column: 1 / -1; }
           .label { display: block; margin-bottom: 4px; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.06em; }
           .value { font-size: 13px; font-weight: 700; color: #111827; word-break: break-word; }
-          .footer { margin-top: 14px; padding-top: 10px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: #6b7280; }
+          .footer { margin-top: 14px; padding-top: 10px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 10px; color: #6b7280; align-items: flex-end; }
+          .qr-block { text-align: center; max-width: 140px; }
+          .qr-block img { width: 120px; height: 120px; display: block; margin: 0 auto 6px; }
+          .qr-caption { font-size: 10px; color: #374151; font-weight: 600; }
           .rtl { direction: rtl; text-align: right; }
         </style>
       </head>
@@ -67,8 +87,16 @@ export function printAppointmentSlip(apt: AppointmentWithDetails): void {
             ${apt.notes ? `<div class="field full"><span class="label">Notes</span><span class="value">${escapeHtml(apt.notes)}</span></div>` : ""}
           </div>
           <div class="footer">
-            <span>Printed by RISpro</span>
-            <span>${escapeHtml(now)}</span>
+            <div>
+              <span>Printed by RISpro</span><br />
+              <span>${escapeHtml(now)}</span>
+            </div>
+            ${qrDataUrl ? `
+              <div class="qr-block">
+                <img src="${escapeHtml(qrDataUrl)}" alt="Cancellation QR Code" />
+                <div class="qr-caption">Scan to cancel this appointment</div>
+              </div>
+            ` : ""}
           </div>
         </div>
       </body>

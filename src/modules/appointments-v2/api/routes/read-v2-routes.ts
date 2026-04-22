@@ -5,6 +5,7 @@ import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
+import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -132,7 +133,12 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    res.json({ appointments: result.rows });
+    const appointments = result.rows.map((row) => ({
+      ...row,
+      public_cancel_token: issuePublicCancelToken(Number(row.id)),
+    }));
+
+    res.json({ appointments });
   })
 );
 
@@ -201,7 +207,12 @@ router.get(
       return;
     }
 
-    res.json({ appointment });
+    res.json({
+      appointment: {
+        ...appointment,
+        public_cancel_token: issuePublicCancelToken(bookingId),
+      },
+    });
   })
 );
 

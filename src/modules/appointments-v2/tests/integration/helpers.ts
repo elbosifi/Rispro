@@ -275,6 +275,7 @@ export async function createTestApp(): Promise<{
   const cookieParser = (await import("cookie-parser")).default;
   const http = await import("http");
   const { createAppointmentsV2Router } = await import("../../index.js");
+  const { publicAppointmentsCancelRouter } = await import("../../api/routes/public-appointments-cancel-routes.js");
 
   const app = express();
   app.use(express.json({ limit: "10mb" }));
@@ -282,6 +283,7 @@ export async function createTestApp(): Promise<{
 
   const v2Router = createAppointmentsV2Router();
   app.use("/api/v2", v2Router);
+  app.use("/api/public/appointments", publicAppointmentsCancelRouter);
 
   app.use((err: Error, _req: import("express").Request, res: import("express").Response, _next: import("express").NextFunction) => {
     console.error("Test app error:", err);

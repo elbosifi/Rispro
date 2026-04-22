@@ -1,0 +1,192 @@
+import { after, before, describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { pool } from "../../../../db/pool.js";
+import {
+  canReachDatabase,
+  createTestApp,
+  createTestAuthCookie,
+  fetchJson,
+  isDatabaseAvailable,
+  seedTestData,
+  setupTestDatabase,
+  type TestData,
+} from "./helpers.js";
+import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
+
+const skipEnv = !isDatabaseAvailable() ? "DATABASE_URL not set" : undefined;
+const TEST_PREFIX = "PUBCANCEL_";
+
+describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
+  let testDb: Awaited<ReturnType<typeof setupTestDatabase>>;
+  let testData: TestData;
+  let app: Awaited<ReturnType<typeof createTestApp>>;
+  let authCookie: string;
+  let originalSecret: string | undefined;
+  let originalServiceUserId: string | undefined;
+
+  before(async () => {
+    if (!(await canReachDatabase())) {
+      console.warn("WARNING: Database is not reachable. Skipping public cancellation integration tests.");
+      return;
+    }
+
+    testDb = await setupTestDatabase(TEST_PREFIX);
+    testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
+    app = await createTestApp();
+    authCookie = createTestAuthCookie(testData.userId, "supervisor");
+
+    originalSecret = process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET;
+    originalServiceUserId = process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
+    process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET = "integration-public-cancel-secret";
+    process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = String(testData.userId);
+  });
+
+  after(async () => {
+    if (originalSecret == null) {
+      delete process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET;
+    } else {
+      process.env.APPOINTMENT_PUBLIC_TOKEN_SECRET = originalSecret;
+    }
+
+    if (originalServiceUserId == null) {
+      delete process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID;
+    } else {
+      process.env.APPOINTMENT_PUBLIC_CANCEL_USER_ID = originalServiceUserId;
+    }
+
+    if (app) await app.close();
+    if (testDb) await testDb.cleanup();
+  });
+
+  function guard(): void {
+    if (!testData || !app) {
+      throw new Error("Test setup failed — database unreachable");
+    }
+  }
+
+  async function createBooking(bookingDate: string): Promise<number> {
+    guard();
+    const createResult = await fetchJson<{ booking: { id: number | string } }>(app.baseUrl, "/api/v2/appointments", {
+      method: "POST",
+      cookie: authCookie,
+      body: {
+        patientId: testData.patientId,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        reportingPriorityId: 1,
+        bookingDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+
+    assert.equal(createResult.status, 201);
+    return Number(createResult.data.booking.id);
+  }
+
+  it("returns preview for a valid token", async () => {
+    const bookingId = await createBooking("2026-08-01");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    const response = await fetchJson<{ preview: Record<string, unknown> }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel-preview?t=${encodeURIComponent(token as string)}`
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(Number(response.data.preview.bookingId), bookingId);
+    assert.equal(String(response.data.preview.currentStatus), "scheduled");
+    assert.ok(String(response.data.preview.modalityName).length > 0);
+  });
+
+  it("rejects token with invalid signature", async () => {
+    const bookingId = await createBooking("2026-08-02");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    const tamperedToken = `${token}x`;
+    const response = await fetchJson<{ details?: { code?: string } }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel-preview?t=${encodeURIComponent(tamperedToken)}`
+    );
+
+    assert.equal(response.status, 401);
+    assert.equal(response.data.details?.code, "invalid_link");
+  });
+
+  it("rejects expired token", async () => {
+    const bookingId = await createBooking("2026-08-03");
+    const token = issuePublicCancelToken(bookingId, { expiresInSeconds: -1 });
+    assert.ok(token);
+
+    const response = await fetchJson<{ details?: { code?: string } }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel-preview?t=${encodeURIComponent(token as string)}`
+    );
+
+    assert.equal(response.status, 401);
+    assert.equal(response.data.details?.code, "expired_link");
+  });
+
+  it("rejects token with wrong action", async () => {
+    const bookingId = await createBooking("2026-08-04");
+    const token = issuePublicCancelToken(bookingId, { action: "reschedule" });
+    assert.ok(token);
+
+    const response = await fetchJson<{ details?: { code?: string } }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel-preview?t=${encodeURIComponent(token as string)}`
+    );
+
+    assert.equal(response.status, 401);
+    assert.equal(response.data.details?.code, "invalid_link");
+  });
+
+  it("cancels booking through public endpoint", async () => {
+    const bookingId = await createBooking("2026-08-05");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    const response = await fetchJson<{ ok: boolean; alreadyCancelled: boolean; status: string }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel?t=${encodeURIComponent(token as string)}`,
+      { method: "POST" }
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.ok, true);
+    assert.equal(response.data.alreadyCancelled, false);
+    assert.equal(response.data.status, "cancelled");
+
+    const statusCheck = await pool.query<{ status: string }>(
+      `select status from appointments_v2.bookings where id = $1`,
+      [bookingId]
+    );
+    assert.equal(statusCheck.rows[0]?.status, "cancelled");
+  });
+
+  it("returns already-cancelled result on repeated cancel", async () => {
+    const bookingId = await createBooking("2026-08-06");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    const first = await fetchJson<{ ok: boolean; alreadyCancelled: boolean }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel?t=${encodeURIComponent(token as string)}`,
+      { method: "POST" }
+    );
+    const second = await fetchJson<{ ok: boolean; alreadyCancelled: boolean; status: string }>(
+      app.baseUrl,
+      `/api/public/appointments/cancel?t=${encodeURIComponent(token as string)}`,
+      { method: "POST" }
+    );
+
+    assert.equal(first.status, 200);
+    assert.equal(first.data.alreadyCancelled, false);
+    assert.equal(second.status, 200);
+    assert.equal(second.data.ok, true);
+    assert.equal(second.data.alreadyCancelled, true);
+    assert.equal(second.data.status, "cancelled");
+  });
+});

@@ -18,6 +18,7 @@ import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
+import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentsV3CreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
@@ -216,6 +217,7 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route
         path="/*"
         element={
