@@ -87,6 +87,7 @@ test("patient import staging: creates valid/invalid/duplicate rows and derives d
       {
         sourceFilename: `import-${suffix}.xlsx`,
         sourceSheetName: "Sheet1",
+        patientCategory: "non_oncology",
         mapping: {
           arabic_full_name: "Arabic Name",
           national_id: "National ID",
@@ -129,6 +130,7 @@ test("patient import staging: creates valid/invalid/duplicate rows and derives d
     assert.equal(Number(batch.valid_rows), 1);
     assert.equal(Number(batch.invalid_rows), 1);
     assert.equal(Number(batch.duplicate_rows), 1);
+    assert.equal(batch.patient_category, "non_oncology");
 
     const rows = await listImportRows(batchId);
     assert.equal(rows.length, 3);
@@ -187,6 +189,7 @@ test("patient import confirm: migrates selected valid rows and skips race duplic
       {
         sourceFilename: `import-confirm-${suffix}.xlsx`,
         sourceSheetName: "Sheet1",
+        patientCategory: "oncology",
         mapping: {
           arabic_full_name: "Arabic Name",
           national_id: "National ID",
@@ -244,11 +247,12 @@ test("patient import confirm: migrates selected valid rows and skips race duplic
     assert.equal(result.migrated, 1);
     assert.equal(result.skipped, 1);
 
-    const migratedPatient = await pool.query<{ id: number }>(
-      `select id from patients where national_id = $1 limit 1`,
+    const migratedPatient = await pool.query<{ id: number; category: string | null }>(
+      `select id, category from patients where national_id = $1 limit 1`,
       [migrateNationalId]
     );
     assert.ok(migratedPatient.rows[0]?.id);
+    assert.equal(migratedPatient.rows[0]?.category, "oncology");
 
     const rows = await listImportRows(batchId);
     const migratedRow = rows.find((row) => row.national_id === migrateNationalId);
@@ -263,6 +267,7 @@ test("patient import confirm: migrates selected valid rows and skips race duplic
     const batch = await listImportBatch(batchId);
     assert.equal(batch.status, "migrated");
     assert.equal(Number(batch.migrated_rows), 1);
+    assert.equal(batch.patient_category, "oncology");
   } finally {
     if (batchId > 0) {
       const rows = await listImportRows(batchId).catch(() => []);

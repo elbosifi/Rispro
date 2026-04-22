@@ -655,6 +655,7 @@ export async function previewPatientImport(payload: {
   fileName: string;
   fileContentBase64: string;
   sheetName?: string;
+  patientCategory?: "oncology" | "non_oncology";
   mapping: {
     arabic_full_name: string;
     national_id: string;

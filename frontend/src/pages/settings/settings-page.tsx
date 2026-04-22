@@ -1259,6 +1259,7 @@ function PatientImportSection({
     national_id: "",
     phone: "",
   });
+  const [batchCategory, setBatchCategory] = useState<"oncology" | "non_oncology">("non_oncology");
   const [batchId, setBatchId] = useState<number | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const [pendingRetry, setPendingRetry] = useState<
@@ -1430,6 +1431,7 @@ function PatientImportSection({
     setSheetNames([]);
     setHeaders([]);
     setMapping({ arabic_full_name: "", national_id: "", phone: "" });
+    setBatchCategory("non_oncology");
     setLocalError(null);
   };
 
@@ -1457,6 +1459,7 @@ function PatientImportSection({
       fileName: fileName || "patient-import.xlsx",
       fileContentBase64,
       sheetName: selectedSheetName || undefined,
+      patientCategory: batchCategory,
       mapping: {
         arabic_full_name: mapping.arabic_full_name,
         national_id: mapping.national_id,
@@ -1571,6 +1574,17 @@ function PatientImportSection({
                 ))}
               </select>
             </label>
+            <label className="text-xs text-stone-700 dark:text-stone-300">
+              {language === "ar" ? "Batch category" : "Batch category"}
+              <select
+                value={batchCategory}
+                onChange={(e) => setBatchCategory((e.target.value as "oncology" | "non_oncology") || "non_oncology")}
+                className="mt-1 w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+              >
+                <option value="non_oncology">{language === "ar" ? "غير أورام" : "Non-oncology"}</option>
+                <option value="oncology">{language === "ar" ? "أورام" : "Oncology"}</option>
+              </select>
+            </label>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -1636,12 +1650,15 @@ function PatientImportSection({
           {batchLoading ? (
             <p className="text-sm text-stone-500">{language === "ar" ? "جاري تحميل الملخص..." : "Loading summary..."}</p>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs">
               <div className="p-2 rounded bg-stone-100 dark:bg-stone-800">Total: {batchData?.total_rows ?? 0}</div>
               <div className="p-2 rounded bg-emerald-100 dark:bg-emerald-900/20">Valid: {batchData?.valid_rows ?? 0}</div>
               <div className="p-2 rounded bg-amber-100 dark:bg-amber-900/20">Invalid: {batchData?.invalid_rows ?? 0}</div>
               <div className="p-2 rounded bg-orange-100 dark:bg-orange-900/20">Duplicate: {batchData?.duplicate_rows ?? 0}</div>
               <div className="p-2 rounded bg-blue-100 dark:bg-blue-900/20">Migrated: {batchData?.migrated_rows ?? 0}</div>
+              <div className="p-2 rounded bg-violet-100 dark:bg-violet-900/20">
+                Category: {batchData?.patient_category === "oncology" ? (language === "ar" ? "أورام" : "Oncology") : (language === "ar" ? "غير أورام" : "Non-oncology")}
+              </div>
             </div>
           )}
 

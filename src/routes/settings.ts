@@ -277,6 +277,7 @@ settingsRouter.post(
     const sourceFilename = asString(body.fileName || body.sourceFilename).trim();
     const fileContentBase64 = asString(body.fileContentBase64).trim();
     const selectedSheetName = asString(body.sheetName || body.selectedSheetName).trim();
+    const patientCategory = asString(body.patientCategory).trim();
     const mapping = asUnknownRecord(body.mapping ?? {});
     const mappingArabic = asString(mapping.arabic_full_name || mapping.arabicFullName).trim();
     const mappingNationalId = asString(mapping.national_id || mapping.nationalId).trim();
@@ -288,6 +289,7 @@ settingsRouter.post(
       {
         sourceFilename: sourceFilename || "patient-import.xlsx",
         sourceSheetName: parsed.selectedSheetName,
+        patientCategory: (patientCategory || undefined) as "oncology" | "non_oncology" | undefined,
         rows: parsed.rows,
         mapping: {
           arabic_full_name: mappingArabic,

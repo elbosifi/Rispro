@@ -21,6 +21,7 @@ interface ImportBatchRow {
   id: number;
   source_filename: string;
   source_sheet_name: string | null;
+  patient_category: "oncology" | "non_oncology" | null;
   imported_by_user_id: number | null;
   imported_at: string;
   status: string;
@@ -68,6 +69,7 @@ export interface PreviewMapping {
 export interface CreateBatchInput {
   sourceFilename: string;
   sourceSheetName?: string | null;
+  patientCategory?: "oncology" | "non_oncology" | null;
   rows: RawParsedRow[];
   mapping: PreviewMapping;
 }
@@ -117,6 +119,15 @@ function normalizeArabicFullName(value: unknown): string {
 
 function normalizePhone(value: unknown): string {
   return normalizeLibyanPhone(String(value || ""));
+}
+
+function normalizeBatchCategory(value: unknown): "oncology" | "non_oncology" | null {
+  if (value === null || value === undefined) return null;
+  const raw = String(value).trim().toLowerCase();
+  if (!raw) return null;
+  if (raw === "oncology") return "oncology";
+  if (raw === "non_oncology") return "non_oncology";
+  throw new HttpError(400, "patientCategory must be 'oncology' or 'non_oncology'.");
 }
 
 async function findExistingPatientByNationalId(
@@ -279,6 +290,7 @@ export async function createImportBatchFromParsedRows(
 ): Promise<{ batch: ImportBatchRow; summary: Record<string, number> }> {
   const sourceFilename = String(input.sourceFilename || "").trim();
   const sourceSheetName = String(input.sourceSheetName || "").trim() || null;
+  const patientCategory = normalizeBatchCategory(input.patientCategory);
   const rows = Array.isArray(input.rows) ? input.rows : [];
   const mapping = input.mapping;
 
@@ -303,13 +315,14 @@ export async function createImportBatchFromParsedRows(
         insert into patient_import_batches (
           source_filename,
           source_sheet_name,
+          patient_category,
           imported_by_user_id,
           status
         )
-        values ($1, $2, $3, 'staged')
+        values ($1, $2, $3, $4, 'staged')
         returning *
       `,
-      [sourceFilename, sourceSheetName, importedByUserId]
+      [sourceFilename, sourceSheetName, patientCategory, importedByUserId]
     );
 
     const batch = batchRes.rows[0];
@@ -591,6 +604,7 @@ export async function confirmBatchMigration(
       identifierValue: nationalId,
       nationalId,
       nationalIdConfirmation: nationalId,
+      category: batch.patient_category || undefined,
       arabicFullName: String(row.arabic_full_name || ""),
       englishFullName: String(row.english_full_name || ""),
       sex: mapSexToCreatePatientValue(row.derived_sex),

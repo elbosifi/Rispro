@@ -380,6 +380,7 @@ export interface PatientImportBatch {
   id: number;
   source_filename: string;
   source_sheet_name?: string | null;
+  patient_category?: "oncology" | "non_oncology" | null;
   imported_by_user_id?: number | null;
   imported_at: string;
   status: "uploaded" | "staged" | "reviewed" | "migrated" | "failed";
