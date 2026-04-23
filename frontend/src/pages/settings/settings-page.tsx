@@ -21,6 +21,7 @@ import {
   createExamType,
   updateExamType,
   deleteExamType,
+  hardDeleteExamType,
   exportCatalogWorkbook,
   importCatalogWorkbook,
   saveSettings,
@@ -530,6 +531,16 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
     },
     onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
   });
+  const hardDeleteMutation = useMutation({
+    mutationFn: (id: number) => hardDeleteExamType(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["exam-types"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+      setMutationError(null);
+    },
+    onError: (err: any) => { setMutationError(err?.message || "Hard delete failed"); }
+  });
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => updateExamType(id, {
       modalityId: data.modalityId,
@@ -691,7 +702,10 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                   {et.is_active ? (
                     <button onClick={() => { if (window.confirm("Deactivate this exam type? It will disappear from active lists.")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors">Deactivate</button>
                   ) : (
-                    <button onClick={() => updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: true } })} className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">Activate</button>
+                    <>
+                      <button onClick={() => updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: true } })} className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">Activate</button>
+                      <button onClick={() => { if (window.confirm("Hard delete this inactive exam type? This cannot be undone and will fail if it is still referenced.")) hardDeleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Hard Delete</button>
+                    </>
                   )}
                 </div>
               </div>

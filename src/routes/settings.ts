@@ -21,6 +21,7 @@ import {
   deleteExamType,
   deactivateModality,
   hardDeleteModality,
+  hardDeleteExamType,
   listExamTypesForSettings,
   listModalitiesForSettings,
   updateExamType,
@@ -207,6 +208,15 @@ settingsRouter.delete(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const examType = await deleteExamType(asString(request.params?.examTypeId), request.user.sub as UserId);
+    res.json({ examType });
+  })
+);
+
+settingsRouter.delete(
+  "/exam-types/:examTypeId/hard-delete",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const examType = await hardDeleteExamType(asString(request.params?.examTypeId), request.user.sub as UserId);
     res.json({ examType });
   })
 );

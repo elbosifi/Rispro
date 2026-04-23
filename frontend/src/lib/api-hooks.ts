@@ -683,6 +683,10 @@ export async function deleteExamType(id: number) {
   return api<{ examType: RawRecord }>(`/settings/exam-types/${id}`, { method: "DELETE" });
 }
 
+export async function hardDeleteExamType(id: number) {
+  return api<{ examType: RawRecord }>(`/settings/exam-types/${id}/hard-delete`, { method: "DELETE" });
+}
+
 export async function exportCatalogWorkbook() {
   const response = await fetch("/api/settings/catalog-import-export.xlsx", { credentials: "include" });
   if (!response.ok) throw new Error("Catalog export failed");

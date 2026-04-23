@@ -2013,6 +2013,123 @@ export async function deleteExamType(
   }
 }
 
+export async function hardDeleteExamType(
+  examTypeId: number | string,
+  currentUserId: UserId
+): Promise<ExamTypeRow> {
+  const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId") as number;
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select
+          id,
+          modality_id,
+          code,
+          name_ar,
+          name_en,
+          specific_instruction_ar,
+          specific_instruction_en,
+          duration_minutes,
+          is_active
+        from exam_types
+        where id = $1
+        limit 1
+      `,
+      [cleanExamTypeId]
+    );
+
+    const existing = existingResult.rows[0] as ExamTypeRow | undefined;
+
+    if (!existing) {
+      throw new HttpError(404, "Exam type not found.");
+    }
+
+    if (existing.is_active) {
+      throw new HttpError(409, "Deactivate this exam type first before permanently deleting it.");
+    }
+
+    const dependencyResult = await client.query<{
+      legacy_appointments: number;
+      v2_bookings: number;
+      legacy_rule_items: number;
+      legacy_special_quotas: number;
+      v2_rule_items: number;
+      v2_special_quotas: number;
+      v2_mix_rule_items: number;
+    }>(
+      `
+        select
+          (select count(*)::int from appointments where exam_type_id = $1) as legacy_appointments,
+          (select count(*)::int from appointments_v2.bookings where exam_type_id = $1) as v2_bookings,
+          (select count(*)::int from exam_type_schedule_rule_items where exam_type_id = $1) as legacy_rule_items,
+          (select count(*)::int from exam_type_special_quotas where exam_type_id = $1) as legacy_special_quotas,
+          (select count(*)::int from appointments_v2.exam_type_rule_items where exam_type_id = $1) as v2_rule_items,
+          (select count(*)::int from appointments_v2.exam_type_special_quotas where exam_type_id = $1) as v2_special_quotas,
+          (select count(*)::int from appointments_v2.exam_mix_quota_rule_items where exam_type_id = $1) as v2_mix_rule_items
+      `,
+      [cleanExamTypeId]
+    );
+    const dependencyCounts = dependencyResult.rows[0];
+
+    const dependencySummary = [
+      ["legacy appointment(s)", dependencyCounts?.legacy_appointments || 0],
+      ["V2 booking(s)", dependencyCounts?.v2_bookings || 0],
+      ["legacy schedule rule item(s)", dependencyCounts?.legacy_rule_items || 0],
+      ["legacy special quota(s)", dependencyCounts?.legacy_special_quotas || 0],
+      ["V2 rule item(s)", dependencyCounts?.v2_rule_items || 0],
+      ["V2 special quota(s)", dependencyCounts?.v2_special_quotas || 0],
+      ["V2 mix rule item(s)", dependencyCounts?.v2_mix_rule_items || 0]
+    ].filter(([, count]) => Number(count) > 0);
+
+    if (dependencySummary.length > 0) {
+      throw new HttpError(
+        409,
+        `Cannot permanently delete this exam type because it is still referenced by ${dependencySummary.map(([label, count]) => `${count} ${label}`).join(", ")}. Remove those references first or keep it deactivated.`
+      );
+    }
+
+    const { rows } = await client.query(
+      `
+        delete from exam_types
+        where id = $1
+        returning id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, false as is_active
+      `,
+      [cleanExamTypeId]
+    );
+    const deletedExamType = requireRow<ExamTypeRow>(
+      rows[0] as ExamTypeRow | undefined,
+      "Failed to hard delete exam type."
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "exam_type",
+        entityId: cleanExamTypeId,
+        actionType: "hard_delete",
+        oldValues: existing,
+        newValues: {
+          ...deletedExamType,
+          dependencySummary
+        },
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return deletedExamType;
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createAppointment(
   payload: UnknownRecord,
   currentUser: AppointmentActor | null | undefined,
