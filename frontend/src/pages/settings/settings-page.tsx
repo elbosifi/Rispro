@@ -15,6 +15,7 @@ import {
   importNameDictionary,
   upsertNameDictionaryEntry,
   createModality,
+  deactivateModality,
   updateModality,
   deleteModality,
   createExamType,
@@ -683,7 +684,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
+  const { data, isLoading, error } = useQuery({ queryKey: ["modalities"], queryFn: () => fetchModalitiesSettings() });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -692,14 +693,23 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
-  const deleteMutation = useMutation({
+  const deactivateMutation = useMutation({
+    mutationFn: (id: number) => deactivateModality(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["modalities"] });
+      queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      setMutationError(null);
+    },
+    onError: (err: any) => { setMutationError(err?.message || "Deactivate failed"); }
+  });
+  const hardDeleteMutation = useMutation({
     mutationFn: (id: number) => deleteModality(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
       setMutationError(null);
     },
-    onError: (err: any) => { setMutationError(err?.message || "Delete failed"); }
+    onError: (err: any) => { setMutationError(err?.message || "Hard delete failed"); }
   });
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: any }) => updateModality(id, {
@@ -796,7 +806,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
         </div>
       )}
       <p className="text-sm description-center">
-        Showing all configured modalities, including inactive ones.
+        Showing active modalities only. Deactivated modalities stay hidden from this list.
       </p>
       <div className="flex justify-between items-center">
         <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
@@ -874,7 +884,26 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                     {m.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
                   <button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
-                  <button onClick={() => { if (window.confirm("Delete this modality?")) deleteMutation.mutate(m.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Deactivate this modality? It will disappear from active lists.")) {
+                        deactivateMutation.mutate(m.id);
+                      }
+                    }}
+                    className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                  >
+                    Deactivate
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm("Permanently delete this modality? This cannot be undone.")) {
+                        hardDeleteMutation.mutate(m.id);
+                      }
+                    }}
+                    className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                  >
+                    Hard Delete
+                  </button>
                 </div>
               </div>
             )}

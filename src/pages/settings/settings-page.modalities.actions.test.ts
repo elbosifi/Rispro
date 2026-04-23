@@ -1,0 +1,19 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+const filePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/pages/settings/settings-page.tsx";
+
+test("modality settings page exposes deactivate and hard delete actions", async () => {
+  const content = await readFile(filePath, "utf-8");
+  assert.ok(content.includes("Deactivate"), "Settings page should include a deactivate action");
+  assert.ok(content.includes("Hard Delete"), "Settings page should include a hard delete action");
+  assert.ok(
+    content.includes('mutationFn: (id: number) => deactivateModality(id)'),
+    "Settings page should call the deactivate API"
+  );
+  assert.ok(
+    content.includes('mutationFn: (id: number) => deleteModality(id)'),
+    "Settings page should call the hard delete API"
+  );
+});

@@ -1601,7 +1601,7 @@ export async function updateModality(
   }
 }
 
-export async function deleteModality(
+export async function deactivateModality(
   modalityId: number | string,
   currentUserId: UserId
 ): Promise<ModalityRow> {
@@ -1613,7 +1613,18 @@ export async function deleteModality(
 
     const existingResult = await client.query(
       `
-        select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        select
+          id,
+          code,
+          name_ar,
+          name_en,
+          daily_capacity,
+          general_instruction_ar,
+          general_instruction_en,
+          is_active,
+          safety_warning_ar,
+          safety_warning_en,
+          safety_warning_enabled
         from modalities
         where id = $1
         limit 1
@@ -1634,7 +1645,18 @@ export async function deleteModality(
           is_active = false,
           updated_at = now()
         where id = $1
-        returning id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
+        returning
+          id,
+          code,
+          name_ar,
+          name_en,
+          daily_capacity,
+          general_instruction_ar,
+          general_instruction_en,
+          is_active,
+          safety_warning_ar,
+          safety_warning_en,
+          safety_warning_enabled
       `,
       [cleanModalityId]
     );
@@ -1647,7 +1669,7 @@ export async function deleteModality(
       {
         entityType: "modality",
         entityId: cleanModalityId,
-        actionType: "delete",
+        actionType: "deactivate",
         oldValues: existing,
         newValues: deletedModality,
         changedByUserId: currentUserId
@@ -1660,6 +1682,113 @@ export async function deleteModality(
   } catch (error) {
     await client.query("rollback");
     throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function hardDeleteModality(
+  modalityId: number | string,
+  currentUserId: UserId
+): Promise<ModalityRow> {
+  const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId") as number;
+  const client = await pool.connect();
+
+  try {
+    await client.query("begin");
+
+    const existingResult = await client.query(
+      `
+        select
+          id,
+          code,
+          name_ar,
+          name_en,
+          daily_capacity,
+          general_instruction_ar,
+          general_instruction_en,
+          is_active,
+          safety_warning_ar,
+          safety_warning_en,
+          safety_warning_enabled
+        from modalities
+        where id = $1
+        limit 1
+      `,
+      [cleanModalityId]
+    );
+
+    const existing = existingResult.rows[0] as ModalityRow | undefined;
+
+    if (!existing) {
+      throw new HttpError(404, "Modality not found.");
+    }
+
+    const dependencyResult = await client.query<{
+      appointment_count: number;
+      exam_type_count: number;
+    }>(
+      `
+        select
+          (select count(*)::int from appointments where modality_id = $1) as appointment_count,
+          (select count(*)::int from exam_types where modality_id = $1) as exam_type_count
+      `,
+      [cleanModalityId]
+    );
+    const dependencyCounts = dependencyResult.rows[0];
+
+    if ((dependencyCounts?.appointment_count || 0) > 0) {
+      throw new HttpError(
+        409,
+        `Cannot permanently delete this modality because it still has ${dependencyCounts?.appointment_count || 0} appointment(s). Deactivate it instead.`
+      );
+    }
+
+    const { rows } = await client.query(
+      `
+        delete from modalities
+        where id = $1
+        returning
+          id,
+          code,
+          name_ar,
+          name_en,
+          daily_capacity,
+          general_instruction_ar,
+          general_instruction_en,
+          false as is_active,
+          safety_warning_ar,
+          safety_warning_en,
+          safety_warning_enabled
+      `,
+      [cleanModalityId]
+    );
+    const deletedModality = requireRow<ModalityRow>(
+      rows[0] as ModalityRow | undefined,
+      "Failed to hard delete modality."
+    );
+
+    await logAuditEntry(
+      {
+        entityType: "modality",
+        entityId: cleanModalityId,
+        actionType: "hard_delete",
+        oldValues: existing,
+        newValues: {
+          ...deletedModality,
+          examTypeCount: dependencyCounts?.exam_type_count || 0
+        },
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return deletedModality;
+  } catch (error) {
+    await client.query("rollback");
+    const mapped = toSchedulingConflictError(error);
+    throw mapped || error;
   } finally {
     client.release();
   }

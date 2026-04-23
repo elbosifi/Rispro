@@ -19,7 +19,8 @@ import {
   createExamType,
   createModality,
   deleteExamType,
-  deleteModality,
+  deactivateModality,
+  hardDeleteModality,
   listExamTypesForSettings,
   listModalitiesForSettings,
   updateExamType,
@@ -159,7 +160,16 @@ settingsRouter.delete(
   "/modalities/:modalityId",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
-    const modality = await deleteModality(asString(request.params?.modalityId), request.user.sub as UserId);
+    const modality = await hardDeleteModality(asString(request.params?.modalityId), request.user.sub as UserId);
+    res.json({ modality });
+  })
+);
+
+settingsRouter.post(
+  "/modalities/:modalityId/deactivate",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const modality = await deactivateModality(asString(request.params?.modalityId), request.user.sub as UserId);
     res.json({ modality });
   })
 );

@@ -654,6 +654,12 @@ export async function updateModality(id: number, payload: RawRecord) {
   });
 }
 
+export async function deactivateModality(id: number) {
+  return api<{ modality: RawRecord }>(`/settings/modalities/${id}/deactivate`, {
+    method: "POST"
+  });
+}
+
 export async function deleteModality(id: number) {
   return api<{ modality: RawRecord }>(`/settings/modalities/${id}`, { method: "DELETE" });
 }
