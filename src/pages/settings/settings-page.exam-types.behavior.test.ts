@@ -19,4 +19,8 @@ test("exam type settings list supports hiding and showing inactive rows", async 
     content.includes('showInactive ? "Hide inactive" : "Show inactive"'),
     "Exam types section should expose a toggle for inactive rows"
   );
+  assert.ok(
+    content.includes("تحضير الفحص (عربي)") && content.includes("Exam preparation (English)"),
+    "Exam types section should expose preparation fields for editing"
+  );
 });

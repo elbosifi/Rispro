@@ -47,6 +47,8 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     modalityGeneralInstructionEn: null,
     examNameAr: "فحص",
     examNameEn: "CT Head",
+    examSpecificInstructionAr: "تجهيز عربي",
+    examSpecificInstructionEn: "English prep",
     priorityNameAr: "عادي",
     priorityNameEn: "Routine",
     modalitySlotNumber: null,
@@ -84,5 +86,33 @@ describe("printAppointmentSlip QR", () => {
     );
     expect(writtenHtml).toContain("Scan to cancel this appointment");
     expect(writtenHtml).toContain("data:image/png;base64,qr-image");
+  });
+
+  it("renders modality preparation before exam preparation", async () => {
+    let writtenHtml = "";
+    const documentMock = {
+      write: vi.fn((html: string) => {
+        writtenHtml = html;
+      }),
+      close: vi.fn(),
+    };
+    const printWindowMock = {
+      document: documentMock,
+      focus: vi.fn(),
+      print: vi.fn(),
+    };
+
+    vi.spyOn(window, "open").mockReturnValue(printWindowMock as unknown as Window);
+    printAppointmentSlip(
+      makeAppointment({
+        modalityGeneralInstructionEn: "Modality prep",
+        examSpecificInstructionEn: "Exam prep",
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(writtenHtml).toContain("Modality prep");
+    expect(writtenHtml).toContain("Exam prep");
+    expect(writtenHtml.indexOf("Modality prep")).toBeLessThan(writtenHtml.indexOf("Exam prep"));
   });
 });

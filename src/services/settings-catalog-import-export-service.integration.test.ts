@@ -157,7 +157,10 @@ test("catalog export workbook generation includes both sheets and current rows",
     const examRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets["ExamTypes"], { defval: "" });
 
     assert.ok(modalityRows.some((row) => row.code === modalityCode));
-    assert.ok(examRows.some((row) => row.code === examCode && row.modality_code === modalityCode));
+    const exportedExam = examRows.find((row) => row.code === examCode && row.modality_code === modalityCode);
+    assert.ok(exportedExam, "Export should include the active exam type row");
+    assert.equal(exportedExam?.description_en, "scan en");
+    assert.equal(exportedExam?.description_ar, "scan ar");
     assert.ok(!examRows.some((row) => row.code === inactiveExamCode), "Inactive exam types should not be exported");
   } finally {
     await cleanupCatalog("CATEXP_");
@@ -290,9 +293,9 @@ test("catalog import creates new modality and exam type from workbook", async (t
     assert.equal(modality.rows[0]?.code, `${prefix}_MOD`);
     assert.equal(Number(modality.rows[0]?.daily_capacity), 11);
 
-    const exam = await pool.query<{ code: string; duration_minutes: number | null }>(
+    const exam = await pool.query<{ code: string; duration_minutes: number | null; specific_instruction_ar: string | null; specific_instruction_en: string | null }>(
       `
-        select et.code, et.duration_minutes
+        select et.code, et.duration_minutes, et.specific_instruction_ar, et.specific_instruction_en
         from exam_types et
         join modalities m on m.id = et.modality_id
         where m.code = $1 and et.code = $2
@@ -302,6 +305,8 @@ test("catalog import creates new modality and exam type from workbook", async (t
     );
     assert.equal(exam.rows[0]?.code, `${prefix}_EXAM`);
     assert.equal(Number(exam.rows[0]?.duration_minutes), 40);
+    assert.equal(exam.rows[0]?.specific_instruction_ar, `${prefix}_EXAM description ar`);
+    assert.equal(exam.rows[0]?.specific_instruction_en, `${prefix}_EXAM description en`);
   } finally {
     await cleanupCatalog(`CATNEW_${suffix}`);
     await cleanupUser(userId);
@@ -374,9 +379,9 @@ test("catalog import updates existing modality and exam type from workbook", asy
     assert.equal(Number(modality.rows[0]?.daily_capacity), 13);
     assert.equal(modality.rows[0]?.is_active, false);
 
-    const exam = await pool.query<{ name_en: string; duration_minutes: number | null; is_active: boolean }>(
+    const exam = await pool.query<{ name_en: string; duration_minutes: number | null; is_active: boolean; specific_instruction_ar: string | null; specific_instruction_en: string | null }>(
       `
-        select et.name_en, et.duration_minutes, et.is_active
+        select et.name_en, et.duration_minutes, et.is_active, et.specific_instruction_ar, et.specific_instruction_en
         from exam_types et
         join modalities m on m.id = et.modality_id
         where m.code = $1 and et.code = $2
@@ -387,6 +392,8 @@ test("catalog import updates existing modality and exam type from workbook", asy
     assert.equal(exam.rows[0]?.name_en, "updated exam en");
     assert.equal(Number(exam.rows[0]?.duration_minutes), 55);
     assert.equal(exam.rows[0]?.is_active, false);
+    assert.equal(exam.rows[0]?.specific_instruction_ar, "updated exam desc ar");
+    assert.equal(exam.rows[0]?.specific_instruction_en, "updated exam desc en");
   } finally {
     await cleanupCatalog(`CATUPD_${suffix}`);
     await cleanupUser(userId);

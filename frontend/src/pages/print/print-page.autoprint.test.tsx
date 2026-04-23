@@ -32,6 +32,8 @@ const { mockAppointmentData: mockAppointment42, mockAppointment99 } = vi.hoisted
     modalityGeneralInstructionEn: null,
     examNameAr: "رأس CT",
     examNameEn: "CT Head",
+    examSpecificInstructionAr: null,
+    examSpecificInstructionEn: null,
     priorityNameAr: "عادي",
     priorityNameEn: "Normal",
     modalitySlotNumber: null,

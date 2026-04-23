@@ -117,6 +117,8 @@ router.get(
           m.general_instruction_en as modality_general_instruction_en,
           et.name_ar as exam_name_ar,
           et.name_en as exam_name_en,
+          et.specific_instruction_ar as exam_specific_instruction_ar,
+          et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
           null::int as modality_slot_number
@@ -187,6 +189,8 @@ router.get(
           m.general_instruction_en as modality_general_instruction_en,
           et.name_ar as exam_name_ar,
           et.name_en as exam_name_en,
+          et.specific_instruction_ar as exam_specific_instruction_ar,
+          et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
           null::int as modality_slot_number

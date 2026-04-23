@@ -331,6 +331,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     et.id as exam_type_id,
     et.name_ar as exam_name_ar,
     et.name_en as exam_name_en,
+    et.specific_instruction_ar as exam_specific_instruction_ar,
+    et.specific_instruction_en as exam_specific_instruction_en,
     rp.name_ar as priority_name_ar,
     rp.name_en as priority_name_en
   from booking_base bb
@@ -371,6 +373,8 @@ export interface BookingPrintDetailsRow {
   exam_type_id: number | null;
   exam_name_ar: string | null;
   exam_name_en: string | null;
+  exam_specific_instruction_ar: string | null;
+  exam_specific_instruction_en: string | null;
   priority_name_ar: string | null;
   priority_name_en: string | null;
 }

@@ -10,6 +10,10 @@ test("exam type settings page exposes activate and deactivate actions", async ()
   assert.ok(content.includes("Activate"), "Settings page should include an activate action for inactive exam types");
   assert.ok(content.includes("Hard Delete"), "Settings page should include a hard delete action for inactive exam types");
   assert.ok(
+    content.includes("تحضير الفحص (عربي)") && content.includes("Exam preparation (English)"),
+    "Settings page should include exam preparation fields in the form"
+  );
+  assert.ok(
     content.includes('mutationFn: (id: number) => deleteExamType(id)'),
     "Settings page should call the exam-type deactivate API"
   );
@@ -18,7 +22,12 @@ test("exam type settings page exposes activate and deactivate actions", async ()
     "Settings page should call the exam-type hard delete API"
   );
   assert.ok(
-    content.includes('updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: true } })'),
+    content.includes('updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, specific_instruction_ar: et.specific_instruction_ar, specific_instruction_en: et.specific_instruction_en, is_active: true } })'),
     "Settings page should reactivate inactive exam types through the update mutation"
+  );
+  assert.ok(
+    content.includes("specificInstructionAr: data.specific_instruction_ar") &&
+      content.includes("specificInstructionEn: data.specific_instruction_en"),
+    "Settings page should forward exam preparation text through create/update payloads"
   );
 });

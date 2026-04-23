@@ -83,6 +83,8 @@ export interface AppointmentWithDetails extends Appointment {
   modalityGeneralInstructionEn: string | null;
   examNameAr: string | null;
   examNameEn: string | null;
+  examSpecificInstructionAr: string | null;
+  examSpecificInstructionEn: string | null;
   priorityNameAr: string | null;
   priorityNameEn: string | null;
   modalitySlotNumber: number | null;
@@ -262,6 +264,10 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     // Exam type fields
     examNameAr: strOrNull(raw, 'exam_name_ar') ?? strOrNull(raw, 'examNameAr'),
     examNameEn: strOrNull(raw, 'exam_name_en') ?? strOrNull(raw, 'examNameEn'),
+    examSpecificInstructionAr:
+      strOrNull(raw, 'exam_specific_instruction_ar') ?? strOrNull(raw, 'examSpecificInstructionAr'),
+    examSpecificInstructionEn:
+      strOrNull(raw, 'exam_specific_instruction_en') ?? strOrNull(raw, 'examSpecificInstructionEn'),
     // Priority fields
     priorityNameAr: strOrNull(raw, 'priority_name_ar') ?? strOrNull(raw, 'priorityNameAr'),
     priorityNameEn: strOrNull(raw, 'priority_name_en') ?? strOrNull(raw, 'priorityNameEn'),

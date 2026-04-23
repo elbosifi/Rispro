@@ -517,7 +517,13 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
   const [showCreate, setShowCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({ modalityId: "", name_ar: "", name_en: "" });
+  const [createForm, setCreateForm] = useState({
+    modalityId: "",
+    name_ar: "",
+    name_en: "",
+    specific_instruction_ar: "",
+    specific_instruction_en: ""
+  });
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [importSummary, setImportSummary] = useState<string | null>(null);
 
@@ -546,6 +552,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       modalityId: data.modalityId,
       nameAr: data.name_ar,
       nameEn: data.name_en,
+      specificInstructionAr: data.specific_instruction_ar,
+      specificInstructionEn: data.specific_instruction_en,
       is_active: data.is_active
     }),
     onSuccess: () => { 
@@ -562,6 +570,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       modalityId: data.modalityId ? parseInt(data.modalityId, 10) : undefined,
       nameAr: data.name_ar,
       nameEn: data.name_en,
+      specificInstructionAr: data.specific_instruction_ar,
+      specificInstructionEn: data.specific_instruction_en,
       is_active: true
     }),
     onSuccess: () => { 
@@ -569,7 +579,13 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
       queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
       queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
       setShowCreate(false); 
-      setCreateForm({ modalityId: "", name_ar: "", name_en: "" }); 
+      setCreateForm({
+        modalityId: "",
+        name_ar: "",
+        name_en: "",
+        specific_instruction_ar: "",
+        specific_instruction_en: ""
+      }); 
       setMutationError(null); 
     },
     onError: (err: any) => { setMutationError(err?.message || "Create failed"); }
@@ -589,7 +605,14 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 
   const startEdit = (et: any) => {
     setEditingId(et.id);
-    setEditForm({ modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: et.is_active });
+    setEditForm({
+      modalityId: et.modality_id,
+      name_ar: et.name_ar,
+      name_en: et.name_en,
+      specific_instruction_ar: et.specific_instruction_ar || "",
+      specific_instruction_en: et.specific_instruction_en || "",
+      is_active: et.is_active
+    });
   };
 
   return (
@@ -654,6 +677,22 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
               <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
             )}
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <textarea
+              value={createForm.specific_instruction_ar}
+              onChange={(e) => setCreateForm({ ...createForm, specific_instruction_ar: e.target.value })}
+              placeholder="تحضير الفحص (عربي)"
+              rows={2}
+              className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl"
+            />
+            <textarea
+              value={createForm.specific_instruction_en}
+              onChange={(e) => setCreateForm({ ...createForm, specific_instruction_en: e.target.value })}
+              placeholder="Exam preparation (English)"
+              rows={2}
+              className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr"
+            />
+          </div>
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.name_en || !createForm.modalityId} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
         </div>
       )}
@@ -677,6 +716,10 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 ) : (
                   <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
                 )}
+                <div className="grid grid-cols-2 gap-2">
+                  <textarea value={editForm.specific_instruction_ar} onChange={(e) => setEditForm({ ...editForm, specific_instruction_ar: e.target.value })} placeholder="تحضير الفحص (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
+                  <textarea value={editForm.specific_instruction_en} onChange={(e) => setEditForm({ ...editForm, specific_instruction_en: e.target.value })} placeholder="Exam preparation (English)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-ltr" />
+                </div>
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={editForm.is_active} onChange={(e) => setEditForm({ ...editForm, is_active: e.target.checked })} className="rounded" />
                   مفعل
@@ -703,7 +746,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                     <button onClick={() => { if (window.confirm("Deactivate this exam type? It will disappear from active lists.")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors">Deactivate</button>
                   ) : (
                     <>
-                      <button onClick={() => updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: true } })} className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">Activate</button>
+                      <button onClick={() => updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, specific_instruction_ar: et.specific_instruction_ar, specific_instruction_en: et.specific_instruction_en, is_active: true } })} className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">Activate</button>
                       <button onClick={() => { if (window.confirm("Hard delete this inactive exam type? This cannot be undone and will fail if it is still referenced.")) hardDeleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Hard Delete</button>
                     </>
                   )}

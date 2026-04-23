@@ -86,6 +86,9 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
   const now = new Date().toLocaleString();
   const rawCaseCategory = (apt as { caseCategory?: string }).caseCategory;
   const categoryLabel = rawCaseCategory ? toTitleCase(rawCaseCategory) : "—";
+  const appointmentNotes = String(apt.notes || "").trim();
+  const modalityPreparation = String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim();
+  const examPreparation = String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim();
   const rows = [
     { icon: "P", label: "Patient Name", value: apt.englishFullName || apt.arabicFullName || "—" },
     { icon: "ID", label: "MRN / Patient ID", value: apt.mrn || apt.nationalId || "—" },
@@ -95,11 +98,7 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
     { icon: "D", label: "Date", value: formatSlipDate(apt.appointmentDate), highlight: true },
     { icon: "C", label: "Category", value: categoryLabel },
   ];
-  const notesText =
-    apt.notes ||
-    apt.modalityGeneralInstructionEn ||
-    apt.modalityGeneralInstructionAr ||
-    "Please arrive 15 minutes before your appointment. Bring previous imaging and referral form.";
+  const hasPrepContent = Boolean(appointmentNotes || modalityPreparation || examPreparation);
 
   printWindow.document.write(`
     <html>
@@ -172,21 +171,31 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             border: 1px solid #d1d5db;
             border-radius: 8px;
             padding: 8px;
-            max-height: 92px;
+            max-height: 130px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
           .notes-icon { width: 34px; height: 34px; border-radius: 6px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
           .notes-title { margin: 0; color: #b11116; font-size: 15px; font-weight: 800; }
+          .notes-content { display: flex; flex-direction: column; gap: 4px; }
+          .prep-item { display: grid; grid-template-columns: 84px 1fr; gap: 6px; align-items: start; }
+          .prep-label {
+            color: #b11116;
+            font-size: 11px;
+            font-weight: 800;
+            line-height: 1.25;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+          }
           .notes-text {
-            margin: 3px 0 0;
-            font-size: 12px;
-            line-height: 1.28;
+            margin: 0;
+            font-size: 11.5px;
+            line-height: 1.25;
             color: #20242a;
             display: -webkit-box;
             -webkit-box-orient: vertical;
-            -webkit-line-clamp: 3;
+            -webkit-line-clamp: 2;
             overflow: hidden;
           }
           .mid-divider { margin: 8px 0 6px; display: flex; align-items: center; gap: 8px; }
@@ -277,9 +286,17 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
 
           <div class="notes">
             <div class="notes-icon">N</div>
-            <div>
+            <div class="notes-content">
               <p class="notes-title">Notes / Preparation:</p>
-              <p class="notes-text">${escapeHtml(notesText)}</p>
+              ${
+                hasPrepContent
+                  ? `
+                    ${appointmentNotes ? `<div class="prep-item"><span class="prep-label">Notes</span><p class="notes-text">${escapeHtml(appointmentNotes)}</p></div>` : ""}
+                    ${modalityPreparation ? `<div class="prep-item"><span class="prep-label">Modality Instructions</span><p class="notes-text">${escapeHtml(modalityPreparation)}</p></div>` : ""}
+                    ${examPreparation ? `<div class="prep-item"><span class="prep-label">Exam Preparation</span><p class="notes-text">${escapeHtml(examPreparation)}</p></div>` : ""}
+                  `
+                  : `<p class="notes-text">Please arrive 15 minutes before your appointment. Bring previous imaging and referral form.</p>`
+              }
             </div>
           </div>
 
