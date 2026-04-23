@@ -101,3 +101,14 @@ export function todayIsoDateLy(): string {
   const year = parts.find((p) => p.type === "year")?.value ?? "1970";
   return `${year}-${month}-${day}`;
 }
+
+export function isoDateDaysFromNow(offsetDays: number): string {
+  const offset = Number.isFinite(offsetDays) ? Math.trunc(offsetDays) : 0;
+  const baseDate = new Date(`${todayIsoDateLy()}T12:00:00Z`);
+  baseDate.setUTCDate(baseDate.getUTCDate() + offset);
+
+  const year = baseDate.getUTCFullYear();
+  const month = String(baseDate.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(baseDate.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

@@ -6,7 +6,7 @@ import {
   fetchAppointmentLookups,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
@@ -38,6 +38,8 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
   query: "",
   statuses: ["scheduled", "arrived", "waiting"],
 };
+
+const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
@@ -96,6 +98,14 @@ export default function RegistrationsPage() {
   const listWindowLabel = filters.date
     ? formatDateLy(filters.date)
     : `${filters.dateFrom ? formatDateLy(filters.dateFrom) : "—"} - ${filters.dateTo ? formatDateLy(filters.dateTo) : "—"}`;
+  const todayValue = todayIsoDateLy();
+  const tomorrowValue = isoDateDaysFromNow(1);
+  const isTodayShortcutActive =
+    filters.date === todayValue && filters.dateFrom === todayValue && filters.dateTo === todayValue;
+  const isTomorrowShortcutActive =
+    filters.date === tomorrowValue &&
+    filters.dateFrom === tomorrowValue &&
+    filters.dateTo === tomorrowValue;
 
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
     key: K,
@@ -152,12 +162,11 @@ export default function RegistrationsPage() {
       query: filters.query,
       statuses: filters.statuses,
     });
+    void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
 
   const handleTomorrowShortcut = () => {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const value = tomorrow.toISOString().slice(0, 10);
+    const value = isoDateDaysFromNow(1);
     setFilters({
       ...DEFAULT_FILTERS,
       date: value,
@@ -167,6 +176,7 @@ export default function RegistrationsPage() {
       query: filters.query,
       statuses: filters.statuses,
     });
+    void queryClient.invalidateQueries({ queryKey: ["registrations"] });
   };
 
   const handlePrintVisibleList = () => {
@@ -227,11 +237,11 @@ export default function RegistrationsPage() {
 
   function Field({ label, value }: { label: string; value: any }) {
     return (
-      <div className="p-3 rounded-xl border border-border bg-muted/30">
-        <p className="text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-1">
+      <div className="rounded-lg border border-border bg-muted/30 p-2.5">
+        <p className="mb-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
           {label}
         </p>
-        <p className="font-medium">{value ?? "—"}</p>
+        <p className="text-sm font-medium leading-snug">{value ?? "—"}</p>
       </div>
     );
   }
@@ -264,10 +274,24 @@ export default function RegistrationsPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" size="sm" onClick={handleTodayShortcut}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleTodayShortcut}
+              aria-pressed={isTodayShortcutActive}
+              className={isTodayShortcutActive ? ACTIVE_FILTER_PILL_CLASS : undefined}
+            >
               {language === "ar" ? "اليوم" : "Today"}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={handleTomorrowShortcut}>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleTomorrowShortcut}
+              aria-pressed={isTomorrowShortcutActive}
+              className={isTomorrowShortcutActive ? ACTIVE_FILTER_PILL_CLASS : undefined}
+            >
               {language === "ar" ? "غداً" : "Tomorrow"}
             </Button>
             <Button type="button" variant="secondary" size="sm" onClick={handlePrintVisibleList}>
@@ -361,9 +385,10 @@ export default function RegistrationsPage() {
                     key={status}
                     type="button"
                     onClick={() => handleStatusToggle(status)}
+                    aria-pressed={filters.statuses.includes(status)}
                     className={`min-h-10 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
                       filters.statuses.includes(status)
-                        ? "bg-accent text-accent-foreground"
+                        ? ACTIVE_FILTER_PILL_CLASS
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
                     }`}
                   >
@@ -390,14 +415,14 @@ export default function RegistrationsPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <div className="min-w-[1320px]">
-            <div className="grid grid-cols-[1.9fr_1.1fr_1.2fr_0.8fr_0.9fr_1fr_0.95fr] gap-3 border-b border-border bg-muted/40 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          <div className="min-w-[1200px]">
+            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-2.5 border-b border-border bg-muted/40 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
               <div>{t("registrations.print")}</div>
               <div>{t("registrations.modality")}</div>
               <div>{t("registrations.date")}</div>
               <div>{t("registrations.statusCol")}</div>
-              <div>{t("registrations.notes")}</div>
+              <div>{t("registrations.walkIn")}</div>
               <div className="text-right">Actions</div>
             </div>
 
@@ -417,6 +442,7 @@ export default function RegistrationsPage() {
                   const modalityName = chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn);
                   const examName = chooseLocalized(language, apt.examNameAr, apt.examNameEn);
                   const priorityName = chooseLocalized(language, apt.priorityNameAr, apt.priorityNameEn);
+                  const notesText = String(apt.notes || "").trim();
 
                   return (
                     <div
@@ -424,55 +450,65 @@ export default function RegistrationsPage() {
                       role="button"
                       tabIndex={0}
                       onClick={() => openSlipPreview(apt)}
+                      title={notesText ? `Notes: ${notesText}` : undefined}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           openSlipPreview(apt);
                         }
                       }}
-                      className={`grid grid-cols-[1.9fr_1.1fr_1.2fr_0.8fr_0.9fr_1fr_0.95fr] gap-3 px-4 py-3 transition-colors outline-none cursor-pointer ${
+                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-2.5 px-4 py-2.5 transition-colors outline-none cursor-pointer ${
                         index % 2 === 0 ? "bg-background" : "bg-muted/25"
                       } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
-                    >
+                      >
                       <div className="min-w-0">
                         <div className="flex items-start gap-2">
                           <div className="min-w-0">
-                            <p className="truncate font-semibold text-foreground">{patientName}</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">
-                              {apt.mrn || apt.nationalId || "—"}
-                              {apt.phone1 ? ` • ${apt.phone1}` : ""}
-                              {apt.sex ? ` • ${apt.sex}` : ""}
-                              {Number.isFinite(apt.ageYears) ? ` • ${apt.ageYears}` : ""}
+                            <p className="truncate text-[14px] font-semibold leading-tight text-foreground">
+                              {patientName}
+                            </p>
+                            <p className="mt-0.5 truncate text-[10px] leading-none text-muted-foreground">
+                              {[
+                                apt.mrn || apt.nationalId || "—",
+                                apt.phone1 || null,
+                                [apt.sex || null, Number.isFinite(apt.ageYears) ? String(apt.ageYears) : null]
+                                  .filter(Boolean)
+                                  .join(" / ") || null,
+                              ]
+                                .filter(Boolean)
+                                .join(" • ")}
                             </p>
                           </div>
                         </div>
                       </div>
 
                       <div className="min-w-0">
-                        <p className="font-mono text-sm font-semibold text-foreground">{apt.accessionNumber}</p>
-                        <p className="text-xs text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
+                        <p className="truncate font-mono text-[12px] font-semibold leading-tight tracking-tight text-foreground">
+                          {apt.accessionNumber}
+                        </p>
+                        <p className="text-[10px] leading-none text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-foreground">{modalityName}</p>
-                        <p className="truncate text-xs text-muted-foreground">{examName || "—"}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{priorityName || "—"}</p>
+                        <p className="truncate text-[13px] font-medium leading-tight text-foreground">{modalityName}</p>
+                        <p className="truncate text-[11px] leading-snug text-muted-foreground">
+                          {[examName || null, priorityName || null].filter(Boolean).join(" • ") || "—"}
+                        </p>
                       </div>
 
-                      <div className="text-sm text-foreground">{formatDateLy(apt.appointmentDate)}</div>
+                      <div className="text-[13px] leading-tight text-foreground">{formatDateLy(apt.appointmentDate)}</div>
 
                       <div>
-                        <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
+                        <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
                           {statusLabel(language, apt.status)}
                         </span>
                       </div>
 
-                      <div className="min-w-0 text-xs text-muted-foreground">
+                      <div className="min-w-0 text-[11px] leading-snug text-muted-foreground">
                         <p className="truncate">{apt.isWalkIn ? t("registrations.yes") : t("registrations.no")}</p>
-                        <p className="truncate">{apt.notes || "—"}</p>
                       </div>
 
-                      <div className="flex justify-end gap-2">
+                      <div className="flex justify-end gap-1.5">
                         <Button
                           type="button"
                           size="sm"
@@ -481,6 +517,7 @@ export default function RegistrationsPage() {
                             e.stopPropagation();
                             openSlipPreview(apt);
                           }}
+                          className="h-8 px-3 text-xs"
                         >
                           {t("registrations.print")}
                         </Button>
@@ -488,6 +525,7 @@ export default function RegistrationsPage() {
                           type="button"
                           size="sm"
                           variant="ghost"
+                          className="h-8 px-3 text-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             manageAppointment(apt);
@@ -609,60 +647,61 @@ export default function RegistrationsPage() {
       ) : null}
 
       {slipPreviewAppointment ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 py-4 sm:px-6">
-          <div className="w-full max-w-7xl rounded-3xl border border-border bg-background shadow-2xl overflow-hidden">
-            <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <h3 className="text-xl font-semibold">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-2 py-2 sm:px-4 sm:py-4">
+          <div className="flex w-full max-w-[1360px] flex-col overflow-hidden rounded-3xl border border-border bg-background shadow-2xl max-h-[calc(100vh-1rem)]">
+          <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-start sm:justify-between sm:p-4">
+            <div>
+                <h3 className="text-base font-semibold leading-tight sm:text-lg">
                   {t("print.previewTitle")}
                 </h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs sm:text-sm text-muted-foreground">
                   {t("print.previewSubtitle")}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="secondary" onClick={closeSlipPreview}>
+              <div className="flex flex-wrap gap-2 sm:justify-end">
+                <Button type="button" size="sm" variant="secondary" onClick={closeSlipPreview}>
                   {t("toast.close")}
                 </Button>
                 <Button
                   type="button"
+                  size="sm"
                   variant="secondary"
                   onClick={() => void handlePreviewPdf()}
                   disabled={pdfDownloading}
                 >
                   {pdfDownloading ? t("common.loading") : t("print.downloadPdf")}
                 </Button>
-                <Button type="button" onClick={handlePreviewPrint}>
+                <Button type="button" size="sm" onClick={handlePreviewPrint}>
                   {t("print.confirmPrint")}
                 </Button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_360px] gap-0">
-              <div className="min-h-[72vh] bg-muted/10">
+          <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1.38fr)_280px] gap-0">
+            <div className="min-h-[48vh] bg-muted/10 xl:min-h-[60vh]">
                 {slipPreviewLoading ? (
-                  <div className="flex h-full items-center justify-center p-8 text-muted-foreground">
+                  <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
                     {t("print.loading")}
                   </div>
                 ) : slipPreviewHtml ? (
                   <iframe
                     title="Appointment slip preview"
                     srcDoc={slipPreviewHtml}
-                    className="h-[72vh] w-full bg-white"
+                    className="h-[48vh] w-full bg-white xl:h-[60vh]"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center p-8 text-muted-foreground">
+                  <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
                     {t("print.loading")}
                   </div>
                 )}
               </div>
 
-              <div className="border-t xl:border-t-0 xl:border-l border-border p-4 sm:p-5 space-y-4">
-                <div>
+              <div className="border-t border-border p-3 space-y-2.5 text-sm sm:p-4 xl:border-t-0 xl:border-l xl:max-h-[58vh] xl:overflow-y-auto">
+                <div className="space-y-0.5">
                   <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
                     {t("registrations.patient")}
                   </p>
-                  <p className="mt-1 text-lg font-semibold">
+                  <p className="text-sm sm:text-[15px] font-semibold leading-tight">
                     {chooseLocalized(
                       language,
                       slipPreviewAppointment.arabicFullName,
@@ -671,18 +710,18 @@ export default function RegistrationsPage() {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="grid grid-cols-2 gap-2">
                   <Field label={t("registrations.modality")} value={chooseLocalized(language, slipPreviewAppointment.modalityNameAr, slipPreviewAppointment.modalityNameEn)} />
                   <Field label={t("registrations.date")} value={formatDateLy(slipPreviewAppointment.appointmentDate)} />
                   <Field label={t("registrations.statusCol")} value={statusLabel(language, slipPreviewAppointment.status)} />
                   <Field label={t("registrations.print")} value={slipPreviewAppointment.accessionNumber} />
                 </div>
 
-                <div className="rounded-2xl border border-border bg-muted/20 p-4 text-sm">
+                <div className="rounded-xl border border-border bg-muted/20 p-2.5 text-sm">
                   <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
                     {t("registrations.notes")}
                   </p>
-                  <p className="mt-2 whitespace-pre-wrap text-foreground">
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">
                     {slipPreviewAppointment.notes || "—"}
                   </p>
                 </div>

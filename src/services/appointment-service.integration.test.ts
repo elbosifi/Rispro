@@ -172,6 +172,10 @@ function isoDate(value: unknown): string {
   return String(value || "").slice(0, 10);
 }
 
+function buildAccessionNumber(modalityId: number, appointmentDate: string, modalitySlotNumber: number): string {
+  return `${modalityId}-${appointmentDate.replaceAll("-", "")}-${String(modalitySlotNumber).padStart(3, "0")}`;
+}
+
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
   try {
     await pool.query("select 1");
@@ -669,8 +673,7 @@ test("integration: approved_but_failed is audited when post-approval create fail
 
   try {
     const user = asUser(fx.receptionistUserId);
-    const compactDate = fx.targetDate.replaceAll("-", "");
-    const conflictingAccession = `${compactDate}-002`;
+    const conflictingAccession = buildAccessionNumber(fx.modalityId, fx.targetDate, 2);
 
     // Occupy the non-oncology category for this date so the next booking requires override.
     await createAppointment(

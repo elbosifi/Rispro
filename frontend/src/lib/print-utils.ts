@@ -2,15 +2,29 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import QRCode from "qrcode";
 
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function escapeHtml(str: string = ""): string {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function slipField(label: string, value: unknown, rtl = false): string {
+  const displayValue = value === null || value === undefined || value === "" ? "—" : String(value);
   return `
-    <div class="field ${rtl ? "rtl" : ""}">
+    <div class="summary-item ${rtl ? "rtl" : ""}">
       <span class="label">${escapeHtml(label)}</span>
-      <span class="value">${escapeHtml(value ? String(value) : "—")}</span>
+      <span class="value">${escapeHtml(displayValue)}</span>
+    </div>
+  `;
+}
+
+function slipRow(left: string, right: string): string {
+  return `
+    <div class="summary-row">
+      ${left}
+      ${right}
     </div>
   `;
 }
@@ -120,13 +134,26 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
   const modalityPreparation = String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim();
   const examPreparation = String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim();
   const rows = [
-    { icon: "P", label: "Patient Name", value: apt.englishFullName || apt.arabicFullName || "—" },
-    { icon: "ID", label: "MRN / Patient ID", value: apt.mrn || apt.nationalId || "—" },
-    { icon: "No", label: "Appointment No.", value: apt.accessionNumber || `V2-${apt.id}` },
-    { icon: "M", label: "Modality", value: apt.modalityNameEn || "—" },
-    { icon: "E", label: "Exam", value: apt.examNameEn || "—" },
-    { icon: "D", label: "Date", value: formatSlipDate(apt.appointmentDate), highlight: true },
-    { icon: "C", label: "Category", value: categoryLabel },
+    slipRow(
+      slipField("Patient Name", apt.englishFullName || apt.arabicFullName || "—"),
+      slipField("MRN / Patient ID", apt.mrn || apt.nationalId || "—")
+    ),
+    slipRow(
+      slipField("Appointment No.", apt.accessionNumber || `V2-${apt.id}`),
+      slipField("Date", formatSlipDate(apt.appointmentDate), true)
+    ),
+    slipRow(
+      slipField("Modality", apt.modalityNameEn || "—"),
+      slipField("Exam", apt.examNameEn || "—")
+    ),
+    slipRow(
+      slipField("Category", categoryLabel),
+      slipField("Phone", apt.phone1 || "—")
+    ),
+    slipRow(
+      slipField("Age / Sex", `${apt.ageYears || "—"} / ${apt.sex || "—"}`),
+      slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")
+    ),
   ];
   const hasPrepContent = Boolean(appointmentNotes || modalityPreparation || examPreparation);
 
@@ -163,37 +190,46 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
           .qr-card svg { width: 100%; display: block; border-radius: 2px; }
           .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
           .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
-          .rows { margin-top: 8px; border-top: 1px solid #d3d4d6; }
-          .info-row {
+          .rows { margin-top: 8px; border-top: 1px solid #d3d4d6; display: flex; flex-direction: column; gap: 4px; }
+          .summary-row {
             display: grid;
-            grid-template-columns: 170px 18px 1fr;
-            align-items: center;
-            min-height: 36px;
-            border-bottom: 1px solid #d3d4d6;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            page-break-inside: avoid;
+            break-inside: avoid-page;
+          }
+          .summary-item {
+            display: grid;
+            grid-template-columns: 108px 1fr;
+            align-items: baseline;
+            gap: 8px;
+            min-height: 34px;
+            padding: 5px 6px;
+            border: 1px solid #d3d4d6;
+            border-radius: 7px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .info-label-wrap { display: flex; align-items: center; gap: 8px; color: #25282d; }
-          .info-icon { min-width: 22px; display: inline-flex; align-items: center; justify-content: center; height: 22px; border-radius: 5px; background: #b11116; color: white; font-weight: 800; font-size: 10px; letter-spacing: 0.02em; }
-          .info-label {
-            font-size: 13px;
-            color: #22262b;
+          .summary-item .label {
+            font-size: 11px;
+            color: #b11116;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          .pipe { text-align: center; color: #9ca3af; font-size: 15px; }
-          .info-value {
-            font-size: 15px;
+          .summary-item .value {
+            font-size: 13px;
             font-weight: 700;
             color: #0f1115;
-            line-height: 1.1;
+            line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          .info-value.highlight { color: #b11116; }
           .notes {
             margin-top: 7px;
             display: grid;
@@ -203,7 +239,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
             border: 1px solid #d1d5db;
             border-radius: 8px;
             padding: 7px;
-            max-height: 122px;
+            max-height: 148px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
@@ -307,20 +343,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
           </div>
 
           <div class="rows">
-            ${rows
-              .map(
-                (row) => `
-                  <div class="info-row">
-                    <div class="info-label-wrap">
-                      <span class="info-icon">${escapeHtml(row.icon)}</span>
-                      <span class="info-label">${escapeHtml(row.label)}</span>
-                    </div>
-                    <div class="pipe">|</div>
-                    <div class="info-value ${row.highlight ? "highlight" : ""}">${escapeHtml(row.value)}</div>
-                  </div>
-                `
-              )
-              .join("")}
+            ${rows.join("")}
           </div>
 
           <div class="notes">

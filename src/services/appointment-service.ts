@@ -299,9 +299,9 @@ function normalizeAppointmentDate(value: unknown, fieldName = "appointmentDate")
   return validateIsoDate(value, fieldName);
 }
 
-function buildAccessionNumber(appointmentDate: string, dailySequence: number): string {
+function buildAccessionNumber(modalityId: number, appointmentDate: string, modalitySlotNumber: number): string {
   const compactDate = appointmentDate.replaceAll("-", "");
-  return `${compactDate}-${String(dailySequence).padStart(3, "0")}`;
+  return `${modalityId}-${compactDate}-${String(modalitySlotNumber).padStart(3, "0")}`;
 }
 
 function normalizeCapacityLimit(value: unknown): number | null {
@@ -2375,7 +2375,7 @@ export async function createAppointment(
       schedulingOverbooked = Boolean(flags.enabled && evaluation?.consumedCapacityMode === "override");
     }
 
-    const accessionNumber = buildAccessionNumber(appointmentDate, nextDailySequence);
+    const accessionNumber = buildAccessionNumber(modalityId, appointmentDate, nextSlotNumber);
     const { rows } = await client.query(
       `
         insert into appointments (
@@ -2833,9 +2833,9 @@ export async function updateAppointment(
 
     const modalitySlotNumber = modalityOrDateChanged
       ? slotStats.slotNumber
-      : Number(existingAppointment.modality_slot_number);
+      : Number(existingAppointment.modality_slot_number ?? slotStats.slotNumber);
 
-    const accessionNumber = buildAccessionNumber(appointmentDate, sequence);
+    const accessionNumber = buildAccessionNumber(modalityId, appointmentDate, modalitySlotNumber);
     const isOverbooked = requiresApproval || Boolean(flags.enabled && evaluation?.consumedCapacityMode === "override");
 
     const approvedByUserId =
