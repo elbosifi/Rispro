@@ -17,6 +17,7 @@ export function PatientSearchSection({ value, onSelectPatient, onClearPatient, c
       <label className="block text-sm font-semibold mb-2 text-foreground">{t(language, "appointments.create.patient")}</label>
       <PatientSearch
         caseCategory={caseCategory}
+        transliterateMissingEnglish
         onSelect={(patient) => {
           onSelectPatient({
             id: patient.id,

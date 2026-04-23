@@ -12,6 +12,7 @@ import { PatientCategoryBadge } from "@/components/patients/patient-category-bad
 import { searchPatients } from "@/lib/api-hooks";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { formatAppointmentPatientName } from "../utils/patient-display-name";
 
 interface Patient {
   id: number;
@@ -35,6 +36,7 @@ interface PatientSearchProps {
   selectedPatient: Patient | null;
   onClear: () => void;
   caseCategory: "oncology" | "non_oncology";
+  transliterateMissingEnglish?: boolean;
 }
 
 function getPrimaryIdentifier(patient: Patient, language: "ar" | "en"): { label: string; value: string | null } {
@@ -70,7 +72,13 @@ function renderSex(sex?: string | null, language: "ar" | "en" = "en"): string {
   return sex;
 }
 
-export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory }: PatientSearchProps) {
+export function PatientSearch({
+  onSelect,
+  selectedPatient,
+  onClear,
+  caseCategory,
+  transliterateMissingEnglish = false,
+}: PatientSearchProps) {
   const { language } = useLanguage();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Patient[]>([]);
@@ -117,6 +125,11 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
     const primaryIdentifier = getPrimaryIdentifier(selectedPatient, language);
     const mrn = selectedPatient.mrn || selectedPatient.medicalRecordNo || null;
     const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
+    const displayName = transliterateMissingEnglish
+      ? formatAppointmentPatientName(language, selectedPatient, `Patient #${selectedPatient.id}`)
+      : (language === "ar"
+        ? selectedPatient.arabicFullName
+        : (selectedPatient.englishFullName || selectedPatient.arabicFullName));
 
     return (
       <div
@@ -133,13 +146,15 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
       >
         <div style={{ minWidth: 0 }}>
           <div style={{ fontWeight: 600, fontSize: 14, lineHeight: 1.3 }}>
-            <span>{language === "ar" ? selectedPatient.arabicFullName : (selectedPatient.englishFullName || selectedPatient.arabicFullName)}</span>
+            <span>{displayName}</span>
             <span style={{ marginInlineStart: 8 }}>
               <PatientCategoryBadge category={selectedPatient.category} showWhenUnset />
             </span>
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 2 }}>
-            {language === "ar" ? selectedPatient.englishFullName : selectedPatient.arabicFullName}
+            {language === "ar"
+              ? (selectedPatient.englishFullName || selectedPatient.arabicFullName)
+              : (selectedPatient.arabicFullName || selectedPatient.englishFullName)}
           </div>
           <div style={{ fontSize: 12, color: "var(--text-muted, #64748b)", marginTop: 4 }}>
             {primaryIdentifier.value ? `${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : `${t(language, "appointments.create.primaryId")}: —`}
@@ -204,6 +219,11 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
             const primaryIdentifier = getPrimaryIdentifier(patient, language);
             const mrn = patient.mrn || patient.medicalRecordNo || null;
             const showMrn = mrn != null && !(primaryIdentifier.label === t(language, "appointments.create.mrn") && primaryIdentifier.value === mrn);
+            const displayName = transliterateMissingEnglish
+              ? formatAppointmentPatientName(language, patient, `Patient #${patient.id}`)
+              : (language === "ar"
+                ? patient.arabicFullName
+                : (patient.englishFullName || patient.arabicFullName));
 
             return (
               <li key={patient.id}>
@@ -227,12 +247,12 @@ export function PatientSearch({ onSelect, selectedPatient, onClear, caseCategory
                     (e.currentTarget.style.backgroundColor = "transparent")
                   }
                 >
-                  <div style={{ fontWeight: 500 }}>{language === "ar" ? patient.arabicFullName : (patient.englishFullName || patient.arabicFullName)}</div>
+                  <div style={{ fontWeight: 500 }}>{displayName}</div>
                   <div style={{ marginTop: 4 }}>
                     <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
                   </div>
                   <div style={{ fontSize: 11, color: "var(--text-muted, #64748b)" }}>
-                    {language === "ar" ? patient.englishFullName : patient.arabicFullName}
+                    {language === "ar" ? (patient.englishFullName || patient.arabicFullName) : patient.arabicFullName}
                     {primaryIdentifier.value ? ` · ${t(language, "appointments.create.primaryId")}: ${primaryIdentifier.value}` : ""}
                     {showMrn ? ` · ${t(language, "appointments.create.mrn")}: ${mrn}` : ""}
                   </div>

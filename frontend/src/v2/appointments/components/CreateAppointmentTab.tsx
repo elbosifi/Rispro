@@ -24,6 +24,7 @@ import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { SectionLabel, Button, Card } from "@/components/shared";
+import { formatAppointmentPatientName } from "../utils/patient-display-name";
 
 interface CreateAppointmentTabProps {
   patientLookups: unknown;
@@ -285,7 +286,7 @@ export function CreateAppointmentTab({
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,
-      patientName: chooseLocalized(language, form.patient?.arabicFullName, form.patient?.englishFullName) || `Patient #${form.patientId}`,
+      patientName: formatAppointmentPatientName(language, form.patient, `Patient #${form.patientId}`),
       bookingDate: response.booking.bookingDate,
       modalityName,
       examTypeName,
