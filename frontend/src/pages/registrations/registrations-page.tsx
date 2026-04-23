@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelAppointment,
@@ -15,6 +14,12 @@ import { AppointmentEditor } from "@/components/appointments/appointment-editor"
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { pushToast } from "@/lib/toast";
 import { Card, Button, SearchInput } from "@/components/shared";
+import {
+  downloadAppointmentSlipPdf,
+  prepareAppointmentSlipHtml,
+  printAppointmentList,
+  printAppointmentSlip,
+} from "@/lib/print-utils";
 
 interface RegistrationsFilters {
   date: string;
@@ -36,11 +41,15 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
+  const [slipPreviewAppointment, setSlipPreviewAppointment] =
+    useState<AppointmentWithDetails | null>(null);
+  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
+  const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -84,6 +93,9 @@ export default function RegistrationsPage() {
   });
 
   const modalities = lookups?.modalities ?? [];
+  const listWindowLabel = filters.date
+    ? formatDateLy(filters.date)
+    : `${filters.dateFrom ? formatDateLy(filters.dateFrom) : "—"} - ${filters.dateTo ? formatDateLy(filters.dateTo) : "—"}`;
 
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
     key: K,
@@ -129,6 +141,90 @@ export default function RegistrationsPage() {
     setSelectedAppointment(null);
   };
 
+  const handleTodayShortcut = () => {
+    const today = todayIsoDateLy();
+    setFilters({
+      ...DEFAULT_FILTERS,
+      date: today,
+      dateFrom: today,
+      dateTo: today,
+      modalityId: filters.modalityId,
+      query: filters.query,
+      statuses: filters.statuses,
+    });
+  };
+
+  const handleTomorrowShortcut = () => {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const value = tomorrow.toISOString().slice(0, 10);
+    setFilters({
+      ...DEFAULT_FILTERS,
+      date: value,
+      dateFrom: value,
+      dateTo: value,
+      modalityId: filters.modalityId,
+      query: filters.query,
+      statuses: filters.statuses,
+    });
+  };
+
+  const handlePrintVisibleList = () => {
+    printAppointmentList(appointments, listWindowLabel);
+  };
+
+  const openSlipPreview = (appointment: AppointmentWithDetails) => {
+    setSlipPreviewAppointment(appointment);
+  };
+
+  const manageAppointment = (appointment: AppointmentWithDetails) => {
+    setSelectedAppointment(appointment);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!slipPreviewAppointment) {
+      setSlipPreviewHtml(null);
+      setSlipPreviewLoading(false);
+      return;
+    }
+
+    setSlipPreviewLoading(true);
+    void prepareAppointmentSlipHtml(slipPreviewAppointment)
+      .then((html) => {
+        if (!cancelled) setSlipPreviewHtml(html);
+      })
+      .finally(() => {
+        if (!cancelled) setSlipPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [slipPreviewAppointment]);
+
+  const closeSlipPreview = () => {
+    setSlipPreviewAppointment(null);
+    setSlipPreviewHtml(null);
+    setSlipPreviewLoading(false);
+  };
+
+  const handlePreviewPrint = () => {
+    if (!slipPreviewAppointment) return;
+    printAppointmentSlip(slipPreviewAppointment);
+  };
+
+  const handlePreviewPdf = async () => {
+    if (!slipPreviewAppointment) return;
+    setPdfDownloading(true);
+    try {
+      await downloadAppointmentSlipPdf(slipPreviewAppointment);
+    } finally {
+      setPdfDownloading(false);
+    }
+  };
+
   function Field({ label, value }: { label: string; value: any }) {
     return (
       <div className="p-3 rounded-xl border border-border bg-muted/30">
@@ -141,7 +237,7 @@ export default function RegistrationsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6">
+    <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-4 sm:space-y-5">
       <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-3 rounded-full border border-accent/30 bg-accent/5 px-5 py-2">
@@ -159,265 +255,319 @@ export default function RegistrationsPage() {
         </h1>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2">
-          <Card className="p-5 sm:p-6">
-            <div className="space-y-6">
-              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                <div className="space-y-1">
-                  <h3 className="text-lg font-semibold">
-                    {t("registrations.filters")}
-                  </h3>
-                  <p className="text-sm text-muted-foreground max-w-xl">
-                    {t("registrations.filtersDescription")}
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleResetFilters}
-                  className="sm:self-start w-full sm:w-auto"
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold">{t("registrations.filters")}</h3>
+            <p className="text-sm text-muted-foreground max-w-3xl">
+              {t("registrations.filtersDescription")}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="secondary" size="sm" onClick={handleTodayShortcut}>
+              {language === "ar" ? "اليوم" : "Today"}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={handleTomorrowShortcut}>
+              {language === "ar" ? "غداً" : "Tomorrow"}
+            </Button>
+            <Button type="button" variant="secondary" size="sm" onClick={handlePrintVisibleList}>
+              {t("registrations.print")}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={handleResetFilters}>
+              {t("registrations.reset")}
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 xl:grid-cols-[1.15fr_1.05fr_0.8fr] gap-4">
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
+              {t("registrations.dateFilters")}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("registrations.dateFiltersHint")}</p>
+            <div className="mt-4 grid grid-cols-1 gap-4">
+              <DateInput
+                label={t("registrations.date")}
+                value={filters.date}
+                onChange={(value) => handleDateChange("date", value)}
+              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <DateInput
+                  label={t("registrations.dateFrom")}
+                  value={filters.dateFrom}
+                  onChange={(value) => handleDateChange("dateFrom", value)}
+                />
+                <DateInput
+                  label={t("registrations.dateTo")}
+                  value={filters.dateTo}
+                  onChange={(value) => handleDateChange("dateTo", value)}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+            <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
+              {t("registrations.searchFilters")}
+            </p>
+            <p className="mt-1 text-sm text-muted-foreground">{t("registrations.searchFiltersHint")}</p>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                  {t("registrations.modality")}
+                </label>
+                <select
+                  value={filters.modalityId}
+                  onChange={(e) => handleFilterChange("modalityId", e.target.value)}
+                  className="input-premium input-ltr w-full min-h-12"
                 >
-                  {t("registrations.reset")}
-                </Button>
+                  <option value="">{t("registrations.all")}</option>
+                  {modalities.map((modality: any) => (
+                    <option key={modality.id} value={String(modality.id)}>
+                      {modality.nameEn ?? modality.name ?? modality.code ?? `#${modality.id}`}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              <div className="grid grid-cols-1 xl:grid-cols-[1.05fr_0.95fr] gap-5">
-                <div className="space-y-4 rounded-2xl border border-border bg-muted/20 p-4">
-                  <div>
-                    <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
-                      {t("registrations.dateFilters")}
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {t("registrations.dateFiltersHint")}
-                    </p>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="rounded-xl border border-border bg-background p-3">
-                      <DateInput
-                        label={t("registrations.date")}
-                        value={filters.date}
-                        onChange={(value) => handleDateChange("date", value)}
-                      />
-                    </div>
-
-                    <div className="rounded-xl border border-border bg-background p-3">
-                      <div className="mb-3">
-                        <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
-                          {t("registrations.dateFrom")} / {t("registrations.dateTo")}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {t("registrations.rangeHint")}
-                        </p>
-                      </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <DateInput
-                          label={t("registrations.dateFrom")}
-                          value={filters.dateFrom}
-                          onChange={(value) => handleDateChange("dateFrom", value)}
-                        />
-                        <DateInput
-                          label={t("registrations.dateTo")}
-                          value={filters.dateTo}
-                          onChange={(value) => handleDateChange("dateTo", value)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-3 rounded-2xl border border-border bg-muted/20 p-4">
-                  <div>
-                    <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
-                      {t("registrations.searchFilters")}
-                    </p>
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {t("registrations.searchFiltersHint")}
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
-                        {t("registrations.modality")}
-                      </label>
-                      <select
-                        value={filters.modalityId}
-                        onChange={(e) => handleFilterChange("modalityId", e.target.value)}
-                        className="input-premium input-ltr w-full min-h-12"
-                      >
-                        <option value="">{t("registrations.all")}</option>
-                        {modalities.map((modality: any) => (
-                          <option key={modality.id} value={String(modality.id)}>
-                            {modality.nameEn ?? modality.name ?? modality.code ?? `#${modality.id}`}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
-                        {t("registrations.search")}
-                      </label>
-                      <SearchInput
-                        placeholder={t("registrations.searchPlaceholder")}
-                        value={filters.query}
-                        onChange={(e) => handleFilterChange("query", e.target.value)}
-                        showClearButton
-                        onClear={() => handleFilterChange("query", "")}
-                        className="w-full min-h-12"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-3 rounded-2xl border border-border bg-background p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-sm font-medium text-muted-foreground">
-                    {t("registrations.status")}
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    {t("registrations.statusHint")}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
-                    (status) => (
-                      <button
-                        key={status}
-                        type="button"
-                        onClick={() => handleStatusToggle(status)}
-                        className={`min-h-10 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
-                          filters.statuses.includes(status)
-                            ? "bg-accent text-accent-foreground"
-                            : "bg-muted text-muted-foreground hover:bg-muted/80"
-                        }`}
-                      >
-                        {status}
-                      </button>
-                    ),
-                  )}
-                </div>
+              <div>
+                <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                  {t("registrations.search")}
+                </label>
+                <SearchInput
+                  placeholder={t("registrations.searchPlaceholder")}
+                  value={filters.query}
+                  onChange={(e) => handleFilterChange("query", e.target.value)}
+                  showClearButton
+                  onClear={() => handleFilterChange("query", "")}
+                  className="w-full min-h-12"
+                />
               </div>
             </div>
-          </Card>
+          </div>
 
-          <Card className="overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <h3 className="text-xl font-semibold">
-                {t("registrations.title")}
-              </h3>
+          <div className="rounded-2xl border border-border bg-background p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-muted-foreground">
+                {t("registrations.status")}
+              </span>
+              <span className="text-xs text-muted-foreground">
+                {t("registrations.statusHint")}
+              </span>
             </div>
-            <div className="p-4">
-              {isLoading ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  {t("common.loading")}
-                </div>
-              ) : appointments.length === 0 ? (
-                <div className="p-8 text-center text-muted-foreground">
-                  {t("queue.empty")}
-                </div>
-              ) : (
-                <ul className="divide-y divide-border max-h-[500px] overflow-y-auto">
-                  {appointments.map((apt: AppointmentWithDetails) => (
-                    <li
+            <div className="mt-3 flex flex-wrap gap-2">
+              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
+                (status) => (
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => handleStatusToggle(status)}
+                    className={`min-h-10 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
+                      filters.statuses.includes(status)
+                        ? "bg-accent text-accent-foreground"
+                        : "bg-muted text-muted-foreground hover:bg-muted/80"
+                    }`}
+                  >
+                    {status}
+                  </button>
+                ),
+              )}
+            </div>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-xl font-semibold">{t("registrations.title")}</h3>
+            <p className="text-sm text-muted-foreground">
+              {appointments.length} {language === "ar" ? "موعد" : "appointments"} {listWindowLabel}
+            </p>
+          </div>
+          <Button type="button" variant="secondary" size="sm" onClick={handlePrintVisibleList}>
+            {t("registrations.print")}
+          </Button>
+        </div>
+
+        <div className="overflow-x-auto">
+          <div className="min-w-[1320px]">
+            <div className="grid grid-cols-[1.9fr_1.1fr_1.2fr_0.8fr_0.9fr_1fr_0.95fr] gap-3 border-b border-border bg-muted/40 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+              <div>{t("registrations.patient")}</div>
+              <div>{t("registrations.print")}</div>
+              <div>{t("registrations.modality")}</div>
+              <div>{t("registrations.date")}</div>
+              <div>{t("registrations.statusCol")}</div>
+              <div>{t("registrations.notes")}</div>
+              <div className="text-right">Actions</div>
+            </div>
+
+            {isLoading ? (
+              <div className="p-8 text-center text-muted-foreground">
+                {t("common.loading")}
+              </div>
+            ) : appointments.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">
+                {t("queue.empty")}
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {appointments.map((apt: AppointmentWithDetails, index: number) => {
+                  const isSelected = selectedAppointment?.id === apt.id;
+                  const patientName = chooseLocalized(language, apt.arabicFullName, apt.englishFullName);
+                  const modalityName = chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn);
+                  const examName = chooseLocalized(language, apt.examNameAr, apt.examNameEn);
+                  const priorityName = chooseLocalized(language, apt.priorityNameAr, apt.priorityNameEn);
+
+                  return (
+                    <div
                       key={apt.id}
-                      onClick={() => setSelectedAppointment(apt)}
-                      className={`p-4 hover:bg-muted/50 transition-colors cursor-pointer ${
-                        selectedAppointment?.id === apt.id ? "bg-accent/10" : ""
-                      }`}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openSlipPreview(apt)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openSlipPreview(apt);
+                        }
+                      }}
+                      className={`grid grid-cols-[1.9fr_1.1fr_1.2fr_0.8fr_0.9fr_1fr_0.95fr] gap-3 px-4 py-3 transition-colors outline-none cursor-pointer ${
+                        index % 2 === 0 ? "bg-background" : "bg-muted/25"
+                      } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
                     >
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <p className="font-medium">
-                            {chooseLocalized(
-                              language,
-                              apt.arabicFullName,
-                              apt.englishFullName,
-                            )}
-                          </p>
-                          <p className="text-sm text-muted-foreground font-mono">
-                            {apt.accessionNumber} • {apt.modalityNameEn}
-                          </p>
+                      <div className="min-w-0">
+                        <div className="flex items-start gap-2">
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-foreground">{patientName}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">
+                              {apt.mrn || apt.nationalId || "—"}
+                              {apt.phone1 ? ` • ${apt.phone1}` : ""}
+                              {apt.sex ? ` • ${apt.sex}` : ""}
+                              {Number.isFinite(apt.ageYears) ? ` • ${apt.ageYears}` : ""}
+                            </p>
+                          </div>
                         </div>
-                        <span className="px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm font-semibold text-foreground">{apt.accessionNumber}</p>
+                        <p className="text-xs text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-foreground">{modalityName}</p>
+                        <p className="truncate text-xs text-muted-foreground">{examName || "—"}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{priorityName || "—"}</p>
+                      </div>
+
+                      <div className="text-sm text-foreground">{formatDateLy(apt.appointmentDate)}</div>
+
+                      <div>
+                        <span className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-700">
                           {statusLabel(language, apt.status)}
                         </span>
                       </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </Card>
-        </div>
 
-        <div className="space-y-4">
-          {selectedAppointment ? (
-            <Card className="p-6">
-              <div className="flex items-center justify-between gap-3 mb-6">
-                <h3 className="text-xl font-semibold">
-                  {t("calendar.title")}
-                </h3>
-                <Button
-                  onClick={() =>
-                    navigate(`/print?appointmentId=${selectedAppointment.id}`)
-                  }
-                >
-                  {t("registrations.print")}
-                </Button>
+                      <div className="min-w-0 text-xs text-muted-foreground">
+                        <p className="truncate">{apt.isWalkIn ? t("registrations.yes") : t("registrations.no")}</p>
+                        <p className="truncate">{apt.notes || "—"}</p>
+                      </div>
+
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openSlipPreview(apt);
+                          }}
+                        >
+                          {t("registrations.print")}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            manageAppointment(apt);
+                          }}
+                        >
+                          Manage
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <Field
-                  label={t("registrations.patient")}
-                  value={chooseLocalized(
-                    language,
-                    selectedAppointment.arabicFullName,
-                    selectedAppointment.englishFullName,
-                  )}
-                />
-                <Field
-                  label={t("registrations.modality")}
-                  value={chooseLocalized(
-                    language,
-                    selectedAppointment.modalityNameAr,
-                    selectedAppointment.modalityNameEn,
-                  )}
-                />
-                <Field
-                  label={t("registrations.date")}
-                  value={formatDateLy(selectedAppointment.appointmentDate)}
-                />
-                <Field
-                  label={t("registrations.statusCol")}
-                  value={statusLabel(language, selectedAppointment.status)}
-                />
-                <Field
-                  label={t("registrations.walkIn")}
-                  value={
-                    selectedAppointment.isWalkIn
-                      ? t("registrations.yes")
-                      : t("registrations.no")
-                  }
-                />
-                <Field
-                  label={t("registrations.notes")}
-                  value={selectedAppointment.notes}
-                />
-              </div>
-              <div className="mt-6">
-                <RequestDocumentsPanel
-                  appointmentId={selectedAppointment.id}
-                  patientId={selectedAppointment.patientId}
-                  appointmentRefType="v2_booking"
-                  title={t("registrations.requestDocuments")}
-                />
-              </div>
-              <div className="mt-6">
-                {["scheduled", "arrived", "waiting"].includes(
-                  selectedAppointment.status,
-                ) && (
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {selectedAppointment ? (
+        <Card className="p-4 sm:p-5 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="text-lg font-semibold">
+                {chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)}
+              </h3>
+              <p className="text-sm text-muted-foreground">
+                {selectedAppointment.accessionNumber} • {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={() => openSlipPreview(selectedAppointment)}>
+                {t("registrations.print")}
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setSelectedAppointment(null)}>
+                {t("toast.close")}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
+            <Field
+              label={t("registrations.patient")}
+              value={chooseLocalized(
+                language,
+                selectedAppointment.arabicFullName,
+                selectedAppointment.englishFullName,
+              )}
+            />
+            <Field
+              label={t("registrations.modality")}
+              value={chooseLocalized(
+                language,
+                selectedAppointment.modalityNameAr,
+                selectedAppointment.modalityNameEn,
+              )}
+            />
+            <Field
+              label={t("registrations.date")}
+              value={formatDateLy(selectedAppointment.appointmentDate)}
+            />
+            <Field
+              label={t("registrations.statusCol")}
+              value={statusLabel(language, selectedAppointment.status)}
+            />
+            <Field
+              label={t("registrations.walkIn")}
+              value={selectedAppointment.isWalkIn ? t("registrations.yes") : t("registrations.no")}
+            />
+            <Field
+              label={t("registrations.notes")}
+              value={selectedAppointment.notes}
+            />
+          </div>
+
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <details className="rounded-2xl border border-border bg-muted/20 p-4" open>
+              <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                {t("registrations.cancelAppointment")}
+              </summary>
+              <div className="mt-4">
+                {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
                   <div className="mb-3 flex justify-end">
                     <Button
                       size="sm"
@@ -439,16 +589,108 @@ export default function RegistrationsPage() {
                   onDeleted={() => setSelectedAppointment(null)}
                 />
               </div>
-            </Card>
-          ) : (
-            <Card className="p-6 h-full flex items-center justify-center">
-              <p className="text-muted-foreground text-center">
-                {t("doctor.selectPrompt")}
-              </p>
-            </Card>
-          )}
+            </details>
+
+            <details className="rounded-2xl border border-border bg-muted/20 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground">
+                {t("registrations.requestDocuments")}
+              </summary>
+              <div className="mt-4">
+                <RequestDocumentsPanel
+                  appointmentId={selectedAppointment.id}
+                  patientId={selectedAppointment.patientId}
+                  appointmentRefType="v2_booking"
+                  title={t("registrations.requestDocuments")}
+                />
+              </div>
+            </details>
+          </div>
+        </Card>
+      ) : null}
+
+      {slipPreviewAppointment ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-3 py-4 sm:px-6">
+          <div className="w-full max-w-7xl rounded-3xl border border-border bg-background shadow-2xl overflow-hidden">
+            <div className="flex flex-col gap-3 border-b border-border p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-xl font-semibold">
+                  {t("print.previewTitle")}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {t("print.previewSubtitle")}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="secondary" onClick={closeSlipPreview}>
+                  {t("toast.close")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => void handlePreviewPdf()}
+                  disabled={pdfDownloading}
+                >
+                  {pdfDownloading ? t("common.loading") : t("print.downloadPdf")}
+                </Button>
+                <Button type="button" onClick={handlePreviewPrint}>
+                  {t("print.confirmPrint")}
+                </Button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_360px] gap-0">
+              <div className="min-h-[72vh] bg-muted/10">
+                {slipPreviewLoading ? (
+                  <div className="flex h-full items-center justify-center p-8 text-muted-foreground">
+                    {t("print.loading")}
+                  </div>
+                ) : slipPreviewHtml ? (
+                  <iframe
+                    title="Appointment slip preview"
+                    srcDoc={slipPreviewHtml}
+                    className="h-[72vh] w-full bg-white"
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center p-8 text-muted-foreground">
+                    {t("print.loading")}
+                  </div>
+                )}
+              </div>
+
+              <div className="border-t xl:border-t-0 xl:border-l border-border p-4 sm:p-5 space-y-4">
+                <div>
+                  <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
+                    {t("registrations.patient")}
+                  </p>
+                  <p className="mt-1 text-lg font-semibold">
+                    {chooseLocalized(
+                      language,
+                      slipPreviewAppointment.arabicFullName,
+                      slipPreviewAppointment.englishFullName,
+                    )}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <Field label={t("registrations.modality")} value={chooseLocalized(language, slipPreviewAppointment.modalityNameAr, slipPreviewAppointment.modalityNameEn)} />
+                  <Field label={t("registrations.date")} value={formatDateLy(slipPreviewAppointment.appointmentDate)} />
+                  <Field label={t("registrations.statusCol")} value={statusLabel(language, slipPreviewAppointment.status)} />
+                  <Field label={t("registrations.print")} value={slipPreviewAppointment.accessionNumber} />
+                </div>
+
+                <div className="rounded-2xl border border-border bg-muted/20 p-4 text-sm">
+                  <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
+                    {t("registrations.notes")}
+                  </p>
+                  <p className="mt-2 whitespace-pre-wrap text-foreground">
+                    {slipPreviewAppointment.notes || "—"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
