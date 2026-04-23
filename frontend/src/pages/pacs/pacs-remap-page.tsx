@@ -80,6 +80,11 @@ export default function PacsRemapPage() {
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
 
+  const setSelectedFiles = (incoming: FileList | null): void => {
+    const nextFiles = Array.from(incoming || []);
+    setFiles(nextFiles);
+  };
+
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
     queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
@@ -410,7 +415,3 @@ export default function PacsRemapPage() {
     </div>
   );
 }
-  const setSelectedFiles = (incoming: FileList | null): void => {
-    const nextFiles = Array.from(incoming || []);
-    setFiles(nextFiles);
-  };
