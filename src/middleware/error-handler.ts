@@ -24,7 +24,7 @@ export function errorHandler(
   res.status(statusCode).json({
     error: {
       message:
-        statusCode >= 500 && env.isProduction
+        statusCode >= 500 && env.isProduction && !isExpected
           ? "Unexpected server error."
           : String(errorRecord.message ?? "Unexpected server error."),
       details: env.isProduction && !isExpected ? null : (errorRecord.details ?? null)
