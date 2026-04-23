@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Search, RefreshCw, Monitor, Calendar, Activity, FileText, Hash } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 export interface PacsStudy {
   studyDate?: string;
@@ -79,6 +80,7 @@ function modalityLabel(code: string, language: "ar" | "en"): string {
 
 export default function PacsPage() {
   const { language } = useLanguage();
+  const navigate = useNavigate();
 
   // Search criteria
   const [nationalId, setNationalId] = useState("");
@@ -172,7 +174,7 @@ export default function PacsPage() {
         <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: "var(--accent)" }}>
           <Monitor className="w-5 h-5 text-white" />
         </div>
-        <div>
+        <div className="flex-1">
           <h2 className="text-xl font-bold text-embossed" style={{ color: "var(--text)" }}>
             {t(language, "pacs.title")}
           </h2>
@@ -180,6 +182,13 @@ export default function PacsPage() {
             {t(language, "pacs.searchBtn")}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={() => navigate("/pacs/remap")}
+          className="btn-secondary px-3 py-2 rounded-lg text-xs"
+        >
+          {language === "ar" ? "إعادة ربط DICOM" : "DICOM Remap"}
+        </button>
       </div>
 
       {/* Search Form */}

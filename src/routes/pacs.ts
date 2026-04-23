@@ -11,6 +11,17 @@ import {
   deletePacsNode
 } from "../services/pacs-node-service.js";
 import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.js";
+import {
+  assertDicomRemapRouteAccess,
+  confirmDicomRemapAndSend,
+  createDicomRemapUploadJob,
+  getDicomRemapJob,
+  listDicomRemapDestinations,
+  listMyDicomRemapJobs,
+  prepareDicomRemapConfirmation,
+  validateDicomRemapUploadFilesInput,
+  validateExplicitConfirm,
+} from "../services/dicom-remap-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
@@ -200,5 +211,121 @@ pacsRouter.post(
 
       res.json({ studies, node: { id: defaultNode.id, name: defaultNode.name } });
     }
+  })
+);
+
+// ---------------------------------------------------------------------------
+// Internal DICOM remap/send tool (authenticated users, backend-orchestrated)
+// ---------------------------------------------------------------------------
+
+pacsRouter.post(
+  "/remap/jobs/upload",
+  ...authMiddleware,
+  express.json({ limit: "100mb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext };
+    const body = asUnknownRecord(request.body ?? {});
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const files = validateDicomRemapUploadFilesInput(body.files);
+
+    const result = await createDicomRemapUploadJob({
+      files,
+      currentUserId,
+    });
+
+    res.status(201).json(result);
+  })
+);
+
+pacsRouter.get(
+  "/remap/jobs",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; query?: UnknownRecord };
+    const query = asUnknownRecord(request.query ?? {});
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const limit = asOptionalString(query.limit);
+    const jobs = await listMyDicomRemapJobs({
+      currentUserId,
+      limit: limit ? Number(limit) : 20,
+    });
+    res.json({ jobs });
+  })
+);
+
+pacsRouter.get(
+  "/remap/jobs/:jobId",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+    const result = await getDicomRemapJob({ jobId, currentUserId });
+    res.json(result);
+  })
+);
+
+pacsRouter.get(
+  "/remap/destinations",
+  ...authMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    const destinations = await listDicomRemapDestinations();
+    res.json({ destinations });
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/prepare",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+    const body = asUnknownRecord(request.body ?? {});
+    const risproPatientId = asOptionalString(body.risproPatientId);
+    const destinationPacsKey = asOptionalString(body.destinationPacsKey);
+
+    if (!risproPatientId) {
+      throw new HttpError(400, "risproPatientId is required.");
+    }
+    if (!destinationPacsKey) {
+      throw new HttpError(400, "destinationPacsKey is required.");
+    }
+
+    const result = await prepareDicomRemapConfirmation({
+      jobId,
+      risproPatientId,
+      destinationPacsKey,
+      currentUserId,
+    });
+
+    res.json(result);
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/confirm-send",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+    const body = asUnknownRecord(request.body ?? {});
+    const confirm = validateExplicitConfirm(body.confirm);
+    const result = await confirmDicomRemapAndSend({
+      jobId,
+      confirm,
+      currentUserId,
+    });
+    res.json(result);
   })
 );

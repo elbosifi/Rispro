@@ -1,0 +1,816 @@
+import { Buffer } from "node:buffer";
+import { pool } from "../db/pool.js";
+import { HttpError } from "../utils/http-error.js";
+import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
+import { getPacsNode, listPacsNodes, type PacsNodeRow } from "./pacs-node-service.js";
+import { logAuditEntry } from "./audit-service.js";
+import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
+import { getPatientById } from "./patient-service.js";
+import type { OptionalUserId, UserId } from "../types/http.js";
+
+export type DicomRemapJobStatus =
+  | "uploaded"
+  | "awaiting_confirmation"
+  | "remapped"
+  | "sending"
+  | "sent"
+  | "failed";
+
+export interface DicomRemapUploadFileInput {
+  fileName?: unknown;
+  mimeType?: unknown;
+  fileContentBase64?: unknown;
+}
+
+export interface DicomRemapJobRow {
+  id: number;
+  created_by_user_id: number;
+  status: DicomRemapJobStatus;
+  source_orthanc_study_id: string | null;
+  modified_orthanc_study_id: string | null;
+  rispro_patient_id: number | null;
+  destination_pacs_key: string | null;
+  original_patient_id: string | null;
+  original_patient_name: string | null;
+  original_patient_sex: string | null;
+  original_patient_birth_date: string | null;
+  replacement_patient_id: string | null;
+  replacement_patient_name: string | null;
+  replacement_patient_sex: string | null;
+  replacement_patient_birth_date: string | null;
+  send_result: unknown;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface OrthancFetchResult {
+  status: number;
+  ok: boolean;
+  text: string;
+  json: unknown;
+}
+
+interface OrthancPatientSummary {
+  patientId: string;
+  patientName: string;
+  patientSex: string;
+  patientBirthDate: string;
+}
+
+interface ConfirmComparison {
+  original: OrthancPatientSummary;
+  replacement: OrthancPatientSummary;
+}
+
+const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation", "remapped", "sending"];
+
+function joinUrl(baseUrl: string, suffix: string): string {
+  const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const cleanSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
+  return `${cleanBase}${cleanSuffix}`;
+}
+
+function sanitizeFileName(value: unknown): string {
+  return String(value || "dicom.dcm").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
+function decodeBase64(value: unknown): Buffer {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    throw new HttpError(400, "fileContentBase64 is required.");
+  }
+  const normalized = raw.includes(",") ? raw.split(",").pop() || "" : raw;
+  const decoded = Buffer.from(normalized, "base64");
+  if (!decoded.length) {
+    throw new HttpError(400, "Uploaded file is empty.");
+  }
+  return decoded;
+}
+
+function isLikelyDicomFile(fileName: string, mimeType: string): boolean {
+  const lowerName = fileName.toLowerCase();
+  const lowerMime = mimeType.toLowerCase();
+  return (
+    lowerMime.includes("dicom") ||
+    lowerName.endsWith(".dcm") ||
+    lowerName.endsWith(".dicom")
+  );
+}
+
+function extractTagCandidate(tags: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = tags[key];
+    if (value == null) continue;
+    const clean = String(value).trim();
+    if (clean) return clean;
+  }
+  return "";
+}
+
+function normalizePatientSex(value: string): string {
+  const upper = String(value || "").trim().toUpperCase();
+  if (upper === "M" || upper === "F" || upper === "O") {
+    return upper;
+  }
+  if (upper === "MALE") return "M";
+  if (upper === "FEMALE") return "F";
+  return "";
+}
+
+function normalizeDicomBirthDate(value: string): string {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (/^\d{8}$/.test(clean)) return clean;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return clean.replaceAll("-", "");
+  }
+  return "";
+}
+
+function normalizeDicomPatientName(value: string): string {
+  const clean = String(value || "").trim();
+  if (!clean) return "";
+  if (clean.includes("^")) return clean;
+  return clean.replace(/\s+/g, "^");
+}
+
+function parseOrthancResourceId(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  const record = payload as Record<string, unknown>;
+  const candidates = [record.ID, record.Id, record.id, record.ParentStudy, record.Parent];
+  for (const candidate of candidates) {
+    const clean = String(candidate || "").trim();
+    if (clean) return clean;
+  }
+  return "";
+}
+
+function assertJobStatus(current: DicomRemapJobStatus, expected: DicomRemapJobStatus, message: string): void {
+  if (current !== expected) {
+    throw new HttpError(409, message);
+  }
+}
+
+async function orthancFetch(
+  path: string,
+  options: {
+    method?: string;
+    body?: unknown;
+    timeoutSeconds?: number;
+    contentType?: string;
+  } = {}
+): Promise<OrthancFetchResult> {
+  const settings = await resolveOrthancSettings();
+  const baseUrl = normalizeOptionalText(settings.baseUrl);
+  if (!baseUrl) {
+    throw new HttpError(500, "Orthanc base URL is not configured.");
+  }
+
+  const timeoutMs = Math.max(1, options.timeoutSeconds || settings.timeoutSeconds || 10) * 1000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+    };
+
+    if (settings.username) {
+      const basic = Buffer.from(`${settings.username}:${settings.password}`).toString("base64");
+      headers.Authorization = `Basic ${basic}`;
+    }
+
+    if (options.contentType) {
+      headers["Content-Type"] = options.contentType;
+    } else if (options.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    const requestInit: RequestInit & { dispatcher?: unknown } = {
+      method: options.method || "GET",
+      headers,
+      signal: controller.signal,
+    };
+
+    if (options.body !== undefined) {
+      requestInit.body = typeof options.body === "string"
+        ? options.body
+        : Buffer.isBuffer(options.body)
+          ? new Uint8Array(options.body)
+          : JSON.stringify(options.body);
+    }
+
+    const response = await fetch(joinUrl(baseUrl, path), requestInit);
+    const text = await response.text();
+    let json: unknown = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+
+    return {
+      status: response.status,
+      ok: response.ok,
+      text,
+      json,
+    };
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new HttpError(504, `Orthanc request timed out after ${timeoutMs}ms.`);
+    }
+    throw new HttpError(502, `Orthanc request failed: ${(error as Error).message || "unknown_error"}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function assertNoActiveUserJob(userId: UserId): Promise<void> {
+  const { rows } = await pool.query<{ id: number }>(
+    `
+      select id
+      from dicom_remap_jobs
+      where created_by_user_id = $1
+        and status = any($2::text[])
+      order by created_at desc
+      limit 1
+    `,
+    [userId, ACTIVE_JOB_STATUSES]
+  );
+
+  if (rows[0]?.id) {
+    throw new HttpError(409, "You already have an active DICOM remap job. Finish or fail it before starting a new one.");
+  }
+}
+
+async function readStudyPatientSummary(studyId: string): Promise<OrthancPatientSummary> {
+  const response = await orthancFetch(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
+  if (!response.ok || !response.json || typeof response.json !== "object") {
+    throw new HttpError(502, `Unable to read Orthanc study summary (status=${response.status}).`);
+  }
+  const payload = response.json as Record<string, unknown>;
+  const mainTags = payload.MainDicomTags && typeof payload.MainDicomTags === "object"
+    ? payload.MainDicomTags as Record<string, unknown>
+    : {};
+  const patientMainTags = payload.PatientMainDicomTags && typeof payload.PatientMainDicomTags === "object"
+    ? payload.PatientMainDicomTags as Record<string, unknown>
+    : {};
+  const mergedTags = { ...patientMainTags, ...mainTags };
+
+  return {
+    patientId: extractTagCandidate(mergedTags, ["PatientID"]),
+    patientName: extractTagCandidate(mergedTags, ["PatientName"]),
+    patientSex: normalizePatientSex(extractTagCandidate(mergedTags, ["PatientSex"])),
+    patientBirthDate: normalizeDicomBirthDate(extractTagCandidate(mergedTags, ["PatientBirthDate"])),
+  };
+}
+
+function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPatientById>>): OrthancPatientSummary {
+  const patientId = String(
+    patient.identifier_value ||
+    patient.national_id ||
+    patient.mrn ||
+    patient.id
+  ).trim();
+  const patientName = normalizeDicomPatientName(
+    String(patient.english_full_name || patient.arabic_full_name || "").trim()
+  );
+  const patientSex = normalizePatientSex(String(patient.sex || ""));
+  const patientBirthDate = normalizeDicomBirthDate(String(patient.estimated_date_of_birth || ""));
+
+  return {
+    patientId,
+    patientName,
+    patientSex,
+    patientBirthDate,
+  };
+}
+
+async function createModifiedStudyCopy(sourceStudyId: string, replacement: OrthancPatientSummary): Promise<string> {
+  const response = await orthancFetch(`/studies/${encodeURIComponent(sourceStudyId)}/modify`, {
+    method: "POST",
+    body: {
+      Replace: {
+        PatientID: replacement.patientId,
+        PatientName: replacement.patientName,
+        PatientSex: replacement.patientSex,
+        PatientBirthDate: replacement.patientBirthDate,
+      },
+      KeepSource: true,
+    },
+  });
+
+  if (!response.ok) {
+    throw new HttpError(502, `Orthanc study modify failed (status=${response.status}).`);
+  }
+
+  const modifiedStudyId = parseOrthancResourceId(response.json);
+  if (!modifiedStudyId) {
+    throw new HttpError(502, "Orthanc modify response did not include modified study ID.");
+  }
+  return modifiedStudyId;
+}
+
+async function ensureOrthancModalityFromPacsNode(node: PacsNodeRow, modalityKey: string): Promise<void> {
+  const response = await orthancFetch(`/modalities/${encodeURIComponent(modalityKey)}`, {
+    method: "PUT",
+    body: {
+      AET: node.called_ae_title,
+      Host: node.host,
+      Port: Number(node.port),
+    },
+  });
+
+  if (!response.ok) {
+    throw new HttpError(502, `Failed to register Orthanc modality destination (status=${response.status}).`);
+  }
+}
+
+async function sendStudyToOrthancModality(studyId: string, modalityKey: string): Promise<unknown> {
+  const payloadCandidates: unknown[] = [
+    studyId,
+    { Resources: [studyId] },
+    { resources: [studyId] },
+  ];
+
+  for (const payload of payloadCandidates) {
+    const response = await orthancFetch(`/modalities/${encodeURIComponent(modalityKey)}/store`, {
+      method: "POST",
+      body: payload,
+    });
+
+    if (response.ok || response.status === 202) {
+      return response.json ?? response.text ?? null;
+    }
+  }
+
+  const studyStoreCandidates: unknown[] = [
+    modalityKey,
+    { Target: modalityKey },
+  ];
+
+  for (const payload of studyStoreCandidates) {
+    const response = await orthancFetch(`/studies/${encodeURIComponent(studyId)}/store`, {
+      method: "POST",
+      body: payload,
+    });
+    if (response.ok || response.status === 202) {
+      return response.json ?? response.text ?? null;
+    }
+  }
+
+  throw new HttpError(502, "Orthanc store-to-modality request failed.");
+}
+
+async function loadOwnedJob(jobId: number | string, userId: UserId): Promise<DicomRemapJobRow> {
+  const cleanJobId = normalizePositiveInteger(jobId, "jobId");
+  const { rows } = await pool.query<DicomRemapJobRow>(
+    `
+      select *
+      from dicom_remap_jobs
+      where id = $1
+        and created_by_user_id = $2
+      limit 1
+    `,
+    [cleanJobId, userId]
+  );
+
+  const job = rows[0];
+  if (!job) {
+    throw new HttpError(404, "DICOM remap job not found.");
+  }
+  return job;
+}
+
+export async function createDicomRemapUploadJob({
+  files,
+  currentUserId,
+}: {
+  files: DicomRemapUploadFileInput[];
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow; summary: OrthancPatientSummary }> {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new HttpError(400, "At least one DICOM file is required.");
+  }
+
+  await assertNoActiveUserJob(currentUserId);
+
+  const createResult = await pool.query<DicomRemapJobRow>(
+    `
+      insert into dicom_remap_jobs (
+        created_by_user_id,
+        status
+      )
+      values ($1, 'uploaded')
+      returning *
+    `,
+    [currentUserId]
+  );
+  const job = createResult.rows[0];
+  if (!job) {
+    throw new HttpError(500, "Failed to create DICOM remap job.");
+  }
+
+  try {
+    const studyIds = new Set<string>();
+
+    for (const file of files) {
+      const fileName = sanitizeFileName(file.fileName);
+      const mimeType = String(file.mimeType || "application/octet-stream").trim();
+
+      if (!isLikelyDicomFile(fileName, mimeType)) {
+        throw new HttpError(400, `File "${fileName}" is not an accepted DICOM file.`);
+      }
+
+      const content = decodeBase64(file.fileContentBase64);
+
+      const uploadResponse = await orthancFetch("/instances", {
+        method: "POST",
+        body: content,
+        contentType: "application/dicom",
+      });
+
+      if (!uploadResponse.ok) {
+        throw new HttpError(400, `Orthanc rejected "${fileName}" as non-DICOM or invalid content.`);
+      }
+
+      const parentStudyId = parseOrthancResourceId(uploadResponse.json);
+      if (!parentStudyId) {
+        throw new HttpError(502, "Orthanc upload response did not include parent study ID.");
+      }
+      studyIds.add(parentStudyId);
+    }
+
+    if (studyIds.size !== 1) {
+      throw new HttpError(400, "Uploaded files must belong to exactly one study.");
+    }
+
+    const sourceStudyId = Array.from(studyIds)[0];
+    const summary = await readStudyPatientSummary(sourceStudyId);
+
+    const updateResult = await pool.query<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set
+          source_orthanc_study_id = $2,
+          original_patient_id = $3,
+          original_patient_name = $4,
+          original_patient_sex = $5,
+          original_patient_birth_date = $6,
+          updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [
+        job.id,
+        sourceStudyId,
+        summary.patientId,
+        summary.patientName,
+        summary.patientSex,
+        summary.patientBirthDate,
+      ]
+    );
+
+    const updatedJob = updateResult.rows[0];
+    if (!updatedJob) {
+      throw new HttpError(500, "Failed to update upload job.");
+    }
+
+    await logAuditEntry({
+      entityType: "dicom_remap_job",
+      entityId: updatedJob.id,
+      actionType: "upload",
+      oldValues: null,
+      newValues: {
+        sourceOrthancStudyId: updatedJob.source_orthanc_study_id,
+        originalPatient: summary,
+      },
+      changedByUserId: currentUserId,
+    });
+
+    return { job: updatedJob, summary };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DICOM upload failed.";
+    await pool.query(
+      `
+        update dicom_remap_jobs
+        set status = 'failed',
+            error_message = $2,
+            updated_at = now()
+        where id = $1
+      `,
+      [job.id, message]
+    );
+    throw error;
+  }
+}
+
+export async function getDicomRemapJob({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow; comparison: ConfirmComparison | null }> {
+  const job = await loadOwnedJob(jobId, currentUserId);
+  const comparison = job.replacement_patient_id
+    ? {
+      original: {
+        patientId: job.original_patient_id || "",
+        patientName: job.original_patient_name || "",
+        patientSex: job.original_patient_sex || "",
+        patientBirthDate: job.original_patient_birth_date || "",
+      },
+      replacement: {
+        patientId: job.replacement_patient_id || "",
+        patientName: job.replacement_patient_name || "",
+        patientSex: job.replacement_patient_sex || "",
+        patientBirthDate: job.replacement_patient_birth_date || "",
+      },
+    }
+    : null;
+  return { job, comparison };
+}
+
+export async function listMyDicomRemapJobs({
+  currentUserId,
+  limit = 20,
+}: {
+  currentUserId: UserId;
+  limit?: number;
+}): Promise<DicomRemapJobRow[]> {
+  const cleanLimit = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const { rows } = await pool.query<DicomRemapJobRow>(
+    `
+      select *
+      from dicom_remap_jobs
+      where created_by_user_id = $1
+      order by created_at desc
+      limit $2
+    `,
+    [currentUserId, cleanLimit]
+  );
+  return rows;
+}
+
+export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: number; name: string }>> {
+  const nodes = await listPacsNodes({ includeInactive: false });
+  return nodes
+    .filter((node) => node.is_active)
+    .map((node) => ({
+      key: String(node.id),
+      id: node.id,
+      name: node.name,
+    }));
+}
+
+export async function prepareDicomRemapConfirmation({
+  jobId,
+  risproPatientId,
+  destinationPacsKey,
+  currentUserId,
+}: {
+  jobId: number | string;
+  risproPatientId: number | string;
+  destinationPacsKey: string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow; comparison: ConfirmComparison }> {
+  const job = await loadOwnedJob(jobId, currentUserId);
+  assertJobStatus(job.status, "uploaded", "Job is not in uploaded state.");
+  if (!job.source_orthanc_study_id) {
+    throw new HttpError(409, "Uploaded Orthanc study ID is missing for this job.");
+  }
+
+  const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
+  const destinationNodeId = normalizePositiveInteger(destinationPacsKey, "destinationPacsKey");
+  if (!patientId) {
+    throw new HttpError(400, "risproPatientId is required.");
+  }
+  if (!destinationNodeId) {
+    throw new HttpError(400, "destinationPacsKey is required.");
+  }
+
+  const patient = await getPatientById(patientId);
+  const destinationNode = await getPacsNode(destinationNodeId);
+  if (!destinationNode.is_active) {
+    throw new HttpError(400, "Selected PACS destination is inactive.");
+  }
+
+  const replacement = formatReplacementFromPatient(patient);
+  if (!replacement.patientId || !replacement.patientName) {
+    throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
+  }
+
+  const updateResult = await pool.query<DicomRemapJobRow>(
+    `
+      update dicom_remap_jobs
+      set
+        status = 'awaiting_confirmation',
+        rispro_patient_id = $2,
+        destination_pacs_key = $3,
+        replacement_patient_id = $4,
+        replacement_patient_name = $5,
+        replacement_patient_sex = $6,
+        replacement_patient_birth_date = $7,
+        error_message = null,
+        updated_at = now()
+      where id = $1
+      returning *
+    `,
+    [
+      job.id,
+      patient.id,
+      String(destinationNode.id),
+      replacement.patientId,
+      replacement.patientName,
+      replacement.patientSex,
+      replacement.patientBirthDate,
+    ]
+  );
+
+  const updatedJob = updateResult.rows[0];
+  if (!updatedJob) {
+    throw new HttpError(500, "Failed to prepare DICOM remap job.");
+  }
+
+  const comparison: ConfirmComparison = {
+    original: {
+      patientId: updatedJob.original_patient_id || "",
+      patientName: updatedJob.original_patient_name || "",
+      patientSex: updatedJob.original_patient_sex || "",
+      patientBirthDate: updatedJob.original_patient_birth_date || "",
+    },
+    replacement,
+  };
+
+  await logAuditEntry({
+    entityType: "dicom_remap_job",
+    entityId: updatedJob.id,
+    actionType: "prepare_confirmation",
+    oldValues: { status: job.status },
+    newValues: {
+      status: updatedJob.status,
+      risproPatientId: patient.id,
+      destinationPacsKey: updatedJob.destination_pacs_key,
+      replacement,
+    },
+    changedByUserId: currentUserId,
+  });
+
+  return { job: updatedJob, comparison };
+}
+
+export async function confirmDicomRemapAndSend({
+  jobId,
+  confirm,
+  currentUserId,
+}: {
+  jobId: number | string;
+  confirm: boolean;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  if (!confirm) {
+    throw new HttpError(400, "Explicit confirmation is required.");
+  }
+
+  const job = await loadOwnedJob(jobId, currentUserId);
+  assertJobStatus(job.status, "awaiting_confirmation", "Job is not awaiting confirmation.");
+  if (!job.source_orthanc_study_id || !job.destination_pacs_key) {
+    throw new HttpError(409, "Job does not have source study or destination set.");
+  }
+
+  const replacement: OrthancPatientSummary = {
+    patientId: job.replacement_patient_id || "",
+    patientName: job.replacement_patient_name || "",
+    patientSex: job.replacement_patient_sex || "",
+    patientBirthDate: job.replacement_patient_birth_date || "",
+  };
+
+  if (!replacement.patientId || !replacement.patientName) {
+    throw new HttpError(409, "Replacement identity fields are missing.");
+  }
+
+  const destinationNodeId = normalizePositiveInteger(job.destination_pacs_key, "destinationPacsKey");
+  if (!destinationNodeId) {
+    throw new HttpError(409, "destinationPacsKey is missing.");
+  }
+  const destinationNode = await getPacsNode(destinationNodeId);
+  if (!destinationNode.is_active) {
+    throw new HttpError(400, "Selected PACS destination is inactive.");
+  }
+
+  await pool.query(
+    `update dicom_remap_jobs set status = 'remapped', updated_at = now() where id = $1`,
+    [job.id]
+  );
+
+  try {
+    const modifiedStudyId = await createModifiedStudyCopy(job.source_orthanc_study_id, replacement);
+
+    await pool.query(
+      `
+        update dicom_remap_jobs
+        set status = 'sending',
+            modified_orthanc_study_id = $2,
+            updated_at = now()
+        where id = $1
+      `,
+      [job.id, modifiedStudyId]
+    );
+
+    const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
+    await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
+    const sendResult = await sendStudyToOrthancModality(modifiedStudyId, modalityKey);
+
+    const result = await pool.query<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set status = 'sent',
+            send_result = $2::jsonb,
+            error_message = null,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [job.id, JSON.stringify(sendResult ?? {})]
+    );
+    const finalJob = result.rows[0];
+    if (!finalJob) {
+      throw new HttpError(500, "Failed to finalize DICOM remap send result.");
+    }
+
+    await logAuditEntry({
+      entityType: "dicom_remap_job",
+      entityId: finalJob.id,
+      actionType: "confirm_send",
+      oldValues: { status: job.status },
+      newValues: {
+        status: finalJob.status,
+        sourceOrthancStudyId: finalJob.source_orthanc_study_id,
+        modifiedOrthancStudyId: finalJob.modified_orthanc_study_id,
+        destinationPacsKey: finalJob.destination_pacs_key,
+      },
+      changedByUserId: currentUserId,
+    });
+
+    return { job: finalJob };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DICOM remap send failed.";
+    const failed = await pool.query<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set status = 'failed',
+            error_message = $2,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [job.id, message]
+    );
+    const failedJob = failed.rows[0];
+
+    await logAuditEntry({
+      entityType: "dicom_remap_job",
+      entityId: job.id,
+      actionType: "confirm_send_failed",
+      oldValues: { status: "sending" },
+      newValues: { status: "failed", errorMessage: message },
+      changedByUserId: currentUserId,
+    });
+
+    if (failedJob) {
+      return { job: failedJob };
+    }
+    throw error;
+  }
+}
+
+export function validateDicomRemapUploadFilesInput(value: unknown): DicomRemapUploadFileInput[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new HttpError(400, "files must be a non-empty array.");
+  }
+  return value as DicomRemapUploadFileInput[];
+}
+
+export function validateExplicitConfirm(value: unknown): boolean {
+  return value === true || String(value || "").trim().toLowerCase() === "true";
+}
+
+export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId): Promise<UserId> {
+  const normalized = normalizePositiveInteger(currentUserId, "currentUserId");
+  if (!normalized) {
+    throw new HttpError(401, "Authentication required.");
+  }
+  return normalized as UserId;
+}
+
+export const __dicomRemapTestables = {
+  isLikelyDicomFile,
+  normalizePatientSex,
+  normalizeDicomBirthDate,
+  parseOrthancResourceId,
+  assertJobStatus,
+};

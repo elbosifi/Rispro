@@ -16,6 +16,7 @@ import DoctorPage from "@/pages/doctor/doctor-page";
 import PrintPage from "@/pages/print/print-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
+import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
 import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
@@ -69,6 +70,9 @@ function AppContent() {
 
   const currentRoute = (() => {
     const pathname = location.pathname;
+    if (pathname.startsWith("/pacs/remap")) {
+      return "pacs";
+    }
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
@@ -185,6 +189,7 @@ function AppContent() {
             <Route path="/statistics" element={<StatisticsPage />} />
             <Route path="/search" element={<SearchPage />} />
             <Route path="/pacs" element={<PacsPage />} />
+            <Route path="/pacs/remap" element={<PacsRemapPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />

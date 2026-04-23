@@ -66,8 +66,13 @@ export function createApp(): Application {
   // -----------------------------------------------------------------------
   const LEGACY_UPLOAD_PATH = "/api/legacy-access-viewer/upload";
   const PATIENT_IMPORT_PREFIX = "/api/settings/patient-import";
+  const PACS_REMAP_UPLOAD_PATH = "/api/pacs/remap/jobs/upload";
   app.use((req: Request, _res: Response, next: NextFunction) => {
-    if (req.path === LEGACY_UPLOAD_PATH || req.path.startsWith(PATIENT_IMPORT_PREFIX)) {
+    if (
+      req.path === LEGACY_UPLOAD_PATH ||
+      req.path.startsWith(PATIENT_IMPORT_PREFIX) ||
+      req.path === PACS_REMAP_UPLOAD_PATH
+    ) {
       // Let route-specific body parsers handle it.
       return next();
     }
