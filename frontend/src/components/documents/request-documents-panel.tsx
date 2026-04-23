@@ -306,7 +306,7 @@ export function RequestDocumentsPanel({
   }
 
   function handlePrepareScanAction() {
-    if (enableLocalScan && isScanBridgeSupported) {
+    if (isScanBridgeSupported) {
       void handleScanAndAttach();
       return;
     }

@@ -82,6 +82,31 @@ function renderPanel() {
   );
 }
 
+function renderPanelWithoutLocalScan() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+      mutations: {
+        retry: false,
+      },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <LanguageProvider>
+        <RequestDocumentsPanel
+          appointmentId={42}
+          patientId={9}
+          appointmentRefType="v2_booking"
+        />
+      </LanguageProvider>
+    </QueryClientProvider>
+  );
+}
+
 describe("RequestDocumentsPanel local scan flow", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
@@ -155,6 +180,19 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
   it("Prepare Scan triggers a real scanner request when local scan is enabled", async () => {
     renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Prepare Scan" }));
+
+    await waitFor(() => {
+      expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(mockScanPages).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Prepare Scan triggers scanner request even when local-scan button is hidden", async () => {
+    renderPanelWithoutLocalScan();
 
     await userEvent.click(screen.getByRole("button", { name: "Prepare Scan" }));
 
