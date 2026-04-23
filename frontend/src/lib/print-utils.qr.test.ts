@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { printAppointmentSlip } from "./print-utils";
 
-const toDataURLMock = vi.hoisted(() => vi.fn().mockResolvedValue("data:image/png;base64,qr-image"));
+const toStringMock = vi.hoisted(() => vi.fn().mockResolvedValue("<svg data-testid=\"qr-image\"></svg>"));
 
 vi.mock("qrcode", () => ({
   default: {
-    toDataURL: toDataURLMock,
+    toString: toStringMock,
   },
 }));
 
@@ -80,12 +80,12 @@ describe("printAppointmentSlip QR", () => {
     printAppointmentSlip(makeAppointment());
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(toDataURLMock).toHaveBeenCalledWith(
+    expect(toStringMock).toHaveBeenCalledWith(
       "http://localhost:3000/public/cancel-appointment?t=signed-token",
-      { width: 120, margin: 1 }
+      { type: "svg", width: 120, margin: 1 }
     );
     expect(writtenHtml).toContain("Scan to cancel this appointment");
-    expect(writtenHtml).toContain("data:image/png;base64,qr-image");
+    expect(writtenHtml).toContain("qr-image");
   });
 
   it("renders modality preparation before exam preparation", async () => {

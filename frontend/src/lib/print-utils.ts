@@ -53,13 +53,50 @@ function generateBarcodeDataUri(value: string): string {
     x += 3;
   }
   const totalWidth = Math.max(860, x + 16);
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="92" viewBox="0 0 ${totalWidth} 92" preserveAspectRatio="none">
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="92" viewBox="0 0 ${totalWidth} 92" preserveAspectRatio="xMidYMid meet">
       <rect width="${totalWidth}" height="92" fill="#ffffff"/>
       ${bars.map((bar) => `<rect x="${bar.x}" y="4" width="${bar.w}" height="84" fill="#111111"/>`).join("")}
     </svg>
   `;
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function normalizeInlineSvg(svg: string): string {
+  return svg.replace(/^<\?xml[\s\S]*?\?>\s*/i, "").trim();
+}
+
+async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<void> {
+  const images = Array.from(doc.images ?? []);
+  if (images.length === 0) return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let remaining = images.length;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    const timer = window.setTimeout(finish, timeoutMs);
+    const done = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        window.clearTimeout(timer);
+        finish();
+      }
+    };
+
+    for (const img of images) {
+      if (img.complete) {
+        done();
+        continue;
+      }
+
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+    }
+  });
 }
 
 export function printAppointmentSlip(apt: AppointmentWithDetails): void {
@@ -73,16 +110,16 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
     token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : null;
-  let qrDataUrl: string | null = null;
+  let qrSvg: string | null = null;
   if (cancelUrl) {
     try {
-      qrDataUrl = await QRCode.toDataURL(cancelUrl, { width: 120, margin: 1 });
+      qrSvg = normalizeInlineSvg(await QRCode.toString(cancelUrl, { type: "svg", width: 120, margin: 1 }));
     } catch {
-      qrDataUrl = null;
+      qrSvg = null;
     }
   }
   const logoUrl = `${window.location.origin}/assets/nccb-logo.png`;
-  const barcodeUrl = generateBarcodeDataUri(apt.accessionNumber || `V2-${apt.id}`);
+  const barcodeSvg = generateBarcodeDataUri(apt.accessionNumber || `V2-${apt.id}`);
   const now = new Date().toLocaleString();
   const rawCaseCategory = (apt as { caseCategory?: string }).caseCategory;
   const categoryLabel = rawCaseCategory ? toTitleCase(rawCaseCategory) : "—";
@@ -115,6 +152,8 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             border-radius: 8px;
             padding: 5mm;
             background: #ffffff;
+            transform: scale(0.9);
+            transform-origin: top center;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
@@ -128,7 +167,7 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
           .rule-dot { width: 8px; height: 8px; border-radius: 50%; background: #b11116; }
           .slip-title { margin: 8px 0 0; color: #b11116; letter-spacing: 4px; text-transform: uppercase; font-size: 28px; font-weight: 500; }
           .qr-card { border: 1px solid #e2676d; border-radius: 10px; background: #ffffff; padding: 6px; }
-          .qr-card img { width: 100%; display: block; border-radius: 2px; }
+          .qr-card svg { width: 100%; display: block; border-radius: 2px; }
           .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
           .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
           .rows { margin-top: 10px; border-top: 1px solid #d3d4d6; }
@@ -226,11 +265,18 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             border-radius: 8px;
             padding: 8px;
             background: #ffffff;
+            text-align: center;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
           .queue-title { text-align: center; margin: 0 0 4px; color: #b11116; text-transform: uppercase; font-size: 14px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
-          .queue img { width: 100%; height: 42px; display: block; }
+          .queue svg {
+            width: auto;
+            max-width: 100%;
+            height: 42px;
+            display: block;
+            margin: 0 auto;
+          }
           .queue-label { text-align: center; margin: 4px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .small-muted { color: #6b7280; font-size: 10px; }
           .rtl { direction: rtl; text-align: right; }
@@ -255,10 +301,10 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
               </div>
             </div>
             <div>
-              <div class="qr-card">
+            <div class="qr-card">
                 ${
-                  qrDataUrl
-                    ? `<img src="${escapeHtml(qrDataUrl)}" alt="Cancellation QR Code" />`
+                  qrSvg
+                    ? `<div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>`
                     : `<div class="small-muted">QR unavailable</div>`
                 }
               </div>
@@ -323,7 +369,7 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
 
           <div class="queue">
             <p class="queue-title">Scan to enter the queue</p>
-            <img src="${escapeHtml(barcodeUrl)}" alt="Queue barcode" />
+            <div class="barcode-wrap" aria-label="Queue barcode">${barcodeSvg}</div>
             <p class="queue-label">${escapeHtml(apt.accessionNumber || `V2-${apt.id}`)}</p>
           </div>
         </div>
@@ -331,6 +377,7 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
     </html>
   `);
   printWindow.document.close();
+  await waitForImagesToLoad(printWindow.document);
   printWindow.focus();
   printWindow.print();
 }
