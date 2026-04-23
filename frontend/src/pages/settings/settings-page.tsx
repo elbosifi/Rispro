@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo } from "react";
+import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { ApiError } from "@/lib/api-client";
 import {
   fetchUsers,
   fetchAuditEntries,
@@ -19,6 +20,8 @@ import {
   createExamType,
   updateExamType,
   deleteExamType,
+  exportCatalogWorkbook,
+  importCatalogWorkbook,
   saveSettings,
   fetchSchedulingEngineConfig,
   saveSchedulingEngineConfig,
@@ -394,6 +397,111 @@ function AuditSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   );
 }
 
+function CatalogImportExportPanel({
+  onImportSuccess
+}: {
+  onImportSuccess: (summary: {
+    modalitiesCreated: number;
+    modalitiesUpdated: number;
+    examTypesCreated: number;
+    examTypesUpdated: number;
+    skipped: number;
+    errors: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
+  }) => void;
+}) {
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorRows, setErrorRows] = useState<Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>>([]);
+
+  const handleExport = async () => {
+    try {
+      setIsExporting(true);
+      setErrorMessage(null);
+      setErrorRows([]);
+      await exportCatalogWorkbook();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Catalog export failed");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleImportChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      setErrorMessage(null);
+      setErrorRows([]);
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || "");
+          const [, content = ""] = result.split(",", 2);
+          resolve(content);
+        };
+        reader.onerror = () => reject(new Error("Failed to read the selected workbook."));
+        reader.readAsDataURL(file);
+      });
+
+      const response = await importCatalogWorkbook({ fileContentBase64: base64 });
+      onImportSuccess(response.summary);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        const details = (error.details ?? {}) as {
+          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
+        };
+        setErrorRows(Array.isArray(details.errors) ? details.errors : []);
+        setErrorMessage(error.message || "Catalog import failed");
+      } else {
+        setErrorMessage(error instanceof Error ? error.message : "Catalog import failed");
+      }
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  return (
+    <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-4 bg-stone-50/80 dark:bg-stone-800/40 space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm">
+          <p className="font-medium text-stone-900 dark:text-white">Excel import/export</p>
+          <p className="description-center">One workbook includes both the Modalities and ExamTypes sheets.</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={handleExport} disabled={isExporting || isImporting} className="text-xs">
+            {isExporting ? "Exporting..." : "Export Excel"}
+          </Button>
+          <label className="inline-flex items-center px-3 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium cursor-pointer disabled:opacity-60">
+            {isImporting ? "Importing..." : "Import Excel"}
+            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} className="sr-only" disabled={isExporting || isImporting} />
+          </label>
+        </div>
+      </div>
+
+      {errorMessage && (
+        <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-700 dark:text-red-300 space-y-2">
+          <p>{errorMessage}</p>
+          {errorRows.length > 0 && (
+            <ul className="space-y-1">
+              {errorRows.slice(0, 8).map((item, index) => (
+                <li key={`${item.sheet}-${item.rowNumber}-${item.column || "none"}-${index}`}>
+                  {item.sheet} row {item.rowNumber}
+                  {item.column ? ` (${item.column})` : ""}: {item.message}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
@@ -405,6 +513,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ modalityId: "", name_ar: "", name_en: "" });
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteExamType(id),
@@ -469,6 +578,25 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 
   return (
     <div className="space-y-4">
+      <CatalogImportExportPanel
+        onImportSuccess={(summary) => {
+          queryClient.invalidateQueries({ queryKey: ["exam-types"] });
+          queryClient.invalidateQueries({ queryKey: ["modalities"] });
+          queryClient.invalidateQueries({ queryKey: ["modalities", "all"] });
+          queryClient.invalidateQueries({ queryKey: ["lookups"] });
+          queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+          queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+          setImportSummary(
+            `Imported workbook: ${summary.modalitiesCreated} modalities created, ${summary.modalitiesUpdated} updated, ${summary.examTypesCreated} exam types created, ${summary.examTypesUpdated} updated, ${summary.skipped} skipped.`
+          );
+          setMutationError(null);
+        }}
+      />
+      {importSummary && (
+        <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-sm">
+          {importSummary}
+        </div>
+      )}
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
@@ -562,6 +690,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, general_instruction_ar: "", general_instruction_en: "", safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [importSummary, setImportSummary] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteModality(id),
@@ -641,6 +770,25 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
 
   return (
     <div className="space-y-4">
+      <CatalogImportExportPanel
+        onImportSuccess={(summary) => {
+          queryClient.invalidateQueries({ queryKey: ["modalities"] });
+          queryClient.invalidateQueries({ queryKey: ["modalities", "all"] });
+          queryClient.invalidateQueries({ queryKey: ["exam-types"] });
+          queryClient.invalidateQueries({ queryKey: ["lookups"] });
+          queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
+          queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+          setImportSummary(
+            `Imported workbook: ${summary.modalitiesCreated} modalities created, ${summary.modalitiesUpdated} updated, ${summary.examTypesCreated} exam types created, ${summary.examTypesUpdated} updated, ${summary.skipped} skipped.`
+          );
+          setMutationError(null);
+        }}
+      />
+      {importSummary && (
+        <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-sm">
+          {importSummary}
+        </div>
+      )}
       {mutationError && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}

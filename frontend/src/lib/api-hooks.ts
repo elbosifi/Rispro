@@ -33,6 +33,7 @@ type RawRecord = Record<string, unknown>;
 const IMPORT_WORKBOOK_TIMEOUT_MS = 180_000;
 const IMPORT_PREVIEW_TIMEOUT_MS = 180_000;
 const IMPORT_CONFIRM_TIMEOUT_MS = 180_000;
+const CATALOG_IMPORT_TIMEOUT_MS = 180_000;
 
 export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
 
@@ -673,6 +674,37 @@ export async function updateExamType(id: number, payload: RawRecord) {
 
 export async function deleteExamType(id: number) {
   return api<{ examType: RawRecord }>(`/settings/exam-types/${id}`, { method: "DELETE" });
+}
+
+export async function exportCatalogWorkbook() {
+  const response = await fetch("/api/settings/catalog-import-export.xlsx", { credentials: "include" });
+  if (!response.ok) throw new Error("Catalog export failed");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filenameMatch = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = filenameMatch?.[1] || "rispro-modalities-exam-types.xlsx";
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export async function importCatalogWorkbook(payload: { fileContentBase64: string }) {
+  return api<{
+    summary: {
+      modalitiesCreated: number;
+      modalitiesUpdated: number;
+      examTypesCreated: number;
+      examTypesUpdated: number;
+      skipped: number;
+      errors: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
+    };
+  }>("/settings/catalog-import-export", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, CATALOG_IMPORT_TIMEOUT_MS);
 }
 
 export async function createDicomDevice(payload: RawRecord) {

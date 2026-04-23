@@ -11,6 +11,7 @@ import { generateEnglishFromDictionary, type NameDictionaryLookup } from "../uti
 import { createPatient, type PatientPayload } from "./patient-service.js";
 import type { OptionalUserId, UnknownRecord, UserId } from "../types/http.js";
 import type { PoolClient } from "pg";
+import { parseWorksheet, readWorkbookFromBase64 } from "./workbook-service.js";
 
 interface SettingsRow {
   setting_key: string;
@@ -233,24 +234,7 @@ export async function parseWorkbookBase64(
   fileContentBase64: string,
   selectedSheetName?: string
 ): Promise<ParsedWorkbookPreview> {
-  let XLSX: typeof import("xlsx");
-  try {
-    XLSX = await import("xlsx");
-  } catch {
-    throw new HttpError(500, "Excel parser dependency is missing. Install 'xlsx'.");
-  }
-
-  const binaryBuffer = Buffer.from(String(fileContentBase64 || ""), "base64");
-  if (!binaryBuffer.length) {
-    throw new HttpError(400, "fileContentBase64 is required.");
-  }
-
-  const workbook = XLSX.read(binaryBuffer, { type: "buffer" });
-  const sheetNames = Array.isArray(workbook.SheetNames) ? workbook.SheetNames : [];
-
-  if (sheetNames.length === 0) {
-    throw new HttpError(400, "Workbook does not contain any sheets.");
-  }
+  const { XLSX, workbook, sheetNames } = await readWorkbookFromBase64(fileContentBase64);
 
   const selectedSheet = String(selectedSheetName || "").trim();
   const effectiveSheetName = selectedSheet || sheetNames[0]!;
@@ -259,22 +243,9 @@ export async function parseWorkbookBase64(
     throw new HttpError(400, `Sheet '${effectiveSheetName}' was not found in workbook.`);
   }
 
-  const worksheet = workbook.Sheets[effectiveSheetName];
-  if (!worksheet) {
-    throw new HttpError(400, `Worksheet '${effectiveSheetName}' is not readable.`);
-  }
-
-  const jsonRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(worksheet, {
-    defval: "",
-    raw: false,
-    blankrows: false
-  });
-
-  const headers = Object.keys(jsonRows[0] || {});
-  const rows: RawParsedRow[] = jsonRows.map((values, index) => ({
-    rowNumber: index + 2,
-    values
-  }));
+  const parsedSheet = parseWorksheet(XLSX, workbook.Sheets[effectiveSheetName], effectiveSheetName);
+  const headers = parsedSheet.headers;
+  const rows = parsedSheet.rows as RawParsedRow[];
 
   return {
     sheetNames,

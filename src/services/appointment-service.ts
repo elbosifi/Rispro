@@ -178,10 +178,12 @@ export interface ModalityRow {
 export interface ExamTypeRow {
   id: number;
   modality_id: number;
+  code: string;
   name_ar: string;
   name_en: string;
   specific_instruction_ar: string | null;
   specific_instruction_en: string | null;
+  duration_minutes: number | null;
   is_active: boolean;
 }
 
@@ -319,6 +321,29 @@ function normalizeDailyCapacity(value: unknown): number {
 
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new HttpError(400, "dailyCapacity must be 0 or a positive whole number.");
+  }
+
+  return parsed;
+}
+
+function normalizeExamTypeCode(value: unknown): string {
+  const clean = String(value || "").trim();
+
+  if (!clean) {
+    throw new HttpError(400, "code is required.");
+  }
+
+  return clean;
+}
+
+function normalizeDurationMinutes(value: unknown): number | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new HttpError(400, "durationMinutes must be empty or a non-negative whole number.");
   }
 
   return parsed;
@@ -772,6 +797,7 @@ async function getExamTypeById(
   const { rows } = await client.query(
     `
       select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+      , code, duration_minutes
       from exam_types
       where id = $1
       limit 1
@@ -834,6 +860,7 @@ export async function listAppointmentLookups(): Promise<{
     `),
     pool.query(`
       select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en
+      , code, duration_minutes
       from exam_types
       where is_active = true
       order by name_en asc
@@ -872,6 +899,7 @@ export async function listExamTypesForSettings(): Promise<{
     `),
     pool.query(`
       select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+      , code, duration_minutes
       from exam_types
       where is_active = true
       order by name_en asc, name_ar asc
@@ -1642,13 +1670,15 @@ export async function createExamType(
   currentUserId: UserId | null = null
 ): Promise<ExamTypeRow> {
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId") as number;
+  const code = normalizeExamTypeCode(payload.code || payload.nameEn);
   const nameAr = String(payload.nameAr || "").trim();
   const nameEn = String(payload.nameEn || "").trim();
   const specificInstructionAr = String(payload.specificInstructionAr || "").trim();
   const specificInstructionEn = String(payload.specificInstructionEn || "").trim();
+  const durationMinutes = normalizeDurationMinutes(payload.durationMinutes);
 
   if (!nameAr || !nameEn) {
-    throw new HttpError(400, "nameAr and nameEn are required.");
+    throw new HttpError(400, "code, nameAr and nameEn are required.");
   }
 
   const client = await pool.connect();
@@ -1660,15 +1690,17 @@ export async function createExamType(
       `
         insert into exam_types (
           modality_id,
+          code,
           name_ar,
           name_en,
           specific_instruction_ar,
-          specific_instruction_en
+          specific_instruction_en,
+          duration_minutes
         )
-        values ($1, $2, $3, nullif($4, ''), nullif($5, ''))
-        returning id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        values ($1, $2, $3, $4, nullif($5, ''), nullif($6, ''), $7)
+        returning id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
       `,
-      [modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
+      [modalityId, code, nameAr, nameEn, specificInstructionAr, specificInstructionEn, durationMinutes]
     );
     const createdExamType = requireRow<ExamTypeRow>(
       rows[0] as ExamTypeRow | undefined,
@@ -1706,13 +1738,15 @@ export async function updateExamType(
 ): Promise<ExamTypeRow> {
   const cleanExamTypeId = normalizePositiveInteger(examTypeId, "examTypeId") as number;
   const modalityId = normalizePositiveInteger(payload.modalityId, "modalityId") as number;
+  const code = normalizeExamTypeCode(payload.code || payload.nameEn);
   const nameAr = String(payload.nameAr || "").trim();
   const nameEn = String(payload.nameEn || "").trim();
   const specificInstructionAr = String(payload.specificInstructionAr || "").trim();
   const specificInstructionEn = String(payload.specificInstructionEn || "").trim();
+  const durationMinutes = normalizeDurationMinutes(payload.durationMinutes);
 
   if (!nameAr || !nameEn) {
-    throw new HttpError(400, "nameAr and nameEn are required.");
+    throw new HttpError(400, "code, nameAr and nameEn are required.");
   }
 
   const client = await pool.connect();
@@ -1722,7 +1756,7 @@ export async function updateExamType(
 
     const existingResult = await client.query(
       `
-        select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        select id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
         from exam_types
         where id = $1
         limit 1
@@ -1743,16 +1777,18 @@ export async function updateExamType(
         update exam_types
         set
           modality_id = $2,
-          name_ar = $3,
-          name_en = $4,
-          specific_instruction_ar = nullif($5, ''),
-          specific_instruction_en = nullif($6, ''),
+          code = $3,
+          name_ar = $4,
+          name_en = $5,
+          specific_instruction_ar = nullif($6, ''),
+          specific_instruction_en = nullif($7, ''),
+          duration_minutes = $8,
           is_active = true,
           updated_at = now()
         where id = $1
-        returning id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        returning id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
       `,
-      [cleanExamTypeId, modalityId, nameAr, nameEn, specificInstructionAr, specificInstructionEn]
+      [cleanExamTypeId, modalityId, code, nameAr, nameEn, specificInstructionAr, specificInstructionEn, durationMinutes]
     );
     const updatedExamType = requireRow<ExamTypeRow>(
       rows[0] as ExamTypeRow | undefined,
@@ -1793,7 +1829,7 @@ export async function deleteExamType(
 
     const existingResult = await client.query(
       `
-        select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        select id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
         from exam_types
         where id = $1
         limit 1
@@ -1814,7 +1850,7 @@ export async function deleteExamType(
           is_active = false,
           updated_at = now()
         where id = $1
-        returning id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
+        returning id, modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
       `,
       [cleanExamTypeId]
     );

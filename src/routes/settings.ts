@@ -53,6 +53,10 @@ import {
   normalizeOrthancSettingsEntries,
   validateOrthancSettingsEntries
 } from "../services/orthanc-settings-resolver.js";
+import {
+  exportCatalogWorkbook,
+  importCatalogWorkbook
+} from "../services/settings-catalog-import-export-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -192,6 +196,27 @@ settingsRouter.delete(
     const request = req as SettingsRequest;
     const examType = await deleteExamType(asString(request.params?.examTypeId), request.user.sub as UserId);
     res.json({ examType });
+  })
+);
+
+settingsRouter.get(
+  "/catalog-import-export.xlsx",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const { buffer, filename } = await exportCatalogWorkbook();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
+    res.send(buffer);
+  })
+);
+
+settingsRouter.post(
+  "/catalog-import-export",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const fileContentBase64 = asString(body.fileContentBase64).trim();
+    const summary = await importCatalogWorkbook(fileContentBase64, request.user.sub as UserId);
+    res.json({ summary });
   })
 );
 
