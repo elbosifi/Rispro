@@ -153,6 +153,19 @@ describe("RequestDocumentsPanel local scan flow", () => {
     );
   });
 
+  it("Prepare Scan triggers a real scanner request when local scan is enabled", async () => {
+    renderPanel();
+
+    await userEvent.click(screen.getByRole("button", { name: "Prepare Scan" }));
+
+    await waitFor(() => {
+      expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(mockScanPages).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it("keeps failed scanned uploads retryable through the same upload API", async () => {
     mockScanPages.mockResolvedValue([new Blob(["retry-me"], { type: "application/pdf" })]);
     mockUploadAppointmentDocument

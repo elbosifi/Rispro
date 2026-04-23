@@ -305,6 +305,14 @@ export function RequestDocumentsPanel({
     }
   }
 
+  function handlePrepareScanAction() {
+    if (enableLocalScan && isScanBridgeSupported) {
+      void handleScanAndAttach();
+      return;
+    }
+    prepareMutation.mutate();
+  }
+
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -327,11 +335,11 @@ export function RequestDocumentsPanel({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => prepareMutation.mutate()}
+            onClick={handlePrepareScanAction}
             className="px-3 py-2 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm"
-            disabled={prepareMutation.isPending || scanUploading || retryingFailedUploads}
+            disabled={prepareMutation.isPending || scanUploading || retryingFailedUploads || uploadMutation.isPending}
           >
-            {prepareMutation.isPending ? t("documents.preparing") : t("documents.prepareScan")}
+            {prepareMutation.isPending || scanUploading ? t("documents.preparing") : t("documents.prepareScan")}
           </button>
           {enableLocalScan && (
             <button
