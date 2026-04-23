@@ -99,14 +99,7 @@ async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<voi
   });
 }
 
-export function printAppointmentSlip(apt: AppointmentWithDetails): void {
-  void printAppointmentSlipInternal(apt);
-}
-
-async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
-
+export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): Promise<string> {
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
     token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : null;
@@ -137,12 +130,12 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
   ];
   const hasPrepContent = Boolean(appointmentNotes || modalityPreparation || examPreparation);
 
-  printWindow.document.write(`
+  return `
     <html>
       <head>
         <title>Appointment Slip</title>
         <style>
-          @page { size: A5 portrait; margin: 6mm; }
+          @page { size: A5 portrait; margin: 4mm; }
           * { box-sizing: border-box; }
           body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .sheet {
@@ -150,32 +143,32 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             margin: 0 auto;
             border: 1px solid #d1d5db;
             border-radius: 8px;
-            padding: 5mm;
+            padding: 4mm;
             background: #ffffff;
             transform: scale(0.9);
             transform-origin: top center;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .top { display: grid; grid-template-columns: 1fr 118px; gap: 12px; align-items: start; }
-          .brand-wrap { display: flex; gap: 10px; align-items: center; }
-          .logo { width: 64px; height: 64px; object-fit: contain; }
-          .brand-title { color: #b11116; margin: 0; font-size: 19px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
-          .brand-sub { margin: 2px 0 0; font-size: 13px; color: #24272c; }
-          .rule { margin-top: 6px; display: flex; align-items: center; gap: 8px; }
+          .top { display: grid; grid-template-columns: 1fr 114px; gap: 10px; align-items: start; }
+          .brand-wrap { display: flex; gap: 8px; align-items: center; }
+          .logo { width: 60px; height: 60px; object-fit: contain; }
+          .brand-title { color: #b11116; margin: 0; font-size: 18px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
+          .brand-sub { margin: 2px 0 0; font-size: 12px; color: #24272c; }
+          .rule { margin-top: 5px; display: flex; align-items: center; gap: 8px; }
           .rule-line { flex: 1; height: 0.35mm; background: #d34f53; opacity: 0.8; }
           .rule-dot { width: 8px; height: 8px; border-radius: 50%; background: #b11116; }
-          .slip-title { margin: 8px 0 0; color: #b11116; letter-spacing: 4px; text-transform: uppercase; font-size: 28px; font-weight: 500; }
+          .slip-title { margin: 6px 0 0; color: #b11116; letter-spacing: 3px; text-transform: uppercase; font-size: 26px; font-weight: 500; }
           .qr-card { border: 1px solid #e2676d; border-radius: 10px; background: #ffffff; padding: 6px; }
           .qr-card svg { width: 100%; display: block; border-radius: 2px; }
           .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
           .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
-          .rows { margin-top: 10px; border-top: 1px solid #d3d4d6; }
+          .rows { margin-top: 8px; border-top: 1px solid #d3d4d6; }
           .info-row {
             display: grid;
             grid-template-columns: 170px 18px 1fr;
             align-items: center;
-            height: 38px;
+            min-height: 36px;
             border-bottom: 1px solid #d3d4d6;
             overflow: hidden;
             page-break-inside: avoid;
@@ -202,22 +195,22 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
           }
           .info-value.highlight { color: #b11116; }
           .notes {
-            margin-top: 8px;
+            margin-top: 7px;
             display: grid;
             grid-template-columns: 34px 1fr;
-            gap: 8px;
+            gap: 7px;
             background: #ffffff;
             border: 1px solid #d1d5db;
             border-radius: 8px;
-            padding: 8px;
-            max-height: 130px;
+            padding: 7px;
+            max-height: 122px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
           .notes-icon { width: 34px; height: 34px; border-radius: 6px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
-          .notes-title { margin: 0; color: #b11116; font-size: 15px; font-weight: 800; }
-          .notes-content { display: flex; flex-direction: column; gap: 4px; }
+          .notes-title { margin: 0; color: #b11116; font-size: 14px; font-weight: 800; }
+          .notes-content { display: flex; flex-direction: column; gap: 3px; }
           .prep-item { display: grid; grid-template-columns: 84px 1fr; gap: 6px; align-items: start; }
           .prep-label {
             color: #b11116;
@@ -237,15 +230,15 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
             -webkit-line-clamp: 2;
             overflow: hidden;
           }
-          .mid-divider { margin: 8px 0 6px; display: flex; align-items: center; gap: 8px; }
+          .mid-divider { margin: 7px 0 5px; display: flex; align-items: center; gap: 8px; }
           .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
           .meta-item {
             display: flex;
             align-items: center;
             gap: 6px;
-            padding: 4px;
+            padding: 3px 4px;
             border-right: 1px solid #c7c8cb;
-            min-height: 48px;
+            min-height: 44px;
             overflow: hidden;
             page-break-inside: avoid;
             break-inside: avoid-page;
@@ -253,31 +246,31 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
           .meta-item:last-child { border-right: none; }
           .meta-icon { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px; }
           .meta-text {
-            font-size: 12px;
+            font-size: 11px;
             line-height: 1.2;
             color: #20242a;
             overflow: hidden;
           }
           .meta-text strong { color: #b11116; }
           .queue {
-            margin-top: 8px;
+            margin-top: 7px;
             border: 1px solid #e2676d;
             border-radius: 8px;
-            padding: 8px;
+            padding: 7px;
             background: #ffffff;
             text-align: center;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .queue-title { text-align: center; margin: 0 0 4px; color: #b11116; text-transform: uppercase; font-size: 14px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
+          .queue-title { text-align: center; margin: 0 0 3px; color: #b11116; text-transform: uppercase; font-size: 13px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
           .queue svg {
             width: auto;
             max-width: 100%;
-            height: 42px;
+            height: 40px;
             display: block;
             margin: 0 auto;
           }
-          .queue-label { text-align: center; margin: 4px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+          .queue-label { text-align: center; margin: 3px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
           .small-muted { color: #6b7280; font-size: 10px; }
           .rtl { direction: rtl; text-align: right; }
         </style>
@@ -301,7 +294,7 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
               </div>
             </div>
             <div>
-            <div class="qr-card">
+              <div class="qr-card">
                 ${
                   qrSvg
                     ? `<div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>`
@@ -375,7 +368,76 @@ async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promis
         </div>
       </body>
     </html>
-  `);
+  `;
+}
+
+function getAppointmentSlipFileName(apt: AppointmentWithDetails): string {
+  const suffix = String(apt.accessionNumber || `appointment-${apt.id}`)
+    .trim()
+    .replace(/[^a-zA-Z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `appointment-slip-${suffix || apt.id}.pdf`;
+}
+
+export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): Promise<void> {
+  const html = await prepareAppointmentSlipHtml(apt);
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.position = "fixed";
+  frame.style.left = "-10000px";
+  frame.style.top = "0";
+  frame.style.width = "0";
+  frame.style.height = "0";
+  frame.style.border = "0";
+
+  try {
+    const loaded = new Promise<void>((resolve) => {
+      frame.addEventListener("load", () => resolve(), { once: true });
+    });
+    frame.srcdoc = html;
+    document.body.appendChild(frame);
+    await loaded;
+
+    const doc = frame.contentDocument;
+    if (!doc?.body) return;
+
+    await waitForImagesToLoad(doc);
+
+    const { default: html2pdf } = await import("html2pdf.js");
+    await html2pdf()
+      .set({
+        filename: getAppointmentSlipFileName(apt),
+        margin: 0,
+        image: { type: "jpeg", quality: 1 },
+        enableLinks: true,
+        html2canvas: {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+        },
+        jsPDF: {
+          unit: "mm",
+          format: "a5",
+          orientation: "portrait",
+        },
+      })
+      .from(doc.body)
+      .save();
+  } finally {
+    frame.remove();
+  }
+}
+
+export function printAppointmentSlip(apt: AppointmentWithDetails): void {
+  void printAppointmentSlipInternal(apt);
+}
+
+async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
+  const html = await prepareAppointmentSlipHtml(apt);
+  printWindow.document.write(html);
   printWindow.document.close();
   await waitForImagesToLoad(printWindow.document);
   printWindow.focus();

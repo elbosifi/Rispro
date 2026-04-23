@@ -396,7 +396,7 @@ export function CreateAppointmentTab({
       <div className="max-w-2xl mx-auto">
         <AppointmentSuccessState
           appointmentSummary={success}
-          onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}&autoprint=1`)}
+          onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}`)}
           onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
           onCreateAnother={() => {
             setSuccess(null);

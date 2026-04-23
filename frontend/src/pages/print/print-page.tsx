@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchAppointments,
@@ -8,7 +8,12 @@ import {
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
-import { printAppointmentList, printAppointmentSlip } from "@/lib/print-utils";
+import {
+  downloadAppointmentSlipPdf,
+  prepareAppointmentSlipHtml,
+  printAppointmentList,
+  printAppointmentSlip,
+} from "@/lib/print-utils";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
@@ -24,12 +29,16 @@ function EditedBadge() {
 
 export default function PrintPage() {
   const { language } = useLanguage();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
+  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
+  const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
+  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
   const autoprintParam = searchParams.get("autoprint") === "1";
@@ -59,8 +68,19 @@ export default function PrintPage() {
   });
 
   useEffect(() => {
+    let cancelled = false;
+
     if (appointmentById && !autoprintDone) {
       setSelectedAppointment(appointmentById);
+      setSlipPreviewLoading(true);
+      prepareAppointmentSlipHtml(appointmentById)
+        .then((html) => {
+          if (!cancelled) setSlipPreviewHtml(html);
+        })
+        .finally(() => {
+          if (!cancelled) setSlipPreviewLoading(false);
+        });
+
       if (autoprintParam) {
         setTimeout(() => {
           printAppointmentSlip(appointmentById);
@@ -68,10 +88,26 @@ export default function PrintPage() {
         }, 300);
       }
     }
+    return () => {
+      cancelled = true;
+    };
   }, [appointmentById, autoprintParam, autoprintDone]);
+
+  function openSlipPreview(appointment: AppointmentWithDetails) {
+    navigate(`/print?appointmentId=${appointment.id}`);
+  }
 
   function handlePrintSlip(appointment: AppointmentWithDetails) {
     printAppointmentSlip(appointment);
+  }
+
+  async function handleDownloadPdf(appointment: AppointmentWithDetails) {
+    setPdfDownloading(true);
+    try {
+      await downloadAppointmentSlipPdf(appointment);
+    } finally {
+      setPdfDownloading(false);
+    }
   }
 
   function handlePrintList(
@@ -181,6 +217,61 @@ export default function PrintPage() {
     }
   }, [appointments, selectedAppointment]);
 
+  if (appointmentIdParam) {
+    return (
+      <div className="max-w-5xl mx-auto p-4 space-y-4">
+        <Card className="p-4 sm:p-6 space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-xl sm:text-2xl font-bold">{t(language, "print.previewTitle")}</h2>
+              <p className="text-sm text-muted-foreground">
+                {t(language, "print.previewSubtitle")}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={() => navigate("/print")}>
+                {t(language, "common.cancel")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => selectedAppointment && void handleDownloadPdf(selectedAppointment)}
+                disabled={!selectedAppointment || pdfDownloading}
+              >
+                {t(language, "print.downloadPdf")}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
+                disabled={!selectedAppointment}
+              >
+                {t(language, "print.confirmPrint")}
+              </Button>
+            </div>
+          </div>
+
+          {slipPreviewLoading ? (
+            <div className="p-8 text-center text-muted-foreground">
+              {t(language, "print.loading")}
+            </div>
+          ) : slipPreviewHtml ? (
+            <div className="overflow-auto rounded-xl border border-border bg-muted/20 p-3">
+              <iframe
+                title="Appointment slip preview"
+                srcDoc={slipPreviewHtml}
+                className="w-full h-[1120px] bg-white rounded-lg shadow-sm"
+              />
+            </div>
+          ) : (
+            <div className="p-8 text-center text-muted-foreground">
+              {t(language, "print.loading")}
+            </div>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 lg:hidden">
@@ -244,9 +335,7 @@ export default function PrintPage() {
                 variant="secondary"
                 size="sm"
                 disabled={!selectedAppointment}
-                onClick={() =>
-                  selectedAppointment && handlePrintSlip(selectedAppointment)
-                }
+                onClick={() => selectedAppointment && openSlipPreview(selectedAppointment)}
               >
                 {t(language, "print.printSlip")}
               </Button>
@@ -314,7 +403,7 @@ export default function PrintPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" onClick={() => handlePrintSlip(selectedAppointment)}>
+                  <Button type="button" onClick={() => openSlipPreview(selectedAppointment)}>
                     {t(language, "print.printSelected")}
                   </Button>
                 </div>
