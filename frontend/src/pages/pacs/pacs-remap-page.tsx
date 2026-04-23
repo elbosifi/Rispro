@@ -70,6 +70,40 @@ function formatName(patient: PatientOption): string {
   return patient.english_full_name || patient.arabic_full_name || `Patient #${patient.id}`;
 }
 
+function isLikelyDicomClientFile(file: File): boolean {
+  const name = String(file.name || "").toLowerCase();
+  const type = String(file.type || "").toLowerCase();
+
+  if (
+    type.includes("dicom") ||
+    name.endsWith(".dcm") ||
+    name.endsWith(".dicom") ||
+    name.endsWith(".ima")
+  ) {
+    return true;
+  }
+
+  if (
+    type.startsWith("image/") ||
+    type.startsWith("text/") ||
+    type === "application/pdf" ||
+    name.endsWith(".pdf") ||
+    name.endsWith(".txt") ||
+    name.endsWith(".csv") ||
+    name.endsWith(".json") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".png") ||
+    name.endsWith(".gif") ||
+    name.endsWith(".webp")
+  ) {
+    return false;
+  }
+
+  // Unknown binary file types are allowed and validated by Orthanc.
+  return true;
+}
+
 export default function PacsRemapPage() {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
@@ -79,10 +113,19 @@ export default function PacsRemapPage() {
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
 
   const setSelectedFiles = (incoming: FileList | null): void => {
-    const nextFiles = Array.from(incoming || []);
-    setFiles(nextFiles);
+    const all = Array.from(incoming || []);
+    const accepted = all.filter(isLikelyDicomClientFile);
+    const skipped = all.length - accepted.length;
+    setFiles(accepted);
+    setSkippedFilesCount(skipped);
+    if (accepted.length === 0 && all.length > 0) {
+      setErrorMessage(language === "ar" ? "لم يتم العثور على ملفات DICOM في الاختيار." : "No DICOM-like files found in selection.");
+    } else {
+      setErrorMessage("");
+    }
   };
 
   const destinationsQuery = useQuery({
@@ -129,7 +172,7 @@ export default function PacsRemapPage() {
       return api<{ job: RemapJob }>("/pacs/remap/jobs/upload", {
         method: "POST",
         body: JSON.stringify({ files: payloadFiles }),
-      }, 120_000);
+      }, 600_000);
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
@@ -137,6 +180,18 @@ export default function PacsRemapPage() {
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
     onError: (error: unknown) => {
+      if (error instanceof ApiError && error.status === 409) {
+        const details = (error.details || {}) as { activeJobId?: number };
+        if (details.activeJobId) {
+          setJobId(Number(details.activeJobId));
+          setErrorMessage(
+            language === "ar"
+              ? `لديك مهمة نشطة بالفعل (#${details.activeJobId}). تم فتحها.`
+              : `You already have an active job (#${details.activeJobId}). Opened it for you.`
+          );
+          return;
+        }
+      }
       setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
     },
   });
@@ -225,7 +280,7 @@ export default function PacsRemapPage() {
         <input
           type="file"
           multiple
-          accept=".dcm,.dicom,application/dicom"
+          accept=".dcm,.dicom,.ima,application/dicom,application/octet-stream"
           onChange={(event) => setSelectedFiles(event.target.files)}
           className="input-premium w-full px-3 py-2"
         />
@@ -234,13 +289,20 @@ export default function PacsRemapPage() {
           multiple
           onChange={(event) => setSelectedFiles(event.target.files)}
           className="input-premium w-full px-3 py-2"
-          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+          {...({ webkitdirectory: "true", directory: "true", mozdirectory: "true" } as Record<string, string>)}
         />
         <p className="text-xs" style={{ color: "var(--text-muted)" }}>
           {language === "ar"
             ? `الملفات المختارة: ${files.length}`
             : `Selected files: ${files.length}`}
         </p>
+        {skippedFilesCount > 0 && (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {language === "ar"
+              ? `تم تجاهل ${skippedFilesCount} ملف غير DICOM.`
+              : `Skipped ${skippedFilesCount} non-DICOM files.`}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => uploadMutation.mutate()}

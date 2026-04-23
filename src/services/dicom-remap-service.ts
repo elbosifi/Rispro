@@ -267,7 +267,11 @@ async function assertNoActiveUserJob(userId: UserId): Promise<void> {
   );
 
   if (rows[0]?.id) {
-    throw new HttpError(409, "You already have an active DICOM remap job. Finish or fail it before starting a new one.");
+    throw new HttpError(
+      409,
+      "You already have an active DICOM remap job. Resume it from recent jobs.",
+      { activeJobId: rows[0].id }
+    );
   }
 }
 
@@ -459,7 +463,15 @@ export async function createDicomRemapUploadJob({
       });
 
       if (!uploadResponse.ok) {
-        throw new HttpError(400, `Orthanc rejected "${fileName}" as non-DICOM or invalid content.`);
+        throw new HttpError(
+          400,
+          `Orthanc rejected "${fileName}" as non-DICOM or invalid content.`,
+          {
+            fileName,
+            orthancStatus: uploadResponse.status,
+            orthancResponse: String(uploadResponse.text || "").slice(0, 400),
+          }
+        );
       }
 
       const parentStudyId = parseOrthancResourceId(uploadResponse.json);

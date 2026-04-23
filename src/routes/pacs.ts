@@ -221,7 +221,7 @@ pacsRouter.post(
 pacsRouter.post(
   "/remap/jobs/upload",
   ...authMiddleware,
-  express.json({ limit: "100mb" }),
+  express.json({ limit: "500mb" }),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});
