@@ -506,7 +506,11 @@ function CatalogImportExportPanel({
 function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["exam-types"], queryFn: fetchExamTypes });
+  const [showInactive, setShowInactive] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["exam-types", showInactive ? "with-inactive" : "active"],
+    queryFn: () => fetchExamTypes(showInactive)
+  });
   const { data: modalityData, isLoading: modalitiesLoading, error: modalitiesError } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -604,10 +608,24 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
           <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
-      <div className="flex justify-between items-center">
-        <span className="text-sm description-center">{(data as any)?.examTypes?.length ?? 0} exam types</span>
-        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة نوع فحص"}</Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm description-center">
+          {showInactive
+            ? "Showing all exam types, including inactive ones."
+            : "Showing active exam types only. Deactivated exam types stay hidden from this list."}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setShowInactive((prev) => !prev)}
+            className="text-xs"
+          >
+            {showInactive ? "Hide inactive" : "Show inactive"}
+          </Button>
+          <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة نوع فحص"}</Button>
+        </div>
       </div>
+      <span className="text-sm description-center">{(data as any)?.examTypes?.length ?? 0} exam types</span>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
@@ -670,7 +688,11 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                     {et.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
                   <button onClick={() => startEdit(et)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
-                  <button onClick={() => { if (window.confirm("Delete this exam type?")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors">Delete</button>
+                  {et.is_active ? (
+                    <button onClick={() => { if (window.confirm("Deactivate this exam type? It will disappear from active lists.")) deleteMutation.mutate(et.id); }} className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors">Deactivate</button>
+                  ) : (
+                    <button onClick={() => updateMutation.mutate({ id: et.id, data: { modalityId: et.modality_id, name_ar: et.name_ar, name_en: et.name_en, is_active: true } })} className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors">Activate</button>
+                  )}
                 </div>
               </div>
             )}

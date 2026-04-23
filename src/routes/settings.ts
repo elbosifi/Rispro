@@ -177,7 +177,9 @@ settingsRouter.post(
 settingsRouter.get(
   "/exam-types",
   asyncRoute(async (_req: Request, res: Response) => {
-    const result = await listExamTypesForSettings();
+    const request = _req as SettingsRequest;
+    const includeInactive = asBooleanFlag(request.query?.includeInactive);
+    const result = await listExamTypesForSettings({ includeInactive });
     res.json(result);
   })
 );

@@ -886,10 +886,13 @@ export async function listAppointmentLookups(): Promise<{
   };
 }
 
-export async function listExamTypesForSettings(): Promise<{
+export async function listExamTypesForSettings({
+  includeInactive = false
+}: { includeInactive?: boolean } = {}): Promise<{
   modalities: ModalityRow[];
   examTypes: ExamTypeRow[];
 }> {
+  const examTypeWhereClause = includeInactive ? "" : "where is_active = true";
   const [modalitiesResult, examTypesResult] = await Promise.all([
     pool.query(`
       select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en
@@ -901,7 +904,7 @@ export async function listExamTypesForSettings(): Promise<{
       select id, modality_id, name_ar, name_en, specific_instruction_ar, specific_instruction_en, is_active
       , code, duration_minutes
       from exam_types
-      where is_active = true
+      ${examTypeWhereClause}
       order by name_en asc, name_ar asc
     `)
   ]);
