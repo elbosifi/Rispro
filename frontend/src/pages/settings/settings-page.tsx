@@ -684,7 +684,11 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
 function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
   const { language, t } = useLanguage();
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["modalities"], queryFn: () => fetchModalitiesSettings() });
+  const [showInactive, setShowInactive] = useState(false);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["modalities", showInactive ? "with-inactive" : "active"],
+    queryFn: () => fetchModalitiesSettings(showInactive)
+  });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -805,13 +809,24 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
           <button onClick={() => setMutationError(null)} className="ml-2 underline">إغلاق</button>
         </div>
       )}
-      <p className="text-sm description-center">
-        Showing active modalities only. Deactivated modalities stay hidden from this list.
-      </p>
-      <div className="flex justify-between items-center">
-        <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
-        <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة جهاز"}</Button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm description-center">
+          {showInactive
+            ? "Showing all modalities, including inactive ones."
+            : "Showing active modalities only. Deactivated modalities stay hidden from this list."}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={() => setShowInactive((prev) => !prev)}
+            className="text-xs"
+          >
+            {showInactive ? "Hide inactive" : "Show inactive"}
+          </Button>
+          <Button variant="secondary" onClick={() => { setShowCreate(!showCreate); setMutationError(null); }} className="text-xs">{showCreate ? "إلغاء" : "إضافة جهاز"}</Button>
+        </div>
       </div>
+      <span className="text-sm description-center">{(data as any)?.modalities?.length ?? 0} modalities</span>
 
       {showCreate && (
         <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-2 text-sm">
@@ -884,16 +899,29 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
                     {m.is_active ? t("settings.active") : t("settings.inactive")}
                   </span>
                   <button onClick={() => startEdit(m)} className="px-2 py-1 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-200 dark:hover:bg-amber-900/50 transition-colors">Edit</button>
-                  <button
-                    onClick={() => {
-                      if (window.confirm("Deactivate this modality? It will disappear from active lists.")) {
-                        deactivateMutation.mutate(m.id);
-                      }
-                    }}
-                    className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
-                  >
-                    Deactivate
-                  </button>
+                  {m.is_active ? (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Deactivate this modality? It will disappear from active lists.")) {
+                          deactivateMutation.mutate(m.id);
+                        }
+                      }}
+                      className="px-2 py-1 text-xs bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 rounded hover:bg-stone-200 dark:hover:bg-stone-600 transition-colors"
+                    >
+                      Deactivate
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Reactivate this modality?")) {
+                          updateMutation.mutate({ id: m.id, data: { ...m, is_active: true } });
+                        }
+                      }}
+                      className="px-2 py-1 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded hover:bg-emerald-200 dark:hover:bg-emerald-900/50 transition-colors"
+                    >
+                      Activate
+                    </button>
+                  )}
                   <button
                     onClick={() => {
                       if (window.confirm("Permanently delete this modality? This cannot be undone.")) {
