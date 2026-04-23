@@ -18,17 +18,24 @@ type MockNoShowAppointment = {
 const mockFetchAppointments = vi.fn<
   (params: unknown) => Promise<MockNoShowAppointment[]>
 >(async () => []);
-const mockListAppointmentDocuments = vi.fn(async () => []);
-const mockUploadAppointmentDocument = vi.fn(async () => ({}));
-const mockDeleteAppointmentDocument = vi.fn(async () => ({ deleted: true, documentId: 1 }));
-const mockPrepareScanSession = vi.fn(async () => ({ preparation: {} }));
+const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
+  async () => []
+);
+const mockUploadAppointmentDocument = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({}));
+const mockDeleteAppointmentDocument = vi.fn<(documentId: number) => Promise<{ deleted: boolean; documentId: number }>>(
+  async () => ({ deleted: true, documentId: 1 })
+);
+const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<{ preparation: Record<string, unknown> }>>(
+  async () => ({ preparation: {} })
+);
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
-  listAppointmentDocuments: (...args: unknown[]) => mockListAppointmentDocuments(...args),
-  uploadAppointmentDocument: (...args: unknown[]) => mockUploadAppointmentDocument(...args),
-  deleteAppointmentDocument: (...args: unknown[]) => mockDeleteAppointmentDocument(...args),
-  prepareScanSession: (...args: unknown[]) => mockPrepareScanSession(...args),
+  listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
+    mockListAppointmentDocuments(appointmentId, appointmentRefType),
+  uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
+  deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
+  prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({

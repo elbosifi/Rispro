@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LanguageProvider } from "@/providers/language-provider";
 import { RequestDocumentsPanel } from "./request-documents-panel";
 
-const mockListAppointmentDocuments = vi.fn(async () => []);
-const mockUploadAppointmentDocument = vi.fn(async () => ({
+const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(async () => []);
+const mockUploadAppointmentDocument = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
   id: 1,
   patientId: 9,
   appointmentId: null,
@@ -21,8 +21,10 @@ const mockUploadAppointmentDocument = vi.fn(async () => ({
   lastMoveError: null,
   createdAt: "2026-01-01T00:00:00.000Z",
 }));
-const mockDeleteAppointmentDocument = vi.fn(async () => ({ deleted: true, documentId: 1 }));
-const mockPrepareScanSession = vi.fn(async () => ({
+const mockDeleteAppointmentDocument = vi.fn<(documentId: number) => Promise<{ deleted: boolean; documentId: number }>>(
+  async () => ({ deleted: true, documentId: 1 })
+);
+const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
   preparation: {
     documentType: "referral_request",
     suggestedFileName: "V2-42-referral_request.pdf",
@@ -31,13 +33,16 @@ const mockPrepareScanSession = vi.fn(async () => ({
     guidance: "Ready to scan",
   },
 }));
-const mockScanPages = vi.fn(async () => [new Blob(["page-1"], { type: "application/pdf" })]);
+const mockScanPages = vi.fn<(customOptions?: unknown) => Promise<Blob[]>>(
+  async () => [new Blob(["page-1"], { type: "application/pdf" })]
+);
 
 vi.mock("@/lib/api-hooks", () => ({
-  listAppointmentDocuments: (...args: unknown[]) => mockListAppointmentDocuments(...args),
-  uploadAppointmentDocument: (...args: unknown[]) => mockUploadAppointmentDocument(...args),
-  deleteAppointmentDocument: (...args: unknown[]) => mockDeleteAppointmentDocument(...args),
-  prepareScanSession: (...args: unknown[]) => mockPrepareScanSession(...args),
+  listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
+    mockListAppointmentDocuments(appointmentId, appointmentRefType),
+  uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
+  deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
+  prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -47,7 +52,7 @@ vi.mock("@/lib/toast", () => ({
 vi.mock("./use-scanapp-for-web", () => ({
   useScanAppForWeb: () => ({
     isSupported: true,
-    scanPages: (...args: unknown[]) => mockScanPages(...args),
+    scanPages: (customOptions?: unknown) => mockScanPages(customOptions),
   }),
 }));
 
@@ -187,4 +192,3 @@ describe("RequestDocumentsPanel local scan flow", () => {
     });
   });
 });
-

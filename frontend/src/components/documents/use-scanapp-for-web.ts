@@ -25,8 +25,9 @@ function normalizeToBlob(payload: unknown): Blob | null {
   }
   if (ArrayBuffer.isView(payload)) {
     const view = payload as ArrayBufferView;
-    const copy = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
-    return new Blob([copy], { type: "application/octet-stream" });
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+    const copy = new Uint8Array(bytes);
+    return new Blob([copy.buffer], { type: "application/octet-stream" });
   }
   return null;
 }
@@ -168,4 +169,3 @@ export function useScanAppForWeb() {
     scanPages,
   };
 }
-
