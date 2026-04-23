@@ -91,11 +91,36 @@ function decodeBase64(value: unknown): Buffer {
 function isLikelyDicomFile(fileName: string, mimeType: string): boolean {
   const lowerName = fileName.toLowerCase();
   const lowerMime = mimeType.toLowerCase();
-  return (
+
+  if (
     lowerMime.includes("dicom") ||
     lowerName.endsWith(".dcm") ||
-    lowerName.endsWith(".dicom")
-  );
+    lowerName.endsWith(".dicom") ||
+    lowerName.endsWith(".ima")
+  ) {
+    return true;
+  }
+
+  // Allow unknown/opaque binaries and let Orthanc perform the authoritative
+  // DICOM validation. Block only clearly non-DICOM document/image types.
+  if (
+    lowerMime.startsWith("image/") ||
+    lowerMime.startsWith("text/") ||
+    lowerMime === "application/pdf" ||
+    lowerName.endsWith(".pdf") ||
+    lowerName.endsWith(".txt") ||
+    lowerName.endsWith(".csv") ||
+    lowerName.endsWith(".json") ||
+    lowerName.endsWith(".jpg") ||
+    lowerName.endsWith(".jpeg") ||
+    lowerName.endsWith(".png") ||
+    lowerName.endsWith(".gif") ||
+    lowerName.endsWith(".webp")
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function extractTagCandidate(tags: Record<string, unknown>, keys: string[]): string {

@@ -40,7 +40,10 @@ test("assertDicomRemapRouteAccess enforces authenticated user id", async () => {
 test("dicom helper: DICOM file checks are strict but predictable", () => {
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.dcm", "application/octet-stream"), true);
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.bin", "application/dicom"), true);
-  assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.bin", "application/octet-stream"), false);
+  assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.ima", "application/octet-stream"), true);
+  assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.bin", "application/octet-stream"), true);
+  assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.jpg", "image/jpeg"), false);
+  assert.equal(__dicomRemapTestables.isLikelyDicomFile("notes.txt", "text/plain"), false);
 });
 
 test("dicom helper: patient sex and birth date normalization", () => {

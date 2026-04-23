@@ -221,9 +221,21 @@ export default function PacsRemapPage() {
           type="file"
           multiple
           accept=".dcm,.dicom,application/dicom"
-          onChange={(event) => setFiles(Array.from(event.target.files || []))}
+          onChange={(event) => setSelectedFiles(event.target.files)}
           className="input-premium w-full px-3 py-2"
         />
+        <input
+          type="file"
+          multiple
+          onChange={(event) => setSelectedFiles(event.target.files)}
+          className="input-premium w-full px-3 py-2"
+          {...({ webkitdirectory: "", directory: "" } as Record<string, string>)}
+        />
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+          {language === "ar"
+            ? `الملفات المختارة: ${files.length}`
+            : `Selected files: ${files.length}`}
+        </p>
         <button
           type="button"
           onClick={() => uploadMutation.mutate()}
@@ -398,3 +410,7 @@ export default function PacsRemapPage() {
     </div>
   );
 }
+  const setSelectedFiles = (incoming: FileList | null): void => {
+    const nextFiles = Array.from(incoming || []);
+    setFiles(nextFiles);
+  };
