@@ -381,6 +381,7 @@ async function listExamTypesForCatalog(executor: DbExecutor = pool): Promise<Exa
         et.is_active
       from exam_types et
       join modalities m on m.id = et.modality_id
+      where et.is_active = true
       order by m.code asc, et.code asc, et.name_en asc
     `
   );

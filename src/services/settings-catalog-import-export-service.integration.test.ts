@@ -112,6 +112,7 @@ test("catalog export workbook generation includes both sheets and current rows",
   const suffix = uniqueSuffix();
   const modalityCode = `CATEXP_${suffix}`;
   const examCode = `HEAD_${suffix}`;
+  const inactiveExamCode = `OLD_${suffix}`;
 
   try {
     const modalityInsert = await pool.query<{ id: number }>(
@@ -135,6 +136,15 @@ test("catalog export workbook generation includes both sheets and current rows",
       `,
       [modalityId, examCode, `Exam AR ${suffix}`, `Exam EN ${suffix}`]
     );
+    await pool.query(
+      `
+        insert into exam_types (
+          modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
+        )
+        values ($1, $2, $3, $4, 'old ar', 'old en', 15, false)
+      `,
+      [modalityId, inactiveExamCode, `Old Exam AR ${suffix}`, `Old Exam EN ${suffix}`]
+    );
 
     const { buffer } = await exportCatalogWorkbook();
     const XLSX = await import("xlsx");
@@ -148,6 +158,7 @@ test("catalog export workbook generation includes both sheets and current rows",
 
     assert.ok(modalityRows.some((row) => row.code === modalityCode));
     assert.ok(examRows.some((row) => row.code === examCode && row.modality_code === modalityCode));
+    assert.ok(!examRows.some((row) => row.code === inactiveExamCode), "Inactive exam types should not be exported");
   } finally {
     await cleanupCatalog("CATEXP_");
   }

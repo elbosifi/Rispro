@@ -2129,14 +2129,14 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
   const queryClient = useQueryClient();
 
   // Lookup data for dropdowns
-  const { data: modalityLookup } = useQuery({
+  const { data: modalityLookup } = useQuery<{ modalities: Record<string, unknown>[] }>({
     queryKey: ["modalities-settings"],
     queryFn: () => fetchModalitiesSettings(true),
     staleTime: 1000 * 60 * 10
   });
-  const { data: examTypeLookup } = useQuery({
+  const { data: examTypeLookup } = useQuery<{ examTypes: Record<string, unknown>[] }>({
     queryKey: ["exam-types-settings"],
-    queryFn: fetchExamTypes,
+    queryFn: () => fetchExamTypes(true),
     staleTime: 1000 * 60 * 10
   });
 
