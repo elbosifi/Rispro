@@ -18,9 +18,21 @@ type MockNoShowAppointment = {
 const mockFetchAppointments = vi.fn<
   (params: unknown) => Promise<MockNoShowAppointment[]>
 >(async () => []);
+const mockListAppointmentDocuments = vi.fn(async () => []);
+const mockUploadAppointmentDocument = vi.fn(async () => ({}));
+const mockDeleteAppointmentDocument = vi.fn(async () => ({ deleted: true, documentId: 1 }));
+const mockPrepareScanSession = vi.fn(async () => ({ preparation: {} }));
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
+  listAppointmentDocuments: (...args: unknown[]) => mockListAppointmentDocuments(...args),
+  uploadAppointmentDocument: (...args: unknown[]) => mockUploadAppointmentDocument(...args),
+  deleteAppointmentDocument: (...args: unknown[]) => mockDeleteAppointmentDocument(...args),
+  prepareScanSession: (...args: unknown[]) => mockPrepareScanSession(...args),
+}));
+
+vi.mock("@/components/documents/request-documents-panel", () => ({
+  RequestDocumentsPanel: () => <div data-testid="request-documents-panel" />,
 }));
 
 vi.mock("../components/PatientSearchSection", () => ({
@@ -298,6 +310,14 @@ describe("CreateAppointmentTab UI interactions", () => {
     localStorage.setItem("rispro-language", "en");
     mockFetchAppointments.mockReset();
     mockFetchAppointments.mockResolvedValue([]);
+    mockListAppointmentDocuments.mockReset();
+    mockListAppointmentDocuments.mockResolvedValue([]);
+    mockUploadAppointmentDocument.mockReset();
+    mockUploadAppointmentDocument.mockResolvedValue({});
+    mockDeleteAppointmentDocument.mockReset();
+    mockDeleteAppointmentDocument.mockResolvedValue({ deleted: true, documentId: 1 });
+    mockPrepareScanSession.mockReset();
+    mockPrepareScanSession.mockResolvedValue({ preparation: {} });
     mockRawItemsRef.current = [
       {
         date: "2027-01-02",

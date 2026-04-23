@@ -52,6 +52,7 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
           patientId={appointmentSummary.patientId}
           appointmentRefType="v2_booking"
           title={t(language, "documents.attachRequest")}
+          enableLocalScan
         />
       </div>
     </div>

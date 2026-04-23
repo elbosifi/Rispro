@@ -10,6 +10,7 @@ import {
   type RequestDocument,
 } from "@/lib/api-hooks";
 import { pushToast } from "@/lib/toast";
+import { useScanAppForWeb } from "./use-scanapp-for-web";
 
 async function fileToBase64(file: File): Promise<string> {
   const buffer = await file.arrayBuffer();
@@ -27,6 +28,7 @@ interface RequestDocumentsPanelProps {
   appointmentRefType?: AppointmentRefType;
   title?: string;
   enablePreviewModal?: boolean;
+  enableLocalScan?: boolean;
 }
 
 export function RequestDocumentsPanel({
@@ -35,12 +37,17 @@ export function RequestDocumentsPanel({
   appointmentRefType = "auto",
   title,
   enablePreviewModal = false,
+  enableLocalScan = false,
 }: RequestDocumentsPanelProps) {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
+  const { isSupported: isScanBridgeSupported, scanPages } = useScanAppForWeb();
   const [file, setFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState("referral_request");
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
+  const [scanUploading, setScanUploading] = useState(false);
+  const [retryingFailedUploads, setRetryingFailedUploads] = useState(false);
+  const [failedScanUploads, setFailedScanUploads] = useState<Array<{ file: File; error: string; documentType: string }>>([]);
   const resolvedTitle = title ?? t("documents.title");
 
   const queryKey = useMemo(
@@ -56,16 +63,7 @@ export function RequestDocumentsPanel({
   const uploadMutation = useMutation({
     mutationFn: async () => {
       if (!file) throw new Error(t("documents.chooseFileFirst"));
-      const fileContentBase64 = await fileToBase64(file);
-      return uploadAppointmentDocument({
-        patientId,
-        appointmentId,
-        appointmentRefType,
-        documentType: documentType || "referral_request",
-        originalFilename: file.name,
-        mimeType: file.type || "application/octet-stream",
-        fileContentBase64,
-      });
+      return uploadFileAsDocument(file, documentType || "referral_request");
     },
     onSuccess: () => {
       setFile(null);
@@ -129,6 +127,184 @@ export function RequestDocumentsPanel({
     },
   });
 
+  function extensionFromMimeType(mimeType: string): string {
+    const normalized = mimeType.trim().toLowerCase();
+    if (normalized === "application/pdf") return "pdf";
+    if (normalized === "image/jpeg") return "jpg";
+    if (normalized === "image/png") return "png";
+    if (normalized === "image/tiff" || normalized === "image/tif") return "tiff";
+    if (normalized === "image/bmp") return "bmp";
+    return "";
+  }
+
+  function normalizeSuggestedBaseName(suggestedFileName: string | undefined): string {
+    const rawName = String(suggestedFileName || "scan-document").trim();
+    const withoutExtension = rawName.replace(/\.[a-z0-9]+$/i, "");
+    return withoutExtension || "scan-document";
+  }
+
+  function buildScannedFile(blob: Blob, index: number, total: number, suggestedFileName?: string, scanFileFormat?: string): File {
+    const mimeType = blob.type || "application/octet-stream";
+    const baseName = normalizeSuggestedBaseName(suggestedFileName);
+    const preferredExtension =
+      extensionFromMimeType(mimeType) ||
+      String(scanFileFormat || "").trim().toLowerCase() ||
+      "pdf";
+    const suffix = total > 1 ? `-p${index + 1}` : "";
+    const fileName = `${baseName}${suffix}.${preferredExtension}`;
+    return new File([blob], fileName, { type: mimeType });
+  }
+
+  async function uploadFileAsDocument(fileToUpload: File, normalizedDocumentType: string) {
+    const fileContentBase64 = await fileToBase64(fileToUpload);
+    return uploadAppointmentDocument({
+      patientId,
+      appointmentId,
+      appointmentRefType,
+      documentType: normalizedDocumentType,
+      originalFilename: fileToUpload.name,
+      mimeType: fileToUpload.type || "application/octet-stream",
+      fileContentBase64,
+    });
+  }
+
+  async function handleScanAndAttach() {
+    if (scanUploading || retryingFailedUploads || uploadMutation.isPending) return;
+    if (!isScanBridgeSupported) {
+      pushToast({
+        type: "error",
+        title: t("documents.scanNotSupportedTitle"),
+        message: t("documents.scanNotSupportedMessage"),
+      });
+      return;
+    }
+
+    const normalizedDocumentType = documentType.trim() || "referral_request";
+    setScanUploading(true);
+    setFailedScanUploads([]);
+
+    try {
+      const preparationResponse = await prepareScanSession({
+        appointmentId,
+        patientId,
+        documentType: normalizedDocumentType,
+        appointmentRefType,
+      });
+      const preparation = (preparationResponse as { preparation?: Record<string, unknown> }).preparation;
+      const preparedDocumentTypeRaw = preparation?.documentType;
+      const preparedDocumentType =
+        typeof preparedDocumentTypeRaw === "string" && preparedDocumentTypeRaw.trim()
+          ? preparedDocumentTypeRaw.trim()
+          : normalizedDocumentType;
+      const suggestedFileNameRaw = preparation?.suggestedFileName;
+      const suggestedFileName = typeof suggestedFileNameRaw === "string" ? suggestedFileNameRaw : undefined;
+      const scanFileFormatRaw = preparation?.scanFileFormat;
+      const scanFileFormat = typeof scanFileFormatRaw === "string" ? scanFileFormatRaw : undefined;
+      const preparedSessionCode = typeof preparation?.sessionCode === "string" ? preparation.sessionCode : "";
+      const preparedGuidance = typeof preparation?.guidance === "string" ? preparation.guidance : "";
+      pushToast({
+        type: "success",
+        title: t("documents.scanPreparedTitle"),
+        message: `${preparedSessionCode} ${preparedGuidance}`.trim(),
+      });
+
+      const scannedPages = await scanPages();
+      if (scannedPages.length === 0) {
+        throw new Error(t("documents.scanNoPages"));
+      }
+
+      let uploadedCount = 0;
+      const failures: Array<{ file: File; error: string; documentType: string }> = [];
+      for (let index = 0; index < scannedPages.length; index += 1) {
+        const scannedFile = buildScannedFile(
+          scannedPages[index],
+          index,
+          scannedPages.length,
+          suggestedFileName,
+          scanFileFormat
+        );
+        try {
+          await uploadFileAsDocument(scannedFile, preparedDocumentType);
+          uploadedCount += 1;
+        } catch (err) {
+          failures.push({
+            file: scannedFile,
+            error: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
+            documentType: preparedDocumentType,
+          });
+        }
+      }
+
+      if (uploadedCount > 0) {
+        queryClient.invalidateQueries({ queryKey });
+        pushToast({
+          type: "success",
+          title: t("documents.scanUploadedTitle"),
+          message: t("documents.scanUploadedMessage"),
+        });
+      }
+
+      if (failures.length > 0) {
+        setFailedScanUploads(failures);
+        pushToast({
+          type: "error",
+          title: t("documents.scanPartialFailedTitle"),
+          message: t("documents.scanPartialFailedMessage"),
+        });
+      }
+    } catch (err) {
+      pushToast({
+        type: "error",
+        title: t("documents.scanFailedTitle"),
+        message: err instanceof Error ? err.message : t("documents.scanFailedMessage"),
+      });
+    } finally {
+      setScanUploading(false);
+    }
+  }
+
+  async function handleRetryFailedUploads() {
+    if (scanUploading || retryingFailedUploads || failedScanUploads.length === 0) return;
+    setRetryingFailedUploads(true);
+    const remainingFailures: Array<{ file: File; error: string; documentType: string }> = [];
+    let retriedSuccessCount = 0;
+
+    try {
+      for (const failedUpload of failedScanUploads) {
+        try {
+          await uploadFileAsDocument(failedUpload.file, failedUpload.documentType);
+          retriedSuccessCount += 1;
+        } catch (err) {
+          remainingFailures.push({
+            file: failedUpload.file,
+            error: err instanceof Error ? err.message : t("documents.uploadFailedMessage"),
+            documentType: failedUpload.documentType,
+          });
+        }
+      }
+
+      setFailedScanUploads(remainingFailures);
+      if (retriedSuccessCount > 0) {
+        queryClient.invalidateQueries({ queryKey });
+        pushToast({
+          type: "success",
+          title: t("documents.retryUploadedTitle"),
+          message: t("documents.retryUploadedMessage"),
+        });
+      }
+
+      if (remainingFailures.length > 0) {
+        pushToast({
+          type: "error",
+          title: t("documents.retryFailedTitle"),
+          message: t("documents.retryFailedMessage"),
+        });
+      }
+    } finally {
+      setRetryingFailedUploads(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-stone-200 dark:border-stone-700 p-4 space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -153,20 +329,46 @@ export function RequestDocumentsPanel({
             type="button"
             onClick={() => prepareMutation.mutate()}
             className="px-3 py-2 rounded-lg bg-stone-100 dark:bg-stone-700 text-stone-700 dark:text-stone-300 text-sm"
-            disabled={prepareMutation.isPending}
+            disabled={prepareMutation.isPending || scanUploading || retryingFailedUploads}
           >
             {prepareMutation.isPending ? t("documents.preparing") : t("documents.prepareScan")}
           </button>
+          {enableLocalScan && (
+            <button
+              type="button"
+              onClick={handleScanAndAttach}
+              className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm"
+              disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending || !isScanBridgeSupported}
+            >
+              {scanUploading ? t("documents.scanning") : t("documents.scanAndAttach")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => uploadMutation.mutate()}
             className="px-3 py-2 rounded-lg bg-teal-600 text-white text-sm"
-            disabled={!file || uploadMutation.isPending}
+            disabled={!file || uploadMutation.isPending || scanUploading || retryingFailedUploads}
           >
             {uploadMutation.isPending ? t("documents.uploading") : t("documents.attachRequest")}
           </button>
         </div>
       </div>
+
+      {failedScanUploads.length > 0 && (
+        <div className="rounded-lg border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20 p-3 space-y-2">
+          <div className="text-xs text-amber-800 dark:text-amber-200">
+            {t("documents.failedUploadsRemaining")}: {failedScanUploads.length}
+          </div>
+          <button
+            type="button"
+            onClick={handleRetryFailedUploads}
+            className="px-3 py-2 rounded-lg bg-amber-600 text-white text-sm"
+            disabled={retryingFailedUploads || scanUploading}
+          >
+            {retryingFailedUploads ? t("documents.retryingFailedUploads") : t("documents.retryFailedUploads")}
+          </button>
+        </div>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-stone-500">{t("documents.loading")}</p>
