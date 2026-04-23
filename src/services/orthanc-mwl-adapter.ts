@@ -99,8 +99,6 @@ function buildOrthancWorklistPayload(
       modalityNameEn: row.modality_name_en,
       modalityNameAr: row.modality_name_ar,
       accessionNumber,
-      requestedProcedureId: stableId,
-      scheduledStationAeTitle: stationAeTitle,
     },
     { mwlProfile: "minimal" }
   );

@@ -36,6 +36,7 @@ test("buildCanonicalMwlDataset produces minimal canonical dataset", () => {
     patientId: "PRIMARY-123",
     patientBirthDate: "19800320",
     patientSex: "M",
+    accessionNumber: undefined,
     scheduledProcedureStepSequence: [
       {
         modality: "MR",
@@ -114,22 +115,24 @@ test("buildCanonicalMwlDataset falls back to MRN when no primary identifier is s
 });
 
 test("renderers include Orthanc-friendly identifiers when provided", () => {
-  const dataset = {
-    ...buildCanonicalMwlDataset(baseInput(), { mwlProfile: "minimal" }),
-    accessionNumber: "V2-123",
-    requestedProcedureId: "rispro-v2-booking-123",
-    scheduledStationAeTitle: "RISPRO_MWL",
-  };
+  const dataset = buildCanonicalMwlDataset(
+    baseInput({
+      accessionNumber: "V2-123",
+      requestedProcedureId: "rispro-v2-booking-123",
+      scheduledStationAeTitle: "RISPRO_MWL",
+    }),
+    { mwlProfile: "minimal" }
+  );
 
-  const dump = renderCanonicalMwlToDump(dataset as Parameters<typeof renderCanonicalMwlToDump>[0]);
-  const orthancJson = renderCanonicalMwlToOrthancJson(dataset as Parameters<typeof renderCanonicalMwlToOrthancJson>[0]) as Record<string, unknown>;
+  const dump = renderCanonicalMwlToDump(dataset);
+  const orthancJson = renderCanonicalMwlToOrthancJson(dataset) as Record<string, unknown>;
   const sps = ((orthancJson.ScheduledProcedureStepSequence as Array<Record<string, unknown>>)[0]) || {};
 
   assert.equal(dump.includes("(0008,0050) SH [V2-123]"), true);
-  assert.equal(dump.includes("(0040,0001) AE [RISPRO_MWL]"), true);
-  assert.equal(dump.includes("(0040,0009) SH [rispro-v2-booking-123]"), true);
+  assert.equal(dump.includes("(0040,0001)"), false);
+  assert.equal(dump.includes("(0040,0009)"), false);
   assert.equal(orthancJson.AccessionNumber, "V2-123");
-  assert.equal(orthancJson.RequestedProcedureID, "rispro-v2-booking-123");
-  assert.equal(sps.ScheduledStationAETitle, "RISPRO_MWL");
-  assert.equal(sps.ScheduledProcedureStepID, "rispro-v2-booking-123");
+  assert.equal("RequestedProcedureID" in orthancJson, false);
+  assert.equal("ScheduledStationAETitle" in sps, false);
+  assert.equal("ScheduledProcedureStepID" in sps, false);
 });

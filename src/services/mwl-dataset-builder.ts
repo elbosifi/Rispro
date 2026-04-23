@@ -15,13 +15,8 @@ export interface CanonicalMwlDataset {
   patientId: string;
   patientBirthDate: string;
   patientSex: string;
-  scheduledProcedureStepSequence: [CanonicalScheduledProcedureStep];
-}
-
-interface CanonicalMwlDatasetWithOptionalIds extends CanonicalMwlDataset {
   accessionNumber?: string;
-  requestedProcedureId?: string;
-  scheduledStationAeTitle?: string;
+  scheduledProcedureStepSequence: [CanonicalScheduledProcedureStep];
 }
 
 export interface CanonicalMwlInput {
@@ -120,6 +115,7 @@ export function buildCanonicalMwlDataset(
     patientId: buildPatientId(input),
     patientBirthDate: normalizeDateForDicom(input.patientBirthDate),
     patientSex: normalizeSexForDicom(input.patientSex),
+    accessionNumber: normalizeOptionalText(input.accessionNumber) || undefined,
     scheduledProcedureStepSequence: [
       {
         modality: normalizeModalityForDicom(input.modalityCode),
@@ -146,12 +142,9 @@ function buildSequenceDump(tag: string, lines: string[]): string[] {
 
 export function renderCanonicalMwlToDump(dataset: CanonicalMwlDataset): string {
   const sps = dataset.scheduledProcedureStepSequence[0];
-  const extended = dataset as CanonicalMwlDatasetWithOptionalIds;
   const sequenceLines = [
-    extended.accessionNumber ? `(0008,0050) SH ${quoteDicomValue(extended.accessionNumber)}` : null,
+    dataset.accessionNumber ? `(0008,0050) SH ${quoteDicomValue(dataset.accessionNumber)}` : null,
     `(0008,0060) CS ${quoteDicomValue(sps.modality)}`,
-    extended.scheduledStationAeTitle ? `(0040,0001) AE ${quoteDicomValue(extended.scheduledStationAeTitle)}` : null,
-    extended.requestedProcedureId ? `(0040,0009) SH ${quoteDicomValue(extended.requestedProcedureId)}` : null,
     `(0040,0002) DA ${quoteDicomValue(sps.scheduledProcedureStepStartDate)}`,
     `(0040,0007) LO ${quoteDicomValue(sps.scheduledProcedureStepDescription)}`,
   ].filter((line): line is string => Boolean(line));
@@ -169,7 +162,6 @@ export function renderCanonicalMwlToDump(dataset: CanonicalMwlDataset): string {
 
 export function renderCanonicalMwlToOrthancJson(dataset: CanonicalMwlDataset): Record<string, unknown> {
   const sps = dataset.scheduledProcedureStepSequence[0];
-  const extended = dataset as CanonicalMwlDatasetWithOptionalIds;
 
   return {
     SpecificCharacterSet: dataset.specificCharacterSet,
@@ -177,13 +169,10 @@ export function renderCanonicalMwlToOrthancJson(dataset: CanonicalMwlDataset): R
     PatientID: dataset.patientId,
     PatientBirthDate: dataset.patientBirthDate,
     PatientSex: dataset.patientSex,
-    ...(extended.accessionNumber ? { AccessionNumber: extended.accessionNumber } : {}),
-    ...(extended.requestedProcedureId ? { RequestedProcedureID: extended.requestedProcedureId } : {}),
+    ...(dataset.accessionNumber ? { AccessionNumber: dataset.accessionNumber } : {}),
     ScheduledProcedureStepSequence: [
       {
         Modality: sps.modality,
-        ...(extended.scheduledStationAeTitle ? { ScheduledStationAETitle: extended.scheduledStationAeTitle } : {}),
-        ...(extended.requestedProcedureId ? { ScheduledProcedureStepID: extended.requestedProcedureId } : {}),
         ScheduledProcedureStepStartDate: sps.scheduledProcedureStepStartDate,
         ScheduledProcedureStepDescription: sps.scheduledProcedureStepDescription,
       },
