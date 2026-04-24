@@ -194,6 +194,10 @@ async function toDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+export async function blobToDataUrl(blob: Blob): Promise<string> {
+  return toDataUrl(blob);
+}
+
 async function loadImageDataUrl(url: string): Promise<string | null> {
   try {
     const response = await fetch(url);

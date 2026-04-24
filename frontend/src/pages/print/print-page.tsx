@@ -9,6 +9,7 @@ import {
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import {
+  blobToDataUrl,
   createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
   printAppointmentList,
@@ -69,7 +70,6 @@ export default function PrintPage() {
 
   useEffect(() => {
     let cancelled = false;
-    let previewUrl: string | null = null;
 
     if (appointmentById && !autoprintDone) {
       setSelectedAppointment(appointmentById);
@@ -77,8 +77,11 @@ export default function PrintPage() {
       void createAppointmentSlipPdfBlob(appointmentById, "blank")
         .then((blob) => {
           if (cancelled) return;
-          previewUrl = URL.createObjectURL(blob);
-          setSlipPreviewPdfUrl(previewUrl);
+          return blobToDataUrl(blob);
+        })
+        .then((dataUrl) => {
+          if (cancelled || !dataUrl) return;
+          setSlipPreviewPdfUrl(dataUrl);
         })
         .finally(() => {
           if (!cancelled) setSlipPreviewLoading(false);
@@ -93,7 +96,6 @@ export default function PrintPage() {
     }
     return () => {
       cancelled = true;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [appointmentById, autoprintParam, autoprintDone]);
 
@@ -261,9 +263,11 @@ export default function PrintPage() {
           ) : slipPreviewPdfUrl ? (
             <div className="overflow-auto rounded-xl border border-border bg-muted/20 p-3">
               <iframe
+                key={slipPreviewPdfUrl}
                 title="Appointment slip preview"
                 src={slipPreviewPdfUrl}
                 className="w-full h-[1120px] bg-white rounded-lg shadow-sm"
+                loading="eager"
               />
             </div>
           ) : (

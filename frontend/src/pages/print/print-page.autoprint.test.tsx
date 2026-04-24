@@ -56,6 +56,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 vi.mock("@/lib/print-utils", () => ({
   createAppointmentSlipPdfBlob: vi.fn().mockResolvedValue(new Blob(["%PDF-1.4"], { type: "application/pdf" })),
+  blobToDataUrl: vi.fn().mockResolvedValue("data:application/pdf;base64,JVBERi0xLjQK"),
   downloadAppointmentSlipPdf: vi.fn(),
   printAppointmentSlip: vi.fn(),
 }));

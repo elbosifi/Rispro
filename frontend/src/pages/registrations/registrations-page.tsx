@@ -15,6 +15,7 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { pushToast } from "@/lib/toast";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
+  blobToDataUrl,
   createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
   printAppointmentList,
@@ -193,7 +194,6 @@ export default function RegistrationsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    let previewUrl: string | null = null;
 
     if (!slipPreviewAppointment) {
       setSlipPreviewPdfUrl(null);
@@ -205,8 +205,11 @@ export default function RegistrationsPage() {
     void createAppointmentSlipPdfBlob(slipPreviewAppointment, "blank")
       .then((blob) => {
         if (cancelled) return;
-        previewUrl = URL.createObjectURL(blob);
-        setSlipPreviewPdfUrl(previewUrl);
+        return blobToDataUrl(blob);
+      })
+      .then((dataUrl) => {
+        if (cancelled || !dataUrl) return;
+        setSlipPreviewPdfUrl(dataUrl);
       })
       .finally(() => {
         if (!cancelled) setSlipPreviewLoading(false);
@@ -214,7 +217,6 @@ export default function RegistrationsPage() {
 
     return () => {
       cancelled = true;
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [slipPreviewAppointment]);
 
@@ -685,9 +687,11 @@ export default function RegistrationsPage() {
                   </div>
                 ) : slipPreviewPdfUrl ? (
                   <iframe
+                    key={slipPreviewPdfUrl}
                     title="Appointment slip preview"
                     src={slipPreviewPdfUrl}
                     className="h-[48vh] w-full bg-white xl:h-[60vh]"
+                    loading="eager"
                   />
                 ) : (
                   <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
