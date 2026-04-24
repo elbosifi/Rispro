@@ -711,13 +711,13 @@ export async function fetchSettings(category: string) {
   return mapSettings(raw.settings ?? []);
 }
 
-export async function fetchSonicDicomSettings() {
+export async function fetchSonicDicomSettings(): Promise<Record<string, unknown>> {
   const raw = await api<{ settings: RawRecord[] }>(`/settings/sonicdicom_reports`);
   const settings = raw.settings ?? [];
   const configRow = settings.find((row) => row.setting_key === "config");
   if (configRow?.setting_value && typeof configRow.setting_value === "object" && !Array.isArray(configRow.setting_value)) {
     const value = (configRow.setting_value as { value?: unknown }).value;
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
   }
   return {};
 }
