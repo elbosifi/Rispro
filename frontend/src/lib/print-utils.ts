@@ -113,6 +113,9 @@ async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<voi
   });
 }
 
+const PDF_VIEWPORT_WIDTH = 560;
+const PDF_VIEWPORT_HEIGHT = 794;
+
 export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): Promise<string> {
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
@@ -410,9 +413,10 @@ export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): P
   frame.style.position = "fixed";
   frame.style.left = "-10000px";
   frame.style.top = "0";
-  frame.style.width = "0";
-  frame.style.height = "0";
+  frame.style.width = `${PDF_VIEWPORT_WIDTH}px`;
+  frame.style.height = `${PDF_VIEWPORT_HEIGHT}px`;
   frame.style.border = "0";
+  frame.style.visibility = "hidden";
 
   try {
     const loaded = new Promise<void>((resolve) => {
@@ -425,27 +429,37 @@ export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): P
     const doc = frame.contentDocument;
     if (!doc?.body) return;
 
+    doc.documentElement.style.width = `${PDF_VIEWPORT_WIDTH}px`;
+    doc.documentElement.style.margin = "0";
+    doc.body.style.width = `${PDF_VIEWPORT_WIDTH}px`;
+    doc.body.style.margin = "0";
+
     await waitForImagesToLoad(doc);
 
     const { default: html2pdf } = await import("html2pdf.js");
+    const content = (doc.body.firstElementChild as HTMLElement | null) ?? doc.body;
+
     await html2pdf()
       .set({
         filename: getAppointmentSlipFileName(apt),
         margin: 0,
         image: { type: "jpeg", quality: 1 },
         enableLinks: true,
+        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
         html2canvas: {
           backgroundColor: "#ffffff",
           scale: 2,
           useCORS: true,
+          windowWidth: PDF_VIEWPORT_WIDTH,
+          windowHeight: PDF_VIEWPORT_HEIGHT,
         },
         jsPDF: {
           unit: "mm",
           format: "a5",
           orientation: "portrait",
         },
-      })
-      .from(doc.body)
+      } as any)
+      .from(content)
       .save();
   } finally {
     frame.remove();
