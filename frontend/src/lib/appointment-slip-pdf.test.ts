@@ -50,7 +50,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     examSpecificInstructionEn: "Exam prep",
     priorityNameAr: "عادي",
     priorityNameEn: "Routine",
-    modalitySlotNumber: 7,
+    modalitySlotNumber: null,
     publicCancelToken: null,
     ...overrides,
   };

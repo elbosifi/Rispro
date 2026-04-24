@@ -68,6 +68,28 @@ function generateBarcodeDataUri(value: string): string {
   `;
 }
 
+function generateBarcodeSvg(value: string, width = 336, height = 44, quietZone = 18): string {
+  const clean = value.trim() || "APPOINTMENT";
+  const bars = buildBarcodeBars(clean);
+  const contentWidth = Math.max(1, bars.at(-1)?.x ?? 1);
+  const scale = (width - quietZone * 2) / contentWidth;
+  const barY = 5;
+  const barHeight = Math.max(10, height - 10);
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet">
+      <rect width="${width}" height="${height}" fill="#ffffff"/>
+      ${bars
+        .map((bar) => {
+          const x = quietZone + bar.x * scale;
+          const w = Math.max(0.7, bar.w * scale);
+          return `<rect x="${x.toFixed(2)}" y="${barY}" width="${w.toFixed(2)}" height="${barHeight}" fill="#000000" shape-rendering="crispEdges"/>`;
+        })
+        .join("")}
+    </svg>
+  `;
+}
+
 function normalizeInlineSvg(svg: string): string {
   return svg.replace(/^<\?xml[\s\S]*?\?>\s*/i, "").trim();
 }
@@ -212,7 +234,7 @@ export function buildAppointmentSlipData(apt: AppointmentWithDetails): Appointme
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
     token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : "";
-  const accession = String(apt.accessionNumber || "—").trim() || "—";
+  const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
   return {
     hospitalName: "National Cancer Center Benghazi",
     departmentName: "Diagnostic Radiology Department",
@@ -266,15 +288,15 @@ export async function createAppointmentSlipPdfBlob(
       };
 
   const headerHeight = mode === "blank" ? 82 : 0;
-  const qrSize = mode === "blank" ? 60 : 56;
-  const barcodeHeight = 36;
+  const qrSize = mode === "blank" ? 64 : 60;
+  const queueAreaHeight = 86;
   const detailsTop = safe.y + headerHeight + (mode === "blank" ? 8 : 0);
   const detailsLeft = safe.x;
   const detailsWidth = safe.w;
   const columnGap = 8;
   const fieldWidth = (detailsWidth - columnGap) / 2;
-  const fieldHeight = 31;
-  const rowGap = 5;
+  const fieldHeight = 28;
+  const rowGap = 4;
 
   doc.setTextColor("#111827");
   doc.setFillColor("#ffffff");
@@ -309,21 +331,20 @@ export async function createAppointmentSlipPdfBlob(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor("#b11116");
-    doc.text(
-      wrapLines(doc, "Scan to cancel this appointment", qrSize + 2, 2),
-      page.w - safe.x - qrSize - 2,
-      safe.y + qrSize + 12,
-      { baseline: "top", lineHeightFactor: 1.05 }
-    );
+    const qrCaptionX = page.w - safe.x - 94;
+    doc.text(wrapLines(doc, "Scan to cancel this appointment", 90, 2), qrCaptionX, safe.y + qrSize + 10, {
+      baseline: "top",
+      lineHeightFactor: 1.05,
+      align: "right",
+    });
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor("#374151");
-    doc.text(
-      wrapLines(doc, "This link is unique to you and your appointment.", qrSize + 2, 2),
-      page.w - safe.x - qrSize - 2,
-      safe.y + qrSize + 26,
-      { baseline: "top", lineHeightFactor: 1.05 }
-    );
+    doc.text(wrapLines(doc, "This link is unique to you and your appointment.", 90, 2), qrCaptionX, safe.y + qrSize + 22, {
+      baseline: "top",
+      lineHeightFactor: 1.05,
+      align: "right",
+    });
   }
 
   const rows = [
@@ -377,7 +398,7 @@ export async function createAppointmentSlipPdfBlob(
   }
 
   if (mode === "blank") {
-    const footerY = page.h - safe.y - barcodeHeight - 16;
+    const footerY = page.h - safe.y - queueAreaHeight + 2;
     doc.setDrawColor("#d3d4d6");
     doc.setLineWidth(0.5);
     doc.line(detailsLeft, footerY - 8, detailsLeft + prepWidth, footerY - 8);
@@ -392,29 +413,35 @@ export async function createAppointmentSlipPdfBlob(
     doc.text("RISpro", detailsLeft + prepWidth - 34, footerY, { align: "right" });
   }
 
-  const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 2 : 0);
-  const bars = buildBarcodeBars(slip.accessionBarcodePayload);
-  const barPadding = 12;
-  const barWidth = page.w - safe.x * 2 - barPadding * 2;
-  const scale = barWidth / Math.max(1, bars.at(-1)?.x ?? 1);
-  doc.setDrawColor("#b11116");
-  doc.setFillColor("#111111");
+  const queueAreaTop = page.h - safe.y - queueAreaHeight;
+  const barcodeWidth = 334;
+  const barcodeHeightPx = 42;
+  const barcodeX = detailsLeft + (prepWidth - barcodeWidth) / 2;
+  const barcodeY = queueAreaTop + 22;
+  const barcodeSvg = generateBarcodeSvg(slip.accessionBarcodePayload, barcodeWidth, barcodeHeightPx, 18);
+  const barcodeBars = buildBarcodeBars(slip.accessionBarcodePayload);
+  const barcodeContentWidth = Math.max(1, barcodeBars.at(-1)?.x ?? 1);
+  const barcodeScale = (barcodeWidth - 36) / barcodeContentWidth;
+
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
+  doc.setFontSize(8.75);
   doc.setTextColor("#b11116");
-  doc.text("Scan to enter the queue", detailsLeft + prepWidth / 2, barcodeY - 10, { align: "center" });
-  doc.setLineWidth(0.5);
-  doc.roundedRect(detailsLeft, barcodeY, prepWidth, barcodeHeight, 6, 6, "S");
-  const baseX = detailsLeft + barPadding;
-  const baseY = barcodeY + 5;
-  const barHeight = barcodeHeight - 10;
-  for (const bar of bars) {
-    doc.rect(baseX + bar.x * scale, baseY, Math.max(0.8, bar.w * scale), barHeight, "F");
+  doc.text("Scan to enter the queue", detailsLeft + prepWidth / 2, queueAreaTop + 9, { align: "center" });
+  try {
+    doc.addSvgAsImage(barcodeSvg, barcodeX, barcodeY, barcodeWidth, barcodeHeightPx);
+  } catch {
+    const fallbackBaseX = barcodeX + 18;
+    const fallbackBaseY = barcodeY + 5;
+    const fallbackHeight = barcodeHeightPx - 10;
+    for (const bar of barcodeBars) {
+      doc.setFillColor("#000000");
+      doc.rect(fallbackBaseX + bar.x * barcodeScale, fallbackBaseY, Math.max(0.7, bar.w * barcodeScale), fallbackHeight, "F");
+    }
   }
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor("#1f2937");
-  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + prepWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
+  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + prepWidth / 2, barcodeY + barcodeHeightPx + 10, { align: "center" });
 
   return doc.output("blob");
 }

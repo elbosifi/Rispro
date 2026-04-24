@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   cancelAppointment,
@@ -53,7 +53,6 @@ export default function RegistrationsPage() {
   const [slipPreviewPdfUrl, setSlipPreviewPdfUrl] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
-  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -228,12 +227,6 @@ export default function RegistrationsPage() {
   };
 
   const handlePreviewPrint = () => {
-    const frameWindow = previewFrameRef.current?.contentWindow;
-    if (frameWindow) {
-      frameWindow.focus();
-      frameWindow.print();
-      return;
-    }
     if (!slipPreviewAppointment) return;
     printAppointmentSlip(slipPreviewAppointment);
   };
@@ -694,7 +687,6 @@ export default function RegistrationsPage() {
                   </div>
                 ) : slipPreviewPdfUrl ? (
                   <iframe
-                    ref={previewFrameRef}
                     key={slipPreviewPdfUrl}
                     title="Appointment slip preview"
                     src={slipPreviewPdfUrl}
