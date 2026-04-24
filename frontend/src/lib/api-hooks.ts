@@ -510,8 +510,9 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
 }
 
 export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
-  const raw = await api<RawRecord>("/settings/patient_qr_self_service");
-  return normalizePatientQrSettings(raw);
+  const response = await api<{ settings: RawRecord[] }>("/settings/patient_qr_self_service");
+  const configRow = response.settings?.find((row) => row.setting_key === "config");
+  return normalizePatientQrSettings(configRow ?? {});
 }
 
 export async function savePatientQrSettings(payload: PatientQrSettings) {
