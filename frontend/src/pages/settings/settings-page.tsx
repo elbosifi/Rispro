@@ -419,6 +419,8 @@ function CatalogImportExportPanel({
   const [errorType, setErrorType] = useState<string | null>(null);
   const [progressNotes, setProgressNotes] = useState<string[]>([]);
   const [errorRows, setErrorRows] = useState<Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>>([]);
+  const [modalityFilter, setModalityFilter] = useState<"all" | "selected" | "errors" | "create" | "update" | "skip">("all");
+  const [examTypeFilter, setExamTypeFilter] = useState<"all" | "selected" | "errors" | "create" | "update" | "skip">("all");
   const [draft, setDraft] = useState<null | {
     canApply: boolean;
     summary: { modalitiesTotal: number; examTypesTotal: number; selectedModalities: number; selectedExamTypes: number; errors: number; warnings: number };
@@ -451,6 +453,8 @@ function CatalogImportExportPanel({
       setErrorType(null);
       setErrorRows([]);
       setProgressNotes(["Reading the selected workbook..."]);
+      setModalityFilter("all");
+      setExamTypeFilter("all");
       setDraft(null);
 
       const base64 = await new Promise<string>((resolve, reject) => {
@@ -514,6 +518,47 @@ function CatalogImportExportPanel({
           selectedExamTypes
         }
       };
+    });
+  };
+
+  const bulkSetSelected = (kind: "modalities" | "examTypes", nextSelected: boolean, mode: "all" | "visible") => {
+    setDraft((current) => {
+      if (!current) return current;
+      const activeFilter = kind === "modalities" ? modalityFilter : examTypeFilter;
+      const nextRows = (current[kind] || []).map((row) => {
+        const matchesFilter =
+          activeFilter === "all" ? true
+          : activeFilter === "selected" ? Boolean(row.selected)
+          : activeFilter === "errors" ? Array.isArray(row.errors) && row.errors.length > 0
+          : String(row.action) === activeFilter;
+        if (String(row.action) === "invalid") return row;
+        if (mode === "all" || matchesFilter) {
+          return { ...row, selected: nextSelected };
+        }
+        return row;
+      });
+      const selectedModalities = (kind === "modalities" ? nextRows : current.modalities).filter((row) => Boolean(row.selected)).length;
+      const selectedExamTypes = (kind === "examTypes" ? nextRows : current.examTypes).filter((row) => Boolean(row.selected)).length;
+      return {
+        ...current,
+        [kind]: nextRows,
+        summary: {
+          ...current.summary,
+          selectedModalities,
+          selectedExamTypes
+        }
+      };
+    });
+  };
+
+  const filteredRows = (kind: "modalities" | "examTypes") => {
+    if (!draft) return [];
+    const filter = kind === "modalities" ? modalityFilter : examTypeFilter;
+    return (draft[kind] || []).filter((row) => {
+      if (filter === "all") return true;
+      if (filter === "selected") return Boolean(row.selected);
+      if (filter === "errors") return Array.isArray(row.errors) && row.errors.length > 0;
+      return String(row.action) === filter;
     });
   };
 
@@ -603,54 +648,133 @@ function CatalogImportExportPanel({
       {draft && (
         <div className="space-y-3">
           <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm bg-white/70 dark:bg-stone-900/20">
-            Preview summary: {draft.summary.modalitiesTotal} modality rows, {draft.summary.examTypesTotal} exam type rows, {draft.summary.selectedModalities} selected modalities, {draft.summary.selectedExamTypes} selected exam types, {draft.summary.errors} errors.
+            <div className="grid grid-cols-2 lg:grid-cols-6 gap-2">
+              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Modality Rows</div><div className="font-semibold">{draft.summary.modalitiesTotal}</div></div>
+              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Exam Rows</div><div className="font-semibold">{draft.summary.examTypesTotal}</div></div>
+              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Selected Modalities</div><div className="font-semibold">{draft.summary.selectedModalities}</div></div>
+              <div className="rounded border border-stone-200 dark:border-stone-700 p-2"><div className="text-[10px] uppercase font-mono">Selected Exams</div><div className="font-semibold">{draft.summary.selectedExamTypes}</div></div>
+              <div className="rounded border border-amber-200 dark:border-amber-800 p-2"><div className="text-[10px] uppercase font-mono">Warnings</div><div className="font-semibold">{draft.summary.warnings}</div></div>
+              <div className="rounded border border-red-200 dark:border-red-800 p-2"><div className="text-[10px] uppercase font-mono">Errors</div><div className="font-semibold">{draft.summary.errors}</div></div>
+            </div>
           </div>
 
           <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-white/70 dark:bg-stone-900/20" open>
             <summary className="cursor-pointer font-medium text-sm">Review modality rows</summary>
-            <div className="mt-3 space-y-2">
-              {draft.modalities.map((row) => (
-                <div key={String(row.id)} className="rounded border border-stone-200 dark:border-stone-700 p-3 text-sm space-y-2">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("modalities", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
-                      Select
-                    </label>
-                    <span className="text-xs uppercase font-mono">{String(row.action)}</span>
-                    <span className="text-xs">row {String(row.rowNumber)}</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "code", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="code" />
-                    <input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameEn", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_en" />
-                    <input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameAr", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_ar" />
-                    <input type="number" value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow("modalities", String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="daily_capacity" />
-                  </div>
-                </div>
-              ))}
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-2 items-center">
+                <select value={modalityFilter} onChange={(e) => setModalityFilter(e.target.value as typeof modalityFilter)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-xs">
+                  <option value="all">All modality rows</option>
+                  <option value="selected">Selected only</option>
+                  <option value="errors">Errors only</option>
+                  <option value="create">Creates</option>
+                  <option value="update">Updates</option>
+                  <option value="skip">Skips</option>
+                </select>
+                <button onClick={() => bulkSetSelected("modalities", true, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select Visible</button>
+                <button onClick={() => bulkSetSelected("modalities", false, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear Visible</button>
+                <button onClick={() => bulkSetSelected("modalities", true, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select All</button>
+                <button onClick={() => bulkSetSelected("modalities", false, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear All</button>
+                <span className="text-xs description-center">{filteredRows("modalities").length} visible</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="text-left border-b border-stone-200 dark:border-stone-700">
+                      <th className="py-2 pr-2">Use</th>
+                      <th className="py-2 pr-2">Action</th>
+                      <th className="py-2 pr-2">Row</th>
+                      <th className="py-2 pr-2">Code</th>
+                      <th className="py-2 pr-2">Name EN</th>
+                      <th className="py-2 pr-2">Name AR</th>
+                      <th className="py-2 pr-2">Capacity</th>
+                      <th className="py-2 pr-2">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows("modalities").map((row) => (
+                      <tr key={String(row.id)} className="border-b border-stone-100 dark:border-stone-800 align-top">
+                        <td className="py-2 pr-2">
+                          <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("modalities", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
+                        </td>
+                        <td className="py-2 pr-2"><span className="font-mono uppercase">{String(row.action)}</span></td>
+                        <td className="py-2 pr-2">{String(row.rowNumber)}</td>
+                        <td className="py-2 pr-2"><input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "code", e.target.value)} className="w-28 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameEn", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameAr", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input type="number" value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow("modalities", String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2">
+                          {Array.isArray(row.errors) && row.errors.length > 0 ? (
+                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item: any) => item.errorType || item.message).join(", ")}</div>
+                          ) : (
+                            <div className="text-stone-500">Ready</div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </details>
 
           <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-white/70 dark:bg-stone-900/20" open>
             <summary className="cursor-pointer font-medium text-sm">Review exam type rows</summary>
-            <div className="mt-3 space-y-2">
-              {draft.examTypes.map((row) => (
-                <div key={String(row.id)} className="rounded border border-stone-200 dark:border-stone-700 p-3 text-sm space-y-2">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("examTypes", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
-                      Select
-                    </label>
-                    <span className="text-xs uppercase font-mono">{String(row.action)}</span>
-                    <span className="text-xs">row {String(row.rowNumber)}</span>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <input value={String(row.modalityCode ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "modalityCode", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="modality_code" />
-                    <input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "code", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="code" />
-                    <input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameEn", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_en" />
-                    <input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameAr", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_ar" />
-                  </div>
-                </div>
-              ))}
+            <div className="mt-3 space-y-3">
+              <div className="flex flex-wrap gap-2 items-center">
+                <select value={examTypeFilter} onChange={(e) => setExamTypeFilter(e.target.value as typeof examTypeFilter)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-xs">
+                  <option value="all">All exam rows</option>
+                  <option value="selected">Selected only</option>
+                  <option value="errors">Errors only</option>
+                  <option value="create">Creates</option>
+                  <option value="update">Updates</option>
+                  <option value="skip">Skips</option>
+                </select>
+                <button onClick={() => bulkSetSelected("examTypes", true, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select Visible</button>
+                <button onClick={() => bulkSetSelected("examTypes", false, "visible")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear Visible</button>
+                <button onClick={() => bulkSetSelected("examTypes", true, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Select All</button>
+                <button onClick={() => bulkSetSelected("examTypes", false, "all")} className="px-2.5 py-1.5 rounded bg-stone-100 dark:bg-stone-700 text-xs">Clear All</button>
+                <span className="text-xs description-center">{filteredRows("examTypes").length} visible</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead>
+                    <tr className="text-left border-b border-stone-200 dark:border-stone-700">
+                      <th className="py-2 pr-2">Use</th>
+                      <th className="py-2 pr-2">Action</th>
+                      <th className="py-2 pr-2">Row</th>
+                      <th className="py-2 pr-2">Modality</th>
+                      <th className="py-2 pr-2">Code</th>
+                      <th className="py-2 pr-2">Name EN</th>
+                      <th className="py-2 pr-2">Name AR</th>
+                      <th className="py-2 pr-2">Minutes</th>
+                      <th className="py-2 pr-2">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredRows("examTypes").map((row) => (
+                      <tr key={String(row.id)} className="border-b border-stone-100 dark:border-stone-800 align-top">
+                        <td className="py-2 pr-2">
+                          <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("examTypes", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
+                        </td>
+                        <td className="py-2 pr-2"><span className="font-mono uppercase">{String(row.action)}</span></td>
+                        <td className="py-2 pr-2">{String(row.rowNumber)}</td>
+                        <td className="py-2 pr-2"><input value={String(row.modalityCode ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "modalityCode", e.target.value)} className="w-24 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "code", e.target.value)} className="w-28 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameEn", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameAr", e.target.value)} className="w-40 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2"><input type="number" value={row.durationMinutes == null ? "" : Number(row.durationMinutes)} onChange={(e) => updateDraftRow("examTypes", String(row.id), "durationMinutes", e.target.value === "" ? null : Number(e.target.value))} className="w-20 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" /></td>
+                        <td className="py-2 pr-2">
+                          {Array.isArray(row.errors) && row.errors.length > 0 ? (
+                            <div className="text-red-600 dark:text-red-300 max-w-xs">{row.errors.map((item: any) => item.errorType || item.message).join(", ")}</div>
+                          ) : (
+                            <div className="text-stone-500">Ready</div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </details>
         </div>

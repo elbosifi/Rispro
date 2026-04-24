@@ -392,7 +392,6 @@ async function listExamTypesForCatalog(executor: DbExecutor = pool): Promise<Exa
       et.specific_instruction_ar, et.specific_instruction_en, et.duration_minutes, et.is_active
     from exam_types et
     join modalities m on m.id = et.modality_id
-    where et.is_active = true
     order by m.code asc, et.code asc, et.name_en asc
   `);
   return rows;
@@ -567,6 +566,37 @@ function buildDraftRows(
   });
 
   return { modalities: modalityDraftRows, examTypes: examTypeDraftRows };
+}
+
+function mapDatabaseImportError(error: unknown): HttpError | null {
+  const record = error as { code?: string; constraint?: string; detail?: string; message?: string } | null;
+  if (!record?.code) return null;
+
+  if (record.code === "23505") {
+    return new HttpError(409, "Catalog import hit a duplicate database constraint.", {
+      errorType: "database_unique_conflict",
+      constraint: record.constraint ?? null,
+      detail: record.detail ?? record.message ?? null
+    });
+  }
+
+  if (record.code === "23503") {
+    return new HttpError(409, "Catalog import hit a related-record database constraint.", {
+      errorType: "database_foreign_key_conflict",
+      constraint: record.constraint ?? null,
+      detail: record.detail ?? record.message ?? null
+    });
+  }
+
+  if (record.code === "23502") {
+    return new HttpError(400, "Catalog import is missing a required database value.", {
+      errorType: "database_not_null_violation",
+      constraint: record.constraint ?? null,
+      detail: record.detail ?? record.message ?? null
+    });
+  }
+
+  return null;
 }
 
 export async function previewCatalogWorkbook(fileContentBase64: string): Promise<CatalogImportPreview> {
@@ -818,7 +848,7 @@ export async function applyCatalogImport(
     return summary;
   } catch (error) {
     await client.query("rollback");
-    throw error;
+    throw mapDatabaseImportError(error) || error;
   } finally {
     client.release();
   }

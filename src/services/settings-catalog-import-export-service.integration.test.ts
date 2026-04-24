@@ -161,9 +161,51 @@ test("catalog export workbook generation includes both sheets and current rows",
     assert.ok(exportedExam, "Export should include the active exam type row");
     assert.equal(exportedExam?.description_en, "scan en");
     assert.equal(exportedExam?.description_ar, "scan ar");
-    assert.ok(!examRows.some((row) => row.code === inactiveExamCode), "Inactive exam types should not be exported");
+    const inactiveExam = examRows.find((row) => row.code === inactiveExamCode);
+    assert.ok(inactiveExam, "Export should include inactive exam types with their active flag");
+    assert.equal(inactiveExam?.active, false);
   } finally {
     await cleanupCatalog("CATEXP_");
+  }
+});
+
+test("catalog preview matches inactive existing exam types as updates, not creates", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  await ensureCatalogSchema();
+
+  const suffix = uniqueSuffix();
+  const modalityCode = `INACTIVE_MATCH_${suffix}`;
+  const examCode = `exam_${suffix}`;
+
+  try {
+    const modalityInsert = await pool.query<{ id: number }>(
+      `
+        insert into modalities (code, name_ar, name_en, daily_capacity, is_active)
+        values ($1, $2, $3, 5, true)
+        returning id
+      `,
+      [modalityCode, `AR ${suffix}`, `EN ${suffix}`]
+    );
+    const modalityId = Number(modalityInsert.rows[0]?.id);
+
+    await pool.query(
+      `
+        insert into exam_types (
+          modality_id, code, name_ar, name_en, specific_instruction_ar, specific_instruction_en, duration_minutes, is_active
+        )
+        values ($1, $2, $3, $4, 'inst ar', 'inst en', 20, false)
+      `,
+      [modalityId, examCode, `Exam AR ${suffix}`, `Exam EN ${suffix}`]
+    );
+
+    const preview = await previewCatalogWorkbook(await buildWorkbookBase64({
+      modalities: [baseModalityRow(modalityCode, { name_en: `EN ${suffix}`, name_ar: `AR ${suffix}` })],
+      examTypes: [baseExamTypeRow(modalityCode, examCode, { active: true, name_en: `Exam EN ${suffix}`, name_ar: `Exam AR ${suffix}` })]
+    }));
+
+    assert.equal(String(preview.examTypes[0]?.action), "update");
+  } finally {
+    await cleanupCatalog("INACTIVE_MATCH_");
   }
 });
 
