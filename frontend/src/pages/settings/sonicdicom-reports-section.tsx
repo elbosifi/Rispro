@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
-import { fetchSettings, saveSettings } from "@/lib/api-hooks";
+import { fetchSonicDicomSettings, saveSettings } from "@/lib/api-hooks";
 
 type SonicSettings = Record<string, string | boolean | number | string[]>;
 
@@ -59,13 +59,13 @@ export default function SonicDicomReportsSection() {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings", "sonicdicom_reports"],
-    queryFn: () => fetchSettings("sonicdicom_reports"),
+    queryFn: () => fetchSonicDicomSettings(),
   });
   const [form, setForm] = useState<SonicSettings>(DEFAULTS);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    if (data) setForm(normalize(data as Record<string, unknown>));
+    if (data) setForm(normalize(data));
   }, [data]);
 
   const mutation = useMutation({
