@@ -9,8 +9,8 @@ import {
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import {
+  createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
-  prepareAppointmentSlipHtml,
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
@@ -36,7 +36,7 @@ export default function PrintPage() {
   const [query, setQuery] = useState("");
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
-  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
+  const [slipPreviewPdfUrl, setSlipPreviewPdfUrl] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
@@ -69,13 +69,16 @@ export default function PrintPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let previewUrl: string | null = null;
 
     if (appointmentById && !autoprintDone) {
       setSelectedAppointment(appointmentById);
       setSlipPreviewLoading(true);
-      prepareAppointmentSlipHtml(appointmentById)
-        .then((html) => {
-          if (!cancelled) setSlipPreviewHtml(html);
+      void createAppointmentSlipPdfBlob(appointmentById, "blank")
+        .then((blob) => {
+          if (cancelled) return;
+          previewUrl = URL.createObjectURL(blob);
+          setSlipPreviewPdfUrl(previewUrl);
         })
         .finally(() => {
           if (!cancelled) setSlipPreviewLoading(false);
@@ -90,6 +93,7 @@ export default function PrintPage() {
     }
     return () => {
       cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [appointmentById, autoprintParam, autoprintDone]);
 
@@ -254,11 +258,11 @@ export default function PrintPage() {
             <div className="p-8 text-center text-muted-foreground">
               {t(language, "print.loading")}
             </div>
-          ) : slipPreviewHtml ? (
+          ) : slipPreviewPdfUrl ? (
             <div className="overflow-auto rounded-xl border border-border bg-muted/20 p-3">
               <iframe
                 title="Appointment slip preview"
-                srcDoc={slipPreviewHtml}
+                src={slipPreviewPdfUrl}
                 className="w-full h-[1120px] bg-white rounded-lg shadow-sm"
               />
             </div>

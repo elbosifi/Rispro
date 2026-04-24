@@ -15,8 +15,8 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { pushToast } from "@/lib/toast";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
+  createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
-  prepareAppointmentSlipHtml,
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
@@ -49,7 +49,7 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
     useState<AppointmentWithDetails | null>(null);
-  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
+  const [slipPreviewPdfUrl, setSlipPreviewPdfUrl] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
 
@@ -193,17 +193,20 @@ export default function RegistrationsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    let previewUrl: string | null = null;
 
     if (!slipPreviewAppointment) {
-      setSlipPreviewHtml(null);
+      setSlipPreviewPdfUrl(null);
       setSlipPreviewLoading(false);
       return;
     }
 
     setSlipPreviewLoading(true);
-    void prepareAppointmentSlipHtml(slipPreviewAppointment)
-      .then((html) => {
-        if (!cancelled) setSlipPreviewHtml(html);
+    void createAppointmentSlipPdfBlob(slipPreviewAppointment, "blank")
+      .then((blob) => {
+        if (cancelled) return;
+        previewUrl = URL.createObjectURL(blob);
+        setSlipPreviewPdfUrl(previewUrl);
       })
       .finally(() => {
         if (!cancelled) setSlipPreviewLoading(false);
@@ -211,12 +214,13 @@ export default function RegistrationsPage() {
 
     return () => {
       cancelled = true;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [slipPreviewAppointment]);
 
   const closeSlipPreview = () => {
     setSlipPreviewAppointment(null);
-    setSlipPreviewHtml(null);
+    setSlipPreviewPdfUrl(null);
     setSlipPreviewLoading(false);
   };
 
@@ -679,10 +683,10 @@ export default function RegistrationsPage() {
                   <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
                     {t("print.loading")}
                   </div>
-                ) : slipPreviewHtml ? (
+                ) : slipPreviewPdfUrl ? (
                   <iframe
                     title="Appointment slip preview"
-                    srcDoc={slipPreviewHtml}
+                    src={slipPreviewPdfUrl}
                     className="h-[48vh] w-full bg-white xl:h-[60vh]"
                   />
                 ) : (

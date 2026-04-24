@@ -736,14 +736,36 @@ export function printAppointmentSlip(apt: AppointmentWithDetails): void {
 }
 
 async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
-  const printWindow = window.open("", "_blank");
-  if (!printWindow) return;
-  const html = await prepareAppointmentSlipHtml(apt);
-  printWindow.document.write(html);
-  printWindow.document.close();
-  await waitForImagesToLoad(printWindow.document);
-  printWindow.focus();
-  printWindow.print();
+  const blob = await createAppointmentSlipPdfBlob(apt, "blank");
+  const url = URL.createObjectURL(blob);
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.position = "fixed";
+  frame.style.left = "-10000px";
+  frame.style.top = "0";
+  frame.style.width = "1px";
+  frame.style.height = "1px";
+  frame.style.border = "0";
+  frame.src = url;
+
+  try {
+    document.body.appendChild(frame);
+    await new Promise<void>((resolve) => {
+      frame.addEventListener("load", () => resolve(), { once: true });
+    });
+
+    const printWindow = frame.contentWindow;
+    if (!printWindow) return;
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 350));
+    printWindow.focus();
+    printWindow.print();
+  } finally {
+    window.setTimeout(() => {
+      URL.revokeObjectURL(url);
+      frame.remove();
+    }, 1000);
+  }
 }
 
 export function printAppointmentList(list: AppointmentWithDetails[], listDate: string): void {

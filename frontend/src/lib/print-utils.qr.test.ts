@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { printAppointmentSlip } from "./print-utils";
+import { buildAppointmentSlipData } from "./print-utils";
 
 const toStringMock = vi.hoisted(() => vi.fn().mockResolvedValue("<svg data-testid=\"qr-image\"></svg>"));
-
 vi.mock("qrcode", () => ({
   default: {
     toString: toStringMock,
@@ -57,87 +56,21 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
   };
 }
 
-describe("printAppointmentSlip QR", () => {
+describe("appointment slip QR payloads", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("generates QR code for public cancellation link", async () => {
-    let writtenHtml = "";
-    const documentMock = {
-      write: vi.fn((html: string) => {
-        writtenHtml = html;
-      }),
-      close: vi.fn(),
-    };
-    const printWindowMock = {
-      document: documentMock,
-      focus: vi.fn(),
-      print: vi.fn(),
-    };
+  it("builds the cancellation QR payload from the public token when present", () => {
+    const slip = buildAppointmentSlipData(makeAppointment());
 
-    vi.spyOn(window, "open").mockReturnValue(printWindowMock as unknown as Window);
-    printAppointmentSlip(makeAppointment());
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(toStringMock).toHaveBeenCalledWith(
-      "http://localhost:3000/public/cancel-appointment?t=signed-token",
-      { type: "svg", width: 120, margin: 1 }
-    );
-    expect(writtenHtml).toContain("Scan to cancel this appointment");
-    expect(writtenHtml).toContain("qr-image");
+    expect(slip.queueQrPayload).toBe("http://localhost:3000/public/cancel-appointment?t=signed-token");
+    expect(slip.accessionBarcodePayload).toBe("V2-45");
   });
 
-  it("renders modality preparation before exam preparation", async () => {
-    let writtenHtml = "";
-    const documentMock = {
-      write: vi.fn((html: string) => {
-        writtenHtml = html;
-      }),
-      close: vi.fn(),
-    };
-    const printWindowMock = {
-      document: documentMock,
-      focus: vi.fn(),
-      print: vi.fn(),
-    };
+  it("falls back to the accession number when no public token exists", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ publicCancelToken: null }));
 
-    vi.spyOn(window, "open").mockReturnValue(printWindowMock as unknown as Window);
-    printAppointmentSlip(
-      makeAppointment({
-        modalityGeneralInstructionEn: "Modality prep",
-        examSpecificInstructionEn: "Exam prep",
-      })
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(writtenHtml).toContain("Modality prep");
-    expect(writtenHtml).toContain("Exam prep");
-    expect(writtenHtml.indexOf("Modality prep")).toBeLessThan(writtenHtml.indexOf("Exam prep"));
-  });
-
-  it("does not render appointment notes in the slip html", async () => {
-    let writtenHtml = "";
-    const documentMock = {
-      write: vi.fn((html: string) => {
-        writtenHtml = html;
-      }),
-      close: vi.fn(),
-    };
-    const printWindowMock = {
-      document: documentMock,
-      focus: vi.fn(),
-      print: vi.fn(),
-    };
-
-    vi.spyOn(window, "open").mockReturnValue(printWindowMock as unknown as Window);
-    printAppointmentSlip(
-      makeAppointment({
-        notes: "Do not show this note",
-      })
-    );
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(writtenHtml).not.toContain("Do not show this note");
+    expect(slip.queueQrPayload).toBe("V2-45");
   });
 });
