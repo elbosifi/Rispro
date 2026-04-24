@@ -1,6 +1,9 @@
 export { Button } from "./Button";
 export { Card } from "./Card";
 export { Input } from "./Input";
+export { Textarea } from "./Textarea";
+export { Checkbox } from "./Checkbox";
+export { Switch } from "./Switch";
 export { SearchInput } from "./SearchInput";
 export { Badge } from "./Badge";
 export { SectionLabel } from "./SectionLabel";
@@ -9,3 +12,5 @@ export { EmptyState } from "./EmptyState";
 export { ErrorState } from "./ErrorState";
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from "./Table";
 export { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "./Dialog";
+export { Tabs, TabsList, TabsTrigger, TabsContent } from "./Tabs";
+export { Alert, AlertTitle, AlertDescription } from "./Alert";

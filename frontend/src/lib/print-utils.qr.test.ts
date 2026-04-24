@@ -115,4 +115,29 @@ describe("printAppointmentSlip QR", () => {
     expect(writtenHtml).toContain("Exam prep");
     expect(writtenHtml.indexOf("Modality prep")).toBeLessThan(writtenHtml.indexOf("Exam prep"));
   });
+
+  it("does not render appointment notes in the slip html", async () => {
+    let writtenHtml = "";
+    const documentMock = {
+      write: vi.fn((html: string) => {
+        writtenHtml = html;
+      }),
+      close: vi.fn(),
+    };
+    const printWindowMock = {
+      document: documentMock,
+      focus: vi.fn(),
+      print: vi.fn(),
+    };
+
+    vi.spyOn(window, "open").mockReturnValue(printWindowMock as unknown as Window);
+    printAppointmentSlip(
+      makeAppointment({
+        notes: "Do not show this note",
+      })
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(writtenHtml).not.toContain("Do not show this note");
+  });
 });

@@ -1,6 +1,7 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import QRCode from "qrcode";
+import { jsPDF } from "jspdf";
 
 function escapeHtml(str: string = ""): string {
   return String(str)
@@ -42,14 +43,6 @@ function formatSlipDate(isoDate: string): string {
   });
 }
 
-function toTitleCase(input: string): string {
-  return input
-    .split(/[_\s-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
-    .join(" ");
-}
-
 function generateBarcodeDataUri(value: string): string {
   const clean = value.trim() || "APPOINTMENT";
   const bars: Array<{ x: number; w: number }> = [];
@@ -77,6 +70,340 @@ function generateBarcodeDataUri(value: string): string {
 
 function normalizeInlineSvg(svg: string): string {
   return svg.replace(/^<\?xml[\s\S]*?\?>\s*/i, "").trim();
+}
+
+export interface AppointmentSlipData {
+  hospitalName: string;
+  departmentName: string;
+  patientName: string;
+  patientId: string;
+  accessionNumber: string;
+  modality: string;
+  examName: string;
+  appointmentDate: string;
+  queueQrPayload: string;
+  accessionBarcodePayload: string;
+}
+
+interface AppointmentSlipRenderData extends AppointmentSlipData {
+  modalityInstructions: string;
+  examInstructions: string;
+  phone: string;
+  generatedAt: string;
+  arrivalNote: string;
+}
+
+type AppointmentSlipPdfMode = "blank" | "preprinted";
+
+const A5_WIDTH_PT = 419.53;
+const A5_HEIGHT_PT = 595.28;
+const MM_TO_PT = 72 / 25.4;
+const PREPRINTED_SAFE_AREA = {
+  left: 12 * MM_TO_PT,
+  top: 18 * MM_TO_PT,
+  right: 12 * MM_TO_PT,
+  bottom: 18 * MM_TO_PT,
+};
+
+function mm(value: number): number {
+  return value * MM_TO_PT;
+}
+
+function shorten(value: string, maxLength: number): string {
+  const normalized = String(value || "").trim();
+  if (normalized.length <= maxLength) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
+  const cleaned = String(value || "").trim();
+  if (!cleaned) return ["—"];
+  const lines = doc.splitTextToSize(cleaned, maxWidth) as string[];
+  if (lines.length <= maxLines) return lines;
+  const visible = lines.slice(0, maxLines);
+  visible[maxLines - 1] = shorten(visible[maxLines - 1], Math.max(12, visible[maxLines - 1].length - 1));
+  return visible;
+}
+
+function drawBox(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  options?: { fill?: string; stroke?: string; radius?: number }
+) {
+  const fill = options?.fill ?? "#ffffff";
+  const stroke = options?.stroke ?? "#d1d5db";
+  const radius = options?.radius ?? 4;
+  doc.setFillColor(fill);
+  doc.setDrawColor(stroke);
+  doc.roundedRect(x, y, w, h, radius, radius, "FD");
+}
+
+function drawLabelValueBox(
+  doc: jsPDF,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  label: string,
+  value: string,
+  options?: { labelColor?: string; valueColor?: string; maxLines?: number }
+) {
+  const labelColor = options?.labelColor ?? "#b11116";
+  const valueColor = options?.valueColor ?? "#0f1115";
+  const maxLines = options?.maxLines ?? 2;
+  drawBox(doc, x, y, w, h, { fill: "#ffffff", stroke: "#d3d4d6", radius: 4 });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(labelColor);
+  doc.text(shorten(label.toUpperCase(), 24), x + 6, y + 10, { baseline: "top" });
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor(valueColor);
+  const valueLines = wrapLines(doc, value, w - 12, maxLines);
+  doc.text(valueLines, x + 6, y + 20, { baseline: "top", lineHeightFactor: 1.15 });
+}
+
+function buildBarcodeBars(value: string): Array<{ x: number; w: number }> {
+  const clean = value.trim() || "APPOINTMENT";
+  const bars: Array<{ x: number; w: number }> = [];
+  let x = 16;
+  for (let i = 0; i < clean.length; i += 1) {
+    const code = clean.charCodeAt(i);
+    const pattern = [1, 2, 1, 3, 2, 1, 2, 3];
+    for (let j = 0; j < pattern.length; j += 1) {
+      const width = ((code + j * 3) % 3) + pattern[j];
+      if (j % 2 === 0) {
+        bars.push({ x, w: width });
+      }
+      x += width + 1;
+    }
+    x += 3;
+  }
+  return bars;
+}
+
+async function toDataUrl(blob: Blob): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read blob"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function loadImageDataUrl(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    return await toDataUrl(await response.blob());
+  } catch {
+    return null;
+  }
+}
+
+export function buildAppointmentSlipData(apt: AppointmentWithDetails): AppointmentSlipRenderData {
+  const token = String(apt.publicCancelToken || "").trim();
+  const cancelUrl =
+    token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : "";
+  const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
+  return {
+    hospitalName: "National Cancer Center Benghazi",
+    departmentName: "Diagnostic Radiology Department",
+    patientName: apt.englishFullName || apt.arabicFullName || "—",
+    patientId: apt.mrn || apt.nationalId || "—",
+    accessionNumber: accession,
+    modality: apt.modalityNameEn || "—",
+    examName: apt.examNameEn || "—",
+    appointmentDate: formatSlipDate(apt.appointmentDate),
+    queueQrPayload: cancelUrl || accession,
+    accessionBarcodePayload: accession,
+    modalityInstructions: String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim(),
+    examInstructions: String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim(),
+    phone: apt.phone1 || "—",
+    generatedAt: new Date().toLocaleString(),
+    arrivalNote: "Please arrive 15 minutes before your appointment",
+  };
+}
+
+export async function createAppointmentSlipPdfBlob(
+  apt: AppointmentWithDetails,
+  mode: AppointmentSlipPdfMode = "blank"
+): Promise<Blob> {
+  const slip = buildAppointmentSlipData(apt);
+  const doc = new jsPDF({
+    orientation: "portrait",
+    unit: "pt",
+    format: [A5_WIDTH_PT, A5_HEIGHT_PT],
+    compress: true,
+  });
+
+  // Blank-paper mode uses the full sheet. Preprinted mode stays inside the explicit middle safe area.
+  const page = {
+    x: 0,
+    y: 0,
+    w: A5_WIDTH_PT,
+    h: A5_HEIGHT_PT,
+  };
+  const safe = mode === "preprinted"
+    ? {
+        x: PREPRINTED_SAFE_AREA.left,
+        y: PREPRINTED_SAFE_AREA.top,
+        w: page.w - PREPRINTED_SAFE_AREA.left - PREPRINTED_SAFE_AREA.right,
+        h: page.h - PREPRINTED_SAFE_AREA.top - PREPRINTED_SAFE_AREA.bottom,
+      }
+    : {
+        x: mm(10),
+        y: mm(10),
+        w: page.w - mm(20),
+        h: page.h - mm(20),
+      };
+
+  const headerHeight = mode === "blank" ? 88 : 0;
+  const footerHeight = mode === "blank" ? 56 : 0;
+  const qrSize = mode === "blank" ? 72 : 66;
+  const barcodeHeight = 44;
+  const detailsTop = safe.y + headerHeight + (mode === "blank" ? 8 : 0);
+  const detailsLeft = safe.x;
+  const detailsWidth = safe.w;
+  const columnGap = 8;
+  const fieldWidth = (detailsWidth - columnGap) / 2;
+  const fieldHeight = 30;
+  const rowGap = 5;
+
+  doc.setTextColor("#111827");
+  doc.setFillColor("#ffffff");
+  doc.rect(page.x, page.y, page.w, page.h, "F");
+
+  if (mode === "blank") {
+    const logoDataUrl = await loadImageDataUrl(`${window.location.origin}/assets/nccb-logo.png`);
+    if (logoDataUrl) {
+      doc.addImage(logoDataUrl, "PNG", safe.x, safe.y, 52, 52);
+    } else {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.text("NCCB", safe.x, safe.y + 18);
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor("#b11116");
+    doc.text(slip.hospitalName, safe.x + 58, safe.y + 12);
+    doc.setFontSize(9.5);
+    doc.setTextColor("#1f2937");
+    doc.text(slip.departmentName, safe.x + 58, safe.y + 27);
+    doc.setFontSize(22);
+    doc.setTextColor("#b11116");
+    doc.text("APPOINTMENT SLIP", safe.x + 58, safe.y + 52);
+
+    const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
+    doc.setDrawColor("#e2676d");
+    doc.setLineWidth(1);
+    doc.roundedRect(page.w - safe.x - qrSize - 2, safe.y, qrSize + 2, qrSize + 2, 6, 6, "S");
+    doc.addImage(qrDataUrl, "PNG", page.w - safe.x - qrSize - 1, safe.y + 1, qrSize, qrSize);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor("#b11116");
+    doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor("#374151");
+    doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
+  }
+
+  const rows = [
+    { leftLabel: "Patient Name", leftValue: slip.patientName, rightLabel: "MRN / Patient ID", rightValue: slip.patientId },
+    { leftLabel: "Appointment No.", leftValue: slip.accessionNumber, rightLabel: "Date", rightValue: slip.appointmentDate },
+    { leftLabel: "Modality", leftValue: slip.modality, rightLabel: "Exam", rightValue: slip.examName },
+    { leftLabel: "Age / Sex", leftValue: `${apt.ageYears || "—"} / ${apt.sex || "—"}`, rightLabel: "Walk-In", rightValue: apt.isWalkIn ? "Yes" : "No" },
+    { leftLabel: "Phone", leftValue: slip.phone, rightLabel: "Arrival", rightValue: slip.arrivalNote },
+  ] as const;
+
+  rows.forEach((row, index) => {
+    const rowY = detailsTop + index * (fieldHeight + rowGap);
+    drawLabelValueBox(doc, detailsLeft, rowY, fieldWidth, fieldHeight, row.leftLabel, row.leftValue, { maxLines: 2 });
+    drawLabelValueBox(doc, detailsLeft + fieldWidth + columnGap, rowY, fieldWidth, fieldHeight, row.rightLabel, row.rightValue, { maxLines: 2 });
+  });
+
+  const prepTop = detailsTop + rows.length * (fieldHeight + rowGap) + (mode === "blank" ? 4 : 8);
+  const prepWidth = detailsWidth;
+  if (slip.modalityInstructions || slip.examInstructions) {
+    drawBox(doc, detailsLeft, prepTop, prepWidth, mode === "blank" ? 82 : 72, {
+      fill: "#ffffff",
+      stroke: "#e2676d",
+      radius: 6,
+    });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#b11116");
+    doc.text("Modality Instructions", detailsLeft + 8, prepTop + 10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor("#20242a");
+    doc.text(wrapLines(doc, slip.modalityInstructions || "Please follow the department preparation instructions.", prepWidth - 16, 2), detailsLeft + 8, prepTop + 22, {
+      baseline: "top",
+      lineHeightFactor: 1.15,
+    });
+
+    if (slip.examInstructions) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor("#b11116");
+      doc.text("Exam Preparation", detailsLeft + 8, prepTop + 48);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor("#20242a");
+      doc.text(wrapLines(doc, slip.examInstructions, prepWidth - 16, 2), detailsLeft + 8, prepTop + 60, {
+        baseline: "top",
+        lineHeightFactor: 1.15,
+      });
+    }
+  }
+
+  if (mode === "blank") {
+    const footerY = page.h - safe.y - footerHeight + 6;
+    doc.setDrawColor("#d3d4d6");
+    doc.setLineWidth(0.5);
+    doc.line(detailsLeft, footerY - 10, detailsLeft + prepWidth, footerY - 10);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#b11116");
+    doc.text("Please arrive 15 minutes before your appointment", detailsLeft, footerY);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#1f2937");
+    doc.text(`Phone ${slip.phone}`, detailsLeft + 172, footerY);
+    doc.text(`Printed: ${slip.generatedAt}`, detailsLeft, footerY + 12);
+  }
+
+  const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 4 : 0);
+  const bars = buildBarcodeBars(slip.accessionBarcodePayload);
+  const barPadding = 14;
+  const barWidth = page.w - safe.x * 2 - barPadding * 2;
+  const scale = barWidth / Math.max(1, bars.at(-1)?.x ?? 1);
+  doc.setDrawColor("#b11116");
+  doc.setFillColor("#111111");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9.5);
+  doc.setTextColor("#b11116");
+  doc.text("Scan to enter the queue", detailsLeft + prepWidth / 2, barcodeY - 10, { align: "center" });
+  doc.setLineWidth(0.5);
+  doc.roundedRect(detailsLeft, barcodeY, prepWidth, barcodeHeight, 6, 6, "S");
+  const baseX = detailsLeft + barPadding;
+  const baseY = barcodeY + 6;
+  const barHeight = barcodeHeight - 12;
+  for (const bar of bars) {
+    doc.rect(baseX + bar.x * scale, baseY, Math.max(0.8, bar.w * scale), barHeight, "F");
+  }
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor("#1f2937");
+  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + prepWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
+
+  return doc.output("blob");
 }
 
 async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<void> {
@@ -113,51 +440,38 @@ async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<voi
   });
 }
 
-const PDF_VIEWPORT_WIDTH = 560;
-const PDF_VIEWPORT_HEIGHT = 794;
-
 export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): Promise<string> {
-  const token = String(apt.publicCancelToken || "").trim();
-  const cancelUrl =
-    token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : null;
+  const slip = buildAppointmentSlipData(apt);
   let qrSvg: string | null = null;
-  if (cancelUrl) {
+  if (slip.queueQrPayload) {
     try {
-      qrSvg = normalizeInlineSvg(await QRCode.toString(cancelUrl, { type: "svg", width: 120, margin: 1 }));
+      qrSvg = normalizeInlineSvg(await QRCode.toString(slip.queueQrPayload, { type: "svg", width: 120, margin: 1 }));
     } catch {
       qrSvg = null;
     }
   }
   const logoUrl = `${window.location.origin}/assets/nccb-logo.png`;
-  const barcodeSvg = generateBarcodeDataUri(apt.accessionNumber || `V2-${apt.id}`);
-  const now = new Date().toLocaleString();
-  const rawCaseCategory = (apt as { caseCategory?: string }).caseCategory;
-  const categoryLabel = rawCaseCategory ? toTitleCase(rawCaseCategory) : "—";
-  const modalityPreparation = String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim();
-  const examPreparation = String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim();
+  const barcodeSvg = generateBarcodeDataUri(slip.accessionBarcodePayload);
+  const now = slip.generatedAt;
   const rows = [
     slipRow(
-      slipField("Patient Name", apt.englishFullName || apt.arabicFullName || "—"),
-      slipField("MRN / Patient ID", apt.mrn || apt.nationalId || "—")
+      slipField("Patient Name", slip.patientName),
+      slipField("MRN / Patient ID", slip.patientId)
     ),
     slipRow(
-      slipField("Appointment No.", apt.accessionNumber || `V2-${apt.id}`),
-      slipField("Date", formatSlipDate(apt.appointmentDate), true)
+      slipField("Appointment No.", slip.accessionNumber),
+      slipField("Date", slip.appointmentDate, true)
     ),
     slipRow(
-      slipField("Modality", apt.modalityNameEn || "—"),
-      slipField("Exam", apt.examNameEn || "—")
+      slipField("Modality", slip.modality),
+      slipField("Exam", slip.examName)
     ),
     slipRow(
-      slipField("Category", categoryLabel),
-      slipField("Phone", apt.phone1 || "—")
-    ),
-    slipRow(
-      slipField("Age / Sex", `${apt.ageYears || "—"} / ${apt.sex || "—"}`),
-      slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")
+      slipField("Phone", slip.phone),
+      slipField("Arrival", slip.arrivalNote)
     ),
   ];
-  const hasPrepContent = Boolean(modalityPreparation || examPreparation);
+  const hasPrepContent = Boolean(slip.modalityInstructions || slip.examInstructions);
   return `
     <html>
       <head>
@@ -344,14 +658,14 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
               ? `
                 <div class="prep">
                   <div class="prep-label">Modality Instructions</div>
-                  <p class="prep-text">${escapeHtml(modalityPreparation || "Please follow the department preparation instructions.")}</p>
+                  <p class="prep-text">${escapeHtml(slip.modalityInstructions || "Please follow the department preparation instructions.")}</p>
                 </div>
                 ${
-                  examPreparation
+                  slip.examInstructions
                     ? `
                       <div class="prep">
                         <div class="prep-label">Exam Preparation</div>
-                        <p class="prep-text">${escapeHtml(examPreparation)}</p>
+                        <p class="prep-text">${escapeHtml(slip.examInstructions)}</p>
                       </div>
                     `
                     : ""
@@ -369,11 +683,11 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
           <div class="meta-strip">
             <div class="meta-item">
               <span class="meta-icon">T</span>
-              <div class="meta-text">Please arrive <strong>15 minutes</strong> before your appointment</div>
+              <div class="meta-text">${escapeHtml(slip.arrivalNote)}</div>
             </div>
             <div class="meta-item">
               <span class="meta-icon">P</span>
-              <div class="meta-text">Phone <strong>${escapeHtml(apt.phone1 || "—")}</strong></div>
+              <div class="meta-text">Phone <strong>${escapeHtml(slip.phone)}</strong></div>
             </div>
             <div class="meta-item">
               <span class="meta-icon">R</span>
@@ -402,63 +716,19 @@ function getAppointmentSlipFileName(apt: AppointmentWithDetails): string {
 }
 
 export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): Promise<void> {
-  const html = await prepareAppointmentSlipHtml(apt);
-  const frame = document.createElement("iframe");
-  frame.setAttribute("aria-hidden", "true");
-  frame.style.position = "fixed";
-  frame.style.left = "-10000px";
-  frame.style.top = "0";
-  frame.style.width = `${PDF_VIEWPORT_WIDTH}px`;
-  frame.style.height = `${PDF_VIEWPORT_HEIGHT}px`;
-  frame.style.border = "0";
-  frame.style.visibility = "hidden";
-
-  try {
-    const loaded = new Promise<void>((resolve) => {
-      frame.addEventListener("load", () => resolve(), { once: true });
-    });
-    frame.srcdoc = html;
-    document.body.appendChild(frame);
-    await loaded;
-
-    const doc = frame.contentDocument;
-    if (!doc?.body) return;
-
-    doc.documentElement.style.width = `${PDF_VIEWPORT_WIDTH}px`;
-    doc.documentElement.style.margin = "0";
-    doc.body.style.width = `${PDF_VIEWPORT_WIDTH}px`;
-    doc.body.style.margin = "0";
-
-    await waitForImagesToLoad(doc);
-
-    const { default: html2pdf } = await import("html2pdf.js");
-    const content = (doc.body.firstElementChild as HTMLElement | null) ?? doc.body;
-
-    await html2pdf()
-      .set({
-        filename: getAppointmentSlipFileName(apt),
-        margin: 0,
-        image: { type: "jpeg", quality: 1 },
-        enableLinks: true,
-        pagebreak: { mode: ["avoid-all", "css", "legacy"] },
-        html2canvas: {
-          backgroundColor: "#ffffff",
-          scale: 2,
-          useCORS: true,
-          windowWidth: PDF_VIEWPORT_WIDTH,
-          windowHeight: PDF_VIEWPORT_HEIGHT,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a5",
-          orientation: "portrait",
-        },
-      } as any)
-      .from(content)
-      .save();
-  } finally {
-    frame.remove();
-  }
+  const blob = await createAppointmentSlipPdfBlob(apt, "blank");
+  const fileName = getAppointmentSlipFileName(apt);
+  const anchor = document.createElement("a");
+  anchor.href = URL.createObjectURL(blob);
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(anchor.href);
+    anchor.remove();
+  }, 1000);
 }
 
 export function printAppointmentSlip(apt: AppointmentWithDetails): void {

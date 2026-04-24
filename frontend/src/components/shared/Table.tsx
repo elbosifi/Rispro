@@ -3,7 +3,7 @@ import { HTMLAttributes, forwardRef } from "react";
 const Table = forwardRef<HTMLTableElement, HTMLAttributes<HTMLTableElement>>(
   ({ className = "", children, ...props }, ref) => {
     return (
-      <table ref={ref} className={`w-full text-sm ${className}`} {...props}>
+      <table ref={ref} className={`w-full text-sm ${className}`.trim()} {...props}>
         {children}
       </table>
     );
@@ -15,7 +15,7 @@ const TableHeader = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTable
     return (
       <thead
         ref={ref}
-        className={`border-b sticky top-0 bg-muted/50 backdrop-blur ${className}`}
+        className={`border-b sticky top-0 bg-muted/50 backdrop-blur ${className}`.trim()}
         style={{ borderColor: "var(--border)" }}
         {...props}
       >
@@ -30,7 +30,7 @@ const TableBody = forwardRef<HTMLTableSectionElement, HTMLAttributes<HTMLTableSe
     return (
       <tbody
         ref={ref}
-        className={`divide-y ${className}`}
+        className={`divide-y ${className}`.trim()}
         style={{ borderColor: "var(--border)" }}
         {...props}
       >
@@ -45,7 +45,7 @@ const TableRow = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTableRowElem
     return (
       <tr
         ref={ref}
-        className={`transition-colors hover:bg-muted ${className}`}
+        className={`transition-colors hover:bg-muted ${className}`.trim()}
         {...props}
       >
         {children}
@@ -59,7 +59,7 @@ const TableHead = forwardRef<HTMLTableCellElement, HTMLAttributes<HTMLTableCellE
     return (
       <th
         ref={ref}
-        className={`text-left p-3 font-bold text-xs uppercase tracking-[0.08em] text-muted-foreground ${className}`}
+        className={`text-left px-3 py-[var(--table-cell-padding-y)] font-bold text-xs uppercase tracking-[0.08em] text-muted-foreground ${className}`.trim()}
         style={{ color: "var(--text-muted)" }}
         {...props}
       >
@@ -74,7 +74,7 @@ const TableCell = forwardRef<HTMLTableCellElement, HTMLAttributes<HTMLTableCellE
     return (
       <td
         ref={ref}
-        className={`p-3 ${className}`}
+        className={`px-3 py-[var(--table-cell-padding-y)] ${className}`.trim()}
         {...props}
       >
         {children}

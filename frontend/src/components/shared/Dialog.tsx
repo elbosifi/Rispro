@@ -106,6 +106,8 @@ const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(
           backgroundColor: "var(--background)",
           border: "1px solid var(--border)",
           boxShadow: "var(--shadow-floating)",
+          maxHeight: "calc(100vh - 32px)",
+          overflow: "auto",
         }}
         className={className}
       >

@@ -13,10 +13,10 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
     const baseClass = `btn-${variant}`;
     
     const sizeClasses = {
-      sm: "h-10 px-3 text-sm",
-      default: "h-12 px-4",
-      lg: "h-14 px-6 text-base",
-      icon: "w-12 h-12 p-0"
+      sm: "h-[var(--control-height-sm)] px-3 text-sm",
+      default: "h-[var(--control-height-md)] px-4",
+      lg: "h-[var(--control-height-lg)] px-6 text-base",
+      icon: "w-[var(--control-height-md)] h-[var(--control-height-md)] p-0"
     };
 
     return (

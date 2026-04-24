@@ -67,6 +67,9 @@
   --background: #FAFAFA;
   /* Primary text and inverted backgrounds */
   --foreground: #0F172A;
+  /* Back-compat aliases used by older screens */
+  --text: var(--foreground);
+  --text-muted: var(--muted-foreground);
   /* Secondary surfaces, card backgrounds */
   --muted: #F1F5F9;
   /* Secondary text, descriptions */
@@ -81,18 +84,22 @@
   --border: #E2E8F0;
   /* Elevated surfaces */
   --card: #FFFFFF;
+  --surface: var(--card);
 
   /* Semantic status colors */
   --green: #22c55e;
   --amber: #f59e0b;
   --blue: #3b82f6;
   --violet: #8b5cf6;
+  --red: #ef4444;
 
   /* --- Shadow System --- */
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 6px rgba(0,0,0,0.07);
   --shadow-lg: 0 10px 15px rgba(0,0,0,0.08);
   --shadow-xl: 0 20px 25px rgba(0,0,0,0.1);
+  --shadow-card: var(--shadow-md);
+  --shadow-floating: var(--shadow-xl);
   --shadow-accent: 0 4px 14px rgba(0,82,255,0.25);
   --shadow-accent-lg: 0 8px 24px rgba(0,82,255,0.35);
 
@@ -108,6 +115,62 @@
   --font-display: "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   --font-body: "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
   --font-mono: "Noto Sans Arabic", "Segoe UI", Tahoma, Arial, sans-serif;
+
+  /* --- Control sizing --- */
+  --control-height-sm: 36px;
+  --control-height-md: 46px;
+  --control-height-lg: 54px;
+  --control-padding-x: 0.95rem;
+  --control-padding-y: 0.6rem;
+  --panel-padding: 1rem;
+  --table-cell-padding-y: 0.7rem;
+
+  /* --- Canonical operational state palette --- */
+  --state-available-bg: rgba(34, 197, 94, 0.1);
+  --state-available-border: rgba(34, 197, 94, 0.28);
+  --state-available-text: #166534;
+  --state-blocked-bg: rgba(15, 23, 42, 0.06);
+  --state-blocked-border: rgba(185, 28, 28, 0.22);
+  --state-blocked-text: #991b1b;
+  --state-restricted-bg: rgba(245, 158, 11, 0.1);
+  --state-restricted-border: rgba(245, 158, 11, 0.28);
+  --state-restricted-text: #92400e;
+  --state-full-bg: rgba(100, 116, 139, 0.1);
+  --state-full-border: rgba(100, 116, 139, 0.24);
+  --state-full-text: #334155;
+  --state-override-bg: rgba(139, 92, 246, 0.1);
+  --state-override-border: rgba(139, 92, 246, 0.25);
+  --state-override-text: #6d28d9;
+  --state-disabled-bg: rgba(148, 163, 184, 0.12);
+  --state-disabled-border: rgba(148, 163, 184, 0.18);
+  --state-disabled-text: #64748b;
+  --state-warning-bg: rgba(245, 158, 11, 0.12);
+  --state-warning-border: rgba(245, 158, 11, 0.25);
+  --state-warning-text: #b45309;
+  --state-success-bg: rgba(34, 197, 94, 0.1);
+  --state-success-border: rgba(34, 197, 94, 0.25);
+  --state-success-text: #15803d;
+  --state-error-bg: rgba(239, 68, 68, 0.1);
+  --state-error-border: rgba(239, 68, 68, 0.25);
+  --state-error-text: #b91c1c;
+  --state-loading-bg: rgba(59, 130, 246, 0.08);
+  --state-loading-border: rgba(59, 130, 246, 0.18);
+  --state-loading-text: #1d4ed8;
+  --state-draft-bg: rgba(148, 163, 184, 0.12);
+  --state-draft-border: rgba(148, 163, 184, 0.2);
+  --state-draft-text: #475569;
+  --state-live-bg: rgba(0, 82, 255, 0.1);
+  --state-live-border: rgba(0, 82, 255, 0.22);
+  --state-live-text: #0052ff;
+  --state-legacy-bg: rgba(107, 114, 128, 0.12);
+  --state-legacy-border: rgba(107, 114, 128, 0.18);
+  --state-legacy-text: #374151;
+  --state-v2-bg: rgba(59, 130, 246, 0.1);
+  --state-v2-border: rgba(59, 130, 246, 0.22);
+  --state-v2-text: #1d4ed8;
+  --state-v3-bg: rgba(0, 82, 255, 0.12);
+  --state-v3-border: rgba(0, 82, 255, 0.24);
+  --state-v3-text: #0052ff;
 }
 
 /* --- Typography & Base --- */
@@ -371,7 +434,7 @@ body::before {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-md);
+  box-shadow: var(--shadow-card);
   padding: 1.5rem;
   transition: all 300ms ease-out;
   position: relative;
@@ -406,13 +469,13 @@ body::before {
   color: var(--foreground);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  padding: 0.6rem 0.95rem;
+  padding: var(--control-padding-y) var(--control-padding-x);
   font-family: var(--font-body);
   font-size: 0.9rem;
   font-weight: 500;
   outline: none;
   transition: all 200ms ease-out;
-  min-height: 46px;
+  min-height: var(--control-height-md);
   width: 100%;
   box-shadow: var(--shadow-sm);
 }
@@ -521,6 +584,80 @@ body::before {
 .icon-housing--lg {
   width: 64px;
   height: 64px;
+}
+
+/* --- Shared state chips / banners --- */
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  width: fit-content;
+}
+
+.state-chip--available { background: var(--state-available-bg); border-color: var(--state-available-border); color: var(--state-available-text); }
+.state-chip--blocked { background: var(--state-blocked-bg); border-color: var(--state-blocked-border); color: var(--state-blocked-text); }
+.state-chip--restricted { background: var(--state-restricted-bg); border-color: var(--state-restricted-border); color: var(--state-restricted-text); }
+.state-chip--full { background: var(--state-full-bg); border-color: var(--state-full-border); color: var(--state-full-text); }
+.state-chip--requires_override { background: var(--state-override-bg); border-color: var(--state-override-border); color: var(--state-override-text); }
+.state-chip--selected { background: var(--state-live-bg); border-color: var(--state-live-border); color: var(--state-live-text); }
+.state-chip--disabled { background: var(--state-disabled-bg); border-color: var(--state-disabled-border); color: var(--state-disabled-text); }
+.state-chip--warning { background: var(--state-warning-bg); border-color: var(--state-warning-border); color: var(--state-warning-text); }
+.state-chip--success { background: var(--state-success-bg); border-color: var(--state-success-border); color: var(--state-success-text); }
+.state-chip--error { background: var(--state-error-bg); border-color: var(--state-error-border); color: var(--state-error-text); }
+.state-chip--info { background: var(--state-loading-bg); border-color: var(--state-loading-border); color: var(--state-loading-text); }
+.state-chip--loading { background: var(--state-loading-bg); border-color: var(--state-loading-border); color: var(--state-loading-text); }
+.state-chip--draft { background: var(--state-draft-bg); border-color: var(--state-draft-border); color: var(--state-draft-text); }
+.state-chip--live { background: var(--state-live-bg); border-color: var(--state-live-border); color: var(--state-live-text); }
+.state-chip--legacy { background: var(--state-legacy-bg); border-color: var(--state-legacy-border); color: var(--state-legacy-text); }
+.state-chip--v2 { background: var(--state-v2-bg); border-color: var(--state-v2-border); color: var(--state-v2-text); }
+.state-chip--v3 { background: var(--state-v3-bg); border-color: var(--state-v3-border); color: var(--state-v3-text); }
+
+.alert-shell {
+  border-radius: var(--radius-lg);
+  border: 1px solid transparent;
+  padding: 0.9rem 1rem;
+  box-shadow: var(--shadow-sm);
+}
+
+.alert-shell--success { background: var(--state-success-bg); border-color: var(--state-success-border); color: var(--state-success-text); }
+.alert-shell--warning { background: var(--state-warning-bg); border-color: var(--state-warning-border); color: var(--state-warning-text); }
+.alert-shell--error { background: var(--state-error-bg); border-color: var(--state-error-border); color: var(--state-error-text); }
+.alert-shell--info { background: var(--state-loading-bg); border-color: var(--state-loading-border); color: var(--state-loading-text); }
+
+.tabs-shell {
+  display: inline-flex;
+  gap: 0.35rem;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabs-trigger {
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 0.5rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  transition: all 180ms ease-out;
+}
+
+.tabs-trigger[data-state="active"] {
+  background: var(--card);
+  color: var(--accent);
+  border-color: rgba(0, 82, 255, 0.18);
+  box-shadow: var(--shadow-sm);
+}
+
+.tabs-trigger[data-state="inactive"] {
+  color: var(--muted-foreground);
 }
 
 /* --- Monospace Data Display --- */
