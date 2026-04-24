@@ -6,6 +6,7 @@ import { createBooking } from "../../booking/services/create-booking.service.js"
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
+import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -31,6 +32,7 @@ function parseBookingIdFromScan(scanValue: string): number | null {
 router.get(
   "/appointments",
   asyncRoute(async (req: Request, res: Response) => {
+    const patientQrSettings = await readPatientQrSettings();
     const query = req.query as Record<string, unknown>;
     const date = typeof query.date === "string" ? query.date : "";
     const dateFrom = typeof query.dateFrom === "string" ? query.dateFrom : "";
@@ -137,7 +139,10 @@ router.get(
     const result = await pool.query(sql, params);
     const appointments = result.rows.map((row) => ({
       ...row,
-      public_cancel_token: issuePublicCancelToken(Number(row.id)),
+      public_cancel_token:
+        patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
+          ? issuePublicCancelToken(Number(row.id))
+          : null,
     }));
 
     res.json({ appointments });
@@ -147,6 +152,7 @@ router.get(
 router.get(
   "/appointments/:id",
   asyncRoute(async (req: Request, res: Response) => {
+    const patientQrSettings = await readPatientQrSettings();
     const bookingId = Number(req.params.id);
     if (!Number.isInteger(bookingId) || bookingId <= 0) {
       res.status(400).json({ error: "Invalid booking ID" });
@@ -214,7 +220,10 @@ router.get(
     res.json({
       appointment: {
         ...appointment,
-        public_cancel_token: issuePublicCancelToken(bookingId),
+        public_cancel_token:
+          patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
+            ? issuePublicCancelToken(bookingId)
+            : null,
       },
     });
   })

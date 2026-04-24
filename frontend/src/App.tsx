@@ -222,6 +222,7 @@ function RouterConfig() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route
         path="/*"

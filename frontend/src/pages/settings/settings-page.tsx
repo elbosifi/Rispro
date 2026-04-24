@@ -49,6 +49,7 @@ import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
 import PacsSettingsSection from "./pacs-settings-section";
+import PatientQrSettingsSection from "./patient-qr-settings-section";
 import type {
   User,
   SchedulingEngineConfig,
@@ -159,6 +160,7 @@ type SettingsSection =
   | "exam_types"
   | "modalities"
   | "name_dictionary"
+  | "patient_qr_self_service"
   | "documents_and_uploads"
   | "backup_restore";
 
@@ -178,6 +180,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "exam_types",
   "modalities",
   "name_dictionary",
+  "patient_qr_self_service",
   "documents_and_uploads",
   "backup_restore"
 ];
@@ -185,6 +188,9 @@ const SECTION_KEYS: SettingsSection[] = [
 function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
   if (section === "patient_import") {
     return "Patient Import";
+  }
+  if (section === "patient_qr_self_service") {
+    return "إعدادات صفحة المريض ورمز QR";
   }
   return _t(`settings.section.${section}` as TranslationKey);
 }
@@ -260,6 +266,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
+            {section === "patient_qr_self_service" && <PatientQrSettingsSection />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

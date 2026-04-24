@@ -64,13 +64,13 @@ describe("appointment slip QR payloads", () => {
   it("builds the cancellation QR payload from the public token when present", () => {
     const slip = buildAppointmentSlipData(makeAppointment());
 
-    expect(slip.queueQrPayload).toBe("http://localhost:3000/public/cancel-appointment?t=signed-token");
+    expect(slip.queueQrPayload).toBe("http://localhost:3000/public/appointment?t=signed-token");
     expect(slip.accessionBarcodePayload).toBe("V2-45");
   });
 
-  it("falls back to the accession number when no public token exists", () => {
+  it("omits the QR payload when no public token exists", () => {
     const slip = buildAppointmentSlipData(makeAppointment({ publicCancelToken: null }));
 
-    expect(slip.queueQrPayload).toBe("V2-45");
+    expect(slip.queueQrPayload).toBe("");
   });
 });

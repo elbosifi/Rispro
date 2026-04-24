@@ -344,9 +344,20 @@ export interface PublicAppointmentCancelPreview {
   bookingId: number;
   patientDisplayName: string;
   bookingDate: string;
-  modalityName: string;
-  examName: string;
+  bookingTime?: string;
+  accessionNumber?: string;
+  modalityName?: string;
+  modalityNameAr?: string;
+  modalityNameEn?: string;
+  examName?: string;
+  examNameAr?: string;
+  examNameEn?: string;
+  modalityInstructionAr?: string;
+  modalityInstructionEn?: string;
+  examInstructionAr?: string;
+  examInstructionEn?: string;
   currentStatus: string;
+  patientQrSettings?: PatientQrSettings;
 }
 
 export interface PublicAppointmentCancelResult {
@@ -359,16 +370,27 @@ export interface PublicAppointmentCancelResult {
 
 export async function fetchPublicAppointmentCancelPreview(token: string): Promise<PublicAppointmentCancelPreview> {
   const query = new URLSearchParams({ t: token });
-  const raw = await api<{ preview: RawRecord }>(`/public/appointments/cancel-preview?${query.toString()}`);
+  const raw = await api<{ preview: RawRecord; settings?: RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
   const preview = raw.preview ?? {};
 
   return {
     bookingId: Number(preview.bookingId ?? preview.booking_id ?? 0),
     patientDisplayName: String(preview.patientDisplayName ?? preview.patient_display_name ?? ""),
     bookingDate: String(preview.bookingDate ?? preview.booking_date ?? ""),
-    modalityName: String(preview.modalityName ?? preview.modality_name ?? "—"),
-    examName: String(preview.examName ?? preview.exam_name ?? "—"),
+    bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
+    accessionNumber: String(preview.accessionNumber ?? preview.accession_number ?? ""),
+    modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "—"),
+    modalityNameAr: String(preview.modalityNameAr ?? preview.modality_name_ar ?? ""),
+    modalityNameEn: String(preview.modalityNameEn ?? preview.modality_name_en ?? ""),
+    examName: String(preview.examName ?? preview.exam_name ?? preview.examNameAr ?? preview.exam_name_ar ?? "—"),
+    examNameAr: String(preview.examNameAr ?? preview.exam_name_ar ?? ""),
+    examNameEn: String(preview.examNameEn ?? preview.exam_name_en ?? ""),
+    modalityInstructionAr: String(preview.modalityInstructionAr ?? preview.modality_instruction_ar ?? ""),
+    modalityInstructionEn: String(preview.modalityInstructionEn ?? preview.modality_instruction_en ?? ""),
+    examInstructionAr: String(preview.examInstructionAr ?? preview.exam_instruction_ar ?? ""),
+    examInstructionEn: String(preview.examInstructionEn ?? preview.exam_instruction_en ?? ""),
     currentStatus: String(preview.currentStatus ?? preview.current_status ?? ""),
+    patientQrSettings: raw.settings && raw.settings.length > 0 ? normalizePatientQrSettings(raw.settings[0]) : undefined,
   };
 }
 
@@ -385,6 +407,114 @@ export async function cancelPublicAppointment(token: string): Promise<PublicAppo
     status: String(raw.status ?? ""),
     previousStatus: raw.previousStatus == null ? undefined : String(raw.previousStatus),
   };
+}
+
+export interface PatientQrContactSettings {
+  primaryPhone: string;
+  secondaryPhone: string;
+  whatsapp: string;
+  whatsappEnabled: boolean;
+  workingHoursAr: string;
+  noteAr: string;
+}
+
+export interface PatientQrLocationSettings {
+  centerNameAr: string;
+  departmentLocationAr: string;
+  arrivalInstructionsAr: string;
+  googleMapsUrl: string;
+  parkingNoteAr: string;
+}
+
+export interface PatientQrSettings {
+  enabled: boolean;
+  printQrOnAppointmentSlip: boolean;
+  allowCancellation: boolean;
+  allowAddToCalendar: boolean;
+  showPreparationInstructions: boolean;
+  showDocumentsChecklist: boolean;
+  showDepartmentContact: boolean;
+  showLocationDirections: boolean;
+  pageTitleAr: string;
+  introTextAr: string;
+  genericPreparationTextAr: string;
+  documentsChecklistAr: string[];
+  contact: PatientQrContactSettings;
+  location: PatientQrLocationSettings;
+}
+
+function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
+  const candidate = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const rawValue =
+    "setting_value" in candidate
+      ? (candidate as RawRecord).setting_value
+      : "value" in candidate
+        ? (candidate as RawRecord).value
+        : candidate;
+  const config =
+    rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) && "value" in rawValue
+      ? (rawValue as RawRecord).value
+      : rawValue;
+  const record = (config && typeof config === "object" && !Array.isArray(config) ? config : {}) as RawRecord;
+  const contact = (record.contact && typeof record.contact === "object" && !Array.isArray(record.contact) ? record.contact : {}) as RawRecord;
+  const location = (record.location && typeof record.location === "object" && !Array.isArray(record.location) ? record.location : {}) as RawRecord;
+
+  const bool = (value: unknown, fallback: boolean) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "enabled", "yes", "on"].includes(normalized)) return true;
+      if (["false", "0", "disabled", "no", "off"].includes(normalized)) return false;
+    }
+    return fallback;
+  };
+  const str = (value: unknown, fallback = "") => (value == null ? fallback : String(value).trim());
+
+  return {
+    enabled: bool(record.enabled, true),
+    printQrOnAppointmentSlip: bool(record.printQrOnAppointmentSlip, true),
+    allowCancellation: bool(record.allowCancellation, true),
+    allowAddToCalendar: bool(record.allowAddToCalendar, true),
+    showPreparationInstructions: bool(record.showPreparationInstructions, true),
+    showDocumentsChecklist: bool(record.showDocumentsChecklist, true),
+    showDepartmentContact: bool(record.showDepartmentContact, false),
+    showLocationDirections: bool(record.showLocationDirections, false),
+    pageTitleAr: str(record.pageTitleAr, "خدمة المريض عبر رمز QR"),
+    introTextAr: str(record.introTextAr, "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة."),
+    genericPreparationTextAr: str(record.genericPreparationTextAr, ""),
+    documentsChecklistAr: Array.isArray(record.documentsChecklistAr)
+      ? record.documentsChecklistAr.map((item) => String(item).trim()).filter(Boolean)
+      : [],
+    contact: {
+      primaryPhone: str(contact.primaryPhone, ""),
+      secondaryPhone: str(contact.secondaryPhone, ""),
+      whatsapp: str(contact.whatsapp, ""),
+      whatsappEnabled: bool(contact.whatsappEnabled, false),
+      workingHoursAr: str(contact.workingHoursAr, ""),
+      noteAr: str(contact.noteAr, ""),
+    },
+    location: {
+      centerNameAr: str(location.centerNameAr, "المركز الوطني لعلاج الأورام - بنغازي"),
+      departmentLocationAr: str(location.departmentLocationAr, ""),
+      arrivalInstructionsAr: str(location.arrivalInstructionsAr, ""),
+      googleMapsUrl: str(location.googleMapsUrl, ""),
+      parkingNoteAr: str(location.parkingNoteAr, ""),
+    },
+  };
+}
+
+export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
+  const raw = await api<RawRecord>("/settings/patient_qr_self_service");
+  return normalizePatientQrSettings(raw);
+}
+
+export async function savePatientQrSettings(payload: PatientQrSettings) {
+  return api<RawRecord>("/settings/patient_qr_self_service", {
+    method: "PUT",
+    body: JSON.stringify({
+      entries: [{ key: "config", value: payload }],
+    }),
+  });
 }
 
 export async function updateAppointment(id: number, payload: RawRecord) {

@@ -15,7 +15,61 @@ vi.mock("@/lib/api-hooks", () => ({
   cancelPublicAppointment: vi.fn(),
 }));
 
-function renderPage(entry = "/public/cancel-appointment?t=test-token") {
+function baseSettings(overrides: Record<string, unknown> = {}) {
+  return {
+    enabled: true,
+    printQrOnAppointmentSlip: true,
+    allowCancellation: true,
+    allowAddToCalendar: true,
+    showPreparationInstructions: true,
+    showDocumentsChecklist: true,
+    showDepartmentContact: true,
+    showLocationDirections: true,
+    pageTitleAr: "خدمة المريض عبر رمز QR",
+    introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+    genericPreparationTextAr: "تعليمات عامة",
+    documentsChecklistAr: ["ورقة الإحالة", "إثبات الهوية"],
+    contact: {
+      primaryPhone: "0912345678",
+      secondaryPhone: "",
+      whatsapp: "0912345678",
+      whatsappEnabled: true,
+      workingHoursAr: "08:00 - 14:00",
+      noteAr: "يرجى الاتصال خلال ساعات العمل",
+    },
+    location: {
+      centerNameAr: "المركز الوطني لعلاج الأورام - بنغازي",
+      departmentLocationAr: "الطابق الأول",
+      arrivalInstructionsAr: "الحضور قبل 15 دقيقة",
+      googleMapsUrl: "https://maps.google.com/?q=test",
+      parkingNoteAr: "مواقف أمامية متاحة",
+    },
+    ...overrides,
+  };
+}
+
+function preview(overrides: Record<string, unknown> = {}) {
+  return {
+    bookingId: 12,
+    patientDisplayName: "Test Patient",
+    bookingDate: "2026-07-01",
+    bookingTime: "10:30:00",
+    accessionNumber: "V2-12",
+    modalityNameAr: "CT",
+    modalityNameEn: "CT",
+    examNameAr: "CT Head",
+    examNameEn: "CT Head",
+    modalityInstructionAr: "لا طعام قبل الفحص",
+    modalityInstructionEn: "",
+    examInstructionAr: "تعليمات الفحص",
+    examInstructionEn: "",
+    currentStatus: "scheduled",
+    patientQrSettings: baseSettings(),
+    ...overrides,
+  };
+}
+
+function renderPage(entry = "/public/appointment?t=test-token") {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -27,6 +81,7 @@ function renderPage(entry = "/public/cancel-appointment?t=test-token") {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[entry]}>
         <Routes>
+          <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
           <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
         </Routes>
       </MemoryRouter>
@@ -37,14 +92,7 @@ function renderPage(entry = "/public/cancel-appointment?t=test-token") {
 describe("PublicCancelAppointmentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValue({
-      bookingId: 12,
-      patientDisplayName: "Test Patient",
-      bookingDate: "2026-07-01",
-      modalityName: "CT",
-      examName: "CT Head",
-      currentStatus: "scheduled",
-    });
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValue(preview());
     vi.mocked(cancelPublicAppointment).mockResolvedValue({
       ok: true,
       alreadyCancelled: false,
@@ -53,22 +101,26 @@ describe("PublicCancelAppointmentPage", () => {
     });
   });
 
-  it("shows the landing page first and does not expose the destructive action immediately", async () => {
+  it("shows the landing page first and keeps the destructive action hidden until requested", async () => {
     renderPage();
 
-    expect(await screen.findByText("إلغاء الموعد")).toBeTruthy();
-    expect(screen.getByText("متابعة الإلغاء")).toBeTruthy();
+    expect(await screen.findByText("خدمة المريض عبر رمز QR")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /إضافة إلى التقويم/i })).toBeTruthy();
+    expect(screen.getByText("ما الذي يجب إحضاره؟")).toBeTruthy();
+    expect(screen.getByText("التواصل مع القسم")).toBeTruthy();
+    expect(screen.getByText("موقع القسم")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /إلغاء الموعد/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
     expect(fetchPublicAppointmentCancelPreview).toHaveBeenCalledWith("test-token");
-    expect(screen.queryByRole("button", { name: /طلب موعد جديد/i })).toBeNull();
+    expect(screen.queryByText(/طلب موعد جديد/i)).toBeNull();
   });
 
   it("moves from landing to confirmation and requires acknowledgement before canceling", async () => {
     const user = userEvent.setup();
     renderPage();
 
-    await screen.findByText("إلغاء الموعد");
-    await user.click(screen.getByRole("button", { name: /متابعة الإلغاء/i }));
+    await screen.findByRole("button", { name: /إلغاء الموعد/i });
+    await user.click(screen.getByRole("button", { name: /إلغاء الموعد/i }));
 
     expect(await screen.findByText("تأكيد إلغاء الموعد")).toBeTruthy();
 
@@ -89,14 +141,9 @@ describe("PublicCancelAppointmentPage", () => {
   });
 
   it("shows the already-cancelled state when the QR link is reopened after cancellation", async () => {
-    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce({
-      bookingId: 12,
-      patientDisplayName: "Test Patient",
-      bookingDate: "2026-07-01",
-      modalityName: "CT",
-      examName: "CT Head",
-      currentStatus: "cancelled",
-    });
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({ currentStatus: "cancelled" })
+    );
 
     renderPage();
 
@@ -105,20 +152,14 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
   });
 
-  it("shows the non-cancellable state for completed appointments", async () => {
-    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce({
-      bookingId: 12,
-      patientDisplayName: "Test Patient",
-      bookingDate: "2026-07-01",
-      modalityName: "CT",
-      examName: "CT Head",
-      currentStatus: "completed",
-    });
+  it("shows a safe disabled message when QR access is turned off", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockRejectedValue(
+      new ApiError("Patient QR access is disabled.", 403, { code: "patient_qr_disabled" })
+    );
 
     renderPage();
 
-    expect(await screen.findByText("هذا الموعد غير قابل للإلغاء من هذه الصفحة")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
+    expect(await screen.findByText("خدمة عرض تفاصيل الموعد عبر رمز QR غير مفعلة حالياً.")).toBeTruthy();
   });
 
   it("shows a safe invalid-link state", async () => {
@@ -151,12 +192,49 @@ describe("PublicCancelAppointmentPage", () => {
 
     renderPage();
 
-    await screen.findByText("إلغاء الموعد");
-    await user.click(screen.getByRole("button", { name: /متابعة الإلغاء/i }));
+    await screen.findByRole("button", { name: /إلغاء الموعد/i });
+    await user.click(screen.getByRole("button", { name: /إلغاء الموعد/i }));
     await user.click(screen.getByRole("checkbox", { name: /أفهم أن هذا الإلغاء نهائي/i }));
     await user.click(screen.getByRole("button", { name: /تأكيد الإلغاء/i }));
 
-    expect(await screen.findByText(/تعذر إلغاء الموعد الآن/i)).toBeTruthy();
+    expect(await screen.findByText("تعذر إلغاء الموعد الآن. يمكنك المحاولة مرة أخرى بأمان.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /تأكيد الإلغاء/i })).toBeTruthy();
+  });
+
+  it("hides disabled sections and add-to-calendar when configured off", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        patientQrSettings: baseSettings({
+          showPreparationInstructions: false,
+          showDocumentsChecklist: false,
+          showDepartmentContact: false,
+          showLocationDirections: false,
+          allowAddToCalendar: false,
+        }),
+      })
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("خدمة المريض عبر رمز QR")).toBeTruthy();
+    expect(screen.queryByText("تعليمات التحضير")).toBeNull();
+    expect(screen.queryByText("ما الذي يجب إحضاره؟")).toBeNull();
+    expect(screen.queryByText("التواصل مع القسم")).toBeNull();
+    expect(screen.queryByText("موقع القسم")).toBeNull();
+    expect(screen.queryByText("إضافة إلى التقويم")).toBeNull();
+  });
+
+  it("generates an ICS file when add-to-calendar is enabled", async () => {
+    const user = userEvent.setup();
+    const createObjectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake");
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+
+    renderPage();
+
+    await screen.findByRole("button", { name: /إضافة إلى التقويم/i });
+    await user.click(screen.getByRole("button", { name: /إضافة إلى التقويم/i }));
+
+    expect(createObjectUrl).toHaveBeenCalled();
+    expect(clickSpy).toHaveBeenCalled();
   });
 });

@@ -211,7 +211,7 @@ async function loadImageDataUrl(url: string): Promise<string | null> {
 export function buildAppointmentSlipData(apt: AppointmentWithDetails): AppointmentSlipRenderData {
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
-    token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : "";
+    token.length > 0 ? `${window.location.origin}/public/appointment?t=${encodeURIComponent(token)}` : "";
   const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
   return {
     hospitalName: "National Cancer Center Benghazi",
@@ -222,7 +222,7 @@ export function buildAppointmentSlipData(apt: AppointmentWithDetails): Appointme
     modality: apt.modalityNameEn || "—",
     examName: apt.examNameEn || "—",
     appointmentDate: formatSlipDate(apt.appointmentDate),
-    queueQrPayload: cancelUrl || accession,
+    queueQrPayload: cancelUrl,
     accessionBarcodePayload: accession,
     modalityInstructions: String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim(),
     examInstructions: String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim(),
@@ -301,19 +301,21 @@ export async function createAppointmentSlipPdfBlob(
     doc.setTextColor("#b11116");
     doc.text("APPOINTMENT SLIP", safe.x + 58, safe.y + 52);
 
-    const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
-    doc.setDrawColor("#e2676d");
-    doc.setLineWidth(1);
-    doc.roundedRect(page.w - safe.x - qrSize - 2, safe.y, qrSize + 2, qrSize + 2, 6, 6, "S");
-    doc.addImage(qrDataUrl, "PNG", page.w - safe.x - qrSize - 1, safe.y + 1, qrSize, qrSize);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(9);
-    doc.setTextColor("#b11116");
-    doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(7);
-    doc.setTextColor("#374151");
-    doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
+    if (slip.queueQrPayload) {
+      const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
+      doc.setDrawColor("#e2676d");
+      doc.setLineWidth(1);
+      doc.roundedRect(page.w - safe.x - qrSize - 2, safe.y, qrSize + 2, qrSize + 2, 6, 6, "S");
+      doc.addImage(qrDataUrl, "PNG", page.w - safe.x - qrSize - 1, safe.y + 1, qrSize, qrSize);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor("#b11116");
+      doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor("#374151");
+      doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
+    }
   }
 
   const rows = [
@@ -496,6 +498,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
             break-inside: avoid-page;
           }
           .top { display: grid; grid-template-columns: 1fr 114px; gap: 10px; align-items: start; }
+          .top.no-qr { grid-template-columns: 1fr; }
           .brand-wrap { display: flex; gap: 8px; align-items: center; }
           .logo { width: 60px; height: 60px; object-fit: contain; }
           .brand-title { color: #b11116; margin: 0; font-size: 18px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
@@ -623,7 +626,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
       </head>
       <body>
         <div class="sheet">
-          <div class="top">
+          <div class="top ${qrSvg ? "" : "no-qr"}">
             <div>
               <div class="brand-wrap">
                 <img class="logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo" />
@@ -639,17 +642,19 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
                 </div>
               </div>
             </div>
-            <div>
-              <div class="qr-card">
-                ${
-                  qrSvg
-                    ? `<div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>`
-                    : `<div class="small-muted">QR unavailable</div>`
-                }
-              </div>
-              <div class="qr-title">Scan to cancel this appointment</div>
-              <div class="qr-note">This link is unique to you and your appointment.</div>
-            </div>
+            ${
+              qrSvg
+                ? `
+                  <div>
+                    <div class="qr-card">
+                      <div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>
+                    </div>
+                    <div class="qr-title">Scan to cancel this appointment</div>
+                    <div class="qr-note">This link is unique to you and your appointment.</div>
+                  </div>
+                `
+                : ""
+            }
           </div>
 
           <div class="rows">

@@ -292,6 +292,7 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     bb.id,
     ('V2-' || bb.id::text) as accession_number,
     bb.appointment_date,
+    bb.booking_time,
     (
       select count(*)
       from appointments_v2.bookings seq
@@ -346,6 +347,7 @@ export interface BookingPrintDetailsRow {
   id: number;
   accession_number: string;
   appointment_date: string;
+  booking_time: string | null;
   daily_sequence: number;
   modality_slot_number: number | null;
   status: string;
