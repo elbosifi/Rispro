@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -41,6 +41,7 @@ export default function PrintPage() {
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
+  const previewFrameRef = useRef<HTMLIFrameElement | null>(null);
   const appointmentIdParam = searchParams.get("appointmentId");
   const autoprintParam = searchParams.get("autoprint") === "1";
 
@@ -105,6 +106,18 @@ export default function PrintPage() {
 
   function handlePrintSlip(appointment: AppointmentWithDetails) {
     printAppointmentSlip(appointment);
+  }
+
+  function handlePreviewFramePrint() {
+    const frameWindow = previewFrameRef.current?.contentWindow;
+    if (frameWindow) {
+      frameWindow.focus();
+      frameWindow.print();
+      return;
+    }
+    if (selectedAppointment) {
+      printAppointmentSlip(selectedAppointment);
+    }
   }
 
   async function handleDownloadPdf(appointment: AppointmentWithDetails) {
@@ -248,7 +261,7 @@ export default function PrintPage() {
               </Button>
               <Button
                 type="button"
-                onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
+                onClick={handlePreviewFramePrint}
                 disabled={!selectedAppointment}
               >
                 {t(language, "print.confirmPrint")}
@@ -263,6 +276,7 @@ export default function PrintPage() {
           ) : slipPreviewPdfUrl ? (
             <div className="overflow-auto rounded-xl border border-border bg-muted/20 p-3">
               <iframe
+                ref={previewFrameRef}
                 key={slipPreviewPdfUrl}
                 title="Appointment slip preview"
                 src={slipPreviewPdfUrl}

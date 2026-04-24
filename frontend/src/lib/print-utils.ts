@@ -212,7 +212,7 @@ export function buildAppointmentSlipData(apt: AppointmentWithDetails): Appointme
   const token = String(apt.publicCancelToken || "").trim();
   const cancelUrl =
     token.length > 0 ? `${window.location.origin}/public/cancel-appointment?t=${encodeURIComponent(token)}` : "";
-  const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
+  const accession = String(apt.accessionNumber || "—").trim() || "—";
   return {
     hospitalName: "National Cancer Center Benghazi",
     departmentName: "Diagnostic Radiology Department",
@@ -266,15 +266,15 @@ export async function createAppointmentSlipPdfBlob(
       };
 
   const headerHeight = mode === "blank" ? 82 : 0;
-  const qrSize = mode === "blank" ? 64 : 60;
+  const qrSize = mode === "blank" ? 60 : 56;
   const barcodeHeight = 36;
   const detailsTop = safe.y + headerHeight + (mode === "blank" ? 8 : 0);
   const detailsLeft = safe.x;
   const detailsWidth = safe.w;
   const columnGap = 8;
   const fieldWidth = (detailsWidth - columnGap) / 2;
-  const fieldHeight = 28;
-  const rowGap = 4;
+  const fieldHeight = 31;
+  const rowGap = 5;
 
   doc.setTextColor("#111827");
   doc.setFillColor("#ffffff");
@@ -309,11 +309,21 @@ export async function createAppointmentSlipPdfBlob(
     doc.setFont("helvetica", "bold");
     doc.setFontSize(9);
     doc.setTextColor("#b11116");
-    doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
+    doc.text(
+      wrapLines(doc, "Scan to cancel this appointment", qrSize + 2, 2),
+      page.w - safe.x - qrSize - 2,
+      safe.y + qrSize + 12,
+      { baseline: "top", lineHeightFactor: 1.05 }
+    );
     doc.setFont("helvetica", "normal");
     doc.setFontSize(7);
     doc.setTextColor("#374151");
-    doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
+    doc.text(
+      wrapLines(doc, "This link is unique to you and your appointment.", qrSize + 2, 2),
+      page.w - safe.x - qrSize - 2,
+      safe.y + qrSize + 26,
+      { baseline: "top", lineHeightFactor: 1.05 }
+    );
   }
 
   const rows = [
