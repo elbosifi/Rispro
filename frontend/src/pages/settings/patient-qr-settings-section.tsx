@@ -96,6 +96,18 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       await queryClient.invalidateQueries({ queryKey: ["patient-qr-settings"] });
       setErrors({});
     },
+    onError: (err: unknown) => {
+      const status = err instanceof ApiError ? err.status : undefined;
+      const message = err instanceof Error ? err.message : "";
+      if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+        onReAuthRequired(["settings", "patient_qr_self_service"]);
+        return;
+      }
+      setErrors((current) => ({
+        ...current,
+        save: message || "تعذر حفظ الإعدادات."
+      }));
+    },
   });
 
   const canSave = useMemo(() => {
@@ -330,6 +342,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           حفظ
         </button>
       </div>
+      {errors.save ? <p className="text-sm text-rose-700">{errors.save}</p> : null}
     </div>
   );
 }

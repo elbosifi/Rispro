@@ -459,7 +459,7 @@ export function createCalendarBlob(preview: PublicAppointmentCancelPreview, sett
   const title = [preview.examNameAr || preview.examName || "موعد أشعة", preview.modalityNameAr || preview.modalityName || ""]
     .filter(Boolean)
     .join(" - ");
-  const startDate = new Date(`${preview.bookingDate}T${formatTimeAr(preview.bookingTime || "") || "09:00"}:00`);
+  const startDate = new Date(`${preview.bookingDate}T09:00:00`);
   const hasTime = Boolean(preview.bookingTime);
   const endDate = hasTime ? addDays(startDate, 0) : addDays(new Date(`${preview.bookingDate}T00:00:00`), 1);
   if (hasTime) {

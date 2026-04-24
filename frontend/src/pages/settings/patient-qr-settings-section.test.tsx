@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "@/lib/api-client";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
 import { fetchPatientQrSettings, savePatientQrSettings } from "@/lib/api-hooks";
 
@@ -131,5 +132,33 @@ describe("PatientQrSettingsSection", () => {
 
     expect(await screen.findByText("رقم الهاتف غير صالح.")).toBeTruthy();
     expect(screen.getByText("رابط خرائط Google غير صالح.")).toBeTruthy();
+  });
+
+  it("asks for supervisor re-authentication when saving is rejected with 403", async () => {
+    const onReAuthRequired = vi.fn();
+    vi.mocked(savePatientQrSettings).mockRejectedValueOnce(
+      new ApiError("Recent supervisor re-authentication is required.", 403, { code: "forbidden" })
+    );
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <PatientQrSettingsSection onReAuthRequired={onReAuthRequired} />
+      </QueryClientProvider>
+    );
+
+    await screen.findByText("إعدادات صفحة المريض ورمز QR");
+    await user.click(screen.getByRole("button", { name: /حفظ/i }));
+
+    await waitFor(() => {
+      expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "patient_qr_self_service"]);
+    });
   });
 });
