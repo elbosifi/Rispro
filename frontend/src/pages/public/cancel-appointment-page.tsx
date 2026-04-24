@@ -19,6 +19,8 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
+import { useLanguage } from "@/providers/language-provider";
+import { chooseLocalized } from "@/lib/i18n";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
@@ -44,13 +46,22 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextEn: "You can review appointment details, instructions, and department information from this page.",
   genericPreparationTextAr: "",
+  genericPreparationTextEn: "",
   documentsChecklistAr: [
     "ورقة الإحالة",
     "إثبات الهوية",
     "صور أو تقارير سابقة إن وجدت",
     "تحاليل حديثة إذا طُلبت من القسم",
+  ],
+  documentsChecklistEn: [
+    "Referral paper",
+    "ID proof",
+    "Previous images or reports if available",
+    "Recent tests if requested by the department",
   ],
   contact: {
     primaryPhone: "",
@@ -58,16 +69,24 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     whatsapp: "",
     whatsappEnabled: false,
     workingHoursAr: "",
+    workingHoursEn: "",
     noteAr: "",
+    noteEn: "",
   },
   location: {
     centerNameAr: INST_AR,
+    centerNameEn: "National Cancer Center Benghazi",
     departmentLocationAr: "",
+    departmentLocationEn: "",
     roomUnitFloorAr: "",
+    roomUnitFloorEn: "",
     addressAr: "",
+    addressEn: "",
     arrivalInstructionsAr: "",
+    arrivalInstructionsEn: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
+    parkingNoteEn: "",
   },
 };
 

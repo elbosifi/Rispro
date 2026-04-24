@@ -19,13 +19,22 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextEn: "You can review appointment details, instructions, and department information from this page.",
   genericPreparationTextAr: "",
+  genericPreparationTextEn: "",
   documentsChecklistAr: [
     "ورقة الإحالة",
     "إثبات الهوية",
     "صور أو تقارير سابقة إن وجدت",
     "تحاليل حديثة إذا طُلبت من القسم",
+  ],
+  documentsChecklistEn: [
+    "Referral paper",
+    "ID proof",
+    "Previous images or reports if available",
+    "Recent tests if requested by the department",
   ],
   contact: {
     primaryPhone: "",
@@ -33,16 +42,24 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     whatsapp: "",
     whatsappEnabled: false,
     workingHoursAr: "",
+    workingHoursEn: "",
     noteAr: "",
+    noteEn: "",
   },
   location: {
     centerNameAr: "المركز الوطني للأورام بنغازي",
+    centerNameEn: "National Cancer Center Benghazi",
     departmentLocationAr: "",
+    departmentLocationEn: "",
     roomUnitFloorAr: "",
+    roomUnitFloorEn: "",
     addressAr: "",
+    addressEn: "",
     arrivalInstructionsAr: "",
+    arrivalInstructionsEn: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
+    parkingNoteEn: "",
   },
 };
 
@@ -50,6 +67,7 @@ function cloneSettings(settings: PatientQrSettings): PatientQrSettings {
   return {
     ...settings,
     documentsChecklistAr: [...settings.documentsChecklistAr],
+    documentsChecklistEn: [...settings.documentsChecklistEn],
     contact: { ...settings.contact },
     location: { ...settings.location },
   };
@@ -69,7 +87,6 @@ function isValidUrl(value: string): boolean {
   const trimmed = String(value || "").trim();
   if (!trimmed) return true;
   try {
-    // eslint-disable-next-line no-new
     new URL(trimmed);
     return true;
   } catch {
@@ -84,7 +101,8 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     queryFn: fetchPatientQrSettings,
   });
   const [draft, setDraft] = useState<PatientQrSettings>(DEFAULT_SETTINGS);
-  const [newChecklistItem, setNewChecklistItem] = useState("");
+  const [newChecklistItemAr, setNewChecklistItemAr] = useState("");
+  const [newChecklistItemEn, setNewChecklistItemEn] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -106,7 +124,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       }
       setErrors((current) => ({
         ...current,
-        save: message || "تعذر حفظ الإعدادات."
+        save: message || "تعذر حفظ الإعدادات.",
       }));
     },
   });
@@ -117,11 +135,12 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     if (!isValidPhone(draft.contact.secondaryPhone)) nextErrors.contactSecondaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.whatsapp)) nextErrors.contactWhatsapp = "رقم الواتساب غير صالح.";
     if (!isValidUrl(draft.location.googleMapsUrl)) nextErrors.googleMapsUrl = "رابط خرائط Google غير صالح.";
-    if (draft.documentsChecklistAr.some((item) => !item.trim())) nextErrors.checklist = "جميع عناصر القائمة يجب أن تكون غير فارغة.";
+    if (draft.documentsChecklistAr.some((item) => !item.trim())) nextErrors.checklistAr = "جميع عناصر القائمة يجب أن تكون غير فارغة.";
+    if (draft.documentsChecklistEn.some((item) => !item.trim())) nextErrors.checklistEn = "All checklist items must be non-empty.";
     return { ok: Object.keys(nextErrors).length === 0, nextErrors };
   }, [draft]);
 
-  const updateChecklistItem = (index: number, value: string) => {
+  const updateChecklistItemAr = (index: number, value: string) => {
     setDraft((current) => {
       const next = cloneSettings(current);
       next.documentsChecklistAr[index] = value;
@@ -129,7 +148,15 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     });
   };
 
-  const moveChecklistItem = (index: number, direction: -1 | 1) => {
+  const updateChecklistItemEn = (index: number, value: string) => {
+    setDraft((current) => {
+      const next = cloneSettings(current);
+      next.documentsChecklistEn[index] = value;
+      return next;
+    });
+  };
+
+  const moveChecklistItemAr = (index: number, direction: -1 | 1) => {
     setDraft((current) => {
       const next = cloneSettings(current);
       const target = index + direction;
@@ -141,7 +168,19 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     });
   };
 
-  const removeChecklistItem = (index: number) => {
+  const moveChecklistItemEn = (index: number, direction: -1 | 1) => {
+    setDraft((current) => {
+      const next = cloneSettings(current);
+      const target = index + direction;
+      if (target < 0 || target >= next.documentsChecklistEn.length) return current;
+      const item = next.documentsChecklistEn[index];
+      next.documentsChecklistEn[index] = next.documentsChecklistEn[target];
+      next.documentsChecklistEn[target] = item;
+      return next;
+    });
+  };
+
+  const removeChecklistItemAr = (index: number) => {
     setDraft((current) => {
       const next = cloneSettings(current);
       next.documentsChecklistAr.splice(index, 1);
@@ -149,15 +188,34 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     });
   };
 
-  const addChecklistItem = () => {
-    const value = newChecklistItem.trim();
+  const removeChecklistItemEn = (index: number) => {
+    setDraft((current) => {
+      const next = cloneSettings(current);
+      next.documentsChecklistEn.splice(index, 1);
+      return next;
+    });
+  };
+
+  const addChecklistItemAr = () => {
+    const value = newChecklistItemAr.trim();
     if (!value) return;
     setDraft((current) => {
       const next = cloneSettings(current);
       next.documentsChecklistAr.push(value);
       return next;
     });
-    setNewChecklistItem("");
+    setNewChecklistItemAr("");
+  };
+
+  const addChecklistItemEn = () => {
+    const value = newChecklistItemEn.trim();
+    if (!value) return;
+    setDraft((current) => {
+      const next = cloneSettings(current);
+      next.documentsChecklistEn.push(value);
+      return next;
+    });
+    setNewChecklistItemEn("");
   };
 
   const handleSave = () => {
@@ -166,23 +224,32 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     mutation.mutate({
       ...draft,
       documentsChecklistAr: draft.documentsChecklistAr.map((item) => item.trim()).filter(Boolean),
+      documentsChecklistEn: draft.documentsChecklistEn.map((item) => item.trim()).filter(Boolean),
       contact: {
         ...draft.contact,
         primaryPhone: draft.contact.primaryPhone.trim(),
         secondaryPhone: draft.contact.secondaryPhone.trim(),
         whatsapp: draft.contact.whatsapp.trim(),
         workingHoursAr: draft.contact.workingHoursAr.trim(),
+        workingHoursEn: draft.contact.workingHoursEn.trim(),
         noteAr: draft.contact.noteAr.trim(),
+        noteEn: draft.contact.noteEn.trim(),
       },
       location: {
         ...draft.location,
         centerNameAr: draft.location.centerNameAr.trim(),
+        centerNameEn: draft.location.centerNameEn.trim(),
         departmentLocationAr: draft.location.departmentLocationAr.trim(),
+        departmentLocationEn: draft.location.departmentLocationEn.trim(),
         roomUnitFloorAr: draft.location.roomUnitFloorAr.trim(),
+        roomUnitFloorEn: draft.location.roomUnitFloorEn.trim(),
         addressAr: draft.location.addressAr.trim(),
+        addressEn: draft.location.addressEn.trim(),
         arrivalInstructionsAr: draft.location.arrivalInstructionsAr.trim(),
+        arrivalInstructionsEn: draft.location.arrivalInstructionsEn.trim(),
         googleMapsUrl: draft.location.googleMapsUrl.trim(),
         parkingNoteAr: draft.location.parkingNoteAr.trim(),
+        parkingNoteEn: draft.location.parkingNoteEn.trim(),
       },
     });
   };
@@ -228,27 +295,62 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
 
         <FieldCard title="محتوى الصفحة">
           <label className="block text-sm font-semibold text-slate-700">عنوان الصفحة</label>
-          <input
-            value={draft.pageTitleAr}
-            onChange={(e) => setDraft((current) => ({ ...current, pageTitleAr: e.target.value }))}
-            className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-          />
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <input
+              dir="ltr"
+              value={draft.pageTitleEn}
+              onChange={(e) => setDraft((current) => ({ ...current, pageTitleEn: e.target.value }))}
+              placeholder="Page title (English)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-ltr"
+            />
+            <input
+              dir="rtl"
+              value={draft.pageTitleAr}
+              onChange={(e) => setDraft((current) => ({ ...current, pageTitleAr: e.target.value }))}
+              placeholder="عنوان الصفحة (عربي)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
+            />
+          </div>
 
           <label className="mt-3 block text-sm font-semibold text-slate-700">مقدمة الصفحة</label>
-          <textarea
-            value={draft.introTextAr}
-            onChange={(e) => setDraft((current) => ({ ...current, introTextAr: e.target.value }))}
-            rows={3}
-            className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-          />
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <textarea
+              dir="ltr"
+              value={draft.introTextEn}
+              onChange={(e) => setDraft((current) => ({ ...current, introTextEn: e.target.value }))}
+              rows={3}
+              placeholder="Page intro (English)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-ltr"
+            />
+            <textarea
+              dir="rtl"
+              value={draft.introTextAr}
+              onChange={(e) => setDraft((current) => ({ ...current, introTextAr: e.target.value }))}
+              rows={3}
+              placeholder="مقدمة الصفحة (عربي)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
+            />
+          </div>
 
           <label className="mt-3 block text-sm font-semibold text-slate-700">نص التحضير العام</label>
-          <textarea
-            value={draft.genericPreparationTextAr}
-            onChange={(e) => setDraft((current) => ({ ...current, genericPreparationTextAr: e.target.value }))}
-            rows={3}
-            className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
-          />
+          <div className="mt-1 grid grid-cols-2 gap-2">
+            <textarea
+              dir="ltr"
+              value={draft.genericPreparationTextEn}
+              onChange={(e) => setDraft((current) => ({ ...current, genericPreparationTextEn: e.target.value }))}
+              rows={3}
+              placeholder="General preparation text (English)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-ltr"
+            />
+            <textarea
+              dir="rtl"
+              value={draft.genericPreparationTextAr}
+              onChange={(e) => setDraft((current) => ({ ...current, genericPreparationTextAr: e.target.value }))}
+              rows={3}
+              placeholder="نص التحضير العام (عربي)"
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
+            />
+          </div>
         </FieldCard>
       </div>
 
@@ -261,17 +363,19 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
 
       <FieldCard title="قائمة المستندات المطلوبة">
         <ToggleRow label="إظهار قائمة المستندات" checked={draft.showDocumentsChecklist} onChange={(checked) => setDraft((current) => ({ ...current, showDocumentsChecklist: checked }))} />
-        <div className="mt-3 space-y-2">
+        <p className="mt-2 text-sm font-semibold text-slate-700">العربية</p>
+        <div className="mt-1 space-y-2">
           {draft.documentsChecklistAr.map((item, index) => (
-            <div key={`${index}-${item}`} className="flex items-center gap-2">
+            <div key={`ar-${index}-${item}`} className="flex items-center gap-2">
               <input
+                dir="rtl"
                 value={item}
-                onChange={(e) => updateChecklistItem(index, e.target.value)}
-                className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                onChange={(e) => updateChecklistItemAr(index, e.target.value)}
+                className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
               />
               <button
                 type="button"
-                onClick={() => moveChecklistItem(index, -1)}
+                onClick={() => moveChecklistItemAr(index, -1)}
                 aria-label="تحريك العنصر إلى الأعلى"
                 className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700"
               >
@@ -279,7 +383,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
               </button>
               <button
                 type="button"
-                onClick={() => moveChecklistItem(index, 1)}
+                onClick={() => moveChecklistItemAr(index, 1)}
                 aria-label="تحريك العنصر إلى الأسفل"
                 className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700"
               >
@@ -287,7 +391,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
               </button>
               <button
                 type="button"
-                onClick={() => removeChecklistItem(index)}
+                onClick={() => removeChecklistItemAr(index)}
                 aria-label="حذف العنصر"
                 className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-rose-700"
               >
@@ -297,16 +401,68 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           ))}
           <div className="flex gap-2">
             <input
-              value={newChecklistItem}
-              onChange={(e) => setNewChecklistItem(e.target.value)}
+              dir="rtl"
+              value={newChecklistItemAr}
+              onChange={(e) => setNewChecklistItemAr(e.target.value)}
               placeholder="إضافة عنصر جديد..."
-              className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+              className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
             />
-            <button type="button" onClick={addChecklistItem} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white">
+            <button type="button" onClick={addChecklistItemAr} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white">
               <Plus className="inline h-4 w-4" /> إضافة
             </button>
           </div>
-          {errors.checklist ? <p className="text-sm text-rose-700">{errors.checklist}</p> : null}
+          {errors.checklistAr ? <p className="text-sm text-rose-700">{errors.checklistAr}</p> : null}
+        </div>
+
+        <p className="mt-4 text-sm font-semibold text-slate-700">English</p>
+        <div className="mt-1 space-y-2">
+          {draft.documentsChecklistEn.map((item, index) => (
+            <div key={`en-${index}-${item}`} className="flex items-center gap-2">
+              <input
+                dir="ltr"
+                value={item}
+                onChange={(e) => updateChecklistItemEn(index, e.target.value)}
+                className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-ltr"
+              />
+              <button
+                type="button"
+                onClick={() => moveChecklistItemEn(index, -1)}
+                aria-label="Move item up"
+                className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => moveChecklistItemEn(index, 1)}
+                aria-label="Move item down"
+                className="rounded-xl border border-slate-300 bg-white p-2 text-slate-700"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => removeChecklistItemEn(index)}
+                aria-label="Delete item"
+                className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-rose-700"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <input
+              dir="ltr"
+              value={newChecklistItemEn}
+              onChange={(e) => setNewChecklistItemEn(e.target.value)}
+              placeholder="Add new item..."
+              className="flex-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-ltr"
+            />
+            <button type="button" onClick={addChecklistItemEn} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white">
+              <Plus className="inline h-4 w-4" /> Add
+            </button>
+          </div>
+          {errors.checklistEn ? <p className="text-sm text-rose-700">{errors.checklistEn}</p> : null}
         </div>
       </FieldCard>
 
@@ -317,19 +473,43 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           <Input label="رقم الهاتف الثاني" value={draft.contact.secondaryPhone} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, secondaryPhone: value } }))} error={errors.contactSecondaryPhone} />
           <ToggleRow label="تفعيل الواتساب" checked={draft.contact.whatsappEnabled} onChange={(checked) => setDraft((current) => ({ ...current, contact: { ...current.contact, whatsappEnabled: checked } }))} />
           <Input label="رقم الواتساب" value={draft.contact.whatsapp} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, whatsapp: value } }))} error={errors.contactWhatsapp} />
-          <Input label="ساعات العمل" value={draft.contact.workingHoursAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, workingHoursAr: value } }))} />
-          <Textarea label="ملاحظة قصيرة" value={draft.contact.noteAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteAr: value } }))} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input dir="ltr" label="Working Hours (En)" value={draft.contact.workingHoursEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, workingHoursEn: value } }))} />
+            <Input dir="rtl" label="ساعات العمل" value={draft.contact.workingHoursAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, workingHoursAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Note (En)" value={draft.contact.noteEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteEn: value } }))} />
+            <Textarea dir="rtl" label="ملاحظة قصيرة" value={draft.contact.noteAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteAr: value } }))} />
+          </div>
         </FieldCard>
 
         <FieldCard title="الموقع والدخول">
           <ToggleRow label="إظهار بطاقة الموقع" checked={draft.showLocationDirections} onChange={(checked) => setDraft((current) => ({ ...current, showLocationDirections: checked }))} />
-          <Input label="اسم المركز" value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
-          <Textarea label="اسم القسم / الموقع" value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
-          <Input label="الطابق / الوحدة / الغرفة" value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
-          <Textarea label="العنوان" value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
-          <Textarea label="إرشادات الوصول" value={draft.location.arrivalInstructionsAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsAr: value } }))} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input dir="ltr" label="Center Name (En)" value={draft.location.centerNameEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameEn: value } }))} />
+            <Input dir="rtl" label="اسم المركز" value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Department/Location (En)" value={draft.location.departmentLocationEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationEn: value } }))} />
+            <Textarea dir="rtl" label="اسم القسم / الموقع" value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input dir="ltr" label="Floor/Unit/Room (En)" value={draft.location.roomUnitFloorEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorEn: value } }))} />
+            <Input dir="rtl" label="الطابق / الوحدة / الغرفة" value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Address (En)" value={draft.location.addressEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressEn: value } }))} />
+            <Textarea dir="rtl" label="العنوان" value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Arrival Instructions (En)" value={draft.location.arrivalInstructionsEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsEn: value } }))} />
+            <Textarea dir="rtl" label="إرشادات الوصول" value={draft.location.arrivalInstructionsAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsAr: value } }))} />
+          </div>
           <Input label="رابط خرائط Google" value={draft.location.googleMapsUrl} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, googleMapsUrl: value } }))} error={errors.googleMapsUrl} />
-          <Textarea label="ملاحظة إضافية" value={draft.location.parkingNoteAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteAr: value } }))} />
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Additional Note (En)" value={draft.location.parkingNoteEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteEn: value } }))} />
+            <Textarea dir="rtl" label="ملاحظة إضافية" value={draft.location.parkingNoteAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteAr: value } }))} />
+          </div>
         </FieldCard>
       </div>
 
@@ -367,7 +547,7 @@ function ToggleRow(props: { label: string; checked: boolean; onChange: (checked:
   );
 }
 
-function Input(props: { label: string; value: string; onChange: (value: string) => void; error?: string }) {
+function Input(props: { label: string; value: string; onChange: (value: string) => void; error?: string; dir?: string }) {
   const id = useId();
   return (
     <div>
@@ -376,6 +556,7 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
       </label>
       <input
         id={id}
+        dir={props.dir}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
@@ -385,7 +566,7 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
   );
 }
 
-function Textarea(props: { label: string; value: string; onChange: (value: string) => void }) {
+function Textarea(props: { label: string; value: string; onChange: (value: string) => void; dir?: string }) {
   const id = useId();
   return (
     <div>
@@ -394,6 +575,7 @@ function Textarea(props: { label: string; value: string; onChange: (value: strin
       </label>
       <textarea
         id={id}
+        dir={props.dir}
         value={props.value}
         onChange={(e) => props.onChange(e.target.value)}
         rows={3}

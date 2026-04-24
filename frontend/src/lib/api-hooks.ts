@@ -425,17 +425,25 @@ export interface PatientQrContactSettings {
   whatsapp: string;
   whatsappEnabled: boolean;
   workingHoursAr: string;
+  workingHoursEn: string;
   noteAr: string;
+  noteEn: string;
 }
 
 export interface PatientQrLocationSettings {
   centerNameAr: string;
+  centerNameEn: string;
   departmentLocationAr: string;
+  departmentLocationEn: string;
   roomUnitFloorAr: string;
+  roomUnitFloorEn: string;
   addressAr: string;
+  addressEn: string;
   arrivalInstructionsAr: string;
+  arrivalInstructionsEn: string;
   googleMapsUrl: string;
   parkingNoteAr: string;
+  parkingNoteEn: string;
 }
 
 export interface PatientQrSettings {
@@ -449,9 +457,13 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   pageTitleAr: string;
+  pageTitleEn: string;
   introTextAr: string;
+  introTextEn: string;
   genericPreparationTextAr: string;
+  genericPreparationTextEn: string;
   documentsChecklistAr: string[];
+  documentsChecklistEn: string[];
   contact: PatientQrContactSettings;
   location: PatientQrLocationSettings;
 }
@@ -494,10 +506,16 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     showDepartmentContact: bool(record.showDepartmentContact, false),
     showLocationDirections: bool(record.showLocationDirections, false),
     pageTitleAr: str(record.pageTitleAr, "خدمة المريض عبر رمز QR"),
+    pageTitleEn: str(record.pageTitleEn, "Patient QR Service"),
     introTextAr: str(record.introTextAr, "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة."),
+    introTextEn: str(record.introTextEn, "You can review appointment details, instructions, and department information from this page."),
     genericPreparationTextAr: str(record.genericPreparationTextAr, ""),
+    genericPreparationTextEn: str(record.genericPreparationTextEn, ""),
     documentsChecklistAr: Array.isArray(record.documentsChecklistAr)
       ? record.documentsChecklistAr.map((item) => String(item).trim()).filter(Boolean)
+      : [],
+    documentsChecklistEn: Array.isArray(record.documentsChecklistEn)
+      ? record.documentsChecklistEn.map((item) => String(item).trim()).filter(Boolean)
       : [],
     contact: {
       primaryPhone: str(contact.primaryPhone, ""),
@@ -505,16 +523,24 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
       whatsapp: str(contact.whatsapp, ""),
       whatsappEnabled: bool(contact.whatsappEnabled, false),
       workingHoursAr: str(contact.workingHoursAr, ""),
+      workingHoursEn: str(contact.workingHoursEn, ""),
       noteAr: str(contact.noteAr, ""),
+      noteEn: str(contact.noteEn, ""),
     },
     location: {
       centerNameAr: str(location.centerNameAr, "المركز الوطني للأورام بنغازي"),
+      centerNameEn: str(location.centerNameEn, "National Cancer Center Benghazi"),
       departmentLocationAr: str(location.departmentLocationAr, ""),
+      departmentLocationEn: str(location.departmentLocationEn, ""),
       roomUnitFloorAr: str(location.roomUnitFloorAr, ""),
+      roomUnitFloorEn: str(location.roomUnitFloorEn, ""),
       addressAr: str(location.addressAr, ""),
+      addressEn: str(location.addressEn, ""),
       arrivalInstructionsAr: str(location.arrivalInstructionsAr, ""),
+      arrivalInstructionsEn: str(location.arrivalInstructionsEn, ""),
       googleMapsUrl: str(location.googleMapsUrl, ""),
       parkingNoteAr: str(location.parkingNoteAr, ""),
+      parkingNoteEn: str(location.parkingNoteEn, ""),
     },
   };
 }

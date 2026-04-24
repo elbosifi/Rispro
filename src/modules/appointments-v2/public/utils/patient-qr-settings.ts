@@ -6,17 +6,25 @@ export interface PatientQrContactSettings {
   whatsapp: string;
   whatsappEnabled: boolean;
   workingHoursAr: string;
+  workingHoursEn: string;
   noteAr: string;
+  noteEn: string;
 }
 
 export interface PatientQrLocationSettings {
   centerNameAr: string;
+  centerNameEn: string;
   departmentLocationAr: string;
+  departmentLocationEn: string;
   roomUnitFloorAr: string;
+  roomUnitFloorEn: string;
   addressAr: string;
+  addressEn: string;
   arrivalInstructionsAr: string;
+  arrivalInstructionsEn: string;
   googleMapsUrl: string;
   parkingNoteAr: string;
+  parkingNoteEn: string;
 }
 
 export interface PatientQrSettings {
@@ -30,9 +38,13 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   pageTitleAr: string;
+  pageTitleEn: string;
   introTextAr: string;
+  introTextEn: string;
   genericPreparationTextAr: string;
+  genericPreparationTextEn: string;
   documentsChecklistAr: string[];
+  documentsChecklistEn: string[];
   contact: PatientQrContactSettings;
   location: PatientQrLocationSettings;
 }
@@ -48,13 +60,22 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextEn: "You can review appointment details, instructions, and department information from this page.",
   genericPreparationTextAr: "",
+  genericPreparationTextEn: "",
   documentsChecklistAr: [
     "ورقة الإحالة",
     "إثبات الهوية",
     "صور أو تقارير سابقة إن وجدت",
     "تحاليل حديثة إذا طُلبت من القسم",
+  ],
+  documentsChecklistEn: [
+    "Referral paper",
+    "ID proof",
+    "Previous images or reports if available",
+    "Recent tests if requested by the department",
   ],
   contact: {
     primaryPhone: "",
@@ -62,16 +83,24 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     whatsapp: "",
     whatsappEnabled: false,
     workingHoursAr: "",
+    workingHoursEn: "",
     noteAr: "",
+    noteEn: "",
   },
   location: {
     centerNameAr: "المركز الوطني للأورام بنغازي",
+    centerNameEn: "National Cancer Center Benghazi",
     departmentLocationAr: "",
+    departmentLocationEn: "",
     roomUnitFloorAr: "",
+    roomUnitFloorEn: "",
     addressAr: "",
+    addressEn: "",
     arrivalInstructionsAr: "",
+    arrivalInstructionsEn: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
+    parkingNoteEn: "",
   },
 };
 
@@ -126,25 +155,37 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     showDepartmentContact: asBoolean(record.showDepartmentContact, DEFAULT_SETTINGS.showDepartmentContact),
     showLocationDirections: asBoolean(record.showLocationDirections, DEFAULT_SETTINGS.showLocationDirections),
     pageTitleAr: asString(record.pageTitleAr, DEFAULT_SETTINGS.pageTitleAr),
+    pageTitleEn: asString(record.pageTitleEn, DEFAULT_SETTINGS.pageTitleEn),
     introTextAr: asString(record.introTextAr, DEFAULT_SETTINGS.introTextAr),
+    introTextEn: asString(record.introTextEn, DEFAULT_SETTINGS.introTextEn),
     genericPreparationTextAr: asString(record.genericPreparationTextAr, DEFAULT_SETTINGS.genericPreparationTextAr),
+    genericPreparationTextEn: asString(record.genericPreparationTextEn, DEFAULT_SETTINGS.genericPreparationTextEn),
     documentsChecklistAr: asStringArray(record.documentsChecklistAr, DEFAULT_SETTINGS.documentsChecklistAr),
+    documentsChecklistEn: asStringArray(record.documentsChecklistEn, DEFAULT_SETTINGS.documentsChecklistEn),
     contact: {
       primaryPhone: asString(contactRaw.primaryPhone, DEFAULT_SETTINGS.contact.primaryPhone),
       secondaryPhone: asString(contactRaw.secondaryPhone, DEFAULT_SETTINGS.contact.secondaryPhone),
       whatsapp: asString(contactRaw.whatsapp, DEFAULT_SETTINGS.contact.whatsapp),
       whatsappEnabled: asBoolean(contactRaw.whatsappEnabled, DEFAULT_SETTINGS.contact.whatsappEnabled),
       workingHoursAr: asString(contactRaw.workingHoursAr, DEFAULT_SETTINGS.contact.workingHoursAr),
+      workingHoursEn: asString(contactRaw.workingHoursEn, DEFAULT_SETTINGS.contact.workingHoursEn),
       noteAr: asString(contactRaw.noteAr, DEFAULT_SETTINGS.contact.noteAr),
+      noteEn: asString(contactRaw.noteEn, DEFAULT_SETTINGS.contact.noteEn),
     },
     location: {
       centerNameAr: asString(locationRaw.centerNameAr, DEFAULT_SETTINGS.location.centerNameAr),
+      centerNameEn: asString(locationRaw.centerNameEn, DEFAULT_SETTINGS.location.centerNameEn),
       departmentLocationAr: asString(locationRaw.departmentLocationAr, DEFAULT_SETTINGS.location.departmentLocationAr),
+      departmentLocationEn: asString(locationRaw.departmentLocationEn, DEFAULT_SETTINGS.location.departmentLocationEn),
       roomUnitFloorAr: asString(locationRaw.roomUnitFloorAr, DEFAULT_SETTINGS.location.roomUnitFloorAr),
+      roomUnitFloorEn: asString(locationRaw.roomUnitFloorEn, DEFAULT_SETTINGS.location.roomUnitFloorEn),
       addressAr: asString(locationRaw.addressAr, DEFAULT_SETTINGS.location.addressAr),
+      addressEn: asString(locationRaw.addressEn, DEFAULT_SETTINGS.location.addressEn),
       arrivalInstructionsAr: asString(locationRaw.arrivalInstructionsAr, DEFAULT_SETTINGS.location.arrivalInstructionsAr),
+      arrivalInstructionsEn: asString(locationRaw.arrivalInstructionsEn, DEFAULT_SETTINGS.location.arrivalInstructionsEn),
       googleMapsUrl: asString(locationRaw.googleMapsUrl, DEFAULT_SETTINGS.location.googleMapsUrl),
       parkingNoteAr: asString(locationRaw.parkingNoteAr, DEFAULT_SETTINGS.location.parkingNoteAr),
+      parkingNoteEn: asString(locationRaw.parkingNoteEn, DEFAULT_SETTINGS.location.parkingNoteEn),
     },
   };
 }
