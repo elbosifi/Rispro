@@ -47,21 +47,21 @@ async function createFixture(): Promise<FixtureContext> {
 
   const examType1 = await pool.query<{ id: number }>(
     `
-      insert into exam_types (modality_id, name_ar, name_en, is_active)
-      values ($1, $2, $3, true)
+      insert into exam_types (modality_id, code, name_ar, name_en, is_active)
+      values ($1, $2, $3, $4, true)
       returning id
     `,
-    [modalityId, `فحص 1 ${suffix}`, `Exam 1 ${suffix}`]
+    [modalityId, `EXAM1${suffix.slice(-6)}`, `فحص 1 ${suffix}`, `Exam 1 ${suffix}`]
   );
   const examTypeId = Number(examType1.rows[0]?.id);
 
   const examType2 = await pool.query<{ id: number }>(
     `
-      insert into exam_types (modality_id, name_ar, name_en, is_active)
-      values ($1, $2, $3, true)
+      insert into exam_types (modality_id, code, name_ar, name_en, is_active)
+      values ($1, $2, $3, $4, true)
       returning id
     `,
-    [modalityId, `فحص 2 ${suffix}`, `Exam 2 ${suffix}`]
+    [modalityId, `EXAM2${suffix.slice(-6)}`, `فحص 2 ${suffix}`, `Exam 2 ${suffix}`]
   );
   const examTypeId2 = Number(examType2.rows[0]?.id);
 

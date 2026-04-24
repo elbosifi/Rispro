@@ -26,7 +26,7 @@ import {
   listModalitiesForSettings,
   updateExamType,
   updateModality
-} from "../services/appointment-service.js";
+} from "../services/catalog-service.js";
 import {
   createDicomDevice,
   deleteDicomDevice,

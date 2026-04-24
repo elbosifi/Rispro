@@ -7,7 +7,6 @@ import { pingDatabase } from "./db/pool.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { patientsRouter } from "./routes/patients.js";
-import { appointmentsRouter } from "./routes/appointments.js";
 import { queueRouter } from "./routes/queue.js";
 import { documentsRouter } from "./routes/documents.js";
 import { integrationsRouter } from "./routes/integrations.js";
@@ -102,7 +101,6 @@ export function createApp(): Application {
   app.use("/api/auth", authRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/patients", patientsRouter);
-  app.use("/api/appointments", appointmentsRouter);
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
   app.use("/api/integrations", integrationsRouter);

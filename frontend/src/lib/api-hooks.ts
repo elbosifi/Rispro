@@ -330,14 +330,6 @@ export async function getAppointmentSuggestions(params: {
   return raw.suggestions;
 }
 
-export async function createAppointment(payload: RawRecord) {
-  const raw = await api<{ appointment: RawRecord }>("/appointments", {
-    method: "POST",
-    body: JSON.stringify(payload)
-  });
-  return mapAppointmentWithDetails(raw.appointment);
-}
-
 export async function getAppointmentById(id: number) {
   const raw = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${id}`);
   return mapAppointmentWithDetails(raw.appointment);
@@ -396,67 +388,26 @@ export async function cancelPublicAppointment(token: string): Promise<PublicAppo
 }
 
 export async function updateAppointment(id: number, payload: RawRecord) {
-  try {
-    await api<{ booking: RawRecord }>(`/v2/appointments/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload)
-    });
-    const details = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${id}`);
-    return mapAppointmentWithDetails(details.appointment);
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) {
-      throw error;
-    }
-  }
-
-  const legacy = await api<{ appointment: RawRecord }>(`/appointments/${id}`, {
+  await api<{ booking: RawRecord }>(`/v2/appointments/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload)
   });
-  return mapAppointmentWithDetails(legacy.appointment);
+  const details = await api<{ appointment: RawRecord }>(`/v2/read/appointments/${id}`);
+  return mapAppointmentWithDetails(details.appointment);
 }
 
-export async function cancelAppointment(id: number, cancelReason: string) {
-  try {
-    const raw = await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
-      method: "POST"
-    });
-    return { appointment: raw.booking };
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) {
-      throw error;
-    }
-  }
-
-  return api<{ appointment: RawRecord }>(`/appointments/${id}/cancel`, {
-    method: "POST",
-    body: JSON.stringify({ cancelReason })
+export async function cancelAppointment(id: number, _cancelReason: string) {
+  const raw = await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
+    method: "POST"
   });
+  return { appointment: raw.booking };
 }
 
 export async function deleteAppointment(id: number) {
-  try {
-    await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
-      method: "POST"
-    });
-    return { ok: true };
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) {
-      throw error;
-    }
-  }
-
-  return api<{ ok: boolean }>(`/appointments/${id}`, {
-    method: "DELETE"
+  await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
+    method: "POST"
   });
-}
-
-export async function updateAppointmentProtocol(id: number, payload: RawRecord) {
-  const raw = await api<{ appointment: RawRecord }>(`/appointments/${id}/protocol`, {
-    method: "PUT",
-    body: JSON.stringify(payload)
-  });
-  return mapAppointmentWithDetails(raw.appointment);
+  return { ok: true };
 }
 
 // -- Registrations / Calendar / Modality / Doctor / Print (shared) --

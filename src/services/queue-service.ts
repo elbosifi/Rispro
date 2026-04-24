@@ -3,7 +3,9 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
 import { getTripoliToday, normalizeDateValue, TRIPOLI_TIME_ZONE } from "../utils/date.js";
-import { createAppointment } from "./appointment-service.js";
+import { normalizePositiveInteger } from "../utils/normalize.js";
+import { createBooking } from "../modules/appointments-v2/booking/services/create-booking.service.js";
+import type { CreateBookingPayload } from "../modules/appointments-v2/booking/models/booking.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveScanValueToAccession } from "./dicom-service.js";
 import {
@@ -536,24 +538,27 @@ export async function createWalkInQueueEntry(
   }
 
   const queueDate = getTripoliToday();
-  const appointmentResult = await createAppointment(
+  const userId = normalizePositiveInteger(currentUser.sub, "userId") as number;
+  const bookingResult = await createBooking(
     {
-      ...payload,
-      appointmentDate: queueDate,
-      isWalkIn: true
-    },
-    currentUser,
-    options
+      patientId: Number(payload.patientId),
+      modalityId: Number(payload.modalityId),
+      examTypeId: payload.examTypeId ? Number(payload.examTypeId) : null,
+      bookingDate: queueDate,
+      isWalkIn: true,
+      notes: payload.notes ? String(payload.notes) : null,
+    } as CreateBookingPayload,
+    userId
   );
 
   const scanResult = await scanAppointmentIntoQueue(
-    { scanValue: appointmentResult.barcodeValue },
+    { scanValue: bookingResult.booking.id.toString() },
     currentUser
   );
 
   return {
     ...scanResult,
-    createdAppointment: appointmentResult.appointment
+    createdAppointment: bookingResult.booking as unknown as Record<string, unknown>
   };
 }
 
