@@ -370,8 +370,18 @@ export interface PublicAppointmentCancelResult {
 
 export async function fetchPublicAppointmentCancelPreview(token: string): Promise<PublicAppointmentCancelPreview> {
   const query = new URLSearchParams({ t: token });
-  const raw = await api<{ preview: RawRecord; settings?: RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
+  const raw = await api<{ preview: RawRecord; settings?: PatientQrSettings | RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
   const preview = raw.preview ?? {};
+
+  // Handle both array format (raw records) and object format (already normalized)
+  let patientQrSettings: PatientQrSettings | undefined;
+  if (raw.settings) {
+    if (Array.isArray(raw.settings)) {
+      patientQrSettings = raw.settings.length > 0 ? normalizePatientQrSettings(raw.settings[0]) : undefined;
+    } else {
+      patientQrSettings = raw.settings as PatientQrSettings;
+    }
+  }
 
   return {
     bookingId: Number(preview.bookingId ?? preview.booking_id ?? 0),
@@ -390,7 +400,7 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     examInstructionAr: String(preview.examInstructionAr ?? preview.exam_instruction_ar ?? ""),
     examInstructionEn: String(preview.examInstructionEn ?? preview.exam_instruction_en ?? ""),
     currentStatus: String(preview.currentStatus ?? preview.current_status ?? ""),
-    patientQrSettings: raw.settings && raw.settings.length > 0 ? normalizePatientQrSettings(raw.settings[0]) : undefined,
+    patientQrSettings,
   };
 }
 
