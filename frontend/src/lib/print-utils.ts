@@ -261,17 +261,16 @@ export async function createAppointmentSlipPdfBlob(
         h: page.h - mm(20),
       };
 
-  const headerHeight = mode === "blank" ? 88 : 0;
-  const footerHeight = mode === "blank" ? 56 : 0;
-  const qrSize = mode === "blank" ? 72 : 66;
-  const barcodeHeight = 44;
+  const headerHeight = mode === "blank" ? 82 : 0;
+  const qrSize = mode === "blank" ? 64 : 60;
+  const barcodeHeight = 36;
   const detailsTop = safe.y + headerHeight + (mode === "blank" ? 8 : 0);
   const detailsLeft = safe.x;
   const detailsWidth = safe.w;
   const columnGap = 8;
   const fieldWidth = (detailsWidth - columnGap) / 2;
-  const fieldHeight = 30;
-  const rowGap = 5;
+  const fieldHeight = 28;
+  const rowGap = 4;
 
   doc.setTextColor("#111827");
   doc.setFillColor("#ffffff");
@@ -288,13 +287,13 @@ export async function createAppointmentSlipPdfBlob(
     }
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(14);
+    doc.setFontSize(13.5);
     doc.setTextColor("#b11116");
     doc.text(slip.hospitalName, safe.x + 58, safe.y + 12);
     doc.setFontSize(9.5);
     doc.setTextColor("#1f2937");
     doc.text(slip.departmentName, safe.x + 58, safe.y + 27);
-    doc.setFontSize(22);
+    doc.setFontSize(20);
     doc.setTextColor("#b11116");
     doc.text("APPOINTMENT SLIP", safe.x + 58, safe.y + 52);
 
@@ -304,11 +303,11 @@ export async function createAppointmentSlipPdfBlob(
     doc.roundedRect(page.w - safe.x - qrSize - 2, safe.y, qrSize + 2, qrSize + 2, 6, 6, "S");
     doc.addImage(qrDataUrl, "PNG", page.w - safe.x - qrSize - 1, safe.y + 1, qrSize, qrSize);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(9.5);
+    doc.setFontSize(9);
     doc.setTextColor("#b11116");
     doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor("#374151");
     doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
   }
@@ -364,42 +363,42 @@ export async function createAppointmentSlipPdfBlob(
   }
 
   if (mode === "blank") {
-    const footerY = page.h - safe.y - footerHeight + 6;
+    const footerY = page.h - safe.y - barcodeHeight - 16;
     doc.setDrawColor("#d3d4d6");
     doc.setLineWidth(0.5);
-    doc.line(detailsLeft, footerY - 10, detailsLeft + prepWidth, footerY - 10);
+    doc.line(detailsLeft, footerY - 8, detailsLeft + prepWidth, footerY - 8);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
+    doc.setFontSize(8.25);
     doc.setTextColor("#b11116");
-    doc.text("Please arrive 15 minutes before your appointment", detailsLeft, footerY);
+    doc.text("Printed", detailsLeft, footerY);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.5);
+    doc.setFontSize(8.25);
     doc.setTextColor("#1f2937");
-    doc.text(`Phone ${slip.phone}`, detailsLeft + 172, footerY);
-    doc.text(`Printed: ${slip.generatedAt}`, detailsLeft, footerY + 12);
+    doc.text(`${slip.generatedAt}`, detailsLeft + 34, footerY);
+    doc.text("RISpro", detailsLeft + prepWidth - 34, footerY, { align: "right" });
   }
 
-  const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 4 : 0);
+  const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 2 : 0);
   const bars = buildBarcodeBars(slip.accessionBarcodePayload);
-  const barPadding = 14;
+  const barPadding = 12;
   const barWidth = page.w - safe.x * 2 - barPadding * 2;
   const scale = barWidth / Math.max(1, bars.at(-1)?.x ?? 1);
   doc.setDrawColor("#b11116");
   doc.setFillColor("#111111");
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
+  doc.setFontSize(9);
   doc.setTextColor("#b11116");
   doc.text("Scan to enter the queue", detailsLeft + prepWidth / 2, barcodeY - 10, { align: "center" });
   doc.setLineWidth(0.5);
   doc.roundedRect(detailsLeft, barcodeY, prepWidth, barcodeHeight, 6, 6, "S");
   const baseX = detailsLeft + barPadding;
-  const baseY = barcodeY + 6;
-  const barHeight = barcodeHeight - 12;
+  const baseY = barcodeY + 5;
+  const barHeight = barcodeHeight - 10;
   for (const bar of bars) {
     doc.rect(baseX + bar.x * scale, baseY, Math.max(0.8, bar.w * scale), barHeight, "F");
   }
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
+  doc.setFontSize(8);
   doc.setTextColor("#1f2937");
   doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + prepWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
 

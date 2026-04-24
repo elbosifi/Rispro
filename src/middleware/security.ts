@@ -15,6 +15,7 @@ export function securityHeaders(_req: Request, res: Response, next: NextFunction
       "font-src 'self' data:",
       "connect-src 'self'",
       "object-src 'none'",
+      "frame-src 'self' blob:",
       "base-uri 'self'",
       "frame-ancestors 'none'",
       "form-action 'self'"
