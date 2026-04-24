@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
 import { fetchPatientQrSettings, savePatientQrSettings } from "@/lib/api-hooks";
+import { LanguageProvider } from "@/providers/language-provider";
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchPatientQrSettings: vi.fn(),
@@ -65,9 +66,11 @@ function renderComponent() {
   });
 
   return render(
-    <QueryClientProvider client={queryClient}>
-      <PatientQrSettingsSection onReAuthRequired={vi.fn()} />
-    </QueryClientProvider>
+    <LanguageProvider>
+      <QueryClientProvider client={queryClient}>
+        <PatientQrSettingsSection onReAuthRequired={vi.fn()} />
+      </QueryClientProvider>
+    </LanguageProvider>
   );
 }
 
@@ -163,9 +166,11 @@ describe("PatientQrSettingsSection", () => {
 
     const user = userEvent.setup();
     render(
-      <QueryClientProvider client={queryClient}>
-        <PatientQrSettingsSection onReAuthRequired={onReAuthRequired} />
-      </QueryClientProvider>
+      <LanguageProvider>
+        <QueryClientProvider client={queryClient}>
+          <PatientQrSettingsSection onReAuthRequired={onReAuthRequired} />
+        </QueryClientProvider>
+      </LanguageProvider>
     );
 
     await screen.findByText("إعدادات صفحة المريض ورمز QR");

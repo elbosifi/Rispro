@@ -515,6 +515,41 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           </div>
         </FieldCard>
       </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Note (En)" value={draft.contact.noteEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteEn: value } }))} />
+            <Textarea dir="rtl" label="ملاحظة قصيرة" value={draft.contact.noteAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteAr: value } }))} />
+          </div>
+        </FieldCard>
+
+        <FieldCard title="الموقع والدخول">
+          <ToggleRow label="إظهار بطاقة الموقع" checked={draft.showLocationDirections} onChange={(checked) => setDraft((current) => ({ ...current, showLocationDirections: checked }))} />
+          <div className="grid grid-cols-2 gap-2">
+            <Input dir="ltr" label="Center Name (En)" value={draft.location.centerNameEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameEn: value } }))} />
+            <Input dir="rtl" label="اسم المركز" value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Department/Location (En)" value={draft.location.departmentLocationEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationEn: value } }))} />
+            <Textarea dir="rtl" label="اسم القسم / الموقع" value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Input dir="ltr" label="Floor/Unit/Room (En)" value={draft.location.roomUnitFloorEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorEn: value } }))} />
+            <Input dir="rtl" label="الطابق / الوحدة / الغرفة" value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Address (En)" value={draft.location.addressEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressEn: value } }))} />
+            <Textarea dir="rtl" label="العنوان" value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Arrival Instructions (En)" value={draft.location.arrivalInstructionsEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsEn: value } }))} />
+            <Textarea dir="rtl" label="إرشادات الوصول" value={draft.location.arrivalInstructionsAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsAr: value } }))} />
+          </div>
+          <Input label="رابط خرائط Google" value={draft.location.googleMapsUrl} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, googleMapsUrl: value } }))} error={errors.googleMapsUrl} />
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label="Additional Note (En)" value={draft.location.parkingNoteEn} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteEn: value } }))} />
+            <Textarea dir="rtl" label="ملاحظة إضافية" value={draft.location.parkingNoteAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteAr: value } }))} />
+          </div>
+        </FieldCard>
+      </div>
 
       <div className="flex gap-3">
         <button
@@ -589,7 +624,6 @@ function Textarea(props: { label: string; value: string; onChange: (value: strin
 }
 
 function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
-  const { language } = useLanguage();
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
       <h4 className="text-base font-extrabold text-amber-900">{chooseLocalized(language, "إعادة التحقق مطلوبة", "Re-authentication Required")}</h4>
