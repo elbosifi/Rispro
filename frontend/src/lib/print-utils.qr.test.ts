@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { buildAppointmentSlipData } from "./print-utils";
+import { buildAppointmentSlipData, prepareAppointmentSlipHtml } from "./print-utils";
 
 const toStringMock = vi.hoisted(() => vi.fn().mockResolvedValue("<svg data-testid=\"qr-image\"></svg>"));
 vi.mock("qrcode", () => ({
@@ -72,5 +72,13 @@ describe("appointment slip QR payloads", () => {
     const slip = buildAppointmentSlipData(makeAppointment({ publicCancelToken: null }));
 
     expect(slip.queueQrPayload).toBe("");
+  });
+
+  it("keeps the slip compact and routes the QR to the patient page", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment());
+
+    expect(html).toContain("Scan for instructions & location");
+    expect(html).not.toContain("Modality Instructions");
+    expect(html).not.toContain("Exam Preparation");
   });
 });

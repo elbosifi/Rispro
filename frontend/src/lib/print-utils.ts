@@ -1,5 +1,6 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
+import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
 
@@ -210,8 +211,7 @@ async function loadImageDataUrl(url: string): Promise<string | null> {
 
 export function buildAppointmentSlipData(apt: AppointmentWithDetails): AppointmentSlipRenderData {
   const token = String(apt.publicCancelToken || "").trim();
-  const cancelUrl =
-    token.length > 0 ? `${window.location.origin}/public/appointment?t=${encodeURIComponent(token)}` : "";
+  const cancelUrl = buildPatientAppointmentUrl(token, window.location.origin);
   const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
   return {
     hospitalName: "National Cancer Center Benghazi",
@@ -310,7 +310,7 @@ export async function createAppointmentSlipPdfBlob(
       doc.setFont("helvetica", "bold");
       doc.setFontSize(9);
       doc.setTextColor("#b11116");
-      doc.text("Scan to cancel this appointment", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
+      doc.text("Scan for instructions & location", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(7);
       doc.setTextColor("#374151");
@@ -332,47 +332,11 @@ export async function createAppointmentSlipPdfBlob(
     drawLabelValueBox(doc, detailsLeft + fieldWidth + columnGap, rowY, fieldWidth, fieldHeight, row.rightLabel, row.rightValue, { maxLines: 2 });
   });
 
-  const prepTop = detailsTop + rows.length * (fieldHeight + rowGap) + (mode === "blank" ? 4 : 8);
-  const prepWidth = detailsWidth;
-  if (slip.modalityInstructions || slip.examInstructions) {
-    drawBox(doc, detailsLeft, prepTop, prepWidth, mode === "blank" ? 82 : 72, {
-      fill: "#ffffff",
-      stroke: "#e2676d",
-      radius: 6,
-    });
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.5);
-    doc.setTextColor("#b11116");
-    doc.text("Modality Instructions", detailsLeft + 8, prepTop + 10);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor("#20242a");
-    doc.text(wrapLines(doc, slip.modalityInstructions || "Please follow the department preparation instructions.", prepWidth - 16, 2), detailsLeft + 8, prepTop + 22, {
-      baseline: "top",
-      lineHeightFactor: 1.15,
-    });
-
-    if (slip.examInstructions) {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8.5);
-      doc.setTextColor("#b11116");
-      doc.text("Exam Preparation", detailsLeft + 8, prepTop + 48);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor("#20242a");
-      doc.text(wrapLines(doc, slip.examInstructions, prepWidth - 16, 2), detailsLeft + 8, prepTop + 60, {
-        baseline: "top",
-        lineHeightFactor: 1.15,
-      });
-    }
-  }
-
   if (mode === "blank") {
     const footerY = page.h - safe.y - barcodeHeight - 16;
     doc.setDrawColor("#d3d4d6");
     doc.setLineWidth(0.5);
-    doc.line(detailsLeft, footerY - 8, detailsLeft + prepWidth, footerY - 8);
+    doc.line(detailsLeft, footerY - 8, detailsLeft + detailsWidth, footerY - 8);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8.25);
     doc.setTextColor("#b11116");
@@ -381,7 +345,7 @@ export async function createAppointmentSlipPdfBlob(
     doc.setFontSize(8.25);
     doc.setTextColor("#1f2937");
     doc.text(`${slip.generatedAt}`, detailsLeft + 34, footerY);
-    doc.text("RISpro", detailsLeft + prepWidth - 34, footerY, { align: "right" });
+    doc.text("RISpro", detailsLeft + detailsWidth - 34, footerY, { align: "right" });
   }
 
   const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 2 : 0);
@@ -394,9 +358,9 @@ export async function createAppointmentSlipPdfBlob(
   doc.setFont("helvetica", "bold");
   doc.setFontSize(9);
   doc.setTextColor("#b11116");
-  doc.text("Scan to enter the queue", detailsLeft + prepWidth / 2, barcodeY - 10, { align: "center" });
+  doc.text("Scan to enter the queue", detailsLeft + detailsWidth / 2, barcodeY - 10, { align: "center" });
   doc.setLineWidth(0.5);
-  doc.roundedRect(detailsLeft, barcodeY, prepWidth, barcodeHeight, 6, 6, "S");
+  doc.roundedRect(detailsLeft, barcodeY, detailsWidth, barcodeHeight, 6, 6, "S");
   const baseX = detailsLeft + barPadding;
   const baseY = barcodeY + 5;
   const barHeight = barcodeHeight - 10;
@@ -406,7 +370,7 @@ export async function createAppointmentSlipPdfBlob(
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
   doc.setTextColor("#1f2937");
-  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + prepWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
+  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + detailsWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
 
   return doc.output("blob");
 }
@@ -476,7 +440,6 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
       slipField("Arrival", slip.arrivalNote)
     ),
   ];
-  const hasPrepContent = Boolean(slip.modalityInstructions || slip.examInstructions);
   return `
     <html>
       <head>
@@ -649,7 +612,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
                     <div class="qr-card">
                       <div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>
                     </div>
-                    <div class="qr-title">Scan to cancel this appointment</div>
+                    <div class="qr-title">Scan for instructions & location</div>
                     <div class="qr-note">This link is unique to you and your appointment.</div>
                   </div>
                 `
@@ -660,27 +623,6 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
           <div class="rows">
             ${rows.join("")}
           </div>
-
-          ${
-            hasPrepContent
-              ? `
-                <div class="prep">
-                  <div class="prep-label">Modality Instructions</div>
-                  <p class="prep-text">${escapeHtml(slip.modalityInstructions || "Please follow the department preparation instructions.")}</p>
-                </div>
-                ${
-                  slip.examInstructions
-                    ? `
-                      <div class="prep">
-                        <div class="prep-label">Exam Preparation</div>
-                        <p class="prep-text">${escapeHtml(slip.examInstructions)}</p>
-                      </div>
-                    `
-                    : ""
-                }
-              `
-              : ""
-          }
 
           <div class="mid-divider">
             <div class="rule-line"></div>

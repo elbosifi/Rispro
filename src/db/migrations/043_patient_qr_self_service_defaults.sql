@@ -33,8 +33,10 @@ values (
         "noteAr": ""
       },
       "location": {
-        "centerNameAr": "المركز الوطني لعلاج الأورام - بنغازي",
+        "centerNameAr": "المركز الوطني للأورام بنغازي",
         "departmentLocationAr": "",
+        "roomUnitFloorAr": "",
+        "addressAr": "",
         "arrivalInstructionsAr": "",
         "googleMapsUrl": "",
         "parkingNoteAr": ""

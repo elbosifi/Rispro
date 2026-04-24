@@ -421,6 +421,8 @@ export interface PatientQrContactSettings {
 export interface PatientQrLocationSettings {
   centerNameAr: string;
   departmentLocationAr: string;
+  roomUnitFloorAr: string;
+  addressAr: string;
   arrivalInstructionsAr: string;
   googleMapsUrl: string;
   parkingNoteAr: string;
@@ -494,8 +496,10 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
       noteAr: str(contact.noteAr, ""),
     },
     location: {
-      centerNameAr: str(location.centerNameAr, "المركز الوطني لعلاج الأورام - بنغازي"),
+      centerNameAr: str(location.centerNameAr, "المركز الوطني للأورام بنغازي"),
       departmentLocationAr: str(location.departmentLocationAr, ""),
+      roomUnitFloorAr: str(location.roomUnitFloorAr, ""),
+      addressAr: str(location.addressAr, ""),
       arrivalInstructionsAr: str(location.arrivalInstructionsAr, ""),
       googleMapsUrl: str(location.googleMapsUrl, ""),
       parkingNoteAr: str(location.parkingNoteAr, ""),

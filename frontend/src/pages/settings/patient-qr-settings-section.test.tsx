@@ -32,8 +32,10 @@ const baseSettings = {
     noteAr: "ملاحظة",
   },
   location: {
-    centerNameAr: "المركز الوطني لعلاج الأورام - بنغازي",
-    departmentLocationAr: "الطابق الأول",
+    centerNameAr: "المركز الوطني للأورام بنغازي",
+    departmentLocationAr: "قسم الأشعة التشخيصية",
+    roomUnitFloorAr: "الطابق الأول / غرفة 3",
+    addressAr: "شارع المستشفى",
     arrivalInstructionsAr: "الحضور قبل 15 دقيقة",
     googleMapsUrl: "https://maps.google.com/?q=test",
     parkingNoteAr: "مواقف متاحة",
@@ -68,6 +70,8 @@ describe("PatientQrSettingsSection", () => {
     expect(await screen.findByText("إعدادات صفحة المريض ورمز QR")).toBeTruthy();
     expect(screen.getByDisplayValue("خدمة المريض عبر رمز QR")).toBeTruthy();
     expect(screen.getByDisplayValue("ورقة الإحالة")).toBeTruthy();
+    expect(screen.getByDisplayValue("الطابق الأول / غرفة 3")).toBeTruthy();
+    expect(screen.getByDisplayValue("شارع المستشفى")).toBeTruthy();
   });
 
   it("saves toggles and content changes", async () => {
@@ -88,6 +92,8 @@ describe("PatientQrSettingsSection", () => {
     const payload = vi.mocked(savePatientQrSettings).mock.calls[0][0];
     expect(payload.introTextAr).toBe("مقدمة جديدة");
     expect(payload.showLocationDirections).toBe(false);
+    expect(payload.location.roomUnitFloorAr).toBe("الطابق الأول / غرفة 3");
+    expect(payload.location.addressAr).toBe("شارع المستشفى");
   });
 
   it("supports adding, removing, and reordering checklist items", async () => {

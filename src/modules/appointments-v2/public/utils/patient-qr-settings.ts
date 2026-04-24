@@ -12,6 +12,8 @@ export interface PatientQrContactSettings {
 export interface PatientQrLocationSettings {
   centerNameAr: string;
   departmentLocationAr: string;
+  roomUnitFloorAr: string;
+  addressAr: string;
   arrivalInstructionsAr: string;
   googleMapsUrl: string;
   parkingNoteAr: string;
@@ -61,8 +63,10 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     noteAr: "",
   },
   location: {
-    centerNameAr: "المركز الوطني لعلاج الأورام - بنغازي",
+    centerNameAr: "المركز الوطني للأورام بنغازي",
     departmentLocationAr: "",
+    roomUnitFloorAr: "",
+    addressAr: "",
     arrivalInstructionsAr: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
@@ -133,6 +137,8 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     location: {
       centerNameAr: asString(locationRaw.centerNameAr, DEFAULT_SETTINGS.location.centerNameAr),
       departmentLocationAr: asString(locationRaw.departmentLocationAr, DEFAULT_SETTINGS.location.departmentLocationAr),
+      roomUnitFloorAr: asString(locationRaw.roomUnitFloorAr, DEFAULT_SETTINGS.location.roomUnitFloorAr),
+      addressAr: asString(locationRaw.addressAr, DEFAULT_SETTINGS.location.addressAr),
       arrivalInstructionsAr: asString(locationRaw.arrivalInstructionsAr, DEFAULT_SETTINGS.location.arrivalInstructionsAr),
       googleMapsUrl: asString(locationRaw.googleMapsUrl, DEFAULT_SETTINGS.location.googleMapsUrl),
       parkingNoteAr: asString(locationRaw.parkingNoteAr, DEFAULT_SETTINGS.location.parkingNoteAr),

@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
-import PublicCancelAppointmentPage from "./cancel-appointment-page";
+import PublicCancelAppointmentPage, { createCalendarBlob } from "./cancel-appointment-page";
 import {
   cancelPublicAppointment,
   fetchPublicAppointmentCancelPreview,
@@ -38,8 +38,10 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
       noteAr: "يرجى الاتصال خلال ساعات العمل",
     },
     location: {
-      centerNameAr: "المركز الوطني لعلاج الأورام - بنغازي",
-      departmentLocationAr: "الطابق الأول",
+      centerNameAr: "المركز الوطني للأورام بنغازي",
+      departmentLocationAr: "قسم الأشعة التشخيصية",
+      roomUnitFloorAr: "الطابق الأول / غرفة 3",
+      addressAr: "شارع المستشفى",
       arrivalInstructionsAr: "الحضور قبل 15 دقيقة",
       googleMapsUrl: "https://maps.google.com/?q=test",
       parkingNoteAr: "مواقف أمامية متاحة",
@@ -106,13 +108,19 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(await screen.findByText("خدمة المريض عبر رمز QR")).toBeTruthy();
     expect(screen.getByRole("button", { name: /إضافة إلى التقويم/i })).toBeTruthy();
+    expect(screen.getByText("تعليمات خاصة بالجهاز")).toBeTruthy();
+    expect(screen.getByText("تعليمات خاصة بالفحص")).toBeTruthy();
     expect(screen.getByText("ما الذي يجب إحضاره؟")).toBeTruthy();
     expect(screen.getByText("التواصل مع القسم")).toBeTruthy();
     expect(screen.getByText("موقع القسم")).toBeTruthy();
+    expect(screen.getByText("الطابق / الوحدة / الغرفة")).toBeTruthy();
+    expect(screen.getByText("العنوان")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /فتح الخريطة/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /إلغاء الموعد/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
     expect(fetchPublicAppointmentCancelPreview).toHaveBeenCalledWith("test-token");
     expect(screen.queryByText(/طلب موعد جديد/i)).toBeNull();
+    expect(screen.queryByText("العودة للرئيسية")).toBeNull();
   });
 
   it("moves from landing to confirmation and requires acknowledgement before canceling", async () => {
@@ -138,6 +146,7 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(await screen.findByText("تم إلغاء الموعد بنجاح")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
+    expect(screen.queryByText("العودة للرئيسية")).toBeNull();
   });
 
   it("shows the already-cancelled state when the QR link is reopened after cancellation", async () => {
@@ -150,6 +159,7 @@ describe("PublicCancelAppointmentPage", () => {
     expect(await screen.findByText("هذا الموعد ملغى مسبقاً")).toBeTruthy();
     expect(screen.getByText("لا توجد أي إجراءات مطلوبة.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
+    expect(screen.queryByText("العودة للرئيسية")).toBeNull();
   });
 
   it("shows a safe disabled message when QR access is turned off", async () => {
@@ -218,6 +228,8 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(await screen.findByText("خدمة المريض عبر رمز QR")).toBeTruthy();
     expect(screen.queryByText("تعليمات التحضير")).toBeNull();
+    expect(screen.queryByText("تعليمات خاصة بالجهاز")).toBeNull();
+    expect(screen.queryByText("تعليمات خاصة بالفحص")).toBeNull();
     expect(screen.queryByText("ما الذي يجب إحضاره؟")).toBeNull();
     expect(screen.queryByText("التواصل مع القسم")).toBeNull();
     expect(screen.queryByText("موقع القسم")).toBeNull();
@@ -236,5 +248,14 @@ describe("PublicCancelAppointmentPage", () => {
 
     expect(createObjectUrl).toHaveBeenCalled();
     expect(clickSpy).toHaveBeenCalled();
+  });
+
+  it("builds calendar entries with the patient page link and reminder", async () => {
+    const blob = createCalendarBlob(preview(), baseSettings(), "http://localhost:3000/public/appointment?t=test-token");
+    const text = await blob.text();
+
+    expect(text).toContain("URL:http://localhost:3000/public/appointment?t=test-token");
+    expect(text).toContain("TRIGGER:-PT24H");
+    expect(text).toContain("استخدم هذا الرابط للحصول على المزيد من المعلومات عن الجهاز والفحص.");
   });
 });

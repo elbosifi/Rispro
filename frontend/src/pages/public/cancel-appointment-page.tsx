@@ -9,7 +9,6 @@ import {
   Clock3,
   Download,
   ExternalLink,
-  Home,
   Loader2,
   MapPin,
   Phone,
@@ -20,6 +19,7 @@ import {
   MessageCircle,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
+import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
   fetchPublicAppointmentCancelPreview,
@@ -31,7 +31,7 @@ import {
 type LinkErrorState = "invalid" | "expired" | "unavailable" | "disabled";
 type FlowState = "landing" | "confirm" | "success" | "already_cancelled";
 
-const INST_AR = "المركز الوطني لعلاج الأورام - بنغازي";
+const INST_AR = "المركز الوطني للأورام بنغازي";
 const DEPT_AR = "قسم الأشعة التشخيصية";
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
@@ -62,6 +62,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   location: {
     centerNameAr: INST_AR,
     departmentLocationAr: "",
+    roomUnitFloorAr: "",
+    addressAr: "",
     arrivalInstructionsAr: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
@@ -185,7 +187,7 @@ function Header(props: { centerName: string }) {
         <div className="flex items-start gap-3">
           <img
             src="/assets/nccb-logo.png"
-            alt="شعار المركز الوطني لعلاج الأورام - بنغازي"
+            alt="شعار المركز الوطني للأورام بنغازي"
             className="h-14 w-14 shrink-0 rounded-2xl object-contain ring-1 ring-slate-100"
           />
           <div className="min-w-0 flex-1">
@@ -381,6 +383,8 @@ function ContactCard(props: { settings: PatientQrSettings["contact"] }) {
 function LocationCard(props: { settings: PatientQrSettings["location"] }) {
   const hasContent = Boolean(
     props.settings.departmentLocationAr ||
+      props.settings.roomUnitFloorAr ||
+      props.settings.addressAr ||
       props.settings.arrivalInstructionsAr ||
       props.settings.parkingNoteAr ||
       props.settings.googleMapsUrl
@@ -400,20 +404,32 @@ function LocationCard(props: { settings: PatientQrSettings["location"] }) {
       </div>
 
       <div className="space-y-3">
-        {props.settings.departmentLocationAr ? <InfoCard icon={<MapPin className="h-5 w-5" />} title="الموقع" body={props.settings.departmentLocationAr} tone="info" /> : null}
+        {props.settings.departmentLocationAr ? <InfoCard icon={<MapPin className="h-5 w-5" />} title="اسم القسم / الموقع" body={props.settings.departmentLocationAr} tone="info" /> : null}
+        {props.settings.roomUnitFloorAr ? <InfoCard icon={<MapPin className="h-5 w-5" />} title="الطابق / الوحدة / الغرفة" body={props.settings.roomUnitFloorAr} tone="neutral" /> : null}
+        {props.settings.addressAr ? <InfoCard icon={<MapPin className="h-5 w-5" />} title="العنوان" body={props.settings.addressAr} tone="neutral" /> : null}
         {props.settings.arrivalInstructionsAr ? <InfoCard icon={<Clock3 className="h-5 w-5" />} title="إرشادات الوصول" body={props.settings.arrivalInstructionsAr} tone="neutral" /> : null}
         {props.settings.parkingNoteAr ? <InfoCard icon={<Sparkles className="h-5 w-5" />} title="ملاحظة إضافية" body={props.settings.parkingNoteAr} tone="neutral" /> : null}
         {props.settings.googleMapsUrl ? (
-          <a
-            href={props.settings.googleMapsUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center justify-center gap-2 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm font-extrabold text-sky-800"
-          >
-            <MapPin className="h-4 w-4" />
-            فتح الموقع
-            <ExternalLink className="h-4 w-4" />
-          </a>
+          <div className="rounded-2xl border border-sky-200 bg-sky-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="rounded-full bg-white p-2 text-sky-700 shadow-sm">
+                <MapPin className="h-5 w-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h4 className="text-sm font-extrabold text-slate-900">خريطة الموقع</h4>
+                <p className="mt-1 text-sm leading-7 text-slate-600">اضغط الزر لفتح الخريطة في تطبيق الخرائط أو المتصفح.</p>
+              </div>
+            </div>
+            <a
+              href={props.settings.googleMapsUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-3 inline-flex items-center justify-center gap-2 rounded-2xl bg-sky-600 px-4 py-3 text-sm font-extrabold text-white"
+            >
+              فتح الخريطة
+              <ExternalLink className="h-4 w-4" />
+            </a>
+          </div>
         ) : null}
       </div>
     </Card>
@@ -439,7 +455,7 @@ function escapeIcs(value: string): string {
     .replace(/,/g, "\\,");
 }
 
-function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: PatientQrSettings): Blob {
+export function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: PatientQrSettings, patientPageUrl: string): Blob {
   const title = [preview.examNameAr || preview.examName || "موعد أشعة", preview.modalityNameAr || preview.modalityName || ""]
     .filter(Boolean)
     .join(" - ");
@@ -452,12 +468,16 @@ function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: P
 
   const location = [
     settings.location.departmentLocationAr,
+    settings.location.roomUnitFloorAr,
+    settings.location.addressAr,
     settings.location.centerNameAr,
   ].filter(Boolean).join(" - ");
   const descriptionParts = [
     settings.introTextAr,
     settings.genericPreparationTextAr,
     settings.contact.noteAr,
+    patientPageUrl ? `رابط صفحة الموعد: ${patientPageUrl}` : "",
+    patientPageUrl ? "استخدم هذا الرابط للحصول على المزيد من المعلومات عن الجهاز والفحص." : "",
   ].filter(Boolean);
 
   const lines = [
@@ -476,6 +496,16 @@ function createCalendarBlob(preview: PublicAppointmentCancelPreview, settings: P
       : `DTEND;VALUE=DATE:${buildIcsDate(endDate).slice(0, 8)}`,
     location ? `LOCATION:${escapeIcs(location)}` : null,
     descriptionParts.length > 0 ? `DESCRIPTION:${escapeIcs(descriptionParts.join("\n\n"))}` : null,
+    patientPageUrl ? `URL:${escapeIcs(patientPageUrl)}` : null,
+    hasTime
+      ? [
+          "BEGIN:VALARM",
+          "ACTION:DISPLAY",
+          "DESCRIPTION:موعد الأشعة خلال 24 ساعة",
+          "TRIGGER:-PT24H",
+          "END:VALARM",
+        ].join("\r\n")
+      : null,
     "END:VEVENT",
     "END:VCALENDAR",
   ].filter(Boolean);
@@ -516,6 +546,7 @@ export default function PublicCancelAppointmentPage() {
 
   const preview = previewQuery.data;
   const settings = preview?.patientQrSettings ?? DEFAULT_SETTINGS;
+  const patientPageUrl = useMemo(() => buildPatientAppointmentUrl(token, window.location.origin), [token]);
   const canCancel = Boolean(
     preview &&
       settings.enabled &&
@@ -524,10 +555,13 @@ export default function PublicCancelAppointmentPage() {
       preview.currentStatus !== "cancelled"
   );
   const isAlreadyCancelled = preview?.currentStatus === "cancelled" || result?.alreadyCancelled;
-  const isNonCancellable = Boolean(preview && !canCancel && !isAlreadyCancelled);
-  const preparationText =
-    preview && settings.showPreparationInstructions
-      ? preview.examInstructionAr || preview.examInstructionEn || preview.modalityInstructionAr || preview.modalityInstructionEn || settings.genericPreparationTextAr || ""
+  const modalityInstructionsText =
+    preview && settings.showPreparationInstructions ? preview.modalityInstructionAr || preview.modalityInstructionEn || "" : "";
+  const examInstructionsText =
+    preview && settings.showPreparationInstructions ? preview.examInstructionAr || preview.examInstructionEn || "" : "";
+  const fallbackInstructionsText =
+    preview && settings.showPreparationInstructions && !modalityInstructionsText && !examInstructionsText
+      ? settings.genericPreparationTextAr || ""
       : "";
 
   const cancelMutation = useMutation({
@@ -657,7 +691,7 @@ export default function PublicCancelAppointmentPage() {
               tone="info"
             />
             <AppointmentSummaryCard preview={preview} canCancel={false} />
-            <StaticActionRow onBack={() => navigate(-1)} onHome={() => navigate("/")} />
+            <StaticActionRow onBack={() => navigate(-1)} />
           </div>
         </Card>
       </PageShell>
@@ -688,7 +722,7 @@ export default function PublicCancelAppointmentPage() {
               tone="success"
             />
             <AppointmentSummaryCard preview={{ ...preview, currentStatus: "cancelled" }} canCancel={false} />
-            <StaticActionRow onBack={() => navigate(-1)} onHome={() => navigate("/")} />
+            <StaticActionRow onBack={() => navigate(-1)} />
           </div>
         </Card>
       </PageShell>
@@ -783,19 +817,28 @@ export default function PublicCancelAppointmentPage() {
         <div className="space-y-5 p-5">
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} />
 
-          {preparationText ? (
-            <Card className="p-4 sm:p-5">
-              <div className="mb-3 flex items-start gap-3">
-                <div className="rounded-full bg-amber-50 p-2 text-amber-700">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900">تعليمات التحضير</h3>
-                  <p className="mt-1 text-sm leading-7 text-slate-600">تُعرض تعليمات الفحص حسب المتاح في النظام.</p>
-                </div>
-              </div>
-              <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-700">{preparationText}</p>
-            </Card>
+          {modalityInstructionsText ? (
+            <InstructionCard
+              title="تعليمات خاصة بالجهاز"
+              subtitle="التزم بتعليمات التحضير الخاصة بالجهاز عند وجودها."
+              body={modalityInstructionsText}
+            />
+          ) : null}
+
+          {examInstructionsText ? (
+            <InstructionCard
+              title="تعليمات خاصة بالفحص"
+              subtitle="التزم بتعليمات التحضير الخاصة بالفحص عند وجودها."
+              body={examInstructionsText}
+            />
+          ) : null}
+
+          {fallbackInstructionsText ? (
+            <InstructionCard
+              title="تعليمات التحضير"
+              subtitle="تظهر هذه التعليمات عندما لا تتوفر تعليمات خاصة."
+              body={fallbackInstructionsText}
+            />
           ) : null}
 
           {settings.showDocumentsChecklist && settings.documentsChecklistAr.length > 0 ? (
@@ -819,7 +862,7 @@ export default function PublicCancelAppointmentPage() {
               <ActionButton
                 tone="primary"
                 onClick={async () => {
-                  const blob = createCalendarBlob(preview, settings);
+                  const blob = createCalendarBlob(preview, settings, patientPageUrl);
                   const filename = `rispro-${preview.accessionNumber || preview.bookingId}.ics`;
                   await triggerDownload(blob, filename);
                 }}
@@ -883,23 +926,34 @@ function SafeNotice(props: { title: string; body: string }) {
         <ActionButton tone="neutral" onClick={() => window.history.back()} icon={<ArrowLeft className="h-4 w-4" />}>
           رجوع
         </ActionButton>
-        <ActionButton tone="primary" onClick={() => (window.location.href = "/")} icon={<Home className="h-4 w-4" />}>
-          العودة للرئيسية
-        </ActionButton>
       </div>
     </Card>
   );
 }
 
-function StaticActionRow(props: { onBack: () => void; onHome: () => void }) {
+function StaticActionRow(props: { onBack: () => void }) {
   return (
     <div className="flex gap-3">
       <ActionButton tone="neutral" onClick={props.onBack} icon={<ArrowLeft className="h-4 w-4" />}>
         رجوع
       </ActionButton>
-      <ActionButton tone="primary" onClick={props.onHome} icon={<Home className="h-4 w-4" />}>
-        العودة للرئيسية
-      </ActionButton>
     </div>
+  );
+}
+
+function InstructionCard(props: { title: string; subtitle: string; body: string }) {
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="rounded-full bg-amber-50 p-2 text-amber-700">
+          <Sparkles className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">{props.title}</h3>
+          <p className="mt-1 text-sm leading-7 text-slate-600">{props.subtitle}</p>
+        </div>
+      </div>
+      <p className="rounded-2xl bg-slate-50 px-4 py-3 text-sm leading-7 text-slate-700">{props.body}</p>
+    </Card>
   );
 }

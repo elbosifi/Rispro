@@ -35,8 +35,10 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
     noteAr: "",
   },
   location: {
-    centerNameAr: "المركز الوطني لعلاج الأورام - بنغازي",
+    centerNameAr: "المركز الوطني للأورام بنغازي",
     departmentLocationAr: "",
+    roomUnitFloorAr: "",
+    addressAr: "",
     arrivalInstructionsAr: "",
     googleMapsUrl: "",
     parkingNoteAr: "",
@@ -163,6 +165,8 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
         ...draft.location,
         centerNameAr: draft.location.centerNameAr.trim(),
         departmentLocationAr: draft.location.departmentLocationAr.trim(),
+        roomUnitFloorAr: draft.location.roomUnitFloorAr.trim(),
+        addressAr: draft.location.addressAr.trim(),
         arrivalInstructionsAr: draft.location.arrivalInstructionsAr.trim(),
         googleMapsUrl: draft.location.googleMapsUrl.trim(),
         parkingNoteAr: draft.location.parkingNoteAr.trim(),
@@ -237,7 +241,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       <FieldCard title="تعليمات التحضير">
         <ToggleRow label="إظهار تعليمات التحضير" checked={draft.showPreparationInstructions} onChange={(checked) => setDraft((current) => ({ ...current, showPreparationInstructions: checked }))} />
         <p className="mt-2 text-sm leading-7 text-slate-600">
-          يتم عرض تعليمات الفحص من النوع المخصص أولاً، ثم تعليمات الجهاز، ثم النص العام هنا.
+          تظهر تعليمات الجهاز وتعليمات الفحص كلٌ على حدة عندما تكون متاحة، ويستخدم هذا النص العام كبديل عند الحاجة.
         </p>
       </FieldCard>
 
@@ -306,7 +310,9 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
         <FieldCard title="الموقع والدخول">
           <ToggleRow label="إظهار بطاقة الموقع" checked={draft.showLocationDirections} onChange={(checked) => setDraft((current) => ({ ...current, showLocationDirections: checked }))} />
           <Input label="اسم المركز" value={draft.location.centerNameAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, centerNameAr: value } }))} />
-          <Textarea label="وصف موقع القسم" value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
+          <Textarea label="اسم القسم / الموقع" value={draft.location.departmentLocationAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, departmentLocationAr: value } }))} />
+          <Input label="الطابق / الوحدة / الغرفة" value={draft.location.roomUnitFloorAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, roomUnitFloorAr: value } }))} />
+          <Textarea label="العنوان" value={draft.location.addressAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, addressAr: value } }))} />
           <Textarea label="إرشادات الوصول" value={draft.location.arrivalInstructionsAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, arrivalInstructionsAr: value } }))} />
           <Input label="رابط خرائط Google" value={draft.location.googleMapsUrl} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, googleMapsUrl: value } }))} error={errors.googleMapsUrl} />
           <Textarea label="ملاحظة إضافية" value={draft.location.parkingNoteAr} onChange={(value) => setDraft((current) => ({ ...current, location: { ...current.location, parkingNoteAr: value } }))} />
