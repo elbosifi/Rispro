@@ -50,7 +50,7 @@ function renderComponent() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <PatientQrSettingsSection />
+      <PatientQrSettingsSection onReAuthRequired={vi.fn()} />
     </QueryClientProvider>
   );
 }

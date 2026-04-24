@@ -1,7 +1,12 @@
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "lucide-react";
+import { ApiError } from "@/lib/api-client";
 import { fetchPatientQrSettings, savePatientQrSettings, type PatientQrSettings } from "@/lib/api-hooks";
+
+interface PatientQrSettingsSectionProps {
+  onReAuthRequired: (key: string[]) => void;
+}
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
@@ -69,7 +74,7 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-export default function PatientQrSettingsSection() {
+export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQrSettingsSectionProps) {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["patient-qr-settings"],
@@ -170,6 +175,15 @@ export default function PatientQrSettingsSection() {
   }
 
   if (error) {
+    const message = error instanceof Error ? error.message : "";
+    const status = error instanceof ApiError ? error.status : undefined;
+    if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+      return (
+        <ReAuthPrompt
+          onReAuthRequired={() => onReAuthRequired(["settings", "patient_qr_self_service"])}
+        />
+      );
+    }
     return (
       <div className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
         تعذر تحميل إعدادات صفحة QR.
@@ -364,6 +378,24 @@ function Textarea(props: { label: string; value: string; onChange: (value: strin
         rows={3}
         className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
       />
+    </div>
+  );
+}
+
+function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <h4 className="text-base font-extrabold text-amber-900">إعادة التحقق مطلوبة</h4>
+      <p className="mt-1 text-sm leading-7 text-amber-800">
+        يلزم تأكيد صلاحية المشرف قبل تعديل إعدادات صفحة QR.
+      </p>
+      <button
+        type="button"
+        onClick={onReAuthRequired}
+        className="mt-3 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white"
+      >
+        إعادة التحقق
+      </button>
     </div>
   );
 }
