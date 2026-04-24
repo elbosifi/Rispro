@@ -237,17 +237,17 @@ export default function RegistrationsPage() {
 
   function Field({ label, value }: { label: string; value: any }) {
     return (
-      <div className="rounded-lg border border-border bg-muted/30 p-2.5">
-        <p className="mb-0.5 font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+      <div className="rounded-lg border border-border bg-muted/30 p-2">
+        <p className="mb-0.5 font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">
           {label}
         </p>
-        <p className="text-sm font-medium leading-snug">{value ?? "—"}</p>
+        <p className="text-[13px] font-medium leading-snug">{value ?? "—"}</p>
       </div>
     );
   }
 
   return (
-    <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-4 sm:space-y-5">
+    <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-3 sm:space-y-4">
       <div className="space-y-3 sm:space-y-4 lg:hidden">
         <div className="flex items-center gap-4">
           <span className="inline-flex items-center gap-3 rounded-full border border-accent/30 bg-accent/5 px-5 py-2">
@@ -265,15 +265,15 @@ export default function RegistrationsPage() {
         </h1>
       </div>
 
-      <Card className="p-4 sm:p-5">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <Card className="p-3 sm:p-3.5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
           <div className="space-y-1">
-            <h3 className="text-lg font-semibold">{t("registrations.filters")}</h3>
-            <p className="text-sm text-muted-foreground max-w-3xl">
+            <h3 className="text-base font-semibold">{t("registrations.filters")}</h3>
+            <p className="text-xs sm:text-sm text-muted-foreground max-w-3xl">
               {t("registrations.filtersDescription")}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             <Button
               type="button"
               variant="secondary"
@@ -294,28 +294,28 @@ export default function RegistrationsPage() {
             >
               {language === "ar" ? "غداً" : "Tomorrow"}
             </Button>
-            <Button type="button" variant="secondary" size="sm" onClick={handlePrintVisibleList}>
+            <Button type="button" variant="secondary" size="sm" className="h-9 px-3 text-xs" onClick={handlePrintVisibleList}>
               {t("registrations.print")}
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={handleResetFilters}>
+            <Button type="button" variant="ghost" size="sm" className="h-9 px-3 text-xs" onClick={handleResetFilters}>
               {t("registrations.reset")}
             </Button>
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 xl:grid-cols-[1.15fr_1.05fr_0.8fr] gap-4">
-          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+        <div className="mt-3 grid grid-cols-1 xl:grid-cols-[1.15fr_1.05fr_0.8fr] gap-3">
+          <div className="rounded-2xl border border-border bg-muted/20 p-3.5">
             <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
               {t("registrations.dateFilters")}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">{t("registrations.dateFiltersHint")}</p>
-            <div className="mt-4 grid grid-cols-1 gap-4">
+            <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{t("registrations.dateFiltersHint")}</p>
+            <div className="mt-3 grid grid-cols-1 gap-3">
               <DateInput
                 label={t("registrations.date")}
                 value={filters.date}
                 onChange={(value) => handleDateChange("date", value)}
               />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <DateInput
                   label={t("registrations.dateFrom")}
                   value={filters.dateFrom}
@@ -330,20 +330,20 @@ export default function RegistrationsPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-muted/20 p-4">
+          <div className="rounded-2xl border border-border bg-muted/20 p-3.5">
             <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
               {t("registrations.searchFilters")}
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">{t("registrations.searchFiltersHint")}</p>
-            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{t("registrations.searchFiltersHint")}</p>
+            <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                <label className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">
                   {t("registrations.modality")}
                 </label>
                 <select
                   value={filters.modalityId}
                   onChange={(e) => handleFilterChange("modalityId", e.target.value)}
-                  className="input-premium input-ltr w-full min-h-12"
+                  className="input-premium input-ltr w-full min-h-10"
                 >
                   <option value="">{t("registrations.all")}</option>
                   {modalities.map((modality: any) => (
@@ -354,7 +354,7 @@ export default function RegistrationsPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-mono-data uppercase tracking-[0.08em] mb-1.5 text-muted-foreground">
+                <label className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">
                   {t("registrations.search")}
                 </label>
                 <SearchInput
@@ -363,22 +363,22 @@ export default function RegistrationsPage() {
                   onChange={(e) => handleFilterChange("query", e.target.value)}
                   showClearButton
                   onClear={() => handleFilterChange("query", "")}
-                  className="w-full min-h-12"
+                  className="w-full min-h-10"
                 />
               </div>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-border bg-background p-4">
+          <div className="rounded-2xl border border-border bg-background p-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-muted-foreground">
+              <span className="text-xs sm:text-sm font-medium text-muted-foreground">
                 {t("registrations.status")}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-[10px] sm:text-xs text-muted-foreground">
                 {t("registrations.statusHint")}
               </span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
               {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
                 (status) => (
                   <button
@@ -386,7 +386,7 @@ export default function RegistrationsPage() {
                     type="button"
                     onClick={() => handleStatusToggle(status)}
                     aria-pressed={filters.statuses.includes(status)}
-                    className={`min-h-10 px-3 py-2 rounded-full text-xs font-medium transition-colors ${
+                    className={`min-h-9 px-3 py-1.5 rounded-full text-[11px] font-medium transition-colors ${
                       filters.statuses.includes(status)
                         ? ACTIVE_FILTER_PILL_CLASS
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
@@ -402,21 +402,21 @@ export default function RegistrationsPage() {
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-2 border-b border-border p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-1.5 border-b border-border p-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-xl font-semibold">{t("registrations.title")}</h3>
-            <p className="text-sm text-muted-foreground">
+            <h3 className="text-lg font-semibold">{t("registrations.title")}</h3>
+            <p className="text-xs sm:text-sm text-muted-foreground">
               {appointments.length} {language === "ar" ? "موعد" : "appointments"} {listWindowLabel}
             </p>
           </div>
-          <Button type="button" variant="secondary" size="sm" onClick={handlePrintVisibleList}>
+          <Button type="button" variant="secondary" size="sm" className="h-8 px-3 text-xs" onClick={handlePrintVisibleList}>
             {t("registrations.print")}
           </Button>
         </div>
 
         <div className="overflow-x-auto">
-          <div className="min-w-[1200px]">
-            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-2.5 border-b border-border bg-muted/40 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.13em] text-muted-foreground">
+          <div className="min-w-[1140px]">
+            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-1.5 border-b border-border bg-muted/40 px-3 py-1.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
               <div>{t("registrations.print")}</div>
               <div>{t("registrations.modality")}</div>
@@ -457,17 +457,17 @@ export default function RegistrationsPage() {
                           openSlipPreview(apt);
                         }
                       }}
-                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-2.5 px-4 py-2.5 transition-colors outline-none cursor-pointer ${
+                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-1.5 px-3 py-1.5 transition-colors outline-none cursor-pointer ${
                         index % 2 === 0 ? "bg-background" : "bg-muted/25"
                       } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
                       >
                       <div className="min-w-0">
-                        <div className="flex items-start gap-2">
+                        <div className="flex items-start gap-1">
                           <div className="min-w-0">
-                            <p className="truncate text-[14px] font-semibold leading-tight text-foreground">
+                            <p className="truncate text-[12px] font-semibold leading-tight text-foreground">
                               {patientName}
                             </p>
-                            <p className="mt-0.5 truncate text-[10px] leading-none text-muted-foreground">
+                            <p className="mt-0.5 truncate text-[9px] leading-none text-muted-foreground">
                               {[
                                 apt.mrn || apt.nationalId || "—",
                                 apt.phone1 || null,
@@ -483,32 +483,32 @@ export default function RegistrationsPage() {
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate font-mono text-[12px] font-semibold leading-tight tracking-tight text-foreground">
+                        <p className="truncate font-mono text-[10px] font-semibold leading-tight tracking-tight text-foreground">
                           {apt.accessionNumber}
                         </p>
-                        <p className="text-[10px] leading-none text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
+                        <p className="text-[8px] leading-none text-muted-foreground">Seq {apt.dailySequence || "—"}</p>
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate text-[13px] font-medium leading-tight text-foreground">{modalityName}</p>
-                        <p className="truncate text-[11px] leading-snug text-muted-foreground">
+                        <p className="truncate text-[11px] font-medium leading-tight text-foreground">{modalityName}</p>
+                        <p className="truncate text-[9px] leading-snug text-muted-foreground">
                           {[examName || null, priorityName || null].filter(Boolean).join(" • ") || "—"}
                         </p>
                       </div>
 
-                      <div className="text-[13px] leading-tight text-foreground">{formatDateLy(apt.appointmentDate)}</div>
+                      <div className="text-[11px] leading-tight text-foreground">{formatDateLy(apt.appointmentDate)}</div>
 
                       <div>
-                        <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[11px] font-medium text-blue-700">
+                        <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-medium text-blue-700">
                           {statusLabel(language, apt.status)}
                         </span>
                       </div>
 
-                      <div className="min-w-0 text-[11px] leading-snug text-muted-foreground">
+                      <div className="min-w-0 text-[9px] leading-snug text-muted-foreground">
                         <p className="truncate">{apt.isWalkIn ? t("registrations.yes") : t("registrations.no")}</p>
                       </div>
 
-                      <div className="flex justify-end gap-1.5">
+                      <div className="flex justify-end gap-1">
                         <Button
                           type="button"
                           size="sm"
@@ -517,7 +517,7 @@ export default function RegistrationsPage() {
                             e.stopPropagation();
                             openSlipPreview(apt);
                           }}
-                          className="h-8 px-3 text-xs"
+                          className="h-7 px-2 text-[9px]"
                         >
                           {t("registrations.print")}
                         </Button>
@@ -525,7 +525,7 @@ export default function RegistrationsPage() {
                           type="button"
                           size="sm"
                           variant="ghost"
-                          className="h-8 px-3 text-xs"
+                          className="h-7 px-2 text-[9px]"
                           onClick={(e) => {
                             e.stopPropagation();
                             manageAppointment(apt);
@@ -544,27 +544,27 @@ export default function RegistrationsPage() {
       </Card>
 
       {selectedAppointment ? (
-        <Card className="p-4 sm:p-5 space-y-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <Card className="p-3 sm:p-3.5 space-y-2.5">
+          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h3 className="text-lg font-semibold">
+              <h3 className="text-sm font-semibold">
                 {chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)}
               </h3>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[11px] sm:text-xs text-muted-foreground">
                 {selectedAppointment.accessionNumber} • {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={() => openSlipPreview(selectedAppointment)}>
+            <div className="flex flex-wrap gap-1">
+              <Button type="button" variant="secondary" size="sm" className="h-8 px-2.5 text-[10px]" onClick={() => openSlipPreview(selectedAppointment)}>
                 {t("registrations.print")}
               </Button>
-              <Button type="button" variant="ghost" onClick={() => setSelectedAppointment(null)}>
+              <Button type="button" variant="ghost" size="sm" className="h-8 px-2.5 text-[10px]" onClick={() => setSelectedAppointment(null)}>
                 {t("toast.close")}
               </Button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 text-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-sm">
             <Field
               label={t("registrations.patient")}
               value={chooseLocalized(
@@ -593,20 +593,16 @@ export default function RegistrationsPage() {
               label={t("registrations.walkIn")}
               value={selectedAppointment.isWalkIn ? t("registrations.yes") : t("registrations.no")}
             />
-            <Field
-              label={t("registrations.notes")}
-              value={selectedAppointment.notes}
-            />
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-            <details className="rounded-2xl border border-border bg-muted/20 p-4" open>
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
+            <details className="rounded-2xl border border-border bg-muted/20 p-3" open>
               <summary className="cursor-pointer text-sm font-semibold text-foreground">
                 {t("registrations.cancelAppointment")}
               </summary>
-              <div className="mt-4">
+              <div className="mt-2.5">
                 {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
-                  <div className="mb-3 flex justify-end">
+                  <div className="mb-2 flex justify-end">
                     <Button
                       size="sm"
                       variant="ghost"
@@ -629,11 +625,11 @@ export default function RegistrationsPage() {
               </div>
             </details>
 
-            <details className="rounded-2xl border border-border bg-muted/20 p-4">
+            <details className="rounded-2xl border border-border bg-muted/20 p-3">
               <summary className="cursor-pointer text-sm font-semibold text-foreground">
                 {t("registrations.requestDocuments")}
               </summary>
-              <div className="mt-4">
+              <div className="mt-2.5">
                 <RequestDocumentsPanel
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
@@ -649,8 +645,8 @@ export default function RegistrationsPage() {
       {slipPreviewAppointment ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-2 py-2 sm:px-4 sm:py-4">
           <div className="flex w-full max-w-[1360px] flex-col overflow-hidden rounded-3xl border border-border bg-background shadow-2xl max-h-[calc(100vh-1rem)]">
-          <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-start sm:justify-between sm:p-4">
-            <div>
+            <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-start sm:justify-between sm:p-4">
+              <div>
                 <h3 className="text-base font-semibold leading-tight sm:text-lg">
                   {t("print.previewTitle")}
                 </h3>
@@ -677,8 +673,8 @@ export default function RegistrationsPage() {
               </div>
             </div>
 
-          <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1.38fr)_280px] gap-0">
-            <div className="min-h-[48vh] bg-muted/10 xl:min-h-[60vh]">
+            <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1.38fr)_280px] gap-0">
+              <div className="min-h-[48vh] bg-muted/10 xl:min-h-[60vh]">
                 {slipPreviewLoading ? (
                   <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
                     {t("print.loading")}
@@ -696,7 +692,7 @@ export default function RegistrationsPage() {
                 )}
               </div>
 
-              <div className="border-t border-border p-3 space-y-2.5 text-sm sm:p-4 xl:border-t-0 xl:border-l xl:max-h-[58vh] xl:overflow-y-auto">
+              <div className="border-t border-border p-3 space-y-2 text-sm sm:p-4 xl:border-t-0 xl:border-l xl:max-h-[58vh] xl:overflow-y-auto">
                 <div className="space-y-0.5">
                   <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
                     {t("registrations.patient")}
@@ -710,20 +706,11 @@ export default function RegistrationsPage() {
                   </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-1.5">
                   <Field label={t("registrations.modality")} value={chooseLocalized(language, slipPreviewAppointment.modalityNameAr, slipPreviewAppointment.modalityNameEn)} />
                   <Field label={t("registrations.date")} value={formatDateLy(slipPreviewAppointment.appointmentDate)} />
                   <Field label={t("registrations.statusCol")} value={statusLabel(language, slipPreviewAppointment.status)} />
                   <Field label={t("registrations.print")} value={slipPreviewAppointment.accessionNumber} />
-                </div>
-
-                <div className="rounded-xl border border-border bg-muted/20 p-2.5 text-sm">
-                  <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
-                    {t("registrations.notes")}
-                  </p>
-                  <p className="mt-1 whitespace-pre-wrap text-sm leading-5 text-foreground">
-                    {slipPreviewAppointment.notes || "—"}
-                  </p>
                 </div>
               </div>
             </div>

@@ -133,7 +133,6 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
   const now = new Date().toLocaleString();
   const rawCaseCategory = (apt as { caseCategory?: string }).caseCategory;
   const categoryLabel = rawCaseCategory ? toTitleCase(rawCaseCategory) : "—";
-  const appointmentNotes = String(apt.notes || "").trim();
   const modalityPreparation = String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim();
   const examPreparation = String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim();
   const rows = [
@@ -158,8 +157,7 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
       slipField("Walk-In", apt.isWalkIn ? "Yes" : "No")
     ),
   ];
-  const hasPrepContent = Boolean(appointmentNotes || modalityPreparation || examPreparation);
-
+  const hasPrepContent = Boolean(modalityPreparation || examPreparation);
   return `
     <html>
       <head>
@@ -233,35 +231,28 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
             overflow: hidden;
             text-overflow: ellipsis;
           }
-          .notes {
-            margin-top: 7px;
+          .mid-divider { margin: 6px 0 4px; display: flex; align-items: center; gap: 8px; }
+          .prep {
+            margin-top: 6px;
             display: grid;
-            grid-template-columns: 34px 1fr;
-            gap: 7px;
-            background: #ffffff;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 7px;
-            max-height: 148px;
-            overflow: hidden;
+            grid-template-columns: 84px 1fr;
+            gap: 6px;
+            align-items: start;
             page-break-inside: avoid;
             break-inside: avoid-page;
           }
-          .notes-icon { width: 34px; height: 34px; border-radius: 6px; background: #b11116; color: white; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; }
-          .notes-title { margin: 0; color: #b11116; font-size: 14px; font-weight: 800; }
-          .notes-content { display: flex; flex-direction: column; gap: 3px; }
-          .prep-item { display: grid; grid-template-columns: 84px 1fr; gap: 6px; align-items: start; }
+          .prep + .prep { margin-top: 4px; }
           .prep-label {
             color: #b11116;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 800;
             line-height: 1.25;
             text-transform: uppercase;
             letter-spacing: 0.04em;
           }
-          .notes-text {
+          .prep-text {
             margin: 0;
-            font-size: 11.5px;
+            font-size: 11px;
             line-height: 1.25;
             color: #20242a;
             display: -webkit-box;
@@ -269,7 +260,6 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
             -webkit-line-clamp: 2;
             overflow: hidden;
           }
-          .mid-divider { margin: 7px 0 5px; display: flex; align-items: center; gap: 8px; }
           .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
           .meta-item {
             display: flex;
@@ -349,21 +339,26 @@ export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): P
             ${rows.join("")}
           </div>
 
-          <div class="notes">
-            <div class="notes-icon">N</div>
-            <div class="notes-content">
-              <p class="notes-title">Notes / Preparation:</p>
-              ${
-                hasPrepContent
-                  ? `
-                    ${appointmentNotes ? `<div class="prep-item"><span class="prep-label">Notes</span><p class="notes-text">${escapeHtml(appointmentNotes)}</p></div>` : ""}
-                    ${modalityPreparation ? `<div class="prep-item"><span class="prep-label">Modality Instructions</span><p class="notes-text">${escapeHtml(modalityPreparation)}</p></div>` : ""}
-                    ${examPreparation ? `<div class="prep-item"><span class="prep-label">Exam Preparation</span><p class="notes-text">${escapeHtml(examPreparation)}</p></div>` : ""}
-                  `
-                  : `<p class="notes-text">Please arrive 15 minutes before your appointment. Bring previous imaging and referral form.</p>`
-              }
-            </div>
-          </div>
+          ${
+            hasPrepContent
+              ? `
+                <div class="prep">
+                  <div class="prep-label">Modality Instructions</div>
+                  <p class="prep-text">${escapeHtml(modalityPreparation || "Please follow the department preparation instructions.")}</p>
+                </div>
+                ${
+                  examPreparation
+                    ? `
+                      <div class="prep">
+                        <div class="prep-label">Exam Preparation</div>
+                        <p class="prep-text">${escapeHtml(examPreparation)}</p>
+                      </div>
+                    `
+                    : ""
+                }
+              `
+              : ""
+          }
 
           <div class="mid-divider">
             <div class="rule-line"></div>
