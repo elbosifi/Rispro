@@ -11,6 +11,7 @@ values (
       "printQrOnAppointmentSlip": true,
       "allowCancellation": true,
       "allowAddToCalendar": true,
+      "showBookingTime": true,
       "showPreparationInstructions": true,
       "showDocumentsChecklist": true,
       "showDepartmentContact": false,

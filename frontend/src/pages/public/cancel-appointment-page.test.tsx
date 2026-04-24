@@ -21,6 +21,7 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
     printQrOnAppointmentSlip: true,
     allowCancellation: true,
     allowAddToCalendar: true,
+    showBookingTime: true,
     showPreparationInstructions: true,
     showDocumentsChecklist: true,
     showDepartmentContact: true,
@@ -107,6 +108,7 @@ describe("PublicCancelAppointmentPage", () => {
     renderPage();
 
     expect(await screen.findByText("خدمة المريض عبر رمز QR")).toBeTruthy();
+    expect(screen.getByText("وقت الموعد")).toBeTruthy();
     expect(screen.getByRole("button", { name: /إضافة إلى التقويم/i })).toBeTruthy();
     expect(screen.getByText("تعليمات خاصة بالجهاز")).toBeTruthy();
     expect(screen.getByText("تعليمات خاصة بالفحص")).toBeTruthy();
@@ -215,6 +217,7 @@ describe("PublicCancelAppointmentPage", () => {
     vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
       preview({
         patientQrSettings: baseSettings({
+          showBookingTime: false,
           showPreparationInstructions: false,
           showDocumentsChecklist: false,
           showDepartmentContact: false,
@@ -234,6 +237,14 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.queryByText("التواصل مع القسم")).toBeNull();
     expect(screen.queryByText("موقع القسم")).toBeNull();
     expect(screen.queryByText("إضافة إلى التقويم")).toBeNull();
+    expect(screen.queryByText("وقت الموعد")).toBeNull();
+  });
+
+  it("shows the booking time row when configured on", async () => {
+    renderPage();
+
+    expect(await screen.findByText("وقت الموعد")).toBeTruthy();
+    expect(screen.getByText("10:30")).toBeTruthy();
   });
 
   it("generates an ICS file when add-to-calendar is enabled", async () => {

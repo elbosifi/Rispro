@@ -24,6 +24,7 @@ export interface PatientQrSettings {
   printQrOnAppointmentSlip: boolean;
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
+  showBookingTime: boolean;
   showPreparationInstructions: boolean;
   showDocumentsChecklist: boolean;
   showDepartmentContact: boolean;
@@ -41,6 +42,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
+  showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
   showDepartmentContact: false,
@@ -118,6 +120,7 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     printQrOnAppointmentSlip: asBoolean(record.printQrOnAppointmentSlip, DEFAULT_SETTINGS.printQrOnAppointmentSlip),
     allowCancellation: asBoolean(record.allowCancellation, DEFAULT_SETTINGS.allowCancellation),
     allowAddToCalendar: asBoolean(record.allowAddToCalendar, DEFAULT_SETTINGS.allowAddToCalendar),
+    showBookingTime: asBoolean(record.showBookingTime, DEFAULT_SETTINGS.showBookingTime),
     showPreparationInstructions: asBoolean(record.showPreparationInstructions, DEFAULT_SETTINGS.showPreparationInstructions),
     showDocumentsChecklist: asBoolean(record.showDocumentsChecklist, DEFAULT_SETTINGS.showDocumentsChecklist),
     showDepartmentContact: asBoolean(record.showDepartmentContact, DEFAULT_SETTINGS.showDepartmentContact),

@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
+  showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
   showDepartmentContact: false,
@@ -250,6 +251,7 @@ function ActionButton(props: {
 function AppointmentSummaryCard(props: {
   preview: PublicAppointmentCancelPreview;
   canCancel: boolean;
+  showBookingTime: boolean;
 }) {
   const { preview } = props;
   const statusLabel = preview.currentStatus === "cancelled" ? "ملغى" : formatBookingStatusAr(preview.currentStatus);
@@ -270,7 +272,7 @@ function AppointmentSummaryCard(props: {
       <dl className="mt-4 space-y-3 text-sm">
         <SummaryRow label="اسم المريض" value={preview.patientDisplayName} />
         <SummaryRow label="تاريخ الموعد" value={formatDateAr(preview.bookingDate)} />
-        {preview.bookingTime ? <SummaryRow label="وقت الموعد" value={formatTimeAr(preview.bookingTime)} /> : null}
+        {props.showBookingTime && preview.bookingTime ? <SummaryRow label="وقت الموعد" value={formatTimeAr(preview.bookingTime)} /> : null}
         <SummaryRow label="الجهاز" value={preview.modalityNameAr || preview.modalityName || "—"} />
         <SummaryRow label="نوع الفحص" value={preview.examNameAr || preview.examName || "—"} />
         {preview.accessionNumber ? <SummaryRow label="رقم الموعد" value={preview.accessionNumber} /> : null}
@@ -690,7 +692,7 @@ export default function PublicCancelAppointmentPage() {
               body="إذا كنت بحاجة إلى موعد جديد، يرجى التواصل مع قسم الأشعة."
               tone="info"
             />
-            <AppointmentSummaryCard preview={preview} canCancel={false} />
+            <AppointmentSummaryCard preview={preview} canCancel={false} showBookingTime={settings.showBookingTime} />
             <StaticActionRow onBack={() => navigate(-1)} />
           </div>
         </Card>
@@ -721,7 +723,11 @@ export default function PublicCancelAppointmentPage() {
               body="أصبح هذا الموعد متاحاً الآن لمريض آخر بحاجة إلى خدمة الأشعة."
               tone="success"
             />
-            <AppointmentSummaryCard preview={{ ...preview, currentStatus: "cancelled" }} canCancel={false} />
+            <AppointmentSummaryCard
+              preview={{ ...preview, currentStatus: "cancelled" }}
+              canCancel={false}
+              showBookingTime={settings.showBookingTime}
+            />
             <StaticActionRow onBack={() => navigate(-1)} />
           </div>
         </Card>
@@ -749,7 +755,7 @@ export default function PublicCancelAppointmentPage() {
           </div>
 
           <div className="space-y-4 p-5">
-            <AppointmentSummaryCard preview={preview} canCancel={canCancel} />
+            <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
             <InfoCard
               tone="warning"
@@ -815,7 +821,7 @@ export default function PublicCancelAppointmentPage() {
         </div>
 
         <div className="space-y-5 p-5">
-          <AppointmentSummaryCard preview={preview} canCancel={canCancel} />
+          <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
           {modalityInstructionsText ? (
             <InstructionCard

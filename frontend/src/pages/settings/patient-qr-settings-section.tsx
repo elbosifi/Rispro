@@ -13,6 +13,7 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
+  showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
   showDepartmentContact: false,
@@ -222,6 +223,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           <ToggleRow label="طباعة رمز QR على ورقة الموعد" checked={draft.printQrOnAppointmentSlip} onChange={(checked) => setDraft((current) => ({ ...current, printQrOnAppointmentSlip: checked }))} />
           <ToggleRow label="السماح بإلغاء الموعد" checked={draft.allowCancellation} onChange={(checked) => setDraft((current) => ({ ...current, allowCancellation: checked }))} />
           <ToggleRow label="إضافة إلى التقويم" checked={draft.allowAddToCalendar} onChange={(checked) => setDraft((current) => ({ ...current, allowAddToCalendar: checked }))} />
+          <ToggleRow label="إظهار وقت الموعد في صفحة QR" checked={draft.showBookingTime} onChange={(checked) => setDraft((current) => ({ ...current, showBookingTime: checked }))} />
         </FieldCard>
 
         <FieldCard title="محتوى الصفحة">

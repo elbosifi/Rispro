@@ -16,6 +16,7 @@ const baseSettings = {
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
+  showBookingTime: true,
   showPreparationInstructions: true,
   showDocumentsChecklist: true,
   showDepartmentContact: true,
@@ -93,6 +94,7 @@ describe("PatientQrSettingsSection", () => {
     const payload = vi.mocked(savePatientQrSettings).mock.calls[0][0];
     expect(payload.introTextAr).toBe("مقدمة جديدة");
     expect(payload.showLocationDirections).toBe(false);
+    expect(payload.showBookingTime).toBe(true);
     expect(payload.location.roomUnitFloorAr).toBe("الطابق الأول / غرفة 3");
     expect(payload.location.addressAr).toBe("شارع المستشفى");
   });
