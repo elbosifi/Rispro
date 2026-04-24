@@ -22,8 +22,9 @@ import {
   updateExamType,
   deleteExamType,
   hardDeleteExamType,
+  applyCatalogWorkbookImport,
   exportCatalogWorkbook,
-  importCatalogWorkbook,
+  previewCatalogWorkbookImport,
   saveSettings,
   fetchSchedulingEngineConfig,
   saveSchedulingEngineConfig,
@@ -412,14 +413,24 @@ function CatalogImportExportPanel({
   }) => void;
 }) {
   const [isExporting, setIsExporting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [errorRows, setErrorRows] = useState<Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>>([]);
+  const [errorType, setErrorType] = useState<string | null>(null);
+  const [progressNotes, setProgressNotes] = useState<string[]>([]);
+  const [errorRows, setErrorRows] = useState<Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>>([]);
+  const [draft, setDraft] = useState<null | {
+    canApply: boolean;
+    summary: { modalitiesTotal: number; examTypesTotal: number; selectedModalities: number; selectedExamTypes: number; errors: number; warnings: number };
+    modalities: Array<Record<string, unknown>>;
+    examTypes: Array<Record<string, unknown>>;
+  }>(null);
 
   const handleExport = async () => {
     try {
       setIsExporting(true);
       setErrorMessage(null);
+      setErrorType(null);
       setErrorRows([]);
       await exportCatalogWorkbook();
     } catch (error) {
@@ -435,9 +446,12 @@ function CatalogImportExportPanel({
     if (!file) return;
 
     try {
-      setIsImporting(true);
+      setIsPreviewing(true);
       setErrorMessage(null);
+      setErrorType(null);
       setErrorRows([]);
+      setProgressNotes(["Reading the selected workbook..."]);
+      setDraft(null);
 
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -450,20 +464,89 @@ function CatalogImportExportPanel({
         reader.readAsDataURL(file);
       });
 
-      const response = await importCatalogWorkbook({ fileContentBase64: base64 });
-      onImportSuccess(response.summary);
+      const response = await previewCatalogWorkbookImport({ fileContentBase64: base64 });
+      setDraft({
+        canApply: response.preview.canApply,
+        summary: response.preview.summary,
+        modalities: response.preview.modalities,
+        examTypes: response.preview.examTypes
+      });
+      setProgressNotes(response.preview.progressNotes || []);
+      setErrorRows((response.preview.errors || []) as Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>);
+      if (!response.preview.canApply) {
+        setErrorMessage("Preview found validation issues. Review and fix the rows before applying.");
+        setErrorType("validation_failed");
+      }
     } catch (error) {
       if (error instanceof ApiError) {
         const details = (error.details ?? {}) as {
-          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
+          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>;
+          errorType?: string;
+          progressNotes?: string[];
         };
         setErrorRows(Array.isArray(details.errors) ? details.errors : []);
+        setErrorType(details.errorType || `http_${error.status}`);
+        setProgressNotes(Array.isArray(details.progressNotes) ? details.progressNotes : []);
         setErrorMessage(error.message || "Catalog import failed");
       } else {
         setErrorMessage(error instanceof Error ? error.message : "Catalog import failed");
+        setErrorType("unknown_error");
       }
     } finally {
-      setIsImporting(false);
+      setIsPreviewing(false);
+    }
+  };
+
+  const updateDraftRow = (kind: "modalities" | "examTypes", rowId: string, field: string, value: unknown) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const nextRows = (current[kind] || []).map((row) => (
+        String(row.id) === rowId ? { ...row, [field]: value } : row
+      ));
+      const selectedModalities = (kind === "modalities" ? nextRows : current.modalities).filter((row) => Boolean(row.selected)).length;
+      const selectedExamTypes = (kind === "examTypes" ? nextRows : current.examTypes).filter((row) => Boolean(row.selected)).length;
+      return {
+        ...current,
+        [kind]: nextRows,
+        summary: {
+          ...current.summary,
+          selectedModalities,
+          selectedExamTypes
+        }
+      };
+    });
+  };
+
+  const handleApply = async () => {
+    if (!draft) return;
+    try {
+      setIsApplying(true);
+      setErrorMessage(null);
+      setErrorType(null);
+      setProgressNotes((current) => [...current, "Applying the selected reviewed rows in one transaction..."]);
+      const response = await applyCatalogWorkbookImport({
+        modalities: draft.modalities,
+        examTypes: draft.examTypes
+      });
+      onImportSuccess(response.summary);
+      setDraft(null);
+      setErrorRows([]);
+      setProgressNotes(["Preview completed.", "Selected rows were applied successfully."]);
+    } catch (error) {
+      if (error instanceof ApiError) {
+        const details = (error.details ?? {}) as {
+          errors?: Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string }>;
+          errorType?: string;
+        };
+        setErrorRows(Array.isArray(details.errors) ? details.errors : []);
+        setErrorType(details.errorType || `http_${error.status}`);
+        setErrorMessage(error.message || "Catalog import apply failed");
+      } else {
+        setErrorMessage(error instanceof Error ? error.message : "Catalog import apply failed");
+        setErrorType("unknown_error");
+      }
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -475,29 +558,101 @@ function CatalogImportExportPanel({
           <p className="description-center">One workbook includes both the Modalities and ExamTypes sheets.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" onClick={handleExport} disabled={isExporting || isImporting} className="text-xs">
+          <Button variant="secondary" onClick={handleExport} disabled={isExporting || isPreviewing || isApplying} className="text-xs">
             {isExporting ? "Exporting..." : "Export Excel"}
           </Button>
           <label className="inline-flex items-center px-3 py-2 rounded-md bg-teal-600 hover:bg-teal-700 text-white text-xs font-medium cursor-pointer disabled:opacity-60">
-            {isImporting ? "Importing..." : "Import Excel"}
-            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} className="sr-only" disabled={isExporting || isImporting} />
+            {isPreviewing ? "Reviewing..." : "Import Excel"}
+            <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={handleImportChange} className="sr-only" disabled={isExporting || isPreviewing || isApplying} />
           </label>
+          {draft && (
+            <Button variant="secondary" onClick={handleApply} disabled={isApplying || !draft.canApply} className="text-xs">
+              {isApplying ? "Applying..." : "Apply Selected Rows"}
+            </Button>
+          )}
         </div>
       </div>
+
+      {progressNotes.length > 0 && (
+        <div className="rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50 dark:bg-blue-950/30 p-3 text-sm text-blue-700 dark:text-blue-300">
+          <p className="font-medium mb-1">Progress notes</p>
+          <ul className="space-y-1">
+            {progressNotes.map((note, index) => <li key={`${note}-${index}`}>{index + 1}. {note}</li>)}
+          </ul>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="rounded-lg border border-red-200 dark:border-red-900/60 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-700 dark:text-red-300 space-y-2">
           <p>{errorMessage}</p>
+          {errorType && <p className="text-xs font-mono">errorType: {errorType}</p>}
           {errorRows.length > 0 && (
             <ul className="space-y-1">
               {errorRows.slice(0, 8).map((item, index) => (
                 <li key={`${item.sheet}-${item.rowNumber}-${item.column || "none"}-${index}`}>
                   {item.sheet} row {item.rowNumber}
                   {item.column ? ` (${item.column})` : ""}: {item.message}
+                  {item.errorType ? ` [${item.errorType}]` : ""}
                 </li>
               ))}
             </ul>
           )}
+        </div>
+      )}
+
+      {draft && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm bg-white/70 dark:bg-stone-900/20">
+            Preview summary: {draft.summary.modalitiesTotal} modality rows, {draft.summary.examTypesTotal} exam type rows, {draft.summary.selectedModalities} selected modalities, {draft.summary.selectedExamTypes} selected exam types, {draft.summary.errors} errors.
+          </div>
+
+          <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-white/70 dark:bg-stone-900/20" open>
+            <summary className="cursor-pointer font-medium text-sm">Review modality rows</summary>
+            <div className="mt-3 space-y-2">
+              {draft.modalities.map((row) => (
+                <div key={String(row.id)} className="rounded border border-stone-200 dark:border-stone-700 p-3 text-sm space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("modalities", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
+                      Select
+                    </label>
+                    <span className="text-xs uppercase font-mono">{String(row.action)}</span>
+                    <span className="text-xs">row {String(row.rowNumber)}</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "code", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="code" />
+                    <input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameEn", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_en" />
+                    <input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("modalities", String(row.id), "nameAr", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_ar" />
+                    <input type="number" value={Number(row.dailyCapacity ?? 0)} onChange={(e) => updateDraftRow("modalities", String(row.id), "dailyCapacity", Number(e.target.value) || 0)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="daily_capacity" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <details className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 bg-white/70 dark:bg-stone-900/20" open>
+            <summary className="cursor-pointer font-medium text-sm">Review exam type rows</summary>
+            <div className="mt-3 space-y-2">
+              {draft.examTypes.map((row) => (
+                <div key={String(row.id)} className="rounded border border-stone-200 dark:border-stone-700 p-3 text-sm space-y-2">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <label className="flex items-center gap-2">
+                      <input type="checkbox" checked={Boolean(row.selected)} onChange={(e) => updateDraftRow("examTypes", String(row.id), "selected", e.target.checked)} disabled={String(row.action) === "invalid"} />
+                      Select
+                    </label>
+                    <span className="text-xs uppercase font-mono">{String(row.action)}</span>
+                    <span className="text-xs">row {String(row.rowNumber)}</span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input value={String(row.modalityCode ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "modalityCode", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="modality_code" />
+                    <input value={String(row.code ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "code", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="code" />
+                    <input value={String(row.nameEn ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameEn", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_en" />
+                    <input value={String(row.nameAr ?? "")} onChange={(e) => updateDraftRow("examTypes", String(row.id), "nameAr", e.target.value)} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-sm" placeholder="name_ar" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
         </div>
       )}
     </div>

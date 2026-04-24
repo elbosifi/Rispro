@@ -56,8 +56,10 @@ import {
   validateOrthancSettingsEntries
 } from "../services/orthanc-settings-resolver.js";
 import {
+  applyCatalogImport,
   exportCatalogWorkbook,
-  importCatalogWorkbook
+  importCatalogWorkbook,
+  previewCatalogWorkbook
 } from "../services/settings-catalog-import-export-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
@@ -228,6 +230,35 @@ settingsRouter.get(
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename=\"${filename}\"`);
     res.send(buffer);
+  })
+);
+
+settingsRouter.post(
+  "/catalog-import-export/preview",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const fileContentBase64 = asString(body.fileContentBase64).trim();
+    const preview = await previewCatalogWorkbook(fileContentBase64);
+    res.json({ preview });
+  })
+);
+
+settingsRouter.post(
+  "/catalog-import-export/apply",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const modalities = Array.isArray(body.modalities) ? body.modalities : [];
+    const examTypes = Array.isArray(body.examTypes) ? body.examTypes : [];
+    const summary = await applyCatalogImport(
+      {
+        modalities: modalities as never,
+        examTypes: examTypes as never
+      },
+      request.user.sub as UserId
+    );
+    res.json({ summary });
   })
 );
 

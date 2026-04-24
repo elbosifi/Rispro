@@ -669,6 +669,49 @@ export async function importCatalogWorkbook(payload: { fileContentBase64: string
   }, CATALOG_IMPORT_TIMEOUT_MS);
 }
 
+export async function previewCatalogWorkbookImport(payload: { fileContentBase64: string }) {
+  return api<{
+    preview: {
+      workbook: { sheetNames: string[]; requiredSheets: string[] };
+      progressNotes: string[];
+      canApply: boolean;
+      modalities: Array<Record<string, unknown>>;
+      examTypes: Array<Record<string, unknown>>;
+      summary: {
+        modalitiesTotal: number;
+        examTypesTotal: number;
+        selectedModalities: number;
+        selectedExamTypes: number;
+        errors: number;
+        warnings: number;
+      };
+      errors: Array<{ sheet: string; rowNumber: number; column: string | null; message: string; errorType?: string; severity?: string }>;
+    };
+  }>("/settings/catalog-import-export/preview", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, CATALOG_IMPORT_TIMEOUT_MS);
+}
+
+export async function applyCatalogWorkbookImport(payload: {
+  modalities: Array<Record<string, unknown>>;
+  examTypes: Array<Record<string, unknown>>;
+}) {
+  return api<{
+    summary: {
+      modalitiesCreated: number;
+      modalitiesUpdated: number;
+      examTypesCreated: number;
+      examTypesUpdated: number;
+      skipped: number;
+      errors: Array<{ sheet: string; rowNumber: number; column: string | null; message: string }>;
+    };
+  }>("/settings/catalog-import-export/apply", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  }, CATALOG_IMPORT_TIMEOUT_MS);
+}
+
 export async function createDicomDevice(payload: RawRecord) {
   return api<{ device: RawRecord }>("/settings/dicom-devices", {
     method: "POST",

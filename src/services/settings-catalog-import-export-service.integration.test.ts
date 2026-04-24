@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { exportCatalogWorkbook, importCatalogWorkbook } from "./settings-catalog-import-export-service.js";
+import { applyCatalogImport, exportCatalogWorkbook, importCatalogWorkbook, previewCatalogWorkbook } from "./settings-catalog-import-export-service.js";
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
   try {
@@ -309,6 +309,55 @@ test("catalog import creates new modality and exam type from workbook", async (t
     assert.equal(exam.rows[0]?.specific_instruction_en, `${prefix}_EXAM description en`);
   } finally {
     await cleanupCatalog(`CATNEW_${suffix}`);
+    await cleanupUser(userId);
+  }
+});
+
+test("catalog preview returns progress notes and editable draft rows", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  await ensureCatalogSchema();
+
+  const base64 = await buildWorkbookBase64({
+    modalities: [baseModalityRow("PREVIEW_MOD")],
+    examTypes: [baseExamTypeRow("PREVIEW_MOD", "PREVIEW_EXAM")]
+  });
+
+  const preview = await previewCatalogWorkbook(base64);
+  assert.ok(preview.progressNotes.length >= 3);
+  assert.equal(preview.canApply, true);
+  assert.equal(preview.modalities.length, 1);
+  assert.equal(preview.examTypes.length, 1);
+  assert.equal(String(preview.modalities[0]?.action), "create");
+  assert.equal(String(preview.examTypes[0]?.action), "create");
+});
+
+test("catalog apply imports only selected reviewed rows", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  await ensureCatalogSchema();
+
+  const suffix = uniqueSuffix();
+  const prefix = `CATSEL_${suffix}`;
+  const userId = await createSupervisorUser(suffix);
+
+  try {
+    const preview = await previewCatalogWorkbook(await buildWorkbookBase64({
+      modalities: [baseModalityRow(`${prefix}_MOD_A`), baseModalityRow(`${prefix}_MOD_B`)],
+      examTypes: [baseExamTypeRow(`${prefix}_MOD_A`, `${prefix}_EXAM_A`), baseExamTypeRow(`${prefix}_MOD_B`, `${prefix}_EXAM_B`)]
+    }));
+
+    preview.modalities[1]!.selected = false;
+    preview.examTypes[1]!.selected = false;
+
+    const summary = await applyCatalogImport({ modalities: preview.modalities, examTypes: preview.examTypes }, userId);
+    assert.equal(summary.modalitiesCreated, 1);
+    assert.equal(summary.examTypesCreated, 1);
+
+    const kept = await pool.query<{ count: string }>(`select count(*)::text as count from modalities where code = $1`, [`${prefix}_MOD_A`]);
+    const skipped = await pool.query<{ count: string }>(`select count(*)::text as count from modalities where code = $1`, [`${prefix}_MOD_B`]);
+    assert.equal(Number(kept.rows[0]?.count || 0), 1);
+    assert.equal(Number(skipped.rows[0]?.count || 0), 0);
+  } finally {
+    await cleanupCatalog(`CATSEL_${suffix}`);
     await cleanupUser(userId);
   }
 });
