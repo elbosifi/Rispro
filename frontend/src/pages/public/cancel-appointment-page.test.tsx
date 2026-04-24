@@ -254,9 +254,22 @@ describe("PublicCancelAppointmentPage", () => {
     const blob = createCalendarBlob(preview(), baseSettings(), "http://localhost:3000/public/appointment?t=test-token");
     const text = await blob.text();
 
-    expect(text).toContain("DTSTART:20260701T090000");
+    expect(text).toContain("DTSTART:20260701T103000");
+    expect(text).toContain("DTEND:20260701T113000");
     expect(text).toContain("URL:http://localhost:3000/public/appointment?t=test-token");
     expect(text).toContain("TRIGGER:-PT24H");
     expect(text).toContain("استخدم هذا الرابط للحصول على المزيد من المعلومات عن الجهاز والفحص.");
+  });
+
+  it("falls back to the 8:30 to 13:30 window when booking time is missing", async () => {
+    const blob = createCalendarBlob(
+      preview({ bookingTime: "" }),
+      baseSettings(),
+      "http://localhost:3000/public/appointment?t=test-token"
+    );
+    const text = await blob.text();
+
+    expect(text).toContain("DTSTART:20260701T083000");
+    expect(text).toContain("DTEND:20260701T133000");
   });
 });

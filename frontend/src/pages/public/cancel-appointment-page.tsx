@@ -459,12 +459,16 @@ export function createCalendarBlob(preview: PublicAppointmentCancelPreview, sett
   const title = [preview.examNameAr || preview.examName || "موعد أشعة", preview.modalityNameAr || preview.modalityName || ""]
     .filter(Boolean)
     .join(" - ");
-  const startDate = new Date(`${preview.bookingDate}T09:00:00`);
-  const hasTime = Boolean(preview.bookingTime);
-  const endDate = hasTime ? addDays(startDate, 0) : addDays(new Date(`${preview.bookingDate}T00:00:00`), 1);
-  if (hasTime) {
-    endDate.setMinutes(endDate.getMinutes() + 60);
-  }
+  const bookingTime = formatTimeAr(preview.bookingTime || "");
+  const hasBookingTime = Boolean(bookingTime);
+  const startDate = new Date(`${preview.bookingDate}T${hasBookingTime ? bookingTime : "08:30"}:00`);
+  const endDate = hasBookingTime
+    ? (() => {
+        const next = new Date(startDate);
+        next.setMinutes(next.getMinutes() + 60);
+        return next;
+      })()
+    : new Date(`${preview.bookingDate}T13:30:00`);
 
   const location = [
     settings.location.departmentLocationAr,
@@ -490,22 +494,18 @@ export function createCalendarBlob(preview: PublicAppointmentCancelPreview, sett
     `UID:rispro-${preview.bookingId}@rispro`,
     `DTSTAMP:${buildIcsDate(new Date())}`,
     `SUMMARY:${escapeIcs(title)}`,
-    hasTime ? `DTSTART:${buildIcsDate(startDate)}` : `DTSTART;VALUE=DATE:${buildIcsDate(new Date(`${preview.bookingDate}T00:00:00`)).slice(0, 8)}`,
-    hasTime
-      ? `DTEND:${buildIcsDate(endDate)}`
-      : `DTEND;VALUE=DATE:${buildIcsDate(endDate).slice(0, 8)}`,
+    `DTSTART:${buildIcsDate(startDate)}`,
+    `DTEND:${buildIcsDate(endDate)}`,
     location ? `LOCATION:${escapeIcs(location)}` : null,
     descriptionParts.length > 0 ? `DESCRIPTION:${escapeIcs(descriptionParts.join("\n\n"))}` : null,
     patientPageUrl ? `URL:${escapeIcs(patientPageUrl)}` : null,
-    hasTime
-      ? [
-          "BEGIN:VALARM",
-          "ACTION:DISPLAY",
-          "DESCRIPTION:موعد الأشعة خلال 24 ساعة",
-          "TRIGGER:-PT24H",
-          "END:VALARM",
-        ].join("\r\n")
-      : null,
+    [
+      "BEGIN:VALARM",
+      "ACTION:DISPLAY",
+      "DESCRIPTION:موعد الأشعة خلال 24 ساعة",
+      "TRIGGER:-PT24H",
+      "END:VALARM",
+    ].join("\r\n"),
     "END:VEVENT",
     "END:VCALENDAR",
   ].filter(Boolean);
