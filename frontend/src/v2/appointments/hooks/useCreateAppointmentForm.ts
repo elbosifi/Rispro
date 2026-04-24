@@ -21,6 +21,8 @@ export interface CreateAppointmentFormModel {
   modalityId: number | null;
   examTypeId: number | null;
   caseCategory: "oncology" | "non_oncology";
+  requiresReport: boolean;
+  reportRequiredManuallyOverridden: boolean;
   appointmentDate: string;
   notes: string;
   reportingPriorityId: number | null;
@@ -39,6 +41,8 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   modalityId: null,
   examTypeId: null,
   caseCategory: "non_oncology",
+  requiresReport: false,
+  reportRequiredManuallyOverridden: false,
   appointmentDate: "",
   notes: "",
   reportingPriorityId: null,
@@ -51,7 +55,7 @@ const DEFAULT_FORM: CreateAppointmentFormModel = {
   overrideReason: "",
 };
 
-export function useCreateAppointmentForm() {
+export function useCreateAppointmentForm(reportDefaults = { oncology: true, nonOncology: false }) {
   const [form, setForm] = useState<CreateAppointmentFormModel>(DEFAULT_FORM);
 
   const actions = useMemo(() => ({
@@ -60,11 +64,15 @@ export function useCreateAppointmentForm() {
         patient?.category === "oncology" || patient?.category === "non_oncology"
           ? patient.category
           : "non_oncology";
+      const defaultRequiresReport =
+        defaultCategory === "oncology" ? reportDefaults.oncology : reportDefaults.nonOncology;
       setForm((prev) => ({
         ...prev,
         patientId: patient?.id ?? null,
         patient,
         caseCategory: defaultCategory,
+        requiresReport: defaultRequiresReport,
+        reportRequiredManuallyOverridden: false,
         modalityId: null,
         examTypeId: null,
         appointmentDate: "",
@@ -104,9 +112,21 @@ export function useCreateAppointmentForm() {
       setForm((prev) => ({
         ...prev,
         caseCategory,
+        requiresReport: prev.reportRequiredManuallyOverridden
+          ? prev.requiresReport
+          : caseCategory === "oncology"
+            ? reportDefaults.oncology
+            : reportDefaults.nonOncology,
         appointmentDate: "",
         overrideRequired: false,
         overrideReason: "",
+      }));
+    },
+    setRequiresReport(requiresReport: boolean) {
+      setForm((prev) => ({
+        ...prev,
+        requiresReport,
+        reportRequiredManuallyOverridden: true,
       }));
     },
     setAppointmentDate(appointmentDate: string, overrideRequired: boolean) {
@@ -162,12 +182,15 @@ export function useCreateAppointmentForm() {
         ...DEFAULT_FORM,
         patientId: prev.patientId,
         patient: prev.patient,
+        caseCategory: prev.caseCategory,
+        requiresReport:
+          prev.caseCategory === "oncology" ? reportDefaults.oncology : reportDefaults.nonOncology,
       }));
     },
     resetAll() {
       setForm(DEFAULT_FORM);
     },
-  }), []);
+  }), [reportDefaults.nonOncology, reportDefaults.oncology]);
 
   return { form, setForm, actions };
 }

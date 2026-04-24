@@ -13,6 +13,8 @@ export interface Booking {
   bookingDate: string;
   bookingTime: string | null;
   caseCategory: CaseCategory;
+  requiresReport: boolean;
+  studyInstanceUid: string | null;
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
@@ -35,6 +37,8 @@ export interface CreateBookingPayload {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory?: CaseCategory;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;

@@ -10,16 +10,17 @@ import type { Booking } from "../models/booking.js";
 const INSERT_SQL = `
   insert into appointments_v2.bookings (
     patient_id, modality_id, exam_type_id, reporting_priority_id,
-    booking_date, booking_time, case_category, status, notes,
+    booking_date, booking_time, case_category, requires_report, study_instance_uid, status, notes,
     policy_version_id, capacity_resolution_mode, uses_special_quota, special_reason_code, special_reason_note,
     is_walk_in, created_by_user_id, updated_by_user_id
   ) values (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
   )
   returning id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
     booking_date::text as "bookingDate", booking_time as "bookingTime",
-    case_category as "caseCategory", status, notes,
+    case_category as "caseCategory", requires_report as "requiresReport",
+    study_instance_uid as "studyInstanceUid", status, notes,
     policy_version_id as "policyVersionId",
     capacity_resolution_mode as "capacityResolutionMode",
     uses_special_quota as "usesSpecialQuota",
@@ -40,6 +41,8 @@ export async function insertBooking(
     bookingDate: string;
     bookingTime: string | null;
     caseCategory: string;
+    requiresReport: boolean;
+    studyInstanceUid: string | null;
     status: string;
     notes: string | null;
     policyVersionId: number;
@@ -59,6 +62,8 @@ export async function insertBooking(
     booking.bookingDate,
     booking.bookingTime,
     booking.caseCategory,
+    booking.requiresReport,
+    booking.studyInstanceUid,
     booking.status,
     booking.notes,
     booking.policyVersionId,
@@ -77,7 +82,8 @@ const FIND_BY_ID_SQL = `
   select id, patient_id as "patientId", modality_id as "modalityId",
     exam_type_id as "examTypeId", reporting_priority_id as "reportingPriorityId",
     booking_date::text as "bookingDate", booking_time as "bookingTime",
-    case_category as "caseCategory", status, notes,
+    case_category as "caseCategory", requires_report as "requiresReport",
+    study_instance_uid as "studyInstanceUid", status, notes,
     policy_version_id as "policyVersionId",
     capacity_resolution_mode as "capacityResolutionMode",
     uses_special_quota as "usesSpecialQuota",
@@ -120,9 +126,11 @@ const UPDATE_DATE_TIME_SQL = `
       booking_time = $2,
       reporting_priority_id = $3,
       notes = $4,
+      requires_report = $5,
+      study_instance_uid = $6,
       updated_at = now(),
-      updated_by_user_id = $5
-  where id = $6
+      updated_by_user_id = $7
+  where id = $8
 `;
 
 export async function updateBookingDateTime(
@@ -132,13 +140,17 @@ export async function updateBookingDateTime(
   newTime: string | null,
   userId: number,
   reportingPriorityId: number | null,
-  notes: string | null
+  notes: string | null,
+  requiresReport: boolean,
+  studyInstanceUid: string | null
 ): Promise<void> {
   await client.query(UPDATE_DATE_TIME_SQL, [
     newDate,
     newTime,
     reportingPriorityId,
     notes,
+    requiresReport,
+    studyInstanceUid,
     userId,
     bookingId,
   ]);
@@ -156,9 +168,11 @@ const UPDATE_RESCHEDULE_SQL = `
       exam_type_id = $8,
       reporting_priority_id = $9,
       notes = $10,
+      requires_report = $11,
+      study_instance_uid = $12,
       updated_at = now(),
-      updated_by_user_id = $11
-  where id = $12
+      updated_by_user_id = $13
+  where id = $14
 `;
 
 export async function updateBookingForReschedule(
@@ -174,7 +188,9 @@ export async function updateBookingForReschedule(
   specialReasonNote: string | null,
   examTypeId: number | null,
   reportingPriorityId: number | null,
-  notes: string | null
+  notes: string | null,
+  requiresReport: boolean,
+  studyInstanceUid: string | null
 ): Promise<void> {
   await client.query(UPDATE_RESCHEDULE_SQL, [
     newDate,
@@ -187,6 +203,8 @@ export async function updateBookingForReschedule(
     examTypeId,
     reportingPriorityId,
     notes,
+    requiresReport,
+    studyInstanceUid,
     userId,
     bookingId,
   ]);
@@ -206,6 +224,8 @@ const LIST_BOOKINGS_SQL = `
     b.booking_date::text as "bookingDate",
     b.booking_time as "bookingTime",
     b.case_category as "caseCategory",
+    b.requires_report as "requiresReport",
+    b.study_instance_uid as "studyInstanceUid",
     b.status,
     b.notes,
     b.policy_version_id as "policyVersionId",
@@ -279,6 +299,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
       b.booking_date::text as appointment_date,
       b.booking_time,
       b.case_category,
+      b.requires_report,
+      b.study_instance_uid,
       b.status,
       b.notes,
       b.is_walk_in,
@@ -293,6 +315,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     ('V2-' || bb.id::text) as accession_number,
     bb.appointment_date,
     bb.booking_time,
+    bb.requires_report,
+    bb.study_instance_uid,
     (
       select count(*)
       from appointments_v2.bookings seq
@@ -346,6 +370,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
 export interface BookingPrintDetailsRow {
   id: number;
   accession_number: string;
+  requires_report: boolean;
+  study_instance_uid: string | null;
   appointment_date: string;
   booking_time: string | null;
   daily_sequence: number;

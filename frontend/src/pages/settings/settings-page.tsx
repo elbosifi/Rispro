@@ -50,6 +50,7 @@ import DicomMonitoringSection from "./dicom-monitoring-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
 import PacsSettingsSection from "./pacs-settings-section";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
+import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import type {
   User,
   SchedulingEngineConfig,
@@ -161,6 +162,7 @@ type SettingsSection =
   | "modalities"
   | "name_dictionary"
   | "patient_qr_self_service"
+  | "sonicdicom_reports"
   | "documents_and_uploads"
   | "backup_restore";
 
@@ -181,6 +183,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "modalities",
   "name_dictionary",
   "patient_qr_self_service",
+  "sonicdicom_reports",
   "documents_and_uploads",
   "backup_restore"
 ];
@@ -191,6 +194,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "patient_qr_self_service") {
     return "إعدادات صفحة المريض ورمز QR";
+  }
+  if (section === "sonicdicom_reports") {
+    return "SonicDICOM Reports";
   }
   return _t(`settings.section.${section}` as TranslationKey);
 }
@@ -267,6 +273,7 @@ export default function SettingsPage() {
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} />}
+            {section === "sonicdicom_reports" && <SonicDicomReportsSection />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

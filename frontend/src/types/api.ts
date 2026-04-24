@@ -107,6 +107,8 @@ export interface Appointment {
   examTypeId?: number | null;
   reportingPriorityId?: number | null;
   accessionNumber: string;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   appointmentDate: string;
   dailySequence: number;
   status: AppointmentStatus;

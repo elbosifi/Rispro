@@ -54,4 +54,55 @@ describe("useCreateAppointmentForm", () => {
 
     expect(result.current.form.caseCategory).toBe("non_oncology");
   });
+
+  it("defaults report required true for oncology and false for non-oncology", () => {
+    const { result } = renderHook(() => useCreateAppointmentForm());
+
+    act(() => {
+      result.current.actions.setPatient({
+        id: 3,
+        arabicFullName: "Oncology Patient",
+        category: "oncology",
+      });
+    });
+    expect(result.current.form.requiresReport).toBe(true);
+
+    act(() => {
+      result.current.actions.setPatient({
+        id: 4,
+        arabicFullName: "Non Oncology Patient",
+        category: "non_oncology",
+      });
+    });
+    expect(result.current.form.requiresReport).toBe(false);
+  });
+
+  it("updates report-required default on category change until manual override", () => {
+    const { result } = renderHook(() => useCreateAppointmentForm());
+
+    act(() => {
+      result.current.actions.setPatient({
+        id: 5,
+        arabicFullName: "Test Patient",
+        category: "non_oncology",
+      });
+    });
+    expect(result.current.form.requiresReport).toBe(false);
+
+    act(() => {
+      result.current.actions.setCaseCategory("oncology");
+    });
+    expect(result.current.form.requiresReport).toBe(true);
+
+    act(() => {
+      result.current.actions.setRequiresReport(false);
+    });
+    act(() => {
+      result.current.actions.setCaseCategory("non_oncology");
+    });
+    act(() => {
+      result.current.actions.setCaseCategory("oncology");
+    });
+    expect(result.current.form.requiresReport).toBe(false);
+  });
 });

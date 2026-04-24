@@ -12,6 +12,8 @@ export interface CreateAppointmentDto {
   bookingDate: string;
   bookingTime?: string | null;
   caseCategory?: CaseCategory;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
@@ -33,6 +35,8 @@ export interface UpdateAppointmentDto {
   reportingPriorityId?: number | null;
   notes?: string | null;
   caseCategory?: CaseCategory;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
@@ -55,6 +59,8 @@ export interface AppointmentResponseDto {
   bookingDate: string;
   bookingTime: string | null;
   caseCategory: CaseCategory;
+  requiresReport: boolean;
+  studyInstanceUid: string | null;
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;

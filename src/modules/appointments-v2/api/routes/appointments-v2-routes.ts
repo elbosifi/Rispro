@@ -135,6 +135,8 @@ router.post(
         bookingDate: body.bookingDate,
         bookingTime: body.bookingTime ?? null,
         caseCategory: body.caseCategory,
+        requiresReport: body.requiresReport,
+        studyInstanceUid: body.studyInstanceUid ?? null,
         capacityResolutionMode,
         useSpecialQuota: body.useSpecialQuota === true,
         specialReasonCode: body.specialReasonCode ?? null,
@@ -200,6 +202,8 @@ router.put(
       body.specialReasonCode ?? null,
       body.specialReasonNote ?? null,
       body.rescheduleReason ?? null,
+      body.requiresReport,
+      body.studyInstanceUid ?? undefined,
       body.policySetKey ?? "default"
     );
 

@@ -7,8 +7,22 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { getPublicCancelServiceUserId } from "../../public/utils/public-cancel-config.js";
 import { verifyPublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
+import { createRateLimiter } from "../../../../middleware/rate-limit.js";
+import {
+  buildPublicSonicDicomReportUrl,
+  checkSonicDicomReportStatus,
+  messageForReportState,
+  type SonicDicomReportState,
+} from "../../../../services/sonicdicom-report-service.js";
+import { readSonicDicomReportSettings } from "../../../../services/sonicdicom-report-settings.js";
+import { logAuditEntry } from "../../../../services/audit-service.js";
 
 const router = Router();
+const reportRateLimiter = createRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 20,
+  message: "Too many report access requests. Please try again later.",
+});
 
 function readToken(req: Request): string {
   const tokenValue = req.query.t;
@@ -34,6 +48,33 @@ function formatTimeLabel(value: string | null | undefined): string {
   return raw;
 }
 
+type BookingDetails = Awaited<ReturnType<typeof getBookingDetails>>;
+
+function reportContextFromBooking(booking: BookingDetails) {
+  return {
+    bookingId: Number(booking.id),
+    accessionNumber: String(booking.accession_number || ""),
+    studyInstanceUid: booking.study_instance_uid ?? null,
+    requiresReport: Boolean(booking.requires_report),
+    status: String(booking.status || ""),
+  };
+}
+
+function makeReportStatusResponse(
+  state: SonicDicomReportState,
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>,
+  canViewReport = false
+) {
+  return {
+    enabled: patientQrSettings.allowReportAccess,
+    state,
+    canViewReport,
+    message: messageForReportState(state, patientQrSettings),
+    checkButtonLabel: patientQrSettings.qrReportCheckButtonLabel,
+    viewButtonLabel: patientQrSettings.qrReportViewButtonLabel,
+  };
+}
+
 router.get(
   "/cancel-preview",
   asyncRoute(async (req: Request, res: Response) => {
@@ -55,7 +96,18 @@ router.get(
         }),
         bookingDate: booking.appointment_date,
         bookingTime: formatTimeLabel(booking.booking_time),
-        accessionNumber: booking.accession_number,
+        requiresReport: Boolean(booking.requires_report),
+        reportFeature: {
+          allowReportAccess: patientQrSettings.allowReportAccess,
+          showReportPendingCard: patientQrSettings.showReportPendingCard,
+          reportAccessRequiresCompletedAppointment: patientQrSettings.reportAccessRequiresCompletedAppointment,
+          showReportNotRequiredMessage: patientQrSettings.showReportNotRequiredMessage,
+          qrReportCheckingMessage: patientQrSettings.qrReportCheckingMessage,
+          qrReportCheckButtonLabel: patientQrSettings.qrReportCheckButtonLabel,
+          qrReportViewButtonLabel: patientQrSettings.qrReportViewButtonLabel,
+          qrReportNotRequiredMessage: patientQrSettings.qrReportNotRequiredMessage,
+          qrReportNotCompletedMessage: patientQrSettings.qrReportNotCompletedMessage,
+        },
         modalityNameAr: booking.modality_name_ar || "—",
         modalityNameEn: booking.modality_name_en || "—",
         examNameAr: booking.exam_name_ar || "—",
@@ -104,6 +156,95 @@ router.post(
 
       throw error;
     }
+  })
+);
+
+router.get(
+  "/report-status",
+  reportRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const token = readToken(req);
+    if (req.query.accessionNumber || req.query.accession || req.query.studyInstanceUid || req.query.studyinstanceuid) {
+      throw new HttpError(400, "Public report lookup identifiers are not accepted.", { code: "public_identifier_rejected" });
+    }
+
+    const payload = verifyPublicCancelToken(token);
+    const patientQrSettings = await readPatientQrSettings();
+    if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
+    if (!patientQrSettings.allowReportAccess) {
+      res.json(makeReportStatusResponse("disabled", patientQrSettings, false));
+      return;
+    }
+
+    const sonicSettings = await readSonicDicomReportSettings();
+    if (!sonicSettings.sonicDicomReportsEnabled) {
+      res.json(makeReportStatusResponse("disabled", patientQrSettings, false));
+      return;
+    }
+
+    const booking = await getBookingDetails(payload.bookingId);
+    const context = reportContextFromBooking(booking);
+    if (!context.requiresReport) {
+      res.json(makeReportStatusResponse("not_required", patientQrSettings, false));
+      return;
+    }
+    if (patientQrSettings.reportAccessRequiresCompletedAppointment && context.status !== "completed") {
+      res.json(makeReportStatusResponse("not_completed", patientQrSettings, false));
+      return;
+    }
+
+    const status = await checkSonicDicomReportStatus(context);
+    res.json(makeReportStatusResponse(status.state, patientQrSettings, status.canViewReport));
+  })
+);
+
+router.get(
+  "/report-open",
+  reportRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const token = readToken(req);
+    const payload = verifyPublicCancelToken(token);
+    const patientQrSettings = await readPatientQrSettings();
+    if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
+    if (!patientQrSettings.allowReportAccess) throw new HttpError(403, "Report access is disabled.", { code: "report_access_disabled" });
+
+    const sonicSettings = await readSonicDicomReportSettings();
+    if (!sonicSettings.sonicDicomReportsEnabled) throw new HttpError(403, "Report integration is disabled.", { code: "report_integration_disabled" });
+
+    const booking = await getBookingDetails(payload.bookingId);
+    const context = reportContextFromBooking(booking);
+    if (!context.requiresReport) throw new HttpError(403, messageForReportState("not_required", patientQrSettings), { code: "report_not_required" });
+    if (patientQrSettings.reportAccessRequiresCompletedAppointment && context.status !== "completed") {
+      throw new HttpError(409, messageForReportState("not_completed", patientQrSettings), { code: "report_not_completed" });
+    }
+
+    const status = await checkSonicDicomReportStatus(context, { useCache: true });
+    if (status.state !== "final") {
+      if (sonicSettings.auditPatientReportAccess) {
+        await logAuditEntry({
+          entityType: "patient_report",
+          entityId: context.bookingId,
+          actionType: "blocked_report_open_attempt",
+          oldValues: null,
+          newValues: { state: status.state },
+          changedByUserId: null,
+        }).catch(() => null);
+      }
+      throw new HttpError(409, messageForReportState(status.state, patientQrSettings), { code: "report_not_final" });
+    }
+
+    const reportUrl = await buildPublicSonicDicomReportUrl(context);
+    if (sonicSettings.auditPatientReportAccess) {
+      await logAuditEntry({
+        entityType: "patient_report",
+        entityId: context.bookingId,
+        actionType: "report_opened",
+        oldValues: null,
+        newValues: { state: "final" },
+        changedByUserId: null,
+      }).catch(() => null);
+    }
+    res.redirect(reportUrl);
   })
 );
 

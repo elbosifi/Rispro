@@ -345,7 +345,18 @@ export interface PublicAppointmentCancelPreview {
   patientDisplayName: string;
   bookingDate: string;
   bookingTime?: string;
-  accessionNumber?: string;
+  requiresReport?: boolean;
+  reportFeature?: {
+    allowReportAccess: boolean;
+    showReportPendingCard: boolean;
+    reportAccessRequiresCompletedAppointment: boolean;
+    showReportNotRequiredMessage: boolean;
+    qrReportCheckingMessage: string;
+    qrReportCheckButtonLabel: string;
+    qrReportViewButtonLabel: string;
+    qrReportNotRequiredMessage: string;
+    qrReportNotCompletedMessage: string;
+  };
   modalityName?: string;
   modalityNameAr?: string;
   modalityNameEn?: string;
@@ -388,7 +399,8 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     patientDisplayName: String(preview.patientDisplayName ?? preview.patient_display_name ?? ""),
     bookingDate: String(preview.bookingDate ?? preview.booking_date ?? ""),
     bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
-    accessionNumber: String(preview.accessionNumber ?? preview.accession_number ?? ""),
+    requiresReport: Boolean(preview.requiresReport ?? preview.requires_report),
+    reportFeature: preview.reportFeature as PublicAppointmentCancelPreview["reportFeature"],
     modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "—"),
     modalityNameAr: String(preview.modalityNameAr ?? preview.modality_name_ar ?? ""),
     modalityNameEn: String(preview.modalityNameEn ?? preview.modality_name_en ?? ""),
@@ -417,6 +429,20 @@ export async function cancelPublicAppointment(token: string): Promise<PublicAppo
     status: String(raw.status ?? ""),
     previousStatus: raw.previousStatus == null ? undefined : String(raw.previousStatus),
   };
+}
+
+export interface PublicReportStatusResponse {
+  enabled: boolean;
+  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
+  canViewReport: boolean;
+  message: string;
+  checkButtonLabel: string;
+  viewButtonLabel: string;
+}
+
+export async function fetchPublicAppointmentReportStatus(token: string): Promise<PublicReportStatusResponse> {
+  const query = new URLSearchParams({ t: token });
+  return api<PublicReportStatusResponse>(`/public/appointments/report-status?${query.toString()}`);
 }
 
 export interface PatientQrContactSettings {
@@ -456,6 +482,21 @@ export interface PatientQrSettings {
   showDocumentsChecklist: boolean;
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
+  allowReportAccess: boolean;
+  showReportPendingCard: boolean;
+  reportAccessRequiresCompletedAppointment: boolean;
+  showReportNotRequiredMessage: boolean;
+  defaultReportRequiredForOncology: boolean;
+  defaultReportRequiredForNonOncology: boolean;
+  qrReportCheckingMessage: string;
+  qrReportFinalMessage: string;
+  qrReportDraftMessage: string;
+  qrReportNoReportMessage: string;
+  qrReportUnavailableMessage: string;
+  qrReportNotRequiredMessage: string;
+  qrReportNotCompletedMessage: string;
+  qrReportCheckButtonLabel: string;
+  qrReportViewButtonLabel: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -505,6 +546,21 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     showDocumentsChecklist: bool(record.showDocumentsChecklist, true),
     showDepartmentContact: bool(record.showDepartmentContact, false),
     showLocationDirections: bool(record.showLocationDirections, false),
+    allowReportAccess: bool(record.allowReportAccess, false),
+    showReportPendingCard: bool(record.showReportPendingCard, true),
+    reportAccessRequiresCompletedAppointment: bool(record.reportAccessRequiresCompletedAppointment, true),
+    showReportNotRequiredMessage: bool(record.showReportNotRequiredMessage, false),
+    defaultReportRequiredForOncology: bool(record.defaultReportRequiredForOncology, true),
+    defaultReportRequiredForNonOncology: bool(record.defaultReportRequiredForNonOncology, false),
+    qrReportCheckingMessage: str(record.qrReportCheckingMessage, "Checking report status..."),
+    qrReportFinalMessage: str(record.qrReportFinalMessage, "Your report is ready."),
+    qrReportDraftMessage: str(record.qrReportDraftMessage, "Your report is still under review and is not finalized yet."),
+    qrReportNoReportMessage: str(record.qrReportNoReportMessage, "No report is available for this appointment yet."),
+    qrReportUnavailableMessage: str(record.qrReportUnavailableMessage, "The report system is temporarily unavailable. Please try again later."),
+    qrReportNotRequiredMessage: str(record.qrReportNotRequiredMessage, ""),
+    qrReportNotCompletedMessage: str(record.qrReportNotCompletedMessage, "Report access becomes available after the examination is completed."),
+    qrReportCheckButtonLabel: str(record.qrReportCheckButtonLabel, "Check report"),
+    qrReportViewButtonLabel: str(record.qrReportViewButtonLabel, "View report"),
     pageTitleAr: str(record.pageTitleAr, "خدمة المريض عبر رمز QR"),
     pageTitleEn: str(record.pageTitleEn, "Patient QR Service"),
     introTextAr: str(record.introTextAr, "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة."),

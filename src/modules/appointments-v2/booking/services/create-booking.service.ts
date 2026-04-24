@@ -36,6 +36,7 @@ import { recordOverrideAudit } from "../repositories/override-audit.repo.js";
 import { authenticateSupervisor } from "../utils/authenticate-supervisor.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -95,6 +96,13 @@ async function createBookingInternal(
 ): Promise<CreateBookingResult> {
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   const caseCategory = await resolveBookingCaseCategory(client, payload.patientId, payload.caseCategory);
+  const patientQrSettings = await readPatientQrSettings();
+  const requiresReport =
+    typeof payload.requiresReport === "boolean"
+      ? payload.requiresReport
+      : caseCategory === "oncology"
+        ? patientQrSettings.defaultReportRequiredForOncology
+        : patientQrSettings.defaultReportRequiredForNonOncology;
   // 1. Load the published policy
   const publishedVersion = await findPublishedPolicyVersion(client, policySetKey);
   if (!publishedVersion) {
@@ -336,6 +344,8 @@ async function createBookingInternal(
     bookingDate: payload.bookingDate,
     bookingTime: payload.bookingTime ?? null,
     caseCategory,
+    requiresReport,
+    studyInstanceUid: payload.studyInstanceUid ?? null,
     status: "scheduled",
     notes: payload.notes ?? null,
     policyVersionId: publishedVersion.id,

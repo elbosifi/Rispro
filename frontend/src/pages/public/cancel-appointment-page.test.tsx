@@ -7,11 +7,13 @@ import { ApiError } from "@/lib/api-client";
 import PublicCancelAppointmentPage, { createCalendarBlob } from "./cancel-appointment-page";
 import {
   cancelPublicAppointment,
+  fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
 } from "@/lib/api-hooks";
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchPublicAppointmentCancelPreview: vi.fn(),
+  fetchPublicAppointmentReportStatus: vi.fn(),
   cancelPublicAppointment: vi.fn(),
 }));
 
@@ -26,6 +28,21 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
     showDocumentsChecklist: true,
     showDepartmentContact: true,
     showLocationDirections: true,
+    allowReportAccess: false,
+    showReportPendingCard: true,
+    reportAccessRequiresCompletedAppointment: true,
+    showReportNotRequiredMessage: false,
+    defaultReportRequiredForOncology: true,
+    defaultReportRequiredForNonOncology: false,
+    qrReportCheckingMessage: "Checking report status...",
+    qrReportFinalMessage: "Your report is ready.",
+    qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
+    qrReportNoReportMessage: "No report is available for this appointment yet.",
+    qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
+    qrReportNotRequiredMessage: "",
+    qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
+    qrReportCheckButtonLabel: "Check report",
+    qrReportViewButtonLabel: "View report",
     pageTitleAr: "خدمة المريض عبر رمز QR",
     pageTitleEn: "Patient QR Service",
     introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -69,7 +86,7 @@ function preview(overrides: Record<string, unknown> = {}) {
     patientDisplayName: "Test Patient",
     bookingDate: "2026-07-01",
     bookingTime: "10:30:00",
-    accessionNumber: "V2-12",
+    requiresReport: false,
     modalityNameAr: "CT",
     modalityNameEn: "CT",
     examNameAr: "CT Head",

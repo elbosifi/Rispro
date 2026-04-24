@@ -98,6 +98,8 @@ router.get(
           b.reporting_priority_id,
           ('V2-' || b.id::text) as accession_number,
           b.booking_date::text as appointment_date,
+          b.requires_report,
+          b.study_instance_uid,
           row_number() over (partition by b.booking_date order by b.created_at asc, b.id asc)::int as daily_sequence,
           b.status,
           b.is_walk_in,
@@ -169,6 +171,8 @@ router.get(
           b.reporting_priority_id,
           ('V2-' || b.id::text) as accession_number,
           b.booking_date::text as appointment_date,
+          b.requires_report,
+          b.study_instance_uid,
           (
             select count(*)::int
             from appointments_v2.bookings seq
@@ -407,6 +411,8 @@ router.get(
             case when b.status in ('arrived', 'waiting') then b.updated_at else null end as scanned_at,
             b.id as appointment_id,
             ('V2-' || b.id::text) as accession_number,
+            b.requires_report,
+            b.study_instance_uid,
             b.status as appointment_status,
             b.is_walk_in,
             b.notes,
@@ -603,6 +609,8 @@ router.get(
         b.reporting_priority_id,
         ('V2-' || b.id::text) as accession_number,
         b.booking_date::text as appointment_date,
+        b.requires_report,
+        b.study_instance_uid,
         row_number() over (partition by b.booking_date, b.modality_id order by b.created_at asc, b.id asc)::int as daily_sequence,
         b.status,
         b.is_walk_in,

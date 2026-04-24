@@ -24,10 +24,12 @@ import { chooseLocalized } from "@/lib/i18n";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
+  fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
   type PatientQrSettings,
   type PublicAppointmentCancelPreview,
   type PublicAppointmentCancelResult,
+  type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 
 type LinkErrorState = "invalid" | "expired" | "unavailable" | "disabled";
@@ -45,6 +47,21 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDocumentsChecklist: true,
   showDepartmentContact: false,
   showLocationDirections: false,
+  allowReportAccess: false,
+  showReportPendingCard: true,
+  reportAccessRequiresCompletedAppointment: true,
+  showReportNotRequiredMessage: false,
+  defaultReportRequiredForOncology: true,
+  defaultReportRequiredForNonOncology: false,
+  qrReportCheckingMessage: "Checking report status...",
+  qrReportFinalMessage: "Your report is ready.",
+  qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
+  qrReportNoReportMessage: "No report is available for this appointment yet.",
+  qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
+  qrReportNotRequiredMessage: "",
+  qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
+  qrReportCheckButtonLabel: "Check report",
+  qrReportViewButtonLabel: "View report",
   pageTitleAr: "خدمة المريض عبر رمز QR",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -294,7 +311,6 @@ function AppointmentSummaryCard(props: {
         {props.showBookingTime && preview.bookingTime ? <SummaryRow label="وقت الموعد" value={formatTimeAr(preview.bookingTime)} /> : null}
         <SummaryRow label="الجهاز" value={preview.modalityNameAr || preview.modalityName || "—"} />
         <SummaryRow label="نوع الفحص" value={preview.examNameAr || preview.examName || "—"} />
-        {preview.accessionNumber ? <SummaryRow label="رقم الموعد" value={preview.accessionNumber} /> : null}
       </dl>
     </Card>
   );
@@ -451,6 +467,78 @@ function LocationCard(props: { settings: PatientQrSettings["location"] }) {
               <ExternalLink className="h-4 w-4" />
             </a>
           </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function ReportCard(props: {
+  token: string;
+  preview: PublicAppointmentCancelPreview;
+  settings: PatientQrSettings;
+}) {
+  const [status, setStatus] = useState<PublicReportStatusResponse | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const reportMutation = useMutation({
+    mutationFn: () => fetchPublicAppointmentReportStatus(props.token),
+    onSuccess: (value) => {
+      setStatus(value);
+      setErrorMessage("");
+    },
+    onError: () => {
+      setErrorMessage(props.settings.qrReportUnavailableMessage);
+    },
+  });
+
+  if (!props.settings.allowReportAccess) return null;
+  if (!props.preview.requiresReport) {
+    if (!props.settings.showReportNotRequiredMessage || !props.settings.qrReportNotRequiredMessage) return null;
+    return <InfoCard icon={<FileText className="h-5 w-5" />} title="التقرير" body={props.settings.qrReportNotRequiredMessage} tone="neutral" />;
+  }
+  if (
+    props.settings.reportAccessRequiresCompletedAppointment &&
+    props.preview.currentStatus !== "completed" &&
+    !props.settings.showReportPendingCard
+  ) {
+    return null;
+  }
+
+  const message =
+    reportMutation.isPending
+      ? props.settings.qrReportCheckingMessage
+      : errorMessage || status?.message || (props.preview.currentStatus !== "completed" ? props.settings.qrReportNotCompletedMessage : "");
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="rounded-full bg-teal-50 p-2 text-teal-700">
+          <FileText className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">التقرير</h3>
+          {message ? <p className="mt-1 text-sm leading-7 text-slate-600">{message}</p> : null}
+        </div>
+      </div>
+      <div className="flex flex-col gap-3 sm:flex-row">
+        <ActionButton
+          tone="primary"
+          onClick={() => reportMutation.mutate()}
+          disabled={reportMutation.isPending}
+          icon={reportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+        >
+          {status?.checkButtonLabel || props.settings.qrReportCheckButtonLabel}
+        </ActionButton>
+        {status?.canViewReport ? (
+          <ActionButton
+            tone="neutral"
+            onClick={() => {
+              window.location.href = `/api/public/appointments/report-open?t=${encodeURIComponent(props.token)}`;
+            }}
+            icon={<ExternalLink className="h-4 w-4" />}
+          >
+            {status.viewButtonLabel || props.settings.qrReportViewButtonLabel}
+          </ActionButton>
         ) : null}
       </div>
     </Card>
@@ -842,6 +930,8 @@ export default function PublicCancelAppointmentPage() {
         <div className="space-y-5 p-5">
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
+          <ReportCard token={token} preview={preview} settings={settings} />
+
           {modalityInstructionsText ? (
             <InstructionCard
               title="تعليمات خاصة بالجهاز"
@@ -888,7 +978,7 @@ export default function PublicCancelAppointmentPage() {
                 tone="primary"
                 onClick={async () => {
                   const blob = createCalendarBlob(preview, settings, patientPageUrl);
-                  const filename = `rispro-${preview.accessionNumber || preview.bookingId}.ics`;
+                  const filename = `rispro-${preview.bookingId}.ics`;
                   await triggerDownload(blob, filename);
                 }}
                 icon={<Download className="h-4 w-4" />}

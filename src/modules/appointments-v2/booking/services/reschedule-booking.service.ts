@@ -61,6 +61,8 @@ export async function rescheduleBooking(
   specialReasonCode: string | null = null,
   specialReasonNote: string | null = null,
   rescheduleReason: string | null = null,
+  requiresReport?: boolean,
+  studyInstanceUid?: string | null,
   policySetKey: string = "default"
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
@@ -78,6 +80,8 @@ export async function rescheduleBooking(
       specialReasonCode,
       specialReasonNote,
       rescheduleReason,
+      requiresReport,
+      studyInstanceUid,
       policySetKey
     );
   }, {
@@ -103,6 +107,8 @@ async function rescheduleBookingInternal(
   specialReasonCode: string | null,
   specialReasonNote: string | null,
   rescheduleReason: string | null,
+  requiresReport: boolean | undefined,
+  studyInstanceUid: string | null | undefined,
   policySetKey: string
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
@@ -135,6 +141,8 @@ async function rescheduleBookingInternal(
   const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
   const effectiveReportingPriorityId = reportingPriorityId ?? booking.reportingPriorityId;
   const effectiveNotes = notes ?? booking.notes;
+  const effectiveRequiresReport = requiresReport ?? booking.requiresReport;
+  const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
 
@@ -165,6 +173,8 @@ async function rescheduleBookingInternal(
       previousTime,
       effectiveReportingPriorityId,
       effectiveNotes,
+      effectiveRequiresReport,
+      effectiveStudyInstanceUid,
       override,
       rescheduleReason
     );
@@ -398,7 +408,9 @@ async function rescheduleBookingInternal(
     specialReasonNote,
     effectiveExamTypeId,
     effectiveReportingPriorityId,
-    effectiveNotes
+    effectiveNotes,
+    effectiveRequiresReport,
+    effectiveStudyInstanceUid
   );
 
   if (wasOverride && supervisorUserId != null) {
@@ -454,10 +466,12 @@ async function rescheduleTimeOnly(
   previousTime: string | null,
   reportingPriorityId: number | null,
   notes: string | null,
+  requiresReport: boolean,
+  studyInstanceUid: string | null,
   override: CreateBookingPayload["override"] | undefined,
   rescheduleReason: string | null
 ): Promise<RescheduleBookingResult> {
-  await updateBookingDateTime(client, bookingId, previousDate, newTime, userId, reportingPriorityId, notes);
+  await updateBookingDateTime(client, bookingId, previousDate, newTime, userId, reportingPriorityId, notes, requiresReport, studyInstanceUid);
 
   await recordRescheduleAudit(client, {
     bookingId,

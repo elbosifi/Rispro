@@ -37,6 +37,21 @@ export interface PatientQrSettings {
   showDocumentsChecklist: boolean;
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
+  allowReportAccess: boolean;
+  showReportPendingCard: boolean;
+  reportAccessRequiresCompletedAppointment: boolean;
+  showReportNotRequiredMessage: boolean;
+  defaultReportRequiredForOncology: boolean;
+  defaultReportRequiredForNonOncology: boolean;
+  qrReportCheckingMessage: string;
+  qrReportFinalMessage: string;
+  qrReportDraftMessage: string;
+  qrReportNoReportMessage: string;
+  qrReportUnavailableMessage: string;
+  qrReportNotRequiredMessage: string;
+  qrReportNotCompletedMessage: string;
+  qrReportCheckButtonLabel: string;
+  qrReportViewButtonLabel: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -59,6 +74,21 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDocumentsChecklist: true,
   showDepartmentContact: false,
   showLocationDirections: false,
+  allowReportAccess: false,
+  showReportPendingCard: true,
+  reportAccessRequiresCompletedAppointment: true,
+  showReportNotRequiredMessage: false,
+  defaultReportRequiredForOncology: true,
+  defaultReportRequiredForNonOncology: false,
+  qrReportCheckingMessage: "Checking report status...",
+  qrReportFinalMessage: "Your report is ready.",
+  qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
+  qrReportNoReportMessage: "No report is available for this appointment yet.",
+  qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
+  qrReportNotRequiredMessage: "",
+  qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
+  qrReportCheckButtonLabel: "Check report",
+  qrReportViewButtonLabel: "View report",
   pageTitleAr: "خدمة المريض عبر رمز QR",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -154,6 +184,21 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     showDocumentsChecklist: asBoolean(record.showDocumentsChecklist, DEFAULT_SETTINGS.showDocumentsChecklist),
     showDepartmentContact: asBoolean(record.showDepartmentContact, DEFAULT_SETTINGS.showDepartmentContact),
     showLocationDirections: asBoolean(record.showLocationDirections, DEFAULT_SETTINGS.showLocationDirections),
+    allowReportAccess: asBoolean(record.allowReportAccess, DEFAULT_SETTINGS.allowReportAccess),
+    showReportPendingCard: asBoolean(record.showReportPendingCard, DEFAULT_SETTINGS.showReportPendingCard),
+    reportAccessRequiresCompletedAppointment: asBoolean(record.reportAccessRequiresCompletedAppointment, DEFAULT_SETTINGS.reportAccessRequiresCompletedAppointment),
+    showReportNotRequiredMessage: asBoolean(record.showReportNotRequiredMessage, DEFAULT_SETTINGS.showReportNotRequiredMessage),
+    defaultReportRequiredForOncology: asBoolean(record.defaultReportRequiredForOncology, DEFAULT_SETTINGS.defaultReportRequiredForOncology),
+    defaultReportRequiredForNonOncology: asBoolean(record.defaultReportRequiredForNonOncology, DEFAULT_SETTINGS.defaultReportRequiredForNonOncology),
+    qrReportCheckingMessage: asString(record.qrReportCheckingMessage, DEFAULT_SETTINGS.qrReportCheckingMessage),
+    qrReportFinalMessage: asString(record.qrReportFinalMessage, DEFAULT_SETTINGS.qrReportFinalMessage),
+    qrReportDraftMessage: asString(record.qrReportDraftMessage, DEFAULT_SETTINGS.qrReportDraftMessage),
+    qrReportNoReportMessage: asString(record.qrReportNoReportMessage, DEFAULT_SETTINGS.qrReportNoReportMessage),
+    qrReportUnavailableMessage: asString(record.qrReportUnavailableMessage, DEFAULT_SETTINGS.qrReportUnavailableMessage),
+    qrReportNotRequiredMessage: asString(record.qrReportNotRequiredMessage, DEFAULT_SETTINGS.qrReportNotRequiredMessage),
+    qrReportNotCompletedMessage: asString(record.qrReportNotCompletedMessage, DEFAULT_SETTINGS.qrReportNotCompletedMessage),
+    qrReportCheckButtonLabel: asString(record.qrReportCheckButtonLabel, DEFAULT_SETTINGS.qrReportCheckButtonLabel),
+    qrReportViewButtonLabel: asString(record.qrReportViewButtonLabel, DEFAULT_SETTINGS.qrReportViewButtonLabel),
     pageTitleAr: asString(record.pageTitleAr, DEFAULT_SETTINGS.pageTitleAr),
     pageTitleEn: asString(record.pageTitleEn, DEFAULT_SETTINGS.pageTitleEn),
     introTextAr: asString(record.introTextAr, DEFAULT_SETTINGS.introTextAr),

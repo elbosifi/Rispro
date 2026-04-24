@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { fetchAppointments } from "@/lib/api-hooks";
+import { fetchAppointments, fetchPatientQrSettings } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type {
@@ -110,7 +111,15 @@ export function CreateAppointmentTab({
   onCreateAppointment,
   onEvaluateAvailability,
 }: CreateAppointmentTabProps) {
-  const { form, actions } = useCreateAppointmentForm();
+  const { data: patientQrSettings } = useQuery({
+    queryKey: ["patient-qr-settings", "appointment-defaults"],
+    queryFn: fetchPatientQrSettings,
+    staleTime: 60_000,
+  });
+  const { form, actions } = useCreateAppointmentForm({
+    oncology: patientQrSettings?.defaultReportRequiredForOncology ?? true,
+    nonOncology: patientQrSettings?.defaultReportRequiredForNonOncology ?? false,
+  });
   const { language } = useLanguage();
   const navigate = useNavigate();
   const [availabilitySelectedRow, setAvailabilitySelectedRow] = useState<AvailabilityRowViewModel | null>(null);
@@ -276,6 +285,7 @@ export function CreateAppointmentTab({
           : null,
       notes: form.notes.trim() || null,
       isWalkIn: form.isWalkIn,
+      requiresReport: form.requiresReport,
       override,
     };
 
@@ -536,6 +546,22 @@ export function CreateAppointmentTab({
                   className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-sm sm:text-base font-semibold text-foreground">{t(language, "appointments.create.walkIn")}</span>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50 xl:col-span-2">
+                <input
+                  type="checkbox"
+                  id="requiresReport"
+                  checked={form.requiresReport}
+                  onChange={(e) => actions.setRequiresReport(e.target.checked)}
+                  className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
+                />
+                <span className="text-sm sm:text-base text-foreground">
+                  <span className="block font-semibold">Report required</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">
+                    When enabled, the patient QR page can show report availability after the exam is completed.
+                  </span>
+                </span>
               </label>
 
               <div>

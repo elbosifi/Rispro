@@ -219,6 +219,8 @@ export function mapAppointment(raw: RawRecord): Appointment {
     examTypeId: numOrNull(raw, 'exam_type_id') ?? numOrNull(raw, 'examTypeId'),
     reportingPriorityId: numOrNull(raw, 'reporting_priority_id') ?? numOrNull(raw, 'reportingPriorityId'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
+    requiresReport: bool(raw, 'requires_report', bool(raw, 'requiresReport', false)),
+    studyInstanceUid: strOrNull(raw, 'study_instance_uid') ?? strOrNull(raw, 'studyInstanceUid'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     status: fallback(raw.status, "scheduled") as Appointment["status"],

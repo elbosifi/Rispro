@@ -154,6 +154,8 @@ export interface CreateBookingRequest {
   bookingDate: string;
   bookingTime: string | null;
   caseCategory: CaseCategory;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
@@ -177,6 +179,8 @@ export interface BookingResponse {
     bookingDate: string;
     bookingTime: string | null;
     caseCategory: CaseCategory;
+    requiresReport?: boolean;
+    studyInstanceUid?: string | null;
     status: BookingStatus;
     notes: string | null;
     policyVersionId: number;
@@ -231,6 +235,8 @@ export interface BookingWithPatientInfo {
   bookingDate: string;
   bookingTime: string | null;
   caseCategory: CaseCategory;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   status: BookingStatus;
   notes: string | null;
   policyVersionId: number;
@@ -262,6 +268,8 @@ export interface RescheduleBookingRequest {
   bookingDate: string;
   bookingTime: string | null;
   examTypeId?: number | null;
+  requiresReport?: boolean;
+  studyInstanceUid?: string | null;
   capacityResolutionMode?: CapacityResolutionMode;
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
@@ -284,6 +292,8 @@ export interface RescheduleBookingResponse {
     bookingDate: string;
     bookingTime: string | null;
     caseCategory: CaseCategory;
+    requiresReport?: boolean;
+    studyInstanceUid?: string | null;
     status: BookingStatus;
     notes: string | null;
     policyVersionId: number;
