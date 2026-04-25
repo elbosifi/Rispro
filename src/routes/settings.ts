@@ -363,6 +363,7 @@ settingsRouter.post(
       baseUrlSource: result.baseUrlSource,
       lookupTried: result.lookupTried,
       steps: result.steps,
+      diagnostics: result.diagnostics,
     });
   })
 );

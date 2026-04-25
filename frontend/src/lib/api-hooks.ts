@@ -737,6 +737,7 @@ export interface SonicDicomLookupDebugResponse {
   baseUrlSource: "internal" | "public_fallback" | "none";
   lookupTried: Array<"accession_number" | "study_instance_uid">;
   steps: SonicDicomLookupDebugStep[];
+  diagnostics?: string[];
 }
 
 export async function testSonicDicomLookup(payload: {

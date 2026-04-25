@@ -36,6 +36,7 @@ export interface SonicDicomLookupDebugResult extends ReportStatusResult {
   baseUrlSource: "internal" | "public_fallback" | "none";
   lookupTried: Array<"accession_number" | "study_instance_uid">;
   steps: SonicDicomLookupDebugStep[];
+  diagnostics: string[];
 }
 
 interface CacheEntry {
@@ -134,11 +135,43 @@ function sanitizeUrlForDebug(url: string): string {
     for (const key of ["password", "pass", "pwd"]) {
       if (parsed.searchParams.has(key)) parsed.searchParams.set(key, "***");
     }
+    if (parsed.hash.includes("?")) {
+      const hashWithoutPrefix = parsed.hash.replace(/^#/, "");
+      const qIndex = hashWithoutPrefix.indexOf("?");
+      if (qIndex >= 0) {
+        const hashPath = hashWithoutPrefix.slice(0, qIndex);
+        const hashParams = new URLSearchParams(hashWithoutPrefix.slice(qIndex + 1));
+        for (const key of ["password", "pass", "pwd"]) {
+          if (hashParams.has(key)) hashParams.set(key, "***");
+        }
+        const renderedParams = hashParams.toString();
+        parsed.hash = renderedParams ? `${hashPath}?${renderedParams}` : hashPath;
+      }
+    }
     return parsed.toString();
   } catch {
     return url
       .replace(/([?&](?:password|pass|pwd)=)[^&]*/gi, "$1***")
+      .replace(/(#.*[?&](?:password|pass|pwd)=)[^&]*/gi, "$1***")
       .replace(/(\{\{password\}\})/gi, "***");
+  }
+}
+
+function isLikelySpaShell(content: string): boolean {
+  const sample = content.slice(0, 5000).toLowerCase();
+  const hasRoot = sample.includes("id=\"root\"") || sample.includes("id='root'") || sample.includes("<app-root");
+  const hasScripts = sample.includes("<script");
+  return hasRoot && hasScripts;
+}
+
+function hasHashRouteLookup(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const hash = parsed.hash.toLowerCase();
+    return hash.includes("#/") && (hash.includes("accessionnumber=") || hash.includes("studyinstanceuid="));
+  } catch {
+    const lowered = url.toLowerCase();
+    return lowered.includes("#/") && (lowered.includes("accessionnumber=") || lowered.includes("studyinstanceuid="));
   }
 }
 
@@ -218,6 +251,7 @@ async function resolveSonicDicomReportStatus(
 
   let result: ReportStatusResult = { state: "no_report", canViewReport: false, source: "sonicdicom" };
   const steps: SonicDicomLookupDebugStep[] = [];
+  const diagnostics: string[] = [];
 
   for (const target of targets) {
     const template = chooseInternalTemplate(settings, target);
@@ -242,6 +276,12 @@ async function resolveSonicDicomReportStatus(
       contentType: contentType || "text/plain",
       state,
     });
+
+    if (state === "unavailable" && contentType.toLowerCase().includes("text/html") && hasHashRouteLookup(url) && isLikelySpaShell(content)) {
+      diagnostics.push(
+        "The configured lookup URL is a hash-route SPA page (#/report...). Backend fetch receives only the app shell, not report status. Configure sonicDicomInternalSearchUrlTemplate to a real internal endpoint that returns searchable JSON/HTML status content."
+      );
+    }
     if (state === "final" || state === "draft" || state === "unavailable") break;
   }
 
@@ -250,6 +290,7 @@ async function resolveSonicDicomReportStatus(
     baseUrlSource,
     lookupTried: targets,
     steps,
+    diagnostics,
   };
 }
 
@@ -302,6 +343,7 @@ export async function testSonicDicomReportStatusLookup(input: {
       baseUrlSource: getStatusCheckBaseUrlSource(settings),
       lookupTried: [],
       steps: [],
+      diagnostics: ["SonicDICOM integration is disabled."],
     };
   }
 
