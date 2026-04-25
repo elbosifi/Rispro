@@ -10,6 +10,15 @@ import {
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
 
+const NOTO_NASKH_REGULAR_URL = new URL("../assets/fonts/NotoNaskhArabic-Regular.ttf", import.meta.url).toString();
+const NOTO_NASKH_BOLD_URL = new URL("../assets/fonts/NotoNaskhArabic-Bold.ttf", import.meta.url).toString();
+const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+const NOTO_FONT_FAMILY = "NotoNaskhArabic";
+const NOTO_REGULAR_FILE = "NotoNaskhArabic-Regular.ttf";
+const NOTO_BOLD_FILE = "NotoNaskhArabic-Bold.ttf";
+
+let notoFontsLoaded: Promise<void> | null = null;
+
 function escapeHtml(str: string = ""): string {
   return String(str)
     .replace(/&/g, "&amp;")
@@ -185,8 +194,10 @@ interface BuildSlipOptions {
 }
 
 interface SlipField {
-  label: string;
-  value: string;
+  labelAr: string;
+  labelEn: string;
+  valueAr: string;
+  valueEn: string;
 }
 
 function mm(value: number): number {
@@ -219,14 +230,80 @@ function shorten(value: string, maxLength: number): string {
   return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
-function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
+function containsArabic(value: string): boolean {
+  return ARABIC_REGEX.test(String(value || ""));
+}
+
+function processPdfText(doc: jsPDF, value: string): string {
   const cleaned = String(value || "").trim();
+  if (!cleaned) return "";
+  const processor = (doc as jsPDF & { processArabic?: (input: string) => string }).processArabic;
+  if (containsArabic(cleaned) && typeof processor === "function") {
+    return processor(cleaned);
+  }
+  return cleaned;
+}
+
+function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
+  const cleaned = processPdfText(doc, String(value || "").trim());
   if (!cleaned) return ["—"];
   const lines = doc.splitTextToSize(cleaned, maxWidth) as string[];
   if (lines.length <= maxLines) return lines;
   const visible = lines.slice(0, maxLines);
   visible[maxLines - 1] = shorten(visible[maxLines - 1], Math.max(12, visible[maxLines - 1].length - 1));
   return visible;
+}
+
+function setPdfFont(doc: jsPDF, style: "normal" | "bold" = "normal"): void {
+  doc.setFont(NOTO_FONT_FAMILY, style);
+}
+
+async function loadFontAsBase64(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load font: ${url}`);
+  }
+  const buffer = await response.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function ensureArabicFontsLoaded(doc: jsPDF): Promise<void> {
+  if (!notoFontsLoaded) {
+    notoFontsLoaded = (async () => {
+      const [regular, bold] = await Promise.all([loadFontAsBase64(NOTO_NASKH_REGULAR_URL), loadFontAsBase64(NOTO_NASKH_BOLD_URL)]);
+      const instance = doc as jsPDF & { addFileToVFS?: (fileName: string, base64: string) => void; addFont?: (fileName: string, fontName: string, fontStyle: string) => void };
+      if (!instance.addFileToVFS || !instance.addFont) {
+        throw new Error("jsPDF font registration is unavailable.");
+      }
+      instance.addFileToVFS(NOTO_REGULAR_FILE, regular);
+      instance.addFont(NOTO_REGULAR_FILE, NOTO_FONT_FAMILY, "normal");
+      instance.addFileToVFS(NOTO_BOLD_FILE, bold);
+      instance.addFont(NOTO_BOLD_FILE, NOTO_FONT_FAMILY, "bold");
+    })();
+  }
+  await notoFontsLoaded;
+}
+
+function drawPdfText(
+  doc: jsPDF,
+  text: string,
+  x: number,
+  y: number,
+  options?: { align?: "left" | "right" | "center"; bold?: boolean }
+) {
+  const processed = processPdfText(doc, text);
+  const align = options?.align ?? "left";
+  const bold = options?.bold ?? false;
+  setPdfFont(doc, bold ? "bold" : "normal");
+  doc.setR2L(containsArabic(text) || align === "right");
+  doc.text(processed, x, y, { align });
+  doc.setR2L(false);
 }
 
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
@@ -298,35 +375,35 @@ function buildSlipBarcodePayload(apt: AppointmentWithDetails, settings: Appointm
 function buildInstructionText(
   apt: AppointmentWithDetails,
   settings: AppointmentSlipSettings
-): { heading: string; body: string; usedFallback: boolean }[] {
-  const sections: Array<{ heading: string; body: string; usedFallback: boolean }> = [];
+): { headingAr: string; headingEn: string; bodyAr: string; bodyEn: string; usedFallback: boolean }[] {
+  const sections: Array<{ headingAr: string; headingEn: string; bodyAr: string; bodyEn: string; usedFallback: boolean }> = [];
   const maxChars = settings.maxInstructionLinesOnSlip * 54;
 
   if (settings.showModalityInstructions) {
-    const body = localizeValue(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", settings.languageMode);
-    const safeBody = body && body !== "—" && body.length <= maxChars ? body : localizeText(
-      "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
-      "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
-      settings.languageMode
-    );
+    const bodyAr = String(apt.modalityGeneralInstructionAr || "").trim();
+    const bodyEn = String(apt.modalityGeneralInstructionEn || "").trim();
+    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
-      heading: localizeText("تعليمات حسب نوع الجهاز", "Modality Instructions", settings.languageMode),
-      body: safeBody,
-      usedFallback: safeBody !== body,
+      headingAr: "تعليمات حسب نوع الجهاز",
+      headingEn: "Modality Instructions",
+      bodyAr: safeBodyAr,
+      bodyEn: safeBodyEn,
+      usedFallback: safeBodyAr !== bodyAr || safeBodyEn !== bodyEn,
     });
   }
 
   if (settings.showExamSpecificInstructions) {
-    const body = localizeValue(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", settings.languageMode);
-    const safeBody = body && body !== "—" && body.length <= maxChars ? body : localizeText(
-      settings.fallbackInstructionTextAr,
-      settings.fallbackInstructionTextEn,
-      settings.languageMode
-    );
+    const bodyAr = String(apt.examSpecificInstructionAr || "").trim();
+    const bodyEn = String(apt.examSpecificInstructionEn || "").trim();
+    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
-      heading: localizeText("تعليمات خاصة بالفحص", "Exam Instructions", settings.languageMode),
-      body: safeBody,
-      usedFallback: safeBody !== body,
+      headingAr: "تعليمات خاصة بالفحص",
+      headingEn: "Exam Instructions",
+      bodyAr: safeBodyAr,
+      bodyEn: safeBodyEn,
+      usedFallback: safeBodyAr !== bodyAr || safeBodyEn !== bodyEn,
     });
   }
 
@@ -335,20 +412,20 @@ function buildInstructionText(
 
 function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
-  if (settings.showPatientName) fields.push({ label: localizeText("اسم المريض", "Patient Name", settings.languageMode), value: slip.patientName });
-  if (settings.showMrn) fields.push({ label: "MRN", value: slip.mrn });
-  if (settings.showNationalId) fields.push({ label: localizeText("الرقم الوطني", "National ID", settings.languageMode), value: slip.nationalId });
-  if (settings.showPhone) fields.push({ label: localizeText("الهاتف", "Phone", settings.languageMode), value: slip.phone });
-  if (settings.showAgeSex) fields.push({ label: localizeText("العمر / الجنس", "Age / Sex", settings.languageMode), value: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ label: localizeText("رقم الموعد", "Appointment Number", settings.languageMode), value: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ label: localizeText("رقم الدخول", "Accession Number", settings.languageMode), value: slip.accessionNumber });
-  if (settings.showModality) fields.push({ label: localizeText("نوع الجهاز", "Modality", settings.languageMode), value: slip.modality });
-  if (settings.showExamName) fields.push({ label: localizeText("اسم الفحص", "Exam", settings.languageMode), value: slip.examName });
-  if (settings.showDate) fields.push({ label: localizeText("التاريخ", "Date", settings.languageMode), value: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ label: localizeText("الوقت", "Time", settings.languageMode), value: slip.bookingTime });
-  if (settings.showWalkIn) fields.push({ label: localizeText("Walk-in", "Walk-in", settings.languageMode), value: slip.walkInLabel });
-  if (settings.showLocation && slip.locationText) fields.push({ label: localizeText("الموقع", "Location", settings.languageMode), value: slip.locationText });
-  if (settings.showArrivalNote) fields.push({ label: localizeText("ملاحظة الحضور", "Arrival Note", settings.languageMode), value: slip.arrivalNote });
+  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
+  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showLocation && slip.locationText) fields.push({ labelAr: "الموقع", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
+  if (settings.showArrivalNote) fields.push({ labelAr: "ملاحظة الحضور", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
   return fields;
 }
 
@@ -541,6 +618,44 @@ function drawCode39Barcode(doc: jsPDF, value: string, x: number, y: number, w: n
   }
 }
 
+function drawSlipFieldCard(
+  doc: jsPDF,
+  field: SlipField,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  languageMode: AppointmentSlipSettings["languageMode"]
+) {
+  drawBox(doc, x, y, w, h);
+
+  if (languageMode === "ar") {
+    drawPdfText(doc, field.labelAr, x + w - 5, y + 8, { align: "right", bold: true });
+    drawPdfText(doc, field.valueAr, x + w - 5, y + 18, { align: "right" });
+    return;
+  }
+
+  if (languageMode === "en") {
+    drawPdfText(doc, field.labelEn, x + 5, y + 8, { align: "left", bold: true });
+    drawPdfText(doc, field.valueEn, x + 5, y + 18, { align: "left" });
+    return;
+  }
+
+  const halfW = Math.max(1, (w - 6) / 2);
+  const leftX = x + 5;
+  const rightX = x + w - 5;
+  drawPdfText(doc, field.labelAr, rightX, y + 8, { align: "right", bold: true });
+  drawPdfText(doc, field.valueAr, rightX, y + 18, { align: "right" });
+  drawPdfText(doc, field.labelEn, leftX, y + 8, { align: "left", bold: true });
+  drawPdfText(doc, field.valueEn, leftX, y + 18, { align: "left" });
+
+  // Keep a little breathing room for very long bilingual cards.
+  if (field.valueAr.length > 40 || field.valueEn.length > 40) {
+    doc.setDrawColor("#e5e7eb");
+    doc.line(x + halfW, y + 4, x + halfW, y + h - 4);
+  }
+}
+
 async function toDataUrl(blob: Blob): Promise<string> {
   return await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -580,6 +695,7 @@ export async function createAppointmentSlipPdfBlob(
     format: [A5_WIDTH_PT, A5_HEIGHT_PT],
     compress: true,
   });
+  await ensureArabicFontsLoaded(doc);
 
   doc.setFillColor("#ffffff");
   doc.rect(0, 0, layout.page.w, layout.page.h, "F");
@@ -595,16 +711,34 @@ export async function createAppointmentSlipPdfBlob(
     if (logoDataUrl) {
       doc.addImage(logoDataUrl, "PNG", content.x, cursorY, 40, 40);
     }
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(13 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text(slip.hospitalName, content.x + 46, cursorY + 12);
-    doc.setFontSize(9 * fontScale);
-    doc.setTextColor("#1f2937");
-    doc.text(slip.departmentName, content.x + 46, cursorY + 25);
-    doc.setFontSize(12 * fontScale);
-    doc.setTextColor("#b11116");
-    doc.text(localizeText("وصل الموعد", "Appointment Slip", slipSettings.languageMode), content.x + 46, cursorY + 40);
+    if (slipSettings.languageMode === "ar") {
+      doc.setFontSize(13 * fontScale);
+      drawPdfText(doc, slipSettings.hospitalNameAr, content.x + 46, cursorY + 12, { align: "right", bold: true });
+      doc.setFontSize(9 * fontScale);
+      doc.setTextColor("#1f2937");
+      drawPdfText(doc, slipSettings.departmentNameAr, content.x + 46, cursorY + 25, { align: "right", bold: false });
+      doc.setFontSize(12 * fontScale);
+      doc.setTextColor("#b11116");
+      drawPdfText(doc, "وصل الموعد", content.x + 46, cursorY + 40, { align: "right", bold: true });
+    } else if (slipSettings.languageMode === "en") {
+      doc.setFontSize(13 * fontScale);
+      drawPdfText(doc, slipSettings.hospitalNameEn, content.x + 46, cursorY + 12, { align: "left", bold: true });
+      doc.setFontSize(9 * fontScale);
+      doc.setTextColor("#1f2937");
+      drawPdfText(doc, slipSettings.departmentNameEn, content.x + 46, cursorY + 25, { align: "left", bold: false });
+      doc.setFontSize(12 * fontScale);
+      doc.setTextColor("#b11116");
+      drawPdfText(doc, "Appointment Slip", content.x + 46, cursorY + 40, { align: "left", bold: true });
+    } else {
+      doc.setFontSize(13 * fontScale);
+      drawPdfText(doc, slipSettings.hospitalNameAr, content.x + 46, cursorY + 10, { align: "right", bold: true });
+      drawPdfText(doc, slipSettings.hospitalNameEn, content.x + 46, cursorY + 22, { align: "left", bold: true });
+      doc.setFontSize(9 * fontScale);
+      doc.setTextColor("#1f2937");
+      drawPdfText(doc, slipSettings.departmentNameAr, content.x + 46, cursorY + 34, { align: "right", bold: false });
+      drawPdfText(doc, slipSettings.departmentNameEn, content.x + 46, cursorY + 44, { align: "left", bold: false });
+    }
   }
 
   if (layout.qrBlock && slip.queueQrPayload) {
@@ -614,24 +748,32 @@ export async function createAppointmentSlipPdfBlob(
     doc.setDrawColor("#e2676d");
     doc.roundedRect(layout.qrBlock.x, layout.qrBlock.y, layout.qrBlock.w, layout.qrBlock.h, 4, 4, "S");
     doc.addImage(qrDataUrl, "PNG", qrX, layout.qrBlock.y + 4, qrSize, qrSize);
-    doc.setFont("helvetica", "bold");
     doc.setFontSize(8 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text(
-      wrapLines(doc, localizeText(slipSettings.qrCaptionAr, slipSettings.qrCaptionEn, slipSettings.languageMode), layout.qrBlock.w - 8, 2),
-      layout.qrBlock.x + 4,
-      layout.qrBlock.y + qrSize + 12,
-      { baseline: "top" }
-    );
-    doc.setFont("helvetica", "normal");
+    const qrCaptionLinesAr = wrapLines(doc, slipSettings.qrCaptionAr, layout.qrBlock.w - 8, 2);
+    const qrCaptionLinesEn = wrapLines(doc, slipSettings.qrCaptionEn, layout.qrBlock.w - 8, 2);
+    if (slipSettings.languageMode === "ar") {
+      doc.setFontSize(8 * fontScale);
+      drawPdfText(doc, qrCaptionLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 12, { align: "right", bold: true });
+    } else if (slipSettings.languageMode === "en") {
+      doc.setFontSize(8 * fontScale);
+      drawPdfText(doc, qrCaptionLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 12, { align: "left", bold: true });
+    } else {
+      drawPdfText(doc, qrCaptionLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 12, { align: "right", bold: true });
+      drawPdfText(doc, qrCaptionLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 22, { align: "left", bold: true });
+    }
     doc.setFontSize(6.8 * fontScale);
     doc.setTextColor("#374151");
-    doc.text(
-      wrapLines(doc, localizeText(slipSettings.qrHelperTextAr, slipSettings.qrHelperTextEn, slipSettings.languageMode), layout.qrBlock.w - 8, 4),
-      layout.qrBlock.x + 4,
-      layout.qrBlock.y + qrSize + 28,
-      { baseline: "top" }
-    );
+    const qrHelperLinesAr = wrapLines(doc, slipSettings.qrHelperTextAr, layout.qrBlock.w - 8, 4);
+    const qrHelperLinesEn = wrapLines(doc, slipSettings.qrHelperTextEn, layout.qrBlock.w - 8, 4);
+    if (slipSettings.languageMode === "ar") {
+      drawPdfText(doc, qrHelperLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 28, { align: "right" });
+    } else if (slipSettings.languageMode === "en") {
+      drawPdfText(doc, qrHelperLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 28, { align: "left" });
+    } else {
+      drawPdfText(doc, qrHelperLinesAr.join(" "), layout.qrBlock.x + layout.qrBlock.w - 4, layout.qrBlock.y + qrSize + 28, { align: "right" });
+      drawPdfText(doc, qrHelperLinesEn.join(" "), layout.qrBlock.x + 4, layout.qrBlock.y + qrSize + 38, { align: "left" });
+    }
   }
 
   cursorY += mode !== "preprinted" ? 52 * fontScale : 0;
@@ -647,56 +789,51 @@ export async function createAppointmentSlipPdfBlob(
     const row = columns === 2 ? Math.floor(index / 2) : index;
     const x = content.x + column * (fieldWidth + fieldGap);
     const y = cursorY + row * (fieldHeight + 4);
-    drawBox(doc, x, y, fieldWidth, fieldHeight);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7.5 * fontScale);
-    doc.setTextColor("#b11116");
-    doc.text(shorten(field.label, 32), x + 5, y + 9);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.6 * fontScale);
-    doc.setTextColor("#111827");
-    doc.text(wrapLines(doc, field.value, fieldWidth - 10, 2), x + 5, y + 18, { baseline: "top" });
+    drawSlipFieldCard(doc, field, x, y, fieldWidth, fieldHeight, slipSettings.languageMode);
   });
 
   cursorY += Math.ceil(fields.length / columns) * (fieldHeight + 4) + 6;
 
   const barcodeTop = layout.barcodeBlock ? layout.barcodeBlock.y - 8 : content.y + content.h;
   for (const section of instructions) {
-    const sectionHeight = 30 * fontScale;
+    const sectionHeight = slipSettings.languageMode === "bilingual" ? 42 * fontScale : 30 * fontScale;
     if (cursorY + sectionHeight > barcodeTop) break;
     drawBox(doc, content.x, cursorY, content.w, sectionHeight, "#fffaf9", "#f0b4b7");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8 * fontScale);
-    doc.setTextColor("#b11116");
-    doc.text(section.heading, content.x + 5, cursorY + 9);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8 * fontScale);
-    doc.setTextColor("#1f2937");
-    doc.text(
-      wrapLines(doc, section.body, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)),
-      content.x + 5,
-      cursorY + 18,
-      { baseline: "top" }
-    );
+    if (slipSettings.languageMode === "ar") {
+      drawPdfText(doc, section.headingAr, content.x + content.w - 5, cursorY + 9, { align: "right", bold: true });
+      drawPdfText(doc, wrapLines(doc, section.bodyAr, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + content.w - 5, cursorY + 18, { align: "right" });
+    } else if (slipSettings.languageMode === "en") {
+      drawPdfText(doc, section.headingEn, content.x + 5, cursorY + 9, { align: "left", bold: true });
+      drawPdfText(doc, wrapLines(doc, section.bodyEn, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + 5, cursorY + 18, { align: "left" });
+    } else {
+      drawPdfText(doc, section.headingAr, content.x + content.w - 5, cursorY + 9, { align: "right", bold: true });
+      drawPdfText(doc, section.headingEn, content.x + 5, cursorY + 9, { align: "left", bold: true });
+      drawPdfText(doc, wrapLines(doc, section.bodyAr, content.w / 2 - 8, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + content.w - 5, cursorY + 20, { align: "right" });
+      drawPdfText(doc, wrapLines(doc, section.bodyEn, content.w / 2 - 8, Math.max(1, slipSettings.maxInstructionLinesOnSlip)).join(" "), content.x + 5, cursorY + 20, { align: "left" });
+    }
     cursorY += sectionHeight + 4;
   }
 
   if (layout.barcodeBlock) {
-    const caption = localizeText(slipSettings.barcodeCaptionAr, slipSettings.barcodeCaptionEn, slipSettings.languageMode);
-    doc.setFont("helvetica", "bold");
     doc.setFontSize(8.5 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text(caption, layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y - 4, { align: "center" });
+    if (slipSettings.languageMode === "ar") {
+      drawPdfText(doc, slipSettings.barcodeCaptionAr, layout.barcodeBlock.x + layout.barcodeBlock.w - 4, layout.barcodeBlock.y - 4, { align: "right", bold: true });
+    } else if (slipSettings.languageMode === "en") {
+      drawPdfText(doc, slipSettings.barcodeCaptionEn, layout.barcodeBlock.x + 4, layout.barcodeBlock.y - 4, { align: "left", bold: true });
+    } else {
+      drawPdfText(doc, slipSettings.barcodeCaptionAr, layout.barcodeBlock.x + layout.barcodeBlock.w - 4, layout.barcodeBlock.y - 4, { align: "right", bold: true });
+      drawPdfText(doc, slipSettings.barcodeCaptionEn, layout.barcodeBlock.x + 4, layout.barcodeBlock.y + 7, { align: "left", bold: true });
+    }
     drawBox(doc, layout.barcodeBlock.x, layout.barcodeBlock.y, layout.barcodeBlock.w, layout.barcodeBlock.h, "#ffffff", "#d8dadd");
     const barcodeInnerX = layout.barcodeBlock.x + 8;
     const barcodeInnerY = layout.barcodeBlock.y + 6;
     const barcodeInnerW = layout.barcodeBlock.w - 16;
     const barcodeInnerH = mm(slipSettings.barcodeHeightMm);
     drawCode39Barcode(doc, slip.accessionBarcodePayload, barcodeInnerX, barcodeInnerY, barcodeInnerW, barcodeInnerH);
-    doc.setFont("helvetica", "normal");
     doc.setFontSize(7.5 * fontScale);
     doc.setTextColor("#111827");
-    doc.text(shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
+    drawPdfText(doc, shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
   }
 
   return doc.output("blob");
@@ -705,8 +842,10 @@ export async function createAppointmentSlipPdfBlob(
 function renderFieldHtml(field: SlipField): string {
   return `
     <div class="summary-item">
-      <div class="label">${escapeHtml(field.label)}</div>
-      <div class="value">${escapeHtml(field.value || "—")}</div>
+      <div class="label ar">${escapeHtml(field.labelAr)}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
+      <div class="label en">${escapeHtml(field.labelEn)}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
     </div>
   `;
 }
@@ -720,6 +859,38 @@ function renderCode39Svg(value: string, widthMm: number, heightMm: number): stri
     .map((bar) => `<rect x="${bar.x}" y="0" width="${bar.units}" height="${height}" fill="#111111" />`)
     .join("");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(widthMm * 4)}" height="${height}" viewBox="0 0 ${totalWidth} ${height}" preserveAspectRatio="xMidYMid meet">${rects}</svg>`;
+}
+
+function renderInstructionHtml(
+  section: { headingAr: string; headingEn: string; bodyAr: string; bodyEn: string; usedFallback: boolean },
+  languageMode: AppointmentSlipSettings["languageMode"]
+): string {
+  if (languageMode === "ar") {
+    return `
+      <div class="instruction">
+        <div class="instruction-title ar">${escapeHtml(section.headingAr)}</div>
+        <div class="instruction-body ar">${escapeHtml(section.bodyAr)}</div>
+      </div>
+    `;
+  }
+
+  if (languageMode === "en") {
+    return `
+      <div class="instruction">
+        <div class="instruction-title en">${escapeHtml(section.headingEn)}</div>
+        <div class="instruction-body en">${escapeHtml(section.bodyEn)}</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="instruction">
+      <div class="instruction-title ar">${escapeHtml(section.headingAr)}</div>
+      <div class="instruction-title en">${escapeHtml(section.headingEn)}</div>
+      <div class="instruction-body ar">${escapeHtml(section.bodyAr)}</div>
+      <div class="instruction-body en">${escapeHtml(section.bodyEn)}</div>
+    </div>
+  `;
 }
 
 export async function prepareAppointmentSlipHtml(
@@ -745,7 +916,7 @@ export async function prepareAppointmentSlipHtml(
         <style>
           @page { size: A5 portrait; margin: 0; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          body { margin: 0; font-family: "Noto Naskh Arabic", "Noto Sans Arabic", Arial, sans-serif; color: #1f2937; background: #ffffff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
           .page { width: 148mm; min-height: 210mm; background: #fff; }
           .safe {
             margin-top: ${layout.safeArea.y / MM_TO_PT}mm;
@@ -761,6 +932,8 @@ export async function prepareAppointmentSlipHtml(
           .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2mm; }
           .summary-item { border: 1px solid #d1d5db; border-radius: 2mm; padding: 1.4mm; min-height: 11mm; overflow: hidden; }
           .summary-item .label { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; line-height: 1.2; }
+          .summary-item .label.ar, .summary-item .value.ar { direction: rtl; text-align: right; }
+          .summary-item .label.en, .summary-item .value.en { direction: ltr; text-align: left; }
           .summary-item .value { color: #111827; font-size: ${11 * slipSettings.fontScale}px; line-height: 1.25; margin-top: 0.7mm; white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
           .qr-block { width: ${layout.qrBlock ? `${layout.qrBlock.w / MM_TO_PT}mm` : "0"}; border: 1px solid #e2676d; border-radius: 2mm; padding: 1mm; }
           .qr-svg svg { width: 100%; height: auto; display: block; }
@@ -769,6 +942,8 @@ export async function prepareAppointmentSlipHtml(
           .instructions { margin-top: 2mm; display: grid; gap: 1.2mm; }
           .instruction { border: 1px solid #f0b4b7; border-radius: 2mm; padding: 1.4mm; background: #fffaf9; }
           .instruction-title { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; }
+          .instruction-title.ar, .instruction-body.ar { direction: rtl; text-align: right; }
+          .instruction-title.en, .instruction-body.en { direction: ltr; text-align: left; }
           .instruction-body { font-size: ${10 * slipSettings.fontScale}px; line-height: 1.3; margin-top: 0.8mm; white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
           .barcode { margin-top: 2mm; border: 1px solid #d1d5db; border-radius: 2mm; padding: 1.4mm; }
           .barcode-caption { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; text-align: center; margin-bottom: 1mm; overflow-wrap: anywhere; }
@@ -802,14 +977,7 @@ export async function prepareAppointmentSlipHtml(
               </div>
               <div class="instructions">
                 ${instructions
-                  .map(
-                    (section) => `
-                    <div class="instruction">
-                      <div class="instruction-title">${escapeHtml(section.heading)}</div>
-                      <div class="instruction-body">${escapeHtml(section.body)}</div>
-                    </div>
-                  `
-                  )
+                  .map((section) => renderInstructionHtml(section, slipSettings.languageMode))
                   .join("")}
               </div>
               ${
