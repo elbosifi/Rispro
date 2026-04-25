@@ -39,6 +39,12 @@ interface CacheEntry {
   result: ReportStatusResult;
 }
 
+interface SqlReadinessRow {
+  FoundStudy?: number;
+  FoundReport?: number;
+  Status?: number | null;
+}
+
 type SqlModule = {
   ConnectionPool: new (config: unknown) => {
     connect: () => Promise<void>;
@@ -49,7 +55,6 @@ type SqlModule = {
     };
   };
   NVarChar: (size?: number) => unknown;
-  Int: unknown;
 };
 
 const statusCache = new Map<number, CacheEntry>();
@@ -114,66 +119,56 @@ async function queryStudyUidByAccession(
   const request = pool.request();
   request.input("accessionNumber", sql.NVarChar(128), accessionNumber);
   const result = await request.query<{ StudyInstanceUID?: string }>(
-    `select top 1 StudyInstanceUID
-     from [${dicomDb}].[dbo].[Studies]
-     where AccessionNumber = @accessionNumber
-     order by StudyDate desc, StudyTime desc`
+    `select top 1 s.StudyInstanceUID
+     from [${dicomDb}].[dbo].[Studies] s
+     where s.AccessionNumber = @accessionNumber
+     order by s.StudyDate desc, s.StudyTime desc`
   );
   return String(result.recordset?.[0]?.StudyInstanceUID || "").trim() || null;
 }
 
-async function hasDocumentsStudyUidColumn(pool: any, sql: SqlModule, reportDb: string): Promise<boolean> {
-  const result = await pool
-    .request()
-    .input("schemaName", sql.NVarChar(128), "dbo")
-    .input("tableName", sql.NVarChar(128), "Documents")
-    .input("columnName", sql.NVarChar(128), "StudyInstanceUID")
-    .query<{ exists_flag?: number }>(
-      `select top 1 1 as exists_flag
-       from [${reportDb}].INFORMATION_SCHEMA.COLUMNS
-       where TABLE_SCHEMA = @schemaName
-         and TABLE_NAME = @tableName
-         and COLUMN_NAME = @columnName`
-    );
-  return Number(result.recordset?.[0]?.exists_flag || 0) === 1;
-}
-
-async function queryReportNoByStudyUidFromSql(
+async function querySqlReportReadinessByAccession(
   pool: any,
   sql: SqlModule,
+  dicomDb: string,
   reportDb: string,
-  studyInstanceUid: string
-): Promise<string | null> {
-  if (!(await hasDocumentsStudyUidColumn(pool, sql, reportDb))) return null;
+  accessionNumber: string
+): Promise<{ foundStudy: boolean; foundReport: boolean; statusCode: number | null }> {
   const request = pool.request();
-  request.input("studyInstanceUid", sql.NVarChar(255), studyInstanceUid);
-  const result = await request.query<{ Report?: string | number }>(
-    `select top 1 Report
-     from [${reportDb}].[dbo].[Documents]
-     where StudyInstanceUID = @studyInstanceUid
-     order by UpdatedAt desc`
+  request.input("accessionNumber", sql.NVarChar(128), accessionNumber);
+  const result = await request.query<SqlReadinessRow>(
+    `with StudyMatch as (
+       select top 1 s.StudyInstanceUID
+       from [${dicomDb}].[dbo].[Studies] s
+       where s.AccessionNumber = @accessionNumber
+       order by s.StudyDate desc, s.StudyTime desc
+     ),
+     ReportMatch as (
+       select top 1 r.No as ReportNo, r.StudyInstanceUID, r.DocumentCount
+       from [${reportDb}].[dbo].[Reports] r
+       inner join StudyMatch s
+         on s.StudyInstanceUID = r.StudyInstanceUID
+       order by r.No desc
+     ),
+     LatestDocument as (
+       select top 1 d.Report, d.Status, d.UpdatedAt
+       from [${reportDb}].[dbo].[Documents] d
+       inner join ReportMatch r
+         on d.Report = r.ReportNo
+       order by d.UpdatedAt desc
+     )
+     select
+       case when exists (select 1 from StudyMatch) then 1 else 0 end as FoundStudy,
+       case when exists (select 1 from ReportMatch) then 1 else 0 end as FoundReport,
+       (select top 1 Status from LatestDocument) as Status`
   );
-  const reportNo = result.recordset?.[0]?.Report;
-  return reportNo == null ? null : String(reportNo).trim() || null;
-}
 
-async function resolveReportNoFromInternalApi(settings: SonicDicomReportSettings, studyInstanceUid: string): Promise<string | null> {
-  const baseUrl = settings.sonicDicomInternalBaseUrl.trim();
-  if (!baseUrl) return null;
-  try {
-    const url = new URL("/api/reports/fromstudy", baseUrl.replace(/\/+$/, "/"));
-    url.searchParams.set("uid", studyInstanceUid);
-    const response = await fetch(url.toString(), { method: "GET" });
-    if (!response.ok) return null;
-    const contentType = (response.headers.get("content-type") || "").toLowerCase();
-    if (!contentType.includes("application/json")) return null;
-    const data = (await response.json()) as Record<string, unknown>;
-    const candidate = data.reportNo ?? data.report_no ?? data.report ?? data.id;
-    const value = String(candidate ?? "").trim();
-    return value || null;
-  } catch {
-    return null;
-  }
+  const row = result.recordset?.[0] ?? {};
+  const foundStudy = Number(row.FoundStudy || 0) === 1;
+  const foundReport = Number(row.FoundReport || 0) === 1;
+  const numericStatus = Number(row.Status);
+  const statusCode = row.Status == null ? null : Number.isFinite(numericStatus) ? Math.trunc(numericStatus) : null;
+  return { foundStudy, foundReport, statusCode };
 }
 
 async function queryReportStatusByReportNo(
@@ -185,10 +180,10 @@ async function queryReportStatusByReportNo(
   const request = pool.request();
   request.input("reportNo", sql.NVarChar(128), reportNo);
   const result = await request.query<{ Status?: number }>(
-    `select top 1 Status
-     from [${reportDb}].[dbo].[Documents]
-     where Report = @reportNo
-     order by UpdatedAt desc`
+    `select top 1 d.Status
+     from [${reportDb}].[dbo].[Documents] d
+     where d.Report = @reportNo
+     order by d.UpdatedAt desc`
   );
   const row = result.recordset?.[0];
   if (!row) return { statusCode: null, foundRow: false };
@@ -205,28 +200,24 @@ function mapStatusCode(settings: SonicDicomReportSettings, statusCode: number | 
 
 async function resolveSqlReadiness(
   settings: SonicDicomReportSettings,
-  context: { accessionNumber: string; studyInstanceUid: string | null }
+  context: { accessionNumber: string }
 ): Promise<{ foundStudy: boolean; foundReport: boolean; statusCode: number | null; result: ReportStatusResult; diagnostic: string }> {
   const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
   const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
   return withSqlConnection(settings, async ({ sql, pool }) => {
     const accession = String(context.accessionNumber || "").trim();
-    let studyUid = String(context.studyInstanceUid || "").trim() || null;
-
-    if (!studyUid) {
-      if (!accession) {
-        return {
-          foundStudy: false,
-          foundReport: false,
-          statusCode: null,
-          result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
-          diagnostic: "No accession number was provided for SQL readiness lookup.",
-        };
-      }
-      studyUid = await queryStudyUidByAccession(pool, sql, dicomDb, accession);
+    if (!accession) {
+      return {
+        foundStudy: false,
+        foundReport: false,
+        statusCode: null,
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        diagnostic: "No accession number was provided for SQL readiness lookup.",
+      };
     }
 
-    if (!studyUid) {
+    const readiness = await querySqlReportReadinessByAccession(pool, sql, dicomDb, reportDb, accession);
+    if (!readiness.foundStudy) {
       return {
         foundStudy: false,
         foundReport: false,
@@ -235,38 +226,30 @@ async function resolveSqlReadiness(
         diagnostic: "No matching StudyInstanceUID was found in dicom.dbo.Studies.",
       };
     }
-
-    let reportNo = await queryReportNoByStudyUidFromSql(pool, sql, reportDb, studyUid);
-    if (!reportNo) {
-      reportNo = await resolveReportNoFromInternalApi(settings, studyUid);
-    }
-
-    if (!reportNo) {
+    if (!readiness.foundReport) {
       return {
         foundStudy: true,
         foundReport: false,
         statusCode: null,
         result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
-        diagnostic: "No report number could be resolved for the study.",
+        diagnostic: "No report mapping was found in report.dbo.Reports for the study.",
       };
     }
-
-    const statusLookup = await queryReportStatusByReportNo(pool, sql, reportDb, reportNo);
-    if (!statusLookup.foundRow) {
+    if (readiness.statusCode == null) {
       return {
         foundStudy: true,
         foundReport: true,
         statusCode: null,
         result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
-        diagnostic: "No matching row was found in report.dbo.Documents for the resolved report number.",
+        diagnostic: "No matching document status row was found in report.dbo.Documents.",
       };
     }
 
-    const mapped = mapStatusCode(settings, statusLookup.statusCode);
+    const mapped = mapStatusCode(settings, readiness.statusCode);
     return {
       foundStudy: true,
       foundReport: true,
-      statusCode: statusLookup.statusCode,
+      statusCode: readiness.statusCode,
       result: mapped,
       diagnostic:
         mapped.state === "unavailable"
@@ -301,10 +284,7 @@ export async function checkSonicDicomReportStatus(
 ): Promise<ReportStatusResult> {
   const settings = await readSonicDicomReportSettings();
   if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro" };
-
-  if (settings.sonicDicomReadinessMode !== "sql_server") {
-    return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
-  }
+  if (settings.sonicDicomReadinessMode !== "sql_server") return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
 
   if (options.useCache !== false) {
     const cached = statusCache.get(context.bookingId);
@@ -313,10 +293,7 @@ export async function checkSonicDicomReportStatus(
 
   let result: ReportStatusResult = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
   try {
-    const resolved = await resolveSqlReadiness(settings, {
-      accessionNumber: context.accessionNumber,
-      studyInstanceUid: context.studyInstanceUid,
-    });
+    const resolved = await resolveSqlReadiness(settings, { accessionNumber: context.accessionNumber });
     result = resolved.result;
   } catch {
     result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
@@ -426,7 +403,9 @@ export async function testSonicDicomSqlReadiness(input: {
       const statusLookup = await withSqlConnection(settings, async ({ sql, pool }) =>
         queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
       );
-      const mapped = statusLookup.foundRow ? mapStatusCode(settings, statusLookup.statusCode) : { state: "no_report", canViewReport: false, source: "sonicdicom" as const };
+      const mapped = statusLookup.foundRow
+        ? mapStatusCode(settings, statusLookup.statusCode)
+        : { state: "no_report", canViewReport: false, source: "sonicdicom" as const };
       return {
         foundStudy: false,
         foundReport: statusLookup.foundRow,
@@ -448,7 +427,7 @@ export async function testSonicDicomSqlReadiness(input: {
         diagnostic: "Accession number is required for full readiness test.",
       };
     }
-    const full = await resolveSqlReadiness(settings, { accessionNumber: accession, studyInstanceUid: null });
+    const full = await resolveSqlReadiness(settings, { accessionNumber: accession });
     return {
       foundStudy: full.foundStudy,
       foundReport: full.foundReport,

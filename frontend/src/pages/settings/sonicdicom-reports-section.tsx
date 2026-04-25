@@ -203,13 +203,6 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
         />
       </FieldCard>
 
-      <FieldCard title="Optional Internal Resolver API (Report Number Only)">
-        <Input label="Internal SonicDICOM base URL" value={String(form.sonicDicomInternalBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomInternalBaseUrl", value)} />
-        <p className="text-xs text-slate-600">
-          This internal URL is used only as fallback to resolve report number from StudyInstanceUID (`/api/reports/fromstudy`), never as finality authority.
-        </p>
-      </FieldCard>
-
       <FieldCard title="SQL Readiness Tests">
         <Input label="Test accession number" value={testAccessionNumber} onChange={setTestAccessionNumber} />
         <Input label="Test report number" value={testReportNo} onChange={setTestReportNo} />
