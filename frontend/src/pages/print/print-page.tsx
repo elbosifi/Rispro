@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -12,6 +12,7 @@ import {
   blobToDataUrl,
   createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
+  filterVisibleAppointments,
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
@@ -60,6 +61,7 @@ export default function PrintPage() {
       }),
     staleTime: 1000 * 30,
   });
+  const visibleAppointments = useMemo(() => filterVisibleAppointments(appointments), [appointments]);
 
   const { data: appointmentById } = useQuery({
     queryKey: ["print-appointment", appointmentIdParam],
@@ -207,21 +209,21 @@ export default function PrintPage() {
   const modalities = lookups?.modalities ?? [];
 
   useEffect(() => {
-    if (appointments.length === 0) {
+    if (visibleAppointments.length === 0) {
       setSelectedAppointment(null);
       return;
     }
 
     if (!selectedAppointment) {
-      setSelectedAppointment(appointments[0]);
+      setSelectedAppointment(visibleAppointments[0]);
       return;
     }
 
-    const exists = appointments.some((appointment) => appointment.id === selectedAppointment.id);
+    const exists = visibleAppointments.some((appointment) => appointment.id === selectedAppointment.id);
     if (!exists) {
-      setSelectedAppointment(appointments[0]);
+      setSelectedAppointment(visibleAppointments[0]);
     }
-  }, [appointments, selectedAppointment]);
+  }, [visibleAppointments, selectedAppointment]);
 
   if (appointmentIdParam) {
     return (
@@ -327,14 +329,14 @@ export default function PrintPage() {
         <Card className="overflow-hidden">
           <div className="p-4 border-b border-border">
             <h3 className="font-semibold">
-              {t(language, "print.listHeading", { count: appointments.length })}
+              {t(language, "print.listHeading", { count: visibleAppointments.length })}
             </h3>
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 type="button"
                 size="sm"
-                disabled={appointments.length === 0}
-                onClick={() => handlePrintList(appointments, date)}
+                disabled={visibleAppointments.length === 0}
+                onClick={() => handlePrintList(visibleAppointments, date)}
               >
                 {t(language, "print.printList")}
               </Button>
@@ -355,13 +357,13 @@ export default function PrintPage() {
               <div className="p-6 text-center text-muted-foreground">
                 {t(language, "print.loading")}
               </div>
-            ) : appointments.length === 0 ? (
+            ) : visibleAppointments.length === 0 ? (
               <div className="p-6 text-center text-muted-foreground">
                 {t(language, "print.empty")}
               </div>
             ) : (
               <ul className="divide-y divide-border max-h-[520px] overflow-y-auto">
-                {appointments.map((appointment) => (
+                {visibleAppointments.map((appointment) => (
                   <li
                     key={appointment.id}
                     className={`p-3 cursor-pointer transition-colors ${

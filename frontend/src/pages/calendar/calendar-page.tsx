@@ -9,6 +9,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Badge, SectionLabel } from "@/components/shared";
+import { filterVisibleAppointments } from "@/lib/print-utils";
 
 interface CalendarDay {
   date: string;
@@ -61,6 +62,7 @@ export default function CalendarPage() {
     staleTime: 1000 * 60,
     placeholderData: (previousData) => previousData
   });
+  const visibleAppointments = useMemo(() => filterVisibleAppointments(appointments), [appointments]);
 
   // Load lookups for modality filter
   const { data: lookups } = useQuery({
@@ -70,13 +72,13 @@ export default function CalendarPage() {
   });
 
   // Group appointments by date
-  const groupedByDate = useMemo(() => appointments.reduce((acc, apt) => {
+  const groupedByDate = useMemo(() => visibleAppointments.reduce((acc, apt) => {
     const date = String(apt.appointmentDate || "").slice(0, 10);
     if (!date) return acc;
     if (!acc[date]) acc[date] = [];
     acc[date].push(apt);
     return acc;
-  }, {} as Record<string, any[]>), [appointments]);
+  }, {} as Record<string, any[]>), [visibleAppointments]);
 
   // Build grid
   const gridDays = useMemo(
