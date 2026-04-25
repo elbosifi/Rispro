@@ -1357,63 +1357,38 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
   const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
-  const sexFilter = sex ? ` and p.sex = $sex` : "";
+  const sexFilter = sex ? ` and p.sex = '${sex}'` : "";
   const ageFilter = (ageMin || ageMax) ? ` and p.age_years >= ${ageMin || 0} and p.age_years <= ${ageMax || 200}` : "";
-  const categoryFilter = category ? ` and p.category = $category` : "";
+  const categoryFilter = category ? ` and p.category = '${category}'` : "";
   const appointmentFilterClause = getAppointmentFilterClause(appointmentFilter);
 
-  let countQuery: string;
-  let countQueryParams: unknown[] = [];
+  const searchWhere = term ? `(
+      p.mrn ilike '${normalizedTerm}'
+      or p.national_id ilike '${normalizedTerm}'
+      or p.identifier_value ilike '${normalizedTerm}'
+      or p.phone_1 ilike '${normalizedTerm}'
+      or p.phone_2 ilike '${normalizedTerm}'
+      or p.arabic_full_name ilike '${normalizedTerm}'
+      or p.normalized_arabic_name ilike '${normalizedPattern}'
+      or p.english_full_name ilike '${normalizedTerm}'
+      or exists (
+        select 1 from patient_identifiers pi
+        where pi.patient_id = p.id and (pi.value ilike '${normalizedTerm}' or pi.normalized_value ilike '${normalizedIdentifierPattern}')
+      )
+    )` : "1=1";
 
-  if (category && term) {
-    countQuery = `select count(*)::bigint as total from patients p where (
-        case when $1 = '' then true
-        else 
-          p.mrn ilike $2
-          or p.national_id ilike $2
-          or p.identifier_value ilike $2
-          or p.phone_1 ilike $2
-          or p.phone_2 ilike $2
-          or p.arabic_full_name ilike $2
-          or p.normalized_arabic_name ilike $3
-          or p.english_full_name ilike $2
-          or exists (
-            select 1 from patient_identifiers pi
-            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-          )
-        end
-      ) and p.category = $5${appointmentFilterClause}`;
-    countQueryParams = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern, category];
-  } else if (category && !term) {
-    countQuery = `select count(*)::bigint as total from patients p where p.category = $1${appointmentFilterClause}`;
-    countQueryParams = [category];
-  } else if (!category && term) {
-    countQuery = `select count(*)::bigint as total from patients p where (
-        case when $1 = '' then true
-        else 
-          p.mrn ilike $2
-          or p.national_id ilike $2
-          or p.identifier_value ilike $2
-          or p.phone_1 ilike $2
-          or p.phone_2 ilike $2
-          or p.arabic_full_name ilike $2
-          or p.normalized_arabic_name ilike $3
-          or p.english_full_name ilike $2
-          or exists (
-            select 1 from patient_identifiers pi
-            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-          )
-        end
-      )${appointmentFilterClause}`;
-    countQueryParams = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern];
-  } else {
-    countQuery = `select count(*)::bigint as total from patients p where 1=1${appointmentFilterClause}`;
-    countQueryParams = [];
-  }
+  const countQuery = `select count(*)::bigint as total from patients p where ${searchWhere}${sexFilter}${ageFilter}${categoryFilter}${appointmentFilterClause}`;
 
-  const countResult = await pool.query<{ total: string }>(countQuery, countQueryParams);
+  const countResult = await pool.query<{ total: string }>(countQuery);
   const total = Number(countResult.rows[0]?.total || 0);
   const totalPages = Math.ceil(total / pageSize);
+
+  let orderBy = "fp.rank asc, fp.id desc";
+  if (sortBy === "recent") {
+    orderBy = "fp.id desc";
+  } else if (sortBy === "mrn") {
+    orderBy = "fp.mrn asc nulls last, fp.id desc";
+  }
 
   const query = `
     with filtered_patients as (
@@ -1430,37 +1405,23 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         p.normalized_arabic_name,
         p.estimated_date_of_birth,
         case
-          when $1 = '' then 99
-          when split_part(p.normalized_arabic_name, ' ', 1) = $6 then 1
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = $7 then 1
-          when split_part(p.normalized_arabic_name, ' ', 1) like $8 then 2
-          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like $9 then 2
-          when p.normalized_arabic_name = $6 then 3
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = $7 then 3
-          when p.normalized_arabic_name like $8 then 4
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like $9 then 4
-          when p.normalized_arabic_name like $10 then 5
-          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like $11 then 5
+          when '${term}' = '' then 99
+          when split_part(p.normalized_arabic_name, ' ', 1) = '${normalizedArabicTerm}' then 1
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = '${normalizedEnglishTerm}' then 1
+          when split_part(p.normalized_arabic_name, ' ', 1) like '${normalizedArabicPrefixPattern}' then 2
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like '${normalizedEnglishPrefixPattern}' then 2
+          when p.normalized_arabic_name = '${normalizedArabicTerm}' then 3
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = '${normalizedEnglishTerm}' then 3
+          when p.normalized_arabic_name like '${normalizedArabicPrefixPattern}' then 4
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishPrefixPattern}' then 4
+          when p.normalized_arabic_name like '${normalizedArabicLaterTokenPattern}' then 5
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like '${normalizedEnglishLaterTokenPattern}' then 5
           else 6
         end as rank
       from patients p
-      where (
-        case when $1 = '' then true
-        else 
-          p.mrn ilike $2
-          or p.national_id ilike $2
-          or p.identifier_value ilike $2
-          or p.phone_1 ilike $2
-          or p.phone_2 ilike $2
-          or p.arabic_full_name ilike $2
-          or p.normalized_arabic_name ilike $3
-          or p.english_full_name ilike $2
-          or exists (
-            select 1 from patient_identifiers pi
-            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-          )
-        end
-      )
+      where ${searchWhere}
+      ${sexFilter}
+      ${ageFilter}
       ${categoryFilter}
       ${appointmentFilterClause}
     )
@@ -1503,27 +1464,11 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         'duplicateReasons', array[]::text[]
       ) as warnings
     from filtered_patients fp
-    order by fp.rank asc, fp.id desc
-    limit $12 offset $13
+    order by ${orderBy}
+    limit ${pageSize} offset ${offset}
   `;
 
-  const queryParams: unknown[] = [
-    term,
-    normalizedTerm,
-    normalizedPattern,
-    normalizedIdentifierPattern,
-    category || null,
-    normalizedArabicTerm,
-    normalizedEnglishTerm,
-    normalizedArabicPrefixPattern,
-    normalizedEnglishPrefixPattern,
-    normalizedArabicLaterTokenPattern,
-    normalizedEnglishLaterTokenPattern,
-    pageSize,
-    offset
-  ];
-
-  const { rows } = await pool.query<PatientDirectoryRowOutput>(query, queryParams);
+  const { rows } = await pool.query<PatientDirectoryRowOutput>(query);
 
   return {
     patients: rows.map(row => ({

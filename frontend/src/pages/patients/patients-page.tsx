@@ -203,6 +203,10 @@ export default function PatientsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("");
   const [appointmentFilter, setAppointmentFilter] = useState<AppointmentFilter>("");
+  const [sexFilter, setSexFilter] = useState<"male" | "female" | "">("");
+  const [ageMin, setAgeMin] = useState<number | "">("");
+  const [ageMax, setAgeMax] = useState<number | "">("");
+  const [sortBy, setSortBy] = useState<"name" | "recent" | "mrn">("name");
   const [page, setPage] = useState(1);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
 
@@ -210,9 +214,13 @@ export default function PatientsPage() {
     q: searchQuery || undefined,
     category: categoryFilter || undefined,
     appointmentFilter: appointmentFilter || undefined,
+    sex: sexFilter || undefined,
+    ageMin: ageMin ? Number(ageMin) : undefined,
+    ageMax: ageMax ? Number(ageMax) : undefined,
+    sortBy: sortBy,
     page,
     pageSize: 25
-  }), [searchQuery, categoryFilter, appointmentFilter, page]);
+  }), [searchQuery, categoryFilter, appointmentFilter, sexFilter, ageMin, ageMax, sortBy, page]);
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["patient-directory", params],
@@ -290,6 +298,62 @@ export default function PatientsPage() {
               <option value="has_future">{t(language, "patients.directory.filter.hasFuture")}</option>
               <option value="today">{t(language, "patients.directory.filter.today")}</option>
               <option value="no_future">{t(language, "patients.directory.filter.noFuture")}</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{t(language, "patients.sex")}:</span>
+            <select
+              value={sexFilter}
+              onChange={(e) => {
+                setSexFilter(e.target.value as "male" | "female" | "");
+                setPage(1);
+              }}
+              className="input-premium h-9 text-sm"
+            >
+              <option value="">{t(language, "patients.directory.filter.all")}</option>
+              <option value="male">Male</option>
+              <option value="female">Female</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">{t(language, "patients.age")}:</span>
+            <input
+              type="number"
+              value={ageMin}
+              onChange={(e) => {
+                setAgeMin(e.target.value === "" ? "" : Number(e.target.value));
+                setPage(1);
+              }}
+              placeholder="Min"
+              className="input-premium h-9 w-16 text-sm"
+              min="0"
+            />
+            <span className="text-muted-foreground">-</span>
+            <input
+              type="number"
+              value={ageMax}
+              onChange={(e) => {
+                setAgeMax(e.target.value === "" ? "" : Number(e.target.value));
+                setPage(1);
+              }}
+              placeholder="Max"
+              className="input-premium h-9 w-16 text-sm"
+              min="0"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">Sort:</span>
+            <select
+              value={sortBy}
+              onChange={(e) => {
+                setSortBy(e.target.value as "name" | "recent" | "mrn");
+                setPage(1);
+              }}
+              className="input-premium h-9 text-sm"
+            >
+              <option value="name">Name</option>
+              <option value="recent">Most Recent</option>
+              <option value="mrn">MRN</option>
             </select>
           </div>
         </div>

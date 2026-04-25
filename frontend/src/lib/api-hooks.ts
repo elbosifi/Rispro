@@ -278,6 +278,10 @@ export interface PatientDirectoryParams {
   q?: string;
   category?: "oncology" | "non_oncology";
   appointmentFilter?: "has_future" | "today" | "no_future";
+  sex?: "male" | "female";
+  ageMin?: number;
+  ageMax?: number;
+  sortBy?: "name" | "recent" | "mrn";
   page?: number;
   pageSize?: number;
 }
@@ -287,6 +291,10 @@ export async function fetchPatientDirectory(params: PatientDirectoryParams): Pro
   if (params.q) query.set("q", params.q);
   if (params.category) query.set("category", params.category);
   if (params.appointmentFilter) query.set("appointmentFilter", params.appointmentFilter);
+  if (params.sex) query.set("sex", params.sex);
+  if (params.ageMin) query.set("ageMin", String(params.ageMin));
+  if (params.ageMax) query.set("ageMax", String(params.ageMax));
+  if (params.sortBy) query.set("sortBy", params.sortBy);
   query.set("page", String(params.page || 1));
   query.set("pageSize", String(params.pageSize || 25));
 
