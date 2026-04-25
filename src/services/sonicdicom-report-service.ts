@@ -62,8 +62,13 @@ function validateDatabaseName(name: string, fallback: string): string {
 
 async function loadSqlModule(): Promise<SqlModule | null> {
   try {
-    const importer = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<SqlModule>;
-    return await importer("mssql");
+    const importer = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<unknown>;
+    const imported = await importer("mssql");
+    const sql = ((imported as { default?: unknown })?.default ?? imported) as Partial<SqlModule>;
+    if (typeof sql.ConnectionPool !== "function") {
+      throw new Error("mssql module loaded but ConnectionPool constructor was not found");
+    }
+    return sql as SqlModule;
   } catch {
     return null;
   }
@@ -74,7 +79,7 @@ async function withSqlConnection<T>(
   work: (ctx: { sql: SqlModule; pool: any }) => Promise<T>
 ): Promise<T> {
   const sql = await loadSqlModule();
-  if (!sql) throw new HttpError(503, "SQL readiness mode requires the 'mssql' package at runtime.");
+  if (!sql) throw new HttpError(503, "mssql module loaded but ConnectionPool constructor was not found");
   if (!settings.sonicDicomSqlEnabled) throw new HttpError(503, "SonicDICOM SQL readiness is disabled.");
   if (!settings.sonicDicomSqlServer.trim()) throw new HttpError(503, "SonicDICOM SQL server is not configured.");
   if (!settings.sonicDicomSqlUsername.trim()) throw new HttpError(503, "SonicDICOM SQL username is not configured.");
