@@ -2,6 +2,7 @@ import express, { Request, Response, Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
+import { pool } from "../db/pool.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import {
   listActivePatientIdentifierTypes,
@@ -41,6 +42,7 @@ patientsRouter.get(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const query = request.query as UnknownRecord;
+    console.log("Directory query params:", query);
     const result = await getPatientDirectory({
       search: String(query.q ?? ""),
       category: (query.category as "oncology" | "non_oncology") || undefined,
@@ -53,6 +55,14 @@ patientsRouter.get(
       pageSize: Number(query.pageSize) || 25
     });
     res.json(result);
+  })
+);
+
+patientsRouter.get(
+  "/sex-values",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const { rows } = await pool.query(`SELECT DISTINCT sex, count(*)::int as cnt FROM patients WHERE sex IS NOT NULL GROUP BY sex ORDER BY cnt DESC`);
+    res.json({ sexValues: rows });
   })
 );
 

@@ -1357,8 +1357,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
   const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
-  const sexValue = sex === "male" ? "ذكر" : "أنثى";
-  const sexFilter = sex ? ` and (p.sex = '${sex}' or p.sex = '${sexValue}' or p.sex = '${sex === "male" ? "Male" : "Female"}')` : "";
+  const sexFilter = sex ? ` and lower(p.sex) = lower('${sex}')` : "";
   const ageFilter = (ageMin || ageMax) ? ` and p.age_years >= ${ageMin || 0} and p.age_years <= ${ageMax || 200}` : "";
   const categoryFilter = category ? ` and p.category = '${category}'` : "";
   const appointmentFilterClause = getAppointmentFilterClause(appointmentFilter);

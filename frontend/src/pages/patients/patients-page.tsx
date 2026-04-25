@@ -34,16 +34,30 @@ function PatientDrawer({
   const navigate = useNavigate();
   const isArabic = language === "ar";
 
-  const { data: summary, isLoading } = useQuery({
+  const { data: summary, isLoading, error } = useQuery({
     queryKey: ["patient-directory-summary", patientId],
     queryFn: () => fetchPatientDirectorySummary(patientId),
-    staleTime: 1000 * 30
+    staleTime: 1000 * 30,
+    retry: 1
   });
 
   if (isLoading) {
     return (
       <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex items-center justify-center">
         <div className="spinner-industrial h-8 w-8" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex items-center justify-center">
+        <div className="text-center p-4">
+          <p className="text-red-500">Failed to load patient details</p>
+          <Button variant="outline" size="sm" onClick={onClose} className="mt-2">
+            Close
+          </Button>
+        </div>
       </div>
     );
   }
@@ -405,7 +419,10 @@ export default function PatientsPage() {
                     <tr
                       key={patient.id}
                       className="transition-colors duration-150 hover:bg-muted/50 cursor-pointer"
-                      onClick={() => setSelectedPatientId(patient.id)}
+                      onClick={() => {
+                        console.log("Clicked patient:", patient.id, patient.arabicFullName);
+                        setSelectedPatientId(patient.id);
+                      }}
                     >
                       <td className="p-3 font-mono text-xs">{patient.mrn || "—"}</td>
                       <td className="p-3 font-medium">
@@ -533,8 +550,8 @@ export default function PatientsPage() {
       </Card>
 
       {selectedPatientId && (
-        <div className="fixed inset-0 z-40 bg-black/30" onClick={() => setSelectedPatientId(null)}>
-          <div className="fixed inset-y-0 right-0" onClick={(e) => e.stopPropagation()}>
+        <div className="fixed inset-0 z-50 bg-black/30" onClick={() => setSelectedPatientId(null)}>
+          <div className="fixed inset-y-0 right-0 w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
           </div>
         </div>
