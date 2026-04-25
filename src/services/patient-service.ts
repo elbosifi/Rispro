@@ -1284,6 +1284,10 @@ interface PatientDirectoryParams {
   search?: string;
   category?: "oncology" | "non_oncology";
   appointmentFilter?: "has_future" | "today" | "no_future";
+  sex?: "male" | "female";
+  ageMin?: number;
+  ageMax?: number;
+  sortBy?: "name" | "recent" | "mrn";
   page?: number;
   pageSize?: number;
 }
@@ -1335,6 +1339,10 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const term = (params.search || "").trim();
   const category = params.category;
   const appointmentFilter = params.appointmentFilter;
+  const sex = params.sex;
+  const ageMin = params.ageMin;
+  const ageMax = params.ageMax;
+  const sortBy = params.sortBy || "name";
   const page = Math.max(1, Number(params.page) || 1);
   const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 25));
   const offset = (page - 1) * pageSize;
@@ -1349,37 +1357,66 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
   const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
-  const categoryFilter = category ? ` and p.category = $5` : "";
-  const appointmentWhereClause = getAppointmentFilterClause(appointmentFilter);
+  const sexFilter = sex ? ` and p.sex = $sex` : "";
+  const ageFilter = (ageMin || ageMax) ? ` and p.age_years >= ${ageMin || 0} and p.age_years <= ${ageMax || 200}` : "";
+  const categoryFilter = category ? ` and p.category = $category` : "";
+  const appointmentFilterClause = getAppointmentFilterClause(appointmentFilter);
 
-  const baseCountQuery = `
-    select count(*)::bigint as total
-    from patients p
-    where ($1::text = '' or p.mrn ilike $2
-      or p.national_id ilike $2
-      or p.identifier_value ilike $2
-      or p.phone_1 ilike $2
-      or p.phone_2 ilike $2
-      or p.arabic_full_name ilike $2
-      or p.normalized_arabic_name ilike $3
-      or p.english_full_name ilike $2
-      or exists (
-        select 1 from patient_identifiers pi
-        where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-      )
-    )
-    ${categoryFilter}
-  `;
+  let countQuery: string;
+  let countQueryParams: unknown[] = [];
 
-  const countParams: unknown[] = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern];
-  if (category) countParams.push(category);
+  if (category && term) {
+    countQuery = `select count(*)::bigint as total from patients p where (
+        case when $1 = '' then true
+        else 
+          p.mrn ilike $2
+          or p.national_id ilike $2
+          or p.identifier_value ilike $2
+          or p.phone_1 ilike $2
+          or p.phone_2 ilike $2
+          or p.arabic_full_name ilike $2
+          or p.normalized_arabic_name ilike $3
+          or p.english_full_name ilike $2
+          or exists (
+            select 1 from patient_identifiers pi
+            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+          )
+        end
+      ) and p.category = $5${appointmentFilterClause}`;
+    countQueryParams = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern, category];
+  } else if (category && !term) {
+    countQuery = `select count(*)::bigint as total from patients p where p.category = $1${appointmentFilterClause}`;
+    countQueryParams = [category];
+  } else if (!category && term) {
+    countQuery = `select count(*)::bigint as total from patients p where (
+        case when $1 = '' then true
+        else 
+          p.mrn ilike $2
+          or p.national_id ilike $2
+          or p.identifier_value ilike $2
+          or p.phone_1 ilike $2
+          or p.phone_2 ilike $2
+          or p.arabic_full_name ilike $2
+          or p.normalized_arabic_name ilike $3
+          or p.english_full_name ilike $2
+          or exists (
+            select 1 from patient_identifiers pi
+            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+          )
+        end
+      )${appointmentFilterClause}`;
+    countQueryParams = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern];
+  } else {
+    countQuery = `select count(*)::bigint as total from patients p where 1=1${appointmentFilterClause}`;
+    countQueryParams = [];
+  }
 
-  const countResult = await pool.query<{ total: string }>(baseCountQuery, countParams);
+  const countResult = await pool.query<{ total: string }>(countQuery, countQueryParams);
   const total = Number(countResult.rows[0]?.total || 0);
   const totalPages = Math.ceil(total / pageSize);
 
   const query = `
-    with patient_base as (
+    with filtered_patients as (
       select
         p.id,
         p.mrn,
@@ -1407,104 +1444,66 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
           else 6
         end as rank
       from patients p
-      where ($1::text = '' or p.mrn ilike $2
-        or p.national_id ilike $2
-        or p.identifier_value ilike $2
-        or p.phone_1 ilike $2
-        or p.phone_2 ilike $2
-        or p.arabic_full_name ilike $2
-        or p.normalized_arabic_name ilike $3
-        or p.english_full_name ilike $2
-        or exists (
-          select 1 from patient_identifiers pi
-          where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
-        )
+      where (
+        case when $1 = '' then true
+        else 
+          p.mrn ilike $2
+          or p.national_id ilike $2
+          or p.identifier_value ilike $2
+          or p.phone_1 ilike $2
+          or p.phone_2 ilike $2
+          or p.arabic_full_name ilike $2
+          or p.normalized_arabic_name ilike $3
+          or p.english_full_name ilike $2
+          or exists (
+            select 1 from patient_identifiers pi
+            where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+          )
+        end
       )
       ${categoryFilter}
-    ),
-    last_appt as (
-      select b.patient_id, json_build_object(
-        'id', b.id,
-        'date', b.booking_date::text,
-        'status', b.status,
-        'modalityName', m.name_en
-      ) as last_appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      where b.booking_date < current_date
-      and b.status not in ('cancelled')
-    ),
-    next_appt as (
-      select b.patient_id, json_build_object(
-        'id', b.id,
-        'date', b.booking_date::text,
-        'status', b.status,
-        'modalityName', m.name_en
-      ) as next_appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      where b.booking_date >= current_date
-      and b.status not in ('cancelled')
-    ),
-    dupes as (
-      select p.id as patient_id,
-        case
-          when count(*) > 1 then true
-          else false
-        end as is_dupe,
-        array_agg(p.id order by p.id) filter (where p.id != pb.id) as other_ids
-      from patients p
-      join patient_base pb on pb.id = p.id
-      left join lateral (
-        select 1 from patients p2
-        where p2.id != p.id
-        and (
-          (p.phone_1 is not null and p.phone_1 != '' and p2.phone_1 = p.phone_1)
-          or (p.national_id is not null and p.national_id != '' and p2.national_id = p.national_id)
-        )
-      ) dup on true
-      group by p.id
+      ${appointmentFilterClause}
     )
     select
-      pb.id,
-      pb.mrn,
-      pb.arabic_full_name,
-      pb.english_full_name,
-      pb.sex,
-      pb.age_years,
-      pb.demographics_estimated,
-      pb.phone_1,
-      pb.category,
-      coalesce(la.last_appt, null::json) as last_appointment,
-      coalesce(na.next_appt, null::json) as next_appointment,
+      fp.id,
+      fp.mrn,
+      fp.arabic_full_name,
+      fp.english_full_name,
+      fp.sex,
+      fp.age_years,
+      fp.demographics_estimated,
+      fp.phone_1,
+      fp.category,
+      (
+        select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en)
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        where b.patient_id = fp.id and b.booking_date < current_date and b.status not in ('cancelled')
+        order by b.booking_date desc
+        limit 1
+      ) as last_appointment,
+      (
+        select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en)
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        where b.patient_id = fp.id and b.booking_date >= current_date and b.status not in ('cancelled')
+        order by b.booking_date asc
+        limit 1
+      ) as next_appointment,
       json_build_object(
-        'missingPhone', pb.phone_1 is null or pb.phone_1 = '',
-        'missingDob', pb.estimated_date_of_birth is null,
-        'missingSex', pb.sex is null or pb.sex = '',
-        'missingName', pb.arabic_full_name is null or pb.arabic_full_name = '',
-        'noAppointment', la.last_appt is null and na.next_appt is null,
-        'possibleDuplicate', dupes.is_dupe = true,
-        'duplicateReasons', case when dupes.is_dupe = true then array['phone_or_id_match'] else array[]::text[] end
+        'missingPhone', fp.phone_1 is null or fp.phone_1 = '',
+        'missingDob', fp.estimated_date_of_birth is null,
+        'missingSex', fp.sex is null or fp.sex = '',
+        'missingName', fp.arabic_full_name is null or fp.arabic_full_name = '',
+        'noAppointment', not exists (
+          select 1 from appointments_v2.bookings b2
+          where b2.patient_id = fp.id and b2.status not in ('cancelled')
+        ),
+        'possibleDuplicate', false,
+        'duplicateReasons', array[]::text[]
       ) as warnings
-    from patient_base pb
-    left join lateral (
-      select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en) as last_appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      where b.patient_id = pb.id and b.booking_date < current_date and b.status not in ('cancelled')
-      order by b.booking_date desc
-      limit 1
-    ) la on true
-    left join lateral (
-      select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en) as next_appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      where b.patient_id = pb.id and b.booking_date >= current_date and b.status not in ('cancelled')
-      order by b.booking_date asc
-      limit 1
-    ) na on true
-    left join dupes dupes on dupes.patient_id = pb.id
-    order by pb.rank asc, pb.id desc
+    from filtered_patients fp
+    order by fp.rank asc, fp.id desc
     limit $12 offset $13
   `;
 

@@ -45,6 +45,10 @@ patientsRouter.get(
       search: String(query.q ?? ""),
       category: (query.category as "oncology" | "non_oncology") || undefined,
       appointmentFilter: (query.appointmentFilter as "has_future" | "today" | "no_future") || undefined,
+      sex: (query.sex as "male" | "female") || undefined,
+      ageMin: query.ageMin ? Number(query.ageMin) : undefined,
+      ageMax: query.ageMax ? Number(query.ageMax) : undefined,
+      sortBy: (query.sortBy as "name" | "recent" | "mrn") || undefined,
       page: Number(query.page) || 1,
       pageSize: Number(query.pageSize) || 25
     });
