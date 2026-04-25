@@ -46,6 +46,16 @@ async function createFixture(): Promise<FixtureContext> {
   );
   const receptionistUserId = Number(receptionist.rows[0]?.id);
 
+  // Ensure MRN identifier type exists for tests
+  const mrnType = await pool.query<{ id: number }>(
+    `
+      insert into patient_identifier_types (code, label_ar, label_en, is_active)
+      values ('mrn', 'رقم الملف', 'MRN', true)
+      on conflict (code) do update set id = patient_identifier_types.id
+      returning id
+    `
+  );
+
   // Create an extra identifier type (active)
   const idType = await pool.query<{ id: number }>(
     `
@@ -115,6 +125,354 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
     return false;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Test: createPatient uses generated MRN as primary identifier when no identifier is provided
+// ---------------------------------------------------------------------------
+test("createPatient: uses generated MRN as primary identifier when no identifier is provided", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_mrn_fallback_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+
+  try {
+    // Set national_id_required to optional for this test
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value)
+        values ('patient_registration', 'national_id_required', '{"value":"optional"}'::jsonb)
+        on conflict (category, setting_key) do update set setting_value = '{"value":"optional"}'::jsonb
+      `
+    );
+    invalidateAllCache();
+
+    const created = await createPatient(
+      {
+        arabicFullName: `مريض بدون معرف ${suffix}`,
+        englishFullName: `No Identifier ${suffix}`,
+        ageYears: 35,
+        demographicsEstimated: false,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city"
+        // No nationalId, identifierValue, or identifiers
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn, "MRN should be generated");
+    assert.equal(created.identifier_type, "mrn", "identifier_type should be mrn");
+    assert.equal(created.identifier_value, created.mrn, "identifier_value should equal the generated MRN");
+    assert.equal(created.national_id, null, "national_id should be null");
+
+    // Verify patient_identifiers has exactly one primary row with MRN
+    const piRow = await pool.query<{ type_code: string; value: string }>(
+      `
+        select pit.code as type_code, pi.value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = $1 and pi.is_primary = true
+      `,
+      [created.id]
+    );
+    assert.equal(piRow.rows.length, 1, "Should have exactly one primary identifier row");
+    assert.equal(piRow.rows[0]?.type_code, "mrn", "Primary identifier type should be mrn");
+    assert.equal(piRow.rows[0]?.value, created.mrn, "Primary identifier value should equal the generated MRN");
+
+    // Verify getPatientById returns correct identifier info
+    const fetched = await getPatientById(created.id);
+    assert.equal(fetched.identifier_type, "mrn", "getPatientById should return identifier_type mrn");
+    assert.equal(fetched.identifier_value, created.mrn, "getPatientById should return identifier_value equal to MRN");
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض بدون معرف ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض بدون معرف ${suffix}`]);
+    await pool.query(
+      `
+        update system_settings
+        set setting_value = '{"value":"required_with_confirmation"}'::jsonb
+        where category = 'patient_registration' and setting_key = 'national_id_required'
+      `
+    ).catch(() => undefined);
+    invalidateAllCache();
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: createPatient keeps national_id as primary when national ID is provided
+// ---------------------------------------------------------------------------
+test("createPatient: keeps national_id as primary when national ID is provided", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_natid_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const nationalId = uniqueNationalId("1");
+
+  try {
+    const created = await createPatient(
+      {
+        nationalId,
+        nationalIdConfirmation: nationalId,
+        identifierType: "national_id",
+        identifierValue: nationalId,
+        arabicFullName: `مريض برقم وطني ${suffix}`,
+        englishFullName: `With National ID ${suffix}`,
+        ageYears: 40,
+        demographicsEstimated: false,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city"
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn, "MRN should be generated");
+    assert.equal(created.identifier_type, "national_id", "identifier_type should be national_id");
+    assert.equal(created.identifier_value, nationalId, "identifier_value should be the national ID");
+    assert.equal(created.national_id, nationalId, "national_id column should match");
+
+    // Verify patient_identifiers has national_id as primary
+    const piRow = await pool.query<{ type_code: string; value: string }>(
+      `
+        select pit.code as type_code, pi.value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = $1 and pi.is_primary = true
+      `,
+      [created.id]
+    );
+    assert.equal(piRow.rows.length, 1, "Should have exactly one primary identifier row");
+    assert.equal(piRow.rows[0]?.type_code, "national_id", "Primary identifier type should be national_id");
+    assert.equal(piRow.rows[0]?.value, nationalId, "Primary identifier value should be the national ID");
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض برقم وطني ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض برقم وطني ${suffix}`]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: createPatient keeps selected passport primary over MRN when passport is provided
+// ---------------------------------------------------------------------------
+test("createPatient: keeps selected passport primary when passport is provided", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_passport_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const passportValue = `P${suffix}`;
+
+  try {
+    const created = await createPatient(
+      {
+        identifierType: "passport",
+        identifierValue: passportValue,
+        arabicFullName: `مريض بجواز ${suffix}`,
+        englishFullName: `With Passport ${suffix}`,
+        ageYears: 30,
+        demographicsEstimated: false,
+        sex: "F",
+        phone1: "0912345678",
+        address: "city",
+        identifiers: [
+          { typeCode: "passport", value: passportValue, isPrimary: true }
+        ]
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn, "MRN should be generated");
+    assert.equal(created.identifier_type, "passport", "identifier_type should be passport");
+    assert.equal(created.identifier_value, passportValue, "identifier_value should be the passport");
+    assert.equal(created.national_id, null, "national_id should be null");
+
+    // Verify patient_identifiers has passport as primary
+    const piRow = await pool.query<{ type_code: string; value: string }>(
+      `
+        select pit.code as type_code, pi.value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = $1 and pi.is_primary = true
+      `,
+      [created.id]
+    );
+    assert.equal(piRow.rows.length, 1, "Should have exactly one primary identifier row");
+    assert.equal(piRow.rows[0]?.type_code, "passport", "Primary identifier type should be passport");
+    assert.equal(piRow.rows[0]?.value, passportValue, "Primary identifier value should be the passport");
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض بجواز ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض بجواز ${suffix}`]);
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: searchPatients can find the patient by MRN when MRN was used as fallback primary
+// ---------------------------------------------------------------------------
+test("searchPatients: can find patient by MRN when MRN was used as fallback primary", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_search_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+
+  try {
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value)
+        values ('patient_registration', 'national_id_required', '{"value":"optional"}'::jsonb)
+        on conflict (category, setting_key) do update set setting_value = '{"value":"optional"}'::jsonb
+      `
+    );
+    invalidateAllCache();
+
+    const created = await createPatient(
+      {
+        arabicFullName: `مريض بحث ${suffix}`,
+        englishFullName: `Search Test ${suffix}`,
+        ageYears: 28,
+        demographicsEstimated: false,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city"
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn, "MRN should be generated for search test");
+
+    // Search by the generated MRN
+    const results = await searchPatients(created.mrn!);
+    const found = results.find((r) => Number(r.id) === Number(created.id));
+    assert.ok(found, `Should find patient by generated MRN ${created.mrn}`);
+    assert.equal(found?.identifier_type, "mrn", "Found patient should have identifier_type mrn");
+    assert.equal(found?.identifier_value, created.mrn, "Found patient should have identifier_value equal to MRN");
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض بحث ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض بحث ${suffix}`]);
+    await pool.query(
+      `
+        update system_settings
+        set setting_value = '{"value":"required_with_confirmation"}'::jsonb
+        where category = 'patient_registration' and setting_key = 'national_id_required'
+      `
+    ).catch(() => undefined);
+    invalidateAllCache();
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Test: createPatient with empty identifiers array uses MRN as fallback
+// ---------------------------------------------------------------------------
+test("createPatient: uses MRN as primary when identifiers array is empty", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_empty_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+
+  try {
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value)
+        values ('patient_registration', 'national_id_required', '{"value":"optional"}'::jsonb)
+        on conflict (category, setting_key) do update set setting_value = '{"value":"optional"}'::jsonb
+      `
+    );
+    invalidateAllCache();
+
+    const created = await createPatient(
+      {
+        arabicFullName: `مريض فارغ ${suffix}`,
+        englishFullName: `Empty Identifiers ${suffix}`,
+        ageYears: 50,
+        demographicsEstimated: true,
+        sex: "M",
+        phone1: "0912345678",
+        address: "city",
+        identifiers: []
+      },
+      receptionistUserId
+    );
+
+    assert.ok(created.mrn, "MRN should be generated");
+    assert.equal(created.identifier_type, "mrn", "identifier_type should be mrn");
+    assert.equal(created.identifier_value, created.mrn, "identifier_value should equal MRN");
+    assert.equal(created.national_id, null, "national_id should be null");
+
+    const piRow = await pool.query<{ type_code: string; value: string }>(
+      `
+        select pit.code as type_code, pi.value
+        from patient_identifiers pi
+        join patient_identifier_types pit on pit.id = pi.identifier_type_id
+        where pi.patient_id = $1 and pi.is_primary = true
+      `,
+      [created.id]
+    );
+    assert.equal(piRow.rows.length, 1, "Should have exactly one primary identifier");
+    assert.equal(piRow.rows[0]?.type_code, "mrn", "Primary type should be mrn");
+  } finally {
+    await pool.query(`delete from patient_identifiers where patient_id in (select id from patients where arabic_full_name = $1)`, [`مريض فارغ ${suffix}`]);
+    await pool.query(`delete from patients where arabic_full_name = $1`, [`مريض فارغ ${suffix}`]);
+    await pool.query(
+      `
+        update system_settings
+        set setting_value = '{"value":"required_with_confirmation"}'::jsonb
+        where category = 'patient_registration' and setting_key = 'national_id_required'
+      `
+    ).catch(() => undefined);
+    invalidateAllCache();
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]);
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test: search finds patients by secondary identifier

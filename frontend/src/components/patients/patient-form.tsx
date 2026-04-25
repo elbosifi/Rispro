@@ -730,6 +730,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   <span className="font-mono text-foreground">
                     {mrnPreviewLoading || !mrnPreview?.mrn ? t("patients.autoMrnGenerating") : mrnPreview.mrn}
                   </span>
+                  {!form.identifierValue && (
+                    <span className="ml-2 text-muted-foreground/70">
+                      {language === "ar" ? "(سيُستخدم كالمعرف الأساسي)" : "(will be used as primary identifier)"}
+                    </span>
+                  )}
                 </p>
               )}
             </div>

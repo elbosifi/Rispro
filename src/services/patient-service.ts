@@ -710,7 +710,8 @@ async function resolveIdentifierTypeMap(client: PoolClient): Promise<Map<string,
 
 function normalizeIdentifierInputs(
   payload: PatientPayload,
-  validated: ValidatedPatientPayload
+  validated: ValidatedPatientPayload,
+  fallbackMrn?: string
 ): Array<{ typeCode: string; value: string; normalizedValue: string; isPrimary: boolean }> {
   const raw = Array.isArray(payload.identifiers) ? (payload.identifiers as PatientIdentifierInput[]) : [];
   const normalized = raw
@@ -734,6 +735,16 @@ function normalizeIdentifierInputs(
           typeCode: validated.identifierType,
           value: validated.cleanIdentifierValue,
           normalizedValue: normalizeIdentifierValue(validated.cleanIdentifierValue),
+          isPrimary: true
+        }
+      ];
+    }
+    if (fallbackMrn) {
+      return [
+        {
+          typeCode: "mrn",
+          value: fallbackMrn,
+          normalizedValue: normalizeIdentifierValue(fallbackMrn),
           isPrimary: true
         }
       ];
@@ -787,9 +798,10 @@ async function replacePatientIdentifiers(
   patientId: number,
   payload: PatientPayload,
   validated: ValidatedPatientPayload,
-  actingUserId: OptionalUserId
+  actingUserId: OptionalUserId,
+  fallbackMrn?: string
 ): Promise<void> {
-  const identifiers = normalizeIdentifierInputs(payload, validated);
+  const identifiers = normalizeIdentifierInputs(payload, validated, fallbackMrn);
   await client.query(`delete from patient_identifiers where patient_id = $1`, [patientId]);
   if (identifiers.length === 0) {
     return;
@@ -937,7 +949,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
         throw new HttpError(500, "Failed to create patient.");
       }
 
-      await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId);
+      await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId, allocatedMrn);
       await syncPatientPrimaryIdentifierColumns(client, Number(createdPatient.id), createdByUserId);
 
       await logAuditEntry(
