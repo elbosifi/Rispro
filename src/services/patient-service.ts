@@ -710,8 +710,7 @@ async function resolveIdentifierTypeMap(client: PoolClient): Promise<Map<string,
 
 function normalizeIdentifierInputs(
   payload: PatientPayload,
-  validated: ValidatedPatientPayload,
-  fallbackMrn?: string
+  validated: ValidatedPatientPayload
 ): Array<{ typeCode: string; value: string; normalizedValue: string; isPrimary: boolean }> {
   const raw = Array.isArray(payload.identifiers) ? (payload.identifiers as PatientIdentifierInput[]) : [];
   const normalized = raw
@@ -735,16 +734,6 @@ function normalizeIdentifierInputs(
           typeCode: validated.identifierType,
           value: validated.cleanIdentifierValue,
           normalizedValue: normalizeIdentifierValue(validated.cleanIdentifierValue),
-          isPrimary: true
-        }
-      ];
-    }
-    if (fallbackMrn) {
-      return [
-        {
-          typeCode: "mrn",
-          value: fallbackMrn,
-          normalizedValue: normalizeIdentifierValue(fallbackMrn),
           isPrimary: true
         }
       ];
@@ -798,31 +787,15 @@ async function replacePatientIdentifiers(
   patientId: number,
   payload: PatientPayload,
   validated: ValidatedPatientPayload,
-  actingUserId: OptionalUserId,
-  fallbackMrn?: string
+  actingUserId: OptionalUserId
 ): Promise<void> {
-  const identifiers = normalizeIdentifierInputs(payload, validated, fallbackMrn);
+  const identifiers = normalizeIdentifierInputs(payload, validated);
   await client.query(`delete from patient_identifiers where patient_id = $1`, [patientId]);
   if (identifiers.length === 0) {
     return;
   }
 
   const typeMap = await resolveIdentifierTypeMap(client);
-
-  if (fallbackMrn && identifiers.some(i => i.typeCode === "mrn") && !typeMap.has("mrn")) {
-    await client.query(
-      `
-        insert into patient_identifier_types (code, label_ar, label_en, is_active)
-        values ('mrn', 'رقم الملف', 'MRN', true)
-        on conflict (code) do nothing
-      `
-    );
-    const refreshed = await resolveIdentifierTypeMap(client);
-    for (const [k, v] of refreshed) {
-      typeMap.set(k, v);
-    }
-  }
-
   for (const identifier of identifiers) {
     const typeId = typeMap.get(identifier.typeCode);
     if (!typeId) {
@@ -964,7 +937,7 @@ export async function createPatient(payload: PatientPayload, createdByUserId: Op
         throw new HttpError(500, "Failed to create patient.");
       }
 
-      await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId, allocatedMrn);
+      await replacePatientIdentifiers(client, Number(createdPatient.id), payload, validated, createdByUserId);
       await syncPatientPrimaryIdentifierColumns(client, Number(createdPatient.id), createdByUserId);
 
       await logAuditEntry(
