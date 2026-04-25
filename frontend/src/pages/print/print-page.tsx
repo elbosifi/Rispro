@@ -402,14 +402,14 @@ export default function PrintPage() {
             ) : (
               <>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <Field label="Patient" value={selectedAppointment.englishFullName || selectedAppointment.arabicFullName} />
-                  <Field label="Accession" value={selectedAppointment.accessionNumber} />
-                  <Field label="MRN" value={selectedAppointment.mrn || "—"} />
-                  <Field label={t(language, "common.date")} value={formatDateLy(selectedAppointment.appointmentDate)} />
-                  <Field label={t(language, "common.modality")} value={selectedAppointment.modalityNameEn || "—"} />
-                  <Field label="Exam" value={selectedAppointment.examNameEn || "—"} />
-                  <Field label="Status" value={selectedAppointment.status || "—"} />
-                  <Field label="Walk-In" value={selectedAppointment.isWalkIn ? t(language, "print.walkInYes") : t(language, "print.walkInNo")} />
+                  <Field label={t(language, "print.patientLabel")} value={selectedAppointment.englishFullName || selectedAppointment.arabicFullName} />
+                  <Field label={t(language, "print.accessionLabel")} value={selectedAppointment.accessionNumber} />
+                  <Field label={t(language, "print.mrnLabel")} value={selectedAppointment.mrn || "—"} />
+                  <Field label={t(language, "print.dateLabel")} value={formatDateLy(selectedAppointment.appointmentDate)} />
+                  <Field label={t(language, "print.modalityLabel")} value={selectedAppointment.modalityNameEn || "—"} />
+                  <Field label={t(language, "print.examLabel")} value={selectedAppointment.examNameEn || "—"} />
+                  <Field label={t(language, "print.statusLabel")} value={selectedAppointment.status || "—"} />
+                  <Field label={t(language, "print.walkInLabel")} value={selectedAppointment.isWalkIn ? t(language, "print.walkInYes") : t(language, "print.walkInNo")} />
                 </div>
 
                 <div className="flex flex-wrap gap-2">

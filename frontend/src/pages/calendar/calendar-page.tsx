@@ -82,8 +82,8 @@ export default function CalendarPage() {
 
   // Build grid
   const gridDays = useMemo(
-    () => buildCalendarGrid(displayDate, selectedDate, groupedByDate),
-    [displayDate, selectedDate, groupedByDate]
+    () => buildCalendarGrid(displayDate, selectedDate, groupedByDate, language),
+    [displayDate, selectedDate, groupedByDate, language]
   );
 
   // Selected day appointments
@@ -252,7 +252,7 @@ export default function CalendarPage() {
                     </h4>
                     {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
                       <Badge variant="warning" size="sm">
-                        {t(language, "appointmentEditor.edited")}
+                        {t(language, "calendar.printBadge")}
                       </Badge>
                     )}
                   </div>
@@ -349,7 +349,8 @@ export default function CalendarPage() {
 function buildCalendarGrid(
   displayDate: Date,
   selectedDate: string,
-  groupedByDate: Record<string, any[]>
+  groupedByDate: Record<string, any[]>,
+  language: "ar" | "en"
 ): CalendarDay[] {
   const todayStr = formatDate(new Date());
   const firstDayOfMonth = new Date(displayDate.getFullYear(), displayDate.getMonth(), 1);
@@ -365,7 +366,7 @@ function buildCalendarGrid(
     const dayAppointments = groupedByDate[dateStr] || [];
 
     const summary = dayAppointments.reduce((acc, apt) => {
-      const mod = apt.modalityNameEn || "Other";
+      const mod = apt.modalityNameEn || t(language, "calendar.other");
       acc[mod] = (acc[mod] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);

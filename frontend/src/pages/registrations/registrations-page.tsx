@@ -398,7 +398,7 @@ export default function RegistrationsPage() {
                         : "bg-muted text-muted-foreground hover:bg-muted/80"
                     }`}
                   >
-                    {status}
+                    {statusLabel(language, status)}
                   </button>
                 ),
               )}
@@ -429,7 +429,7 @@ export default function RegistrationsPage() {
               <div>{t("registrations.date")}</div>
               <div>{t("registrations.statusCol")}</div>
               <div>{t("registrations.walkIn")}</div>
-              <div className="text-right">Actions</div>
+              <div className="text-right">{language === "ar" ? "الإجراءات" : "Actions"}</div>
             </div>
 
             {isLoading ? (

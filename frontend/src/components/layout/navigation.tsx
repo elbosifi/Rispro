@@ -117,7 +117,7 @@ function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }
       <p className="mt-2 text-xl font-display">{t(language, "shell.reception")}</p>
       <div className="flex items-center justify-center gap-2 mt-3">
         <span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
-        <span className="text-xs uppercase tracking-[0.15em] opacity-80 font-mono">SYSTEM ONLINE</span>
+        <span className="text-xs uppercase tracking-[0.15em] opacity-80 font-mono">{t(language, "shell.systemOnline")}</span>
       </div>
     </div>
   );
@@ -383,7 +383,7 @@ export function SideNav({
       >
         <div className="flex items-center justify-center gap-2">
           <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-            MWL ACTIVE
+            {t(language, "shell.mwlActive")}
           </span>
         </div>
       </div>
@@ -437,7 +437,7 @@ export function MobileDrawer({
               borderColor: "var(--border)"
             }}
             onClick={onClose}
-            aria-label="Close navigation"
+            aria-label={t(language, "shell.closeNavigation")}
           >
             <X className="w-4 h-4" />
           </button>
@@ -467,7 +467,7 @@ export function MobileDrawer({
         >
           <div className="flex items-center justify-center gap-2">
             <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-              SYSTEM OPERATIONAL
+              {t(language, "shell.systemOperational")}
             </span>
           </div>
         </div>
