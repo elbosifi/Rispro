@@ -1,6 +1,12 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
+import {
+  fetchAppointmentSlipSettings,
+  fetchPatientQrSettings,
+  type AppointmentSlipSettings,
+  type PatientQrSettings,
+} from "@/lib/api-hooks";
 import QRCode from "qrcode";
 import { jsPDF } from "jspdf";
 
@@ -12,23 +18,179 @@ function escapeHtml(str: string = ""): string {
     .replace(/"/g, "&quot;");
 }
 
-function slipField(label: string, value: unknown, rtl = false): string {
-  const displayValue = value === null || value === undefined || value === "" ? "—" : String(value);
-  return `
-    <div class="summary-item ${rtl ? "rtl" : ""}">
-      <span class="label">${escapeHtml(label)}</span>
-      <span class="value">${escapeHtml(displayValue)}</span>
-    </div>
-  `;
+const MM_TO_PT = 72 / 25.4;
+const A5_WIDTH_PT = 148 * MM_TO_PT;
+const A5_HEIGHT_PT = 210 * MM_TO_PT;
+
+const DEFAULT_SLIP_SETTINGS: AppointmentSlipSettings = {
+  paperMode: "preprinted",
+  languageMode: "bilingual",
+  safeTopMm: 58,
+  safeBottomMm: 56,
+  safeLeftMm: 10,
+  safeRightMm: 10,
+  contentPaddingMm: 3,
+  fontScale: 1,
+  qrSizeMm: 24,
+  barcodeHeightMm: 12,
+  barcodeWidthMm: 100,
+  hospitalNameAr: "المركز الوطني للأورام بنغازي",
+  hospitalNameEn: "National Cancer Center Benghazi",
+  departmentNameAr: "قسم الأشعة التشخيصية",
+  departmentNameEn: "Diagnostic Radiology Department",
+  showPatientName: true,
+  showMrn: true,
+  showNationalId: false,
+  showPhone: true,
+  showAgeSex: true,
+  showAppointmentNumber: true,
+  showAccessionNumber: true,
+  showModality: true,
+  showExamName: true,
+  showDate: true,
+  showTime: true,
+  showWalkIn: true,
+  showLocation: true,
+  showArrivalNote: true,
+  showQrCode: true,
+  qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
+  qrCaptionEn: "Scan for appointment details",
+  qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
+  qrHelperTextEn: "Use this QR code to open your appointment page, instructions, and location details.",
+  showAccessionBarcode: true,
+  barcodeValueMode: "accessionNumber",
+  barcodeCaptionAr: "امسح للدخول إلى قائمة الانتظار",
+  barcodeCaptionEn: "Scan to Enter The Queue",
+  showModalityInstructions: true,
+  showExamSpecificInstructions: true,
+  maxInstructionLinesOnSlip: 4,
+  fallbackInstructionTextAr: "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
+  fallbackInstructionTextEn: "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
+  locationTextAr: "",
+  locationTextEn: "",
+};
+
+const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
+  enabled: true,
+  printQrOnAppointmentSlip: true,
+  allowCancellation: true,
+  allowAddToCalendar: true,
+  showBookingTime: true,
+  showPreparationInstructions: true,
+  showDocumentsChecklist: true,
+  showDepartmentContact: false,
+  showLocationDirections: false,
+  allowReportAccess: false,
+  allowImageAccess: false,
+  showReportPendingCard: true,
+  reportAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresReportRequiredFlag: false,
+  showReportNotRequiredMessage: false,
+  defaultReportRequiredForOncology: true,
+  defaultReportRequiredForNonOncology: false,
+  qrReportCheckingMessage: "Checking report status...",
+  qrReportFinalMessage: "Your report is ready.",
+  qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
+  qrReportNoReportMessage: "No report is available for this appointment yet.",
+  qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
+  qrReportNotRequiredMessage: "",
+  qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
+  qrReportCheckButtonLabel: "Check report",
+  qrReportViewButtonLabel: "View report",
+  qrImageViewButtonLabel: "View images",
+  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
+  pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleEn: "Patient QR Service",
+  introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextEn: "You can review appointment details, instructions, and department information from this page.",
+  genericPreparationTextAr: "",
+  genericPreparationTextEn: "",
+  documentsChecklistAr: [],
+  documentsChecklistEn: [],
+  contact: {
+    primaryPhone: "",
+    secondaryPhone: "",
+    whatsapp: "",
+    whatsappEnabled: false,
+    workingHoursAr: "",
+    workingHoursEn: "",
+    noteAr: "",
+    noteEn: "",
+  },
+  location: {
+    centerNameAr: "المركز الوطني للأورام بنغازي",
+    centerNameEn: "National Cancer Center Benghazi",
+    departmentLocationAr: "",
+    departmentLocationEn: "",
+    roomUnitFloorAr: "",
+    roomUnitFloorEn: "",
+    addressAr: "",
+    addressEn: "",
+    arrivalInstructionsAr: "",
+    arrivalInstructionsEn: "",
+    googleMapsUrl: "",
+    parkingNoteAr: "",
+    parkingNoteEn: "",
+  },
+};
+
+export interface AppointmentSlipData {
+  hospitalName: string;
+  departmentName: string;
+  patientName: string;
+  mrn: string;
+  nationalId: string;
+  phone: string;
+  accessionNumber: string;
+  appointmentNumber: string;
+  bookingId: string;
+  bookingTime: string;
+  modality: string;
+  examName: string;
+  appointmentDate: string;
+  ageSex: string;
+  walkInLabel: string;
+  queueQrPayload: string;
+  accessionBarcodePayload: string;
+  locationText: string;
+  arrivalNote: string;
+  modalityInstructions: string;
+  examInstructions: string;
+  fallbackInstructionText: string;
+  generatedAt: string;
 }
 
-function slipRow(left: string, right: string): string {
-  return `
-    <div class="summary-row">
-      ${left}
-      ${right}
-    </div>
-  `;
+export interface AppointmentSlipLayoutModel {
+  page: { w: number; h: number };
+  safeArea: { x: number; y: number; w: number; h: number };
+  content: { x: number; y: number; w: number; h: number };
+  qrBlock: { x: number; y: number; w: number; h: number; captionLines: number; helperLines: number; clipped: boolean } | null;
+  barcodeBlock: { x: number; y: number; w: number; h: number; clipped: boolean } | null;
+  mode: AppointmentSlipSettings["paperMode"];
+}
+
+type AppointmentSlipPdfMode = "blank" | "preprinted";
+
+interface SlipRuntimeSettings {
+  slipSettings: AppointmentSlipSettings;
+  patientQrSettings: PatientQrSettings;
+}
+
+interface BuildSlipOptions {
+  slipSettings?: AppointmentSlipSettings;
+  patientQrSettings?: PatientQrSettings;
+}
+
+interface SlipField {
+  label: string;
+  value: string;
+}
+
+function mm(value: number): number {
+  return value * MM_TO_PT;
 }
 
 function formatSlipDate(isoDate: string): string {
@@ -44,70 +206,11 @@ function formatSlipDate(isoDate: string): string {
   });
 }
 
-function generateBarcodeDataUri(value: string): string {
-  const clean = value.trim() || "APPOINTMENT";
-  const bars: Array<{ x: number; w: number }> = [];
-  let x = 16;
-  for (let i = 0; i < clean.length; i += 1) {
-    const code = clean.charCodeAt(i);
-    const pattern = [1, 2, 1, 3, 2, 1, 2, 3];
-    for (let j = 0; j < pattern.length; j += 1) {
-      const width = ((code + j * 3) % 3) + pattern[j];
-      if (j % 2 === 0) {
-        bars.push({ x, w: width });
-      }
-      x += width + 1;
-    }
-    x += 3;
-  }
-  const totalWidth = Math.max(860, x + 16);
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${totalWidth}" height="92" viewBox="0 0 ${totalWidth} 92" preserveAspectRatio="xMidYMid meet">
-      <rect width="${totalWidth}" height="92" fill="#ffffff"/>
-      ${bars.map((bar) => `<rect x="${bar.x}" y="4" width="${bar.w}" height="84" fill="#111111"/>`).join("")}
-    </svg>
-  `;
-}
-
-function normalizeInlineSvg(svg: string): string {
-  return svg.replace(/^<\?xml[\s\S]*?\?>\s*/i, "").trim();
-}
-
-export interface AppointmentSlipData {
-  hospitalName: string;
-  departmentName: string;
-  patientName: string;
-  patientId: string;
-  accessionNumber: string;
-  modality: string;
-  examName: string;
-  appointmentDate: string;
-  queueQrPayload: string;
-  accessionBarcodePayload: string;
-}
-
-interface AppointmentSlipRenderData extends AppointmentSlipData {
-  modalityInstructions: string;
-  examInstructions: string;
-  phone: string;
-  generatedAt: string;
-  arrivalNote: string;
-}
-
-type AppointmentSlipPdfMode = "blank" | "preprinted";
-
-const A5_WIDTH_PT = 419.53;
-const A5_HEIGHT_PT = 595.28;
-const MM_TO_PT = 72 / 25.4;
-const PREPRINTED_SAFE_AREA = {
-  left: 12 * MM_TO_PT,
-  top: 18 * MM_TO_PT,
-  right: 12 * MM_TO_PT,
-  bottom: 18 * MM_TO_PT,
-};
-
-function mm(value: number): number {
-  return value * MM_TO_PT;
+function formatSlipTime(raw: string | null | undefined): string {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/^(\d{2}):(\d{2})/);
+  return match ? `${match[1]}:${match[2]}` : trimmed;
 }
 
 function shorten(value: string, maxLength: number): string {
@@ -126,64 +229,316 @@ function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number
   return visible;
 }
 
-function drawBox(
-  doc: jsPDF,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  options?: { fill?: string; stroke?: string; radius?: number }
-) {
-  const fill = options?.fill ?? "#ffffff";
-  const stroke = options?.stroke ?? "#d1d5db";
-  const radius = options?.radius ?? 4;
+function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
+  return settings ? { ...DEFAULT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_SLIP_SETTINGS };
+}
+
+function sanitizePatientQrSettings(settings?: PatientQrSettings): PatientQrSettings {
+  return settings ? { ...DEFAULT_PATIENT_QR_SETTINGS, ...settings } : { ...DEFAULT_PATIENT_QR_SETTINGS };
+}
+
+async function resolveSlipRuntimeSettings(options?: BuildSlipOptions): Promise<SlipRuntimeSettings> {
+  if (options?.slipSettings || options?.patientQrSettings) {
+    return {
+      slipSettings: sanitizeSettings(options.slipSettings),
+      patientQrSettings: sanitizePatientQrSettings(options.patientQrSettings),
+    };
+  }
+
+  try {
+    const [slipSettings, patientQrSettings] = await Promise.all([
+      fetchAppointmentSlipSettings(),
+      fetchPatientQrSettings(),
+    ]);
+    return {
+      slipSettings: sanitizeSettings(slipSettings),
+      patientQrSettings: sanitizePatientQrSettings(patientQrSettings),
+    };
+  } catch {
+    return {
+      slipSettings: { ...DEFAULT_SLIP_SETTINGS },
+      patientQrSettings: { ...DEFAULT_PATIENT_QR_SETTINGS },
+    };
+  }
+}
+
+function localizeText(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
+  if (mode === "ar") return ar;
+  if (mode === "en") return en;
+  return `${ar} / ${en}`;
+}
+
+function localizeValue(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
+  const cleanAr = String(ar || "").trim();
+  const cleanEn = String(en || "").trim();
+  if (mode === "ar") return cleanAr || cleanEn || "—";
+  if (mode === "en") return cleanEn || cleanAr || "—";
+  if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
+  return cleanAr || cleanEn || "—";
+}
+
+function buildSlipQrPayload(
+  apt: AppointmentWithDetails,
+  settings: AppointmentSlipSettings,
+  patientQrSettings: PatientQrSettings
+): string {
+  const token = String(apt.publicCancelToken || "").trim();
+  if (!settings.showQrCode) return "";
+  if (!patientQrSettings.enabled || !patientQrSettings.printQrOnAppointmentSlip) return "";
+  if (!token) return "";
+  return buildPatientAppointmentUrl(token, window.location.origin);
+}
+
+function buildSlipBarcodePayload(apt: AppointmentWithDetails, settings: AppointmentSlipSettings): string {
+  if (settings.barcodeValueMode === "bookingId") return String(apt.id);
+  if (settings.barcodeValueMode === "appointmentNumber") return String(apt.dailySequence || apt.id);
+  return String(apt.accessionNumber || `V2-${apt.id}`).trim();
+}
+
+function buildInstructionText(
+  apt: AppointmentWithDetails,
+  settings: AppointmentSlipSettings
+): { heading: string; body: string; usedFallback: boolean }[] {
+  const sections: Array<{ heading: string; body: string; usedFallback: boolean }> = [];
+  const maxChars = settings.maxInstructionLinesOnSlip * 54;
+
+  if (settings.showModalityInstructions) {
+    const body = localizeValue(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", settings.languageMode);
+    const safeBody = body && body !== "—" && body.length <= maxChars ? body : localizeText(
+      "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
+      "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
+      settings.languageMode
+    );
+    sections.push({
+      heading: localizeText("تعليمات حسب نوع الجهاز", "Modality Instructions", settings.languageMode),
+      body: safeBody,
+      usedFallback: safeBody !== body,
+    });
+  }
+
+  if (settings.showExamSpecificInstructions) {
+    const body = localizeValue(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", settings.languageMode);
+    const safeBody = body && body !== "—" && body.length <= maxChars ? body : localizeText(
+      settings.fallbackInstructionTextAr,
+      settings.fallbackInstructionTextEn,
+      settings.languageMode
+    );
+    sections.push({
+      heading: localizeText("تعليمات خاصة بالفحص", "Exam Instructions", settings.languageMode),
+      body: safeBody,
+      usedFallback: safeBody !== body,
+    });
+  }
+
+  return sections;
+}
+
+function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
+  const fields: SlipField[] = [];
+  if (settings.showPatientName) fields.push({ label: localizeText("اسم المريض", "Patient Name", settings.languageMode), value: slip.patientName });
+  if (settings.showMrn) fields.push({ label: "MRN", value: slip.mrn });
+  if (settings.showNationalId) fields.push({ label: localizeText("الرقم الوطني", "National ID", settings.languageMode), value: slip.nationalId });
+  if (settings.showPhone) fields.push({ label: localizeText("الهاتف", "Phone", settings.languageMode), value: slip.phone });
+  if (settings.showAgeSex) fields.push({ label: localizeText("العمر / الجنس", "Age / Sex", settings.languageMode), value: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ label: localizeText("رقم الموعد", "Appointment Number", settings.languageMode), value: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ label: localizeText("رقم الدخول", "Accession Number", settings.languageMode), value: slip.accessionNumber });
+  if (settings.showModality) fields.push({ label: localizeText("نوع الجهاز", "Modality", settings.languageMode), value: slip.modality });
+  if (settings.showExamName) fields.push({ label: localizeText("اسم الفحص", "Exam", settings.languageMode), value: slip.examName });
+  if (settings.showDate) fields.push({ label: localizeText("التاريخ", "Date", settings.languageMode), value: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ label: localizeText("الوقت", "Time", settings.languageMode), value: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ label: localizeText("Walk-in", "Walk-in", settings.languageMode), value: slip.walkInLabel });
+  if (settings.showLocation && slip.locationText) fields.push({ label: localizeText("الموقع", "Location", settings.languageMode), value: slip.locationText });
+  if (settings.showArrivalNote) fields.push({ label: localizeText("ملاحظة الحضور", "Arrival Note", settings.languageMode), value: slip.arrivalNote });
+  return fields;
+}
+
+export function buildAppointmentSlipData(
+  apt: AppointmentWithDetails,
+  options?: BuildSlipOptions
+): AppointmentSlipData {
+  const slipSettings = sanitizeSettings(options?.slipSettings);
+  const patientQrSettings = sanitizePatientQrSettings(options?.patientQrSettings);
+  const queueQrPayload = buildSlipQrPayload(apt, slipSettings, patientQrSettings);
+  const hospitalName = localizeValue(slipSettings.hospitalNameAr, slipSettings.hospitalNameEn, slipSettings.languageMode);
+  const departmentName = localizeValue(slipSettings.departmentNameAr, slipSettings.departmentNameEn, slipSettings.languageMode);
+  const patientName = localizeValue(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
+  const modality = localizeValue(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
+  const examName = localizeValue(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
+  const ageSex = `${apt.ageYears || "—"} / ${apt.sex || "—"}`;
+  const locationText = localizeValue(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
+  return {
+    hospitalName,
+    departmentName,
+    patientName,
+    mrn: apt.mrn || "—",
+    nationalId: apt.nationalId || "—",
+    phone: apt.phone1 || "—",
+    accessionNumber: String(apt.accessionNumber || `V2-${apt.id}`).trim(),
+    appointmentNumber: String(apt.dailySequence || apt.id),
+    bookingId: String(apt.id),
+    bookingTime: formatSlipTime(apt.bookingTime),
+    modality,
+    examName,
+    appointmentDate: formatSlipDate(apt.appointmentDate),
+    ageSex,
+    walkInLabel: apt.isWalkIn ? localizeText("نعم", "Yes", slipSettings.languageMode) : localizeText("لا", "No", slipSettings.languageMode),
+    queueQrPayload,
+    accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
+    locationText,
+    arrivalNote: localizeText("يرجى الحضور قبل الموعد بـ 15 دقيقة", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
+    modalityInstructions: localizeValue(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
+    examInstructions: localizeValue(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
+    fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
+    generatedAt: new Date().toLocaleString(),
+  };
+}
+
+export function buildAppointmentSlipLayoutModel(
+  apt: AppointmentWithDetails,
+  settings: AppointmentSlipSettings,
+  patientQrSettings: PatientQrSettings,
+  modeOverride?: AppointmentSlipPdfMode
+): AppointmentSlipLayoutModel {
+  const mode = modeOverride ?? settings.paperMode;
+  const page = { w: A5_WIDTH_PT, h: A5_HEIGHT_PT };
+  const safeArea = {
+    x: mm(mode === "preprinted" ? settings.safeLeftMm : 8),
+    y: mm(mode === "preprinted" ? settings.safeTopMm : 8),
+    w: page.w - mm(mode === "preprinted" ? settings.safeLeftMm + settings.safeRightMm : 16),
+    h: page.h - mm(mode === "preprinted" ? settings.safeTopMm + settings.safeBottomMm : 16),
+  };
+  const content = {
+    x: safeArea.x + mm(settings.contentPaddingMm),
+    y: safeArea.y + mm(settings.contentPaddingMm),
+    w: safeArea.w - mm(settings.contentPaddingMm * 2),
+    h: safeArea.h - mm(settings.contentPaddingMm * 2),
+  };
+
+  const fontScale = settings.fontScale || 1;
+  const qrShown = Boolean(buildSlipQrPayload(apt, settings, patientQrSettings));
+  const qrWidth = qrShown ? Math.min(mm(settings.qrSizeMm + 18), content.w * 0.34) : 0;
+  const qrCaptionLines = qrShown ? Math.ceil(localizeText(settings.qrCaptionAr, settings.qrCaptionEn, settings.languageMode).length / 24) : 0;
+  const qrHelperLines = qrShown ? Math.ceil(localizeText(settings.qrHelperTextAr, settings.qrHelperTextEn, settings.languageMode).length / 42) : 0;
+  const qrHeight = qrShown ? mm(settings.qrSizeMm) + 10 + qrCaptionLines * 9 * fontScale + qrHelperLines * 7 * fontScale : 0;
+  const headerHeight = mode === "blank" ? 34 * fontScale + (qrShown ? Math.max(qrHeight, 22 * fontScale) : 0) : (qrShown ? qrHeight : 0);
+  const barcodeBlockHeight = settings.showAccessionBarcode ? mm(settings.barcodeHeightMm) + 24 * fontScale : 0;
+  const barcodeWidth = Math.min(mm(settings.barcodeWidthMm), content.w - 6);
+  const barcodeX = content.x + (content.w - barcodeWidth) / 2;
+  const barcodeY = content.y + content.h - barcodeBlockHeight;
+  const barcodeBlock = settings.showAccessionBarcode
+    ? {
+        x: barcodeX,
+        y: barcodeY,
+        w: barcodeWidth,
+        h: barcodeBlockHeight,
+        clipped: barcodeY + barcodeBlockHeight > content.y + content.h || barcodeX < content.x || barcodeX + barcodeWidth > content.x + content.w,
+      }
+    : null;
+
+  const qrBlock = qrShown
+    ? {
+        x: content.x + content.w - qrWidth,
+        y: content.y,
+        w: qrWidth,
+        h: qrHeight,
+        captionLines: qrCaptionLines,
+        helperLines: qrHelperLines,
+        clipped: qrWidth > content.w || qrHeight > content.h,
+      }
+    : null;
+
+  return {
+    page,
+    safeArea,
+    content,
+    qrBlock,
+    barcodeBlock,
+    mode,
+  };
+}
+
+function drawBox(doc: jsPDF, x: number, y: number, w: number, h: number, fill = "#ffffff", stroke = "#d1d5db") {
   doc.setFillColor(fill);
   doc.setDrawColor(stroke);
-  doc.roundedRect(x, y, w, h, radius, radius, "FD");
+  doc.roundedRect(x, y, w, h, 4, 4, "FD");
 }
 
-function drawLabelValueBox(
-  doc: jsPDF,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  label: string,
-  value: string,
-  options?: { labelColor?: string; valueColor?: string; maxLines?: number }
-) {
-  const labelColor = options?.labelColor ?? "#b11116";
-  const valueColor = options?.valueColor ?? "#0f1115";
-  const maxLines = options?.maxLines ?? 2;
-  drawBox(doc, x, y, w, h, { fill: "#ffffff", stroke: "#d3d4d6", radius: 4 });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(8.5);
-  doc.setTextColor(labelColor);
-  doc.text(shorten(label.toUpperCase(), 24), x + 6, y + 10, { baseline: "top" });
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9.5);
-  doc.setTextColor(valueColor);
-  const valueLines = wrapLines(doc, value, w - 12, maxLines);
-  doc.text(valueLines, x + 6, y + 20, { baseline: "top", lineHeightFactor: 1.15 });
-}
+const CODE39_PATTERNS: Record<string, string> = {
+  "0": "nnnwwnwnn",
+  "1": "wnnwnnnnw",
+  "2": "nnwwnnnnw",
+  "3": "wnwwnnnnn",
+  "4": "nnnwwnnnw",
+  "5": "wnnwwnnnn",
+  "6": "nnwwwnnnn",
+  "7": "nnnwnnwnw",
+  "8": "wnnwnnwnn",
+  "9": "nnwwnnwnn",
+  A: "wnnnnwnnw",
+  B: "nnwnnwnnw",
+  C: "wnwnnwnnn",
+  D: "nnnnwwnnw",
+  E: "wnnnwwnnn",
+  F: "nnwnwwnnn",
+  G: "nnnnnwwnw",
+  H: "wnnnnwwnn",
+  I: "nnwnnwwnn",
+  J: "nnnnwwwnn",
+  K: "wnnnnnnww",
+  L: "nnwnnnnww",
+  M: "wnwnnnnwn",
+  N: "nnnnwnnww",
+  O: "wnnnwnnwn",
+  P: "nnwnwnnwn",
+  Q: "nnnnnnwww",
+  R: "wnnnnnwwn",
+  S: "nnwnnnwwn",
+  T: "nnnnwnwwn",
+  U: "wwnnnnnnw",
+  V: "nwwnnnnnw",
+  W: "wwwnnnnnn",
+  X: "nwnnwnnnw",
+  Y: "wwnnwnnnn",
+  Z: "nwwnwnnnn",
+  "-": "nwnnnnwnw",
+  ".": "wwnnnnwnn",
+  " ": "nwwnnnwnn",
+  "$": "nwnwnwnnn",
+  "/": "nwnwnnnwn",
+  "+": "nwnnnwnwn",
+  "%": "nnnwnwnwn",
+  "*": "nwnnwnwnn",
+};
 
-function buildBarcodeBars(value: string): Array<{ x: number; w: number }> {
-  const clean = value.trim() || "APPOINTMENT";
-  const bars: Array<{ x: number; w: number }> = [];
-  let x = 16;
-  for (let i = 0; i < clean.length; i += 1) {
-    const code = clean.charCodeAt(i);
-    const pattern = [1, 2, 1, 3, 2, 1, 2, 3];
+function buildCode39Bars(value: string): { units: number; bars: Array<{ x: number; units: number }> } {
+  const cleaned = String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^0-9A-Z. \-$/+%]/g, "");
+  const payload = `*${cleaned || "APPOINTMENT"}*`;
+  const bars: Array<{ x: number; units: number }> = [];
+  let cursor = 10;
+  for (let i = 0; i < payload.length; i += 1) {
+    const pattern = CODE39_PATTERNS[payload[i]] || CODE39_PATTERNS["-"];
     for (let j = 0; j < pattern.length; j += 1) {
-      const width = ((code + j * 3) % 3) + pattern[j];
-      if (j % 2 === 0) {
-        bars.push({ x, w: width });
-      }
-      x += width + 1;
+      const isWide = pattern[j] === "w";
+      const units = isWide ? 3 : 1;
+      const isBar = j % 2 === 0;
+      if (isBar) bars.push({ x: cursor, units });
+      cursor += units;
     }
-    x += 3;
+    cursor += 1;
   }
-  return bars;
+  return { units: cursor + 10, bars };
+}
+
+function drawCode39Barcode(doc: jsPDF, value: string, x: number, y: number, w: number, h: number) {
+  const spec = buildCode39Bars(value);
+  const scale = w / spec.units;
+  doc.setFillColor("#111111");
+  for (const bar of spec.bars) {
+    doc.rect(x + bar.x * scale, y, Math.max(scale * bar.units, 0.8), h, "F");
+  }
 }
 
 async function toDataUrl(blob: Blob): Promise<string> {
@@ -209,34 +564,16 @@ async function loadImageDataUrl(url: string): Promise<string | null> {
   }
 }
 
-export function buildAppointmentSlipData(apt: AppointmentWithDetails): AppointmentSlipRenderData {
-  const token = String(apt.publicCancelToken || "").trim();
-  const cancelUrl = buildPatientAppointmentUrl(token, window.location.origin);
-  const accession = String(apt.accessionNumber || `V2-${apt.id}`).trim();
-  return {
-    hospitalName: "National Cancer Center Benghazi",
-    departmentName: "Diagnostic Radiology Department",
-    patientName: apt.englishFullName || apt.arabicFullName || "—",
-    patientId: apt.mrn || apt.nationalId || "—",
-    accessionNumber: accession,
-    modality: apt.modalityNameEn || "—",
-    examName: apt.examNameEn || "—",
-    appointmentDate: formatSlipDate(apt.appointmentDate),
-    queueQrPayload: cancelUrl,
-    accessionBarcodePayload: accession,
-    modalityInstructions: String(apt.modalityGeneralInstructionEn || apt.modalityGeneralInstructionAr || "").trim(),
-    examInstructions: String(apt.examSpecificInstructionEn || apt.examSpecificInstructionAr || "").trim(),
-    phone: apt.phone1 || "—",
-    generatedAt: new Date().toLocaleString(),
-    arrivalNote: "Please arrive 15 minutes before your appointment",
-  };
-}
-
 export async function createAppointmentSlipPdfBlob(
   apt: AppointmentWithDetails,
-  mode: AppointmentSlipPdfMode = "blank"
+  mode?: AppointmentSlipPdfMode,
+  options?: BuildSlipOptions
 ): Promise<Blob> {
-  const slip = buildAppointmentSlipData(apt);
+  const runtime = await resolveSlipRuntimeSettings(options);
+  const slipSettings = runtime.slipSettings;
+  const patientQrSettings = runtime.patientQrSettings;
+  const slip = buildAppointmentSlipData(apt, runtime);
+  const layout = buildAppointmentSlipLayoutModel(apt, slipSettings, patientQrSettings, mode);
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "pt",
@@ -244,411 +581,249 @@ export async function createAppointmentSlipPdfBlob(
     compress: true,
   });
 
-  // Blank-paper mode uses the full sheet. Preprinted mode stays inside the explicit middle safe area.
-  const page = {
-    x: 0,
-    y: 0,
-    w: A5_WIDTH_PT,
-    h: A5_HEIGHT_PT,
-  };
-  const safe = mode === "preprinted"
-    ? {
-        x: PREPRINTED_SAFE_AREA.left,
-        y: PREPRINTED_SAFE_AREA.top,
-        w: page.w - PREPRINTED_SAFE_AREA.left - PREPRINTED_SAFE_AREA.right,
-        h: page.h - PREPRINTED_SAFE_AREA.top - PREPRINTED_SAFE_AREA.bottom,
-      }
-    : {
-        x: mm(10),
-        y: mm(10),
-        w: page.w - mm(20),
-        h: page.h - mm(20),
-      };
-
-  const headerHeight = mode === "blank" ? 82 : 0;
-  const qrSize = mode === "blank" ? 64 : 60;
-  const barcodeHeight = 36;
-  const detailsTop = safe.y + headerHeight + (mode === "blank" ? 8 : 0);
-  const detailsLeft = safe.x;
-  const detailsWidth = safe.w;
-  const columnGap = 8;
-  const fieldWidth = (detailsWidth - columnGap) / 2;
-  const fieldHeight = 28;
-  const rowGap = 4;
-
-  doc.setTextColor("#111827");
   doc.setFillColor("#ffffff");
-  doc.rect(page.x, page.y, page.w, page.h, "F");
+  doc.rect(0, 0, layout.page.w, layout.page.h, "F");
 
-  if (mode === "blank") {
+  const fontScale = slipSettings.fontScale || 1;
+  const content = layout.content;
+  const fields = buildSlipFields(apt, slip, slipSettings);
+  const instructions = buildInstructionText(apt, slipSettings);
+
+  let cursorY = content.y;
+  if (mode !== "preprinted") {
     const logoDataUrl = await loadImageDataUrl(`${window.location.origin}/assets/nccb-logo.png`);
     if (logoDataUrl) {
-      doc.addImage(logoDataUrl, "PNG", safe.x, safe.y, 52, 52);
-    } else {
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.text("NCCB", safe.x, safe.y + 18);
+      doc.addImage(logoDataUrl, "PNG", content.x, cursorY, 40, 40);
     }
-
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(13.5);
+    doc.setFontSize(13 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text(slip.hospitalName, safe.x + 58, safe.y + 12);
-    doc.setFontSize(9.5);
+    doc.text(slip.hospitalName, content.x + 46, cursorY + 12);
+    doc.setFontSize(9 * fontScale);
     doc.setTextColor("#1f2937");
-    doc.text(slip.departmentName, safe.x + 58, safe.y + 27);
-    doc.setFontSize(20);
+    doc.text(slip.departmentName, content.x + 46, cursorY + 25);
+    doc.setFontSize(12 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text("APPOINTMENT SLIP", safe.x + 58, safe.y + 52);
-
-    if (slip.queueQrPayload) {
-      const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
-      doc.setDrawColor("#e2676d");
-      doc.setLineWidth(1);
-      doc.roundedRect(page.w - safe.x - qrSize - 2, safe.y, qrSize + 2, qrSize + 2, 6, 6, "S");
-      doc.addImage(qrDataUrl, "PNG", page.w - safe.x - qrSize - 1, safe.y + 1, qrSize, qrSize);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9);
-      doc.setTextColor("#b11116");
-      doc.text("Scan for instructions & location", page.w - safe.x - qrSize - 2, safe.y + qrSize + 14);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-      doc.setTextColor("#374151");
-      doc.text("This link is unique to you and your appointment.", page.w - safe.x - qrSize - 2, safe.y + qrSize + 24);
-    }
+    doc.text(localizeText("وصل الموعد", "Appointment Slip", slipSettings.languageMode), content.x + 46, cursorY + 40);
   }
 
-  const rows = [
-    { leftLabel: "Patient Name", leftValue: slip.patientName, rightLabel: "MRN / Patient ID", rightValue: slip.patientId },
-    { leftLabel: "Appointment No.", leftValue: slip.accessionNumber, rightLabel: "Date", rightValue: slip.appointmentDate },
-    { leftLabel: "Modality", leftValue: slip.modality, rightLabel: "Exam", rightValue: slip.examName },
-    { leftLabel: "Age / Sex", leftValue: `${apt.ageYears || "—"} / ${apt.sex || "—"}`, rightLabel: "Walk-In", rightValue: apt.isWalkIn ? "Yes" : "No" },
-    { leftLabel: "Phone", leftValue: slip.phone, rightLabel: "Arrival", rightValue: slip.arrivalNote },
-  ] as const;
+  if (layout.qrBlock && slip.queueQrPayload) {
+    const qrDataUrl = await QRCode.toDataURL(slip.queueQrPayload, { margin: 1, width: 220 });
+    const qrSize = Math.min(mm(slipSettings.qrSizeMm), layout.qrBlock.w);
+    const qrX = layout.qrBlock.x + (layout.qrBlock.w - qrSize) / 2;
+    doc.setDrawColor("#e2676d");
+    doc.roundedRect(layout.qrBlock.x, layout.qrBlock.y, layout.qrBlock.w, layout.qrBlock.h, 4, 4, "S");
+    doc.addImage(qrDataUrl, "PNG", qrX, layout.qrBlock.y + 4, qrSize, qrSize);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8 * fontScale);
+    doc.setTextColor("#b11116");
+    doc.text(
+      wrapLines(doc, localizeText(slipSettings.qrCaptionAr, slipSettings.qrCaptionEn, slipSettings.languageMode), layout.qrBlock.w - 8, 2),
+      layout.qrBlock.x + 4,
+      layout.qrBlock.y + qrSize + 12,
+      { baseline: "top" }
+    );
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.8 * fontScale);
+    doc.setTextColor("#374151");
+    doc.text(
+      wrapLines(doc, localizeText(slipSettings.qrHelperTextAr, slipSettings.qrHelperTextEn, slipSettings.languageMode), layout.qrBlock.w - 8, 4),
+      layout.qrBlock.x + 4,
+      layout.qrBlock.y + qrSize + 28,
+      { baseline: "top" }
+    );
+  }
 
-  rows.forEach((row, index) => {
-    const rowY = detailsTop + index * (fieldHeight + rowGap);
-    drawLabelValueBox(doc, detailsLeft, rowY, fieldWidth, fieldHeight, row.leftLabel, row.leftValue, { maxLines: 2 });
-    drawLabelValueBox(doc, detailsLeft + fieldWidth + columnGap, rowY, fieldWidth, fieldHeight, row.rightLabel, row.rightValue, { maxLines: 2 });
+  cursorY += mode !== "preprinted" ? 52 * fontScale : 0;
+  const qrReserve = layout.qrBlock ? layout.qrBlock.w + 8 : 0;
+  const fieldsWidth = content.w - qrReserve;
+  const fieldGap = 6;
+  const columns = fieldsWidth > 210 ? 2 : 1;
+  const fieldWidth = columns === 2 ? (fieldsWidth - fieldGap) / 2 : fieldsWidth;
+  const fieldHeight = 30 * fontScale;
+
+  fields.forEach((field, index) => {
+    const column = columns === 2 ? index % 2 : 0;
+    const row = columns === 2 ? Math.floor(index / 2) : index;
+    const x = content.x + column * (fieldWidth + fieldGap);
+    const y = cursorY + row * (fieldHeight + 4);
+    drawBox(doc, x, y, fieldWidth, fieldHeight);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5 * fontScale);
+    doc.setTextColor("#b11116");
+    doc.text(shorten(field.label, 32), x + 5, y + 9);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.6 * fontScale);
+    doc.setTextColor("#111827");
+    doc.text(wrapLines(doc, field.value, fieldWidth - 10, 2), x + 5, y + 18, { baseline: "top" });
   });
 
-  if (mode === "blank") {
-    const footerY = page.h - safe.y - barcodeHeight - 16;
-    doc.setDrawColor("#d3d4d6");
-    doc.setLineWidth(0.5);
-    doc.line(detailsLeft, footerY - 8, detailsLeft + detailsWidth, footerY - 8);
+  cursorY += Math.ceil(fields.length / columns) * (fieldHeight + 4) + 6;
+
+  const barcodeTop = layout.barcodeBlock ? layout.barcodeBlock.y - 8 : content.y + content.h;
+  for (const section of instructions) {
+    const sectionHeight = 30 * fontScale;
+    if (cursorY + sectionHeight > barcodeTop) break;
+    drawBox(doc, content.x, cursorY, content.w, sectionHeight, "#fffaf9", "#f0b4b7");
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(8.25);
+    doc.setFontSize(8 * fontScale);
     doc.setTextColor("#b11116");
-    doc.text("Printed", detailsLeft, footerY);
+    doc.text(section.heading, content.x + 5, cursorY + 9);
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(8.25);
+    doc.setFontSize(8 * fontScale);
     doc.setTextColor("#1f2937");
-    doc.text(`${slip.generatedAt}`, detailsLeft + 34, footerY);
-    doc.text("RISpro", detailsLeft + detailsWidth - 34, footerY, { align: "right" });
+    doc.text(
+      wrapLines(doc, section.body, content.w - 10, Math.max(1, slipSettings.maxInstructionLinesOnSlip)),
+      content.x + 5,
+      cursorY + 18,
+      { baseline: "top" }
+    );
+    cursorY += sectionHeight + 4;
   }
 
-  const barcodeY = page.h - safe.y - barcodeHeight - (mode === "blank" ? 2 : 0);
-  const bars = buildBarcodeBars(slip.accessionBarcodePayload);
-  const barPadding = 12;
-  const barWidth = page.w - safe.x * 2 - barPadding * 2;
-  const scale = barWidth / Math.max(1, bars.at(-1)?.x ?? 1);
-  doc.setDrawColor("#b11116");
-  doc.setFillColor("#111111");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(9);
-  doc.setTextColor("#b11116");
-  doc.text("Scan to enter the queue", detailsLeft + detailsWidth / 2, barcodeY - 10, { align: "center" });
-  doc.setLineWidth(0.5);
-  doc.roundedRect(detailsLeft, barcodeY, detailsWidth, barcodeHeight, 6, 6, "S");
-  const baseX = detailsLeft + barPadding;
-  const baseY = barcodeY + 5;
-  const barHeight = barcodeHeight - 10;
-  for (const bar of bars) {
-    doc.rect(baseX + bar.x * scale, baseY, Math.max(0.8, bar.w * scale), barHeight, "F");
+  if (layout.barcodeBlock) {
+    const caption = localizeText(slipSettings.barcodeCaptionAr, slipSettings.barcodeCaptionEn, slipSettings.languageMode);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5 * fontScale);
+    doc.setTextColor("#b11116");
+    doc.text(caption, layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y - 4, { align: "center" });
+    drawBox(doc, layout.barcodeBlock.x, layout.barcodeBlock.y, layout.barcodeBlock.w, layout.barcodeBlock.h, "#ffffff", "#d8dadd");
+    const barcodeInnerX = layout.barcodeBlock.x + 8;
+    const barcodeInnerY = layout.barcodeBlock.y + 6;
+    const barcodeInnerW = layout.barcodeBlock.w - 16;
+    const barcodeInnerH = mm(slipSettings.barcodeHeightMm);
+    drawCode39Barcode(doc, slip.accessionBarcodePayload, barcodeInnerX, barcodeInnerY, barcodeInnerW, barcodeInnerH);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5 * fontScale);
+    doc.setTextColor("#111827");
+    doc.text(shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
   }
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8);
-  doc.setTextColor("#1f2937");
-  doc.text(shorten(slip.accessionBarcodePayload, 36), detailsLeft + detailsWidth / 2, barcodeY + barcodeHeight + 10, { align: "center" });
 
   return doc.output("blob");
 }
 
-async function waitForImagesToLoad(doc: Document, timeoutMs = 1500): Promise<void> {
-  const images = Array.from(doc.images ?? []);
-  if (images.length === 0) return;
-
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    let remaining = images.length;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      resolve();
-    };
-
-    const timer = window.setTimeout(finish, timeoutMs);
-    const done = () => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        window.clearTimeout(timer);
-        finish();
-      }
-    };
-
-    for (const img of images) {
-      if (img.complete) {
-        done();
-        continue;
-      }
-
-      img.addEventListener("load", done, { once: true });
-      img.addEventListener("error", done, { once: true });
-    }
-  });
+function renderFieldHtml(field: SlipField): string {
+  return `
+    <div class="summary-item">
+      <div class="label">${escapeHtml(field.label)}</div>
+      <div class="value">${escapeHtml(field.value || "—")}</div>
+    </div>
+  `;
 }
 
-export async function prepareAppointmentSlipHtml(apt: AppointmentWithDetails): Promise<string> {
-  const slip = buildAppointmentSlipData(apt);
-  let qrSvg: string | null = null;
+function renderCode39Svg(value: string, widthMm: number, heightMm: number): string {
+  const spec = buildCode39Bars(value);
+  const unitWidth = 1;
+  const totalWidth = spec.units * unitWidth;
+  const height = Math.max(40, Math.round(heightMm * 4));
+  const rects = spec.bars
+    .map((bar) => `<rect x="${bar.x}" y="0" width="${bar.units}" height="${height}" fill="#111111" />`)
+    .join("");
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(widthMm * 4)}" height="${height}" viewBox="0 0 ${totalWidth} ${height}" preserveAspectRatio="xMidYMid meet">${rects}</svg>`;
+}
+
+export async function prepareAppointmentSlipHtml(
+  apt: AppointmentWithDetails,
+  options?: BuildSlipOptions
+): Promise<string> {
+  const runtime = await resolveSlipRuntimeSettings(options);
+  const slipSettings = runtime.slipSettings;
+  const patientQrSettings = runtime.patientQrSettings;
+  const slip = buildAppointmentSlipData(apt, runtime);
+  const layout = buildAppointmentSlipLayoutModel(apt, slipSettings, patientQrSettings);
+  const fields = buildSlipFields(apt, slip, slipSettings);
+  const instructions = buildInstructionText(apt, slipSettings);
+  let qrSvg = "";
   if (slip.queueQrPayload) {
-    try {
-      qrSvg = normalizeInlineSvg(await QRCode.toString(slip.queueQrPayload, { type: "svg", width: 120, margin: 1 }));
-    } catch {
-      qrSvg = null;
-    }
+    qrSvg = await QRCode.toString(slip.queueQrPayload, { type: "svg", width: 140, margin: 1 });
   }
-  const logoUrl = `${window.location.origin}/assets/nccb-logo.png`;
-  const barcodeSvg = generateBarcodeDataUri(slip.accessionBarcodePayload);
-  const now = slip.generatedAt;
-  const rows = [
-    slipRow(
-      slipField("Patient Name", slip.patientName),
-      slipField("MRN / Patient ID", slip.patientId)
-    ),
-    slipRow(
-      slipField("Appointment No.", slip.accessionNumber),
-      slipField("Date", slip.appointmentDate, true)
-    ),
-    slipRow(
-      slipField("Modality", slip.modality),
-      slipField("Exam", slip.examName)
-    ),
-    slipRow(
-      slipField("Phone", slip.phone),
-      slipField("Arrival", slip.arrivalNote)
-    ),
-  ];
+
   return `
     <html>
       <head>
         <title>Appointment Slip</title>
         <style>
-          @page { size: A5 portrait; margin: 4mm; }
+          @page { size: A5 portrait; margin: 0; }
           * { box-sizing: border-box; }
-          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-          .sheet {
-            width: 100%;
-            margin: 0 auto;
-            border: 1px solid #d1d5db;
-            border-radius: 8px;
-            padding: 4mm;
-            background: #ffffff;
-            transform: scale(0.9);
-            transform-origin: top center;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
+          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #1f2937; background: #ffffff; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+          .page { width: 148mm; min-height: 210mm; background: #fff; }
+          .safe {
+            margin-top: ${layout.safeArea.y / MM_TO_PT}mm;
+            margin-left: ${layout.safeArea.x / MM_TO_PT}mm;
+            width: ${layout.safeArea.w / MM_TO_PT}mm;
+            min-height: ${layout.safeArea.h / MM_TO_PT}mm;
           }
-          .top { display: grid; grid-template-columns: 1fr 114px; gap: 10px; align-items: start; }
-          .top.no-qr { grid-template-columns: 1fr; }
-          .brand-wrap { display: flex; gap: 8px; align-items: center; }
-          .logo { width: 60px; height: 60px; object-fit: contain; }
-          .brand-title { color: #b11116; margin: 0; font-size: 18px; font-weight: 800; line-height: 1.05; letter-spacing: -0.2px; }
-          .brand-sub { margin: 2px 0 0; font-size: 12px; color: #24272c; }
-          .rule { margin-top: 5px; display: flex; align-items: center; gap: 8px; }
-          .rule-line { flex: 1; height: 0.35mm; background: #d34f53; opacity: 0.8; }
-          .rule-dot { width: 8px; height: 8px; border-radius: 50%; background: #b11116; }
-          .slip-title { margin: 6px 0 0; color: #b11116; letter-spacing: 3px; text-transform: uppercase; font-size: 26px; font-weight: 500; }
-          .qr-card { border: 1px solid #e2676d; border-radius: 10px; background: #ffffff; padding: 6px; }
-          .qr-card svg { width: 100%; display: block; border-radius: 2px; }
-          .qr-title { margin-top: 6px; color: #b11116; text-transform: uppercase; font-size: 12px; font-weight: 800; line-height: 1.35; }
-          .qr-note { margin-top: 4px; font-size: 10px; color: #2f3135; line-height: 1.35; }
-          .rows { margin-top: 8px; border-top: 1px solid #d3d4d6; display: flex; flex-direction: column; gap: 4px; }
-          .summary-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 6px;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .summary-item {
-            display: grid;
-            grid-template-columns: 108px 1fr;
-            align-items: baseline;
-            gap: 8px;
-            min-height: 34px;
-            padding: 5px 6px;
-            border: 1px solid #d3d4d6;
-            border-radius: 7px;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .summary-item .label {
-            font-size: 11px;
-            color: #b11116;
-            font-weight: 800;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          .summary-item .value {
-            font-size: 13px;
-            font-weight: 700;
-            color: #0f1115;
-            line-height: 1.2;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-          }
-          .mid-divider { margin: 6px 0 4px; display: flex; align-items: center; gap: 8px; }
-          .prep {
-            margin-top: 6px;
-            display: grid;
-            grid-template-columns: 84px 1fr;
-            gap: 6px;
-            align-items: start;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .prep + .prep { margin-top: 4px; }
-          .prep-label {
-            color: #b11116;
-            font-size: 10px;
-            font-weight: 800;
-            line-height: 1.25;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-          }
-          .prep-text {
-            margin: 0;
-            font-size: 11px;
-            line-height: 1.25;
-            color: #20242a;
-            display: -webkit-box;
-            -webkit-box-orient: vertical;
-            -webkit-line-clamp: 2;
-            overflow: hidden;
-          }
-          .meta-strip { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 0; }
-          .meta-item {
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 3px 4px;
-            border-right: 1px solid #c7c8cb;
-            min-height: 44px;
-            overflow: hidden;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .meta-item:last-child { border-right: none; }
-          .meta-icon { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #b11116; color: #b11116; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 10px; }
-          .meta-text {
-            font-size: 11px;
-            line-height: 1.2;
-            color: #20242a;
-            overflow: hidden;
-          }
-          .meta-text strong { color: #b11116; }
-          .queue {
-            margin-top: 7px;
-            border: 1px solid #e2676d;
-            border-radius: 8px;
-            padding: 7px;
-            background: #ffffff;
-            text-align: center;
-            page-break-inside: avoid;
-            break-inside: avoid-page;
-          }
-          .queue-title { text-align: center; margin: 0 0 3px; color: #b11116; text-transform: uppercase; font-size: 13px; font-weight: 800; letter-spacing: 0.2mm; line-height: 1.08; }
-          .queue svg {
-            width: auto;
-            max-width: 100%;
-            height: 40px;
-            display: block;
-            margin: 0 auto;
-          }
-          .queue-label { text-align: center; margin: 3px 0 0; font-size: 10px; letter-spacing: 0.08em; color: #1f2937; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-          .small-muted { color: #6b7280; font-size: 10px; }
-          .rtl { direction: rtl; text-align: right; }
+          .content { padding: ${slipSettings.contentPaddingMm}mm; position: relative; }
+          .header { display: ${layout.mode === "blank" ? "grid" : "none"}; grid-template-columns: 1fr; gap: 1mm; margin-bottom: 2mm; }
+          .title { color: #b11116; font-weight: 800; font-size: ${14 * slipSettings.fontScale}px; }
+          .subtitle { color: #334155; font-size: ${11 * slipSettings.fontScale}px; }
+          .grid { display: grid; grid-template-columns: ${layout.qrBlock ? "1fr auto" : "1fr"}; gap: 2mm; align-items: start; }
+          .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.2mm; }
+          .summary-item { border: 1px solid #d1d5db; border-radius: 2mm; padding: 1.4mm; min-height: 11mm; overflow: hidden; }
+          .summary-item .label { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; line-height: 1.2; }
+          .summary-item .value { color: #111827; font-size: ${11 * slipSettings.fontScale}px; line-height: 1.25; margin-top: 0.7mm; white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+          .qr-block { width: ${layout.qrBlock ? `${layout.qrBlock.w / MM_TO_PT}mm` : "0"}; border: 1px solid #e2676d; border-radius: 2mm; padding: 1mm; }
+          .qr-svg svg { width: 100%; height: auto; display: block; }
+          .qr-caption { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; line-height: 1.25; margin-top: 1mm; overflow-wrap: anywhere; }
+          .qr-helper { color: #334155; font-size: ${8.5 * slipSettings.fontScale}px; line-height: 1.3; margin-top: 0.7mm; overflow-wrap: anywhere; }
+          .instructions { margin-top: 2mm; display: grid; gap: 1.2mm; }
+          .instruction { border: 1px solid #f0b4b7; border-radius: 2mm; padding: 1.4mm; background: #fffaf9; }
+          .instruction-title { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; }
+          .instruction-body { font-size: ${10 * slipSettings.fontScale}px; line-height: 1.3; margin-top: 0.8mm; white-space: normal; word-break: break-word; overflow-wrap: anywhere; }
+          .barcode { margin-top: 2mm; border: 1px solid #d1d5db; border-radius: 2mm; padding: 1.4mm; }
+          .barcode-caption { color: #b11116; font-size: ${10 * slipSettings.fontScale}px; font-weight: 700; text-align: center; margin-bottom: 1mm; overflow-wrap: anywhere; }
+          .barcode-visual svg { width: 100%; height: ${slipSettings.barcodeHeightMm}mm; display: block; }
+          .barcode-text { color: #111827; font-size: ${9 * slipSettings.fontScale}px; text-align: center; margin-top: 1mm; word-break: break-word; }
         </style>
       </head>
       <body>
-        <div class="sheet">
-          <div class="top ${qrSvg ? "" : "no-qr"}">
-            <div>
-              <div class="brand-wrap">
-                <img class="logo" src="${escapeHtml(logoUrl)}" alt="NCCB logo" />
-                <div>
-                  <p class="brand-title">National Cancer Center Benghazi</p>
-                  <p class="brand-sub">Diagnostic Radiology Department</p>
-                  <div class="rule">
-                    <div class="rule-line"></div>
-                    <div class="rule-dot"></div>
-                    <div class="rule-line"></div>
-                  </div>
-                  <h1 class="slip-title">Appointment Slip</h1>
-                </div>
+        <div class="page">
+          <div class="safe">
+            <div class="content" data-safe-top-mm="${slipSettings.safeTopMm}" data-safe-bottom-mm="${slipSettings.safeBottomMm}">
+              <div class="header">
+                <div class="title">${escapeHtml(slip.hospitalName)}</div>
+                <div class="subtitle">${escapeHtml(slip.departmentName)}</div>
               </div>
-            </div>
-            ${
-              qrSvg
-                ? `
-                  <div>
-                    <div class="qr-card">
-                      <div class="qr-svg" aria-label="Cancellation QR Code">${qrSvg}</div>
+              <div class="grid">
+                <div class="fields">
+                  ${fields.map(renderFieldHtml).join("")}
+                </div>
+                ${
+                  layout.qrBlock && qrSvg
+                    ? `
+                      <div class="qr-block" data-qr-clipped="${String(layout.qrBlock.clipped)}" data-qr-helper-lines="${layout.qrBlock.helperLines}">
+                        <div class="qr-svg">${qrSvg}</div>
+                        <div class="qr-caption">${escapeHtml(localizeText(slipSettings.qrCaptionAr, slipSettings.qrCaptionEn, slipSettings.languageMode))}</div>
+                        <div class="qr-helper">${escapeHtml(localizeText(slipSettings.qrHelperTextAr, slipSettings.qrHelperTextEn, slipSettings.languageMode))}</div>
+                      </div>
+                    `
+                    : ""
+                }
+              </div>
+              <div class="instructions">
+                ${instructions
+                  .map(
+                    (section) => `
+                    <div class="instruction">
+                      <div class="instruction-title">${escapeHtml(section.heading)}</div>
+                      <div class="instruction-body">${escapeHtml(section.body)}</div>
                     </div>
-                    <div class="qr-title">Scan for instructions & location</div>
-                    <div class="qr-note">This link is unique to you and your appointment.</div>
-                  </div>
-                `
-                : ""
-            }
-          </div>
-
-          <div class="rows">
-            ${rows.join("")}
-          </div>
-
-          <div class="mid-divider">
-            <div class="rule-line"></div>
-            <div class="rule-dot"></div>
-            <div class="rule-line"></div>
-          </div>
-
-          <div class="meta-strip">
-            <div class="meta-item">
-              <span class="meta-icon">T</span>
-              <div class="meta-text">${escapeHtml(slip.arrivalNote)}</div>
+                  `
+                  )
+                  .join("")}
+              </div>
+              ${
+                layout.barcodeBlock
+                  ? `
+                    <div class="barcode" data-barcode-clipped="${String(layout.barcodeBlock.clipped)}">
+                      <div class="barcode-caption">${escapeHtml(localizeText(slipSettings.barcodeCaptionAr, slipSettings.barcodeCaptionEn, slipSettings.languageMode))}</div>
+                      <div class="barcode-visual">${renderCode39Svg(slip.accessionBarcodePayload, slipSettings.barcodeWidthMm, slipSettings.barcodeHeightMm)}</div>
+                      <div class="barcode-text">${escapeHtml(slip.accessionBarcodePayload)}</div>
+                    </div>
+                  `
+                  : ""
+              }
             </div>
-            <div class="meta-item">
-              <span class="meta-icon">P</span>
-              <div class="meta-text">Phone <strong>${escapeHtml(slip.phone)}</strong></div>
-            </div>
-            <div class="meta-item">
-              <span class="meta-icon">R</span>
-              <div class="meta-text">Generated by RISpro<br />Printed: ${escapeHtml(now)}</div>
-            </div>
-          </div>
-
-          <div class="queue">
-            <p class="queue-title">Scan to enter the queue</p>
-            <div class="barcode-wrap" aria-label="Queue barcode">${barcodeSvg}</div>
-            <p class="queue-label">${escapeHtml(apt.accessionNumber || `V2-${apt.id}`)}</p>
           </div>
         </div>
       </body>
@@ -666,7 +841,7 @@ function getAppointmentSlipFileName(apt: AppointmentWithDetails): string {
 }
 
 export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): Promise<void> {
-  const blob = await createAppointmentSlipPdfBlob(apt, "blank");
+  const blob = await createAppointmentSlipPdfBlob(apt);
   const fileName = getAppointmentSlipFileName(apt);
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
@@ -686,7 +861,7 @@ export function printAppointmentSlip(apt: AppointmentWithDetails): void {
 }
 
 async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
-  const blob = await createAppointmentSlipPdfBlob(apt, "blank");
+  const blob = await createAppointmentSlipPdfBlob(apt);
   const url = URL.createObjectURL(blob);
   const frame = document.createElement("iframe");
   frame.setAttribute("aria-hidden", "true");
@@ -778,10 +953,10 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
             <p class="brand">RISpro Reception</p>
             <p class="title">Appointment List</p>
           </div>
-          <p class="summary">${listDate} — ${list.length} appointments</p>
+          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${list.length} · Printed: ${escapeHtml(now)}</p>
           ${rows}
           <div class="footer">
-            <span>Printed by RISpro</span>
+            <span>Generated by RISpro</span>
             <span>${escapeHtml(now)}</span>
           </div>
         </div>

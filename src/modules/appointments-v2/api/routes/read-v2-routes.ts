@@ -98,6 +98,7 @@ router.get(
           b.reporting_priority_id,
           ('V2-' || b.id::text) as accession_number,
           b.booking_date::text as appointment_date,
+          b.booking_time::text as booking_time,
           b.requires_report,
           b.study_instance_uid,
           row_number() over (partition by b.booking_date order by b.created_at asc, b.id asc)::int as daily_sequence,
@@ -171,6 +172,7 @@ router.get(
           b.reporting_priority_id,
           ('V2-' || b.id::text) as accession_number,
           b.booking_date::text as appointment_date,
+          b.booking_time::text as booking_time,
           b.requires_report,
           b.study_instance_uid,
           (

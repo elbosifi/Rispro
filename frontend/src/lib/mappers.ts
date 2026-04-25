@@ -89,6 +89,7 @@ export interface AppointmentWithDetails extends Appointment {
   priorityNameEn: string | null;
   modalitySlotNumber: number | null;
   publicCancelToken?: string | null;
+  bookingTime?: string | null;
 }
 
 export interface NoShowCandidate {
@@ -222,6 +223,7 @@ export function mapAppointment(raw: RawRecord): Appointment {
     requiresReport: bool(raw, 'requires_report', bool(raw, 'requiresReport', false)),
     studyInstanceUid: strOrNull(raw, 'study_instance_uid') ?? strOrNull(raw, 'studyInstanceUid'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
+    bookingTime: strOrNull(raw, 'booking_time') ?? strOrNull(raw, 'bookingTime'),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     status: fallback(raw.status, "scheduled") as Appointment["status"],
     isWalkIn: bool(raw, 'is_walk_in', bool(raw, 'isWalkIn', false)),
@@ -279,6 +281,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
+    bookingTime: strOrNull(raw, 'booking_time') ?? strOrNull(raw, 'bookingTime'),
     isWalkIn: bool(raw, 'is_walk_in', bool(raw, 'isWalkIn', false)),
     isOverbooked: bool(raw, 'is_overbooked', bool(raw, 'isOverbooked', false)),
     overbookingReason: strOrNull(raw, 'overbooking_reason') ?? strOrNull(raw, 'overbookingReason'),

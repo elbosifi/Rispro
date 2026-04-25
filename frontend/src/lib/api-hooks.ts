@@ -523,6 +523,58 @@ export interface PatientQrSettings {
   location: PatientQrLocationSettings;
 }
 
+export type AppointmentSlipPaperMode = "blank" | "preprinted";
+export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
+export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNumber" | "bookingId";
+
+export interface AppointmentSlipSettings {
+  paperMode: AppointmentSlipPaperMode;
+  languageMode: AppointmentSlipLanguageMode;
+  safeTopMm: number;
+  safeBottomMm: number;
+  safeLeftMm: number;
+  safeRightMm: number;
+  contentPaddingMm: number;
+  fontScale: number;
+  qrSizeMm: number;
+  barcodeHeightMm: number;
+  barcodeWidthMm: number;
+  hospitalNameAr: string;
+  hospitalNameEn: string;
+  departmentNameAr: string;
+  departmentNameEn: string;
+  showPatientName: boolean;
+  showMrn: boolean;
+  showNationalId: boolean;
+  showPhone: boolean;
+  showAgeSex: boolean;
+  showAppointmentNumber: boolean;
+  showAccessionNumber: boolean;
+  showModality: boolean;
+  showExamName: boolean;
+  showDate: boolean;
+  showTime: boolean;
+  showWalkIn: boolean;
+  showLocation: boolean;
+  showArrivalNote: boolean;
+  showQrCode: boolean;
+  qrCaptionAr: string;
+  qrCaptionEn: string;
+  qrHelperTextAr: string;
+  qrHelperTextEn: string;
+  showAccessionBarcode: boolean;
+  barcodeValueMode: AppointmentSlipBarcodeValueMode;
+  barcodeCaptionAr: string;
+  barcodeCaptionEn: string;
+  showModalityInstructions: boolean;
+  showExamSpecificInstructions: boolean;
+  maxInstructionLinesOnSlip: number;
+  fallbackInstructionTextAr: string;
+  fallbackInstructionTextEn: string;
+  locationTextAr: string;
+  locationTextEn: string;
+}
+
 function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
   const candidate = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
   const rawValue =
@@ -622,6 +674,93 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
   };
 }
 
+function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettings {
+  const candidate = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  const rawValue =
+    "setting_value" in candidate
+      ? (candidate as RawRecord).setting_value
+      : "value" in candidate
+        ? (candidate as RawRecord).value
+        : candidate;
+  const config =
+    rawValue && typeof rawValue === "object" && !Array.isArray(rawValue) && "value" in rawValue
+      ? (rawValue as RawRecord).value
+      : rawValue;
+  const record = (config && typeof config === "object" && !Array.isArray(config) ? config : {}) as RawRecord;
+
+  const bool = (value: unknown, fallback: boolean) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (["true", "1", "enabled", "yes", "on"].includes(normalized)) return true;
+      if (["false", "0", "disabled", "no", "off"].includes(normalized)) return false;
+    }
+    return fallback;
+  };
+  const str = (value: unknown, fallback = "") => (value == null ? fallback : String(value).trim());
+  const num = (value: unknown, fallback: number, min?: number, max?: number) => {
+    const parsed = typeof value === "number" ? value : Number(String(value ?? "").trim());
+    if (!Number.isFinite(parsed)) return fallback;
+    let next = parsed;
+    if (typeof min === "number" && next < min) next = min;
+    if (typeof max === "number" && next > max) next = max;
+    return next;
+  };
+
+  const paperMode = str(record.paperMode, "preprinted");
+  const languageMode = str(record.languageMode, "bilingual");
+  const barcodeValueMode = str(record.barcodeValueMode, "accessionNumber");
+
+  return {
+    paperMode: paperMode === "blank" ? "blank" : "preprinted",
+    languageMode: languageMode === "ar" || languageMode === "en" ? languageMode : "bilingual",
+    safeTopMm: num(record.safeTopMm, 58, 0, 120),
+    safeBottomMm: num(record.safeBottomMm, 56, 0, 120),
+    safeLeftMm: num(record.safeLeftMm, 10, 0, 80),
+    safeRightMm: num(record.safeRightMm, 10, 0, 80),
+    contentPaddingMm: num(record.contentPaddingMm, 3, 0, 20),
+    fontScale: num(record.fontScale, 1, 0.7, 1.6),
+    qrSizeMm: num(record.qrSizeMm, 24, 12, 48),
+    barcodeHeightMm: num(record.barcodeHeightMm, 12, 6, 28),
+    barcodeWidthMm: num(record.barcodeWidthMm, 100, 40, 130),
+    hospitalNameAr: str(record.hospitalNameAr, "المركز الوطني للأورام بنغازي"),
+    hospitalNameEn: str(record.hospitalNameEn, "National Cancer Center Benghazi"),
+    departmentNameAr: str(record.departmentNameAr, "قسم الأشعة التشخيصية"),
+    departmentNameEn: str(record.departmentNameEn, "Diagnostic Radiology Department"),
+    showPatientName: bool(record.showPatientName, true),
+    showMrn: bool(record.showMrn, true),
+    showNationalId: bool(record.showNationalId, false),
+    showPhone: bool(record.showPhone, true),
+    showAgeSex: bool(record.showAgeSex, true),
+    showAppointmentNumber: bool(record.showAppointmentNumber, true),
+    showAccessionNumber: bool(record.showAccessionNumber, true),
+    showModality: bool(record.showModality, true),
+    showExamName: bool(record.showExamName, true),
+    showDate: bool(record.showDate, true),
+    showTime: bool(record.showTime, true),
+    showWalkIn: bool(record.showWalkIn, true),
+    showLocation: bool(record.showLocation, true),
+    showArrivalNote: bool(record.showArrivalNote, true),
+    showQrCode: bool(record.showQrCode, true),
+    qrCaptionAr: str(record.qrCaptionAr, "امسح للاطلاع على تفاصيل الموعد"),
+    qrCaptionEn: str(record.qrCaptionEn, "Scan for appointment details"),
+    qrHelperTextAr: str(record.qrHelperTextAr, "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد."),
+    qrHelperTextEn: str(record.qrHelperTextEn, "Use this QR code to open your appointment page, instructions, and location details."),
+    showAccessionBarcode: bool(record.showAccessionBarcode, true),
+    barcodeValueMode:
+      barcodeValueMode === "appointmentNumber" || barcodeValueMode === "bookingId" ? barcodeValueMode : "accessionNumber",
+    barcodeCaptionAr: str(record.barcodeCaptionAr, "امسح للدخول إلى قائمة الانتظار"),
+    barcodeCaptionEn: str(record.barcodeCaptionEn, "Scan to Enter The Queue"),
+    showModalityInstructions: bool(record.showModalityInstructions, true),
+    showExamSpecificInstructions: bool(record.showExamSpecificInstructions, true),
+    maxInstructionLinesOnSlip: num(record.maxInstructionLinesOnSlip, 4, 1, 8),
+    fallbackInstructionTextAr: str(record.fallbackInstructionTextAr, "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع."),
+    fallbackInstructionTextEn: str(record.fallbackInstructionTextEn, "Scan the QR code for modality instructions, exam-specific instructions, and location details."),
+    locationTextAr: str(record.locationTextAr, ""),
+    locationTextEn: str(record.locationTextEn, ""),
+  };
+}
+
 export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
   const response = await api<{ settings: RawRecord[] }>("/settings/patient_qr_self_service");
   const configRow = response.settings?.find((row) => row.setting_key === "config");
@@ -630,6 +769,21 @@ export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
 
 export async function savePatientQrSettings(payload: PatientQrSettings) {
   return api<RawRecord>("/settings/patient_qr_self_service", {
+    method: "PUT",
+    body: JSON.stringify({
+      entries: [{ key: "config", value: payload }],
+    }),
+  });
+}
+
+export async function fetchAppointmentSlipSettings(): Promise<AppointmentSlipSettings> {
+  const response = await api<{ settings: RawRecord[] }>("/settings/appointment_slip");
+  const configRow = response.settings?.find((row) => row.setting_key === "config");
+  return normalizeAppointmentSlipSettings(configRow ?? {});
+}
+
+export async function saveAppointmentSlipSettings(payload: AppointmentSlipSettings) {
+  return api<RawRecord>("/settings/appointment_slip", {
     method: "PUT",
     body: JSON.stringify({
       entries: [{ key: "config", value: payload }],

@@ -110,6 +110,7 @@ export interface Appointment {
   requiresReport?: boolean;
   studyInstanceUid?: string | null;
   appointmentDate: string;
+  bookingTime?: string | null;
   dailySequence: number;
   status: AppointmentStatus;
   isWalkIn?: boolean;

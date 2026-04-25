@@ -49,6 +49,7 @@ import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
 import PacsSettingsSection from "./pacs-settings-section";
+import AppointmentSlipSettingsSection from "./appointment-slip-settings-section";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import type {
@@ -161,6 +162,7 @@ type SettingsSection =
   | "exam_types"
   | "modalities"
   | "name_dictionary"
+  | "appointment_slip"
   | "patient_qr_self_service"
   | "sonicdicom_reports"
   | "documents_and_uploads"
@@ -182,6 +184,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "exam_types",
   "modalities",
   "name_dictionary",
+  "appointment_slip",
   "patient_qr_self_service",
   "sonicdicom_reports",
   "documents_and_uploads",
@@ -194,6 +197,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "patient_qr_self_service") {
     return "إعدادات صفحة المريض ورمز QR";
+  }
+  if (section === "appointment_slip") {
+    return "Appointment Slip Settings";
   }
   if (section === "sonicdicom_reports") {
     return "SonicDICOM Reports";
@@ -272,6 +278,7 @@ export default function SettingsPage() {
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
+            {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
