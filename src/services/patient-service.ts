@@ -1357,7 +1357,8 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
   const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
   const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
 
-  const sexFilter = sex ? ` and p.sex = '${sex}'` : "";
+  const sexValue = sex === "male" ? "ذكر" : "أنثى";
+  const sexFilter = sex ? ` and (p.sex = '${sex}' or p.sex = '${sexValue}' or p.sex = '${sex === "male" ? "Male" : "Female"}')` : "";
   const ageFilter = (ageMin || ageMax) ? ` and p.age_years >= ${ageMin || 0} and p.age_years <= ${ageMax || 200}` : "";
   const categoryFilter = category ? ` and p.category = '${category}'` : "";
   const appointmentFilterClause = getAppointmentFilterClause(appointmentFilter);
@@ -1377,13 +1378,15 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
       )
     )` : "1=1";
 
+  const filtersApplied = sexFilter || ageFilter || categoryFilter;
+
   const countQuery = `select count(*)::bigint as total from patients p where ${searchWhere}${sexFilter}${ageFilter}${categoryFilter}${appointmentFilterClause}`;
 
   const countResult = await pool.query<{ total: string }>(countQuery);
   const total = Number(countResult.rows[0]?.total || 0);
   const totalPages = Math.ceil(total / pageSize);
 
-  let orderBy = "fp.rank asc, fp.id desc";
+  let orderBy = "fp.normalized_arabic_name asc, fp.arabic_full_name asc";
   if (sortBy === "recent") {
     orderBy = "fp.id desc";
   } else if (sortBy === "mrn") {
