@@ -273,7 +273,7 @@ export default function SettingsPage() {
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} />}
-            {section === "sonicdicom_reports" && <SonicDicomReportsSection />}
+            {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}
             {section === "pacs_connection" && <PacsSettingsSection onReAuthRequired={requestReAuth} />}

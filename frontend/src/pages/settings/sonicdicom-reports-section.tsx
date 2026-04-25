@@ -2,6 +2,11 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { fetchSonicDicomSettings, saveSettings, testSonicDicomLookup, type SonicDicomLookupDebugResponse } from "@/lib/api-hooks";
+import { ApiError } from "@/lib/api-client";
+
+interface SonicDicomReportsSectionProps {
+  onReAuthRequired: (key: string[]) => void;
+}
 
 type SonicSettings = Record<string, string | boolean | number | string[]>;
 
@@ -55,7 +60,7 @@ function hasLookupToken(template: string): boolean {
   return template.includes("{{accessionNumber}}") || template.includes("{{studyInstanceUid}}");
 }
 
-export default function SonicDicomReportsSection() {
+export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDicomReportsSectionProps) {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["settings", "sonicdicom_reports"],
@@ -80,7 +85,15 @@ export default function SonicDicomReportsSection() {
       await queryClient.invalidateQueries({ queryKey: ["settings", "sonicdicom_reports"] });
       setMessage("SonicDICOM report settings saved.");
     },
-    onError: (err) => setMessage(err instanceof Error ? err.message : "Failed to save settings."),
+    onError: (err) => {
+      const status = err instanceof ApiError ? err.status : undefined;
+      const message = err instanceof Error ? err.message : "";
+      if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+        onReAuthRequired(["settings", "sonicdicom_reports"]);
+        return;
+      }
+      setMessage(message || "Failed to save settings.");
+    },
   });
   const testLookupMutation = useMutation({
     mutationFn: () =>
@@ -98,8 +111,14 @@ export default function SonicDicomReportsSection() {
       setMessage(`Lookup test completed: ${result.state}.`);
     },
     onError: (err) => {
+      const status = err instanceof ApiError ? err.status : undefined;
+      const message = err instanceof Error ? err.message : "";
+      if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+        onReAuthRequired(["settings", "sonicdicom_reports"]);
+        return;
+      }
       setTestResult(null);
-      setMessage(err instanceof Error ? err.message : "Lookup test failed.");
+      setMessage(message || "Lookup test failed.");
     },
   });
 
@@ -139,7 +158,14 @@ export default function SonicDicomReportsSection() {
   };
 
   if (isLoading) return <p className="text-sm text-stone-500">Loading SonicDICOM report settings...</p>;
-  if (error) return <p className="text-sm text-red-700">Failed to load SonicDICOM report settings.</p>;
+  if (error) {
+    const status = error instanceof ApiError ? error.status : undefined;
+    const message = error instanceof Error ? error.message : "";
+    if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "sonicdicom_reports"])} />;
+    }
+    return <p className="text-sm text-red-700">Failed to load SonicDICOM report settings.</p>;
+  }
 
   return (
     <div className="space-y-5">
@@ -208,6 +234,24 @@ export default function SonicDicomReportsSection() {
         Save
       </button>
       {message ? <p className="text-sm text-slate-700">{message}</p> : null}
+    </div>
+  );
+}
+
+function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
+      <h4 className="text-base font-extrabold text-amber-900">Re-authentication Required</h4>
+      <p className="mt-1 text-sm leading-7 text-amber-800">
+        Supervisor re-authentication is required before modifying SonicDICOM report settings.
+      </p>
+      <button
+        type="button"
+        onClick={onReAuthRequired}
+        className="mt-3 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white"
+      >
+        Re-authenticate
+      </button>
     </div>
   );
 }
