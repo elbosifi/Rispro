@@ -808,6 +808,21 @@ async function replacePatientIdentifiers(
   }
 
   const typeMap = await resolveIdentifierTypeMap(client);
+
+  if (fallbackMrn && identifiers.some(i => i.typeCode === "mrn") && !typeMap.has("mrn")) {
+    await client.query(
+      `
+        insert into patient_identifier_types (code, label_ar, label_en, is_active)
+        values ('mrn', 'رقم الملف', 'MRN', true)
+        on conflict (code) do nothing
+      `
+    );
+    const refreshed = await resolveIdentifierTypeMap(client);
+    for (const [k, v] of refreshed) {
+      typeMap.set(k, v);
+    }
+  }
+
   for (const identifier of identifiers) {
     const typeId = typeMap.get(identifier.typeCode);
     if (!typeId) {
