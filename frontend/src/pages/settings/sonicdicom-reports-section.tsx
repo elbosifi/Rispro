@@ -1,50 +1,64 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
-import { fetchSonicDicomSettings, saveSettings, testSonicDicomLookup, type SonicDicomLookupDebugResponse } from "@/lib/api-hooks";
+import {
+  fetchSonicDicomSettings,
+  saveSettings,
+  testSonicDicomSqlReadiness,
+  type SonicDicomSqlReadinessResponse,
+} from "@/lib/api-hooks";
 import { ApiError } from "@/lib/api-client";
 
 interface SonicDicomReportsSectionProps {
   onReAuthRequired: (key: string[]) => void;
 }
 
-type SonicSettings = Record<string, string | boolean | number | string[]>;
+type SonicSettings = Record<string, string | boolean | number | string[] | number[]>;
 
 const DEFAULTS: SonicSettings = {
   sonicDicomReportsEnabled: false,
+  sonicDicomReadinessMode: "sql_server",
   sonicDicomPublicBaseUrl: "https://ris.nccb.com.ly/viewer",
   sonicDicomPublicReportViewerUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicPdfUrlTemplate: "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomInternalBaseUrl: "",
-  sonicDicomInternalSearchUrlTemplate: "",
-  sonicDicomInternalReportViewerUrlTemplate: "{{internalBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
-  sonicDicomInternalPdfUrlTemplate: "{{internalBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomReportViewerUsername: "patient",
   sonicDicomReportViewerPassword: "patient",
   sonicDicomReportLookupKey: "accession_number",
   sonicDicomSearchMode: "auto",
-  sonicDicomFinalStatusTerms: ["Final", "Signed", "Approved"],
-  sonicDicomDraftStatusTerms: ["Draft", "Preliminary", "In review", "Unsigned"],
-  sonicDicomNoReportStatusTerms: ["No report", "Not found", "Empty", "No matching report"],
-  sonicDicomUnavailableStatusTerms: ["Unavailable", "Timeout", "Login failed"],
   sonicDicomTimeoutMs: 8000,
   sonicDicomStatusCacheTtlSeconds: 60,
   sonicDicomVerifyTls: true,
   allowPublicFallbackForStatusCheck: false,
   auditPatientReportAccess: true,
   auditReportStatusChecks: true,
+  sonicDicomSqlEnabled: false,
+  sonicDicomSqlServer: "",
+  sonicDicomSqlUsername: "",
+  sonicDicomSqlPassword: "",
+  sonicDicomSqlEncrypt: true,
+  sonicDicomSqlTrustServerCertificate: false,
+  sonicDicomSqlTimeoutMs: 8000,
+  sonicDicomDicomDatabaseName: "dicom",
+  sonicDicomReportDatabaseName: "report",
+  sonicDicomSqlFinalStatusCodes: [6],
+  sonicDicomSqlDraftStatusCodes: [1],
 };
 
 function normalize(raw: Record<string, unknown>): SonicSettings {
   return { ...DEFAULTS, ...(raw || {}) } as SonicSettings;
 }
 
-function asTerms(value: unknown): string {
-  return Array.isArray(value) ? value.join("\n") : String(value ?? "");
+function parseCodeList(value: string): number[] {
+  return value
+    .split(/[\n,]/)
+    .map((item) => Number(item.trim()))
+    .filter((item) => Number.isFinite(item))
+    .map((item) => Math.trunc(item));
 }
 
-function fromTerms(value: string): string[] {
-  return value.split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+function formatCodeList(value: unknown): string {
+  return Array.isArray(value) ? value.join(", ") : "";
 }
 
 function isValidUrl(value: unknown): boolean {
@@ -56,10 +70,6 @@ function isValidUrl(value: unknown): boolean {
   }
 }
 
-function hasLookupToken(template: string): boolean {
-  return template.includes("{{accessionNumber}}") || template.includes("{{studyInstanceUid}}");
-}
-
 export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDicomReportsSectionProps) {
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -69,8 +79,8 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
   const [form, setForm] = useState<SonicSettings>(DEFAULTS);
   const [message, setMessage] = useState("");
   const [testAccessionNumber, setTestAccessionNumber] = useState("");
-  const [testStudyInstanceUid, setTestStudyInstanceUid] = useState("");
-  const [testResult, setTestResult] = useState<SonicDicomLookupDebugResponse | null>(null);
+  const [testReportNo, setTestReportNo] = useState("");
+  const [testResult, setTestResult] = useState<SonicDicomSqlReadinessResponse | null>(null);
 
   useEffect(() => {
     if (data) setForm(normalize(data));
@@ -87,81 +97,59 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
     },
     onError: (err) => {
       const status = err instanceof ApiError ? err.status : undefined;
-      const message = err instanceof Error ? err.message : "";
-      if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+      const msg = err instanceof Error ? err.message : "";
+      if (status === 401 || status === 403 || msg.includes("re-authentication") || msg.includes("403")) {
         onReAuthRequired(["settings", "sonicdicom_reports"]);
         return;
       }
-      setMessage(message || "Failed to save settings.");
+      setMessage(msg || "Failed to save settings.");
     },
   });
-  const testLookupMutation = useMutation({
-    mutationFn: () =>
-      testSonicDicomLookup({
-        accessionNumber: testAccessionNumber.trim(),
-        studyInstanceUid: testStudyInstanceUid.trim() || undefined,
-        lookupKey: String(form.sonicDicomReportLookupKey || "accession_number") as
-          | "accession_number"
-          | "study_instance_uid"
-          | "prefer_study_uid_then_accession"
-          | "prefer_accession_then_study_uid",
+
+  const sqlTestMutation = useMutation({
+    mutationFn: (mode: "sql_connection" | "accession_to_study" | "report_status" | "full_readiness") =>
+      testSonicDicomSqlReadiness({
+        mode,
+        accessionNumber: testAccessionNumber.trim() || undefined,
+        reportNo: testReportNo.trim() || undefined,
       }),
     onSuccess: (result) => {
       setTestResult(result);
-      setMessage(`Lookup test completed: ${result.state}.`);
+      setMessage(`SQL test completed: ${result.normalizedState}.`);
     },
     onError: (err) => {
       const status = err instanceof ApiError ? err.status : undefined;
-      const message = err instanceof Error ? err.message : "";
-      if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+      const msg = err instanceof Error ? err.message : "";
+      if (status === 401 || status === 403 || msg.includes("re-authentication") || msg.includes("403")) {
         onReAuthRequired(["settings", "sonicdicom_reports"]);
         return;
       }
       setTestResult(null);
-      setMessage(message || "Lookup test failed.");
+      setMessage(msg || "SQL test failed.");
     },
   });
 
   const setValue = (key: string, value: SonicSettings[string]) => setForm((current) => ({ ...current, [key]: value }));
+
   const testPublicTemplate = () => {
-    const template = String(form.sonicDicomPublicReportViewerUrlTemplate || form.sonicDicomPublicPdfUrlTemplate || "");
-    if (!isValidUrl(form.sonicDicomPublicBaseUrl)) {
-      setMessage("Public SonicDICOM base URL is missing or malformed.");
-    } else if (!template.includes("{{publicBaseUrl}}") || !template.includes("{{username}}") || !template.includes("{{password}}") || !hasLookupToken(template)) {
-      setMessage("Public report template must include publicBaseUrl, username, password, and a lookup token.");
-    } else {
-      setMessage("Public report URL template is valid. Password values remain hidden.");
+    const baseUrl = String(form.sonicDicomPublicBaseUrl || "");
+    const template = String(form.sonicDicomPublicReportViewerUrlTemplate || "");
+    if (!isValidUrl(baseUrl)) {
+      setMessage("Public SonicDICOM base URL is malformed.");
+      return;
     }
-  };
-  const testInternalSettings = () => {
-    const baseUrl = String(form.sonicDicomInternalBaseUrl || "").trim();
-    const fallbackAllowed = Boolean(form.allowPublicFallbackForStatusCheck);
-    const effectiveBaseUrl = baseUrl || (fallbackAllowed ? String(form.sonicDicomPublicBaseUrl || "") : "");
-    const template = String(form.sonicDicomInternalSearchUrlTemplate || form.sonicDicomInternalReportViewerUrlTemplate || form.sonicDicomInternalPdfUrlTemplate || "");
-    if (!effectiveBaseUrl) {
-      setMessage("Internal SonicDICOM base URL is required unless public fallback is enabled.");
-    } else if (!isValidUrl(effectiveBaseUrl)) {
-      setMessage("Effective status-check base URL is malformed.");
-    } else if (!template || (!template.includes("{{internalBaseUrl}}") && !template.includes("{{publicBaseUrl}}")) || !hasLookupToken(template)) {
-      setMessage("Internal status template must include a base URL token and a lookup token.");
-    } else {
-      setMessage("Internal status-check settings are structurally valid. Use a real lookup endpoint to confirm searchable status content.");
+    if (!template.includes("{{publicBaseUrl}}") || !template.includes("{{username}}") || !template.includes("{{password}}")) {
+      setMessage("Public report template is missing required placeholders.");
+      return;
     }
-  };
-  const testLookupTemplate = (lookup: "accessionNumber" | "studyInstanceUid") => {
-    const template = String(form.sonicDicomInternalSearchUrlTemplate || form.sonicDicomInternalReportViewerUrlTemplate || form.sonicDicomInternalPdfUrlTemplate || "");
-    if (!template.includes(`{{${lookup}}}`)) {
-      setMessage(`Configured internal status template does not include {{${lookup}}}.`);
-    } else {
-      setMessage(`${lookup === "accessionNumber" ? "Accession number" : "StudyInstanceUID"} lookup token is present in the internal status template.`);
-    }
+    setMessage("Public patient-facing report URL template looks valid.");
   };
 
   if (isLoading) return <p className="text-sm text-stone-500">Loading SonicDICOM report settings...</p>;
   if (error) {
     const status = error instanceof ApiError ? error.status : undefined;
-    const message = error instanceof Error ? error.message : "";
-    if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+    const msg = error instanceof Error ? error.message : "";
+    if (status === 401 || status === 403 || msg.includes("re-authentication") || msg.includes("403")) {
       return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "sonicdicom_reports"])} />;
     }
     return <p className="text-sm text-red-700">Failed to load SonicDICOM report settings.</p>;
@@ -170,58 +158,80 @@ export default function SonicDicomReportsSection({ onReAuthRequired }: SonicDico
   return (
     <div className="space-y-5">
       <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        Public URL settings are used only for patient redirects after RISpro confirms a final report. Internal/local URL settings are used only by the RISpro backend for status checks.
+        SQL Server is the active readiness authority in production mode. Patient redirect still uses the public SonicDICOM browser URL template after final status confirmation.
       </div>
 
-      <FieldCard title="Public patient-facing URL">
+      <FieldCard title="Public Patient-Facing URL">
         <Input label="Public SonicDICOM base URL" value={String(form.sonicDicomPublicBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomPublicBaseUrl", value)} />
         <Textarea label="Public report viewer URL template" value={String(form.sonicDicomPublicReportViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicReportViewerUrlTemplate", value)} />
         <Textarea label="Public PDF URL template" value={String(form.sonicDicomPublicPdfUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomPublicPdfUrlTemplate", value)} />
         <button type="button" onClick={testPublicTemplate} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test public report URL template</button>
       </FieldCard>
 
-      <FieldCard title="Internal/local RISpro check URL">
-        <Input label="Internal SonicDICOM base URL" value={String(form.sonicDicomInternalBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomInternalBaseUrl", value)} />
-        <Textarea label="Internal search URL template" value={String(form.sonicDicomInternalSearchUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomInternalSearchUrlTemplate", value)} />
-        <Textarea label="Internal report viewer URL template" value={String(form.sonicDicomInternalReportViewerUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomInternalReportViewerUrlTemplate", value)} />
-        <Textarea label="Internal PDF URL template" value={String(form.sonicDicomInternalPdfUrlTemplate ?? "")} onChange={(value) => setValue("sonicDicomInternalPdfUrlTemplate", value)} />
-        <Toggle label="Allow fallback to public URL for status checks" checked={Boolean(form.allowPublicFallbackForStatusCheck)} onChange={(checked) => setValue("allowPublicFallbackForStatusCheck", checked)} />
-        <button type="button" onClick={testInternalSettings} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test internal connection</button>
+      <FieldCard title="Readiness Mode">
+        <Toggle label="Enable SonicDICOM report integration" checked={Boolean(form.sonicDicomReportsEnabled)} onChange={(checked) => setValue("sonicDicomReportsEnabled", checked)} />
+        <Select
+          label="Readiness mode"
+          value={String(form.sonicDicomReadinessMode ?? "sql_server")}
+          options={["sql_server", "api (legacy diagnostic)", "html_scrape (legacy diagnostic)"]}
+          onChange={(value) => setValue("sonicDicomReadinessMode", value.startsWith("api") ? "api" : value.startsWith("html_scrape") ? "html_scrape" : "sql_server")}
+        />
+        <p className="text-xs text-slate-600">
+          `sql_server` is the production mode. `api` and `html_scrape` are legacy diagnostic modes and are not recommended for finality.
+        </p>
       </FieldCard>
 
-      <FieldCard title="Authentication and lookup">
-        <Toggle label="Enable SonicDICOM report integration" checked={Boolean(form.sonicDicomReportsEnabled)} onChange={(checked) => setValue("sonicDicomReportsEnabled", checked)} />
-        <Input label="Viewer username" value={String(form.sonicDicomReportViewerUsername ?? "")} onChange={(value) => setValue("sonicDicomReportViewerUsername", value)} />
-        <Input label="Viewer password" type="password" value={String(form.sonicDicomReportViewerPassword ?? "")} onChange={(value) => setValue("sonicDicomReportViewerPassword", value)} />
-        <Select label="Lookup key preference" value={String(form.sonicDicomReportLookupKey ?? "accession_number")} options={["accession_number", "study_instance_uid", "prefer_study_uid_then_accession", "prefer_accession_then_study_uid"]} onChange={(value) => setValue("sonicDicomReportLookupKey", value)} />
-        <Select label="Search mode" value={String(form.sonicDicomSearchMode ?? "auto")} options={["auto", "api", "html_scrape"]} onChange={(value) => setValue("sonicDicomSearchMode", value)} />
-        <Input label="Timeout (ms)" type="number" value={String(form.sonicDicomTimeoutMs ?? 8000)} onChange={(value) => setValue("sonicDicomTimeoutMs", Number(value))} />
-        <Input label="Status cache TTL (seconds)" type="number" value={String(form.sonicDicomStatusCacheTtlSeconds ?? 60)} onChange={(value) => setValue("sonicDicomStatusCacheTtlSeconds", Number(value))} />
-        <Toggle label="Verify TLS" checked={Boolean(form.sonicDicomVerifyTls)} onChange={(checked) => setValue("sonicDicomVerifyTls", checked)} />
-        <button type="button" onClick={() => testLookupTemplate("accessionNumber")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test lookup by accession number</button>
-        <button type="button" onClick={() => testLookupTemplate("studyInstanceUid")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test lookup by StudyInstanceUID</button>
-        <Input label="Test accession number (manual)" value={testAccessionNumber} onChange={setTestAccessionNumber} />
-        <Input label="Test StudyInstanceUID (optional)" value={testStudyInstanceUid} onChange={setTestStudyInstanceUid} />
-        <button
-          type="button"
-          onClick={() => testLookupMutation.mutate()}
-          className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60"
-          disabled={testLookupMutation.isPending || (!testAccessionNumber.trim() && !testStudyInstanceUid.trim())}
-        >
-          {testLookupMutation.isPending ? "Testing..." : "Run real lookup test"}
-        </button>
+      <FieldCard title="SQL Server Readiness">
+        <Toggle label="Enable SQL readiness lookup" checked={Boolean(form.sonicDicomSqlEnabled)} onChange={(checked) => setValue("sonicDicomSqlEnabled", checked)} />
+        <Input label="SQL Server host" value={String(form.sonicDicomSqlServer ?? "")} onChange={(value) => setValue("sonicDicomSqlServer", value)} />
+        <Input label="SQL username" value={String(form.sonicDicomSqlUsername ?? "")} onChange={(value) => setValue("sonicDicomSqlUsername", value)} />
+        <Input label="SQL password" type="password" value={String(form.sonicDicomSqlPassword ?? "")} onChange={(value) => setValue("sonicDicomSqlPassword", value)} />
+        <Toggle label="Encrypt SQL connection" checked={Boolean(form.sonicDicomSqlEncrypt)} onChange={(checked) => setValue("sonicDicomSqlEncrypt", checked)} />
+        <Toggle label="Trust server certificate" checked={Boolean(form.sonicDicomSqlTrustServerCertificate)} onChange={(checked) => setValue("sonicDicomSqlTrustServerCertificate", checked)} />
+        <Input label="SQL timeout (ms)" type="number" value={String(form.sonicDicomSqlTimeoutMs ?? 8000)} onChange={(value) => setValue("sonicDicomSqlTimeoutMs", Number(value))} />
+        <Input label="DICOM database name" value={String(form.sonicDicomDicomDatabaseName ?? "dicom")} onChange={(value) => setValue("sonicDicomDicomDatabaseName", value)} />
+        <Input label="Report database name" value={String(form.sonicDicomReportDatabaseName ?? "report")} onChange={(value) => setValue("sonicDicomReportDatabaseName", value)} />
+        <Input
+          label="Final status codes"
+          value={formatCodeList(form.sonicDicomSqlFinalStatusCodes)}
+          onChange={(value) => setValue("sonicDicomSqlFinalStatusCodes", parseCodeList(value))}
+        />
+        <Input
+          label="Draft status codes"
+          value={formatCodeList(form.sonicDicomSqlDraftStatusCodes)}
+          onChange={(value) => setValue("sonicDicomSqlDraftStatusCodes", parseCodeList(value))}
+        />
+      </FieldCard>
+
+      <FieldCard title="Optional Internal Resolver API (Report Number Only)">
+        <Input label="Internal SonicDICOM base URL" value={String(form.sonicDicomInternalBaseUrl ?? "")} onChange={(value) => setValue("sonicDicomInternalBaseUrl", value)} />
+        <p className="text-xs text-slate-600">
+          This internal URL is used only as fallback to resolve report number from StudyInstanceUID (`/api/reports/fromstudy`), never as finality authority.
+        </p>
+      </FieldCard>
+
+      <FieldCard title="SQL Readiness Tests">
+        <Input label="Test accession number" value={testAccessionNumber} onChange={setTestAccessionNumber} />
+        <Input label="Test report number" value={testReportNo} onChange={setTestReportNo} />
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => sqlTestMutation.mutate("sql_connection")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60" disabled={sqlTestMutation.isPending}>
+            Test SQL connection
+          </button>
+          <button type="button" onClick={() => sqlTestMutation.mutate("accession_to_study")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60" disabled={sqlTestMutation.isPending || !testAccessionNumber.trim()}>
+            Test accession to StudyInstanceUID
+          </button>
+          <button type="button" onClick={() => sqlTestMutation.mutate("report_status")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60" disabled={sqlTestMutation.isPending || !testReportNo.trim()}>
+            Test report status by report number
+          </button>
+          <button type="button" onClick={() => sqlTestMutation.mutate("full_readiness")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60" disabled={sqlTestMutation.isPending || !testAccessionNumber.trim()}>
+            Test full SQL readiness by accession number
+          </button>
+        </div>
         {testResult ? (
           <pre className="overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
 {JSON.stringify(testResult, null, 2)}
           </pre>
         ) : null}
-      </FieldCard>
-
-      <FieldCard title="Status terms">
-        <Textarea label="Final status terms" value={asTerms(form.sonicDicomFinalStatusTerms)} onChange={(value) => setValue("sonicDicomFinalStatusTerms", fromTerms(value))} />
-        <Textarea label="Draft/in-review status terms" value={asTerms(form.sonicDicomDraftStatusTerms)} onChange={(value) => setValue("sonicDicomDraftStatusTerms", fromTerms(value))} />
-        <Textarea label="No-report status terms" value={asTerms(form.sonicDicomNoReportStatusTerms)} onChange={(value) => setValue("sonicDicomNoReportStatusTerms", fromTerms(value))} />
-        <Textarea label="Unavailable status terms" value={asTerms(form.sonicDicomUnavailableStatusTerms)} onChange={(value) => setValue("sonicDicomUnavailableStatusTerms", fromTerms(value))} />
       </FieldCard>
 
       <button
@@ -245,11 +255,7 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
       <p className="mt-1 text-sm leading-7 text-amber-800">
         Supervisor re-authentication is required before modifying SonicDICOM report settings.
       </p>
-      <button
-        type="button"
-        onClick={onReAuthRequired}
-        className="mt-3 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white"
-      >
+      <button type="button" onClick={onReAuthRequired} className="mt-3 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
         Re-authenticate
       </button>
     </div>
@@ -269,7 +275,12 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
   return (
     <label className="block text-sm font-semibold text-slate-700">
       {props.label}
-      <input type={props.type || "text"} value={props.value} onChange={(e) => props.onChange(e.target.value)} className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm" />
+      <input
+        type={props.type || "text"}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+      />
     </label>
   );
 }

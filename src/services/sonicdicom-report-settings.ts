@@ -7,6 +7,7 @@ export type SonicDicomLookupKey =
   | "prefer_accession_then_study_uid";
 
 export type SonicDicomSearchMode = "api" | "html_scrape" | "auto";
+export type SonicDicomReadinessMode = "sql_server" | "api" | "html_scrape";
 
 export interface SonicDicomReportSettings {
   sonicDicomReportsEnabled: boolean;
@@ -20,6 +21,7 @@ export interface SonicDicomReportSettings {
   sonicDicomReportViewerUsername: string;
   sonicDicomReportViewerPassword: string;
   sonicDicomReportLookupKey: SonicDicomLookupKey;
+  sonicDicomReadinessMode: SonicDicomReadinessMode;
   sonicDicomSearchMode: SonicDicomSearchMode;
   sonicDicomFinalStatusTerms: string[];
   sonicDicomDraftStatusTerms: string[];
@@ -31,6 +33,17 @@ export interface SonicDicomReportSettings {
   allowPublicFallbackForStatusCheck: boolean;
   auditPatientReportAccess: boolean;
   auditReportStatusChecks: boolean;
+  sonicDicomSqlEnabled: boolean;
+  sonicDicomSqlServer: string;
+  sonicDicomSqlUsername: string;
+  sonicDicomSqlPassword: string;
+  sonicDicomSqlEncrypt: boolean;
+  sonicDicomSqlTrustServerCertificate: boolean;
+  sonicDicomSqlTimeoutMs: number;
+  sonicDicomDicomDatabaseName: string;
+  sonicDicomReportDatabaseName: string;
+  sonicDicomSqlFinalStatusCodes: number[];
+  sonicDicomSqlDraftStatusCodes: number[];
 }
 
 export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
@@ -49,6 +62,7 @@ export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
   sonicDicomReportViewerUsername: "patient",
   sonicDicomReportViewerPassword: "patient",
   sonicDicomReportLookupKey: "accession_number",
+  sonicDicomReadinessMode: "sql_server",
   sonicDicomSearchMode: "auto",
   sonicDicomFinalStatusTerms: ["Final", "Signed", "Approved"],
   sonicDicomDraftStatusTerms: ["Draft", "Preliminary", "In review", "Unsigned"],
@@ -60,6 +74,17 @@ export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
   allowPublicFallbackForStatusCheck: false,
   auditPatientReportAccess: true,
   auditReportStatusChecks: true,
+  sonicDicomSqlEnabled: false,
+  sonicDicomSqlServer: "",
+  sonicDicomSqlUsername: "",
+  sonicDicomSqlPassword: "",
+  sonicDicomSqlEncrypt: true,
+  sonicDicomSqlTrustServerCertificate: false,
+  sonicDicomSqlTimeoutMs: 8000,
+  sonicDicomDicomDatabaseName: "dicom",
+  sonicDicomReportDatabaseName: "report",
+  sonicDicomSqlFinalStatusCodes: [6],
+  sonicDicomSqlDraftStatusCodes: [1],
 };
 
 function readRawValue(value: unknown): unknown {
@@ -95,6 +120,22 @@ function asPositiveInteger(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 }
 
+function asNumberArray(value: unknown, fallback: number[]): number[] {
+  if (Array.isArray(value)) {
+    const parsed = value.map((item) => Number(item)).filter((item) => Number.isFinite(item)).map((item) => Math.trunc(item));
+    return parsed.length ? parsed : [...fallback];
+  }
+  if (typeof value === "string") {
+    const parsed = value
+      .split(/[,\n]/)
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isFinite(item))
+      .map((item) => Math.trunc(item));
+    return parsed.length ? parsed : [...fallback];
+  }
+  return [...fallback];
+}
+
 function asLookupKey(value: unknown): SonicDicomLookupKey {
   const raw = asString(value, DEFAULT_SONICDICOM_REPORT_SETTINGS.sonicDicomReportLookupKey);
   if (
@@ -113,6 +154,11 @@ function asSearchMode(value: unknown): SonicDicomSearchMode {
   return raw === "api" || raw === "html_scrape" || raw === "auto" ? raw : DEFAULT_SONICDICOM_REPORT_SETTINGS.sonicDicomSearchMode;
 }
 
+function asReadinessMode(value: unknown): SonicDicomReadinessMode {
+  const raw = asString(value, DEFAULT_SONICDICOM_REPORT_SETTINGS.sonicDicomReadinessMode);
+  return raw === "sql_server" || raw === "api" || raw === "html_scrape" ? raw : DEFAULT_SONICDICOM_REPORT_SETTINGS.sonicDicomReadinessMode;
+}
+
 export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomReportSettings {
   const record = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
   const defaults = DEFAULT_SONICDICOM_REPORT_SETTINGS;
@@ -128,6 +174,7 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     sonicDicomReportViewerUsername: asString(record.sonicDicomReportViewerUsername, defaults.sonicDicomReportViewerUsername),
     sonicDicomReportViewerPassword: asString(record.sonicDicomReportViewerPassword, defaults.sonicDicomReportViewerPassword),
     sonicDicomReportLookupKey: asLookupKey(record.sonicDicomReportLookupKey),
+    sonicDicomReadinessMode: asReadinessMode(record.sonicDicomReadinessMode),
     sonicDicomSearchMode: asSearchMode(record.sonicDicomSearchMode),
     sonicDicomFinalStatusTerms: asStringArray(record.sonicDicomFinalStatusTerms, defaults.sonicDicomFinalStatusTerms),
     sonicDicomDraftStatusTerms: asStringArray(record.sonicDicomDraftStatusTerms, defaults.sonicDicomDraftStatusTerms),
@@ -139,6 +186,17 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     allowPublicFallbackForStatusCheck: asBoolean(record.allowPublicFallbackForStatusCheck, defaults.allowPublicFallbackForStatusCheck),
     auditPatientReportAccess: asBoolean(record.auditPatientReportAccess, defaults.auditPatientReportAccess),
     auditReportStatusChecks: asBoolean(record.auditReportStatusChecks, defaults.auditReportStatusChecks),
+    sonicDicomSqlEnabled: asBoolean(record.sonicDicomSqlEnabled, defaults.sonicDicomSqlEnabled),
+    sonicDicomSqlServer: asString(record.sonicDicomSqlServer, defaults.sonicDicomSqlServer),
+    sonicDicomSqlUsername: asString(record.sonicDicomSqlUsername, defaults.sonicDicomSqlUsername),
+    sonicDicomSqlPassword: asString(record.sonicDicomSqlPassword, defaults.sonicDicomSqlPassword),
+    sonicDicomSqlEncrypt: asBoolean(record.sonicDicomSqlEncrypt, defaults.sonicDicomSqlEncrypt),
+    sonicDicomSqlTrustServerCertificate: asBoolean(record.sonicDicomSqlTrustServerCertificate, defaults.sonicDicomSqlTrustServerCertificate),
+    sonicDicomSqlTimeoutMs: asPositiveInteger(record.sonicDicomSqlTimeoutMs, defaults.sonicDicomSqlTimeoutMs),
+    sonicDicomDicomDatabaseName: asString(record.sonicDicomDicomDatabaseName, defaults.sonicDicomDicomDatabaseName),
+    sonicDicomReportDatabaseName: asString(record.sonicDicomReportDatabaseName, defaults.sonicDicomReportDatabaseName),
+    sonicDicomSqlFinalStatusCodes: asNumberArray(record.sonicDicomSqlFinalStatusCodes, defaults.sonicDicomSqlFinalStatusCodes),
+    sonicDicomSqlDraftStatusCodes: asNumberArray(record.sonicDicomSqlDraftStatusCodes, defaults.sonicDicomSqlDraftStatusCodes),
   };
 }
 

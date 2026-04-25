@@ -61,7 +61,7 @@ import {
   importCatalogWorkbook,
   previewCatalogWorkbook
 } from "../services/settings-catalog-import-export-service.js";
-import { testSonicDicomReportStatusLookup } from "../services/sonicdicom-report-service.js";
+import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -329,41 +329,35 @@ settingsRouter.put(
 );
 
 settingsRouter.post(
-  "/sonicdicom_reports/test-lookup",
+  "/sonicdicom_reports/test-readiness",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
     const body = asUnknownRecord(request.body ?? {});
+    const mode = asString(body.mode).trim();
     const accessionNumber = asString(body.accessionNumber).trim();
-    const studyInstanceUid = asString(body.studyInstanceUid).trim();
-    const rawLookupKey = asString(body.lookupKey).trim();
-    const lookupKey =
-      rawLookupKey === "accession_number" ||
-      rawLookupKey === "study_instance_uid" ||
-      rawLookupKey === "prefer_study_uid_then_accession" ||
-      rawLookupKey === "prefer_accession_then_study_uid"
-        ? rawLookupKey
-        : undefined;
+    const reportNo = asString(body.reportNo).trim();
+    const selectedMode =
+      mode === "sql_connection" ||
+      mode === "accession_to_study" ||
+      mode === "report_status" ||
+      mode === "full_readiness"
+        ? mode
+        : "full_readiness";
 
-    if (!accessionNumber && !studyInstanceUid) {
-      res.status(400).json({ error: "Provide an accession number or StudyInstanceUID for lookup testing." });
-      return;
-    }
-
-    const result = await testSonicDicomReportStatusLookup({
+    const result = await testSonicDicomSqlReadiness({
+      mode: selectedMode,
       accessionNumber,
-      studyInstanceUid: studyInstanceUid || null,
-      lookupKey,
+      reportNo,
     });
 
     res.json({
       ok: true,
-      state: result.state,
+      foundStudy: result.foundStudy,
+      foundReport: result.foundReport,
+      normalizedState: result.normalizedState,
       canViewReport: result.canViewReport,
-      source: result.source,
-      baseUrlSource: result.baseUrlSource,
-      lookupTried: result.lookupTried,
-      steps: result.steps,
-      diagnostics: result.diagnostics,
+      statusCode: result.statusCode,
+      diagnostic: result.diagnostic,
     });
   })
 );

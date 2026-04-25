@@ -722,30 +722,22 @@ export async function fetchSonicDicomSettings(): Promise<Record<string, unknown>
   return {};
 }
 
-export interface SonicDicomLookupDebugStep {
-  lookupTarget: "accession_number" | "study_instance_uid";
-  requestUrlPreview: string;
-  contentType: string;
-  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
-}
-
-export interface SonicDicomLookupDebugResponse {
+export interface SonicDicomSqlReadinessResponse {
   ok: boolean;
-  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
+  foundStudy: boolean;
+  foundReport: boolean;
+  normalizedState: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
   canViewReport: boolean;
-  source: "sonicdicom" | "rispro";
-  baseUrlSource: "internal" | "public_fallback" | "none";
-  lookupTried: Array<"accession_number" | "study_instance_uid">;
-  steps: SonicDicomLookupDebugStep[];
-  diagnostics?: string[];
+  statusCode: number | null;
+  diagnostic: string;
 }
 
-export async function testSonicDicomLookup(payload: {
-  accessionNumber: string;
-  studyInstanceUid?: string;
-  lookupKey?: "accession_number" | "study_instance_uid" | "prefer_study_uid_then_accession" | "prefer_accession_then_study_uid";
-}): Promise<SonicDicomLookupDebugResponse> {
-  return api<SonicDicomLookupDebugResponse>("/settings/sonicdicom_reports/test-lookup", {
+export async function testSonicDicomSqlReadiness(payload: {
+  mode: "sql_connection" | "accession_to_study" | "report_status" | "full_readiness";
+  accessionNumber?: string;
+  reportNo?: string;
+}): Promise<SonicDicomSqlReadinessResponse> {
+  return api<SonicDicomSqlReadinessResponse>("/settings/sonicdicom_reports/test-readiness", {
     method: "POST",
     body: JSON.stringify(payload),
   });

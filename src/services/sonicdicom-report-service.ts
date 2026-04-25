@@ -25,18 +25,13 @@ export interface ReportStatusResult {
   source: "sonicdicom" | "rispro";
 }
 
-export interface SonicDicomLookupDebugStep {
-  lookupTarget: "accession_number" | "study_instance_uid";
-  requestUrlPreview: string;
-  contentType: string;
-  state: SonicDicomReportState;
-}
-
-export interface SonicDicomLookupDebugResult extends ReportStatusResult {
-  baseUrlSource: "internal" | "public_fallback" | "none";
-  lookupTried: Array<"accession_number" | "study_instance_uid">;
-  steps: SonicDicomLookupDebugStep[];
-  diagnostics: string[];
+export interface SonicDicomSqlTestResult {
+  foundStudy: boolean;
+  foundReport: boolean;
+  normalizedState: SonicDicomReportState;
+  canViewReport: boolean;
+  statusCode: number | null;
+  diagnostic: string;
 }
 
 interface CacheEntry {
@@ -44,40 +39,442 @@ interface CacheEntry {
   result: ReportStatusResult;
 }
 
+type SqlModule = {
+  ConnectionPool: new (config: unknown) => {
+    connect: () => Promise<void>;
+    close: () => Promise<void>;
+    request: () => {
+      input: (name: string, type: unknown, value: unknown) => unknown;
+      query: <T = unknown>(sql: string) => Promise<{ recordset: T[] }>;
+    };
+  };
+  NVarChar: (size?: number) => unknown;
+  Int: unknown;
+};
+
 const statusCache = new Map<number, CacheEntry>();
 
-function containsAnyTerm(content: string, terms: string[]): boolean {
-  const haystack = content.toLowerCase();
-  return terms.some((term) => term.trim() && haystack.includes(term.trim().toLowerCase()));
+function validateDatabaseName(name: string, fallback: string): string {
+  const trimmed = String(name || "").trim() || fallback;
+  if (!/^[A-Za-z0-9_]+$/.test(trimmed)) return fallback;
+  return trimmed;
 }
 
-function flattenJson(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return value.map(flattenJson).join(" ");
-  if (typeof value === "object") return Object.values(value as Record<string, unknown>).map(flattenJson).join(" ");
-  return "";
+async function loadSqlModule(): Promise<SqlModule | null> {
+  try {
+    const importer = new Function("specifier", "return import(specifier)") as (specifier: string) => Promise<SqlModule>;
+    return await importer("mssql");
+  } catch {
+    return null;
+  }
 }
 
-function normalizeFetchedStatus(content: string, settings: SonicDicomReportSettings): SonicDicomReportState {
-  const finalDetected = containsAnyTerm(content, settings.sonicDicomFinalStatusTerms);
-  const draftDetected = containsAnyTerm(content, settings.sonicDicomDraftStatusTerms);
-  const noReportDetected = containsAnyTerm(content, settings.sonicDicomNoReportStatusTerms);
-  const unavailableDetected = containsAnyTerm(content, settings.sonicDicomUnavailableStatusTerms);
+async function withSqlConnection<T>(
+  settings: SonicDicomReportSettings,
+  work: (ctx: { sql: SqlModule; pool: any }) => Promise<T>
+): Promise<T> {
+  const sql = await loadSqlModule();
+  if (!sql) throw new HttpError(503, "SQL readiness mode requires the 'mssql' package at runtime.");
+  if (!settings.sonicDicomSqlEnabled) throw new HttpError(503, "SonicDICOM SQL readiness is disabled.");
+  if (!settings.sonicDicomSqlServer.trim()) throw new HttpError(503, "SonicDICOM SQL server is not configured.");
+  if (!settings.sonicDicomSqlUsername.trim()) throw new HttpError(503, "SonicDICOM SQL username is not configured.");
 
-  if (unavailableDetected) return "unavailable";
-  if (finalDetected && draftDetected) return "unavailable";
-  if (finalDetected) return "final";
-  if (draftDetected) return "draft";
-  if (noReportDetected) return "no_report";
-  return "unavailable";
+  const pool = new sql.ConnectionPool({
+    server: settings.sonicDicomSqlServer.trim(),
+    user: settings.sonicDicomSqlUsername.trim(),
+    password: settings.sonicDicomSqlPassword,
+    options: {
+      encrypt: Boolean(settings.sonicDicomSqlEncrypt),
+      trustServerCertificate: Boolean(settings.sonicDicomSqlTrustServerCertificate),
+      enableArithAbort: true,
+    },
+    requestTimeout: settings.sonicDicomSqlTimeoutMs,
+    connectionTimeout: settings.sonicDicomSqlTimeoutMs,
+  });
+
+  await pool.connect();
+  try {
+    return await work({ sql, pool });
+  } finally {
+    await pool.close().catch(() => null);
+  }
+}
+
+async function queryStudyUidByAccession(
+  pool: any,
+  sql: SqlModule,
+  dicomDb: string,
+  accessionNumber: string
+): Promise<string | null> {
+  const request = pool.request();
+  request.input("accessionNumber", sql.NVarChar(128), accessionNumber);
+  const result = await request.query<{ StudyInstanceUID?: string }>(
+    `select top 1 StudyInstanceUID
+     from [${dicomDb}].[dbo].[Studies]
+     where AccessionNumber = @accessionNumber
+     order by StudyDate desc, StudyTime desc`
+  );
+  return String(result.recordset?.[0]?.StudyInstanceUID || "").trim() || null;
+}
+
+async function hasDocumentsStudyUidColumn(pool: any, sql: SqlModule, reportDb: string): Promise<boolean> {
+  const result = await pool
+    .request()
+    .input("schemaName", sql.NVarChar(128), "dbo")
+    .input("tableName", sql.NVarChar(128), "Documents")
+    .input("columnName", sql.NVarChar(128), "StudyInstanceUID")
+    .query<{ exists_flag?: number }>(
+      `select top 1 1 as exists_flag
+       from [${reportDb}].INFORMATION_SCHEMA.COLUMNS
+       where TABLE_SCHEMA = @schemaName
+         and TABLE_NAME = @tableName
+         and COLUMN_NAME = @columnName`
+    );
+  return Number(result.recordset?.[0]?.exists_flag || 0) === 1;
+}
+
+async function queryReportNoByStudyUidFromSql(
+  pool: any,
+  sql: SqlModule,
+  reportDb: string,
+  studyInstanceUid: string
+): Promise<string | null> {
+  if (!(await hasDocumentsStudyUidColumn(pool, sql, reportDb))) return null;
+  const request = pool.request();
+  request.input("studyInstanceUid", sql.NVarChar(255), studyInstanceUid);
+  const result = await request.query<{ Report?: string | number }>(
+    `select top 1 Report
+     from [${reportDb}].[dbo].[Documents]
+     where StudyInstanceUID = @studyInstanceUid
+     order by UpdatedAt desc`
+  );
+  const reportNo = result.recordset?.[0]?.Report;
+  return reportNo == null ? null : String(reportNo).trim() || null;
+}
+
+async function resolveReportNoFromInternalApi(settings: SonicDicomReportSettings, studyInstanceUid: string): Promise<string | null> {
+  const baseUrl = settings.sonicDicomInternalBaseUrl.trim();
+  if (!baseUrl) return null;
+  try {
+    const url = new URL("/api/reports/fromstudy", baseUrl.replace(/\/+$/, "/"));
+    url.searchParams.set("uid", studyInstanceUid);
+    const response = await fetch(url.toString(), { method: "GET" });
+    if (!response.ok) return null;
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (!contentType.includes("application/json")) return null;
+    const data = (await response.json()) as Record<string, unknown>;
+    const candidate = data.reportNo ?? data.report_no ?? data.report ?? data.id;
+    const value = String(candidate ?? "").trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function queryReportStatusByReportNo(
+  pool: any,
+  sql: SqlModule,
+  reportDb: string,
+  reportNo: string
+): Promise<{ statusCode: number | null; foundRow: boolean }> {
+  const request = pool.request();
+  request.input("reportNo", sql.NVarChar(128), reportNo);
+  const result = await request.query<{ Status?: number }>(
+    `select top 1 Status
+     from [${reportDb}].[dbo].[Documents]
+     where Report = @reportNo
+     order by UpdatedAt desc`
+  );
+  const row = result.recordset?.[0];
+  if (!row) return { statusCode: null, foundRow: false };
+  const numeric = Number(row.Status);
+  return { statusCode: Number.isFinite(numeric) ? Math.trunc(numeric) : null, foundRow: true };
+}
+
+function mapStatusCode(settings: SonicDicomReportSettings, statusCode: number | null): ReportStatusResult {
+  if (statusCode == null) return { state: "no_report", canViewReport: false, source: "sonicdicom" };
+  if (settings.sonicDicomSqlFinalStatusCodes.includes(statusCode)) return { state: "final", canViewReport: true, source: "sonicdicom" };
+  if (settings.sonicDicomSqlDraftStatusCodes.includes(statusCode)) return { state: "draft", canViewReport: false, source: "sonicdicom" };
+  return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+}
+
+async function resolveSqlReadiness(
+  settings: SonicDicomReportSettings,
+  context: { accessionNumber: string; studyInstanceUid: string | null }
+): Promise<{ foundStudy: boolean; foundReport: boolean; statusCode: number | null; result: ReportStatusResult; diagnostic: string }> {
+  const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+  const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
+  return withSqlConnection(settings, async ({ sql, pool }) => {
+    const accession = String(context.accessionNumber || "").trim();
+    let studyUid = String(context.studyInstanceUid || "").trim() || null;
+
+    if (!studyUid) {
+      if (!accession) {
+        return {
+          foundStudy: false,
+          foundReport: false,
+          statusCode: null,
+          result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+          diagnostic: "No accession number was provided for SQL readiness lookup.",
+        };
+      }
+      studyUid = await queryStudyUidByAccession(pool, sql, dicomDb, accession);
+    }
+
+    if (!studyUid) {
+      return {
+        foundStudy: false,
+        foundReport: false,
+        statusCode: null,
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        diagnostic: "No matching StudyInstanceUID was found in dicom.dbo.Studies.",
+      };
+    }
+
+    let reportNo = await queryReportNoByStudyUidFromSql(pool, sql, reportDb, studyUid);
+    if (!reportNo) {
+      reportNo = await resolveReportNoFromInternalApi(settings, studyUid);
+    }
+
+    if (!reportNo) {
+      return {
+        foundStudy: true,
+        foundReport: false,
+        statusCode: null,
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        diagnostic: "No report number could be resolved for the study.",
+      };
+    }
+
+    const statusLookup = await queryReportStatusByReportNo(pool, sql, reportDb, reportNo);
+    if (!statusLookup.foundRow) {
+      return {
+        foundStudy: true,
+        foundReport: true,
+        statusCode: null,
+        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        diagnostic: "No matching row was found in report.dbo.Documents for the resolved report number.",
+      };
+    }
+
+    const mapped = mapStatusCode(settings, statusLookup.statusCode);
+    return {
+      foundStudy: true,
+      foundReport: true,
+      statusCode: statusLookup.statusCode,
+      result: mapped,
+      diagnostic:
+        mapped.state === "unavailable"
+          ? "Document status code is unknown for current SQL mapping and was treated as unavailable."
+          : "SQL readiness lookup completed.",
+    };
+  });
+}
+
+export function messageForReportState(
+  state: SonicDicomReportState,
+  settings: {
+    qrReportFinalMessage?: string;
+    qrReportDraftMessage?: string;
+    qrReportNoReportMessage?: string;
+    qrReportUnavailableMessage?: string;
+    qrReportNotRequiredMessage?: string;
+    qrReportNotCompletedMessage?: string;
+  }
+): string {
+  if (state === "final") return settings.qrReportFinalMessage || "";
+  if (state === "draft") return settings.qrReportDraftMessage || "";
+  if (state === "no_report") return settings.qrReportNoReportMessage || "";
+  if (state === "not_required") return settings.qrReportNotRequiredMessage || "";
+  if (state === "not_completed") return settings.qrReportNotCompletedMessage || "";
+  return settings.qrReportUnavailableMessage || "";
+}
+
+export async function checkSonicDicomReportStatus(
+  context: ReportLookupContext,
+  options: { useCache?: boolean } = {}
+): Promise<ReportStatusResult> {
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro" };
+
+  if (settings.sonicDicomReadinessMode !== "sql_server") {
+    return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+  }
+
+  if (options.useCache !== false) {
+    const cached = statusCache.get(context.bookingId);
+    if (cached && cached.expiresAt > Date.now()) return cached.result;
+  }
+
+  let result: ReportStatusResult = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+  try {
+    const resolved = await resolveSqlReadiness(settings, {
+      accessionNumber: context.accessionNumber,
+      studyInstanceUid: context.studyInstanceUid,
+    });
+    result = resolved.result;
+  } catch {
+    result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+  }
+
+  const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
+  if (ttlMs > 0) statusCache.set(context.bookingId, { result, expiresAt: Date.now() + ttlMs });
+
+  if (settings.auditReportStatusChecks) {
+    await logAuditEntry({
+      entityType: "patient_report",
+      entityId: context.bookingId,
+      actionType: `report_status_${result.state}`,
+      oldValues: null,
+      newValues: { state: result.state, canViewReport: result.canViewReport },
+      changedByUserId: null,
+    }).catch(() => null);
+  }
+
+  return result;
+}
+
+export async function testSonicDicomSqlReadiness(input: {
+  mode: "sql_connection" | "accession_to_study" | "report_status" | "full_readiness";
+  accessionNumber?: string;
+  reportNo?: string;
+}): Promise<SonicDicomSqlTestResult> {
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled) {
+    return {
+      foundStudy: false,
+      foundReport: false,
+      normalizedState: "disabled",
+      canViewReport: false,
+      statusCode: null,
+      diagnostic: "SonicDICOM integration is disabled.",
+    };
+  }
+
+  if (settings.sonicDicomReadinessMode !== "sql_server") {
+    return {
+      foundStudy: false,
+      foundReport: false,
+      normalizedState: "unavailable",
+      canViewReport: false,
+      statusCode: null,
+      diagnostic: "Readiness mode is not SQL Server. Set sonicDicomReadinessMode to sql_server.",
+    };
+  }
+
+  try {
+    const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+    const reportDb = validateDatabaseName(settings.sonicDicomReportDatabaseName, "report");
+
+    if (input.mode === "sql_connection") {
+      await withSqlConnection(settings, async ({ pool }) => {
+        await pool.request().query("select 1 as ok");
+      });
+      return {
+        foundStudy: false,
+        foundReport: false,
+        normalizedState: "no_report",
+        canViewReport: false,
+        statusCode: null,
+        diagnostic: "SQL connection succeeded.",
+      };
+    }
+
+    if (input.mode === "accession_to_study") {
+      const accession = String(input.accessionNumber || "").trim();
+      if (!accession) {
+        return {
+          foundStudy: false,
+          foundReport: false,
+          normalizedState: "no_report",
+          canViewReport: false,
+          statusCode: null,
+          diagnostic: "Accession number is required for accession-to-study test.",
+        };
+      }
+      const foundStudy = await withSqlConnection(settings, async ({ sql, pool }) => {
+        const uid = await queryStudyUidByAccession(pool, sql, dicomDb, accession);
+        return Boolean(uid);
+      });
+      return {
+        foundStudy,
+        foundReport: false,
+        normalizedState: "no_report",
+        canViewReport: false,
+        statusCode: null,
+        diagnostic: foundStudy ? "StudyInstanceUID was resolved from accession." : "No StudyInstanceUID found for accession.",
+      };
+    }
+
+    if (input.mode === "report_status") {
+      const reportNo = String(input.reportNo || "").trim();
+      if (!reportNo) {
+        return {
+          foundStudy: false,
+          foundReport: false,
+          normalizedState: "no_report",
+          canViewReport: false,
+          statusCode: null,
+          diagnostic: "Report number is required for report-status test.",
+        };
+      }
+      const statusLookup = await withSqlConnection(settings, async ({ sql, pool }) =>
+        queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
+      );
+      const mapped = statusLookup.foundRow ? mapStatusCode(settings, statusLookup.statusCode) : { state: "no_report", canViewReport: false, source: "sonicdicom" as const };
+      return {
+        foundStudy: false,
+        foundReport: statusLookup.foundRow,
+        normalizedState: mapped.state,
+        canViewReport: mapped.canViewReport,
+        statusCode: statusLookup.statusCode,
+        diagnostic: statusLookup.foundRow ? "Report status lookup completed." : "No report document row found for report number.",
+      };
+    }
+
+    const accession = String(input.accessionNumber || "").trim();
+    if (!accession) {
+      return {
+        foundStudy: false,
+        foundReport: false,
+        normalizedState: "no_report",
+        canViewReport: false,
+        statusCode: null,
+        diagnostic: "Accession number is required for full readiness test.",
+      };
+    }
+    const full = await resolveSqlReadiness(settings, { accessionNumber: accession, studyInstanceUid: null });
+    return {
+      foundStudy: full.foundStudy,
+      foundReport: full.foundReport,
+      normalizedState: full.result.state,
+      canViewReport: full.result.canViewReport,
+      statusCode: full.statusCode,
+      diagnostic: full.diagnostic,
+    };
+  } catch (error) {
+    return {
+      foundStudy: false,
+      foundReport: false,
+      normalizedState: "unavailable",
+      canViewReport: false,
+      statusCode: null,
+      diagnostic: error instanceof Error ? error.message : "SQL readiness test failed.",
+    };
+  }
 }
 
 function encodeTemplateValue(value: string): string {
   return encodeURIComponent(value);
 }
 
-function renderTemplate(template: string, settings: SonicDicomReportSettings, context: ReportLookupContext, baseUrl: string, baseToken: "publicBaseUrl" | "internalBaseUrl"): string {
+function renderTemplate(
+  template: string,
+  settings: SonicDicomReportSettings,
+  context: ReportLookupContext,
+  baseUrl: string,
+  baseToken: "publicBaseUrl" | "internalBaseUrl"
+): string {
   const values: Record<string, string> = {
     publicBaseUrl: settings.sonicDicomPublicBaseUrl.replace(/\/+$/, ""),
     internalBaseUrl: settings.sonicDicomInternalBaseUrl.replace(/\/+$/, ""),
@@ -87,7 +484,6 @@ function renderTemplate(template: string, settings: SonicDicomReportSettings, co
     accessionNumber: context.accessionNumber,
     studyInstanceUid: context.studyInstanceUid ?? "",
   };
-
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
     const value = values[key] ?? "";
     return key === "publicBaseUrl" || key === "internalBaseUrl" ? value : encodeTemplateValue(value);
@@ -108,275 +504,6 @@ function resolveLookupTargets(settings: SonicDicomReportSettings, context: Repor
   }
 }
 
-function chooseInternalTemplate(settings: SonicDicomReportSettings, lookupTarget: "accession_number" | "study_instance_uid"): string {
-  if (settings.sonicDicomInternalSearchUrlTemplate.trim()) return settings.sonicDicomInternalSearchUrlTemplate;
-  const template = settings.sonicDicomInternalReportViewerUrlTemplate || settings.sonicDicomInternalPdfUrlTemplate;
-  if (lookupTarget === "study_instance_uid") {
-    return template.replace(/accessionnumber=\{\{accessionNumber\}\}/i, "studyinstanceuid={{studyInstanceUid}}");
-  }
-  return template;
-}
-
-function getStatusCheckBaseUrl(settings: SonicDicomReportSettings): string {
-  if (settings.sonicDicomInternalBaseUrl.trim()) return settings.sonicDicomInternalBaseUrl.trim();
-  if (settings.allowPublicFallbackForStatusCheck) return settings.sonicDicomPublicBaseUrl.trim();
-  return "";
-}
-
-function getStatusCheckBaseUrlSource(settings: SonicDicomReportSettings): "internal" | "public_fallback" | "none" {
-  if (settings.sonicDicomInternalBaseUrl.trim()) return "internal";
-  if (settings.allowPublicFallbackForStatusCheck) return "public_fallback";
-  return "none";
-}
-
-function sanitizeUrlForDebug(url: string): string {
-  try {
-    const parsed = new URL(url);
-    for (const key of ["password", "pass", "pwd"]) {
-      if (parsed.searchParams.has(key)) parsed.searchParams.set(key, "***");
-    }
-    if (parsed.hash.includes("?")) {
-      const hashWithoutPrefix = parsed.hash.replace(/^#/, "");
-      const qIndex = hashWithoutPrefix.indexOf("?");
-      if (qIndex >= 0) {
-        const hashPath = hashWithoutPrefix.slice(0, qIndex);
-        const hashParams = new URLSearchParams(hashWithoutPrefix.slice(qIndex + 1));
-        for (const key of ["password", "pass", "pwd"]) {
-          if (hashParams.has(key)) hashParams.set(key, "***");
-        }
-        const renderedParams = hashParams.toString();
-        parsed.hash = renderedParams ? `${hashPath}?${renderedParams}` : hashPath;
-      }
-    }
-    return parsed.toString();
-  } catch {
-    return url
-      .replace(/([?&](?:password|pass|pwd)=)[^&]*/gi, "$1***")
-      .replace(/(#.*[?&](?:password|pass|pwd)=)[^&]*/gi, "$1***")
-      .replace(/(\{\{password\}\})/gi, "***");
-  }
-}
-
-function isLikelySpaShell(content: string): boolean {
-  const sample = content.slice(0, 5000).toLowerCase();
-  const hasRoot = sample.includes("id=\"root\"") || sample.includes("id='root'") || sample.includes("<app-root");
-  const hasScripts = sample.includes("<script");
-  return hasRoot && hasScripts;
-}
-
-function hasHashRouteLookup(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    const hash = parsed.hash.toLowerCase();
-    return hash.includes("#/") && (hash.includes("accessionnumber=") || hash.includes("studyinstanceuid="));
-  } catch {
-    const lowered = url.toLowerCase();
-    return lowered.includes("#/") && (lowered.includes("accessionnumber=") || lowered.includes("studyinstanceuid="));
-  }
-}
-
-async function fetchStatusContent(url: string, timeoutMs: number): Promise<{ content: string; contentType: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      redirect: "follow",
-      signal: controller.signal,
-    });
-    const contentType = response.headers.get("content-type") || "";
-    const text = await response.text();
-    if (!response.ok) {
-      return { content: `Unavailable HTTP ${response.status} ${text.slice(0, 200)}`, contentType };
-    }
-    if (contentType.includes("application/json")) {
-      try {
-        return { content: flattenJson(JSON.parse(text)), contentType };
-      } catch {
-        return { content: text, contentType };
-      }
-    }
-    return { content: text, contentType };
-  } catch {
-    return { content: "Unavailable Timeout", contentType: "text/plain" };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-export function messageForReportState(state: SonicDicomReportState, settings: Pick<SonicDicomReportSettings, never> & {
-  qrReportFinalMessage?: string;
-  qrReportDraftMessage?: string;
-  qrReportNoReportMessage?: string;
-  qrReportUnavailableMessage?: string;
-  qrReportNotRequiredMessage?: string;
-  qrReportNotCompletedMessage?: string;
-}): string {
-  if (state === "final") return settings.qrReportFinalMessage || "";
-  if (state === "draft") return settings.qrReportDraftMessage || "";
-  if (state === "no_report") return settings.qrReportNoReportMessage || "";
-  if (state === "not_required") return settings.qrReportNotRequiredMessage || "";
-  if (state === "not_completed") return settings.qrReportNotCompletedMessage || "";
-  return settings.qrReportUnavailableMessage || "";
-}
-
-async function resolveSonicDicomReportStatus(
-  settings: SonicDicomReportSettings,
-  context: ReportLookupContext
-): Promise<SonicDicomLookupDebugResult> {
-  const baseUrl = getStatusCheckBaseUrl(settings);
-  const baseUrlSource = getStatusCheckBaseUrlSource(settings);
-  if (!baseUrl) {
-    return {
-      state: "unavailable",
-      canViewReport: false,
-      source: "sonicdicom",
-      baseUrlSource,
-      lookupTried: [],
-      steps: [],
-    };
-  }
-
-  const targets = resolveLookupTargets(settings, context);
-  if (targets.length === 0) {
-    return {
-      state: "unavailable",
-      canViewReport: false,
-      source: "sonicdicom",
-      baseUrlSource,
-      lookupTried: [],
-      steps: [],
-    };
-  }
-
-  let result: ReportStatusResult = { state: "no_report", canViewReport: false, source: "sonicdicom" };
-  const steps: SonicDicomLookupDebugStep[] = [];
-  const diagnostics: string[] = [];
-
-  for (const target of targets) {
-    const template = chooseInternalTemplate(settings, target);
-    if (!template.trim()) {
-      result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
-      steps.push({
-        lookupTarget: target,
-        requestUrlPreview: "(missing template)",
-        contentType: "text/plain",
-        state: "unavailable",
-      });
-      break;
-    }
-
-    const url = renderTemplate(template, settings, context, baseUrl, settings.sonicDicomInternalBaseUrl.trim() ? "internalBaseUrl" : "publicBaseUrl");
-    const { content, contentType } = await fetchStatusContent(url, settings.sonicDicomTimeoutMs);
-    const state = normalizeFetchedStatus(content, settings);
-    result = { state, canViewReport: state === "final", source: "sonicdicom" };
-    steps.push({
-      lookupTarget: target,
-      requestUrlPreview: sanitizeUrlForDebug(url),
-      contentType: contentType || "text/plain",
-      state,
-    });
-
-    if (state === "unavailable" && contentType.toLowerCase().includes("text/html") && hasHashRouteLookup(url) && isLikelySpaShell(content)) {
-      diagnostics.push(
-        "The configured lookup URL is a hash-route SPA page (#/report...). Backend fetch receives only the app shell, not report status. Configure sonicDicomInternalSearchUrlTemplate to a real internal endpoint that returns searchable JSON/HTML status content."
-      );
-    }
-    if (state === "final" || state === "draft" || state === "unavailable") break;
-  }
-
-  return {
-    ...result,
-    baseUrlSource,
-    lookupTried: targets,
-    steps,
-    diagnostics,
-  };
-}
-
-export async function checkSonicDicomReportStatus(context: ReportLookupContext, options: { useCache?: boolean } = {}): Promise<ReportStatusResult> {
-  const settings = await readSonicDicomReportSettings();
-  if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro" };
-
-  if (options.useCache !== false) {
-    const cached = statusCache.get(context.bookingId);
-    if (cached && cached.expiresAt > Date.now()) return cached.result;
-  }
-
-  const debugResult = await resolveSonicDicomReportStatus(settings, context);
-  const result: ReportStatusResult = {
-    state: debugResult.state,
-    canViewReport: debugResult.canViewReport,
-    source: debugResult.source,
-  };
-
-  const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
-  if (ttlMs > 0) {
-    statusCache.set(context.bookingId, { result, expiresAt: Date.now() + ttlMs });
-  }
-
-  if (settings.auditReportStatusChecks) {
-    await logAuditEntry({
-      entityType: "patient_report",
-      entityId: context.bookingId,
-      actionType: `report_status_${result.state}`,
-      oldValues: null,
-      newValues: { state: result.state, canViewReport: result.canViewReport },
-      changedByUserId: null,
-    }).catch(() => null);
-  }
-
-  return result;
-}
-
-export async function testSonicDicomReportStatusLookup(input: {
-  accessionNumber: string;
-  studyInstanceUid?: string | null;
-  lookupKey?: "accession_number" | "study_instance_uid" | "prefer_study_uid_then_accession" | "prefer_accession_then_study_uid";
-}): Promise<SonicDicomLookupDebugResult> {
-  const settings = await readSonicDicomReportSettings();
-  if (!settings.sonicDicomReportsEnabled) {
-    return {
-      state: "disabled",
-      canViewReport: false,
-      source: "rispro",
-      baseUrlSource: getStatusCheckBaseUrlSource(settings),
-      lookupTried: [],
-      steps: [],
-      diagnostics: ["SonicDICOM integration is disabled."],
-    };
-  }
-
-  const context: ReportLookupContext = {
-    bookingId: 0,
-    accessionNumber: String(input.accessionNumber || "").trim(),
-    studyInstanceUid: String(input.studyInstanceUid || "").trim() || null,
-    requiresReport: true,
-    status: "completed",
-  };
-
-  const lookupKey = input.lookupKey;
-  const effectiveSettings = lookupKey ? { ...settings, sonicDicomReportLookupKey: lookupKey } : settings;
-  const result = await resolveSonicDicomReportStatus(effectiveSettings, context);
-
-  if (settings.auditReportStatusChecks) {
-    await logAuditEntry({
-      entityType: "patient_report",
-      entityId: null,
-      actionType: "report_status_test",
-      oldValues: null,
-      newValues: {
-        state: result.state,
-        lookupTried: result.lookupTried,
-        stepCount: result.steps.length,
-      },
-      changedByUserId: null,
-    }).catch(() => null);
-  }
-
-  return result;
-}
-
 export async function buildPublicSonicDicomReportUrl(context: ReportLookupContext): Promise<string> {
   const settings = await readSonicDicomReportSettings();
   const publicBaseUrl = settings.sonicDicomPublicBaseUrl.trim();
@@ -386,7 +513,6 @@ export async function buildPublicSonicDicomReportUrl(context: ReportLookupContex
   } catch {
     throw new HttpError(503, "Public SonicDICOM URL is malformed.");
   }
-
   const targets = resolveLookupTargets(settings, context);
   const target = targets[0];
   if (!target) throw new HttpError(503, "No valid report lookup key is available.");
