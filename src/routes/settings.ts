@@ -61,6 +61,7 @@ import {
   importCatalogWorkbook,
   previewCatalogWorkbook
 } from "../services/settings-catalog-import-export-service.js";
+import { testSonicDicomReportStatusLookup } from "../services/sonicdicom-report-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -324,6 +325,45 @@ settingsRouter.put(
     const request = req as SettingsRequest;
     const config = await saveSchedulingEngineConfiguration(asUnknownRecord(request.body ?? {}), request.user.sub as UserId);
     res.json({ config });
+  })
+);
+
+settingsRouter.post(
+  "/sonicdicom_reports/test-lookup",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const accessionNumber = asString(body.accessionNumber).trim();
+    const studyInstanceUid = asString(body.studyInstanceUid).trim();
+    const rawLookupKey = asString(body.lookupKey).trim();
+    const lookupKey =
+      rawLookupKey === "accession_number" ||
+      rawLookupKey === "study_instance_uid" ||
+      rawLookupKey === "prefer_study_uid_then_accession" ||
+      rawLookupKey === "prefer_accession_then_study_uid"
+        ? rawLookupKey
+        : undefined;
+
+    if (!accessionNumber && !studyInstanceUid) {
+      res.status(400).json({ error: "Provide an accession number or StudyInstanceUID for lookup testing." });
+      return;
+    }
+
+    const result = await testSonicDicomReportStatusLookup({
+      accessionNumber,
+      studyInstanceUid: studyInstanceUid || null,
+      lookupKey,
+    });
+
+    res.json({
+      ok: true,
+      state: result.state,
+      canViewReport: result.canViewReport,
+      source: result.source,
+      baseUrlSource: result.baseUrlSource,
+      lookupTried: result.lookupTried,
+      steps: result.steps,
+    });
   })
 );
 

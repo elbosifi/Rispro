@@ -722,6 +722,34 @@ export async function fetchSonicDicomSettings(): Promise<Record<string, unknown>
   return {};
 }
 
+export interface SonicDicomLookupDebugStep {
+  lookupTarget: "accession_number" | "study_instance_uid";
+  requestUrlPreview: string;
+  contentType: string;
+  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
+}
+
+export interface SonicDicomLookupDebugResponse {
+  ok: boolean;
+  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
+  canViewReport: boolean;
+  source: "sonicdicom" | "rispro";
+  baseUrlSource: "internal" | "public_fallback" | "none";
+  lookupTried: Array<"accession_number" | "study_instance_uid">;
+  steps: SonicDicomLookupDebugStep[];
+}
+
+export async function testSonicDicomLookup(payload: {
+  accessionNumber: string;
+  studyInstanceUid?: string;
+  lookupKey?: "accession_number" | "study_instance_uid" | "prefer_study_uid_then_accession" | "prefer_accession_then_study_uid";
+}): Promise<SonicDicomLookupDebugResponse> {
+  return api<SonicDicomLookupDebugResponse>("/settings/sonicdicom_reports/test-lookup", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function saveSettings(category: string, payload: Record<string, unknown>) {
   return api<{ settings: RawRecord }>(`/settings/${category}`, {
     method: "PUT",

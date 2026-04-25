@@ -25,6 +25,19 @@ export interface ReportStatusResult {
   source: "sonicdicom" | "rispro";
 }
 
+export interface SonicDicomLookupDebugStep {
+  lookupTarget: "accession_number" | "study_instance_uid";
+  requestUrlPreview: string;
+  contentType: string;
+  state: SonicDicomReportState;
+}
+
+export interface SonicDicomLookupDebugResult extends ReportStatusResult {
+  baseUrlSource: "internal" | "public_fallback" | "none";
+  lookupTried: Array<"accession_number" | "study_instance_uid">;
+  steps: SonicDicomLookupDebugStep[];
+}
+
 interface CacheEntry {
   expiresAt: number;
   result: ReportStatusResult;
@@ -109,6 +122,26 @@ function getStatusCheckBaseUrl(settings: SonicDicomReportSettings): string {
   return "";
 }
 
+function getStatusCheckBaseUrlSource(settings: SonicDicomReportSettings): "internal" | "public_fallback" | "none" {
+  if (settings.sonicDicomInternalBaseUrl.trim()) return "internal";
+  if (settings.allowPublicFallbackForStatusCheck) return "public_fallback";
+  return "none";
+}
+
+function sanitizeUrlForDebug(url: string): string {
+  try {
+    const parsed = new URL(url);
+    for (const key of ["password", "pass", "pwd"]) {
+      if (parsed.searchParams.has(key)) parsed.searchParams.set(key, "***");
+    }
+    return parsed.toString();
+  } catch {
+    return url
+      .replace(/([?&](?:password|pass|pwd)=)[^&]*/gi, "$1***")
+      .replace(/(\{\{password\}\})/gi, "***");
+  }
+}
+
 async function fetchStatusContent(url: string, timeoutMs: number): Promise<{ content: string; contentType: string }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -154,6 +187,72 @@ export function messageForReportState(state: SonicDicomReportState, settings: Pi
   return settings.qrReportUnavailableMessage || "";
 }
 
+async function resolveSonicDicomReportStatus(
+  settings: SonicDicomReportSettings,
+  context: ReportLookupContext
+): Promise<SonicDicomLookupDebugResult> {
+  const baseUrl = getStatusCheckBaseUrl(settings);
+  const baseUrlSource = getStatusCheckBaseUrlSource(settings);
+  if (!baseUrl) {
+    return {
+      state: "unavailable",
+      canViewReport: false,
+      source: "sonicdicom",
+      baseUrlSource,
+      lookupTried: [],
+      steps: [],
+    };
+  }
+
+  const targets = resolveLookupTargets(settings, context);
+  if (targets.length === 0) {
+    return {
+      state: "unavailable",
+      canViewReport: false,
+      source: "sonicdicom",
+      baseUrlSource,
+      lookupTried: [],
+      steps: [],
+    };
+  }
+
+  let result: ReportStatusResult = { state: "no_report", canViewReport: false, source: "sonicdicom" };
+  const steps: SonicDicomLookupDebugStep[] = [];
+
+  for (const target of targets) {
+    const template = chooseInternalTemplate(settings, target);
+    if (!template.trim()) {
+      result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
+      steps.push({
+        lookupTarget: target,
+        requestUrlPreview: "(missing template)",
+        contentType: "text/plain",
+        state: "unavailable",
+      });
+      break;
+    }
+
+    const url = renderTemplate(template, settings, context, baseUrl, settings.sonicDicomInternalBaseUrl.trim() ? "internalBaseUrl" : "publicBaseUrl");
+    const { content, contentType } = await fetchStatusContent(url, settings.sonicDicomTimeoutMs);
+    const state = normalizeFetchedStatus(content, settings);
+    result = { state, canViewReport: state === "final", source: "sonicdicom" };
+    steps.push({
+      lookupTarget: target,
+      requestUrlPreview: sanitizeUrlForDebug(url),
+      contentType: contentType || "text/plain",
+      state,
+    });
+    if (state === "final" || state === "draft" || state === "unavailable") break;
+  }
+
+  return {
+    ...result,
+    baseUrlSource,
+    lookupTried: targets,
+    steps,
+  };
+}
+
 export async function checkSonicDicomReportStatus(context: ReportLookupContext, options: { useCache?: boolean } = {}): Promise<ReportStatusResult> {
   const settings = await readSonicDicomReportSettings();
   if (!settings.sonicDicomReportsEnabled) return { state: "disabled", canViewReport: false, source: "rispro" };
@@ -163,26 +262,12 @@ export async function checkSonicDicomReportStatus(context: ReportLookupContext, 
     if (cached && cached.expiresAt > Date.now()) return cached.result;
   }
 
-  const baseUrl = getStatusCheckBaseUrl(settings);
-  if (!baseUrl) return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
-
-  const targets = resolveLookupTargets(settings, context);
-  if (targets.length === 0) return { state: "unavailable", canViewReport: false, source: "sonicdicom" };
-
-  let result: ReportStatusResult = { state: "no_report", canViewReport: false, source: "sonicdicom" };
-
-  for (const target of targets) {
-    const template = chooseInternalTemplate(settings, target);
-    if (!template.trim()) {
-      result = { state: "unavailable", canViewReport: false, source: "sonicdicom" };
-      break;
-    }
-    const url = renderTemplate(template, settings, context, baseUrl, settings.sonicDicomInternalBaseUrl.trim() ? "internalBaseUrl" : "publicBaseUrl");
-    const { content } = await fetchStatusContent(url, settings.sonicDicomTimeoutMs);
-    const state = normalizeFetchedStatus(content, settings);
-    result = { state, canViewReport: state === "final", source: "sonicdicom" };
-    if (state === "final" || state === "draft" || state === "unavailable") break;
-  }
+  const debugResult = await resolveSonicDicomReportStatus(settings, context);
+  const result: ReportStatusResult = {
+    state: debugResult.state,
+    canViewReport: debugResult.canViewReport,
+    source: debugResult.source,
+  };
 
   const ttlMs = Math.max(0, settings.sonicDicomStatusCacheTtlSeconds) * 1000;
   if (ttlMs > 0) {
@@ -196,6 +281,53 @@ export async function checkSonicDicomReportStatus(context: ReportLookupContext, 
       actionType: `report_status_${result.state}`,
       oldValues: null,
       newValues: { state: result.state, canViewReport: result.canViewReport },
+      changedByUserId: null,
+    }).catch(() => null);
+  }
+
+  return result;
+}
+
+export async function testSonicDicomReportStatusLookup(input: {
+  accessionNumber: string;
+  studyInstanceUid?: string | null;
+  lookupKey?: "accession_number" | "study_instance_uid" | "prefer_study_uid_then_accession" | "prefer_accession_then_study_uid";
+}): Promise<SonicDicomLookupDebugResult> {
+  const settings = await readSonicDicomReportSettings();
+  if (!settings.sonicDicomReportsEnabled) {
+    return {
+      state: "disabled",
+      canViewReport: false,
+      source: "rispro",
+      baseUrlSource: getStatusCheckBaseUrlSource(settings),
+      lookupTried: [],
+      steps: [],
+    };
+  }
+
+  const context: ReportLookupContext = {
+    bookingId: 0,
+    accessionNumber: String(input.accessionNumber || "").trim(),
+    studyInstanceUid: String(input.studyInstanceUid || "").trim() || null,
+    requiresReport: true,
+    status: "completed",
+  };
+
+  const lookupKey = input.lookupKey;
+  const effectiveSettings = lookupKey ? { ...settings, sonicDicomReportLookupKey: lookupKey } : settings;
+  const result = await resolveSonicDicomReportStatus(effectiveSettings, context);
+
+  if (settings.auditReportStatusChecks) {
+    await logAuditEntry({
+      entityType: "patient_report",
+      entityId: null,
+      actionType: "report_status_test",
+      oldValues: null,
+      newValues: {
+        state: result.state,
+        lookupTried: result.lookupTried,
+        stepCount: result.steps.length,
+      },
       changedByUserId: null,
     }).catch(() => null);
   }

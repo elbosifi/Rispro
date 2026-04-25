@@ -1,4 +1,5 @@
 import jwt, { type JwtPayload } from "jsonwebtoken";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { HttpError } from "../../../../utils/http-error.js";
 import {
   getPublicCancelTokenSecret,
@@ -6,6 +7,8 @@ import {
 } from "./public-cancel-config.js";
 
 const PUBLIC_CANCEL_ACTION = "cancel" as const;
+const COMPACT_TOKEN_VERSION = "v2";
+const COMPACT_SIGNATURE_LENGTH = 22;
 
 export interface PublicCancelTokenPayload {
   bookingId: number;
@@ -40,6 +43,19 @@ export function issuePublicCancelToken(
 
   const action = options?.action ?? PUBLIC_CANCEL_ACTION;
   const expiresInSeconds = options?.expiresInSeconds ?? getPublicCancelTokenTtlSeconds();
+  const exp = Math.floor(Date.now() / 1000) + Math.max(1, Math.floor(expiresInSeconds));
+
+  // Short token format for QR links: v2.<bookingIdBase36>.<expBase36>.<sig>
+  if (action === PUBLIC_CANCEL_ACTION) {
+    const bookingPart = parsedBookingId.toString(36);
+    const expPart = exp.toString(36);
+    const body = `${COMPACT_TOKEN_VERSION}.${bookingPart}.${expPart}`;
+    const signature = createHmac("sha256", secret)
+      .update(body)
+      .digest("base64url")
+      .slice(0, COMPACT_SIGNATURE_LENGTH);
+    return `${body}.${signature}`;
+  }
 
   return jwt.sign(
     {
@@ -54,6 +70,42 @@ export function issuePublicCancelToken(
   );
 }
 
+function verifyCompactToken(token: string, secret: string): PublicCancelTokenPayload {
+  const parts = token.split(".");
+  if (parts.length !== 4 || parts[0] !== COMPACT_TOKEN_VERSION) {
+    throw new HttpError(401, "Invalid cancellation link.", { code: "invalid_link" });
+  }
+
+  const bookingId = Number.parseInt(parts[1], 36);
+  const exp = Number.parseInt(parts[2], 36);
+  const signature = parts[3] || "";
+  const body = `${COMPACT_TOKEN_VERSION}.${parts[1]}.${parts[2]}`;
+
+  if (!Number.isInteger(bookingId) || bookingId <= 0 || !Number.isFinite(exp)) {
+    throw new HttpError(401, "Invalid cancellation link.", { code: "invalid_link" });
+  }
+
+  const expectedSignature = createHmac("sha256", secret)
+    .update(body)
+    .digest("base64url")
+    .slice(0, COMPACT_SIGNATURE_LENGTH);
+  const incoming = Buffer.from(signature);
+  const expected = Buffer.from(expectedSignature);
+  if (incoming.length !== expected.length || !timingSafeEqual(incoming, expected)) {
+    throw new HttpError(401, "Invalid cancellation link.", { code: "invalid_link" });
+  }
+
+  if (exp <= Math.floor(Date.now() / 1000)) {
+    throw new HttpError(401, "Cancellation link has expired.", { code: "expired_link" });
+  }
+
+  return {
+    bookingId,
+    action: PUBLIC_CANCEL_ACTION,
+    exp,
+  };
+}
+
 export function verifyPublicCancelToken(token: string): PublicCancelTokenPayload {
   const trimmedToken = token.trim();
   if (!trimmedToken) {
@@ -63,6 +115,10 @@ export function verifyPublicCancelToken(token: string): PublicCancelTokenPayload
   const secret = getPublicCancelTokenSecret();
   if (!secret) {
     throw new HttpError(503, "Public cancellation is unavailable.", { code: "public_cancel_not_configured" });
+  }
+
+  if (trimmedToken.startsWith(`${COMPACT_TOKEN_VERSION}.`)) {
+    return verifyCompactToken(trimmedToken, secret);
   }
 
   try {

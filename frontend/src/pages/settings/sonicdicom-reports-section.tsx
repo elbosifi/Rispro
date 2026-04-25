@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
-import { fetchSonicDicomSettings, saveSettings } from "@/lib/api-hooks";
+import { fetchSonicDicomSettings, saveSettings, testSonicDicomLookup, type SonicDicomLookupDebugResponse } from "@/lib/api-hooks";
 
 type SonicSettings = Record<string, string | boolean | number | string[]>;
 
@@ -63,6 +63,9 @@ export default function SonicDicomReportsSection() {
   });
   const [form, setForm] = useState<SonicSettings>(DEFAULTS);
   const [message, setMessage] = useState("");
+  const [testAccessionNumber, setTestAccessionNumber] = useState("");
+  const [testStudyInstanceUid, setTestStudyInstanceUid] = useState("");
+  const [testResult, setTestResult] = useState<SonicDicomLookupDebugResponse | null>(null);
 
   useEffect(() => {
     if (data) setForm(normalize(data));
@@ -78,6 +81,26 @@ export default function SonicDicomReportsSection() {
       setMessage("SonicDICOM report settings saved.");
     },
     onError: (err) => setMessage(err instanceof Error ? err.message : "Failed to save settings."),
+  });
+  const testLookupMutation = useMutation({
+    mutationFn: () =>
+      testSonicDicomLookup({
+        accessionNumber: testAccessionNumber.trim(),
+        studyInstanceUid: testStudyInstanceUid.trim() || undefined,
+        lookupKey: String(form.sonicDicomReportLookupKey || "accession_number") as
+          | "accession_number"
+          | "study_instance_uid"
+          | "prefer_study_uid_then_accession"
+          | "prefer_accession_then_study_uid",
+      }),
+    onSuccess: (result) => {
+      setTestResult(result);
+      setMessage(`Lookup test completed: ${result.state}.`);
+    },
+    onError: (err) => {
+      setTestResult(null);
+      setMessage(err instanceof Error ? err.message : "Lookup test failed.");
+    },
   });
 
   const setValue = (key: string, value: SonicSettings[string]) => setForm((current) => ({ ...current, [key]: value }));
@@ -151,6 +174,21 @@ export default function SonicDicomReportsSection() {
         <Toggle label="Verify TLS" checked={Boolean(form.sonicDicomVerifyTls)} onChange={(checked) => setValue("sonicDicomVerifyTls", checked)} />
         <button type="button" onClick={() => testLookupTemplate("accessionNumber")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test lookup by accession number</button>
         <button type="button" onClick={() => testLookupTemplate("studyInstanceUid")} className="rounded-xl border border-slate-300 px-3 py-2 text-sm">Test lookup by StudyInstanceUID</button>
+        <Input label="Test accession number (manual)" value={testAccessionNumber} onChange={setTestAccessionNumber} />
+        <Input label="Test StudyInstanceUID (optional)" value={testStudyInstanceUid} onChange={setTestStudyInstanceUid} />
+        <button
+          type="button"
+          onClick={() => testLookupMutation.mutate()}
+          className="rounded-xl border border-slate-300 px-3 py-2 text-sm disabled:opacity-60"
+          disabled={testLookupMutation.isPending || (!testAccessionNumber.trim() && !testStudyInstanceUid.trim())}
+        >
+          {testLookupMutation.isPending ? "Testing..." : "Run real lookup test"}
+        </button>
+        {testResult ? (
+          <pre className="overflow-auto rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+{JSON.stringify(testResult, null, 2)}
+          </pre>
+        ) : null}
       </FieldCard>
 
       <FieldCard title="Status terms">
