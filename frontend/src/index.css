@@ -427,6 +427,38 @@ body::before {
   cursor: not-allowed;
 }
 
+/* Outline — bordered button */
+.btn-outline {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 0.5rem 0.85rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  transition: all 200ms ease-out;
+  cursor: pointer;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.btn-outline:hover:not(:disabled) {
+  background: var(--muted);
+  border-color: var(--accent);
+}
+
+.btn-outline:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-outline:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* --- Cards --- */
 
 /* Standard card — clean elevated surface */

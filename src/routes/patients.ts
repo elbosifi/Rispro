@@ -8,6 +8,8 @@ import {
   createPatient,
   deletePatient,
   getPatientById,
+  getPatientDirectory,
+  getPatientDirectorySummary,
   getPatientNoShowSummary,
   mergePatients,
   previewNextPatientMrn,
@@ -31,6 +33,22 @@ patientsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const items = await listActivePatientIdentifierTypes();
     res.json({ items });
+  })
+);
+
+patientsRouter.get(
+  "/directory",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as PatientsRequest;
+    const query = request.query as UnknownRecord;
+    const result = await getPatientDirectory({
+      search: String(query.q ?? ""),
+      category: (query.category as "oncology" | "non_oncology") || undefined,
+      appointmentFilter: (query.appointmentFilter as "has_future" | "today" | "no_future") || undefined,
+      page: Number(query.page) || 1,
+      pageSize: Number(query.pageSize) || 25
+    });
+    res.json(result);
   })
 );
 
@@ -79,6 +97,16 @@ patientsRouter.get(
     const patientId = asOptionalString(request.params?.patientId) ?? "";
     const patient = await getPatientById(patientId);
     res.json({ patient });
+  })
+);
+
+patientsRouter.get(
+  "/:patientId/directory-summary",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as PatientsRequest;
+    const patientId = asOptionalString(request.params?.patientId) ?? "";
+    const summary = await getPatientDirectorySummary(patientId);
+    res.json(summary);
   })
 );
 

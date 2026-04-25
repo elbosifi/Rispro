@@ -24,7 +24,9 @@ import type {
   SchedulingEngineConfig,
   PatientImportBatch,
   PatientImportStagingRow,
-  PatientIdentifierTypeOption
+  PatientIdentifierTypeOption,
+  PatientDirectoryResponse,
+  PatientDirectorySummary
 } from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
@@ -270,6 +272,100 @@ export async function createPatient(payload: Partial<Patient>) {
     body: JSON.stringify(payload)
   });
   return mapPatient(raw.patient);
+}
+
+export interface PatientDirectoryParams {
+  q?: string;
+  category?: "oncology" | "non_oncology";
+  appointmentFilter?: "has_future" | "today" | "no_future";
+  page?: number;
+  pageSize?: number;
+}
+
+export async function fetchPatientDirectory(params: PatientDirectoryParams): Promise<PatientDirectoryResponse> {
+  const query = new URLSearchParams();
+  if (params.q) query.set("q", params.q);
+  if (params.category) query.set("category", params.category);
+  if (params.appointmentFilter) query.set("appointmentFilter", params.appointmentFilter);
+  query.set("page", String(params.page || 1));
+  query.set("pageSize", String(params.pageSize || 25));
+
+  const raw = await api<{
+    patients: RawRecord[];
+    pagination: RawRecord;
+  }>(`/patients/directory?${query.toString()}`);
+
+  return {
+    patients: (raw.patients || []).map((row: RawRecord) => ({
+      id: Number(row.id ?? 0),
+      mrn: row.mrn as string | null,
+      arabicFullName: String(row.arabicFullName ?? row.arabic_full_name ?? ""),
+      englishFullName: row.englishFullName as string | null ?? row.english_full_name as string | null,
+      sex: row.sex as string | null,
+      ageYears: Number(row.ageYears ?? row.age_years ?? 0),
+      demographicsEstimated: Boolean(row.demographicsEstimated ?? row.demographics_estimated),
+      phone1: row.phone1 as string | null ?? row.phone_1 as string | null,
+      category: row.category as "oncology" | "non_oncology" | null,
+      lastAppointment: row.lastAppointment as PatientDirectoryResponse["patients"][0]["lastAppointment"],
+      nextAppointment: row.nextAppointment as PatientDirectoryResponse["patients"][0]["nextAppointment"],
+      warnings: row.warnings as PatientDirectoryResponse["patients"][0]["warnings"]
+    })),
+    pagination: {
+      page: Number(raw.pagination?.page ?? 1),
+      pageSize: Number(raw.pagination?.pageSize ?? 25),
+      total: Number(raw.pagination?.total ?? 0),
+      totalPages: Number(raw.pagination?.totalPages ?? 0)
+    }
+  };
+}
+
+export async function fetchPatientDirectorySummary(patientId: number): Promise<PatientDirectorySummary> {
+  const raw = await api<{
+    demographics: RawRecord;
+    identifiers: RawRecord;
+    contact: RawRecord;
+    category: string | null;
+    warnings: RawRecord;
+    lastAppointment: RawRecord | null;
+    nextAppointment: RawRecord | null;
+    recentAppointments: RawRecord[];
+  }>(`/patients/${patientId}/directory-summary`);
+
+  return {
+    demographics: {
+      id: Number(raw.demographics?.id ?? 0),
+      mrn: raw.demographics?.mrn as string | null,
+      arabicFullName: String(raw.demographics?.arabicFullName ?? raw.demographics?.arabic_full_name ?? ""),
+      englishFullName: (raw.demographics?.englishFullName as string | null) ?? (raw.demographics?.english_full_name as string | null),
+      sex: raw.demographics?.sex as string | null,
+      ageYears: Number(raw.demographics?.ageYears ?? raw.demographics?.age_years ?? 0),
+      demographicsEstimated: Boolean(raw.demographics?.demographicsEstimated ?? raw.demographics?.demographics_estimated),
+      dateOfBirth: (raw.demographics?.dateOfBirth as string | null) ?? (raw.demographics?.estimated_date_of_birth as string | null)
+    },
+    identifiers: {
+      nationalId: (raw.identifiers?.nationalId as string | null) ?? (raw.identifiers?.national_id as string | null),
+      identifierType: (raw.identifiers?.identifierType as string | null) ?? (raw.identifiers?.identifier_type as string | null),
+      identifierValue: (raw.identifiers?.identifierValue as string | null) ?? (raw.identifiers?.identifier_value as string | null)
+    },
+    contact: {
+      phone1: (raw.contact?.phone1 as string | null) ?? (raw.contact?.phone_1 as string | null),
+      phone2: (raw.contact?.phone2 as string | null) ?? (raw.contact?.phone_2 as string | null),
+      address: raw.contact?.address as string | null
+    },
+    category: raw.category as "oncology" | "non_oncology" | null,
+    warnings: {
+      missingPhone: Boolean(raw.warnings?.missingPhone),
+      missingDob: Boolean(raw.warnings?.missingDob),
+      missingSex: Boolean(raw.warnings?.missingSex),
+      missingName: Boolean(raw.warnings?.missingName),
+      incompleteData: Boolean(raw.warnings?.incompleteData),
+      possibleDuplicate: Boolean(raw.warnings?.possibleDuplicate),
+      duplicateReasons: (raw.warnings?.duplicateReasons as string[]) || []
+    },
+    lastAppointment: raw.lastAppointment as PatientDirectorySummary["lastAppointment"],
+    nextAppointment: raw.nextAppointment as PatientDirectorySummary["nextAppointment"],
+    recentAppointments: (raw.recentAppointments as PatientDirectorySummary["recentAppointments"]) || []
+  };
 }
 
 export async function mergePatients(targetPatientId: number, sourcePatientId: number, confirmationText = "MERGE") {

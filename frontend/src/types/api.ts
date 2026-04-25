@@ -62,6 +62,103 @@ export interface Patient {
   address?: string | null;
 }
 
+export interface PatientDirectoryRow {
+  id: number;
+  mrn: string | null;
+  arabicFullName: string;
+  englishFullName: string | null;
+  sex: string | null;
+  ageYears: number;
+  demographicsEstimated: boolean;
+  phone1: string | null;
+  category: "oncology" | "non_oncology" | null;
+  lastAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+  } | null;
+  nextAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+  } | null;
+  warnings: {
+    missingPhone: boolean;
+    missingDob: boolean;
+    missingSex: boolean;
+    missingName: boolean;
+    noAppointment: boolean;
+    possibleDuplicate: boolean;
+    duplicateReasons: string[];
+  };
+}
+
+export interface PatientDirectoryResponse {
+  patients: PatientDirectoryRow[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export interface PatientDirectorySummary {
+  demographics: {
+    id: number;
+    mrn: string | null;
+    arabicFullName: string;
+    englishFullName: string | null;
+    sex: string | null;
+    ageYears: number;
+    demographicsEstimated: boolean;
+    dateOfBirth: string | null;
+  };
+  identifiers: {
+    nationalId: string | null;
+    identifierType: string | null;
+    identifierValue: string | null;
+  };
+  contact: {
+    phone1: string | null;
+    phone2: string | null;
+    address: string | null;
+  };
+  category: "oncology" | "non_oncology" | null;
+  warnings: {
+    missingPhone: boolean;
+    missingDob: boolean;
+    missingSex: boolean;
+    missingName: boolean;
+    incompleteData: boolean;
+    possibleDuplicate: boolean;
+    duplicateReasons: string[];
+  };
+  lastAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  } | null;
+  nextAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  } | null;
+  recentAppointments: Array<{
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  }>;
+}
+
 export interface PatientIdentifierTypeOption {
   code: string;
   labelAr: string;

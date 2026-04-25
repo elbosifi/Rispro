@@ -1277,7 +1277,481 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
   } catch (error) {
     await client.query("rollback");
     throw error;
-  } finally {
-    client.release();
   }
+}
+
+interface PatientDirectoryParams {
+  search?: string;
+  category?: "oncology" | "non_oncology";
+  appointmentFilter?: "has_future" | "today" | "no_future";
+  page?: number;
+  pageSize?: number;
+}
+
+interface PatientDirectoryRowOutput {
+  id: number;
+  mrn: string | null;
+  arabicFullName: string;
+  englishFullName: string | null;
+  sex: string | null;
+  ageYears: number;
+  demographicsEstimated: boolean;
+  phone1: string | null;
+  category: "oncology" | "non_oncology" | null;
+  lastAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+  } | null;
+  nextAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+  } | null;
+  warnings: {
+    missingPhone: boolean;
+    missingDob: boolean;
+    missingSex: boolean;
+    missingName: boolean;
+    noAppointment: boolean;
+    possibleDuplicate: boolean;
+    duplicateReasons: string[];
+  };
+}
+
+interface PatientDirectoryResult {
+  patients: PatientDirectoryRowOutput[];
+  pagination: {
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
+export async function getPatientDirectory(params: PatientDirectoryParams): Promise<PatientDirectoryResult> {
+  const term = (params.search || "").trim();
+  const category = params.category;
+  const appointmentFilter = params.appointmentFilter;
+  const page = Math.max(1, Number(params.page) || 1);
+  const pageSize = Math.min(100, Math.max(1, Number(params.pageSize) || 25));
+  const offset = (page - 1) * pageSize;
+
+  const normalizedTerm = term ? `%${term}%` : "%";
+  const normalizedArabicTerm = term ? normalizeArabicName(term) : "";
+  const normalizedPattern = normalizedArabicTerm ? `%${normalizedArabicTerm}%` : "%";
+  const normalizedIdentifierPattern = term ? `%${normalizeIdentifierValue(term)}%` : "%";
+  const normalizedEnglishTerm = term.toLowerCase().replace(/\s+/g, " ").trim();
+  const normalizedArabicPrefixPattern = `${normalizedArabicTerm}%`;
+  const normalizedEnglishPrefixPattern = `${normalizedEnglishTerm}%`;
+  const normalizedArabicLaterTokenPattern = `% ${normalizedArabicTerm}%`;
+  const normalizedEnglishLaterTokenPattern = `% ${normalizedEnglishTerm}%`;
+
+  const categoryFilter = category ? ` and p.category = $5` : "";
+  const appointmentWhereClause = getAppointmentFilterClause(appointmentFilter);
+
+  const baseCountQuery = `
+    select count(*)::bigint as total
+    from patients p
+    where ($1::text = '' or p.mrn ilike $2
+      or p.national_id ilike $2
+      or p.identifier_value ilike $2
+      or p.phone_1 ilike $2
+      or p.phone_2 ilike $2
+      or p.arabic_full_name ilike $2
+      or p.normalized_arabic_name ilike $3
+      or p.english_full_name ilike $2
+      or exists (
+        select 1 from patient_identifiers pi
+        where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+      )
+    )
+    ${categoryFilter}
+  `;
+
+  const countParams: unknown[] = [term, normalizedTerm, normalizedPattern, normalizedIdentifierPattern];
+  if (category) countParams.push(category);
+
+  const countResult = await pool.query<{ total: string }>(baseCountQuery, countParams);
+  const total = Number(countResult.rows[0]?.total || 0);
+  const totalPages = Math.ceil(total / pageSize);
+
+  const query = `
+    with patient_base as (
+      select
+        p.id,
+        p.mrn,
+        p.arabic_full_name,
+        p.english_full_name,
+        p.sex,
+        p.age_years,
+        p.demographics_estimated,
+        p.phone_1,
+        p.category,
+        p.normalized_arabic_name,
+        p.estimated_date_of_birth,
+        case
+          when $1 = '' then 99
+          when split_part(p.normalized_arabic_name, ' ', 1) = $6 then 1
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) = $7 then 1
+          when split_part(p.normalized_arabic_name, ' ', 1) like $8 then 2
+          when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')), ' ', 1) like $9 then 2
+          when p.normalized_arabic_name = $6 then 3
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) = $7 then 3
+          when p.normalized_arabic_name like $8 then 4
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like $9 then 4
+          when p.normalized_arabic_name like $10 then 5
+          when lower(regexp_replace(coalesce(p.english_full_name, ''), '\\s+', ' ', 'g')) like $11 then 5
+          else 6
+        end as rank
+      from patients p
+      where ($1::text = '' or p.mrn ilike $2
+        or p.national_id ilike $2
+        or p.identifier_value ilike $2
+        or p.phone_1 ilike $2
+        or p.phone_2 ilike $2
+        or p.arabic_full_name ilike $2
+        or p.normalized_arabic_name ilike $3
+        or p.english_full_name ilike $2
+        or exists (
+          select 1 from patient_identifiers pi
+          where pi.patient_id = p.id and (pi.value ilike $2 or pi.normalized_value ilike $4)
+        )
+      )
+      ${categoryFilter}
+    ),
+    last_appt as (
+      select b.patient_id, json_build_object(
+        'id', b.id,
+        'date', b.booking_date::text,
+        'status', b.status,
+        'modalityName', m.name_en
+      ) as last_appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      where b.booking_date < current_date
+      and b.status not in ('cancelled')
+    ),
+    next_appt as (
+      select b.patient_id, json_build_object(
+        'id', b.id,
+        'date', b.booking_date::text,
+        'status', b.status,
+        'modalityName', m.name_en
+      ) as next_appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      where b.booking_date >= current_date
+      and b.status not in ('cancelled')
+    ),
+    dupes as (
+      select p.id as patient_id,
+        case
+          when count(*) > 1 then true
+          else false
+        end as is_dupe,
+        array_agg(p.id order by p.id) filter (where p.id != pb.id) as other_ids
+      from patients p
+      join patient_base pb on pb.id = p.id
+      left join lateral (
+        select 1 from patients p2
+        where p2.id != p.id
+        and (
+          (p.phone_1 is not null and p.phone_1 != '' and p2.phone_1 = p.phone_1)
+          or (p.national_id is not null and p.national_id != '' and p2.national_id = p.national_id)
+        )
+      ) dup on true
+      group by p.id
+    )
+    select
+      pb.id,
+      pb.mrn,
+      pb.arabic_full_name,
+      pb.english_full_name,
+      pb.sex,
+      pb.age_years,
+      pb.demographics_estimated,
+      pb.phone_1,
+      pb.category,
+      coalesce(la.last_appt, null::json) as last_appointment,
+      coalesce(na.next_appt, null::json) as next_appointment,
+      json_build_object(
+        'missingPhone', pb.phone_1 is null or pb.phone_1 = '',
+        'missingDob', pb.estimated_date_of_birth is null,
+        'missingSex', pb.sex is null or pb.sex = '',
+        'missingName', pb.arabic_full_name is null or pb.arabic_full_name = '',
+        'noAppointment', la.last_appt is null and na.next_appt is null,
+        'possibleDuplicate', dupes.is_dupe = true,
+        'duplicateReasons', case when dupes.is_dupe = true then array['phone_or_id_match'] else array[]::text[] end
+      ) as warnings
+    from patient_base pb
+    left join lateral (
+      select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en) as last_appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      where b.patient_id = pb.id and b.booking_date < current_date and b.status not in ('cancelled')
+      order by b.booking_date desc
+      limit 1
+    ) la on true
+    left join lateral (
+      select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en) as next_appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      where b.patient_id = pb.id and b.booking_date >= current_date and b.status not in ('cancelled')
+      order by b.booking_date asc
+      limit 1
+    ) na on true
+    left join dupes dupes on dupes.patient_id = pb.id
+    order by pb.rank asc, pb.id desc
+    limit $12 offset $13
+  `;
+
+  const queryParams: unknown[] = [
+    term,
+    normalizedTerm,
+    normalizedPattern,
+    normalizedIdentifierPattern,
+    category || null,
+    normalizedArabicTerm,
+    normalizedEnglishTerm,
+    normalizedArabicPrefixPattern,
+    normalizedEnglishPrefixPattern,
+    normalizedArabicLaterTokenPattern,
+    normalizedEnglishLaterTokenPattern,
+    pageSize,
+    offset
+  ];
+
+  const { rows } = await pool.query<PatientDirectoryRowOutput>(query, queryParams);
+
+  return {
+    patients: rows.map(row => ({
+      ...row,
+      lastAppointment: row.lastAppointment || null,
+      nextAppointment: row.nextAppointment || null,
+      warnings: {
+        ...row.warnings,
+        duplicateReasons: row.warnings.duplicateReasons || []
+      }
+    })),
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages
+    }
+  };
+}
+
+function getAppointmentFilterClause(filter?: string): string {
+  if (!filter) return "";
+  switch (filter) {
+    case "has_future":
+      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status not in ('cancelled'))";
+    case "today":
+      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date = current_date and b2.status not in ('cancelled'))";
+    case "no_future":
+      return " and not exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status not in ('cancelled'))";
+    default:
+      return "";
+  }
+}
+
+interface PatientDirectorySummaryOutput {
+  demographics: {
+    id: number;
+    mrn: string | null;
+    arabicFullName: string;
+    englishFullName: string | null;
+    sex: string | null;
+    ageYears: number;
+    demographicsEstimated: boolean;
+    dateOfBirth: string | null;
+  };
+  identifiers: {
+    nationalId: string | null;
+    identifierType: string | null;
+    identifierValue: string | null;
+  };
+  contact: {
+    phone1: string | null;
+    phone2: string | null;
+    address: string | null;
+  };
+  category: "oncology" | "non_oncology" | null;
+  warnings: {
+    missingPhone: boolean;
+    missingDob: boolean;
+    missingSex: boolean;
+    missingName: boolean;
+    incompleteData: boolean;
+    possibleDuplicate: boolean;
+    duplicateReasons: string[];
+  };
+  lastAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  } | null;
+  nextAppointment: {
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  } | null;
+  recentAppointments: Array<{
+    id: number;
+    date: string;
+    status: string;
+    modalityName: string;
+    examTypeName: string;
+  }>;
+}
+
+export async function getPatientDirectorySummary(patientId: UserId): Promise<PatientDirectorySummaryOutput> {
+  const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
+
+  const query = `
+    with patient_data as (
+      select
+        p.id,
+        p.mrn,
+        p.national_id,
+        p.identifier_type,
+        p.identifier_value,
+        p.category,
+        p.arabic_full_name,
+        p.english_full_name,
+        p.sex,
+        p.age_years,
+        p.demographics_estimated,
+        p.phone_1,
+        p.phone_2,
+        p.address,
+        p.estimated_date_of_birth
+      from patients p
+      where p.id = $1
+      limit 1
+    ),
+    last_appt as (
+      select json_build_object(
+        'id', b.id,
+        'date', b.booking_date::text,
+        'status', b.status,
+        'modalityName', m.name_en,
+        'examTypeName', coalesce(et.name_en, '')
+      ) as appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      where b.patient_id = $1 and b.booking_date < current_date and b.status not in ('cancelled')
+      order by b.booking_date desc
+      limit 1
+    ),
+    next_appt as (
+      select json_build_object(
+        'id', b.id,
+        'date', b.booking_date::text,
+        'status', b.status,
+        'modalityName', m.name_en,
+        'examTypeName', coalesce(et.name_en, '')
+      ) as appt
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      where b.patient_id = $1 and b.booking_date >= current_date and b.status not in ('cancelled')
+      order by b.booking_date asc
+      limit 1
+    ),
+    recent_appts as (
+      select json_agg(json_build_object(
+        'id', b.id,
+        'date', b.booking_date::text,
+        'status', b.status,
+        'modalityName', m.name_en,
+        'examTypeName', coalesce(et.name_en, '')
+      ) order by b.booking_date desc) as appts
+      from appointments_v2.bookings b
+      join modalities m on m.id = b.modality_id
+      left join exam_types et on et.id = b.exam_type_id
+      where b.patient_id = $1 and b.status not in ('cancelled')
+      order by b.booking_date desc
+      limit 10
+    ),
+    dupes as (
+      select case when count(*) > 0 then true else false end as is_dupe
+      from patients p2
+      where p2.id != $1
+      and (
+        (pd.phone_1 is not null and pd.phone_1 != '' and p2.phone_1 = pd.phone_1)
+        or (pd.national_id is not null and pd.national_id != '' and p2.national_id = pd.national_id)
+      )
+      from patient_data pd
+    )
+    select
+      json_build_object(
+        'id', pd.id,
+        'mrn', pd.mrn,
+        'arabicFullName', pd.arabic_full_name,
+        'englishFullName', pd.english_full_name,
+        'sex', pd.sex,
+        'ageYears', pd.age_years,
+        'demographicsEstimated', pd.demographics_estimated,
+        'dateOfBirth', pd.estimated_date_of_birth
+      ) as demographics,
+      json_build_object(
+        'nationalId', pd.national_id,
+        'identifierType', pd.identifier_type,
+        'identifierValue', pd.identifier_value
+      ) as identifiers,
+      json_build_object(
+        'phone1', pd.phone_1,
+        'phone2', pd.phone_2,
+        'address', pd.address
+      ) as contact,
+      pd.category,
+      json_build_object(
+        'missingPhone', pd.phone_1 is null or pd.phone_1 = '',
+        'missingDob', pd.estimated_date_of_birth is null,
+        'missingSex', pd.sex is null or pd.sex = '',
+        'missingName', pd.arabic_full_name is null or pd.arabic_full_name = '',
+        'incompleteData', pd.phone_1 is null or pd.phone_1 = '' or pd.estimated_date_of_birth is null or pd.sex is null or pd.sex = '' or pd.arabic_full_name is null or pd.arabic_full_name = '',
+        'possibleDuplicate', dupes.is_dupe = true,
+        'duplicateReasons', case when dupes.is_dupe = true then array['phone_or_id_match'] else array[]::text[] end
+      ) as warnings,
+      coalesce(la.appt, null::json) as last_appointment,
+      coalesce(na.appt, null::json) as next_appointment,
+      coalesce(rap.appts, '[]'::json) as recent_appointments
+    from patient_data pd
+    left join last_appt la on true
+    left join next_appt na on true
+    left join recent_appts rap on true
+    left join dupes dupes on true
+  `;
+
+  const { rows } = await pool.query<PatientDirectorySummaryOutput>(query, [cleanPatientId]);
+
+  const result = rows[0];
+  if (!result) {
+    throw new HttpError(404, "Patient not found.");
+  }
+
+  return {
+    demographics: result.demographics,
+    identifiers: result.identifiers,
+    contact: result.contact,
+    category: result.category,
+    warnings: {
+      ...result.warnings,
+      duplicateReasons: result.warnings.duplicateReasons || []
+    },
+    lastAppointment: result.lastAppointment || null,
+    nextAppointment: result.nextAppointment || null,
+    recentAppointments: result.recentAppointments || []
+  };
 }
