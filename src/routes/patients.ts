@@ -53,12 +53,12 @@ patientsRouter.get(
 );
 
 patientsRouter.get(
-  "/",
+  "/:patientId/directory-summary",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
-    const query = request.query as UnknownRecord;
-    const patients = await searchPatients(String(query.q ?? ""));
-    res.json({ patients });
+    const patientId = asOptionalString(request.params?.patientId) ?? "";
+    const summary = await getPatientDirectorySummary(patientId);
+    res.json(summary);
   })
 );
 
@@ -87,6 +87,16 @@ patientsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const mrn = await previewNextPatientMrn();
     res.json({ mrn });
+  })
+);
+
+patientsRouter.get(
+  "/",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as PatientsRequest;
+    const query = request.query as UnknownRecord;
+    const patients = await searchPatients(String(query.q ?? ""));
+    res.json({ patients });
   })
 );
 
