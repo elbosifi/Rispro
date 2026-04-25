@@ -6,7 +6,7 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
-import { t } from "@/lib/i18n";
+import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Badge, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
@@ -265,8 +265,8 @@ export default function CalendarPage() {
                 </div>
                 <div className="space-y-3">
                   <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
-                  <Field label={t(language, "calendar.fieldModality")} value={selectedAppointment.modalityNameEn} />
-                  <Field label={t(language, "calendar.fieldExam")} value={selectedAppointment.examNameEn || "—"} />
+                  <Field label={t(language, "calendar.fieldModality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />
+                  <Field label={t(language, "calendar.fieldExam")} value={chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || "—"} />
                   <Field label={t(language, "calendar.fieldPriority")} value={selectedAppointment.priorityNameEn || t(language, "appointmentEditor.normal")} />
                   <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
                 </div>
@@ -318,10 +318,10 @@ export default function CalendarPage() {
                           {apt.accessionNumber}
                         </p>
                       </div>
-                      <StatusBadge status={apt.status} />
+                      <StatusBadge language={language} status={apt.status} />
                     </div>
                     <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{apt.modalityNameEn}</span>
+                      <span>{chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn)}</span>
                       <div className="flex items-center gap-2">
                         <span>#{apt.dailySequence}</span>
                         <button
@@ -366,7 +366,7 @@ function buildCalendarGrid(
     const dayAppointments = groupedByDate[dateStr] || [];
 
     const summary = dayAppointments.reduce((acc, apt) => {
-      const mod = apt.modalityNameEn || t(language, "calendar.other");
+      const mod = chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn) || t(language, "calendar.other");
       acc[mod] = (acc[mod] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -397,7 +397,7 @@ function formatDateDisplay(dateStr: string): string {
   return formatDateLy(dateStr);
 }
 
-function StatusBadge({ status }: { status: string }) {
+function StatusBadge({ language, status }: { language: "ar" | "en"; status: string }) {
   const variantMap: Record<string, "success" | "info" | "warning" | "neutral" | "accent"> = {
     scheduled: "info",
     arrived: "success",
@@ -409,7 +409,7 @@ function StatusBadge({ status }: { status: string }) {
 
   return (
     <Badge variant={variantMap[status] || "neutral"} size="sm">
-      {status}
+      {statusLabel(language, status)}
     </Badge>
   );
 }
