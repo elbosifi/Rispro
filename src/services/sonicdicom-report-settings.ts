@@ -14,6 +14,7 @@ export interface SonicDicomReportSettings {
   sonicDicomPublicBaseUrl: string;
   sonicDicomPublicReportViewerUrlTemplate: string;
   sonicDicomPublicPdfUrlTemplate: string;
+  sonicDicomPublicImageViewerUrlTemplate: string;
   sonicDicomInternalBaseUrl: string;
   sonicDicomInternalSearchUrlTemplate: string;
   sonicDicomInternalReportViewerUrlTemplate: string;
@@ -53,6 +54,8 @@ export const DEFAULT_SONICDICOM_REPORT_SETTINGS: SonicDicomReportSettings = {
     "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
   sonicDicomPublicPdfUrlTemplate:
     "{{publicBaseUrl}}/#/report?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}&pdf=true",
+  sonicDicomPublicImageViewerUrlTemplate:
+    "{{publicBaseUrl}}/#/viewer?id={{username}}&password={{password}}&accessionnumber={{accessionNumber}}",
   sonicDicomInternalBaseUrl: "",
   sonicDicomInternalSearchUrlTemplate: "",
   sonicDicomInternalReportViewerUrlTemplate:
@@ -167,6 +170,7 @@ export function normalizeSonicDicomReportSettings(raw: unknown): SonicDicomRepor
     sonicDicomPublicBaseUrl: asString(record.sonicDicomPublicBaseUrl, defaults.sonicDicomPublicBaseUrl),
     sonicDicomPublicReportViewerUrlTemplate: asString(record.sonicDicomPublicReportViewerUrlTemplate, defaults.sonicDicomPublicReportViewerUrlTemplate),
     sonicDicomPublicPdfUrlTemplate: asString(record.sonicDicomPublicPdfUrlTemplate, defaults.sonicDicomPublicPdfUrlTemplate),
+    sonicDicomPublicImageViewerUrlTemplate: asString(record.sonicDicomPublicImageViewerUrlTemplate, defaults.sonicDicomPublicImageViewerUrlTemplate),
     sonicDicomInternalBaseUrl: asString(record.sonicDicomInternalBaseUrl, defaults.sonicDicomInternalBaseUrl),
     sonicDicomInternalSearchUrlTemplate: asString(record.sonicDicomInternalSearchUrlTemplate, defaults.sonicDicomInternalSearchUrlTemplate),
     sonicDicomInternalReportViewerUrlTemplate: asString(record.sonicDicomInternalReportViewerUrlTemplate, defaults.sonicDicomInternalReportViewerUrlTemplate),

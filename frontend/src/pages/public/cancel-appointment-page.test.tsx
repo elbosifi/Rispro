@@ -29,8 +29,11 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
     showDepartmentContact: true,
     showLocationDirections: true,
     allowReportAccess: false,
+    allowImageAccess: false,
     showReportPendingCard: true,
     reportAccessRequiresCompletedAppointment: true,
+    imageAccessRequiresCompletedAppointment: true,
+    imageAccessRequiresReportRequiredFlag: false,
     showReportNotRequiredMessage: false,
     defaultReportRequiredForOncology: true,
     defaultReportRequiredForNonOncology: false,
@@ -43,6 +46,10 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
     qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
     qrReportCheckButtonLabel: "Check report",
     qrReportViewButtonLabel: "View report",
+    qrImageViewButtonLabel: "View images",
+    qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+    qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+    qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
     pageTitleAr: "خدمة المريض عبر رمز QR",
     pageTitleEn: "Patient QR Service",
     introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -150,8 +157,28 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.getByRole("button", { name: /إلغاء الموعد/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /تأكيد الإلغاء/i })).toBeNull();
     expect(fetchPublicAppointmentCancelPreview).toHaveBeenCalledWith("test-token");
+    expect(fetchPublicAppointmentReportStatus).not.toHaveBeenCalled();
     expect(screen.queryByText(/طلب موعد جديد/i)).toBeNull();
     expect(screen.queryByText("العودة للرئيسية")).toBeNull();
+  });
+
+  it("shows View images button only when image access is eligible", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        currentStatus: "completed",
+        requiresReport: false,
+        patientQrSettings: baseSettings({
+          allowImageAccess: true,
+          imageAccessRequiresCompletedAppointment: true,
+          imageAccessRequiresReportRequiredFlag: false,
+          allowReportAccess: false,
+        }),
+      })
+    );
+
+    renderPage();
+    expect(await screen.findByRole("button", { name: /View images/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Check report/i })).toBeNull();
   });
 
   it("moves from landing to confirmation and requires acknowledgement before canceling", async () => {

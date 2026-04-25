@@ -9,8 +9,10 @@ import { verifyPublicCancelToken } from "../../public/utils/public-cancel-token.
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import {
+  buildPublicSonicDicomImageUrl,
   buildPublicSonicDicomReportUrl,
   checkSonicDicomReportStatus,
+  checkSonicDicomStudyExists,
   messageForReportState,
   type SonicDicomReportState,
 } from "../../../../services/sonicdicom-report-service.js";
@@ -99,14 +101,21 @@ router.get(
         requiresReport: Boolean(booking.requires_report),
         reportFeature: {
           allowReportAccess: patientQrSettings.allowReportAccess,
+          allowImageAccess: patientQrSettings.allowImageAccess,
           showReportPendingCard: patientQrSettings.showReportPendingCard,
           reportAccessRequiresCompletedAppointment: patientQrSettings.reportAccessRequiresCompletedAppointment,
+          imageAccessRequiresCompletedAppointment: patientQrSettings.imageAccessRequiresCompletedAppointment,
+          imageAccessRequiresReportRequiredFlag: patientQrSettings.imageAccessRequiresReportRequiredFlag,
           showReportNotRequiredMessage: patientQrSettings.showReportNotRequiredMessage,
           qrReportCheckingMessage: patientQrSettings.qrReportCheckingMessage,
           qrReportCheckButtonLabel: patientQrSettings.qrReportCheckButtonLabel,
           qrReportViewButtonLabel: patientQrSettings.qrReportViewButtonLabel,
+          qrImageViewButtonLabel: patientQrSettings.qrImageViewButtonLabel,
           qrReportNotRequiredMessage: patientQrSettings.qrReportNotRequiredMessage,
           qrReportNotCompletedMessage: patientQrSettings.qrReportNotCompletedMessage,
+          qrImageUnavailableMessage: patientQrSettings.qrImageUnavailableMessage,
+          qrReportStudyNotFoundMessage: patientQrSettings.qrReportStudyNotFoundMessage,
+          qrImageStudyNotFoundMessage: patientQrSettings.qrImageStudyNotFoundMessage,
         },
         modalityNameAr: booking.modality_name_ar || "—",
         modalityNameEn: booking.modality_name_en || "—",
@@ -195,6 +204,43 @@ router.get(
 
     const status = await checkSonicDicomReportStatus(context);
     res.json(makeReportStatusResponse(status.state, patientQrSettings, status.canViewReport));
+  })
+);
+
+router.get(
+  "/image-open",
+  reportRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const token = readToken(req);
+    const payload = verifyPublicCancelToken(token);
+    const patientQrSettings = await readPatientQrSettings();
+    if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
+    if (!patientQrSettings.allowImageAccess) throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "image_access_disabled" });
+
+    const sonicSettings = await readSonicDicomReportSettings();
+    if (!sonicSettings.sonicDicomReportsEnabled) throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "report_integration_disabled" });
+
+    const booking = await getBookingDetails(payload.bookingId);
+    const context = reportContextFromBooking(booking);
+    if (patientQrSettings.imageAccessRequiresCompletedAppointment && context.status !== "completed") {
+      throw new HttpError(409, patientQrSettings.qrReportNotCompletedMessage, { code: "image_not_completed" });
+    }
+    if (patientQrSettings.imageAccessRequiresReportRequiredFlag && !context.requiresReport) {
+      throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "image_requires_report_flag" });
+    }
+
+    let study;
+    try {
+      study = await checkSonicDicomStudyExists(context);
+    } catch {
+      throw new HttpError(503, patientQrSettings.qrImageUnavailableMessage, { code: "image_system_unavailable" });
+    }
+    if (!study.foundStudy) {
+      throw new HttpError(409, patientQrSettings.qrImageStudyNotFoundMessage, { code: "study_not_found" });
+    }
+
+    const imageUrl = await buildPublicSonicDicomImageUrl(context);
+    res.redirect(imageUrl);
   })
 );
 

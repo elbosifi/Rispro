@@ -6,6 +6,7 @@ export type SonicDicomReportState =
   | "final"
   | "draft"
   | "no_report"
+  | "study_not_found"
   | "unavailable"
   | "not_required"
   | "not_completed"
@@ -32,6 +33,10 @@ export interface SonicDicomSqlTestResult {
   canViewReport: boolean;
   statusCode: number | null;
   diagnostic: string;
+}
+
+export interface StudyExistenceResult {
+  foundStudy: boolean;
 }
 
 interface CacheEntry {
@@ -222,7 +227,7 @@ async function resolveSqlReadiness(
         foundStudy: false,
         foundReport: false,
         statusCode: null,
-        result: { state: "no_report", canViewReport: false, source: "sonicdicom" },
+        result: { state: "study_not_found", canViewReport: false, source: "sonicdicom" },
         diagnostic: "No matching StudyInstanceUID was found in dicom.dbo.Studies.",
       };
     }
@@ -268,11 +273,13 @@ export function messageForReportState(
     qrReportUnavailableMessage?: string;
     qrReportNotRequiredMessage?: string;
     qrReportNotCompletedMessage?: string;
+    qrReportStudyNotFoundMessage?: string;
   }
 ): string {
   if (state === "final") return settings.qrReportFinalMessage || "";
   if (state === "draft") return settings.qrReportDraftMessage || "";
   if (state === "no_report") return settings.qrReportNoReportMessage || "";
+  if (state === "study_not_found") return settings.qrReportStudyNotFoundMessage || settings.qrReportNoReportMessage || "";
   if (state === "not_required") return settings.qrReportNotRequiredMessage || "";
   if (state === "not_completed") return settings.qrReportNotCompletedMessage || "";
   return settings.qrReportUnavailableMessage || "";
@@ -448,6 +455,18 @@ export async function testSonicDicomSqlReadiness(input: {
   }
 }
 
+export async function checkSonicDicomStudyExists(context: ReportLookupContext): Promise<StudyExistenceResult> {
+  const settings = await readSonicDicomReportSettings();
+  const dicomDb = validateDatabaseName(settings.sonicDicomDicomDatabaseName, "dicom");
+  const accession = String(context.accessionNumber || "").trim();
+  if (!accession) return { foundStudy: false };
+  const foundStudy = await withSqlConnection(settings, async ({ sql, pool }) => {
+    const uid = await queryStudyUidByAccession(pool, sql, dicomDb, accession);
+    return Boolean(uid);
+  });
+  return { foundStudy };
+}
+
 function encodeTemplateValue(value: string): string {
   return encodeURIComponent(value);
 }
@@ -501,6 +520,28 @@ export async function buildPublicSonicDicomReportUrl(context: ReportLookupContex
   const target = targets[0];
   if (!target) throw new HttpError(503, "No valid report lookup key is available.");
   let template = settings.sonicDicomPublicReportViewerUrlTemplate || settings.sonicDicomPublicPdfUrlTemplate;
+  if (target === "study_instance_uid") {
+    template = template.replace(/accessionnumber=\{\{accessionNumber\}\}/i, "studyinstanceuid={{studyInstanceUid}}");
+  }
+  return renderTemplate(template, settings, context, publicBaseUrl, "publicBaseUrl");
+}
+
+export async function buildPublicSonicDicomImageUrl(context: ReportLookupContext): Promise<string> {
+  const settings = await readSonicDicomReportSettings();
+  const publicBaseUrl = settings.sonicDicomPublicBaseUrl.trim();
+  if (!publicBaseUrl) throw new HttpError(503, "Public SonicDICOM URL is not configured.");
+  try {
+    new URL(publicBaseUrl);
+  } catch {
+    throw new HttpError(503, "Public SonicDICOM URL is malformed.");
+  }
+  const targets = resolveLookupTargets(settings, context);
+  const target = targets[0];
+  if (!target) throw new HttpError(503, "No valid report lookup key is available.");
+  let template =
+    settings.sonicDicomPublicImageViewerUrlTemplate ||
+    settings.sonicDicomPublicReportViewerUrlTemplate ||
+    settings.sonicDicomPublicPdfUrlTemplate;
   if (target === "study_instance_uid") {
     template = template.replace(/accessionnumber=\{\{accessionNumber\}\}/i, "studyinstanceuid={{studyInstanceUid}}");
   }

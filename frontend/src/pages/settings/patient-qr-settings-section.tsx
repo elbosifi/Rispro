@@ -21,8 +21,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  allowImageAccess: false,
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresReportRequiredFlag: false,
   showReportNotRequiredMessage: false,
   defaultReportRequiredForOncology: true,
   defaultReportRequiredForNonOncology: false,
@@ -35,6 +38,10 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
   qrReportCheckButtonLabel: "Check report",
   qrReportViewButtonLabel: "View report",
+  qrImageViewButtonLabel: "View images",
+  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
   pageTitleAr: "خدمة المريض عبر رمز QR",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -375,18 +382,25 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       <div className="grid gap-4 lg:grid-cols-2">
         <FieldCard title={chooseLocalized(language, "التقارير في صفحة QR", "Patient QR Report Access")}>
           <ToggleRow label={chooseLocalized(language, "تفعيل الوصول للتقرير من صفحة QR", "Enable report access from patient QR page")} checked={draft.allowReportAccess} onChange={(checked) => setDraft((current) => ({ ...current, allowReportAccess: checked }))} />
+          <ToggleRow label="Enable image access from patient QR page" checked={draft.allowImageAccess} onChange={(checked) => setDraft((current) => ({ ...current, allowImageAccess: checked }))} />
           <ToggleRow label={chooseLocalized(language, "اشتراط اكتمال الموعد قبل الوصول للتقرير", "Require completed appointment before report access")} checked={draft.reportAccessRequiresCompletedAppointment} onChange={(checked) => setDraft((current) => ({ ...current, reportAccessRequiresCompletedAppointment: checked }))} />
+          <ToggleRow label="Require completed appointment before image access" checked={draft.imageAccessRequiresCompletedAppointment} onChange={(checked) => setDraft((current) => ({ ...current, imageAccessRequiresCompletedAppointment: checked }))} />
+          <ToggleRow label="Require Report required flag before image access" checked={draft.imageAccessRequiresReportRequiredFlag} onChange={(checked) => setDraft((current) => ({ ...current, imageAccessRequiresReportRequiredFlag: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إظهار بطاقة التقرير المعلق", "Show pending report card")} checked={draft.showReportPendingCard} onChange={(checked) => setDraft((current) => ({ ...current, showReportPendingCard: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إظهار رسالة عندما لا يكون التقرير مطلوباً", "Show not-required message")} checked={draft.showReportNotRequiredMessage} onChange={(checked) => setDraft((current) => ({ ...current, showReportNotRequiredMessage: checked }))} />
           <div className="grid grid-cols-2 gap-2">
             <Input label="Check report button label" value={draft.qrReportCheckButtonLabel} onChange={(value) => setDraft((current) => ({ ...current, qrReportCheckButtonLabel: value }))} />
             <Input label="View report button label" value={draft.qrReportViewButtonLabel} onChange={(value) => setDraft((current) => ({ ...current, qrReportViewButtonLabel: value }))} />
           </div>
+          <Input label="View images button label" value={draft.qrImageViewButtonLabel} onChange={(value) => setDraft((current) => ({ ...current, qrImageViewButtonLabel: value }))} />
           <Textarea label="Checking message" value={draft.qrReportCheckingMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportCheckingMessage: value }))} />
           <Textarea label="Final report message" value={draft.qrReportFinalMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportFinalMessage: value }))} />
           <Textarea label="Draft/in-review report message" value={draft.qrReportDraftMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportDraftMessage: value }))} />
           <Textarea label="No-report message" value={draft.qrReportNoReportMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportNoReportMessage: value }))} />
           <Textarea label="Unavailable message" value={draft.qrReportUnavailableMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportUnavailableMessage: value }))} />
+          <Textarea label="Report study-not-found message" value={draft.qrReportStudyNotFoundMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportStudyNotFoundMessage: value }))} />
+          <Textarea label="Image unavailable message" value={draft.qrImageUnavailableMessage} onChange={(value) => setDraft((current) => ({ ...current, qrImageUnavailableMessage: value }))} />
+          <Textarea label="Image study-not-found message" value={draft.qrImageStudyNotFoundMessage} onChange={(value) => setDraft((current) => ({ ...current, qrImageStudyNotFoundMessage: value }))} />
           <Textarea label="Not-required message" value={draft.qrReportNotRequiredMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportNotRequiredMessage: value }))} />
           <Textarea label="Not-completed message" value={draft.qrReportNotCompletedMessage} onChange={(value) => setDraft((current) => ({ ...current, qrReportNotCompletedMessage: value }))} />
         </FieldCard>

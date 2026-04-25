@@ -48,8 +48,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  allowImageAccess: false,
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresReportRequiredFlag: false,
   showReportNotRequiredMessage: false,
   defaultReportRequiredForOncology: true,
   defaultReportRequiredForNonOncology: false,
@@ -62,6 +65,10 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
   qrReportCheckButtonLabel: "Check report",
   qrReportViewButtonLabel: "View report",
+  qrImageViewButtonLabel: "View images",
+  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
   pageTitleAr: "خدمة المريض عبر رمز QR",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -491,17 +498,28 @@ function ReportCard(props: {
     },
   });
 
-  if (!props.settings.allowReportAccess) return null;
-  if (!props.preview.requiresReport) {
-    if (!props.settings.showReportNotRequiredMessage || !props.settings.qrReportNotRequiredMessage) return null;
-    return <InfoCard icon={<FileText className="h-5 w-5" />} title="التقرير" body={props.settings.qrReportNotRequiredMessage} tone="neutral" />;
+  const reportEnabled = props.settings.allowReportAccess;
+  const reportRequired = Boolean(props.preview.requiresReport);
+  const reportVisible = reportEnabled && reportRequired;
+  const imageEnabled = props.settings.allowImageAccess;
+  const imageCompletionOk = !props.settings.imageAccessRequiresCompletedAppointment || props.preview.currentStatus === "completed";
+  const imageReportGateOk = !props.settings.imageAccessRequiresReportRequiredFlag || reportRequired;
+  const canOpenImages = imageEnabled && imageCompletionOk && imageReportGateOk;
+
+  if (!reportVisible && !canOpenImages) {
+    if (reportEnabled && !reportRequired && props.settings.showReportNotRequiredMessage && props.settings.qrReportNotRequiredMessage) {
+      return <InfoCard icon={<FileText className="h-5 w-5" />} title="التقرير" body={props.settings.qrReportNotRequiredMessage} tone="neutral" />;
+    }
+    return null;
   }
+
   if (
+    reportVisible &&
     props.settings.reportAccessRequiresCompletedAppointment &&
     props.preview.currentStatus !== "completed" &&
     !props.settings.showReportPendingCard
   ) {
-    return null;
+    if (!canOpenImages) return null;
   }
 
   const message =
@@ -521,15 +539,17 @@ function ReportCard(props: {
         </div>
       </div>
       <div className="flex flex-col gap-3 sm:flex-row">
-        <ActionButton
-          tone="primary"
-          onClick={() => reportMutation.mutate()}
-          disabled={reportMutation.isPending}
-          icon={reportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
-        >
-          {status?.checkButtonLabel || props.settings.qrReportCheckButtonLabel}
-        </ActionButton>
-        {status?.canViewReport ? (
+        {reportVisible ? (
+          <ActionButton
+            tone="primary"
+            onClick={() => reportMutation.mutate()}
+            disabled={reportMutation.isPending}
+            icon={reportMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+          >
+            {status?.checkButtonLabel || props.settings.qrReportCheckButtonLabel}
+          </ActionButton>
+        ) : null}
+        {reportVisible && status?.canViewReport ? (
           <ActionButton
             tone="neutral"
             onClick={() => {
@@ -538,6 +558,17 @@ function ReportCard(props: {
             icon={<ExternalLink className="h-4 w-4" />}
           >
             {status.viewButtonLabel || props.settings.qrReportViewButtonLabel}
+          </ActionButton>
+        ) : null}
+        {canOpenImages ? (
+          <ActionButton
+            tone="neutral"
+            onClick={() => {
+              window.location.href = `/api/public/appointments/image-open?t=${encodeURIComponent(props.token)}`;
+            }}
+            icon={<ExternalLink className="h-4 w-4" />}
+          >
+            {props.settings.qrImageViewButtonLabel}
           </ActionButton>
         ) : null}
       </div>

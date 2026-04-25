@@ -38,8 +38,11 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   allowReportAccess: boolean;
+  allowImageAccess: boolean;
   showReportPendingCard: boolean;
   reportAccessRequiresCompletedAppointment: boolean;
+  imageAccessRequiresCompletedAppointment: boolean;
+  imageAccessRequiresReportRequiredFlag: boolean;
   showReportNotRequiredMessage: boolean;
   defaultReportRequiredForOncology: boolean;
   defaultReportRequiredForNonOncology: boolean;
@@ -52,6 +55,10 @@ export interface PatientQrSettings {
   qrReportNotCompletedMessage: string;
   qrReportCheckButtonLabel: string;
   qrReportViewButtonLabel: string;
+  qrImageViewButtonLabel: string;
+  qrImageUnavailableMessage: string;
+  qrReportStudyNotFoundMessage: string;
+  qrImageStudyNotFoundMessage: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -75,8 +82,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  allowImageAccess: false,
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresReportRequiredFlag: false,
   showReportNotRequiredMessage: false,
   defaultReportRequiredForOncology: true,
   defaultReportRequiredForNonOncology: false,
@@ -89,6 +99,10 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
   qrReportCheckButtonLabel: "Check report",
   qrReportViewButtonLabel: "View report",
+  qrImageViewButtonLabel: "View images",
+  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
   pageTitleAr: "خدمة المريض عبر رمز QR",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
@@ -185,8 +199,11 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     showDepartmentContact: asBoolean(record.showDepartmentContact, DEFAULT_SETTINGS.showDepartmentContact),
     showLocationDirections: asBoolean(record.showLocationDirections, DEFAULT_SETTINGS.showLocationDirections),
     allowReportAccess: asBoolean(record.allowReportAccess, DEFAULT_SETTINGS.allowReportAccess),
+    allowImageAccess: asBoolean(record.allowImageAccess, DEFAULT_SETTINGS.allowImageAccess),
     showReportPendingCard: asBoolean(record.showReportPendingCard, DEFAULT_SETTINGS.showReportPendingCard),
     reportAccessRequiresCompletedAppointment: asBoolean(record.reportAccessRequiresCompletedAppointment, DEFAULT_SETTINGS.reportAccessRequiresCompletedAppointment),
+    imageAccessRequiresCompletedAppointment: asBoolean(record.imageAccessRequiresCompletedAppointment, DEFAULT_SETTINGS.imageAccessRequiresCompletedAppointment),
+    imageAccessRequiresReportRequiredFlag: asBoolean(record.imageAccessRequiresReportRequiredFlag, DEFAULT_SETTINGS.imageAccessRequiresReportRequiredFlag),
     showReportNotRequiredMessage: asBoolean(record.showReportNotRequiredMessage, DEFAULT_SETTINGS.showReportNotRequiredMessage),
     defaultReportRequiredForOncology: asBoolean(record.defaultReportRequiredForOncology, DEFAULT_SETTINGS.defaultReportRequiredForOncology),
     defaultReportRequiredForNonOncology: asBoolean(record.defaultReportRequiredForNonOncology, DEFAULT_SETTINGS.defaultReportRequiredForNonOncology),
@@ -199,6 +216,10 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     qrReportNotCompletedMessage: asString(record.qrReportNotCompletedMessage, DEFAULT_SETTINGS.qrReportNotCompletedMessage),
     qrReportCheckButtonLabel: asString(record.qrReportCheckButtonLabel, DEFAULT_SETTINGS.qrReportCheckButtonLabel),
     qrReportViewButtonLabel: asString(record.qrReportViewButtonLabel, DEFAULT_SETTINGS.qrReportViewButtonLabel),
+    qrImageViewButtonLabel: asString(record.qrImageViewButtonLabel, DEFAULT_SETTINGS.qrImageViewButtonLabel),
+    qrImageUnavailableMessage: asString(record.qrImageUnavailableMessage, DEFAULT_SETTINGS.qrImageUnavailableMessage),
+    qrReportStudyNotFoundMessage: asString(record.qrReportStudyNotFoundMessage, DEFAULT_SETTINGS.qrReportStudyNotFoundMessage),
+    qrImageStudyNotFoundMessage: asString(record.qrImageStudyNotFoundMessage, DEFAULT_SETTINGS.qrImageStudyNotFoundMessage),
     pageTitleAr: asString(record.pageTitleAr, DEFAULT_SETTINGS.pageTitleAr),
     pageTitleEn: asString(record.pageTitleEn, DEFAULT_SETTINGS.pageTitleEn),
     introTextAr: asString(record.introTextAr, DEFAULT_SETTINGS.introTextAr),

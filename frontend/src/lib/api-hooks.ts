@@ -348,14 +348,21 @@ export interface PublicAppointmentCancelPreview {
   requiresReport?: boolean;
   reportFeature?: {
     allowReportAccess: boolean;
+    allowImageAccess: boolean;
     showReportPendingCard: boolean;
     reportAccessRequiresCompletedAppointment: boolean;
+    imageAccessRequiresCompletedAppointment: boolean;
+    imageAccessRequiresReportRequiredFlag: boolean;
     showReportNotRequiredMessage: boolean;
     qrReportCheckingMessage: string;
     qrReportCheckButtonLabel: string;
     qrReportViewButtonLabel: string;
+    qrImageViewButtonLabel: string;
     qrReportNotRequiredMessage: string;
     qrReportNotCompletedMessage: string;
+    qrImageUnavailableMessage: string;
+    qrReportStudyNotFoundMessage: string;
+    qrImageStudyNotFoundMessage: string;
   };
   modalityName?: string;
   modalityNameAr?: string;
@@ -433,7 +440,7 @@ export async function cancelPublicAppointment(token: string): Promise<PublicAppo
 
 export interface PublicReportStatusResponse {
   enabled: boolean;
-  state: "final" | "draft" | "no_report" | "unavailable" | "not_required" | "not_completed" | "disabled";
+  state: "final" | "draft" | "no_report" | "study_not_found" | "unavailable" | "not_required" | "not_completed" | "disabled";
   canViewReport: boolean;
   message: string;
   checkButtonLabel: string;
@@ -483,8 +490,11 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   allowReportAccess: boolean;
+  allowImageAccess: boolean;
   showReportPendingCard: boolean;
   reportAccessRequiresCompletedAppointment: boolean;
+  imageAccessRequiresCompletedAppointment: boolean;
+  imageAccessRequiresReportRequiredFlag: boolean;
   showReportNotRequiredMessage: boolean;
   defaultReportRequiredForOncology: boolean;
   defaultReportRequiredForNonOncology: boolean;
@@ -497,6 +507,10 @@ export interface PatientQrSettings {
   qrReportNotCompletedMessage: string;
   qrReportCheckButtonLabel: string;
   qrReportViewButtonLabel: string;
+  qrImageViewButtonLabel: string;
+  qrImageUnavailableMessage: string;
+  qrReportStudyNotFoundMessage: string;
+  qrImageStudyNotFoundMessage: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -547,8 +561,11 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     showDepartmentContact: bool(record.showDepartmentContact, false),
     showLocationDirections: bool(record.showLocationDirections, false),
     allowReportAccess: bool(record.allowReportAccess, false),
+    allowImageAccess: bool(record.allowImageAccess, false),
     showReportPendingCard: bool(record.showReportPendingCard, true),
     reportAccessRequiresCompletedAppointment: bool(record.reportAccessRequiresCompletedAppointment, true),
+    imageAccessRequiresCompletedAppointment: bool(record.imageAccessRequiresCompletedAppointment, true),
+    imageAccessRequiresReportRequiredFlag: bool(record.imageAccessRequiresReportRequiredFlag, false),
     showReportNotRequiredMessage: bool(record.showReportNotRequiredMessage, false),
     defaultReportRequiredForOncology: bool(record.defaultReportRequiredForOncology, true),
     defaultReportRequiredForNonOncology: bool(record.defaultReportRequiredForNonOncology, false),
@@ -561,6 +578,10 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     qrReportNotCompletedMessage: str(record.qrReportNotCompletedMessage, "Report access becomes available after the examination is completed."),
     qrReportCheckButtonLabel: str(record.qrReportCheckButtonLabel, "Check report"),
     qrReportViewButtonLabel: str(record.qrReportViewButtonLabel, "View report"),
+    qrImageViewButtonLabel: str(record.qrImageViewButtonLabel, "View images"),
+    qrImageUnavailableMessage: str(record.qrImageUnavailableMessage, "Image viewing is currently unavailable. Please try again later."),
+    qrReportStudyNotFoundMessage: str(record.qrReportStudyNotFoundMessage, "Your study is not available in the report system yet. Please try again later."),
+    qrImageStudyNotFoundMessage: str(record.qrImageStudyNotFoundMessage, "Your study images are not available yet. Please try again later."),
     pageTitleAr: str(record.pageTitleAr, "خدمة المريض عبر رمز QR"),
     pageTitleEn: str(record.pageTitleEn, "Patient QR Service"),
     introTextAr: str(record.introTextAr, "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة."),
