@@ -903,7 +903,6 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     qrSizeMm: num(record.qrSizeMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrSizeMm, 12, 48),
     barcodeHeightMm: num(record.barcodeHeightMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeHeightMm, 6, 28),
     barcodeWidthMm: num(record.barcodeWidthMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeWidthMm, 40, 130),
-    hospitalNameAr: str(record.hospitalNameAr, "Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Æ’Ã˜Â² Ã˜Â§Ã™â€žÃ™Ë†Ã˜Â·Ã™â€ Ã™Å  Ã™â€žÃ™â€žÃ˜Â£Ã™Ë†Ã˜Â±Ã˜Â§Ã™â€¦ Ã˜Â¨Ã™â€ Ã˜ÂºÃ˜Â§Ã˜Â²Ã™Å "),
     /* legacy literal fallback removed; use centralized defaults */
     hospitalNameAr: str(record.hospitalNameAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameAr),
     hospitalNameEn: str(record.hospitalNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameEn),
