@@ -2,7 +2,6 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
-  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
   type AppointmentSlipSettings,
@@ -874,6 +873,43 @@ function renderFieldHtml(field: SlipField): string {
   `;
 }
 
+function isMeaningfulSlipValue(value: string | null | undefined): boolean {
+  const normalized = String(value || "").trim();
+  return normalized !== "" && normalized !== "—" && normalized !== "â€”";
+}
+
+function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSlipSettings["languageMode"]): string {
+  const valueAr = isMeaningfulSlipValue(field.valueAr) ? field.valueAr : field.valueEn;
+  const valueEn = isMeaningfulSlipValue(field.valueEn) ? field.valueEn : field.valueAr;
+
+  if (languageMode === "ar") {
+    return `
+      <div class="summary-item single-language single-language-ar">
+        <div class="label ar">${escapeHtml(field.labelAr)}</div>
+        <div class="value ar">${escapeHtml(valueAr || "—")}</div>
+      </div>
+    `;
+  }
+
+  if (languageMode === "en") {
+    return `
+      <div class="summary-item single-language single-language-en">
+        <div class="label en">${escapeHtml(field.labelEn)}</div>
+        <div class="value en">${escapeHtml(valueEn || "—")}</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="summary-item bilingual-card">
+      <div class="label ar">${escapeHtml(field.labelAr)}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
+      <div class="label en">${escapeHtml(field.labelEn)}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
+    </div>
+  `;
+}
+
 function renderCode39Svg(value: string, widthMm: number, heightMm: number): string {
   const spec = buildCode39Bars(value);
   const unitWidth = 1;
@@ -936,21 +972,26 @@ export async function prepareAppointmentSlipHtml(
   const barcodeSvg = layout.barcodeBlock
     ? renderCode39Svg(slip.accessionBarcodePayload, slipSettings.barcodeWidthMm, slipSettings.barcodeHeightMm)
     : "";
-  const patientFields = fields.filter((field) => ["Patient Name", "MRN", "National ID", "Phone", "Age / Sex"].includes(field.labelEn));
-  const appointmentFields = fields.filter((field) => ["Appointment Number", "Accession Number", "Modality", "Exam", "Date", "Time", "Walk-in"].includes(field.labelEn));
-  const extraFields = fields.filter((field) => !patientFields.includes(field) && !appointmentFields.includes(field));
+  const patientFieldLabels = ["Patient Name", "MRN", "National ID", "Phone", "Age / Sex"];
+  const appointmentFieldLabels = ["Appointment Number", "Accession Number", "Modality", "Exam", "Date", "Time", "Walk-in"];
+  const dedicatedBlockLabels = ["Location", "Arrival Note"];
+  const patientFields = fields.filter((field) => patientFieldLabels.includes(field.labelEn));
+  const appointmentFields = fields.filter((field) => appointmentFieldLabels.includes(field.labelEn));
+  const extraFields = fields.filter((field) => !patientFields.includes(field) && !appointmentFields.includes(field) && !dedicatedBlockLabels.includes(field.labelEn));
+  const qrPanelWidthMm = qrSvg ? Math.min(Math.max(slipSettings.qrSizeMm + 10, 24), 28) : 0;
+  const compactScale = slipSettings.paperMode === "preprinted" ? 0.92 : 0.95;
   const sectionTitle = (ar: string, en: string) =>
     languageMode === "ar"
       ? `<div class="section-title ar">${escapeHtml(ar)}</div>`
       : languageMode === "en"
         ? `<div class="section-title en">${escapeHtml(en)}</div>`
         : `<div class="section-title bilingual"><span class="ar">${escapeHtml(ar)}</span><span class="en">${escapeHtml(en)}</span></div>`;
-  const renderFieldGroup = (group: SlipField[]) => `<div class="field-grid">${group.map(renderFieldHtml).join("")}</div>`;
+  const renderFieldGroup = (group: SlipField[]) => `<div class="field-grid">${group.map((field) => renderLocalizedFieldHtml(field, languageMode)).join("")}</div>`;
   const renderLocation = slipSettings.showLocation && slip.locationText
     ? `
       <section class="section">
         ${sectionTitle(slipSettings.locationHeadingAr, slipSettings.locationHeadingEn)}
-        <div class="location-card ${languageMode === "en" ? "en" : "ar"}">${escapeHtml(slip.locationText)}</div>
+        <div class="location-card ${languageMode === "en" ? "en" : "ar"}" data-location-block="true">${escapeHtml(slip.locationText)}</div>
       </section>
     `
     : "";
@@ -985,41 +1026,42 @@ export async function prepareAppointmentSlipHtml(
             height: ${slipSettings.paperMode === "preprinted" ? layout.safeArea.h / MM_TO_PT : 210}mm;
             padding: ${slipSettings.contentPaddingMm}mm;
           }
-          .content { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 2mm; }
+          .content { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 1.2mm; }
           .header {
             display: ${slipSettings.paperMode === "blank" ? "grid" : "none"};
             grid-template-columns: auto 1fr;
-            gap: 3mm;
+            gap: 2mm;
             align-items: center;
           }
-          .header-logo { width: 18mm; height: 18mm; object-fit: contain; }
-          .header-copy { display: grid; gap: 0.6mm; }
-          .header-title { color: #8f0f14; font-size: ${4.6 * slipSettings.fontScale}mm; font-weight: 700; }
-          .header-subtitle { color: #475569; font-size: ${3.2 * slipSettings.fontScale}mm; }
-          .content-grid { display: grid; grid-template-columns: ${qrSvg ? "1fr auto" : "1fr"}; gap: 2.2mm; align-items: start; }
-          .main-stack { display: grid; gap: 2mm; }
-          .section { display: grid; gap: 1.2mm; }
-          .section-title { color: #8f0f14; font-size: ${3.5 * slipSettings.fontScale}mm; font-weight: 700; }
-          .section-title.bilingual { display: flex; justify-content: space-between; gap: 3mm; }
+          .header-logo { width: 14mm; height: 14mm; object-fit: contain; }
+          .header-copy { display: grid; gap: 0.35mm; }
+          .header-title { color: #8f0f14; font-size: ${4.1 * slipSettings.fontScale * compactScale}mm; font-weight: 700; line-height: 1.1; }
+          .header-subtitle { color: #475569; font-size: ${2.8 * slipSettings.fontScale * compactScale}mm; line-height: 1.1; }
+          .content-grid { display: grid; grid-template-columns: ${qrSvg ? "1fr auto" : "1fr"}; gap: 1.4mm; align-items: start; }
+          .main-stack { display: grid; gap: 1.2mm; min-width: 0; }
+          .section { display: grid; gap: 0.8mm; }
+          .section-title { color: #8f0f14; font-size: ${3.1 * slipSettings.fontScale * compactScale}mm; font-weight: 700; line-height: 1.1; }
+          .section-title.bilingual { display: flex; justify-content: space-between; gap: 2mm; }
           .section-title .ar, .summary-item .ar, .instruction .ar, .location-card.ar, .arrival-note.ar { direction: rtl; text-align: right; unicode-bidi: plaintext; }
           .section-title .en, .summary-item .en, .instruction .en, .location-card.en, .arrival-note.en { direction: ltr; text-align: left; unicode-bidi: plaintext; }
-          .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.3mm; }
-          .summary-item { border: 0.25mm solid #d1d5db; border-radius: 2mm; padding: 1.4mm; min-height: 12mm; background: #ffffff; }
-          .summary-item .label { color: #8f0f14; font-size: ${2.8 * slipSettings.fontScale}mm; font-weight: 700; line-height: 1.2; }
-          .summary-item .value { margin-top: 0.7mm; font-size: ${3 * slipSettings.fontScale}mm; line-height: 1.3; word-break: break-word; overflow-wrap: anywhere; }
-          .qr-block { width: ${layout.qrBlock ? layout.qrBlock.w / MM_TO_PT : 0}mm; max-width: 34mm; border: 0.25mm solid #e2676d; border-radius: 2mm; padding: 1.2mm; background: #fffdfd; }
+          .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9mm; }
+          .summary-item { border: 0.25mm solid #d1d5db; border-radius: 1.6mm; padding: 1mm; min-height: 8.5mm; background: #ffffff; }
+          .summary-item .label { color: #8f0f14; font-size: ${2.4 * slipSettings.fontScale * compactScale}mm; font-weight: 700; line-height: 1.1; }
+          .summary-item .value { margin-top: 0.35mm; font-size: ${2.7 * slipSettings.fontScale * compactScale}mm; line-height: 1.15; word-break: break-word; overflow-wrap: anywhere; }
+          .bilingual-card .label.en, .bilingual-card .value.en { margin-top: 0.35mm; }
+          .qr-block { width: ${qrPanelWidthMm}mm; max-width: ${qrPanelWidthMm}mm; border: 0.25mm solid #e2676d; border-radius: 1.6mm; padding: 0.9mm; background: #fffdfd; }
           .qr-block svg { width: 100%; height: auto; display: block; }
-          .qr-caption { margin-top: 1mm; color: #8f0f14; font-size: ${2.8 * slipSettings.fontScale}mm; font-weight: 700; line-height: 1.25; }
-          .qr-helper { margin-top: 0.8mm; color: #475569; font-size: ${2.5 * slipSettings.fontScale}mm; line-height: 1.35; }
-          .instructions { display: grid; gap: 1.2mm; }
-          .instruction { border: 0.25mm solid #f0b4b7; border-radius: 2mm; padding: 1.4mm; background: #fffaf9; }
-          .instruction-title { color: #8f0f14; font-size: ${2.8 * slipSettings.fontScale}mm; font-weight: 700; }
-          .instruction-body { margin-top: 0.8mm; font-size: ${2.8 * slipSettings.fontScale}mm; line-height: 1.35; word-break: break-word; overflow-wrap: anywhere; }
-          .location-card, .arrival-note { border: 0.25mm solid #d1d5db; border-radius: 2mm; padding: 1.5mm; background: #ffffff; font-size: ${2.9 * slipSettings.fontScale}mm; line-height: 1.35; }
-          .barcode-block { margin-top: auto; border: 0.25mm solid #d1d5db; border-radius: 2mm; padding: 1.4mm; background: #ffffff; }
-          .barcode-caption { color: #8f0f14; font-size: ${2.8 * slipSettings.fontScale}mm; font-weight: 700; text-align: center; margin-bottom: 1mm; }
+          .qr-caption { margin-top: 0.6mm; color: #8f0f14; font-size: ${2.35 * slipSettings.fontScale * compactScale}mm; font-weight: 700; line-height: 1.15; }
+          .qr-helper { margin-top: 0.5mm; color: #475569; font-size: ${2.1 * slipSettings.fontScale * compactScale}mm; line-height: 1.2; }
+          .instructions { display: grid; gap: 0.9mm; }
+          .instruction { border: 0.25mm solid #f0b4b7; border-radius: 1.6mm; padding: 1mm; background: #fffaf9; }
+          .instruction-title { color: #8f0f14; font-size: ${2.45 * slipSettings.fontScale * compactScale}mm; font-weight: 700; line-height: 1.1; }
+          .instruction-body { margin-top: 0.45mm; font-size: ${2.45 * slipSettings.fontScale * compactScale}mm; line-height: 1.2; word-break: break-word; overflow-wrap: anywhere; }
+          .location-card, .arrival-note { border: 0.25mm solid #d1d5db; border-radius: 1.6mm; padding: 1mm; background: #ffffff; font-size: ${2.55 * slipSettings.fontScale * compactScale}mm; line-height: 1.2; }
+          .barcode-block { margin-top: auto; border: 0.25mm solid #d1d5db; border-radius: 1.6mm; padding: 1mm; background: #ffffff; }
+          .barcode-caption { color: #8f0f14; font-size: ${2.35 * slipSettings.fontScale * compactScale}mm; font-weight: 700; text-align: center; margin-bottom: 0.6mm; line-height: 1.1; }
           .barcode-block svg { width: 100%; height: ${slipSettings.barcodeHeightMm}mm; display: block; }
-          .barcode-text { margin-top: 0.8mm; font-size: ${2.6 * slipSettings.fontScale}mm; text-align: center; word-break: break-word; }
+          .barcode-text { margin-top: 0.45mm; font-size: ${2.25 * slipSettings.fontScale * compactScale}mm; text-align: center; word-break: break-word; line-height: 1.1; }
         </style>
       </head>
       <body>
@@ -1046,10 +1088,10 @@ export async function prepareAppointmentSlipHtml(
                   </section>
                   ${extraFields.length ? `<section class="section">${renderFieldGroup(extraFields)}</section>` : ""}
                   ${renderLocation}
-                  ${slipSettings.showArrivalNote && slip.arrivalNote ? `<div class="arrival-note ${languageMode === "en" ? "en" : "ar"}">${escapeHtml(slip.arrivalNote)}</div>` : ""}
+                  ${slipSettings.showArrivalNote && slip.arrivalNote ? `<div class="arrival-note ${languageMode === "en" ? "en" : "ar"}" data-arrival-note="true">${escapeHtml(slip.arrivalNote)}</div>` : ""}
                   ${instructions.length ? `<section class="section">${sectionTitle(slipSettings.instructionsHeadingAr, slipSettings.instructionsHeadingEn)}<div class="instructions">${instructions.map((section) => renderInstructionHtml(section, languageMode)).join("")}</div></section>` : ""}
                 </div>
-                ${qrSvg ? `<aside class="qr-block" data-qr-size-mm="${slipSettings.qrSizeMm}">${qrSvg}<div class="qr-caption">${escapeHtml(localizeText(slipSettings.qrCaptionAr, slipSettings.qrCaptionEn, languageMode))}</div><div class="qr-helper">${escapeHtml(localizeText(slipSettings.qrHelperTextAr, slipSettings.qrHelperTextEn, languageMode))}</div></aside>` : ""}
+                ${qrSvg ? `<aside class="qr-block" data-qr-size-mm="${slipSettings.qrSizeMm}" data-qr-panel-width-mm="${qrPanelWidthMm}">${qrSvg}<div class="qr-caption">${escapeHtml(localizeText(slipSettings.qrCaptionAr, slipSettings.qrCaptionEn, languageMode))}</div><div class="qr-helper">${escapeHtml(localizeText(slipSettings.qrHelperTextAr, slipSettings.qrHelperTextEn, languageMode))}</div></aside>` : ""}
               </div>
               ${layout.barcodeBlock ? `<section class="barcode-block" data-barcode-value="${escapeHtml(slip.accessionBarcodePayload)}"><div class="barcode-caption">${escapeHtml(localizeText(slipSettings.barcodeCaptionAr, slipSettings.barcodeCaptionEn, languageMode))}</div>${barcodeSvg}<div class="barcode-text">${escapeHtml(slip.accessionBarcodePayload)}</div></section>` : ""}
             </div>

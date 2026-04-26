@@ -199,6 +199,34 @@ describe("appointment slip html renderer", () => {
     expect(html).toContain('data-header-visible="false"');
   });
 
+  it("renders compact single-language cards for arabic and english modes", async () => {
+    const arabicHtml = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "ar" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    const englishHtml = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "en" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(arabicHtml).toContain("single-language-ar");
+    expect(arabicHtml).not.toContain("bilingual-card");
+    expect(arabicHtml).not.toContain("Patient Name");
+    expect(englishHtml).toContain("single-language-en");
+    expect(englishHtml).not.toContain("bilingual-card");
+  });
+
+  it("uses compact spacing css for a5 slips", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ paperMode: "blank", languageMode: "en" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain(".content { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 1.2mm; }");
+    expect(html).toContain(".summary-item { border: 0.25mm solid #d1d5db; border-radius: 1.6mm; padding: 1mm; min-height: 8.5mm; background: #ffffff; }");
+    expect(html).toContain('data-qr-panel-width-mm="');
+  });
+
   it("hides time when showTime is false", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings({ showTime: false }),
@@ -234,6 +262,28 @@ describe("appointment slip html renderer", () => {
     });
 
     expect(html).toContain('data-barcode-value="ACC-7"');
+  });
+
+  it("keeps accession number visible in appointment details when enabled", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment({ accessionNumber: "ACC-42" }), {
+      slipSettings: makeSlipSettings({ languageMode: "en", showAccessionNumber: true }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain("Accession Number");
+    expect(html).toContain("ACC-42");
+  });
+
+  it("renders location and arrival note only once in dedicated blocks", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "en", showLocation: true, showArrivalNote: true }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html.match(/data-location-block="true"/g)?.length ?? 0).toBe(1);
+    expect(html.match(/First floor/g)?.length ?? 0).toBe(1);
+    expect(html.match(/data-arrival-note="true"/g)?.length ?? 0).toBe(1);
+    expect(html.match(/Please arrive 15 minutes before your appointment/g)?.length ?? 0).toBe(1);
   });
 
   it("prints from html without routing through jsPDF blob generation", async () => {
