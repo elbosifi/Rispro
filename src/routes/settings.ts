@@ -120,6 +120,24 @@ settingsRouter.delete(
   })
 );
 
+// Printing flows must read these settings without supervisor re-auth.
+// Writes remain protected by the supervisor middleware below.
+settingsRouter.get(
+  "/appointment_slip",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const settings = await getSettingsByCategory("appointment_slip");
+    res.json({ settings });
+  })
+);
+
+settingsRouter.get(
+  "/patient_qr_self_service",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const settings = await getSettingsByCategory("patient_qr_self_service");
+    res.json({ settings });
+  })
+);
+
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));

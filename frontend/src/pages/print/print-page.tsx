@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api-client";
 import {
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+  DEFAULT_PATIENT_QR_SETTINGS,
   fetchAppointments,
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
@@ -85,6 +87,7 @@ export default function PrintPage() {
   const {
     data: slipSettings,
     error: slipSettingsError,
+    isLoading: slipSettingsLoading,
   } = useQuery({
     queryKey: ["appointment-slip-settings"],
     queryFn: fetchAppointmentSlipSettings,
@@ -93,12 +96,18 @@ export default function PrintPage() {
   const {
     data: patientQrSettings,
     error: patientQrSettingsError,
+    isLoading: patientQrSettingsLoading,
   } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
-  const renderOptions = slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : null;
+  const effectiveSlipSettings = slipSettings ?? DEFAULT_APPOINTMENT_SLIP_SETTINGS;
+  const effectivePatientQrSettings = patientQrSettings ?? DEFAULT_PATIENT_QR_SETTINGS;
+  const renderOptions =
+    slipSettingsLoading || patientQrSettingsLoading
+      ? null
+      : { slipSettings: effectiveSlipSettings, patientQrSettings: effectivePatientQrSettings };
   const settingsReady = Boolean(renderOptions);
   const slipSettingsFailed = Boolean(slipSettingsError);
   const patientQrSettingsFailed = Boolean(patientQrSettingsError);
@@ -106,11 +115,11 @@ export default function PrintPage() {
   const slipSettingsErrorDetails = describeQueryError(slipSettingsError);
   const patientQrSettingsErrorDetails = describeQueryError(patientQrSettingsError);
   const settingsFailureSummary = slipSettingsFailed && patientQrSettingsFailed
-    ? "Appointment Slip Settings and Patient QR Settings could not be loaded. Printing is disabled until both are available."
+    ? "Appointment Slip Settings and Patient QR Settings could not be loaded. Using defaults for this print preview."
     : slipSettingsFailed
-      ? "Appointment Slip Settings could not be loaded. Printing is disabled until settings are available."
+      ? "Appointment Slip Settings could not be loaded. Using defaults for this print preview."
       : patientQrSettingsFailed
-        ? "Patient QR Settings could not be loaded. Printing is disabled until settings are available."
+        ? "Patient QR Settings could not be loaded. Using defaults for this print preview."
         : "";
   const canUsePdfDownload =
     renderOptions?.slipSettings.paperMode === "blank" &&
@@ -122,15 +131,6 @@ export default function PrintPage() {
     if (!appointmentById) return () => {
       cancelled = true;
     };
-
-    if (settingsLoadFailed) {
-      setSelectedAppointment(appointmentById);
-      setSlipPreviewLoading(false);
-      setSlipPreviewHtml(null);
-      return () => {
-        cancelled = true;
-      };
-    }
 
     if (!autoprintDone && renderOptions) {
       setSelectedAppointment(appointmentById);
@@ -160,7 +160,9 @@ export default function PrintPage() {
     autoprintDone,
     renderOptions,
     patientQrSettingsError,
+    patientQrSettingsLoading,
     slipSettingsError,
+    slipSettingsLoading,
     settingsLoadFailed,
   ]);
 
