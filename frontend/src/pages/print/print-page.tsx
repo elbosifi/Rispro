@@ -113,8 +113,7 @@ export default function PrintPage() {
         ? "Patient QR Settings could not be loaded. Printing is disabled until settings are available."
         : "";
   const canUsePdfDownload =
-    Boolean(renderOptions) &&
-    renderOptions.slipSettings.paperMode === "blank" &&
+    renderOptions?.slipSettings.paperMode === "blank" &&
     renderOptions.slipSettings.languageMode === "en";
 
   useEffect(() => {
