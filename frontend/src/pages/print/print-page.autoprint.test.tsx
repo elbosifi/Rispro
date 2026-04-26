@@ -6,7 +6,12 @@ import PrintPage from "./print-page";
 import * as printUtils from "@/lib/print-utils";
 import * as apiHooks from "@/lib/api-hooks";
 
-const { mockAppointmentData: mockAppointment42, mockAppointment99 } = vi.hoisted(() => {
+const {
+  mockAppointmentData: mockAppointment42,
+  mockAppointment99,
+  mockSlipSettings,
+  mockPatientQrSettings,
+} = vi.hoisted(() => {
   const mockAppointmentData = {
     id: 42,
     patientId: 1,
@@ -45,13 +50,80 @@ const { mockAppointmentData: mockAppointment42, mockAppointment99 } = vi.hoisted
     id: 99,
     accessionNumber: "ACC-99",
   };
-  return { mockAppointmentData, mockAppointment99 };
+  const mockSlipSettings = {
+    paperMode: "blank",
+    languageMode: "ar",
+    safeTopMm: 12,
+    safeBottomMm: 14,
+    safeLeftMm: 8,
+    safeRightMm: 9,
+    contentPaddingMm: 4,
+    fontScale: 1,
+    qrSizeMm: 18,
+    barcodeHeightMm: 10,
+    barcodeWidthMm: 80,
+    hospitalNameAr: "Arabic Hospital",
+    hospitalNameEn: "English Hospital",
+    departmentNameAr: "Arabic Department",
+    departmentNameEn: "English Department",
+    slipTitleAr: "Arabic Slip",
+    slipTitleEn: "English Slip",
+    patientDetailsHeadingAr: "Arabic Patient",
+    patientDetailsHeadingEn: "English Patient",
+    appointmentDetailsHeadingAr: "Arabic Appointment",
+    appointmentDetailsHeadingEn: "English Appointment",
+    instructionsHeadingAr: "Arabic Instructions",
+    instructionsHeadingEn: "English Instructions",
+    modalityInstructionsHeadingAr: "Arabic Modality",
+    modalityInstructionsHeadingEn: "English Modality",
+    examInstructionsHeadingAr: "Arabic Exam",
+    examInstructionsHeadingEn: "English Exam",
+    locationHeadingAr: "Arabic Location",
+    locationHeadingEn: "English Location",
+    showPatientName: true,
+    showMrn: true,
+    showNationalId: false,
+    showPhone: true,
+    showAgeSex: true,
+    showAppointmentNumber: true,
+    showAccessionNumber: true,
+    showModality: true,
+    showExamName: true,
+    showDate: true,
+    showTime: false,
+    showWalkIn: true,
+    showLocation: true,
+    showArrivalNote: true,
+    showQrCode: true,
+    qrCaptionAr: "Arabic QR",
+    qrCaptionEn: "English QR",
+    qrHelperTextAr: "Arabic helper",
+    qrHelperTextEn: "English helper",
+    showAccessionBarcode: true,
+    barcodeValueMode: "accessionNumber",
+    barcodeCaptionAr: "Arabic Barcode",
+    barcodeCaptionEn: "English Barcode",
+    showModalityInstructions: true,
+    showExamSpecificInstructions: true,
+    maxInstructionLinesOnSlip: 4,
+    fallbackInstructionTextAr: "Arabic fallback",
+    fallbackInstructionTextEn: "English fallback",
+    locationTextAr: "Arabic location text",
+    locationTextEn: "English location text",
+  };
+  const mockPatientQrSettings = {
+    enabled: true,
+    printQrOnAppointmentSlip: true,
+  };
+  return { mockAppointmentData, mockAppointment99, mockSlipSettings, mockPatientQrSettings };
 });
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: vi.fn().mockResolvedValue([]),
   fetchAppointmentLookups: vi.fn().mockResolvedValue({ modalities: [], examTypes: [] }),
   getAppointmentById: vi.fn().mockResolvedValue(mockAppointment42),
+  fetchAppointmentSlipSettings: vi.fn().mockResolvedValue(mockSlipSettings),
+  fetchPatientQrSettings: vi.fn().mockResolvedValue(mockPatientQrSettings),
 }));
 
 vi.mock("@/lib/print-utils", () => ({
@@ -103,6 +175,10 @@ describe("PrintPage autoprint", () => {
 
     const mockCall = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(mockCall.accessionNumber).toBe("ACC-42");
+    expect((printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][1]).toEqual({
+      slipSettings: mockSlipSettings,
+      patientQrSettings: mockPatientQrSettings,
+    });
   });
 
   it("does not auto-print when autoprint param is missing", async () => {
@@ -126,6 +202,12 @@ describe("PrintPage autoprint", () => {
 
     await waitFor(() => {
       expect(screen.getByText("print.previewTitle")).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenCalledWith(mockAppointment42, {
+        slipSettings: mockSlipSettings,
+        patientQrSettings: mockPatientQrSettings,
+      });
     });
     expect(screen.getByRole("button", { name: "print.confirmPrint" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "print.downloadPdf" })).toBeTruthy();

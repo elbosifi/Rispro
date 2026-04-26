@@ -512,10 +512,10 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
     requiresReport: Boolean(preview.requiresReport ?? preview.requires_report),
     reportFeature: preview.reportFeature as PublicAppointmentCancelPreview["reportFeature"],
-    modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "—"),
+    modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "Ã¢â‚¬â€"),
     modalityNameAr: String(preview.modalityNameAr ?? preview.modality_name_ar ?? ""),
     modalityNameEn: String(preview.modalityNameEn ?? preview.modality_name_en ?? ""),
-    examName: String(preview.examName ?? preview.exam_name ?? preview.examNameAr ?? preview.exam_name_ar ?? "—"),
+    examName: String(preview.examName ?? preview.exam_name ?? preview.examNameAr ?? preview.exam_name_ar ?? "Ã¢â‚¬â€"),
     examNameAr: String(preview.examNameAr ?? preview.exam_name_ar ?? ""),
     examNameEn: String(preview.examNameEn ?? preview.exam_name_en ?? ""),
     modalityInstructionAr: String(preview.modalityInstructionAr ?? preview.modality_instruction_ar ?? ""),
@@ -705,23 +705,23 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   qrSizeMm: 24,
   barcodeHeightMm: 12,
   barcodeWidthMm: 100,
-  hospitalNameAr: "المركز الوطني للأورام بنغازي",
+  hospitalNameAr: "Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Æ’Ã˜Â² Ã˜Â§Ã™â€žÃ™Ë†Ã˜Â·Ã™â€ Ã™Å  Ã™â€žÃ™â€žÃ˜Â£Ã™Ë†Ã˜Â±Ã˜Â§Ã™â€¦ Ã˜Â¨Ã™â€ Ã˜ÂºÃ˜Â§Ã˜Â²Ã™Å ",
   hospitalNameEn: "National Cancer Center Benghazi",
-  departmentNameAr: "قسم الأشعة التشخيصية",
+  departmentNameAr: "Ã™â€šÃ˜Â³Ã™â€¦ Ã˜Â§Ã™â€žÃ˜Â£Ã˜Â´Ã˜Â¹Ã˜Â© Ã˜Â§Ã™â€žÃ˜ÂªÃ˜Â´Ã˜Â®Ã™Å Ã˜ÂµÃ™Å Ã˜Â©",
   departmentNameEn: "Diagnostic Radiology Department",
-  slipTitleAr: "وصل الموعد",
+  slipTitleAr: "Ã™Ë†Ã˜ÂµÃ™â€ž Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯",
   slipTitleEn: "Appointment Slip",
-  patientDetailsHeadingAr: "بيانات المريض",
+  patientDetailsHeadingAr: "Ã˜Â¨Ã™Å Ã˜Â§Ã™â€ Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Å Ã˜Â¶",
   patientDetailsHeadingEn: "Patient Details",
-  appointmentDetailsHeadingAr: "بيانات الموعد",
+  appointmentDetailsHeadingAr: "Ã˜Â¨Ã™Å Ã˜Â§Ã™â€ Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯",
   appointmentDetailsHeadingEn: "Appointment Details",
-  instructionsHeadingAr: "التعليمات",
+  instructionsHeadingAr: "Ã˜Â§Ã™â€žÃ˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª",
   instructionsHeadingEn: "Instructions",
-  modalityInstructionsHeadingAr: "تعليمات حسب نوع الجهاز",
+  modalityInstructionsHeadingAr: "Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â­Ã˜Â³Ã˜Â¨ Ã™â€ Ã™Ë†Ã˜Â¹ Ã˜Â§Ã™â€žÃ˜Â¬Ã™â€¡Ã˜Â§Ã˜Â²",
   modalityInstructionsHeadingEn: "Modality Instructions",
-  examInstructionsHeadingAr: "تعليمات خاصة بالفحص",
+  examInstructionsHeadingAr: "Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â®Ã˜Â§Ã˜ÂµÃ˜Â© Ã˜Â¨Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ",
   examInstructionsHeadingEn: "Exam Instructions",
-  locationHeadingAr: "موقع الفحص",
+  locationHeadingAr: "Ã™â€¦Ã™Ë†Ã™â€šÃ˜Â¹ Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ",
   locationHeadingEn: "Exam Location",
   showPatientName: true,
   showMrn: true,
@@ -738,18 +738,18 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   showLocation: true,
   showArrivalNote: true,
   showQrCode: true,
-  qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
+  qrCaptionAr: "Ã˜Â§Ã™â€¦Ã˜Â³Ã˜Â­ Ã™â€žÃ™â€žÃ˜Â§Ã˜Â·Ã™â€žÃ˜Â§Ã˜Â¹ Ã˜Â¹Ã™â€žÃ™â€° Ã˜ÂªÃ™ÂÃ˜Â§Ã˜ÂµÃ™Å Ã™â€ž Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯",
   qrCaptionEn: "Scan for appointment details",
-  qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
+  qrHelperTextAr: "Ã˜Â§Ã˜Â³Ã˜ÂªÃ˜Â®Ã˜Â¯Ã™â€¦ Ã˜Â§Ã™â€žÃ˜Â±Ã™â€¦Ã˜Â² Ã™â€žÃ˜Â¹Ã˜Â±Ã˜Â¶ Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ Ã™Ë†Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã™â€šÃ˜Â¹ Ã™Ë†Ã˜Â®Ã˜Â¯Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯.",
   qrHelperTextEn: "Use this QR code to open your appointment page, instructions, and location details.",
   showAccessionBarcode: true,
   barcodeValueMode: "accessionNumber",
-  barcodeCaptionAr: "امسح للدخول إلى قائمة الانتظار",
+  barcodeCaptionAr: "Ã˜Â§Ã™â€¦Ã˜Â³Ã˜Â­ Ã™â€žÃ™â€žÃ˜Â¯Ã˜Â®Ã™Ë†Ã™â€ž Ã˜Â¥Ã™â€žÃ™â€° Ã™â€šÃ˜Â§Ã˜Â¦Ã™â€¦Ã˜Â© Ã˜Â§Ã™â€žÃ˜Â§Ã™â€ Ã˜ÂªÃ˜Â¸Ã˜Â§Ã˜Â±",
   barcodeCaptionEn: "Scan to Enter The Queue",
   showModalityInstructions: true,
   showExamSpecificInstructions: true,
   maxInstructionLinesOnSlip: 4,
-  fallbackInstructionTextAr: "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
+  fallbackInstructionTextAr: "Ã™Å Ã˜Â±Ã˜Â¬Ã™â€° Ã™â€¦Ã˜Â³Ã˜Â­ Ã˜Â±Ã™â€¦Ã˜Â² QR Ã™â€žÃ™â€žÃ˜Â§Ã˜Â·Ã™â€žÃ˜Â§Ã˜Â¹ Ã˜Â¹Ã™â€žÃ™â€° Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ˜Â¬Ã™â€¡Ã˜Â§Ã˜Â² Ã™Ë†Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ Ã™Ë†Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã™â€šÃ˜Â¹.",
   fallbackInstructionTextEn: "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
   locationTextAr: "",
   locationTextEn: "",
@@ -814,9 +814,9 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     qrImageUnavailableMessage: str(record.qrImageUnavailableMessage, "Image viewing is currently unavailable. Please try again later."),
     qrReportStudyNotFoundMessage: str(record.qrReportStudyNotFoundMessage, "Your study is not available in the report system yet. Please try again later."),
     qrImageStudyNotFoundMessage: str(record.qrImageStudyNotFoundMessage, "Your study images are not available yet. Please try again later."),
-    pageTitleAr: str(record.pageTitleAr, "خدمة المريض عبر رمز QR"),
+    pageTitleAr: str(record.pageTitleAr, "Ã˜Â®Ã˜Â¯Ã™â€¦Ã˜Â© Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Å Ã˜Â¶ Ã˜Â¹Ã˜Â¨Ã˜Â± Ã˜Â±Ã™â€¦Ã˜Â² QR"),
     pageTitleEn: str(record.pageTitleEn, "Patient QR Service"),
-    introTextAr: str(record.introTextAr, "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة."),
+    introTextAr: str(record.introTextAr, "Ã™Å Ã™â€¦Ã™Æ’Ã™â€ Ã™Æ’ Ã™â€¦Ã˜Â±Ã˜Â§Ã˜Â¬Ã˜Â¹Ã˜Â© Ã˜ÂªÃ™ÂÃ˜Â§Ã˜ÂµÃ™Å Ã™â€ž Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯ Ã™Ë†Ã˜Â§Ã™â€žÃ˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã™Ë†Ã™â€¦Ã˜Â¹Ã™â€žÃ™Ë†Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€šÃ˜Â³Ã™â€¦ Ã™â€¦Ã™â€  Ã™â€¡Ã˜Â°Ã™â€¡ Ã˜Â§Ã™â€žÃ˜ÂµÃ™ÂÃ˜Â­Ã˜Â©."),
     introTextEn: str(record.introTextEn, "You can review appointment details, instructions, and department information from this page."),
     genericPreparationTextAr: str(record.genericPreparationTextAr, ""),
     genericPreparationTextEn: str(record.genericPreparationTextEn, ""),
@@ -837,7 +837,7 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
       noteEn: str(contact.noteEn, ""),
     },
     location: {
-      centerNameAr: str(location.centerNameAr, "المركز الوطني للأورام بنغازي"),
+      centerNameAr: str(location.centerNameAr, "Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Æ’Ã˜Â² Ã˜Â§Ã™â€žÃ™Ë†Ã˜Â·Ã™â€ Ã™Å  Ã™â€žÃ™â€žÃ˜Â£Ã™Ë†Ã˜Â±Ã˜Â§Ã™â€¦ Ã˜Â¨Ã™â€ Ã˜ÂºÃ˜Â§Ã˜Â²Ã™Å "),
       centerNameEn: str(location.centerNameEn, "National Cancer Center Benghazi"),
       departmentLocationAr: str(location.departmentLocationAr, ""),
       departmentLocationEn: str(location.departmentLocationEn, ""),
@@ -887,9 +887,9 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     return next;
   };
 
-  const paperMode = str(record.paperMode, "preprinted");
-  const languageMode = str(record.languageMode, "bilingual");
-  const barcodeValueMode = str(record.barcodeValueMode, "accessionNumber");
+  const paperMode = str(record.paperMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.paperMode);
+  const languageMode = str(record.languageMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.languageMode);
+  const barcodeValueMode = str(record.barcodeValueMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeValueMode);
 
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
@@ -903,9 +903,11 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     qrSizeMm: num(record.qrSizeMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrSizeMm, 12, 48),
     barcodeHeightMm: num(record.barcodeHeightMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeHeightMm, 6, 28),
     barcodeWidthMm: num(record.barcodeWidthMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeWidthMm, 40, 130),
-    hospitalNameAr: str(record.hospitalNameAr, "المركز الوطني للأورام بنغازي"),
+    hospitalNameAr: str(record.hospitalNameAr, "Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Æ’Ã˜Â² Ã˜Â§Ã™â€žÃ™Ë†Ã˜Â·Ã™â€ Ã™Å  Ã™â€žÃ™â€žÃ˜Â£Ã™Ë†Ã˜Â±Ã˜Â§Ã™â€¦ Ã˜Â¨Ã™â€ Ã˜ÂºÃ˜Â§Ã˜Â²Ã™Å "),
+    /* legacy literal fallback removed; use centralized defaults */
+    hospitalNameAr: str(record.hospitalNameAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameAr),
     hospitalNameEn: str(record.hospitalNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameEn),
-    departmentNameAr: str(record.departmentNameAr, "قسم الأشعة التشخيصية"),
+    departmentNameAr: str(record.departmentNameAr, "Ã™â€šÃ˜Â³Ã™â€¦ Ã˜Â§Ã™â€žÃ˜Â£Ã˜Â´Ã˜Â¹Ã˜Â© Ã˜Â§Ã™â€žÃ˜ÂªÃ˜Â´Ã˜Â®Ã™Å Ã˜ÂµÃ™Å Ã˜Â©"),
     departmentNameEn: str(record.departmentNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.departmentNameEn),
     slipTitleAr: str(record.slipTitleAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr),
     slipTitleEn: str(record.slipTitleEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleEn),
@@ -921,37 +923,37 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     examInstructionsHeadingEn: str(record.examInstructionsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingEn),
     locationHeadingAr: str(record.locationHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr),
     locationHeadingEn: str(record.locationHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingEn),
-    showPatientName: bool(record.showPatientName, true),
-    showMrn: bool(record.showMrn, true),
-    showNationalId: bool(record.showNationalId, false),
-    showPhone: bool(record.showPhone, true),
-    showAgeSex: bool(record.showAgeSex, true),
-    showAppointmentNumber: bool(record.showAppointmentNumber, true),
-    showAccessionNumber: bool(record.showAccessionNumber, true),
-    showModality: bool(record.showModality, true),
-    showExamName: bool(record.showExamName, true),
-    showDate: bool(record.showDate, true),
-    showTime: bool(record.showTime, true),
-    showWalkIn: bool(record.showWalkIn, true),
-    showLocation: bool(record.showLocation, true),
-    showArrivalNote: bool(record.showArrivalNote, true),
-    showQrCode: bool(record.showQrCode, true),
-    qrCaptionAr: str(record.qrCaptionAr, "امسح للاطلاع على تفاصيل الموعد"),
-    qrCaptionEn: str(record.qrCaptionEn, "Scan for appointment details"),
-    qrHelperTextAr: str(record.qrHelperTextAr, "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد."),
-    qrHelperTextEn: str(record.qrHelperTextEn, "Use this QR code to open your appointment page, instructions, and location details."),
-    showAccessionBarcode: bool(record.showAccessionBarcode, true),
+    showPatientName: bool(record.showPatientName, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showPatientName),
+    showMrn: bool(record.showMrn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showMrn),
+    showNationalId: bool(record.showNationalId, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showNationalId),
+    showPhone: bool(record.showPhone, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showPhone),
+    showAgeSex: bool(record.showAgeSex, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showAgeSex),
+    showAppointmentNumber: bool(record.showAppointmentNumber, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showAppointmentNumber),
+    showAccessionNumber: bool(record.showAccessionNumber, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showAccessionNumber),
+    showModality: bool(record.showModality, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showModality),
+    showExamName: bool(record.showExamName, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showExamName),
+    showDate: bool(record.showDate, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showDate),
+    showTime: bool(record.showTime, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showTime),
+    showWalkIn: bool(record.showWalkIn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showWalkIn),
+    showLocation: bool(record.showLocation, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showLocation),
+    showArrivalNote: bool(record.showArrivalNote, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showArrivalNote),
+    showQrCode: bool(record.showQrCode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showQrCode),
+    qrCaptionAr: str(record.qrCaptionAr, "Ã˜Â§Ã™â€¦Ã˜Â³Ã˜Â­ Ã™â€žÃ™â€žÃ˜Â§Ã˜Â·Ã™â€žÃ˜Â§Ã˜Â¹ Ã˜Â¹Ã™â€žÃ™â€° Ã˜ÂªÃ™ÂÃ˜Â§Ã˜ÂµÃ™Å Ã™â€ž Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯"),
+    qrCaptionEn: str(record.qrCaptionEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionEn),
+    qrHelperTextAr: str(record.qrHelperTextAr, "Ã˜Â§Ã˜Â³Ã˜ÂªÃ˜Â®Ã˜Â¯Ã™â€¦ Ã˜Â§Ã™â€žÃ˜Â±Ã™â€¦Ã˜Â² Ã™â€žÃ˜Â¹Ã˜Â±Ã˜Â¶ Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ Ã™Ë†Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã™â€šÃ˜Â¹ Ã™Ë†Ã˜Â®Ã˜Â¯Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯."),
+    qrHelperTextEn: str(record.qrHelperTextEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrHelperTextEn),
+    showAccessionBarcode: bool(record.showAccessionBarcode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showAccessionBarcode),
     barcodeValueMode:
       barcodeValueMode === "appointmentNumber" || barcodeValueMode === "bookingId" ? barcodeValueMode : "accessionNumber",
-    barcodeCaptionAr: str(record.barcodeCaptionAr, "امسح للدخول إلى قائمة الانتظار"),
-    barcodeCaptionEn: str(record.barcodeCaptionEn, "Scan to Enter The Queue"),
-    showModalityInstructions: bool(record.showModalityInstructions, true),
-    showExamSpecificInstructions: bool(record.showExamSpecificInstructions, true),
-    maxInstructionLinesOnSlip: num(record.maxInstructionLinesOnSlip, 4, 1, 8),
-    fallbackInstructionTextAr: str(record.fallbackInstructionTextAr, "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع."),
-    fallbackInstructionTextEn: str(record.fallbackInstructionTextEn, "Scan the QR code for modality instructions, exam-specific instructions, and location details."),
-    locationTextAr: str(record.locationTextAr, ""),
-    locationTextEn: str(record.locationTextEn, ""),
+    barcodeCaptionAr: str(record.barcodeCaptionAr, "Ã˜Â§Ã™â€¦Ã˜Â³Ã˜Â­ Ã™â€žÃ™â€žÃ˜Â¯Ã˜Â®Ã™Ë†Ã™â€ž Ã˜Â¥Ã™â€žÃ™â€° Ã™â€šÃ˜Â§Ã˜Â¦Ã™â€¦Ã˜Â© Ã˜Â§Ã™â€žÃ˜Â§Ã™â€ Ã˜ÂªÃ˜Â¸Ã˜Â§Ã˜Â±"),
+    barcodeCaptionEn: str(record.barcodeCaptionEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeCaptionEn),
+    showModalityInstructions: bool(record.showModalityInstructions, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showModalityInstructions),
+    showExamSpecificInstructions: bool(record.showExamSpecificInstructions, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showExamSpecificInstructions),
+    maxInstructionLinesOnSlip: num(record.maxInstructionLinesOnSlip, DEFAULT_APPOINTMENT_SLIP_SETTINGS.maxInstructionLinesOnSlip, 1, 8),
+    fallbackInstructionTextAr: str(record.fallbackInstructionTextAr, "Ã™Å Ã˜Â±Ã˜Â¬Ã™â€° Ã™â€¦Ã˜Â³Ã˜Â­ Ã˜Â±Ã™â€¦Ã˜Â² QR Ã™â€žÃ™â€žÃ˜Â§Ã˜Â·Ã™â€žÃ˜Â§Ã˜Â¹ Ã˜Â¹Ã™â€žÃ™â€° Ã˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ˜Â¬Ã™â€¡Ã˜Â§Ã˜Â² Ã™Ë†Ã˜Â§Ã™â€žÃ™ÂÃ˜Â­Ã˜Âµ Ã™Ë†Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã™â€šÃ˜Â¹."),
+    fallbackInstructionTextEn: str(record.fallbackInstructionTextEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.fallbackInstructionTextEn),
+    locationTextAr: str(record.locationTextAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationTextAr),
+    locationTextEn: str(record.locationTextEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationTextEn),
   };
 }
 
@@ -973,7 +975,11 @@ export async function savePatientQrSettings(payload: PatientQrSettings) {
 export async function fetchAppointmentSlipSettings(): Promise<AppointmentSlipSettings> {
   const response = await api<{ settings: RawRecord[] }>("/settings/appointment_slip");
   const configRow = response.settings?.find((row) => row.setting_key === "config");
-  return normalizeAppointmentSlipSettings(configRow ?? {});
+  const normalized = normalizeAppointmentSlipSettings(configRow ?? {});
+  return {
+    ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+    ...normalized,
+  };
 }
 
 export async function saveAppointmentSlipSettings(payload: AppointmentSlipSettings) {
@@ -1426,3 +1432,4 @@ export async function searchPacs(patientNationalId: string) {
     body: JSON.stringify({ patientNationalId })
   });
 }
+

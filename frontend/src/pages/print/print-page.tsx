@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchAppointments,
   fetchAppointmentLookups,
+  fetchAppointmentSlipSettings,
+  fetchPatientQrSettings,
   getAppointmentById,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -68,14 +70,39 @@ export default function PrintPage() {
     enabled: !!appointmentIdParam && !isNaN(parseInt(appointmentIdParam, 10)),
     staleTime: 1000 * 30,
   });
+  const {
+    data: slipSettings,
+    error: slipSettingsError,
+    isLoading: slipSettingsLoading,
+  } = useQuery({
+    queryKey: ["appointment-slip-settings"],
+    queryFn: fetchAppointmentSlipSettings,
+    staleTime: 1000 * 60,
+  });
+  const {
+    data: patientQrSettings,
+    error: patientQrSettingsError,
+    isLoading: patientQrSettingsLoading,
+  } = useQuery({
+    queryKey: ["patient-qr-settings"],
+    queryFn: fetchPatientQrSettings,
+    staleTime: 1000 * 60,
+  });
 
   useEffect(() => {
     let cancelled = false;
+    const settingsReady =
+      (!slipSettingsLoading || Boolean(slipSettingsError)) &&
+      (!patientQrSettingsLoading || Boolean(patientQrSettingsError));
+    const renderOptions =
+      slipSettings && patientQrSettings
+        ? { slipSettings, patientQrSettings }
+        : undefined;
 
-    if (appointmentById && !autoprintDone) {
+    if (appointmentById && !autoprintDone && settingsReady) {
       setSelectedAppointment(appointmentById);
       setSlipPreviewLoading(true);
-      void prepareAppointmentSlipHtml(appointmentById)
+      void prepareAppointmentSlipHtml(appointmentById, renderOptions)
         .then((html) => {
           if (cancelled || !html) return;
           setSlipPreviewHtml(html);
@@ -86,7 +113,7 @@ export default function PrintPage() {
 
       if (autoprintParam) {
         setTimeout(() => {
-          printAppointmentSlip(appointmentById);
+          printAppointmentSlip(appointmentById, renderOptions);
           setAutoprintDone(true);
         }, 300);
       }
@@ -94,20 +121,36 @@ export default function PrintPage() {
     return () => {
       cancelled = true;
     };
-  }, [appointmentById, autoprintParam, autoprintDone]);
+  }, [
+    appointmentById,
+    autoprintParam,
+    autoprintDone,
+    patientQrSettings,
+    patientQrSettingsError,
+    patientQrSettingsLoading,
+    slipSettings,
+    slipSettingsError,
+    slipSettingsLoading,
+  ]);
 
   function openSlipPreview(appointment: AppointmentWithDetails) {
     navigate(`/print?appointmentId=${appointment.id}`);
   }
 
   function handlePrintSlip(appointment: AppointmentWithDetails) {
-    printAppointmentSlip(appointment);
+    printAppointmentSlip(
+      appointment,
+      slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
+    );
   }
 
   async function handleDownloadPdf(appointment: AppointmentWithDetails) {
     setPdfDownloading(true);
     try {
-      await downloadAppointmentSlipPdf(appointment);
+      await downloadAppointmentSlipPdf(
+        appointment,
+        slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
+      );
     } finally {
       setPdfDownloading(false);
     }
@@ -230,6 +273,11 @@ export default function PrintPage() {
               <p className="text-sm text-muted-foreground">
                 {t(language, "print.previewSubtitle")}
               </p>
+              {slipSettingsError || patientQrSettingsError ? (
+                <p className="mt-2 text-sm text-amber-700">
+                  Appointment slip settings could not be loaded. Using defaults for this preview.
+                </p>
+              ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={() => navigate("/print")}>

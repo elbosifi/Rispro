@@ -2,6 +2,7 @@ import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
   type AppointmentSlipSettings,
@@ -33,65 +34,7 @@ const A5_WIDTH_PT = 148 * MM_TO_PT;
 const A5_HEIGHT_PT = 210 * MM_TO_PT;
 
 const DEFAULT_SLIP_SETTINGS: AppointmentSlipSettings = {
-  paperMode: "preprinted",
-  languageMode: "bilingual",
-  safeTopMm: 58,
-  safeBottomMm: 56,
-  safeLeftMm: 10,
-  safeRightMm: 10,
-  contentPaddingMm: 3,
-  fontScale: 1,
-  qrSizeMm: 24,
-  barcodeHeightMm: 12,
-  barcodeWidthMm: 100,
-  hospitalNameAr: "المركز الوطني للأورام بنغازي",
-  hospitalNameEn: "National Cancer Center Benghazi",
-  departmentNameAr: "قسم الأشعة التشخيصية",
-  departmentNameEn: "Diagnostic Radiology Department",
-  slipTitleAr: "وصل الموعد",
-  slipTitleEn: "Appointment Slip",
-  patientDetailsHeadingAr: "بيانات المريض",
-  patientDetailsHeadingEn: "Patient Details",
-  appointmentDetailsHeadingAr: "بيانات الموعد",
-  appointmentDetailsHeadingEn: "Appointment Details",
-  instructionsHeadingAr: "التعليمات",
-  instructionsHeadingEn: "Instructions",
-  modalityInstructionsHeadingAr: "تعليمات حسب نوع الجهاز",
-  modalityInstructionsHeadingEn: "Modality Instructions",
-  examInstructionsHeadingAr: "تعليمات خاصة بالفحص",
-  examInstructionsHeadingEn: "Exam Instructions",
-  locationHeadingAr: "موقع الفحص",
-  locationHeadingEn: "Exam Location",
-  showPatientName: true,
-  showMrn: true,
-  showNationalId: false,
-  showPhone: true,
-  showAgeSex: true,
-  showAppointmentNumber: true,
-  showAccessionNumber: true,
-  showModality: true,
-  showExamName: true,
-  showDate: true,
-  showTime: true,
-  showWalkIn: true,
-  showLocation: true,
-  showArrivalNote: true,
-  showQrCode: true,
-  qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
-  qrCaptionEn: "Scan for appointment details",
-  qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
-  qrHelperTextEn: "Use this QR code to open your appointment page, instructions, and location details.",
-  showAccessionBarcode: true,
-  barcodeValueMode: "accessionNumber",
-  barcodeCaptionAr: "امسح للدخول إلى قائمة الانتظار",
-  barcodeCaptionEn: "Scan to Enter The Queue",
-  showModalityInstructions: true,
-  showExamSpecificInstructions: true,
-  maxInstructionLinesOnSlip: 4,
-  fallbackInstructionTextAr: "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
-  fallbackInstructionTextEn: "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
-  locationTextAr: "",
-  locationTextEn: "",
+  ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
 };
 
 const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
@@ -126,9 +69,9 @@ const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
   qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
   qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
-  pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleAr: "Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR",
   pageTitleEn: "Patient QR Service",
-  introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextAr: "ÙŠÙ…ÙƒÙ†Ùƒ Ù…Ø±Ø§Ø¬Ø¹Ø© ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯ ÙˆØ§Ù„ØªØ¹Ù„ÙŠÙ…Ø§Øª ÙˆÙ…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ù‚Ø³Ù… Ù…Ù† Ù‡Ø°Ù‡ Ø§Ù„ØµÙØ­Ø©.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
   genericPreparationTextAr: "",
   genericPreparationTextEn: "",
@@ -145,7 +88,7 @@ const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
     noteEn: "",
   },
   location: {
-    centerNameAr: "المركز الوطني للأورام بنغازي",
+    centerNameAr: "Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ",
     centerNameEn: "National Cancer Center Benghazi",
     departmentLocationAr: "",
     departmentLocationEn: "",
@@ -242,7 +185,7 @@ function formatSlipTime(raw: string | null | undefined): string {
 function shorten(value: string, maxLength: number): string {
   const normalized = String(value || "").trim();
   if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}â€¦`;
 }
 
 function containsArabic(value: string): boolean {
@@ -261,7 +204,7 @@ function processPdfText(doc: jsPDF, value: string): string {
 
 function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
   const cleaned = processPdfText(doc, String(value || "").trim());
-  if (!cleaned) return ["—"];
+  if (!cleaned) return ["â€”"];
   const lines = doc.splitTextToSize(cleaned, maxWidth) as string[];
   if (lines.length <= maxLines) return lines;
   const visible = lines.slice(0, maxLines);
@@ -322,7 +265,9 @@ function drawPdfText(
 }
 
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
-  return settings ? { ...DEFAULT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_SLIP_SETTINGS };
+  return settings
+    ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...DEFAULT_SLIP_SETTINGS, ...settings }
+    : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...DEFAULT_SLIP_SETTINGS };
 }
 
 function sanitizePatientQrSettings(settings?: PatientQrSettings): PatientQrSettings {
@@ -338,17 +283,10 @@ export function filterVisibleAppointments<T extends Pick<AppointmentWithDetails,
 }
 
 async function resolveSlipRuntimeSettings(options?: BuildSlipOptions): Promise<SlipRuntimeSettings> {
-  if (options?.slipSettings || options?.patientQrSettings) {
-    return {
-      slipSettings: sanitizeSettings(options.slipSettings),
-      patientQrSettings: sanitizePatientQrSettings(options.patientQrSettings),
-    };
-  }
-
   try {
     const [slipSettings, patientQrSettings] = await Promise.all([
-      fetchAppointmentSlipSettings(),
-      fetchPatientQrSettings(),
+      options?.slipSettings ? Promise.resolve(options.slipSettings) : fetchAppointmentSlipSettings(),
+      options?.patientQrSettings ? Promise.resolve(options.patientQrSettings) : fetchPatientQrSettings(),
     ]);
     return {
       slipSettings: sanitizeSettings(slipSettings),
@@ -356,8 +294,8 @@ async function resolveSlipRuntimeSettings(options?: BuildSlipOptions): Promise<S
     };
   } catch {
     return {
-      slipSettings: { ...DEFAULT_SLIP_SETTINGS },
-      patientQrSettings: { ...DEFAULT_PATIENT_QR_SETTINGS },
+      slipSettings: sanitizeSettings(options?.slipSettings),
+      patientQrSettings: sanitizePatientQrSettings(options?.patientQrSettings),
     };
   }
 }
@@ -371,10 +309,10 @@ function localizeText(ar: string, en: string, mode: AppointmentSlipSettings["lan
 function localizeValue(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
   const cleanAr = String(ar || "").trim();
   const cleanEn = String(en || "").trim();
-  if (mode === "ar") return cleanAr || cleanEn || "—";
-  if (mode === "en") return cleanEn || cleanAr || "—";
+  if (mode === "ar") return cleanAr || cleanEn || "â€”";
+  if (mode === "en") return cleanEn || cleanAr || "â€”";
   if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
-  return cleanAr || cleanEn || "—";
+  return cleanAr || cleanEn || "â€”";
 }
 
 function buildSlipQrPayload(
@@ -405,8 +343,8 @@ function buildInstructionText(
   if (settings.showModalityInstructions) {
     const bodyAr = String(apt.modalityGeneralInstructionAr || "").trim();
     const bodyEn = String(apt.modalityGeneralInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = bodyAr && bodyAr !== "â€”" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "â€”" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
       headingAr: settings.modalityInstructionsHeadingAr,
       headingEn: settings.modalityInstructionsHeadingEn,
@@ -419,8 +357,8 @@ function buildInstructionText(
   if (settings.showExamSpecificInstructions) {
     const bodyAr = String(apt.examSpecificInstructionAr || "").trim();
     const bodyEn = String(apt.examSpecificInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = bodyAr && bodyAr !== "â€”" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "â€”" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
       headingAr: settings.examInstructionsHeadingAr,
       headingEn: settings.examInstructionsHeadingEn,
@@ -435,20 +373,20 @@ function buildInstructionText(
 
 function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
-  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showPatientName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
-  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
-  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
-  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
-  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
-  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
-  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
-  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
-  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
-  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
-  if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
-  if (settings.showLocation && slip.locationText) fields.push({ labelAr: "الموقع", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
-  if (settings.showArrivalNote) fields.push({ labelAr: "ملاحظة الحضور", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
+  if (settings.showNationalId) fields.push({ labelAr: "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "Ø§Ù„Ù‡Ø§ØªÙ", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "Ø§Ù„Ø¹Ù…Ø± / Ø§Ù„Ø¬Ù†Ø³", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "Ù†ÙˆØ¹ Ø§Ù„Ø¬Ù‡Ø§Ø²", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„ÙØ­Øµ", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "Ø§Ù„ØªØ§Ø±ÙŠØ®", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showLocation && slip.locationText) fields.push({ labelAr: "Ø§Ù„Ù…ÙˆÙ‚Ø¹", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
+  if (settings.showArrivalNote) fields.push({ labelAr: "Ù…Ù„Ø§Ø­Ø¸Ø© Ø§Ù„Ø­Ø¶ÙˆØ±", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
   return fields;
 }
 
@@ -464,15 +402,15 @@ export function buildAppointmentSlipData(
   const patientName = localizeValue(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
   const modality = localizeValue(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
   const examName = localizeValue(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
-  const ageSex = `${apt.ageYears || "—"} / ${apt.sex || "—"}`;
+  const ageSex = `${apt.ageYears || "â€”"} / ${apt.sex || "â€”"}`;
   const locationText = localizeValue(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
   return {
     hospitalName,
     departmentName,
     patientName,
-    mrn: apt.mrn || "—",
-    nationalId: apt.nationalId || "—",
-    phone: apt.phone1 || "—",
+    mrn: apt.mrn || "â€”",
+    nationalId: apt.nationalId || "â€”",
+    phone: apt.phone1 || "â€”",
     accessionNumber: String(apt.accessionNumber || `V2-${apt.id}`).trim(),
     appointmentNumber: String(apt.dailySequence || apt.id),
     bookingId: String(apt.id),
@@ -481,11 +419,11 @@ export function buildAppointmentSlipData(
     examName,
     appointmentDate: formatSlipDate(apt.appointmentDate),
     ageSex,
-    walkInLabel: apt.isWalkIn ? localizeText("نعم", "Yes", slipSettings.languageMode) : localizeText("لا", "No", slipSettings.languageMode),
+    walkInLabel: apt.isWalkIn ? localizeText("Ù†Ø¹Ù…", "Yes", slipSettings.languageMode) : localizeText("Ù„Ø§", "No", slipSettings.languageMode),
     queueQrPayload,
     accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
     locationText,
-    arrivalNote: localizeText("يرجى الحضور قبل الموعد بـ 15 دقيقة", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
+    arrivalNote: localizeText("ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø­Ø¶ÙˆØ± Ù‚Ø¨Ù„ Ø§Ù„Ù…ÙˆØ¹Ø¯ Ø¨Ù€ 15 Ø¯Ù‚ÙŠÙ‚Ø©", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
     modalityInstructions: localizeValue(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
     examInstructions: localizeValue(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
     fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
@@ -743,7 +681,7 @@ export async function createAppointmentSlipPdfBlob(
       drawPdfText(doc, slipSettings.departmentNameAr, content.x + 46, cursorY + 25, { align: "right", bold: false });
       doc.setFontSize(12 * fontScale);
       doc.setTextColor("#b11116");
-      drawPdfText(doc, "وصل الموعد", content.x + 46, cursorY + 40, { align: "right", bold: true });
+      drawPdfText(doc, "ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯", content.x + 46, cursorY + 40, { align: "right", bold: true });
     } else if (slipSettings.languageMode === "en") {
       doc.setFontSize(13 * fontScale);
       drawPdfText(doc, slipSettings.hospitalNameEn, content.x + 46, cursorY + 12, { align: "left", bold: true });
@@ -866,16 +804,16 @@ function renderFieldHtml(field: SlipField): string {
   return `
     <div class="summary-item">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
     </div>
   `;
 }
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim();
-  return normalized !== "" && normalized !== "—" && normalized !== "â€”";
+  return normalized !== "" && normalized !== "â€”" && normalized !== "Ã¢â‚¬â€";
 }
 
 function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSlipSettings["languageMode"]): string {
@@ -886,7 +824,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-ar">
         <div class="label ar">${escapeHtml(field.labelAr)}</div>
-        <div class="value ar">${escapeHtml(valueAr || "—")}</div>
+        <div class="value ar">${escapeHtml(valueAr || "â€”")}</div>
       </div>
     `;
   }
@@ -895,7 +833,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-en">
         <div class="label en">${escapeHtml(field.labelEn)}</div>
-        <div class="value en">${escapeHtml(valueEn || "—")}</div>
+        <div class="value en">${escapeHtml(valueEn || "â€”")}</div>
       </div>
     `;
   }
@@ -903,9 +841,9 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
   return `
     <div class="summary-item bilingual-card">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
     </div>
   `;
 }
@@ -1153,8 +1091,8 @@ async function openAppointmentSlipPrintFrame(html: string): Promise<HTMLIFrameEl
   return frame;
 }
 
-export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): Promise<void> {
-  const blob = await createAppointmentSlipPdfBlob(apt);
+export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails, options?: BuildSlipOptions): Promise<void> {
+  const blob = await createAppointmentSlipPdfBlob(apt, undefined, options);
   const fileName = getAppointmentSlipFileName(apt);
   const anchor = document.createElement("a");
   anchor.href = URL.createObjectURL(blob);
@@ -1169,12 +1107,12 @@ export async function downloadAppointmentSlipPdf(apt: AppointmentWithDetails): P
   }, 1000);
 }
 
-export function printAppointmentSlip(apt: AppointmentWithDetails): void {
-  void printAppointmentSlipInternal(apt);
+export function printAppointmentSlip(apt: AppointmentWithDetails, options?: BuildSlipOptions): void {
+  void printAppointmentSlipInternal(apt, options);
 }
 
-async function printAppointmentSlipInternal(apt: AppointmentWithDetails): Promise<void> {
-  const html = await prepareAppointmentSlipHtml(apt);
+async function printAppointmentSlipInternal(apt: AppointmentWithDetails, options?: BuildSlipOptions): Promise<void> {
+  const html = await prepareAppointmentSlipHtml(apt, options);
   let frame: HTMLIFrameElement | null = null;
   try {
     frame = await openAppointmentSlipPrintFrame(html);
@@ -1201,14 +1139,14 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
     .map(
       (apt, idx) => `
       <div class="row">
-        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
+        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "â€”"}</div></div>
         <div class="arabic"><div class="label">Patient</div><div class="value">${escapeHtml(apt.arabicFullName)}</div></div>
         <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
         <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
-        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
-        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
+        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "â€”")}</div></div>
+        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "â€”")}</div></div>
         <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
-        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
+        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "â€”")}</div></div>
       </div>
     `
     )
@@ -1253,11 +1191,11 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
             <img class="logo" src="/assets/nccb-logo.png" alt="Hospital logo" />
             <div class="brand-wrap">
               <p class="brand">National Cancer Center Benghazi</p>
-              <p class="brand-ar">المركز الوطني للأورام بنغازي</p>
+              <p class="brand-ar">Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ</p>
               <p class="title">Appointment List</p>
             </div>
           </div>
-          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${visibleList.length} · Printed: ${escapeHtml(now)}</p>
+          <p class="summary">Date window: ${escapeHtml(listDate)} Â· Total: ${visibleList.length} Â· Printed: ${escapeHtml(now)}</p>
           ${rows}
           <div class="footer">
             <span>Generated by RISpro</span>

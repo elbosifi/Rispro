@@ -236,6 +236,16 @@ describe("appointment slip html renderer", () => {
     expect(html).not.toContain("10:30");
   });
 
+  it("hides phone when showPhone is false", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "en", showPhone: false }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).not.toContain("Phone");
+    expect(html).not.toContain("0911111111");
+  });
+
   it("renders qr only when enabled and a token exists", async () => {
     const enabledHtml = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings(),
@@ -284,6 +294,24 @@ describe("appointment slip html renderer", () => {
     expect(html.match(/First floor/g)?.length ?? 0).toBe(1);
     expect(html.match(/data-arrival-note="true"/g)?.length ?? 0).toBe(1);
     expect(html.match(/Please arrive 15 minutes before your appointment/g)?.length ?? 0).toBe(1);
+  });
+
+  it("uses provided saved settings instead of default captions", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({
+        languageMode: "ar",
+        qrCaptionAr: "QR from saved settings",
+        barcodeCaptionAr: "Barcode from saved settings",
+        patientDetailsHeadingAr: "Patient heading from saved settings",
+      }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain("QR from saved settings");
+    expect(html).toContain("Barcode from saved settings");
+    expect(html).toContain("Patient heading from saved settings");
+    expect(html).not.toContain("Scan for appointment details");
+    expect(html).not.toContain("Patient Details");
   });
 
   it("prints from html without routing through jsPDF blob generation", async () => {

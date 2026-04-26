@@ -18,65 +18,7 @@ interface AppointmentSlipSettingsSectionProps {
 }
 
 const DEFAULT_SETTINGS: AppointmentSlipSettings = {
-  paperMode: "preprinted",
-  languageMode: "bilingual",
-  safeTopMm: 58,
-  safeBottomMm: 56,
-  safeLeftMm: 10,
-  safeRightMm: 10,
-  contentPaddingMm: 3,
-  fontScale: 1,
-  qrSizeMm: 24,
-  barcodeHeightMm: 12,
-  barcodeWidthMm: 100,
-  hospitalNameAr: "المركز الوطني للأورام بنغازي",
-  hospitalNameEn: "National Cancer Center Benghazi",
-  departmentNameAr: "قسم الأشعة التشخيصية",
-  departmentNameEn: "Diagnostic Radiology Department",
-  slipTitleAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr,
-  slipTitleEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleEn,
-  patientDetailsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingAr,
-  patientDetailsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingEn,
-  appointmentDetailsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingAr,
-  appointmentDetailsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingEn,
-  instructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingAr,
-  instructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingEn,
-  modalityInstructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingAr,
-  modalityInstructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingEn,
-  examInstructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingAr,
-  examInstructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingEn,
-  locationHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr,
-  locationHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingEn,
-  showPatientName: true,
-  showMrn: true,
-  showNationalId: false,
-  showPhone: true,
-  showAgeSex: true,
-  showAppointmentNumber: true,
-  showAccessionNumber: true,
-  showModality: true,
-  showExamName: true,
-  showDate: true,
-  showTime: true,
-  showWalkIn: true,
-  showLocation: true,
-  showArrivalNote: true,
-  showQrCode: true,
-  qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
-  qrCaptionEn: "Scan for appointment details",
-  qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
-  qrHelperTextEn: "Use this QR code to open your appointment page, instructions, and location details.",
-  showAccessionBarcode: true,
-  barcodeValueMode: "accessionNumber",
-  barcodeCaptionAr: "امسح للدخول إلى قائمة الانتظار",
-  barcodeCaptionEn: "Scan to Enter The Queue",
-  showModalityInstructions: true,
-  showExamSpecificInstructions: true,
-  maxInstructionLinesOnSlip: 4,
-  fallbackInstructionTextAr: "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
-  fallbackInstructionTextEn: "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
-  locationTextAr: "",
-  locationTextEn: "",
+  ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
 };
 
 function cloneSettings(settings: AppointmentSlipSettings): AppointmentSlipSettings {
@@ -169,8 +111,8 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
         nextErrors[String(key)] = `${label} must be a valid number.`;
       }
     }
-    if (draft.hospitalNameAr.includes("المركز الوطني لعلاج الأورام بنغازي")) {
-      nextErrors.hospitalNameAr = "Use المركز الوطني للأورام بنغازي.";
+    if (draft.hospitalNameAr.includes("Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ø¹Ù„Ø§Ø¬ Ø§Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ")) {
+      nextErrors.hospitalNameAr = "Use Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ.";
     }
     return { ok: Object.keys(nextErrors).length === 0, nextErrors };
   }, [draft]);
@@ -190,7 +132,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
       }
       setErrors((current) => ({
         ...current,
-        save: message || "تعذر حفظ إعدادات وصل الموعد.",
+        save: message || "ØªØ¹Ø°Ø± Ø­ÙØ¸ Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯.",
       }));
     },
   });
@@ -212,17 +154,17 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
   }
 
   if (isLoading) {
-    return <p className="text-sm text-slate-600">{chooseLocalized(language, "جارٍ تحميل إعدادات وصل الموعد...", "Loading appointment slip settings...")}</p>;
+    return <p className="text-sm text-slate-600">{chooseLocalized(language, "Ø¬Ø§Ø±Ù ØªØ­Ù…ÙŠÙ„ Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯...", "Loading appointment slip settings...")}</p>;
   }
 
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <h3 className="text-base font-extrabold text-slate-900">{chooseLocalized(language, "إعدادات طباعة وصل الموعد", "Appointment Slip Print Settings")}</h3>
+        <h3 className="text-base font-extrabold text-slate-900">{chooseLocalized(language, "Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª Ø·Ø¨Ø§Ø¹Ø© ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯", "Appointment Slip Print Settings")}</h3>
         <p className="mt-1 text-sm leading-7 text-slate-600">
           {chooseLocalized(
             language,
-            "هذه الإعدادات تتحكم في الورق المطبوع فقط: اللغة، الحقول، هوامش الأمان، ونصوص QR والباركود.",
+            "Ù‡Ø°Ù‡ Ø§Ù„Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ØªØªØ­ÙƒÙ… ÙÙŠ Ø§Ù„ÙˆØ±Ù‚ Ø§Ù„Ù…Ø·Ø¨ÙˆØ¹ ÙÙ‚Ø·: Ø§Ù„Ù„ØºØ©ØŒ Ø§Ù„Ø­Ù‚ÙˆÙ„ØŒ Ù‡ÙˆØ§Ù…Ø´ Ø§Ù„Ø£Ù…Ø§Ù†ØŒ ÙˆÙ†ØµÙˆØµ QR ÙˆØ§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯.",
             "These settings only control the printed paper: language, visible fields, safe-area geometry, and QR/barcode captions."
           )}
         </p>
@@ -238,24 +180,24 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
       ) : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <FieldCard title={chooseLocalized(language, "الورق والتخطيط", "Paper & Layout")}>
+        <FieldCard title={chooseLocalized(language, "Ø§Ù„ÙˆØ±Ù‚ ÙˆØ§Ù„ØªØ®Ø·ÙŠØ·", "Paper & Layout")}>
           <SelectField
-            label={chooseLocalized(language, "نمط الورق", "Paper mode")}
+            label={chooseLocalized(language, "Ù†Ù…Ø· Ø§Ù„ÙˆØ±Ù‚", "Paper mode")}
             value={draft.paperMode}
             onChange={(value) => setDraft((current) => ({ ...current, paperMode: value as AppointmentSlipSettings["paperMode"] }))}
             options={[
-              { value: "preprinted", label: chooseLocalized(language, "ورق مطبوع مسبقاً", "Preprinted") },
-              { value: "blank", label: chooseLocalized(language, "ورق فارغ", "Blank paper") },
+              { value: "preprinted", label: chooseLocalized(language, "ÙˆØ±Ù‚ Ù…Ø·Ø¨ÙˆØ¹ Ù…Ø³Ø¨Ù‚Ø§Ù‹", "Preprinted") },
+              { value: "blank", label: chooseLocalized(language, "ÙˆØ±Ù‚ ÙØ§Ø±Øº", "Blank paper") },
             ]}
           />
           <SelectField
-            label={chooseLocalized(language, "نمط اللغة", "Language mode")}
+            label={chooseLocalized(language, "Ù†Ù…Ø· Ø§Ù„Ù„ØºØ©", "Language mode")}
             value={draft.languageMode}
             onChange={(value) => setDraft((current) => ({ ...current, languageMode: value as AppointmentSlipSettings["languageMode"] }))}
             options={[
-              { value: "bilingual", label: chooseLocalized(language, "ثنائي اللغة", "Bilingual") },
-              { value: "ar", label: chooseLocalized(language, "العربية", "Arabic") },
-              { value: "en", label: chooseLocalized(language, "الإنجليزية", "English") },
+              { value: "bilingual", label: chooseLocalized(language, "Ø«Ù†Ø§Ø¦ÙŠ Ø§Ù„Ù„ØºØ©", "Bilingual") },
+              { value: "ar", label: chooseLocalized(language, "Ø§Ù„Ø¹Ø±Ø¨ÙŠØ©", "Arabic") },
+              { value: "en", label: chooseLocalized(language, "Ø§Ù„Ø¥Ù†Ø¬Ù„ÙŠØ²ÙŠØ©", "English") },
             ]}
           />
           <div className="grid grid-cols-2 gap-3">
@@ -271,7 +213,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
           </div>
         </FieldCard>
 
-        <FieldCard title={chooseLocalized(language, "هوية المستشفى", "Hospital Identity")}>
+        <FieldCard title={chooseLocalized(language, "Ù‡ÙˆÙŠØ© Ø§Ù„Ù…Ø³ØªØ´ÙÙ‰", "Hospital Identity")}>
           <InputField label="Hospital name (Ar)" value={draft.hospitalNameAr} onChange={(value) => setDraft((current) => ({ ...current, hospitalNameAr: value }))} error={errors.hospitalNameAr} dir="rtl" />
           <InputField label="Hospital name (En)" value={draft.hospitalNameEn} onChange={(value) => setDraft((current) => ({ ...current, hospitalNameEn: value }))} dir="ltr" />
           <InputField label="Department name (Ar)" value={draft.departmentNameAr} onChange={(value) => setDraft((current) => ({ ...current, departmentNameAr: value }))} dir="rtl" />
@@ -280,23 +222,23 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <FieldCard title={chooseLocalized(language, "الحقول الظاهرة", "Visible Fields")}>
+        <FieldCard title={chooseLocalized(language, "Ø§Ù„Ø­Ù‚ÙˆÙ„ Ø§Ù„Ø¸Ø§Ù‡Ø±Ø©", "Visible Fields")}>
           <ToggleGrid
             items={[
-              ["showPatientName", chooseLocalized(language, "اسم المريض", "Patient name")],
+              ["showPatientName", chooseLocalized(language, "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", "Patient name")],
               ["showMrn", "MRN"],
-              ["showNationalId", chooseLocalized(language, "الرقم الوطني", "National ID")],
-              ["showPhone", chooseLocalized(language, "الهاتف", "Phone")],
-              ["showAgeSex", chooseLocalized(language, "العمر / الجنس", "Age / Sex")],
-              ["showAppointmentNumber", chooseLocalized(language, "رقم الموعد", "Appointment number")],
-              ["showAccessionNumber", chooseLocalized(language, "رقم الدخول", "Accession number")],
-              ["showModality", chooseLocalized(language, "نوع الجهاز", "Modality")],
-              ["showExamName", chooseLocalized(language, "اسم الفحص", "Exam name")],
-              ["showDate", chooseLocalized(language, "التاريخ", "Date")],
-              ["showTime", chooseLocalized(language, "الوقت", "Time")],
-              ["showWalkIn", chooseLocalized(language, "حالة Walk-in", "Walk-in")],
-              ["showLocation", chooseLocalized(language, "الموقع", "Location")],
-              ["showArrivalNote", chooseLocalized(language, "ملاحظة الحضور", "Arrival note")],
+              ["showNationalId", chooseLocalized(language, "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", "National ID")],
+              ["showPhone", chooseLocalized(language, "Ø§Ù„Ù‡Ø§ØªÙ", "Phone")],
+              ["showAgeSex", chooseLocalized(language, "Ø§Ù„Ø¹Ù…Ø± / Ø§Ù„Ø¬Ù†Ø³", "Age / Sex")],
+              ["showAppointmentNumber", chooseLocalized(language, "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", "Appointment number")],
+              ["showAccessionNumber", chooseLocalized(language, "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", "Accession number")],
+              ["showModality", chooseLocalized(language, "Ù†ÙˆØ¹ Ø§Ù„Ø¬Ù‡Ø§Ø²", "Modality")],
+              ["showExamName", chooseLocalized(language, "Ø§Ø³Ù… Ø§Ù„ÙØ­Øµ", "Exam name")],
+              ["showDate", chooseLocalized(language, "Ø§Ù„ØªØ§Ø±ÙŠØ®", "Date")],
+              ["showTime", chooseLocalized(language, "Ø§Ù„ÙˆÙ‚Øª", "Time")],
+              ["showWalkIn", chooseLocalized(language, "Ø­Ø§Ù„Ø© Walk-in", "Walk-in")],
+              ["showLocation", chooseLocalized(language, "Ø§Ù„Ù…ÙˆÙ‚Ø¹", "Location")],
+              ["showArrivalNote", chooseLocalized(language, "Ù…Ù„Ø§Ø­Ø¸Ø© Ø§Ù„Ø­Ø¶ÙˆØ±", "Arrival note")],
             ]}
             settings={draft}
             setSettings={setDraft}
@@ -304,7 +246,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
         </FieldCard>
 
         <FieldCard title="QR">
-          <ToggleRow label={chooseLocalized(language, "إظهار QR على الوصل", "Show QR on slip")} checked={draft.showQrCode} onChange={(checked) => setDraft((current) => ({ ...current, showQrCode: checked }))} />
+          <ToggleRow label={chooseLocalized(language, "Ø¥Ø¸Ù‡Ø§Ø± QR Ø¹Ù„Ù‰ Ø§Ù„ÙˆØµÙ„", "Show QR on slip")} checked={draft.showQrCode} onChange={(checked) => setDraft((current) => ({ ...current, showQrCode: checked }))} />
           <div className="grid grid-cols-2 gap-3">
             <InputField label="QR caption (Ar)" value={draft.qrCaptionAr} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionAr: value }))} dir="rtl" />
             <InputField label="QR caption (En)" value={draft.qrCaptionEn} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionEn: value }))} dir="ltr" />
@@ -315,7 +257,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <FieldCard title={chooseLocalized(language, "العناوين والتسميات", "Headings & Captions")}>
+        <FieldCard title={chooseLocalized(language, "Ø§Ù„Ø¹Ù†Ø§ÙˆÙŠÙ† ÙˆØ§Ù„ØªØ³Ù…ÙŠØ§Øª", "Headings & Captions")}>
           <div className="grid grid-cols-2 gap-3">
             <InputField label="Slip title (Ar)" value={draft.slipTitleAr} onChange={(value) => setDraft((current) => ({ ...current, slipTitleAr: value }))} dir="rtl" />
             <InputField label="Slip title (En)" value={draft.slipTitleEn} onChange={(value) => setDraft((current) => ({ ...current, slipTitleEn: value }))} dir="ltr" />
@@ -336,15 +278,15 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <FieldCard title={chooseLocalized(language, "باركود قائمة الانتظار", "Queue Barcode")}>
-          <ToggleRow label={chooseLocalized(language, "إظهار الباركود", "Show barcode")} checked={draft.showAccessionBarcode} onChange={(checked) => setDraft((current) => ({ ...current, showAccessionBarcode: checked }))} />
+        <FieldCard title={chooseLocalized(language, "Ø¨Ø§Ø±ÙƒÙˆØ¯ Ù‚Ø§Ø¦Ù…Ø© Ø§Ù„Ø§Ù†ØªØ¸Ø§Ø±", "Queue Barcode")}>
+          <ToggleRow label={chooseLocalized(language, "Ø¥Ø¸Ù‡Ø§Ø± Ø§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯", "Show barcode")} checked={draft.showAccessionBarcode} onChange={(checked) => setDraft((current) => ({ ...current, showAccessionBarcode: checked }))} />
           <SelectField
-            label={chooseLocalized(language, "مصدر قيمة الباركود", "Barcode value mode")}
+            label={chooseLocalized(language, "Ù…ØµØ¯Ø± Ù‚ÙŠÙ…Ø© Ø§Ù„Ø¨Ø§Ø±ÙƒÙˆØ¯", "Barcode value mode")}
             value={draft.barcodeValueMode}
             onChange={(value) => setDraft((current) => ({ ...current, barcodeValueMode: value as AppointmentSlipSettings["barcodeValueMode"] }))}
             options={[
-              { value: "accessionNumber", label: chooseLocalized(language, "رقم الدخول", "Accession number") },
-              { value: "appointmentNumber", label: chooseLocalized(language, "رقم الموعد", "Appointment number") },
+              { value: "accessionNumber", label: chooseLocalized(language, "Ø±Ù‚Ù… Ø§Ù„Ø¯Ø®ÙˆÙ„", "Accession number") },
+              { value: "appointmentNumber", label: chooseLocalized(language, "Ø±Ù‚Ù… Ø§Ù„Ù…ÙˆØ¹Ø¯", "Appointment number") },
               { value: "bookingId", label: "Booking ID" },
             ]}
           />
@@ -354,11 +296,11 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
           </div>
         </FieldCard>
 
-        <FieldCard title={chooseLocalized(language, "التعليمات والموقع", "Instructions & Location")}>
-          <ToggleRow label={chooseLocalized(language, "إظهار تعليمات الجهاز", "Show modality instructions")} checked={draft.showModalityInstructions} onChange={(checked) => setDraft((current) => ({ ...current, showModalityInstructions: checked }))} />
-          <ToggleRow label={chooseLocalized(language, "إظهار تعليمات الفحص", "Show exam instructions")} checked={draft.showExamSpecificInstructions} onChange={(checked) => setDraft((current) => ({ ...current, showExamSpecificInstructions: checked }))} />
+        <FieldCard title={chooseLocalized(language, "Ø§Ù„ØªØ¹Ù„ÙŠÙ…Ø§Øª ÙˆØ§Ù„Ù…ÙˆÙ‚Ø¹", "Instructions & Location")}>
+          <ToggleRow label={chooseLocalized(language, "Ø¥Ø¸Ù‡Ø§Ø± ØªØ¹Ù„ÙŠÙ…Ø§Øª Ø§Ù„Ø¬Ù‡Ø§Ø²", "Show modality instructions")} checked={draft.showModalityInstructions} onChange={(checked) => setDraft((current) => ({ ...current, showModalityInstructions: checked }))} />
+          <ToggleRow label={chooseLocalized(language, "Ø¥Ø¸Ù‡Ø§Ø± ØªØ¹Ù„ÙŠÙ…Ø§Øª Ø§Ù„ÙØ­Øµ", "Show exam instructions")} checked={draft.showExamSpecificInstructions} onChange={(checked) => setDraft((current) => ({ ...current, showExamSpecificInstructions: checked }))} />
           <NumberField
-            label={chooseLocalized(language, "الحد الأقصى لأسطر التعليمات", "Max instruction lines on slip")}
+            label={chooseLocalized(language, "Ø§Ù„Ø­Ø¯ Ø§Ù„Ø£Ù‚ØµÙ‰ Ù„Ø£Ø³Ø·Ø± Ø§Ù„ØªØ¹Ù„ÙŠÙ…Ø§Øª", "Max instruction lines on slip")}
             value={draft.maxInstructionLinesOnSlip}
             onChange={(value) => setDraft((current) => ({ ...current, maxInstructionLinesOnSlip: value }))}
             error={errors.maxInstructionLinesOnSlip}
@@ -380,7 +322,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
           className="inline-flex min-h-12 items-center gap-2 rounded-2xl bg-teal-600 px-4 py-3 text-sm font-extrabold text-white disabled:opacity-60"
         >
           {mutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-          {chooseLocalized(language, "حفظ", "Save")}
+          {chooseLocalized(language, "Ø­ÙØ¸", "Save")}
         </button>
       </div>
       {errors.save ? <p className="text-sm text-rose-700">{errors.save}</p> : null}
@@ -521,12 +463,12 @@ function ReAuthPrompt({ onReAuthRequired }: { onReAuthRequired: () => void }) {
   const { language } = useLanguage();
   return (
     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4">
-      <h4 className="text-base font-extrabold text-amber-900">{chooseLocalized(language, "إعادة التحقق مطلوبة", "Re-authentication Required")}</h4>
+      <h4 className="text-base font-extrabold text-amber-900">{chooseLocalized(language, "Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ­Ù‚Ù‚ Ù…Ø·Ù„ÙˆØ¨Ø©", "Re-authentication Required")}</h4>
       <p className="mt-1 text-sm leading-7 text-amber-800">
-        {chooseLocalized(language, "يلزم تأكيد صلاحية المشرف قبل تعديل إعدادات وصل الموعد.", "Supervisor re-authentication is required before modifying appointment slip settings.")}
+        {chooseLocalized(language, "ÙŠÙ„Ø²Ù… ØªØ£ÙƒÙŠØ¯ ØµÙ„Ø§Ø­ÙŠØ© Ø§Ù„Ù…Ø´Ø±Ù Ù‚Ø¨Ù„ ØªØ¹Ø¯ÙŠÙ„ Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ÙˆØµÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯.", "Supervisor re-authentication is required before modifying appointment slip settings.")}
       </p>
       <button type="button" onClick={onReAuthRequired} className="mt-3 rounded-xl bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
-        {chooseLocalized(language, "إعادة التحقق", "Re-authenticate")}
+        {chooseLocalized(language, "Ø¥Ø¹Ø§Ø¯Ø© Ø§Ù„ØªØ­Ù‚Ù‚", "Re-authenticate")}
       </button>
     </div>
   );

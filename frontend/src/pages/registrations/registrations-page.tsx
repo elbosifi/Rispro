@@ -4,6 +4,8 @@ import {
   cancelAppointment,
   fetchAppointments,
   fetchAppointmentLookups,
+  fetchAppointmentSlipSettings,
+  fetchPatientQrSettings,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
@@ -70,6 +72,24 @@ export default function RegistrationsPage() {
         status: filters.statuses,
       }),
     staleTime: 1000 * 30,
+  });
+  const {
+    data: slipSettings,
+    error: slipSettingsError,
+    isLoading: slipSettingsLoading,
+  } = useQuery({
+    queryKey: ["appointment-slip-settings"],
+    queryFn: fetchAppointmentSlipSettings,
+    staleTime: 1000 * 60,
+  });
+  const {
+    data: patientQrSettings,
+    error: patientQrSettingsError,
+    isLoading: patientQrSettingsLoading,
+  } = useQuery({
+    queryKey: ["patient-qr-settings"],
+    queryFn: fetchPatientQrSettings,
+    staleTime: 1000 * 60,
   });
 
   const cancelMutation = useMutation({
@@ -193,6 +213,13 @@ export default function RegistrationsPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const settingsReady =
+      (!slipSettingsLoading || Boolean(slipSettingsError)) &&
+      (!patientQrSettingsLoading || Boolean(patientQrSettingsError));
+    const renderOptions =
+      slipSettings && patientQrSettings
+        ? { slipSettings, patientQrSettings }
+        : undefined;
 
     if (!slipPreviewAppointment) {
       setSlipPreviewHtml(null);
@@ -200,8 +227,13 @@ export default function RegistrationsPage() {
       return;
     }
 
+    if (!settingsReady) {
+      setSlipPreviewLoading(true);
+      return;
+    }
+
     setSlipPreviewLoading(true);
-    void prepareAppointmentSlipHtml(slipPreviewAppointment)
+    void prepareAppointmentSlipHtml(slipPreviewAppointment, renderOptions)
       .then((html) => {
         if (cancelled || !html) return;
         setSlipPreviewHtml(html);
@@ -213,7 +245,15 @@ export default function RegistrationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [slipPreviewAppointment]);
+  }, [
+    patientQrSettings,
+    patientQrSettingsError,
+    patientQrSettingsLoading,
+    slipPreviewAppointment,
+    slipSettings,
+    slipSettingsError,
+    slipSettingsLoading,
+  ]);
 
   const closeSlipPreview = () => {
     setSlipPreviewAppointment(null);
@@ -223,14 +263,20 @@ export default function RegistrationsPage() {
 
   const handlePreviewPrint = () => {
     if (!slipPreviewAppointment) return;
-    printAppointmentSlip(slipPreviewAppointment);
+    printAppointmentSlip(
+      slipPreviewAppointment,
+      slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
+    );
   };
 
   const handlePreviewPdf = async () => {
     if (!slipPreviewAppointment) return;
     setPdfDownloading(true);
     try {
-      await downloadAppointmentSlipPdf(slipPreviewAppointment);
+      await downloadAppointmentSlipPdf(
+        slipPreviewAppointment,
+        slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
+      );
     } finally {
       setPdfDownloading(false);
     }
@@ -654,6 +700,11 @@ export default function RegistrationsPage() {
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   {t("print.previewSubtitle")}
                 </p>
+                {slipSettingsError || patientQrSettingsError ? (
+                  <p className="mt-2 text-xs text-amber-700 sm:text-sm">
+                    Appointment slip settings could not be loaded. Using defaults for this preview.
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <Button type="button" size="sm" variant="secondary" onClick={closeSlipPreview}>
