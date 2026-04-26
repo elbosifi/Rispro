@@ -92,9 +92,9 @@ export default function PrintPage() {
   const settingsLoadFailed = Boolean(slipSettingsError || patientQrSettingsError);
   const renderOptions = settingsReady ? { slipSettings, patientQrSettings } : undefined;
   const canUsePdfDownload =
-    settingsReady &&
-    slipSettings.paperMode === "blank" &&
-    slipSettings.languageMode === "en";
+    Boolean(patientQrSettings) &&
+    slipSettings?.paperMode === "blank" &&
+    slipSettings?.languageMode === "en";
 
   useEffect(() => {
     let cancelled = false;
