@@ -87,7 +87,6 @@ export default function PrintPage() {
   const {
     data: slipSettings,
     error: slipSettingsError,
-    isLoading: slipSettingsLoading,
   } = useQuery({
     queryKey: ["appointment-slip-settings"],
     queryFn: fetchAppointmentSlipSettings,
@@ -96,7 +95,6 @@ export default function PrintPage() {
   const {
     data: patientQrSettings,
     error: patientQrSettingsError,
-    isLoading: patientQrSettingsLoading,
   } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
@@ -104,10 +102,7 @@ export default function PrintPage() {
   });
   const effectiveSlipSettings = slipSettings ?? DEFAULT_APPOINTMENT_SLIP_SETTINGS;
   const effectivePatientQrSettings = patientQrSettings ?? DEFAULT_PATIENT_QR_SETTINGS;
-  const renderOptions =
-    slipSettingsLoading || patientQrSettingsLoading
-      ? null
-      : { slipSettings: effectiveSlipSettings, patientQrSettings: effectivePatientQrSettings };
+  const renderOptions = { slipSettings: effectiveSlipSettings, patientQrSettings: effectivePatientQrSettings };
   const settingsReady = Boolean(renderOptions);
   const slipSettingsFailed = Boolean(slipSettingsError);
   const patientQrSettingsFailed = Boolean(patientQrSettingsError);
@@ -132,8 +127,9 @@ export default function PrintPage() {
       cancelled = true;
     };
 
+    setSelectedAppointment(appointmentById);
+
     if (!autoprintDone && renderOptions) {
-      setSelectedAppointment(appointmentById);
       setSlipPreviewLoading(true);
       void prepareAppointmentSlipHtml(appointmentById, renderOptions)
         .then((html) => {
@@ -160,9 +156,7 @@ export default function PrintPage() {
     autoprintDone,
     renderOptions,
     patientQrSettingsError,
-    patientQrSettingsLoading,
     slipSettingsError,
-    slipSettingsLoading,
     settingsLoadFailed,
   ]);
 
