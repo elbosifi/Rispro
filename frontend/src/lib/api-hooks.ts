@@ -647,6 +647,20 @@ export interface AppointmentSlipSettings {
   hospitalNameEn: string;
   departmentNameAr: string;
   departmentNameEn: string;
+  slipTitleAr: string;
+  slipTitleEn: string;
+  patientDetailsHeadingAr: string;
+  patientDetailsHeadingEn: string;
+  appointmentDetailsHeadingAr: string;
+  appointmentDetailsHeadingEn: string;
+  instructionsHeadingAr: string;
+  instructionsHeadingEn: string;
+  modalityInstructionsHeadingAr: string;
+  modalityInstructionsHeadingEn: string;
+  examInstructionsHeadingAr: string;
+  examInstructionsHeadingEn: string;
+  locationHeadingAr: string;
+  locationHeadingEn: string;
   showPatientName: boolean;
   showMrn: boolean;
   showNationalId: boolean;
@@ -678,6 +692,68 @@ export interface AppointmentSlipSettings {
   locationTextAr: string;
   locationTextEn: string;
 }
+
+export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
+  paperMode: "preprinted",
+  languageMode: "bilingual",
+  safeTopMm: 58,
+  safeBottomMm: 56,
+  safeLeftMm: 10,
+  safeRightMm: 10,
+  contentPaddingMm: 3,
+  fontScale: 1,
+  qrSizeMm: 24,
+  barcodeHeightMm: 12,
+  barcodeWidthMm: 100,
+  hospitalNameAr: "المركز الوطني للأورام بنغازي",
+  hospitalNameEn: "National Cancer Center Benghazi",
+  departmentNameAr: "قسم الأشعة التشخيصية",
+  departmentNameEn: "Diagnostic Radiology Department",
+  slipTitleAr: "وصل الموعد",
+  slipTitleEn: "Appointment Slip",
+  patientDetailsHeadingAr: "بيانات المريض",
+  patientDetailsHeadingEn: "Patient Details",
+  appointmentDetailsHeadingAr: "بيانات الموعد",
+  appointmentDetailsHeadingEn: "Appointment Details",
+  instructionsHeadingAr: "التعليمات",
+  instructionsHeadingEn: "Instructions",
+  modalityInstructionsHeadingAr: "تعليمات حسب نوع الجهاز",
+  modalityInstructionsHeadingEn: "Modality Instructions",
+  examInstructionsHeadingAr: "تعليمات خاصة بالفحص",
+  examInstructionsHeadingEn: "Exam Instructions",
+  locationHeadingAr: "موقع الفحص",
+  locationHeadingEn: "Exam Location",
+  showPatientName: true,
+  showMrn: true,
+  showNationalId: false,
+  showPhone: true,
+  showAgeSex: true,
+  showAppointmentNumber: true,
+  showAccessionNumber: true,
+  showModality: true,
+  showExamName: true,
+  showDate: true,
+  showTime: true,
+  showWalkIn: true,
+  showLocation: true,
+  showArrivalNote: true,
+  showQrCode: true,
+  qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
+  qrCaptionEn: "Scan for appointment details",
+  qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
+  qrHelperTextEn: "Use this QR code to open your appointment page, instructions, and location details.",
+  showAccessionBarcode: true,
+  barcodeValueMode: "accessionNumber",
+  barcodeCaptionAr: "امسح للدخول إلى قائمة الانتظار",
+  barcodeCaptionEn: "Scan to Enter The Queue",
+  showModalityInstructions: true,
+  showExamSpecificInstructions: true,
+  maxInstructionLinesOnSlip: 4,
+  fallbackInstructionTextAr: "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.",
+  fallbackInstructionTextEn: "Scan the QR code for modality instructions, exam-specific instructions, and location details.",
+  locationTextAr: "",
+  locationTextEn: "",
+};
 
 function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
   const candidate = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
@@ -818,19 +894,33 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
     languageMode: languageMode === "ar" || languageMode === "en" ? languageMode : "bilingual",
-    safeTopMm: num(record.safeTopMm, 58, 0, 120),
-    safeBottomMm: num(record.safeBottomMm, 56, 0, 120),
-    safeLeftMm: num(record.safeLeftMm, 10, 0, 80),
-    safeRightMm: num(record.safeRightMm, 10, 0, 80),
-    contentPaddingMm: num(record.contentPaddingMm, 3, 0, 20),
-    fontScale: num(record.fontScale, 1, 0.7, 1.6),
-    qrSizeMm: num(record.qrSizeMm, 24, 12, 48),
-    barcodeHeightMm: num(record.barcodeHeightMm, 12, 6, 28),
-    barcodeWidthMm: num(record.barcodeWidthMm, 100, 40, 130),
+    safeTopMm: num(record.safeTopMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeTopMm, 0, 120),
+    safeBottomMm: num(record.safeBottomMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeBottomMm, 0, 120),
+    safeLeftMm: num(record.safeLeftMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeLeftMm, 0, 80),
+    safeRightMm: num(record.safeRightMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeRightMm, 0, 80),
+    contentPaddingMm: num(record.contentPaddingMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.contentPaddingMm, 0, 20),
+    fontScale: num(record.fontScale, DEFAULT_APPOINTMENT_SLIP_SETTINGS.fontScale, 0.7, 1.6),
+    qrSizeMm: num(record.qrSizeMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrSizeMm, 12, 48),
+    barcodeHeightMm: num(record.barcodeHeightMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeHeightMm, 6, 28),
+    barcodeWidthMm: num(record.barcodeWidthMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeWidthMm, 40, 130),
     hospitalNameAr: str(record.hospitalNameAr, "المركز الوطني للأورام بنغازي"),
-    hospitalNameEn: str(record.hospitalNameEn, "National Cancer Center Benghazi"),
+    hospitalNameEn: str(record.hospitalNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameEn),
     departmentNameAr: str(record.departmentNameAr, "قسم الأشعة التشخيصية"),
-    departmentNameEn: str(record.departmentNameEn, "Diagnostic Radiology Department"),
+    departmentNameEn: str(record.departmentNameEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.departmentNameEn),
+    slipTitleAr: str(record.slipTitleAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr),
+    slipTitleEn: str(record.slipTitleEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleEn),
+    patientDetailsHeadingAr: str(record.patientDetailsHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingAr),
+    patientDetailsHeadingEn: str(record.patientDetailsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingEn),
+    appointmentDetailsHeadingAr: str(record.appointmentDetailsHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingAr),
+    appointmentDetailsHeadingEn: str(record.appointmentDetailsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingEn),
+    instructionsHeadingAr: str(record.instructionsHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingAr),
+    instructionsHeadingEn: str(record.instructionsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingEn),
+    modalityInstructionsHeadingAr: str(record.modalityInstructionsHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingAr),
+    modalityInstructionsHeadingEn: str(record.modalityInstructionsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingEn),
+    examInstructionsHeadingAr: str(record.examInstructionsHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingAr),
+    examInstructionsHeadingEn: str(record.examInstructionsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingEn),
+    locationHeadingAr: str(record.locationHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr),
+    locationHeadingEn: str(record.locationHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingEn),
     showPatientName: bool(record.showPatientName, true),
     showMrn: bool(record.showMrn, true),
     showNationalId: bool(record.showNationalId, false),

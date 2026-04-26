@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api-client";
 import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import {
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
   saveAppointmentSlipSettings,
@@ -32,6 +33,20 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   hospitalNameEn: "National Cancer Center Benghazi",
   departmentNameAr: "قسم الأشعة التشخيصية",
   departmentNameEn: "Diagnostic Radiology Department",
+  slipTitleAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr,
+  slipTitleEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleEn,
+  patientDetailsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingAr,
+  patientDetailsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingEn,
+  appointmentDetailsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingAr,
+  appointmentDetailsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingEn,
+  instructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingAr,
+  instructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingEn,
+  modalityInstructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingAr,
+  modalityInstructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingEn,
+  examInstructionsHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingAr,
+  examInstructionsHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingEn,
+  locationHeadingAr: DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr,
+  locationHeadingEn: DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingEn,
   showPatientName: true,
   showMrn: true,
   showNationalId: false,
@@ -90,6 +105,20 @@ function normalizeForSave(settings: AppointmentSlipSettings): AppointmentSlipSet
     hospitalNameEn: settings.hospitalNameEn.trim(),
     departmentNameAr: settings.departmentNameAr.trim(),
     departmentNameEn: settings.departmentNameEn.trim(),
+    slipTitleAr: settings.slipTitleAr.trim(),
+    slipTitleEn: settings.slipTitleEn.trim(),
+    patientDetailsHeadingAr: settings.patientDetailsHeadingAr.trim(),
+    patientDetailsHeadingEn: settings.patientDetailsHeadingEn.trim(),
+    appointmentDetailsHeadingAr: settings.appointmentDetailsHeadingAr.trim(),
+    appointmentDetailsHeadingEn: settings.appointmentDetailsHeadingEn.trim(),
+    instructionsHeadingAr: settings.instructionsHeadingAr.trim(),
+    instructionsHeadingEn: settings.instructionsHeadingEn.trim(),
+    modalityInstructionsHeadingAr: settings.modalityInstructionsHeadingAr.trim(),
+    modalityInstructionsHeadingEn: settings.modalityInstructionsHeadingEn.trim(),
+    examInstructionsHeadingAr: settings.examInstructionsHeadingAr.trim(),
+    examInstructionsHeadingEn: settings.examInstructionsHeadingEn.trim(),
+    locationHeadingAr: settings.locationHeadingAr.trim(),
+    locationHeadingEn: settings.locationHeadingEn.trim(),
     qrCaptionAr: settings.qrCaptionAr.trim(),
     qrCaptionEn: settings.qrCaptionEn.trim(),
     qrHelperTextAr: settings.qrHelperTextAr.trim(),
@@ -281,6 +310,27 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
             <InputField label="QR caption (En)" value={draft.qrCaptionEn} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionEn: value }))} dir="ltr" />
             <TextareaField label="QR helper (Ar)" value={draft.qrHelperTextAr} onChange={(value) => setDraft((current) => ({ ...current, qrHelperTextAr: value }))} dir="rtl" />
             <TextareaField label="QR helper (En)" value={draft.qrHelperTextEn} onChange={(value) => setDraft((current) => ({ ...current, qrHelperTextEn: value }))} dir="ltr" />
+          </div>
+        </FieldCard>
+      </div>
+
+      <div className="grid gap-4 xl:grid-cols-2">
+        <FieldCard title={chooseLocalized(language, "العناوين والتسميات", "Headings & Captions")}>
+          <div className="grid grid-cols-2 gap-3">
+            <InputField label="Slip title (Ar)" value={draft.slipTitleAr} onChange={(value) => setDraft((current) => ({ ...current, slipTitleAr: value }))} dir="rtl" />
+            <InputField label="Slip title (En)" value={draft.slipTitleEn} onChange={(value) => setDraft((current) => ({ ...current, slipTitleEn: value }))} dir="ltr" />
+            <InputField label="Patient details heading (Ar)" value={draft.patientDetailsHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, patientDetailsHeadingAr: value }))} dir="rtl" />
+            <InputField label="Patient details heading (En)" value={draft.patientDetailsHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, patientDetailsHeadingEn: value }))} dir="ltr" />
+            <InputField label="Appointment details heading (Ar)" value={draft.appointmentDetailsHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, appointmentDetailsHeadingAr: value }))} dir="rtl" />
+            <InputField label="Appointment details heading (En)" value={draft.appointmentDetailsHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, appointmentDetailsHeadingEn: value }))} dir="ltr" />
+            <InputField label="Instructions heading (Ar)" value={draft.instructionsHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, instructionsHeadingAr: value }))} dir="rtl" />
+            <InputField label="Instructions heading (En)" value={draft.instructionsHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, instructionsHeadingEn: value }))} dir="ltr" />
+            <InputField label="Modality instructions heading (Ar)" value={draft.modalityInstructionsHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, modalityInstructionsHeadingAr: value }))} dir="rtl" />
+            <InputField label="Modality instructions heading (En)" value={draft.modalityInstructionsHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, modalityInstructionsHeadingEn: value }))} dir="ltr" />
+            <InputField label="Exam instructions heading (Ar)" value={draft.examInstructionsHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, examInstructionsHeadingAr: value }))} dir="rtl" />
+            <InputField label="Exam instructions heading (En)" value={draft.examInstructionsHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, examInstructionsHeadingEn: value }))} dir="ltr" />
+            <InputField label="Location heading (Ar)" value={draft.locationHeadingAr} onChange={(value) => setDraft((current) => ({ ...current, locationHeadingAr: value }))} dir="rtl" />
+            <InputField label="Location heading (En)" value={draft.locationHeadingEn} onChange={(value) => setDraft((current) => ({ ...current, locationHeadingEn: value }))} dir="ltr" />
           </div>
         </FieldCard>
       </div>

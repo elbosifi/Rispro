@@ -15,9 +15,8 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { pushToast } from "@/lib/toast";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
-  blobToDataUrl,
-  createAppointmentSlipPdfBlob,
   downloadAppointmentSlipPdf,
+  prepareAppointmentSlipHtml,
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
@@ -50,7 +49,7 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
     useState<AppointmentWithDetails | null>(null);
-  const [slipPreviewPdfUrl, setSlipPreviewPdfUrl] = useState<string | null>(null);
+  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [pdfDownloading, setPdfDownloading] = useState(false);
 
@@ -196,20 +195,16 @@ export default function RegistrationsPage() {
     let cancelled = false;
 
     if (!slipPreviewAppointment) {
-      setSlipPreviewPdfUrl(null);
+      setSlipPreviewHtml(null);
       setSlipPreviewLoading(false);
       return;
     }
 
     setSlipPreviewLoading(true);
-    void createAppointmentSlipPdfBlob(slipPreviewAppointment, "blank")
-      .then((blob) => {
-        if (cancelled) return;
-        return blobToDataUrl(blob);
-      })
-      .then((dataUrl) => {
-        if (cancelled || !dataUrl) return;
-        setSlipPreviewPdfUrl(dataUrl);
+    void prepareAppointmentSlipHtml(slipPreviewAppointment)
+      .then((html) => {
+        if (cancelled || !html) return;
+        setSlipPreviewHtml(html);
       })
       .finally(() => {
         if (!cancelled) setSlipPreviewLoading(false);
@@ -222,7 +217,7 @@ export default function RegistrationsPage() {
 
   const closeSlipPreview = () => {
     setSlipPreviewAppointment(null);
-    setSlipPreviewPdfUrl(null);
+    setSlipPreviewHtml(null);
     setSlipPreviewLoading(false);
   };
 
@@ -685,11 +680,11 @@ export default function RegistrationsPage() {
                   <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
                     {t("print.loading")}
                   </div>
-                ) : slipPreviewPdfUrl ? (
+                ) : slipPreviewHtml ? (
                   <iframe
-                    key={slipPreviewPdfUrl}
+                    key={slipPreviewHtml}
                     title="Appointment slip preview"
-                    src={slipPreviewPdfUrl}
+                    srcDoc={slipPreviewHtml}
                     className="h-[48vh] w-full bg-white xl:h-[60vh]"
                     loading="eager"
                   />

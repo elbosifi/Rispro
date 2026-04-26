@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AppointmentSlipSettings, PatientQrSettings } from "@/lib/api-hooks";
+import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import {
   buildAppointmentSlipData,
   buildAppointmentSlipLayoutModel,
@@ -64,6 +64,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
 
 function makeSlipSettings(overrides: Partial<AppointmentSlipSettings> = {}): AppointmentSlipSettings {
   return {
+    ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
     paperMode: "preprinted",
     languageMode: "bilingual",
     safeTopMm: 58,

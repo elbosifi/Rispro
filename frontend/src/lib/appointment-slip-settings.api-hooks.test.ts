@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
 import {
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   fetchAppointmentSlipSettings,
   saveAppointmentSlipSettings,
   type AppointmentSlipSettings,
@@ -69,6 +70,7 @@ describe("appointment slip settings api hooks", () => {
   it("saves appointment slip settings under appointment_slip/config", async () => {
     vi.mocked(api).mockResolvedValue({});
     const payload: AppointmentSlipSettings = {
+      ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
       paperMode: "blank",
       languageMode: "en",
       safeTopMm: 10,

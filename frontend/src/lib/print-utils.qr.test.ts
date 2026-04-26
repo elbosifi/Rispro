@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { AppointmentSlipSettings, PatientQrSettings } from "@/lib/api-hooks";
+import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import {
   buildAppointmentSlipLayoutModel,
   buildAppointmentSlipData,
@@ -65,6 +65,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
 
 function makeSlipSettings(overrides: Partial<AppointmentSlipSettings> = {}): AppointmentSlipSettings {
   return {
+    ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
     paperMode: "preprinted",
     languageMode: "bilingual",
     safeTopMm: 58,
@@ -200,7 +201,7 @@ describe("appointment slip QR and layout behavior", () => {
 
   it("respects languageMode", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
-      slipSettings: makeSlipSettings({ languageMode: "ar" }),
+      slipSettings: makeSlipSettings({ languageMode: "ar", hospitalNameAr: "المركز الوطني للأورام بنغازي" }),
       patientQrSettings: makePatientQrSettings(),
     });
 
@@ -248,17 +249,17 @@ describe("appointment slip QR and layout behavior", () => {
       makePatientQrSettings()
     );
 
-    expect(html).not.toContain("data-barcode-clipped");
+    expect(html).not.toContain("data-barcode-value");
     expect(layout.barcodeBlock).toBeNull();
   });
 
-  it("marks QR helper/caption as not clipped", async () => {
+  it("renders the QR block when enabled", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings(),
       patientQrSettings: makePatientQrSettings(),
     });
 
-    expect(html).toContain('data-qr-clipped="false"');
+    expect(html).toContain("qr-block");
   });
 
   it("keeps barcode inside the safe area", () => {
