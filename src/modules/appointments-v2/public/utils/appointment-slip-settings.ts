@@ -20,6 +20,20 @@ export interface AppointmentSlipSettings {
   hospitalNameEn: string;
   departmentNameAr: string;
   departmentNameEn: string;
+  slipTitleAr: string;
+  slipTitleEn: string;
+  patientDetailsHeadingAr: string;
+  patientDetailsHeadingEn: string;
+  appointmentDetailsHeadingAr: string;
+  appointmentDetailsHeadingEn: string;
+  instructionsHeadingAr: string;
+  instructionsHeadingEn: string;
+  modalityInstructionsHeadingAr: string;
+  modalityInstructionsHeadingEn: string;
+  examInstructionsHeadingAr: string;
+  examInstructionsHeadingEn: string;
+  locationHeadingAr: string;
+  locationHeadingEn: string;
   showPatientName: boolean;
   showMrn: boolean;
   showNationalId: boolean;
@@ -68,6 +82,20 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   hospitalNameEn: "National Cancer Center Benghazi",
   departmentNameAr: "قسم الأشعة التشخيصية",
   departmentNameEn: "Diagnostic Radiology Department",
+  slipTitleAr: "وصل الموعد",
+  slipTitleEn: "Appointment Slip",
+  patientDetailsHeadingAr: "بيانات المريض",
+  patientDetailsHeadingEn: "Patient Details",
+  appointmentDetailsHeadingAr: "بيانات الموعد",
+  appointmentDetailsHeadingEn: "Appointment Details",
+  instructionsHeadingAr: "التعليمات",
+  instructionsHeadingEn: "Instructions",
+  modalityInstructionsHeadingAr: "تعليمات حسب نوع الجهاز",
+  modalityInstructionsHeadingEn: "Modality Instructions",
+  examInstructionsHeadingAr: "تعليمات خاصة بالفحص",
+  examInstructionsHeadingEn: "Exam Instructions",
+  locationHeadingAr: "موقع الفحص",
+  locationHeadingEn: "Exam Location",
   showPatientName: true,
   showMrn: true,
   showNationalId: false,
@@ -99,6 +127,13 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   locationTextAr: "",
   locationTextEn: "",
 };
+
+DEFAULT_SETTINGS.hospitalNameAr = "المركز الوطني للأورام بنغازي";
+DEFAULT_SETTINGS.departmentNameAr = "قسم الأشعة التشخيصية";
+DEFAULT_SETTINGS.qrCaptionAr = "امسح للاطلاع على تفاصيل الموعد";
+DEFAULT_SETTINGS.qrHelperTextAr = "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.";
+DEFAULT_SETTINGS.barcodeCaptionAr = "امسح للدخول إلى قائمة الانتظار";
+DEFAULT_SETTINGS.fallbackInstructionTextAr = "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.";
 
 function readRawValue(value: unknown): unknown {
   if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
@@ -153,6 +188,20 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
     hospitalNameEn: asString(record.hospitalNameEn, DEFAULT_SETTINGS.hospitalNameEn),
     departmentNameAr: asString(record.departmentNameAr, DEFAULT_SETTINGS.departmentNameAr),
     departmentNameEn: asString(record.departmentNameEn, DEFAULT_SETTINGS.departmentNameEn),
+    slipTitleAr: asString(record.slipTitleAr, DEFAULT_SETTINGS.slipTitleAr),
+    slipTitleEn: asString(record.slipTitleEn, DEFAULT_SETTINGS.slipTitleEn),
+    patientDetailsHeadingAr: asString(record.patientDetailsHeadingAr, DEFAULT_SETTINGS.patientDetailsHeadingAr),
+    patientDetailsHeadingEn: asString(record.patientDetailsHeadingEn, DEFAULT_SETTINGS.patientDetailsHeadingEn),
+    appointmentDetailsHeadingAr: asString(record.appointmentDetailsHeadingAr, DEFAULT_SETTINGS.appointmentDetailsHeadingAr),
+    appointmentDetailsHeadingEn: asString(record.appointmentDetailsHeadingEn, DEFAULT_SETTINGS.appointmentDetailsHeadingEn),
+    instructionsHeadingAr: asString(record.instructionsHeadingAr, DEFAULT_SETTINGS.instructionsHeadingAr),
+    instructionsHeadingEn: asString(record.instructionsHeadingEn, DEFAULT_SETTINGS.instructionsHeadingEn),
+    modalityInstructionsHeadingAr: asString(record.modalityInstructionsHeadingAr, DEFAULT_SETTINGS.modalityInstructionsHeadingAr),
+    modalityInstructionsHeadingEn: asString(record.modalityInstructionsHeadingEn, DEFAULT_SETTINGS.modalityInstructionsHeadingEn),
+    examInstructionsHeadingAr: asString(record.examInstructionsHeadingAr, DEFAULT_SETTINGS.examInstructionsHeadingAr),
+    examInstructionsHeadingEn: asString(record.examInstructionsHeadingEn, DEFAULT_SETTINGS.examInstructionsHeadingEn),
+    locationHeadingAr: asString(record.locationHeadingAr, DEFAULT_SETTINGS.locationHeadingAr),
+    locationHeadingEn: asString(record.locationHeadingEn, DEFAULT_SETTINGS.locationHeadingEn),
     showPatientName: asBoolean(record.showPatientName, DEFAULT_SETTINGS.showPatientName),
     showMrn: asBoolean(record.showMrn, DEFAULT_SETTINGS.showMrn),
     showNationalId: asBoolean(record.showNationalId, DEFAULT_SETTINGS.showNationalId),

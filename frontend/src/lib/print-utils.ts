@@ -33,10 +33,6 @@ const MM_TO_PT = 72 / 25.4;
 const A5_WIDTH_PT = 148 * MM_TO_PT;
 const A5_HEIGHT_PT = 210 * MM_TO_PT;
 
-const DEFAULT_SLIP_SETTINGS: AppointmentSlipSettings = {
-  ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
-};
-
 const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   enabled: true,
   printQrOnAppointmentSlip: true,
@@ -162,10 +158,13 @@ function mm(value: number): number {
   return value * MM_TO_PT;
 }
 
-function formatSlipDate(isoDate: string): string {
+function formatSlipDate(isoDate: string, languageMode: AppointmentSlipSettings["languageMode"]): string {
   const date = new Date(`${isoDate}T00:00:00`);
   if (Number.isNaN(date.getTime())) {
     return formatDateLy(isoDate);
+  }
+  if (languageMode === "ar") {
+    return date.toLocaleDateString("en-GB");
   }
   return date.toLocaleDateString("en-GB", {
     weekday: "long",
@@ -265,9 +264,7 @@ function drawPdfText(
 }
 
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
-  return settings
-    ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...DEFAULT_SLIP_SETTINGS, ...settings }
-    : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...DEFAULT_SLIP_SETTINGS };
+  return settings ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS };
 }
 
 function sanitizePatientQrSettings(settings?: PatientQrSettings): PatientQrSettings {
@@ -313,6 +310,15 @@ function localizeValue(ar: string, en: string, mode: AppointmentSlipSettings["la
   if (mode === "en") return cleanEn || cleanAr || "â€”";
   if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
   return cleanAr || cleanEn || "â€”";
+}
+
+function localizeValueSafe(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
+  const cleanAr = String(ar || "").trim();
+  const cleanEn = String(en || "").trim();
+  if (mode === "ar") return cleanAr || cleanEn || "-";
+  if (mode === "en") return cleanEn || cleanAr || "-";
+  if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
+  return cleanAr || cleanEn || "-";
 }
 
 function buildSlipQrPayload(
@@ -390,6 +396,26 @@ function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData,
   return fields;
 }
 
+function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
+  const fields: SlipField[] = [];
+  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
+  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  return fields;
+}
+
+const _legacyHelpers = [localizeValue, buildSlipFields];
+void _legacyHelpers;
+
 export function buildAppointmentSlipData(
   apt: AppointmentWithDetails,
   options?: BuildSlipOptions
@@ -397,13 +423,13 @@ export function buildAppointmentSlipData(
   const slipSettings = sanitizeSettings(options?.slipSettings);
   const patientQrSettings = sanitizePatientQrSettings(options?.patientQrSettings);
   const queueQrPayload = buildSlipQrPayload(apt, slipSettings, patientQrSettings);
-  const hospitalName = localizeValue(slipSettings.hospitalNameAr, slipSettings.hospitalNameEn, slipSettings.languageMode);
-  const departmentName = localizeValue(slipSettings.departmentNameAr, slipSettings.departmentNameEn, slipSettings.languageMode);
-  const patientName = localizeValue(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
-  const modality = localizeValue(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
-  const examName = localizeValue(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
+  const hospitalName = localizeValueSafe(slipSettings.hospitalNameAr, slipSettings.hospitalNameEn, slipSettings.languageMode);
+  const departmentName = localizeValueSafe(slipSettings.departmentNameAr, slipSettings.departmentNameEn, slipSettings.languageMode);
+  const patientName = localizeValueSafe(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
+  const modality = localizeValueSafe(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
+  const examName = localizeValueSafe(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
   const ageSex = `${apt.ageYears || "â€”"} / ${apt.sex || "â€”"}`;
-  const locationText = localizeValue(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
+  const locationText = localizeValueSafe(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
   return {
     hospitalName,
     departmentName,
@@ -417,15 +443,15 @@ export function buildAppointmentSlipData(
     bookingTime: formatSlipTime(apt.bookingTime),
     modality,
     examName,
-    appointmentDate: formatSlipDate(apt.appointmentDate),
+    appointmentDate: formatSlipDate(apt.appointmentDate, slipSettings.languageMode),
     ageSex,
     walkInLabel: apt.isWalkIn ? localizeText("Ù†Ø¹Ù…", "Yes", slipSettings.languageMode) : localizeText("Ù„Ø§", "No", slipSettings.languageMode),
     queueQrPayload,
     accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
     locationText,
     arrivalNote: localizeText("ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø­Ø¶ÙˆØ± Ù‚Ø¨Ù„ Ø§Ù„Ù…ÙˆØ¹Ø¯ Ø¨Ù€ 15 Ø¯Ù‚ÙŠÙ‚Ø©", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
-    modalityInstructions: localizeValue(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
-    examInstructions: localizeValue(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
+    modalityInstructions: localizeValueSafe(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
+    examInstructions: localizeValueSafe(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
     fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
     generatedAt: new Date().toLocaleString(),
   };
@@ -663,7 +689,7 @@ export async function createAppointmentSlipPdfBlob(
 
   const fontScale = slipSettings.fontScale || 1;
   const content = layout.content;
-  const fields = buildSlipFields(apt, slip, slipSettings);
+  const fields = buildSlipFieldsClean(apt, slip, slipSettings);
   const instructions = buildInstructionText(apt, slipSettings);
 
   let cursorY = content.y;
@@ -900,7 +926,7 @@ export async function prepareAppointmentSlipHtml(
   const patientQrSettings = runtime.patientQrSettings;
   const slip = buildAppointmentSlipData(apt, runtime);
   const layout = buildAppointmentSlipLayoutModel(apt, slipSettings, patientQrSettings);
-  const fields = buildSlipFields(apt, slip, slipSettings);
+  const fields = buildSlipFieldsClean(apt, slip, slipSettings);
   const instructions = buildInstructionText(apt, slipSettings);
   const languageMode = slipSettings.languageMode;
   const dir = languageMode === "en" ? "ltr" : "rtl";

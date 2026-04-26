@@ -88,16 +88,16 @@ export default function PrintPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
+  const settingsReady = Boolean(slipSettings && patientQrSettings);
+  const settingsLoadFailed = Boolean(slipSettingsError || patientQrSettingsError);
+  const renderOptions = settingsReady ? { slipSettings, patientQrSettings } : undefined;
+  const canUsePdfDownload =
+    settingsReady &&
+    slipSettings.paperMode === "blank" &&
+    slipSettings.languageMode === "en";
 
   useEffect(() => {
     let cancelled = false;
-    const settingsReady =
-      (!slipSettingsLoading || Boolean(slipSettingsError)) &&
-      (!patientQrSettingsLoading || Boolean(patientQrSettingsError));
-    const renderOptions =
-      slipSettings && patientQrSettings
-        ? { slipSettings, patientQrSettings }
-        : undefined;
 
     if (appointmentById && !autoprintDone && settingsReady) {
       setSelectedAppointment(appointmentById);
@@ -117,6 +117,11 @@ export default function PrintPage() {
           setAutoprintDone(true);
         }, 300);
       }
+    }
+    if (appointmentById && settingsLoadFailed) {
+      setSelectedAppointment(appointmentById);
+      setSlipPreviewLoading(false);
+      setSlipPreviewHtml(null);
     }
     return () => {
       cancelled = true;
@@ -138,19 +143,15 @@ export default function PrintPage() {
   }
 
   function handlePrintSlip(appointment: AppointmentWithDetails) {
-    printAppointmentSlip(
-      appointment,
-      slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
-    );
+    if (!renderOptions) return;
+    printAppointmentSlip(appointment, renderOptions);
   }
 
   async function handleDownloadPdf(appointment: AppointmentWithDetails) {
+    if (!renderOptions || !canUsePdfDownload) return;
     setPdfDownloading(true);
     try {
-      await downloadAppointmentSlipPdf(
-        appointment,
-        slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
-      );
+      await downloadAppointmentSlipPdf(appointment, renderOptions);
     } finally {
       setPdfDownloading(false);
     }
@@ -273,9 +274,9 @@ export default function PrintPage() {
               <p className="text-sm text-muted-foreground">
                 {t(language, "print.previewSubtitle")}
               </p>
-              {slipSettingsError || patientQrSettingsError ? (
+              {settingsLoadFailed ? (
                 <p className="mt-2 text-sm text-amber-700">
-                  Appointment slip settings could not be loaded. Using defaults for this preview.
+                  Appointment slip settings could not be loaded. Printing is disabled until settings are available.
                 </p>
               ) : null}
             </div>
@@ -287,14 +288,14 @@ export default function PrintPage() {
                 type="button"
                 variant="secondary"
                 onClick={() => selectedAppointment && void handleDownloadPdf(selectedAppointment)}
-                disabled={!selectedAppointment || pdfDownloading}
+                disabled={!selectedAppointment || pdfDownloading || !canUsePdfDownload}
               >
                 {t(language, "print.downloadPdf")}
               </Button>
               <Button
                 type="button"
                 onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
-                disabled={!selectedAppointment}
+                disabled={!selectedAppointment || !settingsReady}
               >
                 {t(language, "print.confirmPrint")}
               </Button>
