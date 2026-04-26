@@ -240,4 +240,28 @@ describe("PrintPage autoprint", () => {
     const secondCall = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(secondCall.accessionNumber).toBe("ACC-99");
   });
+
+  it("shows appointment-slip-specific error when appointment slip settings query fails", async () => {
+    vi.mocked(apiHooks.fetchAppointmentSlipSettings).mockRejectedValueOnce(new Error("Slip settings 500"));
+    renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(screen.getByText(/Appointment Slip Settings could not be loaded/i)).toBeTruthy();
+    });
+    expect(screen.getByText(/Appointment Slip Settings error: Slip settings 500/i)).toBeTruthy();
+    expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
+    expect(printUtils.printAppointmentSlip).not.toHaveBeenCalled();
+  });
+
+  it("shows patient-qr-specific error when patient QR settings query fails", async () => {
+    vi.mocked(apiHooks.fetchPatientQrSettings).mockRejectedValueOnce(new Error("Patient QR 503"));
+    renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(screen.getByText(/Patient QR Settings could not be loaded/i)).toBeTruthy();
+    });
+    expect(screen.getByText(/Patient QR Settings error: Patient QR 503/i)).toBeTruthy();
+    expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
+    expect(printUtils.printAppointmentSlip).not.toHaveBeenCalled();
+  });
 });

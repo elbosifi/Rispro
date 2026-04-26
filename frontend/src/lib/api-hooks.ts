@@ -499,9 +499,9 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
   let patientQrSettings: PatientQrSettings | undefined;
   if (raw.settings) {
     if (Array.isArray(raw.settings)) {
-      patientQrSettings = raw.settings.length > 0 ? normalizePatientQrSettings(raw.settings[0]) : undefined;
+      patientQrSettings = raw.settings.length > 0 ? sanitizePatientQrTextEncoding(normalizePatientQrSettings(raw.settings[0])) : undefined;
     } else {
-      patientQrSettings = raw.settings as PatientQrSettings;
+      patientQrSettings = sanitizePatientQrTextEncoding(raw.settings as PatientQrSettings);
     }
   }
 
@@ -512,10 +512,10 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
     requiresReport: Boolean(preview.requiresReport ?? preview.requires_report),
     reportFeature: preview.reportFeature as PublicAppointmentCancelPreview["reportFeature"],
-    modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "Ã¢â‚¬â€"),
+    modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "—"),
     modalityNameAr: String(preview.modalityNameAr ?? preview.modality_name_ar ?? ""),
     modalityNameEn: String(preview.modalityNameEn ?? preview.modality_name_en ?? ""),
-    examName: String(preview.examName ?? preview.exam_name ?? preview.examNameAr ?? preview.exam_name_ar ?? "Ã¢â‚¬â€"),
+    examName: String(preview.examName ?? preview.exam_name ?? preview.examNameAr ?? preview.exam_name_ar ?? "—"),
     examNameAr: String(preview.examNameAr ?? preview.exam_name_ar ?? ""),
     examNameEn: String(preview.examNameEn ?? preview.exam_name_en ?? ""),
     modalityInstructionAr: String(preview.modalityInstructionAr ?? preview.modality_instruction_ar ?? ""),
@@ -626,6 +626,83 @@ export interface PatientQrSettings {
   contact: PatientQrContactSettings;
   location: PatientQrLocationSettings;
 }
+
+export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
+  enabled: true,
+  printQrOnAppointmentSlip: true,
+  allowCancellation: true,
+  allowAddToCalendar: true,
+  showBookingTime: true,
+  showPreparationInstructions: true,
+  showDocumentsChecklist: true,
+  showDepartmentContact: false,
+  showLocationDirections: false,
+  allowReportAccess: false,
+  allowImageAccess: false,
+  showReportPendingCard: true,
+  reportAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresCompletedAppointment: true,
+  imageAccessRequiresReportRequiredFlag: false,
+  showReportNotRequiredMessage: false,
+  defaultReportRequiredForOncology: true,
+  defaultReportRequiredForNonOncology: false,
+  qrReportCheckingMessage: "Checking report status...",
+  qrReportFinalMessage: "Your report is ready.",
+  qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
+  qrReportNoReportMessage: "No report is available for this appointment yet.",
+  qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
+  qrReportNotRequiredMessage: "",
+  qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
+  qrReportCheckButtonLabel: "Check report",
+  qrReportViewButtonLabel: "View report",
+  qrImageViewButtonLabel: "View images",
+  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
+  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
+  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
+  pageTitleAr: "خدمة المريض عبر رمز QR",
+  pageTitleEn: "Patient QR Service",
+  introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
+  introTextEn: "You can review appointment details, instructions, and department information from this page.",
+  genericPreparationTextAr: "",
+  genericPreparationTextEn: "",
+  documentsChecklistAr: [
+    "ورقة الإحالة",
+    "إثبات الهوية",
+    "صور أو تقارير سابقة إن وجدت",
+    "تحاليل حديثة إذا طُلبت من القسم",
+  ],
+  documentsChecklistEn: [
+    "Referral paper",
+    "ID proof",
+    "Previous images or reports if available",
+    "Recent tests if requested by the department",
+  ],
+  contact: {
+    primaryPhone: "",
+    secondaryPhone: "",
+    whatsapp: "",
+    whatsappEnabled: false,
+    workingHoursAr: "",
+    workingHoursEn: "",
+    noteAr: "",
+    noteEn: "",
+  },
+  location: {
+    centerNameAr: "المركز الوطني للأورام بنغازي",
+    centerNameEn: "National Cancer Center Benghazi",
+    departmentLocationAr: "",
+    departmentLocationEn: "",
+    roomUnitFloorAr: "",
+    roomUnitFloorEn: "",
+    addressAr: "",
+    addressEn: "",
+    arrivalInstructionsAr: "",
+    arrivalInstructionsEn: "",
+    googleMapsUrl: "",
+    parkingNoteAr: "",
+    parkingNoteEn: "",
+  },
+};
 
 export type AppointmentSlipPaperMode = "blank" | "preprinted";
 export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
@@ -755,19 +832,6 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   locationTextEn: "",
 };
 
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.hospitalNameAr = "المركز الوطني للأورام بنغازي";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.departmentNameAr = "قسم الأشعة التشخيصية";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.slipTitleAr = "وصل الموعد";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.patientDetailsHeadingAr = "بيانات المريض";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.appointmentDetailsHeadingAr = "بيانات الموعد";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.instructionsHeadingAr = "التعليمات";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.modalityInstructionsHeadingAr = "تعليمات حسب نوع الجهاز";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingAr = "تعليمات خاصة بالفحص";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr = "موقع الفحص";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionAr = "امسح للاطلاع على تفاصيل الموعد";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrHelperTextAr = "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeCaptionAr = "امسح للدخول إلى قائمة الانتظار";
-DEFAULT_APPOINTMENT_SLIP_SETTINGS.fallbackInstructionTextAr = "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.";
 
 function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
   const candidate = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
@@ -828,10 +892,10 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     qrImageUnavailableMessage: str(record.qrImageUnavailableMessage, "Image viewing is currently unavailable. Please try again later."),
     qrReportStudyNotFoundMessage: str(record.qrReportStudyNotFoundMessage, "Your study is not available in the report system yet. Please try again later."),
     qrImageStudyNotFoundMessage: str(record.qrImageStudyNotFoundMessage, "Your study images are not available yet. Please try again later."),
-    pageTitleAr: str(record.pageTitleAr, "Ã˜Â®Ã˜Â¯Ã™â€¦Ã˜Â© Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Å Ã˜Â¶ Ã˜Â¹Ã˜Â¨Ã˜Â± Ã˜Â±Ã™â€¦Ã˜Â² QR"),
-    pageTitleEn: str(record.pageTitleEn, "Patient QR Service"),
-    introTextAr: str(record.introTextAr, "Ã™Å Ã™â€¦Ã™Æ’Ã™â€ Ã™Æ’ Ã™â€¦Ã˜Â±Ã˜Â§Ã˜Â¬Ã˜Â¹Ã˜Â© Ã˜ÂªÃ™ÂÃ˜Â§Ã˜ÂµÃ™Å Ã™â€ž Ã˜Â§Ã™â€žÃ™â€¦Ã™Ë†Ã˜Â¹Ã˜Â¯ Ã™Ë†Ã˜Â§Ã™â€žÃ˜ÂªÃ˜Â¹Ã™â€žÃ™Å Ã™â€¦Ã˜Â§Ã˜Âª Ã™Ë†Ã™â€¦Ã˜Â¹Ã™â€žÃ™Ë†Ã™â€¦Ã˜Â§Ã˜Âª Ã˜Â§Ã™â€žÃ™â€šÃ˜Â³Ã™â€¦ Ã™â€¦Ã™â€  Ã™â€¡Ã˜Â°Ã™â€¡ Ã˜Â§Ã™â€žÃ˜ÂµÃ™ÂÃ˜Â­Ã˜Â©."),
-    introTextEn: str(record.introTextEn, "You can review appointment details, instructions, and department information from this page."),
+    pageTitleAr: str(record.pageTitleAr, DEFAULT_PATIENT_QR_SETTINGS.pageTitleAr),
+    pageTitleEn: str(record.pageTitleEn, DEFAULT_PATIENT_QR_SETTINGS.pageTitleEn),
+    introTextAr: str(record.introTextAr, DEFAULT_PATIENT_QR_SETTINGS.introTextAr),
+    introTextEn: str(record.introTextEn, DEFAULT_PATIENT_QR_SETTINGS.introTextEn),
     genericPreparationTextAr: str(record.genericPreparationTextAr, ""),
     genericPreparationTextEn: str(record.genericPreparationTextEn, ""),
     documentsChecklistAr: Array.isArray(record.documentsChecklistAr)
@@ -851,8 +915,8 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
       noteEn: str(contact.noteEn, ""),
     },
     location: {
-      centerNameAr: str(location.centerNameAr, "Ã˜Â§Ã™â€žÃ™â€¦Ã˜Â±Ã™Æ’Ã˜Â² Ã˜Â§Ã™â€žÃ™Ë†Ã˜Â·Ã™â€ Ã™Å  Ã™â€žÃ™â€žÃ˜Â£Ã™Ë†Ã˜Â±Ã˜Â§Ã™â€¦ Ã˜Â¨Ã™â€ Ã˜ÂºÃ˜Â§Ã˜Â²Ã™Å "),
-      centerNameEn: str(location.centerNameEn, "National Cancer Center Benghazi"),
+      centerNameAr: str(location.centerNameAr, DEFAULT_PATIENT_QR_SETTINGS.location.centerNameAr),
+      centerNameEn: str(location.centerNameEn, DEFAULT_PATIENT_QR_SETTINGS.location.centerNameEn),
       departmentLocationAr: str(location.departmentLocationAr, ""),
       departmentLocationEn: str(location.departmentLocationEn, ""),
       roomUnitFloorAr: str(location.roomUnitFloorAr, ""),
@@ -974,6 +1038,30 @@ function looksLikeMojibake(value: string): boolean {
   return /Ã|Â|Ø|Ù|ï¿½|þ/.test(value);
 }
 
+function sanitizePatientQrTextEncoding(settings: PatientQrSettings): PatientQrSettings {
+  const fixed: PatientQrSettings = {
+    ...settings,
+    contact: { ...settings.contact },
+    location: { ...settings.location },
+  };
+
+  const sanitize = (value: string, fallback: string): string =>
+    looksLikeMojibake(String(value ?? "")) ? fallback : value;
+
+  fixed.pageTitleAr = sanitize(fixed.pageTitleAr, DEFAULT_PATIENT_QR_SETTINGS.pageTitleAr);
+  fixed.introTextAr = sanitize(fixed.introTextAr, DEFAULT_PATIENT_QR_SETTINGS.introTextAr);
+  fixed.location.centerNameAr = sanitize(
+    fixed.location.centerNameAr,
+    DEFAULT_PATIENT_QR_SETTINGS.location.centerNameAr
+  );
+
+  fixed.documentsChecklistAr = (fixed.documentsChecklistAr ?? []).map((item, index) =>
+    sanitize(item, DEFAULT_PATIENT_QR_SETTINGS.documentsChecklistAr[index] ?? item)
+  );
+
+  return fixed;
+}
+
 function sanitizeAppointmentSlipTextEncoding(settings: AppointmentSlipSettings): AppointmentSlipSettings {
   const fixed = { ...settings };
   const keys: Array<keyof AppointmentSlipSettings> = [
@@ -1004,7 +1092,7 @@ function sanitizeAppointmentSlipTextEncoding(settings: AppointmentSlipSettings):
 export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
   const response = await api<{ settings: RawRecord[] }>("/settings/patient_qr_self_service");
   const configRow = response.settings?.find((row) => row.setting_key === "config");
-  return normalizePatientQrSettings(configRow ?? {});
+  return sanitizePatientQrTextEncoding(normalizePatientQrSettings(configRow ?? {}));
 }
 
 export async function savePatientQrSettings(payload: PatientQrSettings) {

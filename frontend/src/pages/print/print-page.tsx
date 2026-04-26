@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ApiError } from "@/lib/api-client";
 import {
   fetchAppointments,
   fetchAppointmentLookups,
@@ -21,6 +22,17 @@ import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Button, Card } from "@/components/shared";
+
+function describeQueryError(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof ApiError) {
+    return `HTTP ${error.status}: ${error.message}`;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
+}
 
 function EditedBadge() {
   return (
@@ -73,7 +85,6 @@ export default function PrintPage() {
   const {
     data: slipSettings,
     error: slipSettingsError,
-    isLoading: slipSettingsLoading,
   } = useQuery({
     queryKey: ["appointment-slip-settings"],
     queryFn: fetchAppointmentSlipSettings,
@@ -82,24 +93,47 @@ export default function PrintPage() {
   const {
     data: patientQrSettings,
     error: patientQrSettingsError,
-    isLoading: patientQrSettingsLoading,
   } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
-  const settingsReady = Boolean(slipSettings && patientQrSettings);
-  const settingsLoadFailed = Boolean(slipSettingsError || patientQrSettingsError);
-  const renderOptions = settingsReady ? { slipSettings, patientQrSettings } : undefined;
+  const renderOptions = slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : null;
+  const settingsReady = Boolean(renderOptions);
+  const slipSettingsFailed = Boolean(slipSettingsError);
+  const patientQrSettingsFailed = Boolean(patientQrSettingsError);
+  const settingsLoadFailed = slipSettingsFailed || patientQrSettingsFailed;
+  const slipSettingsErrorDetails = describeQueryError(slipSettingsError);
+  const patientQrSettingsErrorDetails = describeQueryError(patientQrSettingsError);
+  const settingsFailureSummary = slipSettingsFailed && patientQrSettingsFailed
+    ? "Appointment Slip Settings and Patient QR Settings could not be loaded. Printing is disabled until both are available."
+    : slipSettingsFailed
+      ? "Appointment Slip Settings could not be loaded. Printing is disabled until settings are available."
+      : patientQrSettingsFailed
+        ? "Patient QR Settings could not be loaded. Printing is disabled until settings are available."
+        : "";
   const canUsePdfDownload =
-    Boolean(patientQrSettings) &&
-    slipSettings?.paperMode === "blank" &&
-    slipSettings?.languageMode === "en";
+    Boolean(renderOptions) &&
+    renderOptions.slipSettings.paperMode === "blank" &&
+    renderOptions.slipSettings.languageMode === "en";
 
   useEffect(() => {
     let cancelled = false;
 
-    if (appointmentById && !autoprintDone && settingsReady) {
+    if (!appointmentById) return () => {
+      cancelled = true;
+    };
+
+    if (settingsLoadFailed) {
+      setSelectedAppointment(appointmentById);
+      setSlipPreviewLoading(false);
+      setSlipPreviewHtml(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!autoprintDone && renderOptions) {
       setSelectedAppointment(appointmentById);
       setSlipPreviewLoading(true);
       void prepareAppointmentSlipHtml(appointmentById, renderOptions)
@@ -118,11 +152,6 @@ export default function PrintPage() {
         }, 300);
       }
     }
-    if (appointmentById && settingsLoadFailed) {
-      setSelectedAppointment(appointmentById);
-      setSlipPreviewLoading(false);
-      setSlipPreviewHtml(null);
-    }
     return () => {
       cancelled = true;
     };
@@ -130,12 +159,10 @@ export default function PrintPage() {
     appointmentById,
     autoprintParam,
     autoprintDone,
-    patientQrSettings,
+    renderOptions,
     patientQrSettingsError,
-    patientQrSettingsLoading,
-    slipSettings,
     slipSettingsError,
-    slipSettingsLoading,
+    settingsLoadFailed,
   ]);
 
   function openSlipPreview(appointment: AppointmentWithDetails) {
@@ -275,9 +302,16 @@ export default function PrintPage() {
                 {t(language, "print.previewSubtitle")}
               </p>
               {settingsLoadFailed ? (
-                <p className="mt-2 text-sm text-amber-700">
-                  Appointment slip settings could not be loaded. Printing is disabled until settings are available.
-                </p>
+                <div className="mt-2 space-y-1 text-sm text-amber-700">
+                  <p>{settingsFailureSummary}</p>
+                  {slipSettingsFailed ? <p>Appointment Slip Settings error: {slipSettingsErrorDetails || "Unknown error"}</p> : null}
+                  {patientQrSettingsFailed ? <p>Patient QR Settings error: {patientQrSettingsErrorDetails || "Unknown error"}</p> : null}
+                  {import.meta.env.DEV ? (
+                    <p className="font-mono text-xs text-amber-900">
+                      debug: slip={slipSettingsErrorDetails || "ok"} | qr={patientQrSettingsErrorDetails || "ok"}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </div>
             <div className="flex flex-wrap gap-2">
@@ -315,6 +349,10 @@ export default function PrintPage() {
                 className="w-full h-[1120px] bg-white rounded-lg shadow-sm"
                 loading="eager"
               />
+            </div>
+          ) : settingsLoadFailed ? (
+            <div className="p-8 text-center text-amber-700">
+              {settingsFailureSummary}
             </div>
           ) : (
             <div className="p-8 text-center text-muted-foreground">

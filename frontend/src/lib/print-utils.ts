@@ -3,6 +3,7 @@ import { formatDateLy } from "@/lib/date-format";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+  DEFAULT_PATIENT_QR_SETTINGS,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
   type AppointmentSlipSettings,
@@ -32,73 +33,6 @@ function escapeHtml(str: string = ""): string {
 const MM_TO_PT = 72 / 25.4;
 const A5_WIDTH_PT = 148 * MM_TO_PT;
 const A5_HEIGHT_PT = 210 * MM_TO_PT;
-
-const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
-  enabled: true,
-  printQrOnAppointmentSlip: true,
-  allowCancellation: true,
-  allowAddToCalendar: true,
-  showBookingTime: true,
-  showPreparationInstructions: true,
-  showDocumentsChecklist: true,
-  showDepartmentContact: false,
-  showLocationDirections: false,
-  allowReportAccess: false,
-  allowImageAccess: false,
-  showReportPendingCard: true,
-  reportAccessRequiresCompletedAppointment: true,
-  imageAccessRequiresCompletedAppointment: true,
-  imageAccessRequiresReportRequiredFlag: false,
-  showReportNotRequiredMessage: false,
-  defaultReportRequiredForOncology: true,
-  defaultReportRequiredForNonOncology: false,
-  qrReportCheckingMessage: "Checking report status...",
-  qrReportFinalMessage: "Your report is ready.",
-  qrReportDraftMessage: "Your report is still under review and is not finalized yet.",
-  qrReportNoReportMessage: "No report is available for this appointment yet.",
-  qrReportUnavailableMessage: "The report system is temporarily unavailable. Please try again later.",
-  qrReportNotRequiredMessage: "",
-  qrReportNotCompletedMessage: "Report access becomes available after the examination is completed.",
-  qrReportCheckButtonLabel: "Check report",
-  qrReportViewButtonLabel: "View report",
-  qrImageViewButtonLabel: "View images",
-  qrImageUnavailableMessage: "Image viewing is currently unavailable. Please try again later.",
-  qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
-  qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
-  pageTitleAr: "Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR",
-  pageTitleEn: "Patient QR Service",
-  introTextAr: "ÙŠÙ…ÙƒÙ†Ùƒ Ù…Ø±Ø§Ø¬Ø¹Ø© ØªÙØ§ØµÙŠÙ„ Ø§Ù„Ù…ÙˆØ¹Ø¯ ÙˆØ§Ù„ØªØ¹Ù„ÙŠÙ…Ø§Øª ÙˆÙ…Ø¹Ù„ÙˆÙ…Ø§Øª Ø§Ù„Ù‚Ø³Ù… Ù…Ù† Ù‡Ø°Ù‡ Ø§Ù„ØµÙØ­Ø©.",
-  introTextEn: "You can review appointment details, instructions, and department information from this page.",
-  genericPreparationTextAr: "",
-  genericPreparationTextEn: "",
-  documentsChecklistAr: [],
-  documentsChecklistEn: [],
-  contact: {
-    primaryPhone: "",
-    secondaryPhone: "",
-    whatsapp: "",
-    whatsappEnabled: false,
-    workingHoursAr: "",
-    workingHoursEn: "",
-    noteAr: "",
-    noteEn: "",
-  },
-  location: {
-    centerNameAr: "Ø§Ù„Ù…Ø±ÙƒØ² Ø§Ù„ÙˆØ·Ù†ÙŠ Ù„Ù„Ø£ÙˆØ±Ø§Ù… Ø¨Ù†ØºØ§Ø²ÙŠ",
-    centerNameEn: "National Cancer Center Benghazi",
-    departmentLocationAr: "",
-    departmentLocationEn: "",
-    roomUnitFloorAr: "",
-    roomUnitFloorEn: "",
-    addressAr: "",
-    addressEn: "",
-    arrivalInstructionsAr: "",
-    arrivalInstructionsEn: "",
-    googleMapsUrl: "",
-    parkingNoteAr: "",
-    parkingNoteEn: "",
-  },
-};
 
 export interface AppointmentSlipData {
   hospitalName: string;
@@ -184,7 +118,7 @@ function formatSlipTime(raw: string | null | undefined): string {
 function shorten(value: string, maxLength: number): string {
   const normalized = String(value || "").trim();
   if (normalized.length <= maxLength) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}â€¦`;
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function containsArabic(value: string): boolean {
@@ -203,7 +137,7 @@ function processPdfText(doc: jsPDF, value: string): string {
 
 function wrapLines(doc: jsPDF, value: string, maxWidth: number, maxLines: number): string[] {
   const cleaned = processPdfText(doc, String(value || "").trim());
-  if (!cleaned) return ["â€”"];
+  if (!cleaned) return ["—"];
   const lines = doc.splitTextToSize(cleaned, maxWidth) as string[];
   if (lines.length <= maxLines) return lines;
   const visible = lines.slice(0, maxLines);
@@ -306,10 +240,10 @@ function localizeText(ar: string, en: string, mode: AppointmentSlipSettings["lan
 function localizeValue(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
   const cleanAr = String(ar || "").trim();
   const cleanEn = String(en || "").trim();
-  if (mode === "ar") return cleanAr || cleanEn || "â€”";
-  if (mode === "en") return cleanEn || cleanAr || "â€”";
+  if (mode === "ar") return cleanAr || cleanEn || "—";
+  if (mode === "en") return cleanEn || cleanAr || "—";
   if (cleanAr && cleanEn && cleanAr !== cleanEn) return `${cleanAr} / ${cleanEn}`;
-  return cleanAr || cleanEn || "â€”";
+  return cleanAr || cleanEn || "—";
 }
 
 function localizeValueSafe(ar: string, en: string, mode: AppointmentSlipSettings["languageMode"]): string {
@@ -349,8 +283,8 @@ function buildInstructionText(
   if (settings.showModalityInstructions) {
     const bodyAr = String(apt.modalityGeneralInstructionAr || "").trim();
     const bodyEn = String(apt.modalityGeneralInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "â€”" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "â€”" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
       headingAr: settings.modalityInstructionsHeadingAr,
       headingEn: settings.modalityInstructionsHeadingEn,
@@ -363,8 +297,8 @@ function buildInstructionText(
   if (settings.showExamSpecificInstructions) {
     const bodyAr = String(apt.examSpecificInstructionAr || "").trim();
     const bodyEn = String(apt.examSpecificInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "â€”" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "â€”" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
+    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
     sections.push({
       headingAr: settings.examInstructionsHeadingAr,
       headingEn: settings.examInstructionsHeadingEn,
@@ -428,15 +362,15 @@ export function buildAppointmentSlipData(
   const patientName = localizeValueSafe(apt.arabicFullName || "", apt.englishFullName || "", slipSettings.languageMode);
   const modality = localizeValueSafe(apt.modalityNameAr || "", apt.modalityNameEn || "", slipSettings.languageMode);
   const examName = localizeValueSafe(apt.examNameAr || "", apt.examNameEn || "", slipSettings.languageMode);
-  const ageSex = `${apt.ageYears || "â€”"} / ${apt.sex || "â€”"}`;
+  const ageSex = `${apt.ageYears || "—"} / ${apt.sex || "—"}`;
   const locationText = localizeValueSafe(slipSettings.locationTextAr, slipSettings.locationTextEn, slipSettings.languageMode);
   return {
     hospitalName,
     departmentName,
     patientName,
-    mrn: apt.mrn || "â€”",
-    nationalId: apt.nationalId || "â€”",
-    phone: apt.phone1 || "â€”",
+    mrn: apt.mrn || "—",
+    nationalId: apt.nationalId || "—",
+    phone: apt.phone1 || "—",
     accessionNumber: String(apt.accessionNumber || `V2-${apt.id}`).trim(),
     appointmentNumber: String(apt.dailySequence || apt.id),
     bookingId: String(apt.id),
@@ -830,16 +764,16 @@ function renderFieldHtml(field: SlipField): string {
   return `
     <div class="summary-item">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
     </div>
   `;
 }
 
 function isMeaningfulSlipValue(value: string | null | undefined): boolean {
   const normalized = String(value || "").trim();
-  return normalized !== "" && normalized !== "â€”" && normalized !== "Ã¢â‚¬â€";
+  return normalized !== "" && normalized !== "—";
 }
 
 function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSlipSettings["languageMode"]): string {
@@ -850,7 +784,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-ar">
         <div class="label ar">${escapeHtml(field.labelAr)}</div>
-        <div class="value ar">${escapeHtml(valueAr || "â€”")}</div>
+        <div class="value ar">${escapeHtml(valueAr || "—")}</div>
       </div>
     `;
   }
@@ -859,7 +793,7 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
     return `
       <div class="summary-item single-language single-language-en">
         <div class="label en">${escapeHtml(field.labelEn)}</div>
-        <div class="value en">${escapeHtml(valueEn || "â€”")}</div>
+        <div class="value en">${escapeHtml(valueEn || "—")}</div>
       </div>
     `;
   }
@@ -867,9 +801,9 @@ function renderLocalizedFieldHtml(field: SlipField, languageMode: AppointmentSli
   return `
     <div class="summary-item bilingual-card">
       <div class="label ar">${escapeHtml(field.labelAr)}</div>
-      <div class="value ar">${escapeHtml(field.valueAr || "â€”")}</div>
+      <div class="value ar">${escapeHtml(field.valueAr || "—")}</div>
       <div class="label en">${escapeHtml(field.labelEn)}</div>
-      <div class="value en">${escapeHtml(field.valueEn || "â€”")}</div>
+      <div class="value en">${escapeHtml(field.valueEn || "—")}</div>
     </div>
   `;
 }
@@ -1165,14 +1099,14 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
     .map(
       (apt, idx) => `
       <div class="row">
-        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "â€”"}</div></div>
+        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
         <div class="arabic"><div class="label">Patient</div><div class="value">${escapeHtml(apt.arabicFullName)}</div></div>
         <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
         <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
-        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "â€”")}</div></div>
-        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "â€”")}</div></div>
+        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
+        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
         <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
-        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "â€”")}</div></div>
+        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
       </div>
     `
     )
@@ -1221,7 +1155,7 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
               <p class="title">Appointment List</p>
             </div>
           </div>
-          <p class="summary">Date window: ${escapeHtml(listDate)} Â· Total: ${visibleList.length} Â· Printed: ${escapeHtml(now)}</p>
+          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${visibleList.length} · Printed: ${escapeHtml(now)}</p>
           ${rows}
           <div class="footer">
             <span>Generated by RISpro</span>

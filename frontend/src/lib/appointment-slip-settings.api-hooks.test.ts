@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api-client";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+  DEFAULT_PATIENT_QR_SETTINGS,
   fetchAppointmentSlipSettings,
+  fetchPatientQrSettings,
   saveAppointmentSlipSettings,
   type AppointmentSlipSettings,
 } from "./api-hooks";
@@ -126,5 +128,24 @@ describe("appointment slip settings api hooks", () => {
         entries: [{ key: "config", value: payload }],
       }),
     });
+  });
+
+  it("fetches patient QR settings from the dedicated category", async () => {
+    vi.mocked(api).mockResolvedValue({
+      settings: [{ setting_key: "config", setting_value: { value: {} } }],
+    });
+
+    await fetchPatientQrSettings();
+
+    expect(api).toHaveBeenCalledWith("/settings/patient_qr_self_service");
+  });
+
+  it("default settings constants do not contain mojibake markers", () => {
+    const serialized = JSON.stringify({
+      slip: DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+      patientQr: DEFAULT_PATIENT_QR_SETTINGS,
+    });
+
+    expect(serialized).not.toMatch(/[ÃÂþ]|â€”|â€¦|ï¿½/);
   });
 });

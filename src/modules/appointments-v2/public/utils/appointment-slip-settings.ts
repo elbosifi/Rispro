@@ -128,13 +128,6 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   locationTextEn: "",
 };
 
-DEFAULT_SETTINGS.hospitalNameAr = "المركز الوطني للأورام بنغازي";
-DEFAULT_SETTINGS.departmentNameAr = "قسم الأشعة التشخيصية";
-DEFAULT_SETTINGS.qrCaptionAr = "امسح للاطلاع على تفاصيل الموعد";
-DEFAULT_SETTINGS.qrHelperTextAr = "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.";
-DEFAULT_SETTINGS.barcodeCaptionAr = "امسح للدخول إلى قائمة الانتظار";
-DEFAULT_SETTINGS.fallbackInstructionTextAr = "يرجى مسح رمز QR للاطلاع على تعليمات الجهاز والفحص والموقع.";
-
 function readRawValue(value: unknown): unknown {
   if (value && typeof value === "object" && !Array.isArray(value) && "value" in (value as Record<string, unknown>)) {
     return (value as Record<string, unknown>).value;
