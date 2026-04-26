@@ -296,9 +296,34 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const mutation = isEdit ? updateMutation : createMutation;
 
   const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
-  const normalizeIdentifierForType = (type: IdentifierType, value: string) => (
-    type === "passport" ? value.toUpperCase() : value
-  );
+  const normalizeIdentifierForType = (type: IdentifierType, value: string) => {
+    if (type === "national_id") return value.replace(/\D/g, "").slice(0, 12);
+    if (type === "passport") return value.toUpperCase();
+    return value;
+  };
+
+  const applyPrimaryIdentifierState = (
+    current: PatientFormState,
+    identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>,
+    primaryType: IdentifierType,
+    primaryValue: string
+  ): PatientFormState => {
+    const nextState: PatientFormState = {
+      ...current,
+      identifiers,
+      identifierType: primaryType,
+      identifierValue: primaryValue
+    };
+
+    if (primaryType === "national_id" && isValidNationalId(primaryValue)) {
+      const derived = deriveDemographicsFromNationalId(primaryValue);
+      if (derived.sex) nextState.sex = derived.sex;
+      if (derived.estimatedDateOfBirth) nextState.estimatedDateOfBirth = derived.estimatedDateOfBirth;
+      if (derived.ageYears !== undefined) nextState.ageYears = String(derived.ageYears);
+    }
+
+    return nextState;
+  };
   const findPrimaryIdentifierIndex = (identifiers: Array<{ typeCode: IdentifierType; value: string; isPrimary: boolean }>) => {
     const idx = identifiers.findIndex((entry) => entry.isPrimary);
     return idx >= 0 ? idx : 0;
@@ -491,28 +516,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     } finally {
       setAddingToken(null);
     }
-  };
-
-  const handleIdentifierValueChange = (value: string) => {
-    const cv = value.replace(/\D/g, "");
-    setForm((f) => {
-      const nextIdentifiers = [...f.identifiers];
-      const primaryIdx = findPrimaryIdentifierIndex(nextIdentifiers);
-      if (nextIdentifiers.length === 0 || primaryIdx < 0 || !nextIdentifiers[primaryIdx]) {
-        nextIdentifiers.push({ typeCode: f.identifierType, value: cv, isPrimary: true });
-      } else {
-        nextIdentifiers[primaryIdx] = { ...nextIdentifiers[primaryIdx], typeCode: f.identifierType, value: cv, isPrimary: true };
-      }
-
-      const u: Partial<PatientFormState> = { identifierValue: cv, identifiers: nextIdentifiers };
-      if (f.identifierType === "national_id" && isValidNationalId(cv)) {
-        const d = deriveDemographicsFromNationalId(cv);
-        if (d.sex) u.sex = d.sex;
-        if (d.estimatedDateOfBirth) u.estimatedDateOfBirth = d.estimatedDateOfBirth;
-        if (d.ageYears !== undefined) u.ageYears = d.ageYears.toString();
-      }
-      return { ...f, ...u };
-    });
   };
 
   const handleDobChange = (dob: string) => {
@@ -763,7 +766,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     const nextValue = normalizeIdentifierForType(nextType, next[idx]?.value || "");
                     next[idx] = { ...next[idx], typeCode: nextType, value: nextValue };
                     if (next[idx]?.isPrimary) {
-                      return { ...f, identifiers: next, identifierType: nextType, identifierValue: nextValue };
+                      return applyPrimaryIdentifierState(f, next, nextType, nextValue);
                     }
                     return { ...f, identifiers: next };
                   })
@@ -793,7 +796,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                     const nextValue = normalizeIdentifierForType(next[idx]?.typeCode || "other", e.target.value);
                     next[idx] = { ...next[idx], value: nextValue };
                     if (next[idx]?.isPrimary) {
-                      return { ...f, identifiers: next, identifierValue: nextValue };
+                      return applyPrimaryIdentifierState(f, next, next[idx]?.typeCode || f.identifierType, nextValue);
                     }
                     return { ...f, identifiers: next };
                   })
@@ -813,12 +816,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           isPrimary: itemIdx === idx
                         }));
                         const primary = nextIdentifiers[idx] || nextIdentifiers[0];
-                        return {
-                          ...f,
-                          identifiers: nextIdentifiers,
-                          identifierType: (primary?.typeCode || f.identifierType) as IdentifierType,
-                          identifierValue: primary?.value || ""
-                        };
+                        return applyPrimaryIdentifierState(
+                          f,
+                          nextIdentifiers,
+                          (primary?.typeCode || f.identifierType) as IdentifierType,
+                          primary?.value || ""
+                        );
                       })
                     }
                   />
@@ -835,12 +838,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                           next[0] = { ...next[0], isPrimary: true };
                         }
                         const primary = next.find((x) => x.isPrimary) || next[0];
-                        return {
-                          ...f,
-                          identifiers: next,
-                          identifierType: (primary?.typeCode || "national_id") as IdentifierType,
-                          identifierValue: primary?.value || ""
-                        };
+                        return applyPrimaryIdentifierState(
+                          f,
+                          next,
+                          (primary?.typeCode || "national_id") as IdentifierType,
+                          primary?.value || ""
+                        );
                       })
                     }
                   >

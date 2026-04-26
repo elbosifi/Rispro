@@ -248,4 +248,21 @@ describe("PatientForm workflow hardening", () => {
     expect(payload.identifierValue).toBe("SECONDARY-PRIMARY");
     expect(payload.identifiers.find((x: any) => x.isPrimary)?.value).toBe("SECONDARY-PRIMARY");
   });
+
+  it("auto-derives sex and birth year when primary identifier is a valid national ID", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    const nationalIdInput = screen.getByLabelText(/National ID/i) as HTMLInputElement;
+    await user.clear(nationalIdInput);
+    await user.type(nationalIdInput, "119900123456");
+
+    await waitFor(() => {
+      const sexSelect = screen.getByLabelText(/Sex/i) as HTMLSelectElement;
+      expect(sexSelect.value).toBe("M");
+    });
+
+    const dobInput = screen.getByLabelText(/Date of Birth/i) as HTMLInputElement;
+    expect(dobInput.value).toBe("1990-01-01");
+  });
 });
