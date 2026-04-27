@@ -14,7 +14,6 @@ import {
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import {
-  downloadAppointmentSlipPdf,
   filterVisibleAppointments,
   prepareAppointmentSlipHtml,
   printAppointmentList,
@@ -55,7 +54,6 @@ export default function PrintPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [pdfDownloading, setPdfDownloading] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
   const isDirectPreview = Boolean(appointmentIdParam);
@@ -127,9 +125,6 @@ export default function PrintPage() {
         : "";
   const appointmentByIdErrorDetails = describeQueryError(appointmentByIdError);
   const activePrintAppointment = isDirectPreview ? (appointmentById ?? null) : selectedAppointment;
-  const canUsePdfDownload =
-    renderOptions?.slipSettings.paperMode === "blank" &&
-    renderOptions.slipSettings.languageMode === "en";
 
   useEffect(() => {
     if (!isDirectPreview) return;
@@ -180,16 +175,6 @@ export default function PrintPage() {
   function handlePrintSlip(appointment: AppointmentWithDetails) {
     if (!renderOptions) return;
     printAppointmentSlip(appointment, renderOptions);
-  }
-
-  async function handleDownloadPdf(appointment: AppointmentWithDetails) {
-    if (!renderOptions || !canUsePdfDownload) return;
-    setPdfDownloading(true);
-    try {
-      await downloadAppointmentSlipPdf(appointment, renderOptions);
-    } finally {
-      setPdfDownloading(false);
-    }
   }
 
   function handlePrintList(
@@ -326,14 +311,6 @@ export default function PrintPage() {
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={() => navigate("/print")}>
                 {t(language, "common.cancel")}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => activePrintAppointment && void handleDownloadPdf(activePrintAppointment)}
-                disabled={!activePrintAppointment || appointmentByIdLoading || slipPreviewLoading || pdfDownloading || !canUsePdfDownload || settingsLoadFailed}
-              >
-                {t(language, "print.downloadPdf")}
               </Button>
               <Button
                 type="button"

@@ -220,7 +220,7 @@ describe("PrintPage autoprint", () => {
       });
     });
     expect(screen.getByRole("button", { name: "print.confirmPrint" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "print.downloadPdf" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "print.downloadPdf" })).toBeNull();
   });
 
   it("Confirm Print remains disabled while direct appointment is loading", async () => {
