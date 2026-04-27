@@ -54,8 +54,8 @@ const {
   };
   const mockAppointment42Updated = {
     ...mockAppointmentData,
-    modalityGeneralInstructionEn: "Updated modality instruction",
-    modalityGeneralInstructionAr: "ØªØ¹Ù„ÙŠÙ…Ø§Øª Ù…ÙˆØ¯Ø§Ù„ÙŠØªÙŠ Ù…Ø­Ø¯Ø«Ø©",
+    modalityGeneralInstructionEn: "New MRI preparation instructions",
+    modalityGeneralInstructionAr: "ØªØ¹Ù„ÙŠÙ…Ø§Øª Ø¬Ø¯ÙŠØ¯Ø© Ù„Ù„ØªØ­Ø¶ÙŠØ± Ù‚Ø¨Ù„ Ø§Ù„ÙØ­Øµ",
   };
   const mockSlipSettings = {
     paperMode: "blank",
@@ -293,8 +293,8 @@ describe("PrintPage autoprint", () => {
   it("refetches direct print data after remount so updated modality instructions are used", async () => {
     const oldAppointment = {
       ...mockAppointment42,
-      modalityGeneralInstructionEn: "Old modality instruction",
-      modalityGeneralInstructionAr: "Ù‚Ø¯ÙŠÙ… ØªØ¹Ù„ÙŠÙ…Ø§Øª Ø§Ù„Ù…ÙˆØ¯Ø§Ù„ÙŠØªÙŠ",
+      modalityGeneralInstructionEn: "Remove metal items before the study and follow MRI unit instructions.",
+      modalityGeneralInstructionAr: "إزالة المعادن قبل الفحص واتباع تعليمات القسم.",
     };
     const getAppointmentById = vi.mocked(apiHooks.getAppointmentById);
     getAppointmentById
