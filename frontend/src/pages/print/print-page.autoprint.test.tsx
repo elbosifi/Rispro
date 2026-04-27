@@ -229,7 +229,7 @@ describe("PrintPage autoprint", () => {
     renderWithRouter("/print?appointmentId=42");
 
     const confirmButton = await screen.findByRole("button", { name: "print.confirmPrint" });
-    expect(confirmButton).toHaveAttribute("disabled");
+    expect(confirmButton.hasAttribute("disabled")).toBe(true);
     expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
     pending.resolve(mockAppointment42);
   });
