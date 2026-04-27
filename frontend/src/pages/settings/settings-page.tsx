@@ -897,15 +897,23 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
 
-  const modalityRows = (data as any)?.modalities ?? [];
-  const modalityOptions = modalityRows.map((m: any) => {
+  type ExamTypeModalityRow = {
+    id: number;
+    name_ar?: string | null;
+    name_en?: string | null;
+    code?: string | null;
+    is_active?: boolean;
+  };
+
+  const modalityRows = (((data as { modalities?: ExamTypeModalityRow[] } | undefined)?.modalities) ?? []) as ExamTypeModalityRow[];
+  const modalityOptions = modalityRows.map((m) => {
     const baseLabel = chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`;
     return {
       value: m.id,
       label: m.is_active === false ? `${baseLabel} (Inactive)` : baseLabel
     };
   });
-  const modalityById = new Map(modalityRows.map((m: any) => [String(m.id), m]));
+  const modalityById = new Map<string, ExamTypeModalityRow>(modalityRows.map((m) => [String(m.id), m]));
 
   const startEdit = (et: any) => {
     setEditingId(et.id);

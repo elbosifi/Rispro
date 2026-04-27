@@ -7,7 +7,8 @@ const filePath = new URL("../../../frontend/src/pages/settings/settings-page.tsx
 test("exam type settings derive modality labels from the exam-types payload and mark inactive parents", async () => {
   const content = await readFile(filePath, "utf-8");
   assert.ok(
-    content.includes('const modalityRows = (data as any)?.modalities ?? [];'),
+    content.includes('type ExamTypeModalityRow = {') &&
+      content.includes('const modalityRows = (((data as { modalities?: ExamTypeModalityRow[] } | undefined)?.modalities) ?? []) as ExamTypeModalityRow[];'),
     "Exam types section should read modalities from the exam-types settings payload"
   );
   assert.ok(
