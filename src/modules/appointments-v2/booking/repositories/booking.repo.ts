@@ -312,7 +312,7 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
   )
   select
     bb.id,
-    ('V2-' || bb.id::text) as accession_number,
+    ('V2-' || lpad(bb.id::text, 6, '0')) as accession_number,
     bb.appointment_date,
     bb.booking_time,
     bb.requires_report,

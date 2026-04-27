@@ -88,6 +88,10 @@ interface SlipField {
   valueEn: string;
 }
 
+function formatAccessionFromBookingId(id: number): string {
+  return `V2-${String(id).padStart(6, "0")}`;
+}
+
 function mm(value: number): number {
   return value * MM_TO_PT;
 }
@@ -270,7 +274,7 @@ function buildSlipQrPayload(
 function buildSlipBarcodePayload(apt: AppointmentWithDetails, settings: AppointmentSlipSettings): string {
   if (settings.barcodeValueMode === "bookingId") return String(apt.id);
   if (settings.barcodeValueMode === "appointmentNumber") return String(apt.dailySequence || apt.id);
-  return String(apt.accessionNumber || `V2-${apt.id}`).trim();
+  return String(apt.accessionNumber || formatAccessionFromBookingId(apt.id)).trim();
 }
 
 function buildInstructionText(
@@ -392,7 +396,7 @@ export function buildAppointmentSlipData(
     mrn: apt.mrn || "—",
     nationalId: apt.nationalId || "—",
     phone: apt.phone1 || "—",
-    accessionNumber: String(apt.accessionNumber || `V2-${apt.id}`).trim(),
+    accessionNumber: String(apt.accessionNumber || formatAccessionFromBookingId(apt.id)).trim(),
     appointmentNumber: String(apt.dailySequence || apt.id),
     bookingId: String(apt.id),
     bookingTime: formatSlipTime(apt.bookingTime),

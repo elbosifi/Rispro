@@ -81,7 +81,7 @@ function buildOrthancWorklistPayload(
   stableId: string,
   stationAeTitle: string
 ): Record<string, unknown> {
-  const accessionNumber = `V2-${row.id}`;
+  const accessionNumber = `V2-${String(row.id).padStart(6, "0")}`;
   const canonicalDataset = buildCanonicalMwlDataset(
     {
       modalityCode: row.modality_code,

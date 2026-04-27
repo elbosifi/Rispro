@@ -78,7 +78,7 @@ router.get(
     if (q) {
       params.push(`%${q.replace(/%/g, "").replace(/_/g, "")}%`);
       where.push(`(
-        ('V2-' || b.id::text) ilike $${params.length}
+        ('V2-' || lpad(b.id::text, 6, '0')) ilike $${params.length}
         or p.arabic_full_name ilike $${params.length}
         or coalesce(p.english_full_name, '') ilike $${params.length}
         or coalesce(p.national_id, '') ilike $${params.length}
@@ -96,7 +96,7 @@ router.get(
           b.modality_id,
           b.exam_type_id,
           b.reporting_priority_id,
-          ('V2-' || b.id::text) as accession_number,
+          ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
           b.booking_date::text as appointment_date,
           b.booking_time::text as booking_time,
           b.requires_report,
@@ -170,7 +170,7 @@ router.get(
           b.modality_id,
           b.exam_type_id,
           b.reporting_priority_id,
-          ('V2-' || b.id::text) as accession_number,
+          ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
           b.booking_date::text as appointment_date,
           b.booking_time::text as booking_time,
           b.requires_report,
@@ -412,7 +412,7 @@ router.get(
             case when b.status = 'arrived' then 'called' else 'waiting' end as queue_status,
             case when b.status in ('arrived', 'waiting') then b.updated_at else null end as scanned_at,
             b.id as appointment_id,
-            ('V2-' || b.id::text) as accession_number,
+            ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
             b.requires_report,
             b.study_instance_uid,
             b.status as appointment_status,
@@ -609,7 +609,7 @@ router.get(
         b.modality_id,
         b.exam_type_id,
         b.reporting_priority_id,
-        ('V2-' || b.id::text) as accession_number,
+        ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
         b.booking_date::text as appointment_date,
         b.requires_report,
         b.study_instance_uid,
