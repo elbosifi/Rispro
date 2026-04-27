@@ -1633,7 +1633,7 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},
-  walk_in_queue: { label: "طابور الدخول المباشر", type: "dropdown", options: [
+  walk_in_queue: { label: "قائمة الدخول المباشر", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},
