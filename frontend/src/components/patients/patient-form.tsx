@@ -167,6 +167,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const phone1Ref = useRef<HTMLInputElement>(null);
   const phone2Ref = useRef<HTMLInputElement>(null);
   const addressRef = useRef<HTMLSelectElement>(null);
+  const categoryRef = useRef<HTMLSelectElement>(null);
   const navigate = useNavigate();
   const sectionTitleClass = "text-xl sm:text-2xl font-bold text-foreground";
   const fieldLabelClass = "block text-sm font-semibold mb-2 text-foreground";
@@ -547,6 +548,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       sexRef.current?.focus();
       return;
     }
+    if (!form.category) {
+      showToast(language === "ar" ? "يرجى اختيار تصنيف الحالة." : "Patient category is required.", "error");
+      categoryRef.current?.focus();
+      return;
+    }
     if (!form.estimatedDateOfBirth && !form.ageYears.trim()) {
       showToast(language === "ar" ? "يرجى إدخال تاريخ الميلاد أو العمر." : "Please provide either Date of Birth or Age.", "error");
       dobRef.current?.focus();
@@ -571,7 +577,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       englishFullName: form.englishFullName || undefined,
       identifierType: form.identifierType,
       identifierValue: form.identifierValue || undefined,
-      category: form.category || undefined,
+      category: form.category,
       nationalId: isNat ? form.identifierValue : undefined,
       nationalIdConfirmation: isNat ? form.nationalIdConfirmation : undefined,
       sex: form.sex || undefined,
@@ -922,7 +928,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
           </div>
           <div>
-            <label className={fieldLabelClass}>{language === "ar" ? "تصنيف الحالة" : "Patient Category"}</label>
+            <label className={fieldLabelClass}>
+              {language === "ar" ? "تصنيف الحالة *" : "Patient Category *"}
+            </label>
             <select
               aria-label={language === "ar" ? "تصنيف الحالة" : "Patient Category"}
               value={form.category}
@@ -932,9 +940,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
                   category: (event.target.value as "" | "oncology" | "non_oncology") || "",
                 }))
               }
+              required
+              ref={categoryRef}
               className="input-premium input-ltr w-full"
             >
-              <option value="">{language === "ar" ? "غير محدد" : "Not set"}</option>
+              <option value="">{language === "ar" ? "اختر التصنيف..." : "Select category..."}</option>
               <option value="oncology">{language === "ar" ? "أورام" : "Oncology"}</option>
               <option value="non_oncology">{language === "ar" ? "غير أورام" : "Non-oncology"}</option>
             </select>

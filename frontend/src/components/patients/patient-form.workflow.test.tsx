@@ -148,6 +148,20 @@ describe("PatientForm workflow hardening", () => {
     expect(createPatient).not.toHaveBeenCalled();
   });
 
+  it("blocks registering when patient category is not selected", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد علي حسن");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "28");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/Patient category is required/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+  });
+
   it("uses Enter for sequential navigation and does not submit early", async () => {
     const user = userEvent.setup();
     renderPatientForm({ mode: "create" });
