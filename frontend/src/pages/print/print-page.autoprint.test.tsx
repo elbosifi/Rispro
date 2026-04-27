@@ -160,6 +160,16 @@ function renderWithRouter(initialEntry: string) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("PrintPage autoprint", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -211,6 +221,72 @@ describe("PrintPage autoprint", () => {
     });
     expect(screen.getByRole("button", { name: "print.confirmPrint" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "print.downloadPdf" })).toBeTruthy();
+  });
+
+  it("Confirm Print remains disabled while direct appointment is loading", async () => {
+    const pending = deferred<typeof mockAppointment42>();
+    vi.mocked(apiHooks.getAppointmentById).mockImplementationOnce(() => pending.promise);
+    renderWithRouter("/print?appointmentId=42");
+
+    const confirmButton = await screen.findByRole("button", { name: "print.confirmPrint" });
+    expect(confirmButton).toHaveAttribute("disabled");
+    expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
+    pending.resolve(mockAppointment42);
+  });
+
+  it("Confirm Print becomes enabled when direct appointment loads", async () => {
+    renderWithRouter("/print?appointmentId=42");
+
+    const confirmButton = await screen.findByRole("button", { name: "print.confirmPrint" });
+    await waitFor(() => {
+      expect(confirmButton.hasAttribute("disabled")).toBe(false);
+    });
+  });
+
+  it("direct preview print action uses appointmentById and is not overwritten by list selection", async () => {
+    vi.mocked(apiHooks.fetchAppointments).mockResolvedValueOnce([mockAppointment99]);
+    renderWithRouter("/print?appointmentId=42");
+
+    const confirmButton = await screen.findByRole("button", { name: "print.confirmPrint" });
+    await waitFor(() => {
+      expect(confirmButton.hasAttribute("disabled")).toBe(false);
+    });
+    confirmButton.click();
+
+    await waitFor(() => {
+      expect(printUtils.printAppointmentSlip).toHaveBeenCalledTimes(1);
+    });
+    const printedAppointment = (printUtils.printAppointmentSlip as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(printedAppointment.id).toBe(42);
+  });
+
+  it("shows explicit error when appointmentById request fails", async () => {
+    vi.mocked(apiHooks.getAppointmentById).mockRejectedValueOnce(new Error("HTTP 404: not found"));
+    renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(screen.getByText(/Appointment could not be loaded/i)).toBeTruthy();
+    });
+    expect(screen.getByText(/HTTP 404: not found/i)).toBeTruthy();
+    expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
+  });
+
+  it("preview generation does not loop in direct preview mode", async () => {
+    renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("list mode still selects first visible appointment", async () => {
+    vi.mocked(apiHooks.fetchAppointments).mockResolvedValueOnce([mockAppointment99, mockAppointment42]);
+    renderWithRouter("/print");
+
+    const printSlipButton = await screen.findByRole("button", { name: "print.printSlip" });
+    await waitFor(() => {
+      expect(printSlipButton.hasAttribute("disabled")).toBe(false);
+    });
   });
 
   it("autoprint resets and fires again when appointmentId changes", async () => {

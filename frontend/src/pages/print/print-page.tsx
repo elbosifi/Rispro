@@ -58,7 +58,9 @@ export default function PrintPage() {
   const [pdfDownloading, setPdfDownloading] = useState(false);
   const [autoprintDone, setAutoprintDone] = useState(false);
   const appointmentIdParam = searchParams.get("appointmentId");
+  const isDirectPreview = Boolean(appointmentIdParam);
   const autoprintParam = searchParams.get("autoprint") === "1";
+  const appointmentIdNumber = appointmentIdParam ? parseInt(appointmentIdParam, 10) : NaN;
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -78,10 +80,14 @@ export default function PrintPage() {
   });
   const visibleAppointments = useMemo(() => filterVisibleAppointments(appointments), [appointments]);
 
-  const { data: appointmentById } = useQuery({
+  const {
+    data: appointmentById,
+    isLoading: appointmentByIdLoading,
+    error: appointmentByIdError,
+  } = useQuery({
     queryKey: ["print-appointment", appointmentIdParam],
-    queryFn: () => getAppointmentById(parseInt(appointmentIdParam!, 10)),
-    enabled: !!appointmentIdParam && !isNaN(parseInt(appointmentIdParam, 10)),
+    queryFn: () => getAppointmentById(appointmentIdNumber),
+    enabled: isDirectPreview && !isNaN(appointmentIdNumber),
     staleTime: 1000 * 30,
   });
   const {
@@ -102,7 +108,10 @@ export default function PrintPage() {
   });
   const effectiveSlipSettings = slipSettings ?? DEFAULT_APPOINTMENT_SLIP_SETTINGS;
   const effectivePatientQrSettings = patientQrSettings ?? DEFAULT_PATIENT_QR_SETTINGS;
-  const renderOptions = { slipSettings: effectiveSlipSettings, patientQrSettings: effectivePatientQrSettings };
+  const renderOptions = useMemo(
+    () => ({ slipSettings: effectiveSlipSettings, patientQrSettings: effectivePatientQrSettings }),
+    [effectiveSlipSettings, effectivePatientQrSettings]
+  );
   const settingsReady = Boolean(renderOptions);
   const slipSettingsFailed = Boolean(slipSettingsError);
   const patientQrSettingsFailed = Boolean(patientQrSettingsError);
@@ -116,47 +125,51 @@ export default function PrintPage() {
       : patientQrSettingsFailed
         ? "Patient QR Settings could not be loaded. Using defaults for this print preview."
         : "";
+  const appointmentByIdErrorDetails = describeQueryError(appointmentByIdError);
+  const activePrintAppointment = isDirectPreview ? (appointmentById ?? null) : selectedAppointment;
   const canUsePdfDownload =
     renderOptions?.slipSettings.paperMode === "blank" &&
     renderOptions.slipSettings.languageMode === "en";
 
   useEffect(() => {
+    if (!isDirectPreview) return;
+    setAutoprintDone(false);
+  }, [appointmentIdParam, autoprintParam, isDirectPreview]);
+
+  useEffect(() => {
     let cancelled = false;
+    if (!isDirectPreview || !activePrintAppointment || !renderOptions || appointmentByIdLoading || appointmentByIdError || settingsLoadFailed) {
+      return () => {
+        cancelled = true;
+      };
+    }
+    setSlipPreviewLoading(true);
+    void prepareAppointmentSlipHtml(activePrintAppointment, renderOptions)
+      .then((html) => {
+        if (cancelled || !html) return;
+        setSlipPreviewHtml(html);
+      })
+      .finally(() => {
+        if (!cancelled) setSlipPreviewLoading(false);
+      });
 
-    if (!appointmentById) return () => {
-      cancelled = true;
-    };
-
-    setSelectedAppointment(appointmentById);
-
-    if (!autoprintDone && renderOptions) {
-      setSlipPreviewLoading(true);
-      void prepareAppointmentSlipHtml(appointmentById, renderOptions)
-        .then((html) => {
-          if (cancelled || !html) return;
-          setSlipPreviewHtml(html);
-        })
-        .finally(() => {
-          if (!cancelled) setSlipPreviewLoading(false);
-        });
-
-      if (autoprintParam) {
-        setTimeout(() => {
-          printAppointmentSlip(appointmentById, renderOptions);
-          setAutoprintDone(true);
-        }, 300);
-      }
+    if (autoprintParam && !autoprintDone) {
+      setTimeout(() => {
+        printAppointmentSlip(activePrintAppointment, renderOptions);
+        setAutoprintDone(true);
+      }, 300);
     }
     return () => {
       cancelled = true;
     };
   }, [
-    appointmentById,
+    activePrintAppointment,
+    appointmentByIdError,
+    appointmentByIdLoading,
     autoprintParam,
     autoprintDone,
+    isDirectPreview,
     renderOptions,
-    patientQrSettingsError,
-    slipSettingsError,
     settingsLoadFailed,
   ]);
 
@@ -270,6 +283,7 @@ export default function PrintPage() {
   const modalities = lookups?.modalities ?? [];
 
   useEffect(() => {
+    if (isDirectPreview) return;
     if (visibleAppointments.length === 0) {
       setSelectedAppointment(null);
       return;
@@ -284,9 +298,9 @@ export default function PrintPage() {
     if (!exists) {
       setSelectedAppointment(visibleAppointments[0]);
     }
-  }, [visibleAppointments, selectedAppointment]);
+  }, [isDirectPreview, visibleAppointments, selectedAppointment]);
 
-  if (appointmentIdParam) {
+  if (isDirectPreview) {
     return (
       <div className="max-w-5xl mx-auto p-4 space-y-4">
         <Card className="p-4 sm:p-6 space-y-4">
@@ -316,22 +330,31 @@ export default function PrintPage() {
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => selectedAppointment && void handleDownloadPdf(selectedAppointment)}
-                disabled={!selectedAppointment || pdfDownloading || !canUsePdfDownload}
+                onClick={() => activePrintAppointment && void handleDownloadPdf(activePrintAppointment)}
+                disabled={!activePrintAppointment || appointmentByIdLoading || slipPreviewLoading || pdfDownloading || !canUsePdfDownload || settingsLoadFailed}
               >
                 {t(language, "print.downloadPdf")}
               </Button>
               <Button
                 type="button"
-                onClick={() => selectedAppointment && handlePrintSlip(selectedAppointment)}
-                disabled={!selectedAppointment || !settingsReady}
+                onClick={() => activePrintAppointment && handlePrintSlip(activePrintAppointment)}
+                disabled={!activePrintAppointment || appointmentByIdLoading || slipPreviewLoading || !settingsReady || settingsLoadFailed}
               >
                 {t(language, "print.confirmPrint")}
               </Button>
             </div>
           </div>
 
-          {slipPreviewLoading ? (
+          {appointmentByIdError ? (
+            <div className="p-8 text-center text-rose-700">
+              <p>Appointment could not be loaded.</p>
+              <p className="mt-1 text-sm">{appointmentByIdErrorDetails || "Unknown error"}</p>
+            </div>
+          ) : appointmentByIdLoading ? (
+            <div className="p-8 text-center text-muted-foreground">
+              {t(language, "print.loading")}
+            </div>
+          ) : slipPreviewLoading ? (
             <div className="p-8 text-center text-muted-foreground">
               {t(language, "print.loading")}
             </div>
