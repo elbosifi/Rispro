@@ -295,13 +295,17 @@ function buildInstructionText(
   settings: AppointmentSlipSettings
 ): { headingAr: string; headingEn: string; bodyAr: string; bodyEn: string; usedFallback: boolean }[] {
   const sections: Array<{ headingAr: string; headingEn: string; bodyAr: string; bodyEn: string; usedFallback: boolean }> = [];
-  const maxChars = settings.maxInstructionLinesOnSlip * 54;
+  const resolveBody = (value: string, fallback: string) => {
+    // Keep the real instruction text when it exists; fallback is only for empty input.
+    const cleaned = String(value || "").trim();
+    return cleaned && cleaned !== "—" ? cleaned : fallback;
+  };
 
   if (settings.showModalityInstructions) {
     const bodyAr = String(apt.modalityGeneralInstructionAr || "").trim();
     const bodyEn = String(apt.modalityGeneralInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = resolveBody(bodyAr, settings.fallbackInstructionTextAr);
+    const safeBodyEn = resolveBody(bodyEn, settings.fallbackInstructionTextEn);
     sections.push({
       headingAr: settings.modalityInstructionsHeadingAr,
       headingEn: settings.modalityInstructionsHeadingEn,
@@ -314,8 +318,8 @@ function buildInstructionText(
   if (settings.showExamSpecificInstructions) {
     const bodyAr = String(apt.examSpecificInstructionAr || "").trim();
     const bodyEn = String(apt.examSpecificInstructionEn || "").trim();
-    const safeBodyAr = bodyAr && bodyAr !== "—" && bodyAr.length <= maxChars ? bodyAr : settings.fallbackInstructionTextAr;
-    const safeBodyEn = bodyEn && bodyEn !== "—" && bodyEn.length <= maxChars ? bodyEn : settings.fallbackInstructionTextEn;
+    const safeBodyAr = resolveBody(bodyAr, settings.fallbackInstructionTextAr);
+    const safeBodyEn = resolveBody(bodyEn, settings.fallbackInstructionTextEn);
     sections.push({
       headingAr: settings.examInstructionsHeadingAr,
       headingEn: settings.examInstructionsHeadingEn,

@@ -188,6 +188,27 @@ describe("appointment slip html renderer", () => {
     expect(html).toContain("تعليمات الفحص");
   });
 
+  it("renders long modality instructions instead of replacing them with fallback text", async () => {
+    const longModalityInstruction = "Modality prep ".repeat(30).trim();
+    const html = await prepareAppointmentSlipHtml(
+      makeAppointment({
+        modalityGeneralInstructionAr: "تعليمات الجهاز ".repeat(30).trim(),
+        modalityGeneralInstructionEn: longModalityInstruction,
+      }),
+      {
+        slipSettings: makeSlipSettings({
+          languageMode: "en",
+          fallbackInstructionTextEn: "Fallback should not be used",
+          maxInstructionLinesOnSlip: 2,
+        }),
+        patientQrSettings: makePatientQrSettings(),
+      }
+    );
+
+    expect(html).toContain(longModalityInstruction);
+    expect(html).not.toContain("Fallback should not be used");
+  });
+
   it("hides patient category by default", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings({ languageMode: "en" }),
