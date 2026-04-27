@@ -231,7 +231,7 @@ export async function updateExamType(
 
     const existing = existingResult.rows[0] as ExamTypeRow | undefined;
 
-    if (!existing || !existing.is_active) {
+    if (!existing) {
       throw new HttpError(404, "Exam type not found.");
     }
 
