@@ -259,6 +259,19 @@ function localizeValueSafe(ar: string, en: string, mode: AppointmentSlipSettings
   return cleanAr || cleanEn || "-";
 }
 
+function formatCaseCategoryValue(
+  category: AppointmentWithDetails["caseCategory"],
+  mode: AppointmentSlipSettings["languageMode"]
+): string {
+  if (category === "oncology") {
+    return mode === "ar" ? "أورام" : mode === "en" ? "Oncology" : "أورام / Oncology";
+  }
+  if (category === "non_oncology") {
+    return mode === "ar" ? "غير أورام" : mode === "en" ? "Non-oncology" : "غير أورام / Non-oncology";
+  }
+  return "";
+}
+
 function buildSlipQrPayload(
   apt: AppointmentWithDetails,
   settings: AppointmentSlipSettings,
@@ -317,6 +330,14 @@ function buildInstructionText(
 
 function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
+  if (settings.showPatientCategory && apt.caseCategory) {
+    fields.push({
+      labelAr: "التصنيف",
+      labelEn: "Category",
+      valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
+      valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
+    });
+  }
   if (settings.showPatientName) fields.push({ labelAr: "Ø§Ø³Ù… Ø§Ù„Ù…Ø±ÙŠØ¶", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
   if (settings.showNationalId) fields.push({ labelAr: "Ø§Ù„Ø±Ù‚Ù… Ø§Ù„ÙˆØ·Ù†ÙŠ", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
@@ -336,6 +357,14 @@ function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData,
 
 function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
+  if (settings.showPatientCategory && apt.caseCategory) {
+    fields.push({
+      labelAr: "التصنيف",
+      labelEn: "Category",
+      valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
+      valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
+    });
+  }
   if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
   if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
@@ -353,6 +382,14 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
 
 function buildSlipFieldsLocalized(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
+  if (settings.showPatientCategory && apt.caseCategory) {
+    fields.push({
+      labelAr: "التصنيف",
+      labelEn: "Category",
+      valueAr: formatCaseCategoryValue(apt.caseCategory, "ar"),
+      valueEn: formatCaseCategoryValue(apt.caseCategory, "en"),
+    });
+  }
   if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
   if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
   if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
@@ -577,13 +614,13 @@ function drawSlipFieldCard(
 
   if (languageMode === "ar") {
     drawPdfText(doc, field.labelAr, x + w - 5, y + 8, { align: "right", bold: true });
-    drawPdfText(doc, field.valueAr, x + w - 5, y + 18, { align: "right" });
+    drawPdfText(doc, field.valueAr, x + w - 5, y + 18, { align: "right", bold: false });
     return;
   }
 
   if (languageMode === "en") {
     drawPdfText(doc, field.labelEn, x + 5, y + 8, { align: "left", bold: true });
-    drawPdfText(doc, field.valueEn, x + 5, y + 18, { align: "left" });
+    drawPdfText(doc, field.valueEn, x + 5, y + 18, { align: "left", bold: false });
     return;
   }
 
@@ -591,9 +628,9 @@ function drawSlipFieldCard(
   const leftX = x + 5;
   const rightX = x + w - 5;
   drawPdfText(doc, field.labelAr, rightX, y + 8, { align: "right", bold: true });
-  drawPdfText(doc, field.valueAr, rightX, y + 18, { align: "right" });
+  drawPdfText(doc, field.valueAr, rightX, y + 18, { align: "right", bold: false });
   drawPdfText(doc, field.labelEn, leftX, y + 8, { align: "left", bold: true });
-  drawPdfText(doc, field.valueEn, leftX, y + 18, { align: "left" });
+  drawPdfText(doc, field.valueEn, leftX, y + 18, { align: "left", bold: false });
 
   // Keep a little breathing room for very long bilingual cards.
   if (field.valueAr.length > 40 || field.valueEn.length > 40) {
@@ -781,7 +818,6 @@ export async function createAppointmentSlipPdfBlob(
     doc.setTextColor("#111827");
     drawPdfText(doc, shorten(slip.accessionBarcodePayload, 40), layout.barcodeBlock.x + layout.barcodeBlock.w / 2, layout.barcodeBlock.y + layout.barcodeBlock.h - 6, { align: "center" });
   }
-
   return doc.output("blob");
 }
 
@@ -895,7 +931,7 @@ export async function prepareAppointmentSlipHtml(
   const barcodeSvg = layout.barcodeBlock
     ? renderCode39Svg(slip.accessionBarcodePayload, slipSettings.barcodeWidthMm, slipSettings.barcodeHeightMm)
     : "";
-  const patientFieldLabels = ["Patient Name", "MRN", "National ID", "Phone", "Age / Sex"];
+  const patientFieldLabels = ["Category", "Patient Name", "MRN", "National ID", "Phone", "Age / Sex"];
   const appointmentFieldLabels = ["Appointment Number", "Accession Number", "Modality", "Exam", "Date", "Time", "Walk-in"];
   const dedicatedBlockLabels = ["Location", "Arrival Note"];
   const patientFields = fields.filter((field) => patientFieldLabels.includes(field.labelEn));
@@ -950,6 +986,7 @@ export async function prepareAppointmentSlipHtml(
             padding: ${slipSettings.contentPaddingMm}mm;
           }
           .content { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 1.2mm; }
+          .appointment-slip-bold .content { font-weight: 700; }
           .header {
             display: ${slipSettings.paperMode === "blank" ? "grid" : "none"};
             grid-template-columns: auto 1fr;
@@ -987,7 +1024,7 @@ export async function prepareAppointmentSlipHtml(
           .barcode-text { margin-top: 0.45mm; font-size: ${2.25 * slipSettings.fontScale * compactScale}mm; text-align: center; word-break: break-word; line-height: 1.1; }
         </style>
       </head>
-      <body>
+      <body class="${slipSettings.boldAppointmentSlipText ? "appointment-slip-bold" : ""}">
         <div class="sheet" data-paper-mode="${slipSettings.paperMode}" data-language-mode="${languageMode}" data-page-width-mm="148" data-page-height-mm="210">
           <div class="safe-area" data-safe-top-mm="${slipSettings.safeTopMm}" data-safe-bottom-mm="${slipSettings.safeBottomMm}" data-safe-left-mm="${slipSettings.safeLeftMm}" data-safe-right-mm="${slipSettings.safeRightMm}" data-content-padding-mm="${slipSettings.contentPaddingMm}" data-font-scale="${slipSettings.fontScale}">
             <div class="content">

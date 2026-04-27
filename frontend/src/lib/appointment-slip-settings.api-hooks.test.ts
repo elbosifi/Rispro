@@ -42,6 +42,8 @@ describe("appointment slip settings api hooks", () => {
     expect(settings.hospitalNameAr).toBe("المركز الوطني للأورام بنغازي");
     expect(settings.departmentNameEn).toBe("Diagnostic Radiology Department");
     expect(settings.showQrCode).toBe(true);
+    expect(settings.showPatientCategory).toBe(false);
+    expect(settings.boldAppointmentSlipText).toBe(false);
     expect(settings.barcodeValueMode).toBe("accessionNumber");
   });
 

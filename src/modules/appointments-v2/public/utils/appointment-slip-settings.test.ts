@@ -35,3 +35,10 @@ test("normalizeAppointmentSlipSettings preserves heading fields", () => {
   assert.equal(normalized.locationHeadingAr, "موقع خاص");
   assert.equal(normalized.locationHeadingEn, "Custom Location");
 });
+
+test("normalizeAppointmentSlipSettings defaults new slip flags to false", () => {
+  const normalized = normalizeAppointmentSlipSettings({});
+
+  assert.equal(normalized.showPatientCategory, false);
+  assert.equal(normalized.boldAppointmentSlipText, false);
+});

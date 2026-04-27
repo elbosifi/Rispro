@@ -200,6 +200,11 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
               { value: "en", label: chooseLocalized(language, "الإنجليزية", "English") },
             ]}
           />
+          <ToggleRow
+            label={chooseLocalized(language, "Ø¬Ø¹Ù„ Ù†Øµ Ø§Ù„ÙˆØµÙ„ Ø¹Ø±ÙŠØ¶Ù‹Ø§", "Bold appointment slip text")}
+            checked={draft.boldAppointmentSlipText}
+            onChange={(checked) => setDraft((current) => ({ ...current, boldAppointmentSlipText: checked }))}
+          />
           <div className="grid grid-cols-2 gap-3">
             <NumberField label="Safe top (mm)" value={draft.safeTopMm} onChange={(value) => setDraft((current) => ({ ...current, safeTopMm: value }))} error={errors.safeTopMm} />
             <NumberField label="Safe bottom (mm)" value={draft.safeBottomMm} onChange={(value) => setDraft((current) => ({ ...current, safeBottomMm: value }))} error={errors.safeBottomMm} />
@@ -225,6 +230,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
         <FieldCard title={chooseLocalized(language, "الحقول الظاهرة", "Visible Fields")}>
           <ToggleGrid
             items={[
+              ["showPatientCategory", chooseLocalized(language, "إظهار تصنيف المريض", "Show patient category")],
               ["showPatientName", chooseLocalized(language, "اسم المريض", "Patient name")],
               ["showMrn", "MRN"],
               ["showNationalId", chooseLocalized(language, "الرقم الوطني", "National ID")],

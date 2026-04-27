@@ -738,6 +738,7 @@ export interface AppointmentSlipSettings {
   examInstructionsHeadingEn: string;
   locationHeadingAr: string;
   locationHeadingEn: string;
+  showPatientCategory: boolean;
   showPatientName: boolean;
   showMrn: boolean;
   showNationalId: boolean;
@@ -752,6 +753,7 @@ export interface AppointmentSlipSettings {
   showWalkIn: boolean;
   showLocation: boolean;
   showArrivalNote: boolean;
+  boldAppointmentSlipText: boolean;
   showQrCode: boolean;
   qrCaptionAr: string;
   qrCaptionEn: string;
@@ -800,6 +802,7 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   examInstructionsHeadingEn: "Exam Instructions",
   locationHeadingAr: "موقع الفحص",
   locationHeadingEn: "Exam Location",
+  showPatientCategory: false,
   showPatientName: true,
   showMrn: true,
   showNationalId: false,
@@ -814,6 +817,7 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   showWalkIn: true,
   showLocation: true,
   showArrivalNote: true,
+  boldAppointmentSlipText: false,
   showQrCode: true,
   qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
   qrCaptionEn: "Scan for appointment details",
@@ -957,7 +961,9 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
   };
   const str = (value: unknown, fallback = "") => (value == null ? fallback : String(value).trim());
   const num = (value: unknown, fallback: number, min?: number, max?: number) => {
-    const parsed = typeof value === "number" ? value : Number(String(value ?? "").trim());
+    const raw = typeof value === "number" ? String(value) : String(value ?? "").trim();
+    if (!raw) return fallback;
+    const parsed = typeof value === "number" ? value : Number(raw);
     if (!Number.isFinite(parsed)) return fallback;
     let next = parsed;
     if (typeof min === "number" && next < min) next = min;
@@ -1000,6 +1006,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     examInstructionsHeadingEn: str(record.examInstructionsHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.examInstructionsHeadingEn),
     locationHeadingAr: str(record.locationHeadingAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingAr),
     locationHeadingEn: str(record.locationHeadingEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.locationHeadingEn),
+    showPatientCategory: bool(record.showPatientCategory, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showPatientCategory),
     showPatientName: bool(record.showPatientName, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showPatientName),
     showMrn: bool(record.showMrn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showMrn),
     showNationalId: bool(record.showNationalId, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showNationalId),
@@ -1014,6 +1021,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     showWalkIn: bool(record.showWalkIn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showWalkIn),
     showLocation: bool(record.showLocation, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showLocation),
     showArrivalNote: bool(record.showArrivalNote, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showArrivalNote),
+    boldAppointmentSlipText: bool(record.boldAppointmentSlipText, DEFAULT_APPOINTMENT_SLIP_SETTINGS.boldAppointmentSlipText),
     showQrCode: bool(record.showQrCode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showQrCode),
     qrCaptionAr: str(record.qrCaptionAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionAr),
     qrCaptionEn: str(record.qrCaptionEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionEn),

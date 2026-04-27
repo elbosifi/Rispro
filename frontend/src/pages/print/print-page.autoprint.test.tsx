@@ -18,6 +18,7 @@ const {
     modalityId: 1,
     examTypeId: 101,
     reportingPriorityId: null,
+    caseCategory: "oncology",
     accessionNumber: "ACC-42",
     appointmentDate: "2027-01-03",
     dailySequence: 1,
@@ -80,6 +81,7 @@ const {
     examInstructionsHeadingEn: "English Exam",
     locationHeadingAr: "Arabic Location",
     locationHeadingEn: "English Location",
+    showPatientCategory: false,
     showPatientName: true,
     showMrn: true,
     showNationalId: false,
@@ -94,6 +96,7 @@ const {
     showWalkIn: true,
     showLocation: true,
     showArrivalNote: true,
+    boldAppointmentSlipText: false,
     showQrCode: true,
     qrCaptionAr: "Arabic QR",
     qrCaptionEn: "English QR",
@@ -119,6 +122,8 @@ const {
 });
 
 vi.mock("@/lib/api-hooks", () => ({
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS: mockSlipSettings,
+  DEFAULT_PATIENT_QR_SETTINGS: mockPatientQrSettings,
   fetchAppointments: vi.fn().mockResolvedValue([]),
   fetchAppointmentLookups: vi.fn().mockResolvedValue({ modalities: [], examTypes: [] }),
   getAppointmentById: vi.fn().mockResolvedValue(mockAppointment42),
@@ -322,9 +327,8 @@ describe("PrintPage autoprint", () => {
     renderWithRouter("/print?appointmentId=42");
 
     await waitFor(() => {
-      expect(screen.getByText(/Appointment Slip Settings could not be loaded/i)).toBeTruthy();
+      expect(screen.getByText(/Appointment Slip Settings error: Slip settings 500/i)).toBeTruthy();
     });
-    expect(screen.getByText(/Appointment Slip Settings error: Slip settings 500/i)).toBeTruthy();
     expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
     expect(printUtils.printAppointmentSlip).not.toHaveBeenCalled();
   });
@@ -334,9 +338,8 @@ describe("PrintPage autoprint", () => {
     renderWithRouter("/print?appointmentId=42");
 
     await waitFor(() => {
-      expect(screen.getByText(/Patient QR Settings could not be loaded/i)).toBeTruthy();
+      expect(screen.getByText(/Patient QR Settings error: Patient QR 503/i)).toBeTruthy();
     });
-    expect(screen.getByText(/Patient QR Settings error: Patient QR 503/i)).toBeTruthy();
     expect(printUtils.prepareAppointmentSlipHtml).not.toHaveBeenCalled();
     expect(printUtils.printAppointmentSlip).not.toHaveBeenCalled();
   });

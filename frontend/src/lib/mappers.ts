@@ -68,6 +68,7 @@ function fallback<T>(value: unknown, fallback: T): T {
 
 export interface AppointmentWithDetails extends Appointment {
   patientId: number;
+  caseCategory?: "oncology" | "non_oncology" | null;
   arabicFullName: string;
   englishFullName: string | null;
   nationalId: string | null;
@@ -251,6 +252,10 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     ...mapAppointment(raw),
     // Patient fields
     patientId: num(raw, 'patient_id') || num(raw, 'patientId') || num(raw, 'id'),
+    caseCategory: (() => {
+      const value = strOrNull(raw, "case_category") ?? strOrNull(raw, "caseCategory");
+      return value === "oncology" || value === "non_oncology" ? value : null;
+    })(),
     arabicFullName: str(raw, 'arabic_full_name') || str(raw, 'arabicFullName'),
     englishFullName: strOrNull(raw, 'english_full_name') ?? strOrNull(raw, 'englishFullName'),
     nationalId: strOrNull(raw, 'national_id') ?? strOrNull(raw, 'nationalId'),

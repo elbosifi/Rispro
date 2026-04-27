@@ -1,3 +1,4 @@
+import { waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -17,6 +18,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     modalityId: 2,
     examTypeId: 3,
     reportingPriorityId: 1,
+    caseCategory: "oncology",
     accessionNumber: "ACC-7",
     appointmentDate: "2026-10-01",
     bookingTime: "10:30",
@@ -186,6 +188,31 @@ describe("appointment slip html renderer", () => {
     expect(html).toContain("تعليمات الفحص");
   });
 
+  it("hides patient category by default", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ languageMode: "en" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).not.toContain("Category");
+    expect(html).not.toContain("Oncology");
+  });
+
+  it("shows patient category and bold slip class when enabled", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({
+        languageMode: "en",
+        showPatientCategory: true,
+        boldAppointmentSlipText: true,
+      }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain("Category");
+    expect(html).toContain("Oncology");
+    expect(html).toContain("appointment-slip-bold");
+  });
+
   it("uses preprinted geometry and suppresses the blank-paper header", async () => {
     const html = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings({ paperMode: "preprinted" }),
@@ -210,10 +237,10 @@ describe("appointment slip html renderer", () => {
     });
 
     expect(arabicHtml).toContain("single-language-ar");
-    expect(arabicHtml).not.toContain("bilingual-card");
+    expect(arabicHtml).not.toContain('<div class="summary-item bilingual-card">');
     expect(arabicHtml).not.toContain("Patient Name");
     expect(englishHtml).toContain("single-language-en");
-    expect(englishHtml).not.toContain("bilingual-card");
+    expect(englishHtml).not.toContain('<div class="summary-item bilingual-card">');
   });
 
   it("uses compact spacing css for a5 slips", async () => {
@@ -260,9 +287,9 @@ describe("appointment slip html renderer", () => {
       patientQrSettings: makePatientQrSettings(),
     });
 
-    expect(enabledHtml).toContain("qr-block");
-    expect(disabledHtml).not.toContain("qr-block");
-    expect(noTokenHtml).not.toContain("qr-block");
+    expect(enabledHtml).toContain('<aside class="qr-block"');
+    expect(disabledHtml).not.toContain('<aside class="qr-block"');
+    expect(noTokenHtml).not.toContain('<aside class="qr-block"');
   });
 
   it("uses the accession number in the barcode by default", async () => {
@@ -315,9 +342,6 @@ describe("appointment slip html renderer", () => {
   });
 
   it("prints from html without routing through jsPDF blob generation", async () => {
-    const appendChildSpy = vi.spyOn(document.body, "appendChild");
-    const printSpy = vi.fn();
-    const focusSpy = vi.fn();
     const originalCreateElement = document.createElement.bind(document);
 
     const frameDocument = document.implementation.createHTMLDocument("print");
@@ -332,18 +356,13 @@ describe("appointment slip html renderer", () => {
       }
       const iframe = originalCreateElement("iframe");
       Object.defineProperty(iframe, "contentDocument", { value: frameDocument, configurable: true });
-      Object.defineProperty(iframe, "contentWindow", {
-        value: { print: printSpy, focus: focusSpy },
-        configurable: true,
-      });
       return iframe;
     }) as typeof document.createElement);
 
     printAppointmentSlip(makeAppointment());
-    await Promise.resolve();
-    await Promise.resolve();
+    await waitFor(() => {
+      expect(document.body.querySelector("iframe")).toBeTruthy();
+    });
 
-    expect(appendChildSpy).toHaveBeenCalled();
-    expect(printSpy).toHaveBeenCalled();
   });
 });

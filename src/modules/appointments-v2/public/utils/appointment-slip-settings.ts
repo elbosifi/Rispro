@@ -34,6 +34,7 @@ export interface AppointmentSlipSettings {
   examInstructionsHeadingEn: string;
   locationHeadingAr: string;
   locationHeadingEn: string;
+  showPatientCategory: boolean;
   showPatientName: boolean;
   showMrn: boolean;
   showNationalId: boolean;
@@ -48,6 +49,7 @@ export interface AppointmentSlipSettings {
   showWalkIn: boolean;
   showLocation: boolean;
   showArrivalNote: boolean;
+  boldAppointmentSlipText: boolean;
   showQrCode: boolean;
   qrCaptionAr: string;
   qrCaptionEn: string;
@@ -96,6 +98,7 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   examInstructionsHeadingEn: "Exam Instructions",
   locationHeadingAr: "موقع الفحص",
   locationHeadingEn: "Exam Location",
+  showPatientCategory: false,
   showPatientName: true,
   showMrn: true,
   showNationalId: false,
@@ -110,6 +113,7 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   showWalkIn: true,
   showLocation: true,
   showArrivalNote: true,
+  boldAppointmentSlipText: false,
   showQrCode: true,
   qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
   qrCaptionEn: "Scan for appointment details",
@@ -195,6 +199,7 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
     examInstructionsHeadingEn: asString(record.examInstructionsHeadingEn, DEFAULT_SETTINGS.examInstructionsHeadingEn),
     locationHeadingAr: asString(record.locationHeadingAr, DEFAULT_SETTINGS.locationHeadingAr),
     locationHeadingEn: asString(record.locationHeadingEn, DEFAULT_SETTINGS.locationHeadingEn),
+    showPatientCategory: asBoolean(record.showPatientCategory, DEFAULT_SETTINGS.showPatientCategory),
     showPatientName: asBoolean(record.showPatientName, DEFAULT_SETTINGS.showPatientName),
     showMrn: asBoolean(record.showMrn, DEFAULT_SETTINGS.showMrn),
     showNationalId: asBoolean(record.showNationalId, DEFAULT_SETTINGS.showNationalId),
@@ -209,6 +214,7 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
     showWalkIn: asBoolean(record.showWalkIn, DEFAULT_SETTINGS.showWalkIn),
     showLocation: asBoolean(record.showLocation, DEFAULT_SETTINGS.showLocation),
     showArrivalNote: asBoolean(record.showArrivalNote, DEFAULT_SETTINGS.showArrivalNote),
+    boldAppointmentSlipText: asBoolean(record.boldAppointmentSlipText, DEFAULT_SETTINGS.boldAppointmentSlipText),
     showQrCode: asBoolean(record.showQrCode, DEFAULT_SETTINGS.showQrCode),
     qrCaptionAr: asString(record.qrCaptionAr, DEFAULT_SETTINGS.qrCaptionAr),
     qrCaptionEn: asString(record.qrCaptionEn, DEFAULT_SETTINGS.qrCaptionEn),

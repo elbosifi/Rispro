@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { describe, expect, it, vi, afterAll } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import {
@@ -10,9 +12,32 @@ import {
 vi.mock("qrcode", () => ({
   default: {
     toString: vi.fn().mockResolvedValue("<svg />"),
-    toDataURL: vi.fn().mockResolvedValue("data:image/png;base64,Zm9v"),
+    toDataURL: vi
+      .fn()
+      .mockResolvedValue("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3R0bkAAAAASUVORK5CYII="),
   },
 }));
+
+const regularFont = readFileSync(resolve(process.cwd(), "src/assets/fonts/NotoNaskhArabic-Regular.ttf"));
+const boldFont = readFileSync(resolve(process.cwd(), "src/assets/fonts/NotoNaskhArabic-Bold.ttf"));
+
+vi.stubGlobal(
+  "fetch",
+  vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes("NotoNaskhArabic-Regular.ttf")) {
+      return new Response(regularFont, { status: 200 });
+    }
+    if (url.includes("NotoNaskhArabic-Bold.ttf")) {
+      return new Response(boldFont, { status: 200 });
+    }
+    return new Response(null, { status: 404 });
+  })
+);
+
+afterAll(() => {
+  vi.unstubAllGlobals();
+});
 
 function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): AppointmentWithDetails {
   return {
@@ -21,6 +46,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     modalityId: 2,
     examTypeId: 3,
     reportingPriorityId: 1,
+    caseCategory: "oncology",
     accessionNumber: "V2-45",
     appointmentDate: "2026-10-01",
     bookingTime: "09:30",
@@ -214,7 +240,7 @@ describe("appointment slip PDF", () => {
       makeAppointment(),
       "preprinted",
       {
-        slipSettings: makeSlipSettings(),
+        slipSettings: makeSlipSettings({ showQrCode: false }),
         patientQrSettings: makePatientQrSettings(),
       }
     );
