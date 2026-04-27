@@ -18,7 +18,7 @@ const {
     modalityId: 1,
     examTypeId: 101,
     reportingPriorityId: null,
-    caseCategory: "oncology",
+    caseCategory: "oncology" as const,
     accessionNumber: "ACC-42",
     appointmentDate: "2027-01-03",
     dailySequence: 1,
