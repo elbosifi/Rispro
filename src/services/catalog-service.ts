@@ -108,12 +108,13 @@ export async function listExamTypesForSettings({
   modalities: ModalityRow[];
   examTypes: ExamTypeRow[];
 }> {
+  const modalityWhereClause = includeInactive ? "" : "where is_active = true";
   const examTypeWhereClause = includeInactive ? "" : "where is_active = true";
   const [modalitiesResult, examTypesResult] = await Promise.all([
     pool.query(`
-      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en
+      select id, code, name_ar, name_en, daily_capacity, general_instruction_ar, general_instruction_en, is_active
       from modalities
-      where is_active = true
+      ${modalityWhereClause}
       order by name_en asc
     `),
     pool.query(`

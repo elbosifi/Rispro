@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import bcrypt from "bcryptjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
-import { createExamType, deleteExamType, updateExamType } from "./catalog-service.js";
+import { createExamType, deleteExamType, listExamTypesForSettings, updateExamType } from "./catalog-service.js";
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
   try {
@@ -42,7 +42,7 @@ async function cleanupCatalog(prefix: string): Promise<void> {
   await pool.query(`delete from modalities where code like $1`, [`${prefix}%`]).catch(() => undefined);
 }
 
-async function createModalityForTest(code: string): Promise<number> {
+async function createModalityForTest(code: string, isActive = true): Promise<number> {
   const result = await pool.query<{ id: number }>(
     `
       insert into modalities (
@@ -54,13 +54,109 @@ async function createModalityForTest(code: string): Promise<number> {
         general_instruction_en,
         is_active
       )
-      values ($1, $2, $3, 5, 'test ar', 'test en', true)
+      values ($1, $2, $3, 5, 'test ar', 'test en', $4)
       returning id
     `,
-    [code, `${code} AR`, `${code} EN`]
+    [code, `${code} AR`, `${code} EN`, isActive]
   );
   return Number(result.rows[0]?.id);
 }
+
+test("listExamTypesForSettings keeps modality labels available for inactive exam rows when requested", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+
+  const suffix = uniqueSuffix();
+  const prefix = `LIST_${suffix}`;
+  const userId = await createSupervisorUser(suffix);
+
+  try {
+    const activeModalityId = await createModalityForTest(`${prefix}_ACTIVE_MOD`, true);
+    const inactiveModalityId = await createModalityForTest(`${prefix}_INACTIVE_MOD`, false);
+
+    const activeExam = await createExamType(
+      {
+        modalityId: activeModalityId,
+        code: `${prefix}_ACTIVE_EXAM`,
+        nameAr: `${prefix} active exam ar`,
+        nameEn: `${prefix} active exam en`
+      },
+      userId
+    );
+
+    const inactiveExamWithActiveModality = await createExamType(
+      {
+        modalityId: activeModalityId,
+        code: `${prefix}_INACTIVE_EXAM_ACTIVE_MOD`,
+        nameAr: `${prefix} inactive exam active modality ar`,
+        nameEn: `${prefix} inactive exam active modality en`
+      },
+      userId
+    );
+    await deleteExamType(inactiveExamWithActiveModality.id, userId);
+
+    const inactiveExamWithInactiveModality = await createExamType(
+      {
+        modalityId: inactiveModalityId,
+        code: `${prefix}_INACTIVE_EXAM_INACTIVE_MOD`,
+        nameAr: `${prefix} inactive exam inactive modality ar`,
+        nameEn: `${prefix} inactive exam inactive modality en`
+      },
+      userId
+    );
+    await deleteExamType(inactiveExamWithInactiveModality.id, userId);
+
+    const activeOnly = await listExamTypesForSettings();
+    assert.ok(
+      activeOnly.examTypes.some((row) => row.id === activeExam.id),
+      "Active exam linked to an active modality should still be returned in active-only mode"
+    );
+    assert.ok(
+      activeOnly.modalities.some((row) => row.id === activeModalityId && row.is_active === true),
+      "Active modality should still be returned in active-only mode"
+    );
+    assert.ok(
+      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithActiveModality.id),
+      "Active-only mode should continue hiding inactive exam types"
+    );
+    assert.ok(
+      !activeOnly.examTypes.some((row) => row.id === inactiveExamWithInactiveModality.id),
+      "Active-only mode should continue hiding inactive exam types even when their modality is inactive"
+    );
+    assert.ok(
+      !activeOnly.modalities.some((row) => row.id === inactiveModalityId),
+      "Active-only mode should continue hiding inactive modalities"
+    );
+
+    const withInactive = await listExamTypesForSettings({ includeInactive: true });
+    assert.ok(
+      withInactive.examTypes.some((row) => row.id === activeExam.id),
+      "Active exam linked to an active modality should be returned when includeInactive=true"
+    );
+    assert.ok(
+      withInactive.modalities.some((row) => row.id === activeModalityId && row.is_active === true),
+      "Active modality should be included when includeInactive=true"
+    );
+    assert.ok(
+      withInactive.examTypes.some((row) => row.id === inactiveExamWithActiveModality.id && row.is_active === false),
+      "Inactive exam with an active modality should be returned when includeInactive=true"
+    );
+    assert.ok(
+      withInactive.modalities.some((row) => row.id === activeModalityId && row.is_active === true),
+      "Inactive exam with an active modality should still have its active parent modality available"
+    );
+    assert.ok(
+      withInactive.examTypes.some((row) => row.id === inactiveExamWithInactiveModality.id && row.is_active === false),
+      "Inactive exam with an inactive modality should be returned when includeInactive=true"
+    );
+    assert.ok(
+      withInactive.modalities.some((row) => row.id === inactiveModalityId && row.is_active === false),
+      "Inactive exam with an inactive modality should still have its inactive parent modality available"
+    );
+  } finally {
+    await cleanupCatalog(prefix);
+    await cleanupUser(userId);
+  }
+});
 
 test("catalog exam type update reactivates an inactive exam type and keeps 404 for missing rows", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;

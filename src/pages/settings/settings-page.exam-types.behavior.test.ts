@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-const filePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/pages/settings/settings-page.tsx";
+const filePath = new URL("../../../frontend/src/pages/settings/settings-page.tsx", import.meta.url);
 
 test("exam type settings list supports hiding and showing inactive rows", async () => {
   const content = await readFile(filePath, "utf-8");

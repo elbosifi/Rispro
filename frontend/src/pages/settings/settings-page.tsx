@@ -812,7 +812,6 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
     queryKey: ["exam-types", showInactive ? "with-inactive" : "active"],
     queryFn: () => fetchExamTypes(showInactive)
   });
-  const { data: modalityData, isLoading: modalitiesLoading, error: modalitiesError } = useQuery({ queryKey: ["modalities", "all"], queryFn: () => fetchModalitiesSettings(true) });
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<any>({});
@@ -898,10 +897,15 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
   }
   if (isLoading) return <p className="description-center">{t("settings.loading")}</p>;
 
-  const modalityOptions = ((modalityData as any)?.modalities ?? []).map((m: any) => ({
-    value: m.id,
-    label: chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`
-  }));
+  const modalityRows = (data as any)?.modalities ?? [];
+  const modalityOptions = modalityRows.map((m: any) => {
+    const baseLabel = chooseLocalized(language, m.name_ar, m.name_en) || m.code || `Modality ${m.id}`;
+    return {
+      value: m.id,
+      label: m.is_active === false ? `${baseLabel} (Inactive)` : baseLabel
+    };
+  });
+  const modalityById = new Map(modalityRows.map((m: any) => [String(m.id), m]));
 
   const startEdit = (et: any) => {
     setEditingId(et.id);
@@ -971,10 +975,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 <option value="">{t("settings.selectModality")}</option>
                 {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
-            ) : modalitiesLoading ? (
-              <p className="text-sm text-stone-500">{t("settings.loading")}</p>
             ) : (
-              <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
+              <p className="text-sm text-amber-600 dark:text-amber-400">لا توجد أجهزة متاحة</p>
             )}
           </div>
           <div className="grid grid-cols-2 gap-2">
@@ -1011,10 +1013,8 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                     <option value="">{t("settings.selectModality")}</option>
                     {modalityOptions.map((o: any) => <option key={o.value} value={o.value}>{o.label}</option>)}
                   </select>
-                ) : modalitiesLoading ? (
-                  <p className="text-sm text-stone-500">{t("settings.loading")}</p>
                 ) : (
-                  <p className="text-sm text-amber-600 dark:text-amber-400">{modalityData || modalitiesError ? "لا توجد أجهزة متاحة" : "فشل تحميل الأجهزة"}</p>
+                  <p className="text-sm text-amber-600 dark:text-amber-400">لا توجد أجهزة متاحة</p>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <textarea value={editForm.specific_instruction_ar} onChange={(e) => setEditForm({ ...editForm, specific_instruction_ar: e.target.value })} placeholder="تحضير الفحص (عربي)" rows={2} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm input-rtl" />
@@ -1034,7 +1034,12 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
                 <div className="text-start">
                   <p className="font-medium text-stone-900 dark:text-white">{chooseLocalized(language, et.name_ar, et.name_en)}</p>
                   <p className="description-center text-sm">
-                    Modality: {modalityOptions.find((o: any) => String(o.value) === String(et.modality_id))?.label ?? "Not assigned"}
+                    Modality: {(() => {
+                      const modality = modalityById.get(String(et.modality_id));
+                      if (!modality) return "Not assigned";
+                      const baseLabel = chooseLocalized(language, modality.name_ar, modality.name_en) || modality.code || `Modality ${modality.id}`;
+                      return modality.is_active === false ? `${baseLabel} (Inactive)` : baseLabel;
+                    })()}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

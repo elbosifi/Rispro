@@ -1314,9 +1314,9 @@ export async function exportAuditCSV() {
   URL.revokeObjectURL(url);
 }
 
-export async function fetchExamTypes(includeInactive = false): Promise<{ examTypes: RawRecord[] }> {
+export async function fetchExamTypes(includeInactive = false): Promise<{ modalities: RawRecord[]; examTypes: RawRecord[] }> {
   const query = includeInactive ? "?includeInactive=true" : "";
-  const raw = await api<{ examTypes: RawRecord[] }>(`/settings/exam-types${query}`);
+  const raw = await api<{ modalities: RawRecord[]; examTypes: RawRecord[] }>(`/settings/exam-types${query}`);
   return raw;
 }
 
