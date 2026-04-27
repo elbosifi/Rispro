@@ -86,7 +86,8 @@ export default function PrintPage() {
     queryKey: ["print-appointment", appointmentIdParam],
     queryFn: () => getAppointmentById(appointmentIdNumber),
     enabled: isDirectPreview && !isNaN(appointmentIdNumber),
-    staleTime: 1000 * 30,
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const {
     data: slipSettings,
@@ -274,13 +275,21 @@ export default function PrintPage() {
       return;
     }
 
+    const matchingAppointment = selectedAppointment
+      ? visibleAppointments.find((appointment) => appointment.id === selectedAppointment.id)
+      : null;
+
     if (!selectedAppointment) {
       setSelectedAppointment(visibleAppointments[0]);
       return;
     }
 
-    const exists = visibleAppointments.some((appointment) => appointment.id === selectedAppointment.id);
-    if (!exists) {
+    if (matchingAppointment && matchingAppointment !== selectedAppointment) {
+      setSelectedAppointment(matchingAppointment);
+      return;
+    }
+
+    if (!matchingAppointment) {
       setSelectedAppointment(visibleAppointments[0]);
     }
   }, [isDirectPreview, visibleAppointments, selectedAppointment]);

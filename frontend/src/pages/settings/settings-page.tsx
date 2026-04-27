@@ -80,6 +80,18 @@ const CASE_CATEGORY_LABELS: Record<string, string> = {
   non_oncology: "غير أورام"
 };
 
+function invalidateModalityDerivedAppointmentCaches(queryClient: ReturnType<typeof useQueryClient>) {
+  queryClient.invalidateQueries({ queryKey: ["lookups"] });
+  queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+  queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+  queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
+  queryClient.invalidateQueries({ queryKey: ["print-appointments"] });
+  queryClient.invalidateQueries({ queryKey: ["print-appointment"] });
+  queryClient.invalidateQueries({ queryKey: ["registrations"] });
+  queryClient.invalidateQueries({ queryKey: ["calendar"] });
+  queryClient.invalidateQueries({ queryKey: ["queue"] });
+}
+
 const WEEKDAY_LABELS: Record<string, string> = {
   "0": "الأحد",
   "1": "الاثنين",
@@ -937,6 +949,7 @@ function ExamTypesSection({ onReAuthRequired }: { onReAuthRequired: (key: string
           queryClient.invalidateQueries({ queryKey: ["lookups"] });
           queryClient.invalidateQueries({ queryKey: ["v2-exam-type-catalog"] });
           queryClient.invalidateQueries({ queryKey: ["v2-lookups"] });
+          invalidateModalityDerivedAppointmentCaches(queryClient);
           setImportSummary(
             `Imported workbook: ${summary.modalitiesCreated} modalities created, ${summary.modalitiesUpdated} updated, ${summary.examTypesCreated} exam types created, ${summary.examTypesUpdated} updated, ${summary.skipped} skipped.`
           );
@@ -1094,6 +1107,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      invalidateModalityDerivedAppointmentCaches(queryClient);
       setMutationError(null);
     },
     onError: (err: any) => { setMutationError(err?.message || "Deactivate failed"); }
@@ -1103,6 +1117,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      invalidateModalityDerivedAppointmentCaches(queryClient);
       setMutationError(null);
     },
     onError: (err: any) => { setMutationError(err?.message || "Hard delete failed"); }
@@ -1123,6 +1138,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      invalidateModalityDerivedAppointmentCaches(queryClient);
       setEditingId(null);
       setMutationError(null);
     },
@@ -1144,6 +1160,7 @@ function ModalitiesSection({ onReAuthRequired }: { onReAuthRequired: (key: strin
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["modalities"] });
       queryClient.invalidateQueries({ queryKey: ["lookups"] });
+      invalidateModalityDerivedAppointmentCaches(queryClient);
       setShowCreate(false);
       setCreateForm({ code: "", name_ar: "", name_en: "", daily_capacity: 0, is_active: true, general_instruction_ar: "", general_instruction_en: "", safety_warning_ar: "", safety_warning_en: "", safety_warning_enabled: true });
       setMutationError(null);

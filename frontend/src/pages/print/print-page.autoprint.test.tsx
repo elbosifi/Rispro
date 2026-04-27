@@ -8,6 +8,7 @@ import * as apiHooks from "@/lib/api-hooks";
 
 const {
   mockAppointmentData: mockAppointment42,
+  mockAppointment42Updated,
   mockAppointment99,
   mockSlipSettings,
   mockPatientQrSettings,
@@ -50,6 +51,11 @@ const {
     ...mockAppointmentData,
     id: 99,
     accessionNumber: "ACC-99",
+  };
+  const mockAppointment42Updated = {
+    ...mockAppointmentData,
+    modalityGeneralInstructionEn: "Updated modality instruction",
+    modalityGeneralInstructionAr: "ØªØ¹Ù„ÙŠÙ…Ø§Øª Ù…ÙˆØ¯Ø§Ù„ÙŠØªÙŠ Ù…Ø­Ø¯Ø«Ø©",
   };
   const mockSlipSettings = {
     paperMode: "blank",
@@ -118,7 +124,7 @@ const {
     enabled: true,
     printQrOnAppointmentSlip: true,
   };
-  return { mockAppointmentData, mockAppointment99, mockSlipSettings, mockPatientQrSettings };
+  return { mockAppointmentData, mockAppointment42Updated, mockAppointment99, mockSlipSettings, mockPatientQrSettings };
 });
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -281,6 +287,39 @@ describe("PrintPage autoprint", () => {
 
     await waitFor(() => {
       expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("refetches direct print data after remount so updated modality instructions are used", async () => {
+    const oldAppointment = {
+      ...mockAppointment42,
+      modalityGeneralInstructionEn: "Old modality instruction",
+      modalityGeneralInstructionAr: "Ù‚Ø¯ÙŠÙ… ØªØ¹Ù„ÙŠÙ…Ø§Øª Ø§Ù„Ù…ÙˆØ¯Ø§Ù„ÙŠØªÙŠ",
+    };
+    const getAppointmentById = vi.mocked(apiHooks.getAppointmentById);
+    getAppointmentById
+      .mockResolvedValueOnce(oldAppointment)
+      .mockResolvedValueOnce(mockAppointment42Updated);
+
+    const firstRender = renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenCalledTimes(1);
+    });
+    expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenLastCalledWith(oldAppointment, {
+      slipSettings: mockSlipSettings,
+      patientQrSettings: mockPatientQrSettings,
+    });
+
+    firstRender.unmount();
+    renderWithRouter("/print?appointmentId=42");
+
+    await waitFor(() => {
+      expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenCalledTimes(2);
+    });
+    expect(printUtils.prepareAppointmentSlipHtml).toHaveBeenLastCalledWith(mockAppointment42Updated, {
+      slipSettings: mockSlipSettings,
+      patientQrSettings: mockPatientQrSettings,
     });
   });
 
