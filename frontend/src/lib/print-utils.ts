@@ -326,7 +326,7 @@ function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData,
   if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
   if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
   if (settings.showLocation && slip.locationText) fields.push({ labelAr: "Ø§Ù„Ù…ÙˆÙ‚Ø¹", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
-  if (settings.showArrivalNote) fields.push({ labelAr: "Ù…Ù„Ø§Ø­Ø¸Ø© Ø§Ù„Ø­Ø¶ÙˆØ±", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
+  if (settings.showArrivalNote) fields.push({ labelAr: "ملاحظة الحضور", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
   return fields;
 }
 
@@ -344,6 +344,27 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
   if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
   if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
   if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  return fields;
+}
+
+function buildSlipFieldsLocalized(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
+  const fields: SlipField[] = [];
+  if (settings.showPatientName) fields.push({ labelAr: "اسم المريض", labelEn: "Patient Name", valueAr: apt.arabicFullName, valueEn: apt.englishFullName || slip.patientName });
+  if (settings.showMrn) fields.push({ labelAr: "MRN", labelEn: "MRN", valueAr: slip.mrn, valueEn: slip.mrn });
+  if (settings.showNationalId) fields.push({ labelAr: "الرقم الوطني", labelEn: "National ID", valueAr: slip.nationalId, valueEn: slip.nationalId });
+  if (settings.showPhone) fields.push({ labelAr: "الهاتف", labelEn: "Phone", valueAr: slip.phone, valueEn: slip.phone });
+  if (settings.showAgeSex) fields.push({ labelAr: "العمر / الجنس", labelEn: "Age / Sex", valueAr: slip.ageSex, valueEn: slip.ageSex });
+  if (settings.showAppointmentNumber) fields.push({ labelAr: "رقم الموعد", labelEn: "Appointment Number", valueAr: slip.appointmentNumber, valueEn: slip.appointmentNumber });
+  if (settings.showAccessionNumber) fields.push({ labelAr: "رقم الدخول", labelEn: "Accession Number", valueAr: slip.accessionNumber, valueEn: slip.accessionNumber });
+  if (settings.showModality) fields.push({ labelAr: "نوع الجهاز", labelEn: "Modality", valueAr: apt.modalityNameAr || slip.modality, valueEn: apt.modalityNameEn || slip.modality });
+  if (settings.showExamName) fields.push({ labelAr: "اسم الفحص", labelEn: "Exam", valueAr: apt.examNameAr || slip.examName, valueEn: apt.examNameEn || slip.examName });
+  if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
+  if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
+  if (settings.showWalkIn) {
+    const walkInValueAr = apt.isWalkIn ? "نعم" : "لا";
+    const walkInValueEn = apt.isWalkIn ? "Yes" : "No";
+    fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: walkInValueAr, valueEn: walkInValueEn });
+  }
   return fields;
 }
 
@@ -379,11 +400,11 @@ export function buildAppointmentSlipData(
     examName,
     appointmentDate: formatSlipDate(apt.appointmentDate, slipSettings.languageMode),
     ageSex,
-    walkInLabel: apt.isWalkIn ? localizeText("Ù†Ø¹Ù…", "Yes", slipSettings.languageMode) : localizeText("Ù„Ø§", "No", slipSettings.languageMode),
+    walkInLabel: apt.isWalkIn ? localizeText("نعم", "Yes", slipSettings.languageMode) : localizeText("لا", "No", slipSettings.languageMode),
     queueQrPayload,
     accessionBarcodePayload: buildSlipBarcodePayload(apt, slipSettings),
     locationText,
-    arrivalNote: localizeText("ÙŠØ±Ø¬Ù‰ Ø§Ù„Ø­Ø¶ÙˆØ± Ù‚Ø¨Ù„ Ø§Ù„Ù…ÙˆØ¹Ø¯ Ø¨Ù€ 15 Ø¯Ù‚ÙŠÙ‚Ø©", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
+    arrivalNote: localizeText("يرجى الحضور قبل الموعد بـ 15 دقيقة", "Please arrive 15 minutes before your appointment", slipSettings.languageMode),
     modalityInstructions: localizeValueSafe(apt.modalityGeneralInstructionAr || "", apt.modalityGeneralInstructionEn || "", slipSettings.languageMode),
     examInstructions: localizeValueSafe(apt.examSpecificInstructionAr || "", apt.examSpecificInstructionEn || "", slipSettings.languageMode),
     fallbackInstructionText: localizeText(slipSettings.fallbackInstructionTextAr, slipSettings.fallbackInstructionTextEn, slipSettings.languageMode),
@@ -623,7 +644,7 @@ export async function createAppointmentSlipPdfBlob(
 
   const fontScale = slipSettings.fontScale || 1;
   const content = layout.content;
-  const fields = buildSlipFieldsClean(apt, slip, slipSettings);
+  const fields = buildSlipFieldsLocalized(apt, slip, slipSettings);
   const instructions = buildInstructionText(apt, slipSettings);
 
   let cursorY = content.y;
@@ -1166,6 +1187,15 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
     </html>
   `);
   printWindow.document.close();
+  const printDoc = printWindow.document;
+  const brandAr = printDoc.querySelector(".brand-ar");
+  if (brandAr) {
+    brandAr.textContent = "المركز الوطني للأورام بنغازي";
+  }
+  const summary = printDoc.querySelector(".summary");
+  if (summary && summary.textContent) {
+    summary.textContent = summary.textContent.replace(/Â·/g, "·");
+  }
   printWindow.focus();
   printWindow.print();
 }
