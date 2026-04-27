@@ -21,15 +21,8 @@ import {
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
-
-interface RegistrationsFilters {
-  date: string;
-  dateFrom: string;
-  dateTo: string;
-  modalityId: string;
-  query: string;
-  statuses: string[];
-}
+import { buildRegistrationAppointmentQuery } from "./registration-query";
+import type { RegistrationsFilters } from "./registration-query";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
   date: todayIsoDateLy(),
@@ -61,14 +54,7 @@ export default function RegistrationsPage() {
 
   const { data: appointments = [], isLoading } = useQuery({
     queryKey: ["registrations", filters],
-    queryFn: () =>
-      fetchAppointments({
-        dateFrom: filters.dateFrom,
-        dateTo: filters.dateTo,
-        modalityId: filters.modalityId,
-        q: filters.query,
-        status: filters.statuses,
-      }),
+    queryFn: () => fetchAppointments(buildRegistrationAppointmentQuery(filters)),
     staleTime: 1000 * 30,
   });
   const {
