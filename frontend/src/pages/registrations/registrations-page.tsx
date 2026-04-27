@@ -17,7 +17,6 @@ import { RequestDocumentsPanel } from "@/components/documents/request-documents-
 import { pushToast } from "@/lib/toast";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
-  downloadAppointmentSlipPdf,
   prepareAppointmentSlipHtml,
   printAppointmentList,
   printAppointmentSlip,
@@ -53,7 +52,6 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [pdfDownloading, setPdfDownloading] = useState(false);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -267,19 +265,6 @@ export default function RegistrationsPage() {
       slipPreviewAppointment,
       slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
     );
-  };
-
-  const handlePreviewPdf = async () => {
-    if (!slipPreviewAppointment) return;
-    setPdfDownloading(true);
-    try {
-      await downloadAppointmentSlipPdf(
-        slipPreviewAppointment,
-        slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
-      );
-    } finally {
-      setPdfDownloading(false);
-    }
   };
 
   function Field({ label, value }: { label: string; value: any }) {
@@ -709,15 +694,6 @@ export default function RegistrationsPage() {
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <Button type="button" size="sm" variant="secondary" onClick={closeSlipPreview}>
                   {t("toast.close")}
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  onClick={() => void handlePreviewPdf()}
-                  disabled={pdfDownloading}
-                >
-                  {pdfDownloading ? t("common.loading") : t("print.downloadPdf")}
                 </Button>
                 <Button type="button" size="sm" onClick={handlePreviewPrint}>
                   {t("print.confirmPrint")}

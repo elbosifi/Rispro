@@ -296,7 +296,11 @@ export function CreateAppointmentTab({
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,
-      patientName: formatAppointmentPatientName(language, form.patient, `Patient #${form.patientId}`),
+      patientName: formatAppointmentPatientName(
+        language,
+        form.patient,
+        chooseLocalized(language, `المريض #${form.patientId}`, `Patient #${form.patientId}`)
+      ),
       bookingDate: response.booking.bookingDate,
       modalityName,
       examTypeName,
@@ -557,9 +561,9 @@ export function CreateAppointmentTab({
                   className="mt-0.5 w-5 h-5 cursor-pointer accent-[var(--accent)]"
                 />
                 <span className="text-sm sm:text-base text-foreground">
-                  <span className="block font-semibold">Report required</span>
+                  <span className="block font-semibold">{chooseLocalized(language, "التقرير مطلوب", "Report required")}</span>
                   <span className="mt-1 block text-sm text-muted-foreground">
-                    When enabled, the patient QR page can show report availability after the exam is completed.
+                    {chooseLocalized(language, "عند التفعيل، يمكن لصفحة رمز QR الخاصة بالمريض إظهار توفر التقرير بعد اكتمال الفحص.", "When enabled, the patient QR page can show report availability after the exam is completed.")}
                   </span>
                 </span>
               </label>

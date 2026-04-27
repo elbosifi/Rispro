@@ -604,7 +604,7 @@ const copy = {
       statuses: {
         scheduled: "Scheduled",
         arrived: "Arrived",
-        waiting: "Waiting",
+        waiting: "Waiting for patient",
         "in-progress": "In progress",
         completed: "Completed",
         discontinued: "Discontinued",
@@ -1128,7 +1128,7 @@ const copy = {
       statuses: {
         scheduled: "مجدول",
         arrived: "وصل",
-        waiting: "منتظر",
+        waiting: "في انتظار وصول المريض",
         "in-progress": "بدأ الفحص",
         completed: "مكتمل",
         discontinued: "تم إيقافه",
