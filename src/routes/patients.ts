@@ -125,16 +125,6 @@ patientsRouter.get(
 );
 
 patientsRouter.get(
-  "/:patientId/directory-summary",
-  asyncRoute(async (req: Request, res: Response) => {
-    const request = req as PatientsRequest;
-    const patientId = asOptionalString(request.params?.patientId) ?? "";
-    const summary = await getPatientDirectorySummary(patientId);
-    res.json(summary);
-  })
-);
-
-patientsRouter.get(
   "/:patientId/no-show",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;

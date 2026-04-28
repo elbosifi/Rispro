@@ -1566,143 +1566,138 @@ interface PatientDirectorySummaryOutput {
 
 export async function getPatientDirectorySummary(patientId: UserId): Promise<PatientDirectorySummaryOutput> {
   const cleanPatientId = normalizePositiveInteger(patientId, "patientId") as number;
+  const patient = await getPatientById(cleanPatientId);
 
-  const query = `
-    with patient_data as (
-      select
-        p.id,
-        p.mrn,
-        p.national_id,
-        p.identifier_type,
-        p.identifier_value,
-        p.category,
-        p.arabic_full_name,
-        p.english_full_name,
-        p.sex,
-        p.age_years,
-        p.demographics_estimated,
-        p.phone_1,
-        p.phone_2,
-        p.address,
-        p.estimated_date_of_birth
-      from patients p
-      where p.id = $1
-      limit 1
+  type AppointmentSummaryRow = {
+    id: number;
+    date: string;
+    status: string;
+    modality_name: string;
+    exam_type_name: string;
+  };
+
+  type DuplicateCheckRow = {
+    is_dupe: boolean;
+  };
+
+  const [lastApptResult, nextApptResult, recentApptsResult, duplicateResult] = await Promise.all([
+    pool.query<AppointmentSummaryRow>(
+      `
+        select
+          b.id,
+          b.booking_date::text as date,
+          b.status,
+          m.name_en as modality_name,
+          coalesce(et.name_en, '') as exam_type_name
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        left join exam_types et on et.id = b.exam_type_id
+        where b.patient_id = $1 and b.booking_date < current_date and b.status not in ('cancelled')
+        order by b.booking_date desc
+        limit 1
+      `,
+      [cleanPatientId]
     ),
-    last_appt as (
-      select json_build_object(
-        'id', b.id,
-        'date', b.booking_date::text,
-        'status', b.status,
-        'modalityName', m.name_en,
-        'examTypeName', coalesce(et.name_en, '')
-      ) as appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      left join exam_types et on et.id = b.exam_type_id
-      where b.patient_id = $1 and b.booking_date < current_date and b.status not in ('cancelled')
-      order by b.booking_date desc
-      limit 1
+    pool.query<AppointmentSummaryRow>(
+      `
+        select
+          b.id,
+          b.booking_date::text as date,
+          b.status,
+          m.name_en as modality_name,
+          coalesce(et.name_en, '') as exam_type_name
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        left join exam_types et on et.id = b.exam_type_id
+        where b.patient_id = $1 and b.booking_date >= current_date and b.status not in ('cancelled')
+        order by b.booking_date asc
+        limit 1
+      `,
+      [cleanPatientId]
     ),
-    next_appt as (
-      select json_build_object(
-        'id', b.id,
-        'date', b.booking_date::text,
-        'status', b.status,
-        'modalityName', m.name_en,
-        'examTypeName', coalesce(et.name_en, '')
-      ) as appt
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      left join exam_types et on et.id = b.exam_type_id
-      where b.patient_id = $1 and b.booking_date >= current_date and b.status not in ('cancelled')
-      order by b.booking_date asc
-      limit 1
+    pool.query<AppointmentSummaryRow>(
+      `
+        select
+          b.id,
+          b.booking_date::text as date,
+          b.status,
+          m.name_en as modality_name,
+          coalesce(et.name_en, '') as exam_type_name
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        left join exam_types et on et.id = b.exam_type_id
+        where b.patient_id = $1 and b.status not in ('cancelled')
+        order by b.booking_date desc, b.id desc
+        limit 5
+      `,
+      [cleanPatientId]
     ),
-    recent_appts as (
-      select json_agg(json_build_object(
-        'id', b.id,
-        'date', b.booking_date::text,
-        'status', b.status,
-        'modalityName', m.name_en,
-        'examTypeName', coalesce(et.name_en, '')
-      ) order by b.booking_date desc) as appts
-      from appointments_v2.bookings b
-      join modalities m on m.id = b.modality_id
-      left join exam_types et on et.id = b.exam_type_id
-      where b.patient_id = $1 and b.status not in ('cancelled')
-      order by b.booking_date desc
-      limit 10
-    ),
-    dupes as (
-      select case when count(*) > 0 then true else false end as is_dupe
-      from patients p2
-      where p2.id != $1
-      and (
-        (pd.phone_1 is not null and pd.phone_1 != '' and p2.phone_1 = pd.phone_1)
-        or (pd.national_id is not null and pd.national_id != '' and p2.national_id = pd.national_id)
-      )
-      from patient_data pd
+    pool.query<DuplicateCheckRow>(
+      `
+        select exists (
+          select 1
+          from patients p2
+          where p2.id != $1
+            and (
+              ($2::text is not null and $2 <> '' and p2.phone_1 = $2)
+              or ($3::text is not null and $3 <> '' and p2.national_id = $3)
+            )
+        ) as is_dupe
+      `,
+      [cleanPatientId, patient.phone_1 || null, patient.national_id || null]
     )
-    select
-      json_build_object(
-        'id', pd.id,
-        'mrn', pd.mrn,
-        'arabicFullName', pd.arabic_full_name,
-        'englishFullName', pd.english_full_name,
-        'sex', pd.sex,
-        'ageYears', pd.age_years,
-        'demographicsEstimated', pd.demographics_estimated,
-        'dateOfBirth', pd.estimated_date_of_birth
-      ) as demographics,
-      json_build_object(
-        'nationalId', pd.national_id,
-        'identifierType', pd.identifier_type,
-        'identifierValue', pd.identifier_value
-      ) as identifiers,
-      json_build_object(
-        'phone1', pd.phone_1,
-        'phone2', pd.phone_2,
-        'address', pd.address
-      ) as contact,
-      pd.category,
-      json_build_object(
-        'missingPhone', pd.phone_1 is null or pd.phone_1 = '',
-        'missingDob', pd.estimated_date_of_birth is null,
-        'missingSex', pd.sex is null or pd.sex = '',
-        'missingName', pd.arabic_full_name is null or pd.arabic_full_name = '',
-        'incompleteData', pd.phone_1 is null or pd.phone_1 = '' or pd.estimated_date_of_birth is null or pd.sex is null or pd.sex = '' or pd.arabic_full_name is null or pd.arabic_full_name = '',
-        'possibleDuplicate', dupes.is_dupe = true,
-        'duplicateReasons', case when dupes.is_dupe = true then array['phone_or_id_match'] else array[]::text[] end
-      ) as warnings,
-      coalesce(la.appt, null::json) as last_appointment,
-      coalesce(na.appt, null::json) as next_appointment,
-      coalesce(rap.appts, '[]'::json) as recent_appointments
-    from patient_data pd
-    left join last_appt la on true
-    left join next_appt na on true
-    left join recent_appts rap on true
-    left join dupes dupes on true
-  `;
+  ]);
 
-  const { rows } = await pool.query<PatientDirectorySummaryOutput>(query, [cleanPatientId]);
+  const toAppointmentSummary = (row?: AppointmentSummaryRow | null) =>
+    row
+      ? {
+          id: Number(row.id),
+          date: String(row.date),
+          status: String(row.status),
+          modalityName: String(row.modality_name ?? ""),
+          examTypeName: String(row.exam_type_name ?? "")
+        }
+      : null;
 
-  const result = rows[0];
-  if (!result) {
-    throw new HttpError(404, "Patient not found.");
-  }
+  const duplicateReasons = Boolean(duplicateResult.rows[0]?.is_dupe) ? ["phone_or_id_match"] : [];
+  const missingPhone = !patient.phone_1;
+  const missingDob = !patient.estimated_date_of_birth;
+  const missingSex = !patient.sex;
+  const missingName = !patient.arabic_full_name;
 
   return {
-    demographics: result.demographics,
-    identifiers: result.identifiers,
-    contact: result.contact,
-    category: result.category,
-    warnings: {
-      ...result.warnings,
-      duplicateReasons: result.warnings.duplicateReasons || []
+    demographics: {
+      id: patient.id,
+      mrn: patient.mrn,
+      arabicFullName: patient.arabic_full_name,
+      englishFullName: patient.english_full_name,
+      sex: patient.sex,
+      ageYears: patient.age_years,
+      demographicsEstimated: patient.demographics_estimated,
+      dateOfBirth: patient.estimated_date_of_birth
     },
-    lastAppointment: result.lastAppointment || null,
-    nextAppointment: result.nextAppointment || null,
-    recentAppointments: result.recentAppointments || []
+    identifiers: {
+      nationalId: patient.national_id,
+      identifierType: patient.identifier_type,
+      identifierValue: patient.identifier_value
+    },
+    contact: {
+      phone1: patient.phone_1,
+      phone2: patient.phone_2,
+      address: patient.address
+    },
+    category: patient.category,
+    warnings: {
+      missingPhone,
+      missingDob,
+      missingSex,
+      missingName,
+      incompleteData: missingPhone || missingDob || missingSex || missingName,
+      possibleDuplicate: duplicateReasons.length > 0,
+      duplicateReasons
+    },
+    lastAppointment: toAppointmentSummary(lastApptResult.rows[0]),
+    nextAppointment: toAppointmentSummary(nextApptResult.rows[0]),
+    recentAppointments: recentApptsResult.rows.map((row) => toAppointmentSummary(row)).filter(Boolean) as NonNullable<PatientDirectorySummaryOutput["recentAppointments"][number]>[]
   };
 }
