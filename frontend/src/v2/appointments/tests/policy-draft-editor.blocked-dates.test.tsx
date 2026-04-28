@@ -84,12 +84,29 @@ describe("PolicyDraftEditor blocked dates", () => {
     expect(savedSnapshot.modalityBlockedRules[0].endDate).toBe("2026-04-30");
   });
 
-  it("adds one blocked rule per active modality", async () => {
+  it("copies one configured blocked rule to other active modalities", async () => {
     const onSave = vi.fn(async () => {});
     renderEditor(
       {
         categoryDailyLimits: [],
-        modalityBlockedRules: [],
+        modalityBlockedRules: [
+          {
+            id: 1,
+            modalityId: 1,
+            ruleType: "date_range",
+            specificDate: null,
+            startDate: "2026-04-01",
+            endDate: "2026-04-30",
+            recurStartMonth: null,
+            recurStartDay: null,
+            recurEndMonth: null,
+            recurEndDay: null,
+            isOverridable: true,
+            isActive: true,
+            title: "Block period",
+            notes: "Template row",
+          },
+        ],
         examTypeRules: [],
         examTypeSpecialQuotas: [],
         examMixQuotaRules: [],
@@ -106,5 +123,15 @@ describe("PolicyDraftEditor blocked dates", () => {
     expect(savedSnapshot.modalityBlockedRules).toHaveLength(2);
     expect(savedSnapshot.modalityBlockedRules.map((row) => row.modalityId).sort()).toEqual([1, 3]);
     expect(savedSnapshot.modalityBlockedRules.every((row) => row.modalityId > 0)).toBe(true);
+    const copiedRule = savedSnapshot.modalityBlockedRules.find((row) => row.modalityId === 3);
+    expect(copiedRule).toMatchObject({
+      ruleType: "date_range",
+      startDate: "2026-04-01",
+      endDate: "2026-04-30",
+      isOverridable: true,
+      title: "Block period",
+      notes: "Template row",
+      isActive: true,
+    });
   });
 });

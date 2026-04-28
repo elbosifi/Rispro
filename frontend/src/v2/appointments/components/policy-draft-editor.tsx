@@ -47,6 +47,14 @@ function createBlockedRule(modalityId: number, id: number): PolicyModalityBlocke
   };
 }
 
+function cloneBlockedRule(rule: PolicyModalityBlockedRuleDto, modalityId: number, id: number): PolicyModalityBlockedRuleDto {
+  return {
+    ...rule,
+    id,
+    modalityId,
+  };
+}
+
 interface ModalityOption {
   value: number;
   label: string;
@@ -641,11 +649,17 @@ export function PolicyDraftEditor({
               className="w-fit rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
               onClick={() =>
                 setDraft((prev) => {
-                  if (activeModalityIds.length === 0) {
+                  if (activeModalityIds.length === 0 || prev.modalityBlockedRules.length === 0) {
                     return prev;
                   }
+                  const template = prev.modalityBlockedRules.find((row) => Number(row.modalityId) > 0) ?? prev.modalityBlockedRules[0];
+                  const existingModalityIds = new Set(
+                    prev.modalityBlockedRules.map((row) => Number(row.modalityId)).filter((modalityId) => Number.isFinite(modalityId) && modalityId > 0)
+                  );
                   const nextId = createNextId(prev.modalityBlockedRules);
-                  const rows = activeModalityIds.map((modalityId, index) => createBlockedRule(modalityId, nextId + index));
+                  const rows = activeModalityIds
+                    .filter((modalityId) => !existingModalityIds.has(modalityId))
+                    .map((modalityId, index) => cloneBlockedRule(template, modalityId, nextId + index));
                   return {
                     ...prev,
                     modalityBlockedRules: [...prev.modalityBlockedRules, ...rows],
