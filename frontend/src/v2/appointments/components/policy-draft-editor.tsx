@@ -421,12 +421,19 @@ export function PolicyDraftEditor({
                 )}
                 {row.ruleType === "date_range" && (
                   <>
-                  <Input
-                    value={changeNote}
-                    onChange={(e) => setChangeNote(e.target.value)}
-                    placeholder="Change note (optional)"
-                    className="text-xs"
-                  />
+                    <input
+                      className={inputBase}
+                      type="date"
+                      value={row.startDate ?? ""}
+                      onChange={(event) =>
+                        setDraft((prev) => ({
+                          ...prev,
+                          modalityBlockedRules: prev.modalityBlockedRules.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, startDate: event.target.value || null } : item
+                          ),
+                        }))
+                      }
+                    />
                     <input
                       className={inputBase}
                       type="date"
