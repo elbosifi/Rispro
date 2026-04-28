@@ -1,4 +1,4 @@
-import { t } from "@/lib/i18n";
+import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { ExamTypeDto } from "../types";
 
@@ -25,7 +25,7 @@ export function ExamTypeSelect({ options, value, onChange, disabled }: Props) {
       >
         <option value="">{t(language, "appointments.create.selectExamType")}</option>
         {options.map((et) => (
-          <option key={et.id} value={et.id}>{et.name}</option>
+          <option key={et.id} value={et.id}>{chooseLocalized(language, et.nameAr, et.nameEn) || et.name}</option>
         ))}
       </select>
     </div>

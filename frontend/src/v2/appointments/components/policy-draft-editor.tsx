@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Input } from "@/components/shared";
+import { chooseLocalized } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import { useV2ExamTypeCatalog, useV2Lookups } from "../api";
 import type {
   PolicyCategoryDailyLimitDto,
@@ -96,6 +98,7 @@ export function PolicyDraftEditor({
 }) {
   const lookups = useV2Lookups();
   const examTypeCatalog = useV2ExamTypeCatalog();
+  const { language } = useLanguage();
   const [draft, setDraft] = useState<PolicySnapshotDto>(emptySnapshot());
   const [changeNote, setChangeNote] = useState("");
   const [advancedJsonValue, setAdvancedJsonValue] = useState("");
@@ -123,13 +126,13 @@ export function PolicyDraftEditor({
         return Number.isFinite(modalityId)
           ? {
               value: modalityId,
-              label: m.name || m.code || `Modality ${modalityId}`,
+              label: chooseLocalized(language, m.nameAr, m.nameEn) || m.name || m.code || `Modality ${modalityId}`,
               dailyCapacity: Number.isFinite(dailyCapacity) ? dailyCapacity : null,
             }
           : null;
       })
       .filter((option): option is ModalityOption => option != null);
-  }, [lookups.data?.modalities]);
+  }, [language, lookups.data?.modalities]);
 
   const examTypeOptionsByModality = useMemo(() => {
     const map = new Map<number, Array<{ value: number; label: string }>>();
@@ -140,7 +143,7 @@ export function PolicyDraftEditor({
       const list = map.get(modalityId) ?? [];
       list.push({
         value: examTypeId,
-        label: examType.name || examType.code || `Exam type ${examTypeId}`,
+        label: chooseLocalized(language, examType.nameAr, examType.nameEn) || examType.name || examType.code || `Exam type ${examTypeId}`,
       });
       map.set(modalityId, list);
     }
@@ -148,7 +151,7 @@ export function PolicyDraftEditor({
       list.sort((a, b) => a.label.localeCompare(b.label));
     }
     return map;
-  }, [examTypeCatalog.data]);
+  }, [examTypeCatalog.data, language]);
 
   const allExamTypeOptions = useMemo(() => {
     const values = examTypeCatalog.data ?? [];
@@ -158,13 +161,13 @@ export function PolicyDraftEditor({
         return Number.isFinite(examTypeId)
           ? {
               value: examTypeId,
-              label: examType.name || examType.code || `Exam type ${examTypeId}`,
+              label: chooseLocalized(language, examType.nameAr, examType.nameEn) || examType.name || examType.code || `Exam type ${examTypeId}`,
             }
           : null;
       })
       .filter((option): option is { value: number; label: string } => option != null)
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [examTypeCatalog.data]);
+  }, [examTypeCatalog.data, language]);
 
   const lookupStatusMessage = useMemo(() => {
     if (lookups.isLoading || examTypeCatalog.isLoading) {

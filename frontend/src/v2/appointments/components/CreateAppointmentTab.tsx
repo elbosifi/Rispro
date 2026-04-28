@@ -205,14 +205,14 @@ export function CreateAppointmentTab({
       patientId: String(form.patientId),
       dateTo: new Date().toISOString().slice(0, 10),
     })
-      .then((appointments) => {
+        .then((appointments) => {
         if (cancelled) return;
         const history = appointments
           .slice(0, 5)
           .map((appointment) => ({
             id: appointment.id,
             appointmentDate: appointment.appointmentDate,
-            examTypeName: appointment.examNameEn || appointment.examNameAr || "—",
+            examTypeName: chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—",
             status: String(appointment.status || ""),
           }));
         setPatientNoShows(history);
@@ -231,7 +231,7 @@ export function CreateAppointmentTab({
     return () => {
       cancelled = true;
     };
-  }, [form.patientId]);
+  }, [form.patientId, language]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -292,7 +292,8 @@ export function CreateAppointmentTab({
     const response = await onCreateAppointment(request);
     const modalityRecord = modalityOptions.find((m) => m.id === form.modalityId);
     const modalityName = chooseLocalized(language, modalityRecord?.nameAr, modalityRecord?.nameEn) || modalityRecord?.name || "—";
-    const examTypeName = effectiveExamTypes.find((et) => et.id === form.examTypeId)?.name || null;
+    const examTypeRecord = effectiveExamTypes.find((et) => et.id === form.examTypeId);
+    const examTypeName = chooseLocalized(language, examTypeRecord?.nameAr, examTypeRecord?.nameEn) || examTypeRecord?.name || null;
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,

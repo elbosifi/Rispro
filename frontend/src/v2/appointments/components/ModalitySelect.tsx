@@ -1,4 +1,4 @@
-import { t } from "@/lib/i18n";
+import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { ModalityDto } from "../types";
 
@@ -25,7 +25,7 @@ export function ModalitySelect({ options, value, onChange, disabled }: Props) {
       >
         <option value="">{t(language, "appointments.create.selectModality")}</option>
         {options.filter((m) => m.isActive).map((m) => (
-          <option key={m.id} value={m.id}>{m.name}</option>
+          <option key={m.id} value={m.id}>{chooseLocalized(language, m.nameAr, m.nameEn) || m.name}</option>
         ))}
       </select>
     </div>

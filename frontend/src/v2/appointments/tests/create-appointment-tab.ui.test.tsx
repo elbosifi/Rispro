@@ -18,6 +18,10 @@ type MockNoShowAppointment = {
 const mockFetchAppointments = vi.fn<
   (params: unknown) => Promise<MockNoShowAppointment[]>
 >(async () => []);
+const mockFetchPatientQrSettings = vi.fn(async () => ({
+  defaultReportRequiredForOncology: true,
+  defaultReportRequiredForNonOncology: false,
+}));
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
   async () => []
 );
@@ -31,11 +35,24 @@ const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<{ preparation
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
+  fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
   listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
     mockListAppointmentDocuments(appointmentId, appointmentRefType),
   uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
   deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
   prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: () => ({
+    data: {
+      defaultReportRequiredForOncology: true,
+      defaultReportRequiredForNonOncology: false,
+    },
+    isLoading: false,
+    isError: false,
+    error: null,
+  }),
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
@@ -187,15 +204,15 @@ vi.mock("../api", () => ({
     if (modalityId === 1) {
       return {
         data: [
-          { id: 101, name: "CT Head", code: "CTH", modalityId: 1, isActive: true },
-          { id: 102, name: "CT Chest", code: "CTC", modalityId: 1, isActive: true },
+          { id: 101, name: "CT Head", nameAr: "دماغ", nameEn: "CT Head", code: "CTH", modalityId: 1, isActive: true },
+          { id: 102, name: "CT Chest", nameAr: "صدر", nameEn: "CT Chest", code: "CTC", modalityId: 1, isActive: true },
         ],
       };
     }
     if (modalityId === 2) {
       return {
         data: [
-          { id: 201, name: "MRI Brain", code: "MRB", modalityId: 2, isActive: true },
+          { id: 201, name: "MRI Brain", nameAr: "دماغ بالرنين", nameEn: "MRI Brain", code: "MRB", modalityId: 2, isActive: true },
         ],
       };
     }
@@ -286,8 +303,8 @@ function setup(
             <CreateAppointmentTab
               patientLookups={{}}
               modalityOptions={[
-                { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-                { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+                { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+                { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
               ]}
               examTypeOptions={[]}
               specialReasonOptions={[{ code: "urgent", labelAr: "", labelEn: "Urgent", isActive: true }]}
@@ -437,6 +454,41 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     expect(await screen.findByText("Previous No-Shows / Cancelled")).toBeTruthy();
     expect(await screen.findByText("2026-03-01 — MRI Spine (no-show)")).toBeTruthy();
+  });
+
+  it("shows Arabic modality and exam labels when Arabic catalog names are available", async () => {
+    localStorage.setItem("rispro-language", "ar");
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = availabilityRowsWithAvailable;
+    try {
+      setup();
+
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("الجهاز"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("نوع الفحص"), { target: { value: "101" } });
+
+      const modalitySelect = screen.getByLabelText("الجهاز") as HTMLSelectElement;
+      const examTypeSelect = screen.getByLabelText("نوع الفحص") as HTMLSelectElement;
+      expect(Array.from(modalitySelect.options).map((option) => option.textContent ?? "")).toContain("أشعة مقطعية");
+      expect(Array.from(examTypeSelect.options).map((option) => option.textContent ?? "")).toContain("دماغ");
+
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-03 available/i }));
+      await userEvent.click(screen.getByRole("button", { name: /إنشاء موعد|Create Appointment/ }));
+
+      await screen.findByText("مطلوب تجاوز من المشرف");
+      fireEvent.change(screen.getByPlaceholderText("اسم مستخدم المشرف"), { target: { value: "sup" } });
+      fireEvent.change(screen.getByPlaceholderText("كلمة المرور"), { target: { value: "pass" } });
+      fireEvent.change(screen.getByPlaceholderText("سبب التجاوز"), { target: { value: "approved" } });
+      await userEvent.click(screen.getByRole("button", { name: /اعتماد والحجز|Approve & Book/ }));
+
+      await screen.findByText("تم إنشاء الموعد بنجاح");
+      const successHeading = screen.getByText("تم إنشاء الموعد بنجاح");
+      const successCard = successHeading.closest(".card-shell");
+      expect(successCard?.textContent ?? "").toContain("أشعة مقطعية");
+      expect(successCard?.textContent ?? "").toContain("دماغ");
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
   });
 
   it("keeps routine as default but removes routine from selectable priorities", async () => {
@@ -657,7 +709,7 @@ describe("CreateAppointmentTab UI interactions", () => {
                 <CreateAppointmentTab
                   patientLookups={{}}
                   modalityOptions={[
-                    { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+                    { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
                   ]}
                   examTypeOptions={[]}
                   specialReasonOptions={[]}
@@ -785,8 +837,8 @@ describe("safety modal interactions", () => {
                 <CreateAppointmentTab
                   patientLookups={{}}
                   modalityOptions={[
-                    { id: 1, name: "CT", nameAr: "CT", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
-                    { id: 2, name: "MRI", nameAr: "MRI", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
+                    { id: 1, name: "CT", nameAr: "أشعة مقطعية", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: "Radiation risk", safetyWarningAr: "Radiation risk", safetyWarningEnabled: true },
+                    { id: 2, name: "MRI", nameAr: "رنين مغناطيسي", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: "Magnet safety", safetyWarningAr: "Magnet safety", safetyWarningEnabled: true },
                   ]}
                   examTypeOptions={[]}
                   specialReasonOptions={[]}

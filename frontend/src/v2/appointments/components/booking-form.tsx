@@ -9,7 +9,7 @@
 import { useState, useEffect } from "react";
 import { Calendar, Loader2 } from "lucide-react";
 import { pushToast } from "@/lib/toast";
-import { t } from "@/lib/i18n";
+import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2CreateBooking, evaluateV2Scheduling, useV2SpecialReasonCodes } from "../api";
 import { PatientSearch } from "./patient-search";
@@ -246,7 +246,7 @@ export function BookingForm({
           <div>
             <label className="block text-xs uppercase tracking-[0.15em] font-mono text-muted-foreground mb-2">{language === "ar" ? "الجهاز" : "Modality"}</label>
             <div className="input-premium opacity-70">
-              {modality?.name ?? "—"}
+              {chooseLocalized(language, modality?.nameAr, modality?.nameEn) || modality?.name || "—"}
             </div>
           </div>
 

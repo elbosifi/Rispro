@@ -209,6 +209,8 @@ export interface ModalityDto {
 export interface ExamTypeDto {
   id: number;
   name: string;
+  nameAr?: string | null;
+  nameEn?: string | null;
   code: string;
   modalityId: number | null;
   isActive: boolean;
