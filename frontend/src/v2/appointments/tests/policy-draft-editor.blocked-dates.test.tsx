@@ -7,7 +7,11 @@ import type { PolicySnapshotDto } from "../types";
 vi.mock("../api", () => ({
   useV2Lookups: () => ({
     data: {
-      modalities: [{ id: 1, name: "CT", code: "CT", dailyCapacity: 10, nameAr: "CT", nameEn: "CT" }],
+      modalities: [
+        { id: 1, name: "CT", code: "CT", dailyCapacity: 10, nameAr: "CT", nameEn: "CT", isActive: true },
+        { id: 2, name: "MRI", code: "MRI", dailyCapacity: 12, nameAr: "MRI", nameEn: "MRI", isActive: false },
+        { id: 3, name: "XR", code: "XR", dailyCapacity: 8, nameAr: "XR", nameEn: "XR", isActive: true },
+      ],
     },
     isLoading: false,
     isError: false,
@@ -78,5 +82,29 @@ describe("PolicyDraftEditor blocked dates", () => {
     const savedSnapshot = (onSave.mock.calls[0] as unknown as [PolicySnapshotDto, string | null])[0];
     expect(savedSnapshot.modalityBlockedRules[0].startDate).toBe("2026-04-01");
     expect(savedSnapshot.modalityBlockedRules[0].endDate).toBe("2026-04-30");
+  });
+
+  it("adds one blocked rule per active modality", async () => {
+    const onSave = vi.fn(async () => {});
+    renderEditor(
+      {
+        categoryDailyLimits: [],
+        modalityBlockedRules: [],
+        examTypeRules: [],
+        examTypeSpecialQuotas: [],
+        examMixQuotaRules: [],
+        specialReasonCodes: [],
+      },
+      onSave
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add blocked rule for all modalities" }));
+    await fireEvent.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const savedSnapshot = (onSave.mock.calls[0] as unknown as [PolicySnapshotDto, string | null])[0];
+    expect(savedSnapshot.modalityBlockedRules).toHaveLength(2);
+    expect(savedSnapshot.modalityBlockedRules.map((row) => row.modalityId).sort()).toEqual([1, 3]);
+    expect(savedSnapshot.modalityBlockedRules.every((row) => row.modalityId > 0)).toBe(true);
   });
 });

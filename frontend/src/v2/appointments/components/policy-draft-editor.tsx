@@ -28,6 +28,25 @@ function createNextId(values: Array<{ id: number }>): number {
   return maxId + 1;
 }
 
+function createBlockedRule(modalityId: number, id: number): PolicyModalityBlockedRuleDto {
+  return {
+    id,
+    modalityId,
+    ruleType: "specific_date",
+    specificDate: null,
+    startDate: null,
+    endDate: null,
+    recurStartMonth: null,
+    recurStartDay: null,
+    recurEndMonth: null,
+    recurEndDay: null,
+    isOverridable: false,
+    isActive: true,
+    title: null,
+    notes: null,
+  };
+}
+
 interface ModalityOption {
   value: number;
   label: string;
@@ -133,6 +152,13 @@ export function PolicyDraftEditor({
       })
       .filter((option): option is ModalityOption => option != null);
   }, [language, lookups.data?.modalities]);
+
+  const activeModalityIds = useMemo(() => {
+    return (lookups.data?.modalities ?? [])
+      .filter((modality) => modality.isActive)
+      .map((modality) => Number(modality.id))
+      .filter((modalityId) => Number.isFinite(modalityId) && modalityId > 0);
+  }, [lookups.data?.modalities]);
 
   const examTypeOptionsByModality = useMemo(() => {
     const map = new Map<number, Array<{ value: number; label: string }>>();
@@ -603,27 +629,31 @@ export function PolicyDraftEditor({
                   ...prev,
                   modalityBlockedRules: [
                     ...prev.modalityBlockedRules,
-                    {
-                      id: createNextId(prev.modalityBlockedRules),
-                      modalityId: modalityOptions[0]?.value ?? 0,
-                      ruleType: "specific_date",
-                      specificDate: null,
-                      startDate: null,
-                      endDate: null,
-                      recurStartMonth: null,
-                      recurStartDay: null,
-                      recurEndMonth: null,
-                      recurEndDay: null,
-                      isOverridable: false,
-                      isActive: true,
-                      title: null,
-                      notes: null,
-                    } satisfies PolicyModalityBlockedRuleDto,
+                    createBlockedRule(modalityOptions[0]?.value ?? 0, createNextId(prev.modalityBlockedRules)),
                   ],
                 }))
               }
             >
               Add blocked rule
+            </button>
+            <button
+              type="button"
+              className="w-fit rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
+              onClick={() =>
+                setDraft((prev) => {
+                  if (activeModalityIds.length === 0) {
+                    return prev;
+                  }
+                  const nextId = createNextId(prev.modalityBlockedRules);
+                  const rows = activeModalityIds.map((modalityId, index) => createBlockedRule(modalityId, nextId + index));
+                  return {
+                    ...prev,
+                    modalityBlockedRules: [...prev.modalityBlockedRules, ...rows],
+                  };
+                })
+              }
+            >
+              Add blocked rule for all modalities
             </button>
           </div>
         </details>
