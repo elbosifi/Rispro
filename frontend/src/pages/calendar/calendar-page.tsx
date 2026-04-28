@@ -7,6 +7,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Badge, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
@@ -256,10 +257,10 @@ export default function CalendarPage() {
                       </Badge>
                     )}
                   </div>
-                  <button
-                    onClick={() => navigate(`/print?appointmentId=${selectedAppointment.id}`)}
-                    className="text-accent underline underline-offset-2 text-sm"
-                  >
+                <button
+                  onClick={() => navigate(buildAppointmentPrintUrl(selectedAppointment.id, { autoprint: true }))}
+                  className="text-accent underline underline-offset-2 text-sm"
+                >
                     {t(language, "calendar.print")}
                   </button>
                 </div>
@@ -327,7 +328,7 @@ export default function CalendarPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            navigate(`/print?appointmentId=${apt.id}`);
+                            navigate(buildAppointmentPrintUrl(apt.id, { autoprint: true }));
                           }}
                           className="text-accent underline underline-offset-2"
                         >

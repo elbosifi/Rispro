@@ -5,6 +5,7 @@ import { pushToast } from "@/lib/toast";
 import { fetchAppointments, fetchPatientQrSettings } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import type {
   BookingResponse,
   CapacityResolutionMode,
@@ -411,8 +412,9 @@ export function CreateAppointmentTab({
       <div className="max-w-2xl mx-auto">
         <AppointmentSuccessState
           appointmentSummary={success}
-          onPrintSlip={() => navigate(`/print?appointmentId=${success.bookingId}`)}
-          onViewDetails={() => navigate(`/print?appointmentId=${success.bookingId}`)}
+          onPrintView={() => navigate(buildAppointmentPrintUrl(success.bookingId))}
+          onPrintNow={() => navigate(buildAppointmentPrintUrl(success.bookingId, { autoprint: true }))}
+          onViewDetails={() => navigate(buildAppointmentPrintUrl(success.bookingId))}
           onCreateAnother={() => {
             setSuccess(null);
             actions.clearAfterSuccess();

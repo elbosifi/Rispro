@@ -664,6 +664,10 @@ describe("CreateAppointmentTab UI interactions", () => {
   });
 
   describe("success state actions", () => {
+    beforeEach(() => {
+      mockRowsRef.current = availabilityRowsWithAvailable;
+    });
+
     function setupSuccess() {
       const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
         booking: {
@@ -734,7 +738,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
       await waitFor(() => {
@@ -748,22 +752,41 @@ describe("CreateAppointmentTab UI interactions", () => {
       });
     });
 
-    it("Print Slip navigates to /print?appointmentId=<id>", async () => {
+    it("Print View navigates to /print?appointmentId=<id>", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
       await waitFor(() => {
         expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
       });
 
-      await userEvent.click(screen.getByRole("button", { name: "Print Slip" }));
+      await userEvent.click(screen.getByRole("button", { name: "Print View" }));
 
       await waitFor(() => {
         expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42");
+      });
+    });
+
+    it("Print Now navigates to /print?appointmentId=<id>&autoprint=1", async () => {
+      setupSuccess();
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "Print Now" }));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42&autoprint=1");
       });
     });
 
@@ -772,7 +795,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-      await userEvent.click(screen.getByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
       await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
 
       await waitFor(() => {

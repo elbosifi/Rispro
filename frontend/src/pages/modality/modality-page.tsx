@@ -9,6 +9,7 @@ import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 
 export default function ModalityPage() {
   const { language } = useLanguage();
@@ -44,7 +45,7 @@ export default function ModalityPage() {
   };
 
   const handlePrint = (appointmentId: number) => {
-    navigate(`/print?appointmentId=${appointmentId}`);
+    navigate(buildAppointmentPrintUrl(appointmentId, { autoprint: true }));
   };
 
   const handleRefresh = () => {

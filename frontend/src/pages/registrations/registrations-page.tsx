@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import {
   cancelAppointment,
   fetchAppointments,
@@ -19,8 +20,8 @@ import { Card, Button, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
   printAppointmentList,
-  printAppointmentSlip,
 } from "@/lib/print-utils";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 
@@ -37,6 +38,7 @@ const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shad
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
   const [selectedAppointment, setSelectedAppointment] =
@@ -247,10 +249,7 @@ export default function RegistrationsPage() {
 
   const handlePreviewPrint = () => {
     if (!slipPreviewAppointment) return;
-    printAppointmentSlip(
-      slipPreviewAppointment,
-      slipSettings && patientQrSettings ? { slipSettings, patientQrSettings } : undefined
-    );
+    navigate(buildAppointmentPrintUrl(slipPreviewAppointment.id, { autoprint: true }));
   };
 
   function Field({ label, value }: { label: string; value: any }) {

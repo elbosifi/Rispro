@@ -12,12 +12,19 @@ interface Props {
     examTypeName?: string | null;
     wasOverride: boolean;
   };
-  onPrintSlip: () => void;
+  onPrintView: () => void;
+  onPrintNow: () => void;
   onCreateAnother: () => void;
   onViewDetails: () => void;
 }
 
-export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCreateAnother, onViewDetails }: Props) {
+export function AppointmentSuccessState({
+  appointmentSummary,
+  onPrintView,
+  onPrintNow,
+  onCreateAnother,
+  onViewDetails,
+}: Props) {
   const { language } = useLanguage();
   return (
     <div className="card-shell p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
@@ -42,7 +49,8 @@ export function AppointmentSuccessState({ appointmentSummary, onPrintSlip, onCre
         </div>
       </div>
       <div className="flex flex-wrap gap-4 mb-6">
-        <button type="button" className="btn-secondary" onClick={onPrintSlip}>{t(language, "common.print")}</button>
+        <button type="button" className="btn-secondary" onClick={onPrintView}>{t(language, "appointments.create.printView")}</button>
+        <button type="button" className="btn-secondary" onClick={onPrintNow}>{t(language, "appointments.create.printNow")}</button>
         <button type="button" className="btn-secondary" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</button>
         <button type="button" className="btn-primary" onClick={onCreateAnother}>{t(language, "appointments.create.createAnother")}</button>
       </div>

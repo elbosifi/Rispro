@@ -19,6 +19,7 @@ import {
   printAppointmentList,
   printAppointmentSlip,
 } from "@/lib/print-utils";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
@@ -170,7 +171,7 @@ export default function PrintPage() {
   ]);
 
   function openSlipPreview(appointment: AppointmentWithDetails) {
-    navigate(`/print?appointmentId=${appointment.id}`);
+    navigate(buildAppointmentPrintUrl(appointment.id));
   }
 
   function handlePrintSlip(appointment: AppointmentWithDetails) {

@@ -5,6 +5,7 @@ import { fetchPatientDirectory, fetchPatientDirectorySummary, type PatientDirect
 import PatientForm from "@/components/patients/patient-form";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { UserPlus, Search, Pencil, CalendarPlus, Printer, X, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User, IdCard } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
@@ -63,6 +64,7 @@ function PatientDrawer({
   }
 
   if (!summary) return null;
+  const lastAppointmentId = summary.lastAppointment?.id ?? null;
 
   return (
     <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex flex-col overflow-hidden">
@@ -196,11 +198,15 @@ function PatientDrawer({
             <CalendarPlus size={14} />
             {t(language, "patients.directory.action.createAppointment")}
           </Button>
-          {summary.lastAppointment && (
-<Button size="sm" variant="outline" onClick={() => summary.lastAppointment && navigate(`/print?appointmentId=${summary.lastAppointment.id}`)}>
-            <Printer size={14} />
-            {t(language, "patients.directory.action.print")}
-          </Button>
+          {lastAppointmentId != null && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => navigate(buildAppointmentPrintUrl(lastAppointmentId, { autoprint: true }))}
+            >
+              <Printer size={14} />
+              {t(language, "patients.directory.action.print")}
+            </Button>
           )}
         </div>
       </div>
@@ -507,7 +513,7 @@ export default function PatientsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => navigate(`/print?appointmentId=${patient.lastAppointment!.id}`)}
+                              onClick={() => navigate(buildAppointmentPrintUrl(patient.lastAppointment!.id, { autoprint: true }))}
                             >
                               <Printer size={14} />
                             </Button>
