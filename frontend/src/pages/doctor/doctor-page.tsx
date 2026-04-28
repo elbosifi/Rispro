@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -9,7 +8,7 @@ import { AppointmentEditor } from "@/components/appointments/appointment-editor"
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
-import { buildAppointmentPrintUrl } from "@/lib/print-routing";
+import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import type { Appointment } from "@/types/api";
 
 interface DoctorAppointment extends Appointment {
@@ -23,7 +22,6 @@ export default function DoctorPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
   const [selectedAppointment, setSelectedAppointment] = useState<DoctorAppointment | null>(null);
-  const navigate = useNavigate();
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -117,7 +115,7 @@ export default function DoctorPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => navigate(buildAppointmentPrintUrl(selectedAppointment.id, { autoprint: true }))}
+                  onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
                   className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
                 >
                   {t(language, "common.print")}

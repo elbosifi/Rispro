@@ -8,10 +8,15 @@ import { LanguageProvider } from "@/providers/language-provider";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
+const mockPrintAppointmentSlipById = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
+}));
+
+vi.mock("@/lib/appointment-printing", () => ({
+  printAppointmentSlipById: (...args: unknown[]) => mockPrintAppointmentSlipById(...args),
 }));
 
 vi.mock("@/components/appointments/appointment-editor", () => ({
@@ -49,6 +54,8 @@ function renderDoctorPage() {
 describe("DoctorPage print routing", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    mockPrintAppointmentSlipById.mockReset();
+    mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     fetchAppointmentsMock.mockResolvedValue([
       {
         id: 7,
@@ -80,7 +87,8 @@ describe("DoctorPage print routing", () => {
     await userEvent.click(screen.getByRole("button", { name: "Print" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("print-page").textContent).toBe("/print?appointmentId=7&autoprint=1");
+      expect(mockPrintAppointmentSlipById).toHaveBeenCalledWith(7, "en");
     });
+    expect(screen.queryByTestId("print-page")).toBeNull();
   });
 });

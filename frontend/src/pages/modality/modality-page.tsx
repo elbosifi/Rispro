@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -9,7 +8,7 @@ import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
-import { buildAppointmentPrintUrl } from "@/lib/print-routing";
+import { printAppointmentSlipById } from "@/lib/appointment-printing";
 
 export default function ModalityPage() {
   const { language } = useLanguage();
@@ -17,7 +16,6 @@ export default function ModalityPage() {
   const [date, setDate] = useState(todayIsoDateLy());
   const [scope, setScope] = useState<"day" | "all">("day");
   const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: lookups } = useQuery<AppointmentLookups>({
@@ -45,7 +43,7 @@ export default function ModalityPage() {
   };
 
   const handlePrint = (appointmentId: number) => {
-    navigate(buildAppointmentPrintUrl(appointmentId, { autoprint: true }));
+    void printAppointmentSlipById(appointmentId, language);
   };
 
   const handleRefresh = () => {

@@ -416,13 +416,7 @@ export function CreateAppointmentTab({
       if (printNowLoading) return;
       setPrintNowLoading(true);
       try {
-        await printAppointmentSlipById(currentSuccess.bookingId);
-      } catch (error) {
-        pushToast({
-          type: "error",
-          title: t(language, "print.failed"),
-          message: error instanceof Error ? error.message : t(language, "common.validationError"),
-        });
+        await printAppointmentSlipById(currentSuccess.bookingId, language);
       } finally {
         setPrintNowLoading(false);
       }

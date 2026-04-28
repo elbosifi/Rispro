@@ -5,7 +5,7 @@ import { fetchPatientDirectory, fetchPatientDirectorySummary, type PatientDirect
 import PatientForm from "@/components/patients/patient-form";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
-import { buildAppointmentPrintUrl } from "@/lib/print-routing";
+import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { UserPlus, Search, Pencil, CalendarPlus, Printer, X, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User, IdCard } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
@@ -202,7 +202,7 @@ function PatientDrawer({
             <Button
               size="sm"
               variant="outline"
-              onClick={() => navigate(buildAppointmentPrintUrl(lastAppointmentId, { autoprint: true }))}
+              onClick={() => void printAppointmentSlipById(lastAppointmentId, language)}
             >
               <Printer size={14} />
               {t(language, "patients.directory.action.print")}
@@ -513,7 +513,7 @@ export default function PatientsPage() {
                             <Button
                               size="sm"
                               variant="ghost"
-                              onClick={() => navigate(buildAppointmentPrintUrl(patient.lastAppointment!.id, { autoprint: true }))}
+                              onClick={() => void printAppointmentSlipById(patient.lastAppointment!.id, language)}
                             >
                               <Printer size={14} />
                             </Button>
