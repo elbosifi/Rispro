@@ -102,10 +102,10 @@ export default function DoctorPage() {
         {/* Details */}
         <div>
           {selectedAppointment ? (
-            <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-6">
-              <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3 mb-3">
                 <div className="flex items-center gap-2">
-                  <h3 className="text-lg font-semibold text-stone-900 dark:text-white">
+                  <h3 className="text-base sm:text-lg font-semibold text-stone-900 dark:text-white">
                     {t(language, "doctor.details")}
                   </h3>
                   {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
@@ -116,12 +116,12 @@ export default function DoctorPage() {
                 </div>
                 <button
                   onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
-                  className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+                  className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
                 >
                   {t(language, "common.print")}
                 </button>
               </div>
-              <div className="space-y-3 text-sm">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-sm">
                 <Field label={t(language, "doctor.fieldAccession")} value={selectedAppointment.accessionNumber} />
                 <Field label={t(language, "doctor.fieldPatient")} value={selectedAppointment.arabicFullName} />
                 <Field label={t(language, "doctor.fieldModality")} value={selectedAppointment.modalityNameEn} />
@@ -162,9 +162,9 @@ export default function DoctorPage() {
 
 function Field({ label, value }: { label: string; value: string | undefined | null }) {
   return (
-    <div>
-      <p className="text-stone-500 dark:text-stone-400">{label}</p>
-      <p className="mt-1 text-stone-900 dark:text-white font-medium">{value ?? "—"}</p>
+    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 p-2.5">
+      <p className="text-[10px] uppercase tracking-[0.12em] text-stone-500 dark:text-stone-400">{label}</p>
+      <p className="mt-0.5 text-stone-900 dark:text-white font-medium leading-snug">{value ?? "—"}</p>
     </div>
   );
 }

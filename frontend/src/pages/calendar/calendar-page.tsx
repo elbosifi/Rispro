@@ -417,9 +417,9 @@ function StatusBadge({ language, status }: { language: "ar" | "en"; status: stri
 
 function Field({ label, value }: { label: string; value: any }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/30 p-3">
-      <p className="text-muted-foreground text-xs uppercase tracking-[0.15em] font-mono mb-1">{label}</p>
-      <p className="font-medium leading-snug break-words">{value ?? "—"}</p>
+    <div className="rounded-xl border border-border bg-muted/30 p-2.5">
+      <p className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-sm font-medium leading-snug break-words">{value ?? "—"}</p>
     </div>
   );
 }
