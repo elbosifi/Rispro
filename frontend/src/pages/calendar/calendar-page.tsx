@@ -245,10 +245,10 @@ export default function CalendarPage() {
               </div>
             </div>
             {selectedAppointment && (
-              <div className="p-4 border-b border-border bg-accent/5">
-                <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="p-3 border-b border-border bg-accent/5">
+                <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-semibold text-lg">
+                    <h4 className="font-semibold text-base">
                       {selectedAppointment.accessionNumber}
                     </h4>
                     {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
@@ -257,21 +257,21 @@ export default function CalendarPage() {
                       </Badge>
                     )}
                   </div>
-                <button
-                  onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
-                  className="text-accent underline underline-offset-2 text-sm"
-                >
+                  <button
+                    onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
+                    className="text-accent underline underline-offset-2 text-xs sm:text-sm whitespace-nowrap"
+                  >
                     {t(language, "calendar.print")}
                   </button>
                 </div>
-                <div className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
                   <Field label={t(language, "calendar.fieldModality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />
                   <Field label={t(language, "calendar.fieldExam")} value={chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || "—"} />
                   <Field label={t(language, "calendar.fieldPriority")} value={selectedAppointment.priorityNameEn || t(language, "appointmentEditor.normal")} />
                   <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
                 </div>
-                <div className="mt-4">
+                <div className="mt-3">
                   {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
                     <div className="mb-3 flex justify-end">
                       <Button

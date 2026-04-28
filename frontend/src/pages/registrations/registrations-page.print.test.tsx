@@ -115,4 +115,24 @@ describe("RegistrationsPage print actions", () => {
       expect(mockPrintAppointmentSlipById).toHaveBeenCalledWith(7, "en");
     });
   });
+
+  it("dismisses the preview when clicking outside the slip", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByText("ACC-7"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("slip-preview-backdrop")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByTestId("slip-preview-backdrop"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("slip-preview-backdrop")).toBeNull();
+    });
+  });
 });

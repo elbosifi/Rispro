@@ -658,8 +658,19 @@ export default function RegistrationsPage() {
       ) : null}
 
       {slipPreviewAppointment ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-2 py-2 sm:px-4 sm:py-4">
-          <div className="flex w-full max-w-[1360px] flex-col overflow-hidden rounded-3xl border border-border bg-background shadow-2xl max-h-[calc(100vh-1rem)]">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-2 py-2 sm:px-4 sm:py-4"
+          onClick={closeSlipPreview}
+          role="presentation"
+          data-testid="slip-preview-backdrop"
+        >
+          <div
+            className="flex w-full max-w-[980px] flex-col overflow-hidden rounded-3xl border border-border bg-background shadow-2xl max-h-[calc(100vh-1rem)]"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("print.previewTitle")}
+          >
             <div className="flex flex-col gap-2 border-b border-border p-3 sm:flex-row sm:items-start sm:justify-between sm:p-4">
               <div>
                 <h3 className="text-base font-semibold leading-tight sm:text-lg">
@@ -668,11 +679,14 @@ export default function RegistrationsPage() {
                 <p className="text-xs sm:text-sm text-muted-foreground">
                   {t("print.previewSubtitle")}
                 </p>
-                {slipSettingsError || patientQrSettingsError ? (
-                  <p className="mt-2 text-xs text-amber-700 sm:text-sm">
-                    Appointment slip settings could not be loaded. Using defaults for this preview.
-                  </p>
-                ) : null}
+                <p className="mt-1 text-xs sm:text-sm text-muted-foreground">
+                  {chooseLocalized(
+                    language,
+                    slipPreviewAppointment.arabicFullName,
+                    slipPreviewAppointment.englishFullName,
+                  )}{" "}
+                  • {slipPreviewAppointment.accessionNumber}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2 sm:justify-end">
                 <Button type="button" size="sm" variant="secondary" onClick={closeSlipPreview}>
@@ -684,48 +698,24 @@ export default function RegistrationsPage() {
               </div>
             </div>
 
-            <div className="grid min-h-0 grid-cols-1 xl:grid-cols-[minmax(0,1.38fr)_280px] gap-0">
-              <div className="min-h-[48vh] bg-muted/10 xl:min-h-[60vh]">
-                {slipPreviewLoading ? (
-                  <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
-                    {t("print.loading")}
-                  </div>
-                ) : slipPreviewHtml ? (
-                  <iframe
-                    key={slipPreviewHtml}
-                    title="Appointment slip preview"
-                    srcDoc={slipPreviewHtml}
-                    className="h-[48vh] w-full bg-white xl:h-[60vh]"
-                    loading="eager"
-                  />
-                ) : (
-                  <div className="flex h-full items-center justify-center p-4 text-muted-foreground">
-                    {t("print.loading")}
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-border p-3 space-y-2 text-sm sm:p-4 xl:border-t-0 xl:border-l xl:max-h-[58vh] xl:overflow-y-auto">
-                <div className="space-y-0.5">
-                  <p className="text-xs font-mono uppercase tracking-[0.15em] text-muted-foreground">
-                    {t("registrations.patient")}
-                  </p>
-                  <p className="text-sm sm:text-[15px] font-semibold leading-tight">
-                    {chooseLocalized(
-                      language,
-                      slipPreviewAppointment.arabicFullName,
-                      slipPreviewAppointment.englishFullName,
-                    )}
-                  </p>
+            <div className="min-h-0 bg-muted/10">
+              {slipPreviewLoading ? (
+                <div className="flex h-[56vh] items-center justify-center p-4 text-muted-foreground">
+                  {t("print.loading")}
                 </div>
-
-                <div className="grid grid-cols-2 gap-1.5">
-                  <Field label={t("registrations.modality")} value={chooseLocalized(language, slipPreviewAppointment.modalityNameAr, slipPreviewAppointment.modalityNameEn)} />
-                  <Field label={t("registrations.date")} value={formatDateLy(slipPreviewAppointment.appointmentDate)} />
-                  <Field label={t("registrations.statusCol")} value={statusLabel(language, slipPreviewAppointment.status)} />
-                  <Field label={t("registrations.print")} value={slipPreviewAppointment.accessionNumber} />
+              ) : slipPreviewHtml ? (
+                <iframe
+                  key={slipPreviewHtml}
+                  title="Appointment slip preview"
+                  srcDoc={slipPreviewHtml}
+                  className="h-[56vh] w-full bg-white sm:h-[62vh]"
+                  loading="eager"
+                />
+              ) : (
+                <div className="flex h-[56vh] items-center justify-center p-4 text-muted-foreground">
+                  {t("print.loading")}
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
