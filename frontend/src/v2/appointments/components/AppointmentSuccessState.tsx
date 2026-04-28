@@ -14,6 +14,7 @@ interface Props {
   };
   onPrintView: () => void;
   onPrintNow: () => void;
+  printNowDisabled?: boolean;
   onCreateAnother: () => void;
   onViewDetails: () => void;
 }
@@ -22,6 +23,7 @@ export function AppointmentSuccessState({
   appointmentSummary,
   onPrintView,
   onPrintNow,
+  printNowDisabled = false,
   onCreateAnother,
   onViewDetails,
 }: Props) {
@@ -50,7 +52,7 @@ export function AppointmentSuccessState({
       </div>
       <div className="flex flex-wrap gap-4 mb-6">
         <button type="button" className="btn-secondary" onClick={onPrintView}>{t(language, "appointments.create.printView")}</button>
-        <button type="button" className="btn-secondary" onClick={onPrintNow}>{t(language, "appointments.create.printNow")}</button>
+        <button type="button" className="btn-secondary" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</button>
         <button type="button" className="btn-secondary" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</button>
         <button type="button" className="btn-primary" onClick={onCreateAnother}>{t(language, "appointments.create.createAnother")}</button>
       </div>

@@ -6,6 +6,7 @@ import { fetchAppointments, fetchPatientQrSettings } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
+import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import type {
   BookingResponse,
   CapacityResolutionMode,
@@ -133,6 +134,7 @@ export function CreateAppointmentTab({
   const [success, setSuccess] = useState<SuccessSummary | null>(null);
   const [showSafetyModal, setShowSafetyModal] = useState(false);
   const [safetyAcknowledged, setSafetyAcknowledged] = useState(false);
+  const [printNowLoading, setPrintNowLoading] = useState(false);
   const [patientNoShows, setPatientNoShows] = useState<Array<{ id: number; appointmentDate: string; examTypeName: string; status: string }>>([]);
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
@@ -408,13 +410,32 @@ export function CreateAppointmentTab({
   }
 
   if (success) {
+    const currentSuccess = success;
+
+    async function handlePrintNow() {
+      if (printNowLoading) return;
+      setPrintNowLoading(true);
+      try {
+        await printAppointmentSlipById(currentSuccess.bookingId);
+      } catch (error) {
+        pushToast({
+          type: "error",
+          title: t(language, "print.failed"),
+          message: error instanceof Error ? error.message : t(language, "common.validationError"),
+        });
+      } finally {
+        setPrintNowLoading(false);
+      }
+    }
+
     return (
       <div className="max-w-2xl mx-auto">
         <AppointmentSuccessState
-          appointmentSummary={success}
-          onPrintView={() => navigate(buildAppointmentPrintUrl(success.bookingId))}
-          onPrintNow={() => navigate(buildAppointmentPrintUrl(success.bookingId, { autoprint: true }))}
-          onViewDetails={() => navigate(buildAppointmentPrintUrl(success.bookingId))}
+          appointmentSummary={currentSuccess}
+          onPrintView={() => navigate(buildAppointmentPrintUrl(currentSuccess.bookingId))}
+          onPrintNow={handlePrintNow}
+          printNowDisabled={printNowLoading}
+          onViewDetails={() => navigate(buildAppointmentPrintUrl(currentSuccess.bookingId))}
           onCreateAnother={() => {
             setSuccess(null);
             actions.clearAfterSuccess();

@@ -32,6 +32,7 @@ const mockDeleteAppointmentDocument = vi.fn<(documentId: number) => Promise<{ de
 const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<{ preparation: Record<string, unknown> }>>(
   async () => ({ preparation: {} })
 );
+const mockPrintAppointmentSlipById = vi.fn<(appointmentId: number) => Promise<void>>(async () => {});
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
@@ -41,6 +42,10 @@ vi.mock("@/lib/api-hooks", () => ({
   uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
   deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
   prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
+}));
+
+vi.mock("@/lib/appointment-printing", () => ({
+  printAppointmentSlipById: (appointmentId: number) => mockPrintAppointmentSlipById(appointmentId),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -342,6 +347,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockDeleteAppointmentDocument.mockResolvedValue({ deleted: true, documentId: 1 });
     mockPrepareScanSession.mockReset();
     mockPrepareScanSession.mockResolvedValue({ preparation: {} });
+    mockPrintAppointmentSlipById.mockReset();
+    mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockRawItemsRef.current = [
       {
         date: "2027-01-02",
@@ -771,7 +778,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       });
     });
 
-    it("Print Now navigates to /print?appointmentId=<id>&autoprint=1", async () => {
+    it("Print Now stays on the page and prints immediately", async () => {
       setupSuccess();
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -786,8 +793,9 @@ describe("CreateAppointmentTab UI interactions", () => {
       await userEvent.click(screen.getByRole("button", { name: "Print Now" }));
 
       await waitFor(() => {
-        expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42&autoprint=1");
+        expect(mockPrintAppointmentSlipById).toHaveBeenCalledWith(42);
       });
+      expect(screen.queryByTestId("print-page")).toBeNull();
     });
 
     it("Create Another resets form state", async () => {
