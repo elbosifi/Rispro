@@ -44,15 +44,21 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
       },
     ];
 
-    const row = mapAvailabilityRow(day);
+    const row = mapAvailabilityRow(day, "en");
     expect(row.matchedExamRuleSummary?.title).toBe("Brain MRI restriction");
     expect(row.matchedExamRuleSummary?.effectLabel).toBe("Restricted unless supervisor approves");
     expect(row.reasonText).toBe("");
   });
 
   it("falls back to generic reason text when no structured matched exam-rule summary exists", () => {
-    const row = mapAvailabilityRow(baseDay());
+    const row = mapAvailabilityRow(baseDay(), "en");
     expect(row.matchedExamRuleSummary).toBeNull();
     expect(row.reasonText).toBe("Fallback reason");
+  });
+
+  it("formats day labels in Arabic when language is ar", () => {
+    const row = mapAvailabilityRow(baseDay(), "ar");
+    expect(row.dayLabel).toContain("السبت");
+    expect(row.dayLabel).toContain("يناير");
   });
 });

@@ -1,4 +1,5 @@
 import type { AvailabilityDayDto } from "../types";
+import type { Language } from "@/lib/i18n";
 
 export type AvailabilityRowStatus = "available" | "restricted" | "blocked" | "full";
 
@@ -42,9 +43,9 @@ export interface AvailabilityRowViewModel {
   requiresSupervisorOverride: boolean;
 }
 
-function toDayLabel(isoDate: string): string {
+function toDayLabel(isoDate: string, language: Language): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
-  return d.toLocaleDateString("en-LY", {
+  return d.toLocaleDateString(language === "ar" ? "ar-LY" : "en-LY", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -63,7 +64,7 @@ export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityR
   return day.decision.displayStatus;
 }
 
-export function mapAvailabilityRow(day: AvailabilityDayDto): AvailabilityRowViewModel {
+export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language): AvailabilityRowViewModel {
   const status = getAvailabilityRowStatus(day);
   const matchedExamRuleSummary =
     day.decision.matchedExamRuleSummaries && day.decision.matchedExamRuleSummaries.length > 0
@@ -81,7 +82,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto): AvailabilityRowView
 
   return {
     date: day.date,
-    dayLabel: toDayLabel(day.date),
+    dayLabel: toDayLabel(day.date, language),
     status,
     bucketMode: day.bucketMode ?? "total_only",
     remainingCapacity: hideRawCapacity ? null : Math.max(0, day.remainingCapacity ?? day.decision.remainingStandardCapacity ?? 0),

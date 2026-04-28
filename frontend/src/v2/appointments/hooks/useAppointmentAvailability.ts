@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useV2Availability } from "../api";
 import { mapAvailabilityRow } from "./availability-row-mapper";
 import type { CapacityResolutionMode } from "../types";
+import { useLanguage } from "@/providers/language-provider";
 export type { AvailabilityRowStatus, AvailabilityRowViewModel } from "./availability-row-mapper";
 
 interface UseAppointmentAvailabilityArgs {
@@ -16,6 +17,7 @@ interface UseAppointmentAvailabilityArgs {
 }
 
 export function useAppointmentAvailability(args: UseAppointmentAvailabilityArgs) {
+  const { language } = useLanguage();
   const enabled = args.patientId != null && args.modalityId != null && args.examTypeId != null;
 
   const query = useV2Availability(
@@ -36,8 +38,8 @@ export function useAppointmentAvailability(args: UseAppointmentAvailabilityArgs)
 
   const rows = useMemo(() => {
     if (!enabled) return [];
-    return (query.data?.items ?? []).map(mapAvailabilityRow);
-  }, [enabled, query.data?.items]);
+    return (query.data?.items ?? []).map((day) => mapAvailabilityRow(day, language));
+  }, [enabled, language, query.data?.items]);
 
   return {
     enabled,
