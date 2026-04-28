@@ -44,20 +44,30 @@ function PatientDrawer({
 
   if (isLoading) {
     return (
-      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex items-center justify-center">
-        <div className="spinner-industrial h-8 w-8" />
+      <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
+        <div
+          className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex items-center justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="spinner-industrial h-8 w-8" />
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex items-center justify-center">
-        <div className="text-center p-4">
-          <p className="text-red-500">Failed to load patient details</p>
-          <Button variant="outline" size="sm" onClick={onClose} className="mt-2">
-            Close
-          </Button>
+      <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
+        <div
+          className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex items-center justify-center"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="text-center p-4">
+            <p className="text-red-500">Failed to load patient details</p>
+            <Button variant="outline" size="sm" onClick={onClose} className="mt-2">
+              Close
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -67,15 +77,19 @@ function PatientDrawer({
   const lastAppointmentId = summary.lastAppointment?.id ?? null;
 
   return (
-    <div className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-50 flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between p-4 border-b border-border">
-        <h2 className="text-lg font-bold">{t(language, "patients.directory.drawer.title")}</h2>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <X size={18} />
-        </Button>
-      </div>
+    <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
+      <div
+        className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between p-4 border-b border-border">
+          <h2 className="text-lg font-bold">{t(language, "patients.directory.drawer.title")}</h2>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            <X size={18} />
+          </Button>
+        </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
         <section>
           <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
             {t(language, "patients.directory.drawer.demographics")}
@@ -185,29 +199,30 @@ function PatientDrawer({
         </section>
       </div>
 
-      <div className="p-4 border-t border-border">
-        <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-          {t(language, "patients.directory.drawer.quickActions")}
-        </h3>
-        <div className="grid grid-cols-2 gap-2">
-          <Button size="sm" variant="outline" onClick={() => navigate(`/patients/${patientId}/edit`)}>
-            <Pencil size={14} />
-            {t(language, "patients.directory.action.edit")}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => navigate(`/appointments?patientId=${patientId}`)}>
-            <CalendarPlus size={14} />
-            {t(language, "patients.directory.action.createAppointment")}
-          </Button>
-          {lastAppointmentId != null && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void printAppointmentSlipById(lastAppointmentId, language)}
-            >
-              <Printer size={14} />
-              {t(language, "patients.directory.action.print")}
+        <div className="p-4 border-t border-border">
+          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
+            {t(language, "patients.directory.drawer.quickActions")}
+          </h3>
+          <div className="grid grid-cols-2 gap-2">
+            <Button size="sm" variant="outline" onClick={() => navigate(`/patients/${patientId}/edit`)}>
+              <Pencil size={14} />
+              {t(language, "patients.directory.action.edit")}
             </Button>
-          )}
+            <Button size="sm" variant="outline" onClick={() => navigate(`/appointments?patientId=${patientId}`)}>
+              <CalendarPlus size={14} />
+              {t(language, "patients.directory.action.createAppointment")}
+            </Button>
+            {lastAppointmentId != null && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void printAppointmentSlipById(lastAppointmentId, language)}
+              >
+                <Printer size={14} />
+                {t(language, "patients.directory.action.print")}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -422,12 +437,17 @@ export default function PatientsPage() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {patients.map((patient: PatientDirectoryRow) => (
-                    <tr
+                  <tr
                       key={patient.id}
                       className="transition-colors duration-150 hover:bg-muted/50 cursor-pointer"
-                      onClick={() => {
-                        console.log("Clicked patient:", patient.id, patient.arabicFullName);
-                        setSelectedPatientId(patient.id);
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setSelectedPatientId(patient.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setSelectedPatientId(patient.id);
+                        }
                       }}
                     >
                       <td className="p-3 font-mono text-xs">{patient.mrn || "—"}</td>
