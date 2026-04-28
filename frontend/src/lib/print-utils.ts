@@ -96,20 +96,45 @@ function mm(value: number): number {
   return value * MM_TO_PT;
 }
 
+function parseSlipDate(isoDate: string): Date | null {
+  const normalized = String(isoDate || "").trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!normalized) return null;
+  const date = new Date(Date.UTC(Number(normalized[1]), Number(normalized[2]) - 1, Number(normalized[3]), 12, 0, 0));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatSlipNumericDate(date: Date): string {
+  return [
+    String(date.getUTCDate()).padStart(2, "0"),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCFullYear()),
+  ].join("/");
+}
+
+function formatSlipWeekday(date: Date, locale: "ar-LY" | "en-GB"): string {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "long",
+    timeZone: "UTC",
+  }).format(date);
+}
+
 function formatSlipDate(isoDate: string, languageMode: AppointmentSlipSettings["languageMode"]): string {
-  const date = new Date(`${isoDate}T00:00:00`);
-  if (Number.isNaN(date.getTime())) {
+  const date = parseSlipDate(isoDate);
+  if (!date) {
     return formatDateLy(isoDate);
   }
+
+  const numericDate = formatSlipNumericDate(date);
+  const weekdayAr = formatSlipWeekday(date, "ar-LY");
+  const weekdayEn = formatSlipWeekday(date, "en-GB");
+
   if (languageMode === "ar") {
-    return date.toLocaleDateString("en-GB");
+    return `${weekdayAr} ${numericDate}`;
   }
-  return date.toLocaleDateString("en-GB", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-  });
+  if (languageMode === "en") {
+    return `${weekdayEn} ${numericDate}`;
+  }
+  return `${weekdayAr} ${numericDate} / ${weekdayEn} ${numericDate}`;
 }
 
 function formatSlipTime(raw: string | null | undefined): string {

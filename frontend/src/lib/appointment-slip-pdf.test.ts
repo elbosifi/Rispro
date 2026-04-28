@@ -223,6 +223,27 @@ describe("appointment slip PDF", () => {
     expect(slip.accessionBarcodePayload).toBe("V2-45");
   });
 
+  it("formats slip dates with weekday plus numeric date by languageMode", () => {
+    const appointment = makeAppointment({ appointmentDate: "2026-04-28" });
+
+    const arabicSlip = buildAppointmentSlipData(appointment, {
+      slipSettings: makeSlipSettings({ languageMode: "ar" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    const englishSlip = buildAppointmentSlipData(appointment, {
+      slipSettings: makeSlipSettings({ languageMode: "en" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    const bilingualSlip = buildAppointmentSlipData(appointment, {
+      slipSettings: makeSlipSettings({ languageMode: "bilingual" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(arabicSlip.appointmentDate).toBe("الثلاثاء 28/04/2026");
+    expect(englishSlip.appointmentDate).toBe("Tuesday 28/04/2026");
+    expect(bilingualSlip.appointmentDate).toBe("الثلاثاء 28/04/2026 / Tuesday 28/04/2026");
+  });
+
   it("respects preprinted safe area and keeps barcode within bounds", () => {
     const layout = buildAppointmentSlipLayoutModel(
       makeAppointment(),
