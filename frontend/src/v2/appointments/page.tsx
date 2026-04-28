@@ -14,7 +14,7 @@ import { Button, Card, LoadingState } from "@/components/shared";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
-import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo } from "./types";
+import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, ExamTypeDto, ModalityDto } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
 import { StatusBadge } from "./components/status-badge";
 import { BookingForm } from "./components/booking-form";
@@ -157,7 +157,7 @@ export function AppointmentsV2Page() {
               className="input-premium"
             >
               <option value="">{t(language, "appointments.v2.selectModality")}</option>
-              {lookups.data?.modalities.map((m: { id: number; name: string; nameAr?: string; nameEn?: string }) => (
+              {lookups.data?.modalities.map((m: ModalityDto) => (
                 <option key={m.id} value={m.id}>
                   {chooseLocalized(language, m.nameAr, m.nameEn) || m.name}
                 </option>
@@ -180,7 +180,7 @@ export function AppointmentsV2Page() {
               className="input-premium"
             >
               <option value="">{t(language, "appointments.v2.allExamTypes")}</option>
-              {examTypes.data?.map((et: { id: number; name: string; nameAr?: string; nameEn?: string }) => (
+              {examTypes.data?.map((et: ExamTypeDto) => (
                 <option key={et.id} value={et.id}>
                   {chooseLocalized(language, et.nameAr, et.nameEn) || et.name}
                 </option>
