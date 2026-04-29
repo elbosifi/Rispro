@@ -37,6 +37,7 @@ const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shad
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
+  const isRtl = language === "ar";
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
   const [selectedAppointment, setSelectedAppointment] =
@@ -45,6 +46,7 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
+  const [manageTab, setManageTab] = useState<"details" | "documents" | "cancel">("details");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -193,6 +195,12 @@ export default function RegistrationsPage() {
 
   const manageAppointment = (appointment: AppointmentWithDetails) => {
     setSelectedAppointment(appointment);
+    setManageTab("details");
+  };
+
+  const closeManageDrawer = () => {
+    setSelectedAppointment(null);
+    setManageTab("details");
   };
 
   useEffect(() => {
@@ -249,6 +257,17 @@ export default function RegistrationsPage() {
     if (!slipPreviewAppointment) return;
     void printAppointmentSlipById(slipPreviewAppointment.id, language);
   };
+
+  useEffect(() => {
+    if (!selectedAppointment) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeManageDrawer();
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [selectedAppointment]);
 
   function Field({ label, value }: { label: string; value: any }) {
     return (
@@ -546,7 +565,7 @@ export default function RegistrationsPage() {
                             manageAppointment(apt);
                           }}
                         >
-                          Manage
+                          {t("registrations.manage")}
                         </Button>
                       </div>
                     </div>
@@ -559,102 +578,171 @@ export default function RegistrationsPage() {
       </Card>
 
       {selectedAppointment ? (
-        <Card className="p-3 sm:p-3.5 space-y-2.5">
-          <div className="flex flex-col gap-1.5 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h3 className="text-sm font-semibold">
-                {chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)}
-              </h3>
-              <p className="text-[11px] sm:text-xs text-muted-foreground">
-                {selectedAppointment.accessionNumber} • {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
-              </p>
+        <div
+          className="fixed inset-0 z-50 bg-black/45"
+          onClick={closeManageDrawer}
+          role="presentation"
+          data-testid="registrations-manage-backdrop"
+        >
+          <div
+            className={`absolute top-0 h-full w-full overflow-y-auto bg-background shadow-2xl sm:w-[600px] ${
+              isRtl ? "left-0" : "right-0"
+            }`}
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("registrations.manage")}
+          >
+            <div className="border-b border-border p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-semibold sm:text-base">
+                    {chooseLocalized(
+                      language,
+                      selectedAppointment.arabicFullName,
+                      selectedAppointment.englishFullName,
+                    )}
+                  </h3>
+                  <p className="text-[11px] sm:text-xs text-muted-foreground">
+                    {selectedAppointment.accessionNumber} •{" "}
+                    {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 px-2.5 text-[10px]"
+                    onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
+                  >
+                    {t("registrations.print")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2.5 text-[10px]"
+                    onClick={closeManageDrawer}
+                  >
+                    {t("toast.close")}
+                  </Button>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-1 gap-2 text-sm sm:grid-cols-2">
+                <Field
+                  label={t("registrations.patient")}
+                  value={chooseLocalized(
+                    language,
+                    selectedAppointment.arabicFullName,
+                    selectedAppointment.englishFullName,
+                  )}
+                />
+                <Field
+                  label={t("registrations.accession")}
+                  value={selectedAppointment.accessionNumber}
+                />
+                <Field
+                  label={t("registrations.modality")}
+                  value={[
+                    chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn),
+                    chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn),
+                  ]
+                    .filter(Boolean)
+                    .join(" • ") || "—"}
+                />
+                <Field
+                  label={t("registrations.date")}
+                  value={formatDateLy(selectedAppointment.appointmentDate)}
+                />
+              </div>
+              <div className="mt-2">
+                <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                  {statusLabel(language, selectedAppointment.status)}
+                </span>
+              </div>
             </div>
-            <div className="flex flex-wrap gap-1">
-              <Button type="button" variant="secondary" size="sm" className="h-8 px-2.5 text-[10px]" onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}>
-                {t("registrations.print")}
-              </Button>
-              <Button type="button" variant="ghost" size="sm" className="h-8 px-2.5 text-[10px]" onClick={() => setSelectedAppointment(null)}>
-                {t("toast.close")}
-              </Button>
+
+            <div className="border-b border-border px-3 py-2 sm:px-4">
+              <div className="flex flex-wrap gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={manageTab === "details" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => setManageTab("details")}
+                >
+                  {t("registrations.detailsEdit")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={manageTab === "documents" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => setManageTab("documents")}
+                >
+                  {t("registrations.requestDocuments")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={manageTab === "cancel" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => setManageTab("cancel")}
+                >
+                  {t("registrations.cancelAppointment")}
+                </Button>
+              </div>
             </div>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 text-sm">
-            <Field
-              label={t("registrations.patient")}
-              value={chooseLocalized(
-                language,
-                selectedAppointment.arabicFullName,
-                selectedAppointment.englishFullName,
-              )}
-            />
-            <Field
-              label={t("registrations.modality")}
-              value={chooseLocalized(
-                language,
-                selectedAppointment.modalityNameAr,
-                selectedAppointment.modalityNameEn,
-              )}
-            />
-            <Field
-              label={t("registrations.date")}
-              value={formatDateLy(selectedAppointment.appointmentDate)}
-            />
-            <Field
-              label={t("registrations.statusCol")}
-              value={statusLabel(language, selectedAppointment.status)}
-            />
-            <Field
-              label={t("registrations.walkIn")}
-              value={selectedAppointment.isWalkIn ? t("registrations.yes") : t("registrations.no")}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-2.5">
-            <details className="rounded-2xl border border-border bg-muted/20 p-3" open>
-              <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                {t("registrations.cancelAppointment")}
-              </summary>
-              <div className="mt-2.5">
-                {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
-                  <div className="mb-2 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      style={{ color: "#ef4444" }}
-                      onClick={() => {
-                        if (!window.confirm(t("common.confirmCancelAppointment"))) return;
-                        cancelMutation.mutate(selectedAppointment.id);
-                      }}
-                    >
-                      {t("registrations.cancelAppointment")}
-                    </Button>
-                  </div>
-                )}
+            <div className="p-3 sm:p-4">
+              {manageTab === "details" ? (
                 <AppointmentEditor
                   appointment={selectedAppointment}
                   lookups={lookups}
                   onUpdated={(updated) => setSelectedAppointment(updated)}
-                  onDeleted={() => setSelectedAppointment(null)}
+                  onDeleted={closeManageDrawer}
                 />
-              </div>
-            </details>
+              ) : null}
 
-            <details className="rounded-2xl border border-border bg-muted/20 p-3">
-              <summary className="cursor-pointer text-sm font-semibold text-foreground">
-                {t("registrations.requestDocuments")}
-              </summary>
-              <div className="mt-2.5">
+              {manageTab === "documents" ? (
                 <RequestDocumentsPanel
                   appointmentId={selectedAppointment.id}
                   patientId={selectedAppointment.patientId}
                   appointmentRefType="v2_booking"
                   title={t("registrations.requestDocuments")}
                 />
-              </div>
-            </details>
+              ) : null}
+
+              {manageTab === "cancel" ? (
+                ["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) ? (
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3">
+                    <div className="mb-2 text-xs text-muted-foreground">
+                      {t("registrations.cancelAppointment")}
+                    </div>
+                    <div className={isRtl ? "flex justify-start" : "flex justify-end"}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        style={{ color: "#ef4444" }}
+                        onClick={() => {
+                          if (!window.confirm(t("common.confirmCancelAppointment"))) return;
+                          cancelMutation.mutate(selectedAppointment.id);
+                        }}
+                      >
+                        {t("registrations.cancelAppointment")}
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    {t("registrations.cancelNotAllowed")}
+                  </div>
+                )
+              ) : null}
+            </div>
           </div>
-        </Card>
+        </div>
       ) : null}
 
       {slipPreviewAppointment ? (
