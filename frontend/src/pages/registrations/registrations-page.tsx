@@ -189,30 +189,6 @@ export default function RegistrationsPage() {
     printAppointmentList(appointments, listWindowLabel);
   };
 
-  const handleViewAppointmentLink = async (appointment: AppointmentWithDetails) => {
-    const url = String(appointment.publicAppointmentUrl || "").trim();
-    if (!url) {
-      pushToast({
-        type: "error",
-        title: t("registrations.appointmentLinkTitle"),
-        message: t("registrations.appointmentLinkUnavailable"),
-      });
-      return;
-    }
-    try {
-      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(url);
-      }
-    } catch {
-      // Clipboard may be unavailable in some browser contexts; still show URL.
-    }
-    pushToast({
-      type: "success",
-      title: t("registrations.appointmentLinkTitle"),
-      message: url,
-    });
-  };
-
   const openSlipPreview = (appointment: AppointmentWithDetails) => {
     setSlipPreviewAppointment(appointment);
   };
@@ -474,7 +450,7 @@ export default function RegistrationsPage() {
 
         <div className="overflow-x-auto">
           <div className="min-w-[1140px]">
-            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_1.5fr] gap-1.5 border-b border-border bg-muted/40 px-3 py-1.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-1.5 border-b border-border bg-muted/40 px-3 py-1.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
               <div>{t("registrations.print")}</div>
               <div>{t("registrations.modality")}</div>
@@ -515,7 +491,7 @@ export default function RegistrationsPage() {
                           openSlipPreview(apt);
                         }
                       }}
-                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_1.5fr] gap-1.5 px-3 py-1.5 transition-colors outline-none cursor-pointer ${
+                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_0.98fr] gap-1.5 px-3 py-1.5 transition-colors outline-none cursor-pointer ${
                         index % 2 === 0 ? "bg-background" : "bg-muted/25"
                       } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
                       >
@@ -578,18 +554,6 @@ export default function RegistrationsPage() {
                           className="h-7 px-2 text-[9px]"
                         >
                           {t("registrations.print")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[9px]"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleViewAppointmentLink(apt);
-                          }}
-                        >
-                          {t("registrations.viewAppointmentLink")}
                         </Button>
                         <Button
                           type="button"

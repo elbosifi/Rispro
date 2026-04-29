@@ -12,7 +12,6 @@ const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
 const mockPrintAppointmentSlipById = vi.fn();
-const mockPushToast = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   cancelAppointment: vi.fn(),
@@ -29,10 +28,6 @@ vi.mock("@/lib/print-utils", () => ({
 
 vi.mock("@/lib/appointment-printing", () => ({
   printAppointmentSlipById: (...args: unknown[]) => mockPrintAppointmentSlipById(...args),
-}));
-
-vi.mock("@/lib/toast", () => ({
-  pushToast: (...args: unknown[]) => mockPushToast(...args),
 }));
 
 function renderRegistrationsPage() {
@@ -58,7 +53,6 @@ describe("RegistrationsPage print actions", () => {
     localStorage.setItem("rispro-language", "en");
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
-    mockPushToast.mockReset();
     fetchAppointmentsMock.mockResolvedValue([
       {
         id: 7,
@@ -77,7 +71,6 @@ describe("RegistrationsPage print actions", () => {
         status: "scheduled",
         isWalkIn: false,
         notes: null,
-        publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
       },
     ]);
     fetchAppointmentLookupsMock.mockResolvedValue({
@@ -140,69 +133,6 @@ describe("RegistrationsPage print actions", () => {
 
     await waitFor(() => {
       expect(screen.queryByTestId("slip-preview-backdrop")).toBeNull();
-    });
-  });
-
-  it("shows the appointment link from the row action button", async () => {
-    renderRegistrationsPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
-    });
-
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
-    await userEvent.click(within(row).getByRole("button", { name: "View Appointment Link" }));
-
-    await waitFor(() => {
-      expect(mockPushToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "success",
-          title: "Appointment Link",
-          message: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
-        })
-      );
-    });
-  });
-
-  it("shows unavailable message when link is missing", async () => {
-    fetchAppointmentsMock.mockResolvedValueOnce([
-      {
-        id: 7,
-        accessionNumber: "ACC-7",
-        dailySequence: 1,
-        patientId: 1,
-        arabicFullName: "Test Patient",
-        englishFullName: "Test Patient",
-        modalityNameAr: "أشعة مقطعية",
-        modalityNameEn: "CT",
-        examNameAr: "CT Head",
-        examNameEn: "CT Head",
-        priorityNameAr: null,
-        priorityNameEn: null,
-        appointmentDate: "2027-01-03",
-        status: "scheduled",
-        isWalkIn: false,
-        notes: null,
-        publicAppointmentUrl: null,
-      },
-    ]);
-    renderRegistrationsPage();
-
-    await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
-    });
-
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
-    await userEvent.click(within(row).getByRole("button", { name: "View Appointment Link" }));
-
-    await waitFor(() => {
-      expect(mockPushToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "error",
-          title: "Appointment Link",
-          message: "No public appointment link is available for this registration.",
-        })
-      );
     });
   });
 });
