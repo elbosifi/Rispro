@@ -1,15 +1,17 @@
-import { chooseLocalized, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { ExamTypeDto } from "../types";
+import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 
 interface Props {
   options: ExamTypeDto[];
   value: number | null;
   onChange: (value: number | null) => void;
+  displayMode: EntityDisplayMode;
   disabled?: boolean;
 }
 
-export function ExamTypeSelect({ options, value, onChange, disabled }: Props) {
+export function ExamTypeSelect({ options, value, onChange, displayMode, disabled }: Props) {
   const { language } = useLanguage();
   return (
     <div>
@@ -25,7 +27,9 @@ export function ExamTypeSelect({ options, value, onChange, disabled }: Props) {
       >
         <option value="">{t(language, "appointments.create.selectExamType")}</option>
         {options.map((et) => (
-          <option key={et.id} value={et.id}>{chooseLocalized(language, et.nameAr, et.nameEn) || et.name}</option>
+          <option key={et.id} value={et.id}>
+            {formatEntityLabel({ mode: displayMode, nameAr: et.nameAr, nameEn: et.nameEn, fallback: et.name })}
+          </option>
         ))}
       </select>
     </div>

@@ -180,7 +180,7 @@ export default function QueuePage() {
   const enteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled") ?? [];
   const notEnteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus === "scheduled") ?? [];
   const enteredQueueLabel = language === "ar" ? "دخلوا إلى الطابور" : "Entered Queue";
-  const notEnteredQueueLabel = language === "ar" ? "لم يدخلوا الطابور بعد" : "Not Entered Yet";
+  const notEnteredQueueLabel = language === "ar" ? "المريض لم يصل بعد" : "Not Entered Yet";
   const scheduledLabel = language === "ar" ? "مجدول" : "Scheduled";
   const walkInLabel = language === "ar" ? "دخول مباشر" : "Walk-in";
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => (

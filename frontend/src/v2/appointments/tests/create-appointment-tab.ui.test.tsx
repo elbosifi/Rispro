@@ -6,6 +6,7 @@ import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import { LanguageProvider } from "@/providers/language-provider";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
 import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
+import type { ModalityDto } from "../types";
 
 type MockNoShowAppointment = {
   id: number;
@@ -267,7 +268,11 @@ const availabilityRowsWithAvailable: AvailabilityRowViewModel[] = [
 
 function setup(
   canUseNonStandardCapacityModes: boolean = true,
-  priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = []
+  priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = [],
+  modalityOptions: ModalityDto[] = [
+    { id: 1, name: "CT", nameAr: "Ø£Ø´Ø¹Ø© Ù…Ù‚Ø·Ø¹ÙŠØ©", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+    { id: 2, name: "MRI", nameAr: "Ø±Ù†ÙŠÙ† Ù…ØºÙ†Ø§Ø·ÙŠØ³ÙŠ", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
+  ]
 ) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
@@ -342,6 +347,7 @@ function PrintPlaceholder() {
 describe("CreateAppointmentTab UI interactions", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "en");
     mockFetchAppointments.mockReset();
     mockFetchAppointments.mockResolvedValue([]);
     mockGetAppointmentById.mockReset();
@@ -383,6 +389,57 @@ describe("CreateAppointmentTab UI interactions", () => {
     ];
   });
 
+  it("renders entity display mode control with default both mode", async () => {
+    localStorage.removeItem("rispro:create-appointment:entity-display-mode");
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+
+    const modeSelect = screen.getByLabelText("Entity Display") as HTMLSelectElement;
+    expect(modeSelect.value).toBe("both");
+  });
+
+  it("applies Arabic mode to modality and exam labels", async () => {
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "ar");
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+
+    expect((screen.getByLabelText("Modality") as HTMLSelectElement).textContent).toContain("أشعة مقطعية");
+    expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).textContent).toContain("دماغ");
+  });
+
+  it("applies English mode to modality and exam labels", async () => {
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "en");
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+
+    expect((screen.getByLabelText("Modality") as HTMLSelectElement).textContent).toContain("CT");
+    expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).textContent).toContain("CT Head");
+  });
+
+  it("applies Both mode as compact English — Arabic labels", async () => {
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "both");
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+
+    expect((screen.getByLabelText("Modality") as HTMLSelectElement).textContent).toContain("CT —");
+    expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).textContent).toContain("CT Head —");
+  });
+
+  it("falls back to available name in Both mode when one language is missing", async () => {
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "both");
+    mockFetchAppointments.mockResolvedValueOnce([
+      { id: 91, appointmentDate: "2026-03-01", examNameEn: "MRI Spine", examNameAr: null, status: "no-show" },
+    ]);
+
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+
+    expect(await screen.findByText("2026-03-01 — MRI Spine (no-show)")).toBeTruthy();
+  });
+
   it("filters exam types by selected modality", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
@@ -396,6 +453,25 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "2" } });
     expect(examType.textContent).toContain("MRI Brain");
     expect(examType.textContent).not.toContain("CT Head");
+  });
+
+  it("persists entity display mode in localStorage", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Entity Display"), { target: { value: "en" } });
+    expect(localStorage.getItem("rispro:create-appointment:entity-display-mode")).toBe("en");
+  });
+
+  it("changing display mode keeps selected modalityId and examTypeId", async () => {
+    setup();
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    fireEvent.change(screen.getByLabelText("Entity Display"), { target: { value: "ar" } });
+
+    expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("1");
+    expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).value).toBe("101");
   });
 
   it("keeps blocked row non-clickable", async () => {
@@ -475,6 +551,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
   it("shows Arabic modality and exam labels when Arabic catalog names are available", async () => {
     localStorage.setItem("rispro-language", "ar");
+    localStorage.setItem("rispro:create-appointment:entity-display-mode", "ar");
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = availabilityRowsWithAvailable;
     try {
@@ -749,6 +826,22 @@ describe("CreateAppointmentTab UI interactions", () => {
 
       return { onCreateAppointment, onEvaluateAvailability };
     }
+
+    it("success summary respects selected entity display mode", async () => {
+      localStorage.setItem("rispro:create-appointment:entity-display-mode", "both");
+      setupSuccess();
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+      expect(screen.getByText(/CT —/)).toBeTruthy();
+      expect(screen.getByText(/CT Head —/)).toBeTruthy();
+    });
 
     it("View Details navigates to /print?appointmentId=<id>", async () => {
       setupSuccess();

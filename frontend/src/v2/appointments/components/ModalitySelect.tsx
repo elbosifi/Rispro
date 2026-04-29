@@ -1,15 +1,17 @@
-import { chooseLocalized, t } from "@/lib/i18n";
+import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import type { ModalityDto } from "../types";
+import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 
 interface Props {
   options: ModalityDto[];
   value: number | null;
   onChange: (value: number | null) => void;
+  displayMode: EntityDisplayMode;
   disabled?: boolean;
 }
 
-export function ModalitySelect({ options, value, onChange, disabled }: Props) {
+export function ModalitySelect({ options, value, onChange, displayMode, disabled }: Props) {
   const { language } = useLanguage();
   return (
     <div>
@@ -25,7 +27,9 @@ export function ModalitySelect({ options, value, onChange, disabled }: Props) {
       >
         <option value="">{t(language, "appointments.create.selectModality")}</option>
         {options.filter((m) => m.isActive).map((m) => (
-          <option key={m.id} value={m.id}>{chooseLocalized(language, m.nameAr, m.nameEn) || m.name}</option>
+          <option key={m.id} value={m.id}>
+            {formatEntityLabel({ mode: displayMode, nameAr: m.nameAr, nameEn: m.nameEn, fallback: m.name })}
+          </option>
         ))}
       </select>
     </div>

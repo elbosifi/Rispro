@@ -28,6 +28,7 @@ import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { SectionLabel, Button, Card } from "@/components/shared";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
+import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 
 interface CreateAppointmentTabProps {
   patientLookups: unknown;
@@ -65,6 +66,7 @@ interface SuccessSummary {
 
 const AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const ENTITY_DISPLAY_MODE_STORAGE_KEY = "rispro:create-appointment:entity-display-mode";
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -140,8 +142,19 @@ export function CreateAppointmentTab({
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
   const [showFullDays, setShowFullDays] = useState(false);
+  const [entityDisplayMode, setEntityDisplayMode] = useState<EntityDisplayMode>(() => {
+    if (typeof window === "undefined") return "both";
+    const stored = window.localStorage.getItem(ENTITY_DISPLAY_MODE_STORAGE_KEY);
+    if (stored === "ar" || stored === "en" || stored === "both") return stored;
+    return "both";
+  });
   const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
   const initialPatientAppliedRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(ENTITY_DISPLAY_MODE_STORAGE_KEY, entityDisplayMode);
+  }, [entityDisplayMode]);
 
   useEffect(() => {
     if (initialPatientAppliedRef.current) return;
@@ -216,7 +229,13 @@ export function CreateAppointmentTab({
           .map((appointment) => ({
             id: appointment.id,
             appointmentDate: appointment.appointmentDate,
-            examTypeName: chooseLocalized(language, appointment.examNameAr, appointment.examNameEn) || "—",
+            examTypeName:
+              formatEntityLabel({
+                mode: entityDisplayMode,
+                nameAr: appointment.examNameAr,
+                nameEn: appointment.examNameEn,
+                fallback: "—",
+              }) || "—",
             status: String(appointment.status || ""),
           }));
         setPatientNoShows(history);
@@ -235,7 +254,7 @@ export function CreateAppointmentTab({
     return () => {
       cancelled = true;
     };
-  }, [form.patientId, language]);
+  }, [entityDisplayMode, form.patientId]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     if (row.status === "blocked") {
@@ -295,9 +314,20 @@ export function CreateAppointmentTab({
 
     const response = await onCreateAppointment(request);
     const modalityRecord = modalityOptions.find((m) => m.id === form.modalityId);
-    const modalityName = chooseLocalized(language, modalityRecord?.nameAr, modalityRecord?.nameEn) || modalityRecord?.name || "—";
+    const modalityName = formatEntityLabel({
+      mode: entityDisplayMode,
+      nameAr: modalityRecord?.nameAr,
+      nameEn: modalityRecord?.nameEn,
+      fallback: modalityRecord?.name || "—",
+    });
     const examTypeRecord = effectiveExamTypes.find((et) => et.id === form.examTypeId);
-    const examTypeName = chooseLocalized(language, examTypeRecord?.nameAr, examTypeRecord?.nameEn) || examTypeRecord?.name || null;
+    const examTypeName =
+      formatEntityLabel({
+        mode: entityDisplayMode,
+        nameAr: examTypeRecord?.nameAr,
+        nameEn: examTypeRecord?.nameEn,
+        fallback: examTypeRecord?.name || null,
+      }) || null;
     let publicAppointmentUrl: string | null = null;
     try {
       const appointmentDetails = await getAppointmentById(response.booking.id);
@@ -517,6 +547,7 @@ export function CreateAppointmentTab({
               <ModalitySelect
                 options={modalityOptions}
                 value={form.modalityId}
+                displayMode={entityDisplayMode}
                 onChange={(value) => {
                   actions.setModalityId(value);
                   setAvailabilitySelectedRow(null);
@@ -529,12 +560,29 @@ export function CreateAppointmentTab({
               <ExamTypeSelect
                 options={effectiveExamTypes}
                 value={form.examTypeId}
+                displayMode={entityDisplayMode}
                 onChange={(value) => {
                   actions.setExamTypeId(value);
                   setAvailabilitySelectedRow(null);
                 }}
                 disabled={!schedulingEngineEnabled || !form.modalityId}
               />
+
+              <div>
+                <label className="block text-sm font-semibold mb-2 text-foreground">
+                  Entity Display
+                </label>
+                <select
+                  aria-label="Entity Display"
+                  value={entityDisplayMode}
+                  onChange={(e) => setEntityDisplayMode(e.target.value as EntityDisplayMode)}
+                  className="input-premium"
+                >
+                  <option value="ar">Arabic</option>
+                  <option value="en">English</option>
+                  <option value="both">Both</option>
+                </select>
+              </div>
 
               <div>
                 <label className="block text-sm font-semibold mb-2 text-foreground">
@@ -730,7 +778,14 @@ export function CreateAppointmentTab({
             <h3 className="text-lg sm:text-xl font-semibold mb-3" style={{ color: "var(--amber)" }}>{t(language, "appointments.create.safetyConfirmation")}</h3>
             <p className="text-sm sm:text-base mb-4" style={{ color: "var(--amber)" }}>{safetyMessage}</p>
             <p className="text-sm sm:text-base mb-5">
-              {t(language, "appointments.create.confirmNoContraindications", { modality: chooseLocalized(language, selectedModality?.nameAr, selectedModality?.nameEn) || selectedModality?.name || "—" })}
+              {t(language, "appointments.create.confirmNoContraindications", {
+                modality: formatEntityLabel({
+                  mode: entityDisplayMode,
+                  nameAr: selectedModality?.nameAr,
+                  nameEn: selectedModality?.nameEn,
+                  fallback: selectedModality?.name || "—",
+                }),
+              })}
             </p>
             <div className="flex flex-col sm:flex-row gap-3">
               <Button
