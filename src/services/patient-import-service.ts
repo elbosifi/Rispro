@@ -341,6 +341,11 @@ export async function createImportBatchFromParsedRows(
 
       const transliteration = generateEnglishFromDictionary(arabicName, dictionary);
       const englishName = transliteration.englishName;
+      const unresolvedTokens = transliteration.missingTokens;
+      if (validationStatus === "valid" && unresolvedTokens.length > 0) {
+        validationStatus = "invalid";
+        validationMessage = `Unresolved Arabic name token(s) for transliteration: ${unresolvedTokens.join(", ")}.`;
+      }
 
       if (validationStatus === "valid") {
         matchedExistingPatientId = await findExistingPatientByNationalId(client, nationalId);

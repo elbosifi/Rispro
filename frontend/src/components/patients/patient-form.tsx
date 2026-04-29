@@ -470,7 +470,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       }
       // Generate English only when a token is completed (space typed after word)
       if (!englishNameManuallyEdited && tokenJustCompleted) {
-        u.englishFullName = generateEnglishFromDictionary(value, dictionary).englishName;
+        const generated = generateEnglishFromDictionary(value, dictionary);
+        u.englishFullName = generated.missingTokens.length === 0 ? generated.englishName : "";
       }
       return { ...f, ...u };
     });
@@ -485,7 +486,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   const handleRegenerateEnglishName = () => {
     setEnglishNameManuallyEdited(false);
     const r = generateEnglishFromDictionary(form.arabicFullName, dictionary);
-    setForm((f) => ({ ...f, englishFullName: r.englishName }));
+    setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
     if (r.missingTokens.length > 0) {
       setMissingTokenInputs((p) => {
         const n = { ...p };
@@ -510,7 +511,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       setLocalDictionary((p) => [...p, ne]);
       setMissingTokenInputs((p) => { const n = { ...p }; delete n[token]; return n; });
       const r = generateEnglishFromDictionary(form.arabicFullName, [...serverDictionary, ...localDictionary, ne]);
-      setForm((f) => ({ ...f, englishFullName: r.englishName }));
+      setForm((f) => ({ ...f, englishFullName: r.missingTokens.length === 0 ? r.englishName : "" }));
       queryClient.invalidateQueries({ queryKey: ["name-dictionary"] });
     } catch (err: any) {
       setAddTokenError(err?.message || (language === "ar" ? "فشل إضافة الرمز إلى القاموس." : "Failed to add token to dictionary"));
@@ -532,6 +533,18 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    const fullNameGeneration = generateEnglishFromDictionary(form.arabicFullName.trim(), dictionary);
+    if (!englishNameManuallyEdited && fullNameGeneration.missingTokens.length > 0) {
+      const tokensLabel = fullNameGeneration.missingTokens.join(", ");
+      showToast(
+        language === "ar"
+          ? `لا يمكن اعتماد توليد الاسم الإنجليزي تلقائياً. الرموز غير المعروفة: ${tokensLabel}. أضفها إلى القاموس أو حرر الاسم الإنجليزي يدوياً.`
+          : `Cannot use auto-generated English name. Unresolved Arabic token(s): ${tokensLabel}. Add them to the dictionary or edit English name manually.`,
+        "error"
+      );
+      englishFullNameRef.current?.focus();
+      return;
+    }
     const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     if (!isEdit && arabicNameParts.length < 3) {
       showToast(language === "ar" ? "يجب أن يحتوي الاسم العربي على 3 أجزاء على الأقل قبل التسجيل." : "Arabic full name must include at least 3 names before registering.", "error");
@@ -599,17 +612,8 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     mutation.mutate(payload);
   };
 
-  const currentMissingTokens = form.arabicFullName
-    ? (() => {
-        // Only consider completed tokens (those followed by a space)
-        const parts = form.arabicFullName.split(" ");
-        // Remove the last part if it doesn't end with space (user still typing it)
-        if (!form.arabicFullName.endsWith(" ")) parts.pop();
-        const completedTokens = parts.filter(Boolean);
-        const result = generateEnglishFromDictionary(completedTokens.join(" "), dictionary);
-        return result.missingTokens;
-      })()
-    : [];
+  const fullNameGeneration = generateEnglishFromDictionary(form.arabicFullName.trim(), dictionary);
+  const currentMissingTokens = fullNameGeneration.missingTokens;
   const hasShortArabicNameWarning = (() => {
     const parts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     return parts.length > 0 && parts.length < 3;
@@ -682,7 +686,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
             />
             {form.arabicFullName && !englishNameManuallyEdited && (
               <p className={helperTextClass}>
-                {language === "ar" ? "مُولّد من قاموس الأسماء." : "Generated from name dictionary."}
+                {currentMissingTokens.length === 0
+                  ? (language === "ar" ? "مُولّد من قاموس الأسماء." : "Generated from name dictionary.")
+                  : (language === "ar" ? "توليد غير مكتمل: توجد رموز عربية غير موجودة في القاموس." : "Generation incomplete: unresolved Arabic token(s) found in dictionary lookup.")}
                 <button type="button" onClick={handleRegenerateEnglishName} className="ml-2 text-accent hover:underline">{language === "ar" ? "إعادة توليد" : "Regenerate"}</button>
               </p>
             )}

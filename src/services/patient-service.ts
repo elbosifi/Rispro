@@ -470,6 +470,12 @@ async function validatePatientPayload(
   let finalEnglishName = String(englishFullName || "").trim();
   if (autoGenerateEnglish && !englishFullName) {
     const generated = generateEnglishFromDictionary(arabicFullName, dictionary);
+    if (generated.missingTokens.length > 0) {
+      throw new HttpError(
+        400,
+        `Cannot auto-generate English name. Unresolved Arabic token(s): ${generated.missingTokens.join(", ")}.`
+      );
+    }
     finalEnglishName = generated.englishName;
   }
 

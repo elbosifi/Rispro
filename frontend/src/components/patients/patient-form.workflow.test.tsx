@@ -74,7 +74,17 @@ describe("PatientForm workflow hardening", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.setItem("rispro-language", "en");
-    vi.mocked(fetchNameDictionary).mockResolvedValue({ entries: [] } as any);
+    vi.mocked(fetchNameDictionary).mockResolvedValue({
+      entries: [
+        { arabicText: "مريض", englishText: "Patient" },
+        { arabicText: "جديد", englishText: "New" },
+        { arabicText: "ثالث", englishText: "Third" },
+        { arabicText: "مطابق", englishText: "Match" },
+        { arabicText: "محمد", englishText: "Mohamed" },
+        { arabicText: "علي", englishText: "Ali" },
+        { arabicText: "حسن", englishText: "Hassan" }
+      ]
+    } as any);
     vi.mocked(searchPatients).mockResolvedValue([]);
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
@@ -90,6 +100,7 @@ describe("PatientForm workflow hardening", () => {
     renderPatientForm({ mode: "create" });
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
@@ -126,6 +137,7 @@ describe("PatientForm workflow hardening", () => {
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
     expect(await screen.findByText(/Sex is required/i)).toBeTruthy();
 
@@ -251,6 +263,7 @@ describe("PatientForm workflow hardening", () => {
     await user.click(primaryRadios[1]!);
 
     await user.type(screen.getByLabelText(/Arabic Full Name/i), "مريض جديد ثالث");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
     await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
@@ -276,7 +289,53 @@ describe("PatientForm workflow hardening", () => {
       expect(sexSelect.value).toBe("M");
     });
 
-    const dobInput = screen.getByLabelText(/Date of Birth/i) as HTMLInputElement;
-    expect(dobInput.value).toBe("1990-01-01");
+    const dobInput = screen.getByPlaceholderText(/dd\/mm\/yyyy/i) as HTMLInputElement;
+    expect(dobInput.value).toBe("01/01/1990");
+  });
+
+  it("blocks submit when auto-generated English transliteration has unresolved Arabic tokens", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchNameDictionary).mockResolvedValue({
+      entries: [
+        { arabicText: "محمد", englishText: "Mohamed" },
+        { arabicText: "حسن", englishText: "Hassan" }
+      ]
+    } as any);
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
+    await user.tab();
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/Cannot use auto-generated English name/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
+  });
+
+  it("allows save after manual English-name correction even when transliteration has unresolved tokens", async () => {
+    const user = userEvent.setup();
+    vi.mocked(fetchNameDictionary).mockResolvedValue({
+      entries: [
+        { arabicText: "محمد", englishText: "Mohamed" },
+        { arabicText: "حسن", englishText: "Hassan" }
+      ]
+    } as any);
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد زيد حسن");
+    await user.type(screen.getByLabelText(/English Full Name/i), "Mohamed Zaid Hassan");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    await waitFor(() => expect(createPatient).toHaveBeenCalled());
+    const payload = vi.mocked(createPatient).mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(payload.englishFullName).toBe("Mohamed Zaid Hassan");
+    expect(payload.autoGenerateEnglish).toBe(false);
   });
 });
