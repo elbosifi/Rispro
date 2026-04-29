@@ -23,6 +23,7 @@ export function ExamTypeSelect({ options, value, onChange, displayMode, disabled
         value={value ?? ""}
         disabled={disabled}
         onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        dir="ltr"
         className="input-premium"
       >
         <option value="">{t(language, "appointments.create.selectExamType")}</option>
