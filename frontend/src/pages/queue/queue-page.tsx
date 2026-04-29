@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, cancelAppointment, searchPatients, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, cancelAppointment, searchPatients, fetchAppointmentLookups, fetchSettings } from "@/lib/api-hooks";
 import type { QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
@@ -26,6 +26,13 @@ export default function QueuePage() {
   });
 
   const modalities = lookups?.modalities ?? [];
+  const { data: queueArrivalSettings } = useQuery({
+    queryKey: ["settings", "queue_and_arrival"],
+    queryFn: () => fetchSettings("queue_and_arrival"),
+    staleTime: 1000 * 60 * 5
+  });
+  const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "enabled").trim().toLowerCase();
+  const isWalkInEnabled = ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
 
   // Debounced patient search
   const debouncedPatientSearch = useCallback((query: string) => {
@@ -170,6 +177,60 @@ export default function QueuePage() {
     if (!window.confirm(t("common.confirmCancelAppointment"))) return;
     cancelMutation.mutate({ appointmentId });
   };
+  const enteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled") ?? [];
+  const notEnteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus === "scheduled") ?? [];
+  const enteredQueueLabel = language === "ar" ? "دخلوا إلى الطابور" : "Entered Queue";
+  const notEnteredQueueLabel = language === "ar" ? "لم يدخلوا الطابور بعد" : "Not Entered Yet";
+  const scheduledLabel = language === "ar" ? "مجدول" : "Scheduled";
+  const walkInLabel = language === "ar" ? "دخول مباشر" : "Walk-in";
+  const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => (
+    <li key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+        <div>
+          <p className="font-medium text-lg">
+            {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
+          </p>
+          <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
+          <p className="text-sm text-muted-foreground">
+            {chooseLocalized(language, entry.modalityNameAr, entry.modalityNameEn)}
+            {entry.examNameEn || entry.examNameAr ? ` • ${chooseLocalized(language, entry.examNameAr, entry.examNameEn)}` : ""}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            {entry.phone1 || t("queue.noId")} • {entry.nationalId || t("queue.noId")}
+          </p>
+          {entry.notes && <p className="text-sm text-muted-foreground">{entry.notes}</p>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge
+            variant={inQueue ? "warning" : "neutral"}
+            size="sm"
+          >
+            {inQueue ? entry.queueStatus : scheduledLabel}
+          </Badge>
+          {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
+          {queue?.reviewActive && entry.appointmentStatus === "scheduled" && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => handleNoShow(entry.appointmentId)}
+              style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
+            >
+              {t("queue.markNoShow")}
+            </Button>
+          )}
+          {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => handleCancel(entry.appointmentId)}
+            >
+              {t("queue.cancelAppointment")}
+            </Button>
+          )}
+        </div>
+      </div>
+    </li>
+  );
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -209,6 +270,7 @@ export default function QueuePage() {
              </form>
            </Card>
 
+           {isWalkInEnabled && (
            <Card className="p-4 sm:p-5">
              <h3 className="text-lg font-semibold mb-4">{t("queue.walkInPatient")}</h3>
             <div className="relative mb-4">
@@ -273,12 +335,13 @@ export default function QueuePage() {
                {walkInMutation.isPending ? t("queue.adding") : t("queue.addToQueue")}
              </Button>
            </Card>
+           )}
          </div>
 
          <div className="lg:col-span-2">
-           <Card className="overflow-hidden">
+           <Card className="overflow-hidden mb-4">
              <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")}</h3>
+               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")} - {enteredQueueLabel}</h3>
                {queue && (
                  <div className="flex gap-4 text-sm text-muted-foreground">
                    <span>{t("queue.waiting", { count: queue.summary.waiting_count })}</span>
@@ -287,47 +350,23 @@ export default function QueuePage() {
                )}
              </div>
 
-             {queue?.queueEntries.length === 0 ? (
+             {enteredQueueEntries.length === 0 ? (
                <div className="p-12 text-center text-muted-foreground">{t("queue.empty")}</div>
              ) : (
                <ul className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                 {queue?.queueEntries.map((entry) => (
-                   <li key={entry.id} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-muted/50 transition-colors">
-                     <div>
-                       <p className="font-medium text-lg">
-                         {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
-                       </p>
-                       <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
-                     </div>
-                     <div className="flex flex-wrap items-center gap-2">
-                       <Badge
-                         variant={entry.queueStatus === "waiting" ? "warning" : "neutral"}
-                         size="sm"
-                       >
-                         {entry.queueStatus}
-                       </Badge>
-                       {queue.reviewActive && entry.appointmentStatus === "scheduled" && (
-                         <Button
-                           size="sm"
-                           variant="secondary"
-                           onClick={() => handleNoShow(entry.appointmentId)}
-                           style={{ color: "#ef4444", borderColor: "rgba(239, 68, 68, 0.3)", backgroundColor: "rgba(239, 68, 68, 0.05)" }}
-                         >
-                           {t("queue.markNoShow")}
-                         </Button>
-                       )}
-                       {["scheduled", "arrived", "waiting"].includes(entry.appointmentStatus) && (
-                       <Button
-                         size="sm"
-                         variant="secondary"
-                         onClick={() => handleCancel(entry.appointmentId)}
-                       >
-                          {t("queue.cancelAppointment")}
-                       </Button>
-                       )}
-                     </div>
-                   </li>
-                 ))}
+                 {enteredQueueEntries.map((entry) => renderQueueEntry(entry, true))}
+               </ul>
+             )}
+           </Card>
+           <Card className="overflow-hidden">
+             <div className="p-4 border-b border-border">
+               <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")} - {notEnteredQueueLabel}</h3>
+             </div>
+             {notEnteredQueueEntries.length === 0 ? (
+               <div className="p-8 text-center text-muted-foreground">{t("queue.empty")}</div>
+             ) : (
+               <ul className="divide-y divide-border max-h-[450px] overflow-y-auto">
+                 {notEnteredQueueEntries.map((entry) => renderQueueEntry(entry, false))}
                </ul>
              )}
            </Card>
