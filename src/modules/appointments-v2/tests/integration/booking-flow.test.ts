@@ -539,6 +539,84 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
     });
   });
 
+  describe("Public appointment URL resilience", () => {
+    it("read appointments endpoints still return rows when PUBLIC_APP_BASE_URL is missing, with null public_appointment_url", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-06-11",
+          caseCategory: "non_oncology",
+          notes: "URL resilience test",
+        },
+      });
+      const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
+      process.env.PUBLIC_APP_BASE_URL = "";
+      try {
+        const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-11&dateTo=2026-06-11`);
+        assert.equal(readList.status, 200);
+        const readRows = (readList.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+        const row = readRows.find((entry) => Number(entry.id) === bookingId);
+        assert.ok(row, "created booking should still be present in read list");
+        assert.equal(row?.public_appointment_url ?? null, null);
+
+        const readDetails = await fetch(`/api/v2/read/appointments/${bookingId}`);
+        assert.equal(readDetails.status, 200);
+        const details = (readDetails.data as Record<string, unknown>).appointment as Record<string, unknown>;
+        assert.equal(Number(details.id), bookingId);
+        assert.equal(details.public_appointment_url ?? null, null);
+
+        const queueRes = await fetch("/api/v2/read/queue");
+        assert.equal(queueRes.status, 200);
+
+        const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
+        assert.equal(modalityRes.status, 200);
+      } finally {
+        if (previousBaseUrl == null) {
+          delete process.env.PUBLIC_APP_BASE_URL;
+        } else {
+          process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
+        }
+      }
+    });
+
+    it("read appointments list still returns rows when PUBLIC_APP_BASE_URL is invalid", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-06-12",
+          caseCategory: "non_oncology",
+          notes: "Invalid URL resilience test",
+        },
+      });
+      const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
+      process.env.PUBLIC_APP_BASE_URL = "not-a-valid-absolute-url";
+      try {
+        const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-12&dateTo=2026-06-12`);
+        assert.equal(readList.status, 200);
+        const readRows = (readList.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+        const row = readRows.find((entry) => Number(entry.id) === bookingId);
+        assert.ok(row, "created booking should still be present in read list");
+        assert.equal(row?.public_appointment_url ?? null, null);
+      } finally {
+        if (previousBaseUrl == null) {
+          delete process.env.PUBLIC_APP_BASE_URL;
+        } else {
+          process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
+        }
+      }
+    });
+  });
+
   describe("Reschedule status guards", () => {
     it("should reject rescheduling a no-show booking", async () => {
       guard();

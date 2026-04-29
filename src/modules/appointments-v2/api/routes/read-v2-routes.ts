@@ -16,6 +16,22 @@ interface AuthedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
 
+function safeBuildPublicAppointmentUrl(token: string, context: string): string | null {
+  try {
+    return buildPublicAppointmentUrl(token);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error ?? "unknown_error");
+    console.error(
+      JSON.stringify({
+        type: "appointments_v2_public_appointment_url_generation_failed",
+        context,
+        message,
+      })
+    );
+    return null;
+  }
+}
+
 function parseStatuses(input: unknown): string[] {
   if (Array.isArray(input)) return input.map((v) => String(v)).filter(Boolean);
   if (typeof input === "string" && input.trim()) return [input.trim()];
@@ -152,7 +168,9 @@ router.get(
       return {
         ...row,
         public_cancel_token: publicCancelToken,
-        public_appointment_url: publicCancelToken ? buildPublicAppointmentUrl(publicCancelToken) : null,
+        public_appointment_url: publicCancelToken
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_list")
+          : null,
       };
     });
 
@@ -241,7 +259,9 @@ router.get(
       appointment: {
         ...appointment,
         public_cancel_token: publicCancelToken,
-        public_appointment_url: publicCancelToken ? buildPublicAppointmentUrl(publicCancelToken) : null,
+        public_appointment_url: publicCancelToken
+          ? safeBuildPublicAppointmentUrl(publicCancelToken, "read_v2_details")
+          : null,
       },
     });
   })
