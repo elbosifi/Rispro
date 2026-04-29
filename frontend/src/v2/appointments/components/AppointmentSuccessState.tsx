@@ -11,6 +11,7 @@ interface Props {
     modalityName: string;
     examTypeName?: string | null;
     wasOverride: boolean;
+    publicAppointmentUrl?: string | null;
   };
   onPrintView: () => void;
   onPrintNow: () => void;
@@ -28,6 +29,7 @@ export function AppointmentSuccessState({
   onViewDetails,
 }: Props) {
   const { language } = useLanguage();
+  const publicAppointmentUrl = String(appointmentSummary.publicAppointmentUrl || "").trim();
   return (
     <div className="card-shell p-6" style={{ background: "rgba(34, 197, 94, 0.1)" }}>
       <h3 className="text-lg font-bold mb-4" style={{ color: "var(--green)" }}>
@@ -53,6 +55,15 @@ export function AppointmentSuccessState({
       <div className="flex flex-wrap gap-4 mb-6">
         <button type="button" className="btn-secondary" onClick={onPrintView}>{t(language, "appointments.create.printView")}</button>
         <button type="button" className="btn-secondary" onClick={onPrintNow} disabled={printNowDisabled}>{t(language, "appointments.create.printNow")}</button>
+        {publicAppointmentUrl ? (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => window.open(publicAppointmentUrl, "_blank", "noopener,noreferrer")}
+          >
+            {t(language, "registrations.viewAppointmentLink")}
+          </button>
+        ) : null}
         <button type="button" className="btn-secondary" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</button>
         <button type="button" className="btn-primary" onClick={onCreateAnother}>{t(language, "appointments.create.createAnother")}</button>
       </div>

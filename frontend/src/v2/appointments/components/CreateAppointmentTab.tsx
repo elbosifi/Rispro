@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { fetchAppointments, fetchPatientQrSettings } from "@/lib/api-hooks";
+import { fetchAppointments, fetchPatientQrSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
@@ -60,6 +60,7 @@ interface SuccessSummary {
   modalityName: string;
   examTypeName?: string | null;
   wasOverride: boolean;
+  publicAppointmentUrl?: string | null;
 }
 
 const AVAILABILITY_WINDOW_DAYS = 14;
@@ -297,6 +298,13 @@ export function CreateAppointmentTab({
     const modalityName = chooseLocalized(language, modalityRecord?.nameAr, modalityRecord?.nameEn) || modalityRecord?.name || "—";
     const examTypeRecord = effectiveExamTypes.find((et) => et.id === form.examTypeId);
     const examTypeName = chooseLocalized(language, examTypeRecord?.nameAr, examTypeRecord?.nameEn) || examTypeRecord?.name || null;
+    let publicAppointmentUrl: string | null = null;
+    try {
+      const appointmentDetails = await getAppointmentById(response.booking.id);
+      publicAppointmentUrl = String(appointmentDetails.publicAppointmentUrl || "").trim() || null;
+    } catch {
+      publicAppointmentUrl = null;
+    }
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,
@@ -309,6 +317,7 @@ export function CreateAppointmentTab({
       modalityName,
       examTypeName,
       wasOverride: response.wasOverride,
+      publicAppointmentUrl,
     });
 
     if (decision.consumedCapacityMode === "special") {

@@ -22,6 +22,10 @@ const mockFetchPatientQrSettings = vi.fn(async () => ({
   defaultReportRequiredForOncology: true,
   defaultReportRequiredForNonOncology: false,
 }));
+const mockGetAppointmentById = vi.fn(async (id: number) => ({
+  id,
+  publicAppointmentUrl: `https://rispro.nccb.com.ly/public/appointment?t=token-${id}`,
+}));
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
   async () => []
 );
@@ -37,6 +41,7 @@ const mockPrintAppointmentSlipById = vi.fn<(appointmentId: number) => Promise<vo
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
   fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
+  getAppointmentById: (id: number) => mockGetAppointmentById(id),
   listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
     mockListAppointmentDocuments(appointmentId, appointmentRefType),
   uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
@@ -339,6 +344,11 @@ describe("CreateAppointmentTab UI interactions", () => {
     localStorage.setItem("rispro-language", "en");
     mockFetchAppointments.mockReset();
     mockFetchAppointments.mockResolvedValue([]);
+    mockGetAppointmentById.mockReset();
+    mockGetAppointmentById.mockImplementation(async (id: number) => ({
+      id,
+      publicAppointmentUrl: `https://rispro.nccb.com.ly/public/appointment?t=token-${id}`,
+    }));
     mockListAppointmentDocuments.mockReset();
     mockListAppointmentDocuments.mockResolvedValue([]);
     mockUploadAppointmentDocument.mockReset();
@@ -742,6 +752,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     it("View Details navigates to /print?appointmentId=<id>", async () => {
       setupSuccess();
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
       fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
       fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
@@ -751,6 +762,13 @@ describe("CreateAppointmentTab UI interactions", () => {
       await waitFor(() => {
         expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
       });
+      expect(screen.getByRole("button", { name: "View Appointment Link" })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "View Appointment Link" }));
+      expect(openSpy).toHaveBeenCalledWith(
+        "https://rispro.nccb.com.ly/public/appointment?t=token-42",
+        "_blank",
+        "noopener,noreferrer"
+      );
 
       await userEvent.click(screen.getByRole("button", { name: "View Details" }));
 
