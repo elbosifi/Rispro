@@ -18,7 +18,7 @@ const GET_BOOKED_COUNT_SQL = `
   where modality_id = $1
     and booking_date = $2
     and case_category = $3
-    and status not in ('cancelled', 'discontinued')
+    and status not in ('cancelled', 'discontinued', 'voided')
 `;
 
 export async function getBookedCountForDate(
@@ -43,7 +43,7 @@ const GET_BOOKED_COUNTS_BY_CATEGORY_SQL = `
   from appointments_v2.bookings
   where modality_id = $1
     and booking_date = $2
-    and status not in ('cancelled', 'discontinued')
+    and status not in ('cancelled', 'discontinued', 'voided')
 `;
 
 export async function getBookedCountsByCategoryForDate(
@@ -71,7 +71,7 @@ const GET_SPECIAL_QUOTA_BOOKED_COUNT_SQL = `
   where modality_id = $1
     and booking_date = $2
     and exam_type_id = $3
-    and status not in ('cancelled', 'discontinued')
+    and status not in ('cancelled', 'discontinued', 'voided')
     and uses_special_quota = true
 `;
 
@@ -101,7 +101,7 @@ const GET_EXAM_MIX_CONSUMED_BY_RULES_SQL = `
   left join appointments_v2.bookings b
     on b.modality_id = emqr.modality_id
    and b.booking_date = $3
-   and b.status not in ('cancelled', 'discontinued')
+   and b.status not in ('cancelled', 'discontinued', 'voided')
    and b.uses_special_quota = false
    and b.exam_type_id = emqri.exam_type_id
   where emqr.policy_version_id = $1

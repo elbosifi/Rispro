@@ -92,6 +92,7 @@ describe("List bookings — BookingWithPatientInfo shape", () => {
       "discontinued",
       "no-show",
       "cancelled",
+      "voided",
     ] as const;
 
     for (const status of statuses) {
@@ -267,7 +268,7 @@ describe("List bookings — includeCancelled", () => {
     const repoPath = "/Users/serajalsaifi/Nextcloud/RISpro/src/modules/appointments-v2/booking/repositories/booking.repo.ts";
     const content = await fs.readFile(repoPath, "utf-8");
     assert.ok(content.includes("includeCancelled: boolean"));
-    assert.ok(content.includes("($4 = true or b.status not in ('cancelled', 'discontinued'))"));
+    assert.ok(content.includes("($4 = true or b.status not in ('cancelled', 'discontinued', 'voided'))"));
     assert.ok(content.includes("params.includeCancelled"));
   });
 
@@ -309,7 +310,7 @@ describe("List bookings — includeCancelled", () => {
     const content = await fs.readFile(pagePath, "utf-8");
     assert.ok(content.includes("includeCancelled"));
     assert.ok(content.includes("setIncludeCancelled"));
-    assert.ok(content.includes("Include cancelled/discontinued"));
+    assert.ok(content.includes("Include cancelled/discontinued/voided"));
     assert.ok(content.includes('type="checkbox"'));
   });
 
@@ -317,7 +318,7 @@ describe("List bookings — includeCancelled", () => {
     const fs = await import("node:fs/promises");
     const pagePath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/v2/appointments/page.tsx";
     const content = await fs.readFile(pagePath, "utf-8");
-    assert.ok(content.includes('booking.status === "cancelled" || booking.status === "discontinued"'));
+    assert.ok(content.includes('booking.status === "cancelled" || booking.status === "discontinued" || booking.status === "voided"'));
     assert.ok(content.includes("opacity"));
   });
 });

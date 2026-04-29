@@ -27,6 +27,9 @@ export interface Booking {
   createdByUserId: number | null;
   updatedAt: string;
   updatedByUserId: number | null;
+  voidedAt?: string | null;
+  voidedByUserId?: number | null;
+  voidReason?: string | null;
 }
 
 export interface CreateBookingPayload {

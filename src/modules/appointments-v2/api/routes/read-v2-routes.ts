@@ -73,6 +73,8 @@ router.get(
     if (status.length > 0) {
       params.push(status);
       where.push(`b.status = any($${params.length}::text[])`);
+    } else {
+      where.push(`b.status not in ('cancelled', 'discontinued', 'voided')`);
     }
 
     if (q) {
@@ -449,6 +451,7 @@ router.get(
             count(*) filter (where status = 'arrived')::int as arrived_count
           from appointments_v2.bookings
           where booking_date = $1::date
+            and status <> 'voided'
         `,
         [today]
       ),
@@ -646,6 +649,7 @@ router.get(
       left join exam_types et on et.id = b.exam_type_id
       left join reporting_priorities rp on rp.id = b.reporting_priority_id
       where b.modality_id = $1
+        and b.status in ('scheduled', 'arrived', 'waiting')
       ${dateClause}
       order by b.booking_date desc, modality_slot_number asc
       limit 300

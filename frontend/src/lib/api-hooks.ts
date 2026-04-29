@@ -1147,9 +1147,10 @@ export async function cancelAppointment(id: number, _cancelReason: string) {
   return { appointment: raw.booking };
 }
 
-export async function deleteAppointment(id: number) {
-  await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/cancel`, {
-    method: "POST"
+export async function deleteAppointment(id: number, voidReason: string) {
+  await api<{ booking: RawRecord; previousStatus: string }>(`/v2/appointments/${id}/void`, {
+    method: "POST",
+    body: JSON.stringify({ voidReason })
   });
   return { ok: true };
 }
@@ -1572,4 +1573,3 @@ export async function searchPacs(patientNationalId: string) {
     body: JSON.stringify({ patientNationalId })
   });
 }
-

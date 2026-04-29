@@ -11,6 +11,7 @@ import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { rescheduleBooking } from "../../booking/services/reschedule-booking.service.js";
 import { cancelBooking } from "../../booking/services/cancel-booking.service.js";
+import { voidBookingByStaff } from "../../booking/services/void-booking.service.js";
 import { getBookingDetails } from "../../booking/services/get-booking-details.service.js";
 import { listBookingsService } from "../../booking/services/list-bookings.service.js";
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
@@ -39,7 +40,7 @@ function isNonStandardCapacityResolutionMode(mode: CapacityResolutionMode): bool
  * - dateTo (required) — ISO yyyy-mm-dd
  * - limit (optional, default 50)
  * - offset (optional, default 0)
- * - includeCancelled (optional, default false) — include cancelled and discontinued bookings in results
+ * - includeCancelled (optional, default false) — include cancelled and discontinued bookings in results (and voided when present)
  */
 router.get(
   "/",
@@ -232,6 +233,32 @@ router.post(
     const userId = Number(req.user?.sub ?? 0);
 
     const result = await cancelBooking(bookingId, userId);
+
+    res.json({
+      booking: result.booking,
+      previousStatus: result.previousStatus,
+    });
+  })
+);
+
+/**
+ * POST /api/v2/appointments/:id/void
+ * Staff void for correction (soft-delete semantics).
+ */
+router.post(
+  "/:id/void",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const bookingId = parseInt(String(req.params.id), 10);
+    if (isNaN(bookingId)) {
+      res.status(400).json({ error: "Invalid booking ID" });
+      return;
+    }
+
+    const userId = Number(req.user?.sub ?? 0);
+    const userRole = req.user?.role;
+    const voidReason = String((req.body as { voidReason?: string } | undefined)?.voidReason ?? "");
+
+    const result = await voidBookingByStaff(bookingId, userId, userRole, voidReason);
 
     res.json({
       booking: result.booking,

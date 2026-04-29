@@ -70,10 +70,10 @@ describe("Capacity repository — SQL query verification", () => {
     );
   });
 
-  it("excludes cancelled and discontinued bookings from active capacity", () => {
+  it("excludes cancelled, discontinued, and voided bookings from active capacity", () => {
     assert.ok(
-      source.includes("status not in ('cancelled', 'discontinued')"),
-      "Should exclude cancelled and discontinued bookings"
+      source.includes("status not in ('cancelled', 'discontinued', 'voided')"),
+      "Should exclude cancelled, discontinued, and voided bookings"
     );
   });
 

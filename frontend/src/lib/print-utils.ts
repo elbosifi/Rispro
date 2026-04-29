@@ -18,7 +18,7 @@ const ARABIC_REGEX = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE7
 const NOTO_FONT_FAMILY = "NotoNaskhArabic";
 const NOTO_REGULAR_FILE = "NotoNaskhArabic-Regular.ttf";
 const NOTO_BOLD_FILE = "NotoNaskhArabic-Bold.ttf";
-const HIDDEN_APPOINTMENT_STATUSES = new Set(["cancelled", "discontinued"]);
+const HIDDEN_APPOINTMENT_STATUSES = new Set(["cancelled", "discontinued", "voided"]);
 
 let notoFontsLoaded: Promise<void> | null = null;
 

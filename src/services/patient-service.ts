@@ -1446,7 +1446,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en)
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
-        where b.patient_id = fp.id and b.booking_date < current_date and b.status not in ('cancelled')
+        where b.patient_id = fp.id and b.booking_date < current_date and b.status not in ('cancelled', 'voided')
         order by b.booking_date desc
         limit 1
       ) as last_appointment,
@@ -1454,7 +1454,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         select json_build_object('id', b.id, 'date', b.booking_date::text, 'status', b.status, 'modalityName', m.name_en)
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
-        where b.patient_id = fp.id and b.booking_date >= current_date and b.status not in ('cancelled')
+        where b.patient_id = fp.id and b.booking_date >= current_date and b.status not in ('cancelled', 'voided')
         order by b.booking_date asc
         limit 1
       ) as next_appointment,
@@ -1465,7 +1465,7 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
         'missingName', fp.arabic_full_name is null or fp.arabic_full_name = '',
         'noAppointment', not exists (
           select 1 from appointments_v2.bookings b2
-          where b2.patient_id = fp.id and b2.status not in ('cancelled')
+          where b2.patient_id = fp.id and b2.status not in ('cancelled', 'voided')
         ),
         'possibleDuplicate', false,
         'duplicateReasons', array[]::text[]
@@ -1500,11 +1500,11 @@ function getAppointmentFilterClause(filter?: string): string {
   if (!filter) return "";
   switch (filter) {
     case "has_future":
-      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status not in ('cancelled'))";
+      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status in ('scheduled', 'arrived', 'waiting'))";
     case "today":
-      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date = current_date and b2.status not in ('cancelled'))";
+      return " and exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date = current_date and b2.status in ('scheduled', 'arrived', 'waiting'))";
     case "no_future":
-      return " and not exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status not in ('cancelled'))";
+      return " and not exists (select 1 from appointments_v2.bookings b2 where b2.patient_id = p.id and b2.booking_date >= current_date and b2.status in ('scheduled', 'arrived', 'waiting'))";
     default:
       return "";
   }
@@ -1592,7 +1592,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
-        where b.patient_id = $1 and b.booking_date < current_date and b.status not in ('cancelled')
+        where b.patient_id = $1 and b.booking_date < current_date and b.status not in ('cancelled', 'voided')
         order by b.booking_date desc
         limit 1
       `,
@@ -1609,7 +1609,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
-        where b.patient_id = $1 and b.booking_date >= current_date and b.status not in ('cancelled')
+        where b.patient_id = $1 and b.booking_date >= current_date and b.status not in ('cancelled', 'voided')
         order by b.booking_date asc
         limit 1
       `,
@@ -1626,7 +1626,7 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
-        where b.patient_id = $1 and b.status not in ('cancelled')
+        where b.patient_id = $1 and b.status not in ('cancelled', 'voided')
         order by b.booking_date desc, b.id desc
         limit 5
       `,

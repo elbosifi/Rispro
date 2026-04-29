@@ -560,7 +560,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
             onChange={(e) => setIncludeCancelled(e.target.checked)}
             className="w-4 h-4 cursor-pointer accent-[var(--accent)]"
           />
-          {language === "ar" ? "تضمين الملغاة والمتوقفة" : "Include cancelled/discontinued"}
+          {language === "ar" ? "تضمين الملغاة والمتوقفة والمبطلة" : "Include cancelled/discontinued/voided"}
         </label>
       </div>
 
@@ -612,7 +612,7 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
                     className="border-b transition-colors hover:bg-[var(--muted)]"
                     style={{
                       borderColor: "var(--border)",
-                      opacity: booking.status === "cancelled" || booking.status === "discontinued" ? 0.6 : 1,
+                      opacity: booking.status === "cancelled" || booking.status === "discontinued" || booking.status === "voided" ? 0.6 : 1,
                     }}
                   >
                   <td className="p-3">
@@ -724,6 +724,7 @@ function BookingStatusBadge({ status }: { status: string }) {
     completed: { label: language === "ar" ? "مكتمل" : "Completed", color: "var(--text-muted)", bg: "var(--muted)" },
     discontinued: { label: language === "ar" ? "متوقف" : "Discontinued", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.12)" },
     cancelled: { label: language === "ar" ? "ملغي" : "Cancelled", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.08)" },
+    voided: { label: language === "ar" ? "مبطل" : "Voided", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
     "no-show": { label: language === "ar" ? "لم يحضر" : "No-Show", color: "var(--accent)", bg: "rgba(255, 71, 87, 0.1)" },
   };
 

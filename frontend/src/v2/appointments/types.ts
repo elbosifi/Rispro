@@ -14,7 +14,8 @@ export type BookingStatus =
   | "completed"
   | "discontinued"
   | "no-show"
-  | "cancelled";
+  | "cancelled"
+  | "voided";
 
 /**
  * Booking statuses that allow rescheduling.

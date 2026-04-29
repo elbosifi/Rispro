@@ -9,7 +9,8 @@ export type AppointmentStatus =
   | "completed"
   | "discontinued"
   | "no-show"
-  | "cancelled";
+  | "cancelled"
+  | "voided";
 
 export type QueueStatus = "waiting" | "called" | "in-progress" | "removed";
 

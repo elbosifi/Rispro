@@ -9,7 +9,7 @@ import { scheduleBookingWorklistSync } from "./dicom-service.js";
 export type MppsEventType = "n-create" | "n-set";
 export type MppsCorrelationStatus = "matched" | "unmatched" | "ambiguous";
 export type MppsProcessingStatus = "received" | "processed" | "ignored" | "failed";
-export type BookingWorkflowStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued";
+export type BookingWorkflowStatus = "scheduled" | "arrived" | "waiting" | "completed" | "no-show" | "cancelled" | "discontinued" | "voided";
 
 export interface IncomingMppsEventPayload {
   eventType?: unknown;

@@ -56,11 +56,12 @@ afterEach(() => {
 });
 
 describe("print list helpers", () => {
-  it("filters cancelled and discontinued appointments out of list printing", () => {
+  it("filters cancelled, discontinued, and voided appointments out of list printing", () => {
     const appointments = [
       makeAppointment("scheduled"),
       makeAppointment("cancelled"),
       makeAppointment("discontinued"),
+      makeAppointment("voided"),
     ];
 
     const visible = filterVisibleAppointments(appointments);

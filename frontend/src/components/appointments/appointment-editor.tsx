@@ -123,15 +123,15 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
   });
 
   const deleteMutation = useMutation({
-    mutationFn: () => deleteAppointment(appointment.id),
+    mutationFn: (voidReason: string) => deleteAppointment(appointment.id, voidReason),
     meta: {
       suppressGlobalToast: true
     },
     onSuccess: () => {
       pushToast({
         type: "success",
-        title: t(language, "appointmentEditor.toastDeleted"),
-        message: t(language, "appointmentEditor.toastDeletedMsg")
+        title: t(language, "appointmentEditor.toastVoided"),
+        message: t(language, "appointmentEditor.toastVoidedMsg")
       });
       queryClient.invalidateQueries();
       onDeleted?.();
@@ -139,8 +139,8 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
     onError: (err: any) => {
       pushToast({
         type: "error",
-        title: t(language, "appointmentEditor.toastDeleteFailed"),
-        message: err?.message || t(language, "appointmentEditor.toastDeleteFailedMsg")
+        title: t(language, "appointmentEditor.toastVoidFailed"),
+        message: err?.message || t(language, "appointmentEditor.toastVoidFailedMsg")
       });
     }
   });
@@ -237,14 +237,25 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
           <button
             type="button"
             onClick={() => {
-              if (window.confirm(t(language, "appointmentEditor.deleteConfirm"))) {
-                deleteMutation.mutate();
+              const voidReason = window.prompt(t(language, "appointmentEditor.voidReasonPrompt"), "");
+              if (voidReason == null) return;
+              const trimmed = voidReason.trim();
+              if (!trimmed) {
+                pushToast({
+                  type: "error",
+                  title: t(language, "appointmentEditor.toastVoidFailed"),
+                  message: t(language, "appointmentEditor.voidReasonRequired")
+                });
+                return;
+              }
+              if (window.confirm(t(language, "appointmentEditor.voidConfirm"))) {
+                deleteMutation.mutate(trimmed);
               }
             }}
             disabled={deleteMutation.isPending}
             className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-sm font-medium transition-colors"
           >
-            {deleteMutation.isPending ? t(language, "appointmentEditor.deleting") : t(language, "appointmentEditor.delete")}
+            {deleteMutation.isPending ? t(language, "appointmentEditor.voiding") : t(language, "appointmentEditor.void")}
           </button>
           <button
             type="button"

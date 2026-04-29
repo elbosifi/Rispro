@@ -28,7 +28,8 @@ const INSERT_SQL = `
     special_reason_note as "specialReasonNote",
     is_walk_in as "isWalkIn",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
-    updated_at as "updatedAt", updated_by_user_id as "updatedByUserId"
+    updated_at as "updatedAt", updated_by_user_id as "updatedByUserId",
+    voided_at as "voidedAt", voided_by_user_id as "voidedByUserId", void_reason as "voidReason"
 `;
 
 export async function insertBooking(
@@ -91,7 +92,8 @@ const FIND_BY_ID_SQL = `
     special_reason_note as "specialReasonNote",
     is_walk_in as "isWalkIn",
     created_at as "createdAt", created_by_user_id as "createdByUserId",
-    updated_at as "updatedAt", updated_by_user_id as "updatedByUserId"
+    updated_at as "updatedAt", updated_by_user_id as "updatedByUserId",
+    voided_at as "voidedAt", voided_by_user_id as "voidedByUserId", void_reason as "voidReason"
   from appointments_v2.bookings
   where id = $1
 `;
@@ -118,6 +120,27 @@ export async function updateBookingStatus(
   userId: number
 ): Promise<void> {
   await client.query(UPDATE_STATUS_SQL, [status, userId, bookingId]);
+}
+
+const VOID_BOOKING_SQL = `
+  update appointments_v2.bookings
+  set
+    status = 'voided',
+    void_reason = $1,
+    voided_at = now(),
+    voided_by_user_id = $2,
+    updated_at = now(),
+    updated_by_user_id = $2
+  where id = $3
+`;
+
+export async function voidBooking(
+  client: PoolClient,
+  bookingId: number,
+  voidReason: string,
+  userId: number
+): Promise<void> {
+  await client.query(VOID_BOOKING_SQL, [voidReason, userId, bookingId]);
 }
 
 const UPDATE_DATE_TIME_SQL = `
@@ -250,7 +273,7 @@ const LIST_BOOKINGS_SQL = `
   where b.modality_id = $1
     and b.booking_date >= $2
     and b.booking_date <= $3
-    and ($4 = true or b.status not in ('cancelled', 'discontinued'))
+    and ($4 = true or b.status not in ('cancelled', 'discontinued', 'voided'))
   order by b.booking_date asc, b.booking_time asc nulls first, b.created_at desc
   limit $5
   offset $6
@@ -328,7 +351,7 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
       from appointments_v2.bookings slot
       where slot.modality_id = bb.modality_id
         and slot.booking_date = bb.appointment_date::date
-        and slot.status not in ('cancelled', 'discontinued')
+        and slot.status not in ('cancelled', 'discontinued', 'voided')
         and slot.id <= bb.id
     )::int as modality_slot_number,
     bb.status,

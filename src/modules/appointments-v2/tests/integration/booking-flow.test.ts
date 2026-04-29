@@ -372,6 +372,54 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       assert.equal(result.previousStatus, "scheduled");
     });
 
+    it("void endpoint should require a reason", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-05-28",
+          caseCategory: "non_oncology",
+          notes: "Booking to void without reason",
+        },
+      });
+      const localBookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+
+      const { status } = await fetch(`/api/v2/appointments/${localBookingId}/void`, {
+        method: "POST",
+        body: { voidReason: "  " },
+      });
+      assert.equal(status, 400);
+    });
+
+    it("void endpoint should mark scheduled booking as voided", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-05-28",
+          caseCategory: "non_oncology",
+          notes: "Booking to void",
+        },
+      });
+      const localBookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+
+      const { status, data } = await fetch(`/api/v2/appointments/${localBookingId}/void`, {
+        method: "POST",
+        body: { voidReason: "Wrong date entered" },
+      });
+      assert.equal(status, 200);
+      const result = data as Record<string, unknown>;
+      const booking = result.booking as Record<string, unknown>;
+      assert.equal(booking.status, "voided");
+      assert.equal(result.previousStatus, "scheduled");
+    });
+
     it("should reject cancelling an already cancelled booking", async () => {
       guard();
       const { status } = await fetch(`/api/v2/appointments/${bookingId}/cancel`, { method: "POST" });
@@ -418,6 +466,76 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
 
       const { status } = await fetch(`/api/v2/appointments/${noShowBookingId}/cancel`, { method: "POST" });
       assert.equal(status, 409);
+    });
+  });
+
+  describe("Void guards", () => {
+    it("should reject voiding completed/no-show/cancelled/discontinued/already-voided bookings", async () => {
+      guard();
+      const { pool } = await import("../../../../db/pool.js");
+      const statuses = ["completed", "no-show", "cancelled", "discontinued", "voided"] as const;
+
+      for (const statusToSet of statuses) {
+        const createResult = await fetch("/api/v2/appointments", {
+          method: "POST",
+          body: {
+            patientId: testData.patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: "2026-06-02",
+            caseCategory: "non_oncology",
+          },
+        });
+        const bookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+        await pool.query(`update appointments_v2.bookings set status = $2 where id = $1`, [bookingId, statusToSet]);
+        const { status } = await fetch(`/api/v2/appointments/${bookingId}/void`, {
+          method: "POST",
+          body: { voidReason: "Staff correction" },
+        });
+        assert.equal(status, 409);
+      }
+    });
+  });
+
+  describe("Active workflow exclusion", () => {
+    it("voided bookings are excluded from read appointments default, queue, and modality worklist", async () => {
+      guard();
+      const createResult = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: testData.patientId,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2026-06-10",
+          caseCategory: "non_oncology",
+          notes: "To be voided and excluded",
+        },
+      });
+      const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      await fetch(`/api/v2/appointments/${bookingId}/void`, {
+        method: "POST",
+        body: { voidReason: "Duplicate entry" },
+      });
+
+      const readDefault = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-10&dateTo=2026-06-10`);
+      assert.equal(readDefault.status, 200);
+      const readRows = (readDefault.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      assert.equal(readRows.some((row) => Number(row.id) === bookingId), false);
+
+      const readExplicit = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-10&dateTo=2026-06-10&status=voided`);
+      assert.equal(readExplicit.status, 200);
+      const readExplicitRows = (readExplicit.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      assert.equal(readExplicitRows.some((row) => Number(row.id) === bookingId), true);
+
+      const queueRes = await fetch("/api/v2/read/queue");
+      assert.equal(queueRes.status, 200);
+      const queueRows = (queueRes.data as Record<string, unknown>).queue_entries as Array<Record<string, unknown>>;
+      assert.equal(queueRows.some((row) => Number(row.appointment_id) === bookingId), false);
+
+      const modalityRes = await fetch(`/api/v2/read/modality/worklist?modalityId=${testData.modalityId}&scope=all`);
+      assert.equal(modalityRes.status, 200);
+      const modalityRows = (modalityRes.data as Record<string, unknown>).appointments as Array<Record<string, unknown>>;
+      assert.equal(modalityRows.some((row) => Number(row.id) === bookingId), false);
     });
   });
 
