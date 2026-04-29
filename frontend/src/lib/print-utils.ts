@@ -1,6 +1,5 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
-import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   DEFAULT_PATIENT_QR_SETTINGS,
@@ -302,11 +301,13 @@ function buildSlipQrPayload(
   settings: AppointmentSlipSettings,
   patientQrSettings: PatientQrSettings
 ): string {
+  const publicAppointmentUrl = String(apt.publicAppointmentUrl || "").trim();
   const token = String(apt.publicCancelToken || "").trim();
   if (!settings.showQrCode) return "";
   if (!patientQrSettings.enabled || !patientQrSettings.printQrOnAppointmentSlip) return "";
+  if (publicAppointmentUrl) return publicAppointmentUrl;
   if (!token) return "";
-  return buildPatientAppointmentUrl(token, window.location.origin);
+  return "";
 }
 
 function buildSlipBarcodePayload(apt: AppointmentWithDetails, settings: AppointmentSlipSettings): string {

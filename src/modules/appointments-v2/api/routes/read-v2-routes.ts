@@ -7,6 +7,7 @@ import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
+import { buildPublicAppointmentUrl } from "../../public/utils/public-appointment-url.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -143,13 +144,17 @@ router.get(
     `;
 
     const result = await pool.query(sql, params);
-    const appointments = result.rows.map((row) => ({
-      ...row,
-      public_cancel_token:
+    const appointments = result.rows.map((row) => {
+      const publicCancelToken =
         patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
           ? issuePublicCancelToken(Number(row.id))
-          : null,
-    }));
+          : null;
+      return {
+        ...row,
+        public_cancel_token: publicCancelToken,
+        public_appointment_url: publicCancelToken ? buildPublicAppointmentUrl(publicCancelToken) : null,
+      };
+    });
 
     res.json({ appointments });
   })
@@ -227,13 +232,16 @@ router.get(
       return;
     }
 
+    const publicCancelToken =
+      patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
+        ? issuePublicCancelToken(bookingId)
+        : null;
+
     res.json({
       appointment: {
         ...appointment,
-        public_cancel_token:
-          patientQrSettings.enabled && patientQrSettings.printQrOnAppointmentSlip
-            ? issuePublicCancelToken(bookingId)
-            : null,
+        public_cancel_token: publicCancelToken,
+        public_appointment_url: publicCancelToken ? buildPublicAppointmentUrl(publicCancelToken) : null,
       },
     });
   })

@@ -90,6 +90,7 @@ export interface AppointmentWithDetails extends Appointment {
   priorityNameEn: string | null;
   modalitySlotNumber: number | null;
   publicCancelToken?: string | null;
+  publicAppointmentUrl?: string | null;
   bookingTime?: string | null;
 }
 
@@ -283,6 +284,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     // Other
     modalitySlotNumber: numOrNull(raw, 'modality_slot_number') ?? numOrNull(raw, 'modalitySlotNumber'),
     publicCancelToken: strOrNull(raw, 'public_cancel_token') ?? strOrNull(raw, 'publicCancelToken'),
+    publicAppointmentUrl: strOrNull(raw, "public_appointment_url") ?? strOrNull(raw, "publicAppointmentUrl"),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

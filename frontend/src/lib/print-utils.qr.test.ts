@@ -59,6 +59,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     priorityNameEn: "Routine",
     modalitySlotNumber: null,
     publicCancelToken: "signed-token",
+    publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=signed-token",
     ...overrides,
   };
 }
@@ -196,7 +197,43 @@ describe("appointment slip QR and layout behavior", () => {
       patientQrSettings: makePatientQrSettings(),
     });
 
-    expect(slip.queueQrPayload).toBe("http://localhost:3000/public/appointment?t=signed-token");
+    expect(slip.queueQrPayload).toBe("https://rispro.nccb.com.ly/public/appointment?t=signed-token");
+    expect(slip.queueQrPayload).toContain("/public/appointment?t=");
+    expect(slip.queueQrPayload).not.toContain("localhost");
+    expect(slip.queueQrPayload).not.toContain("192.168.");
+  });
+
+  it("uses canonical URL even when token exists and local browser origin differs", () => {
+    const slip = buildAppointmentSlipData(
+      makeAppointment({
+        publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=signed-token",
+      }),
+      {
+        slipSettings: makeSlipSettings(),
+        patientQrSettings: makePatientQrSettings(),
+      }
+    );
+    expect(slip.queueQrPayload).toBe("https://rispro.nccb.com.ly/public/appointment?t=signed-token");
+  });
+
+  it("print preview and print-now rendering paths use the same QR URL", async () => {
+    const appointment = makeAppointment({
+      publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=signed-token",
+    });
+    const slip = buildAppointmentSlipData(appointment, {
+      slipSettings: makeSlipSettings(),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    await prepareAppointmentSlipHtml(appointment, {
+      slipSettings: makeSlipSettings(),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(slip.queueQrPayload).toBe("https://rispro.nccb.com.ly/public/appointment?t=signed-token");
+    expect(toStringMock).toHaveBeenCalledWith(
+      "https://rispro.nccb.com.ly/public/appointment?t=signed-token",
+      expect.any(Object)
+    );
   });
 
   it("respects languageMode", async () => {
@@ -234,7 +271,7 @@ describe("appointment slip QR and layout behavior", () => {
       makePatientQrSettings()
     );
 
-    expect(html).not.toContain("qr-block");
+    expect(html).not.toContain("<aside class=\"qr-block\"");
     expect(layout.qrBlock).toBeNull();
   });
 
@@ -259,7 +296,7 @@ describe("appointment slip QR and layout behavior", () => {
       patientQrSettings: makePatientQrSettings(),
     });
 
-    expect(html).toContain("qr-block");
+    expect(html).toContain("<aside class=\"qr-block\"");
   });
 
   it("keeps barcode inside the safe area", () => {
