@@ -14,6 +14,7 @@ vi.mock("@/lib/api-hooks", () => ({
 
 const baseSettings = {
   enabled: true,
+  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
@@ -108,6 +109,7 @@ describe("PatientQrSettingsSection", () => {
 
     expect(await screen.findByText("إعدادات صفحة المريض ورمز QR")).toBeTruthy();
     expect(screen.getByDisplayValue("خدمة المريض عبر رمز QR")).toBeTruthy();
+    expect(screen.getByDisplayValue("https://rispro.nccb.com.ly")).toBeTruthy();
     expect(screen.getByDisplayValue("ورقة الإحالة")).toBeTruthy();
     expect(screen.getByDisplayValue("الطابق الأول / غرفة 3")).toBeTruthy();
     expect(screen.getByDisplayValue("شارع المستشفى")).toBeTruthy();
@@ -130,6 +132,7 @@ describe("PatientQrSettingsSection", () => {
     });
     const payload = vi.mocked(savePatientQrSettings).mock.calls[0][0];
     expect(payload.introTextAr).toBe("مقدمة جديدة");
+    expect(payload.risproPublicBaseUrl).toBe("https://rispro.nccb.com.ly");
     expect(payload.showLocationDirections).toBe(false);
     expect(payload.showBookingTime).toBe(true);
     expect(payload.location.roomUnitFloorAr).toBe("الطابق الأول / غرفة 3");
@@ -167,8 +170,11 @@ describe("PatientQrSettingsSection", () => {
     await user.type(screen.getByLabelText("رقم الهاتف الرئيسي"), "abc");
     await user.clear(screen.getByLabelText("رابط خرائط Google"));
     await user.type(screen.getByLabelText("رابط خرائط Google"), "bad-url");
+    await user.clear(screen.getByLabelText("رابط RISpro العام"));
+    await user.type(screen.getByLabelText("رابط RISpro العام"), "bad-url");
     await user.click(screen.getByRole("button", { name: /حفظ/i }));
 
+    expect(await screen.findByText("Public RISpro URL is invalid.")).toBeTruthy();
     expect(await screen.findByText("رقم الهاتف غير صالح.")).toBeTruthy();
     expect(screen.getByText("رابط خرائط Google غير صالح.")).toBeTruthy();
   });

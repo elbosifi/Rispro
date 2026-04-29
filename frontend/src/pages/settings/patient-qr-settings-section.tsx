@@ -12,6 +12,7 @@ interface PatientQrSettingsSectionProps {
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
+  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
@@ -156,6 +157,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
 
   const canSave = useMemo(() => {
     const nextErrors: Record<string, string> = {};
+    if (!isValidUrl(draft.risproPublicBaseUrl)) nextErrors.risproPublicBaseUrl = "Public RISpro URL is invalid.";
     if (!isValidPhone(draft.contact.primaryPhone)) nextErrors.contactPrimaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.secondaryPhone)) nextErrors.contactSecondaryPhone = "رقم الهاتف غير صالح.";
     if (!isValidPhone(draft.contact.whatsapp)) nextErrors.contactWhatsapp = "رقم الواتساب غير صالح.";
@@ -248,6 +250,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     if (!canSave.ok) return;
     mutation.mutate({
       ...draft,
+      risproPublicBaseUrl: draft.risproPublicBaseUrl.trim(),
       documentsChecklistAr: draft.documentsChecklistAr.map((item) => item.trim()).filter(Boolean),
       documentsChecklistEn: draft.documentsChecklistEn.map((item) => item.trim()).filter(Boolean),
       contact: {
@@ -312,6 +315,13 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       <div className="grid gap-4 lg:grid-cols-2">
         <FieldCard title={chooseLocalized(language, "التحكم العام", "General Controls")}>
           <ToggleRow label={chooseLocalized(language, "تفعيل صفحة QR للمرضى", "Enable QR Page for Patients")} checked={draft.enabled} onChange={(checked) => setDraft((current) => ({ ...current, enabled: checked }))} />
+          <Input
+            dir="ltr"
+            label={chooseLocalized(language, "رابط RISpro العام", "Public RISpro Base URL")}
+            value={draft.risproPublicBaseUrl}
+            onChange={(value) => setDraft((current) => ({ ...current, risproPublicBaseUrl: value }))}
+            error={errors.risproPublicBaseUrl}
+          />
           <ToggleRow label={chooseLocalized(language, "طباعة رمز QR على ورقة الموعد", "Print QR Code on Appointment Slip")} checked={draft.printQrOnAppointmentSlip} onChange={(checked) => setDraft((current) => ({ ...current, printQrOnAppointmentSlip: checked }))} />
           <ToggleRow label={chooseLocalized(language, "السماح بإلغاء الموعد", "Allow Appointment Cancellation")} checked={draft.allowCancellation} onChange={(checked) => setDraft((current) => ({ ...current, allowCancellation: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إضافة إلى التقويم", "Add to Calendar")} checked={draft.allowAddToCalendar} onChange={(checked) => setDraft((current) => ({ ...current, allowAddToCalendar: checked }))} />

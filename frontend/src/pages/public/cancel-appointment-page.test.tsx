@@ -20,6 +20,7 @@ vi.mock("@/lib/api-hooks", () => ({
 function baseSettings(overrides: Record<string, unknown> = {}) {
   return {
     enabled: true,
+    risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
     allowCancellation: true,
     allowAddToCalendar: true,

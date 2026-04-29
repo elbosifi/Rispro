@@ -554,7 +554,21 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         },
       });
       const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const { pool } = await import("../../../../db/pool.js");
+      const previousSetting = await pool.query(
+        `select setting_value from system_settings where category = 'patient_qr_self_service' and setting_key = 'config'`
+      );
       const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
+      await pool.query(
+        `
+          update system_settings
+          set setting_value = jsonb_build_object(
+            'value',
+            coalesce(setting_value->'value', '{}'::jsonb) || jsonb_build_object('risproPublicBaseUrl', '')
+          )
+          where category = 'patient_qr_self_service' and setting_key = 'config'
+        `
+      );
       process.env.PUBLIC_APP_BASE_URL = "";
       try {
         const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-11&dateTo=2026-06-11`);
@@ -581,6 +595,12 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         } else {
           process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
         }
+        if (previousSetting.rows[0]?.setting_value) {
+          await pool.query(
+            `update system_settings set setting_value = $1::jsonb where category = 'patient_qr_self_service' and setting_key = 'config'`,
+            [JSON.stringify(previousSetting.rows[0].setting_value)]
+          );
+        }
       }
     });
 
@@ -598,8 +618,22 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
         },
       });
       const bookingId = Number(((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id);
+      const { pool } = await import("../../../../db/pool.js");
+      const previousSetting = await pool.query(
+        `select setting_value from system_settings where category = 'patient_qr_self_service' and setting_key = 'config'`
+      );
       const previousBaseUrl = process.env.PUBLIC_APP_BASE_URL;
-      process.env.PUBLIC_APP_BASE_URL = "not-a-valid-absolute-url";
+      await pool.query(
+        `
+          update system_settings
+          set setting_value = jsonb_build_object(
+            'value',
+            coalesce(setting_value->'value', '{}'::jsonb) || jsonb_build_object('risproPublicBaseUrl', 'not-a-valid-absolute-url')
+          )
+          where category = 'patient_qr_self_service' and setting_key = 'config'
+        `
+      );
+      process.env.PUBLIC_APP_BASE_URL = "https://rispro.nccb.com.ly";
       try {
         const readList = await fetch(`/api/v2/read/appointments?dateFrom=2026-06-12&dateTo=2026-06-12`);
         assert.equal(readList.status, 200);
@@ -612,6 +646,12 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
           delete process.env.PUBLIC_APP_BASE_URL;
         } else {
           process.env.PUBLIC_APP_BASE_URL = previousBaseUrl;
+        }
+        if (previousSetting.rows[0]?.setting_value) {
+          await pool.query(
+            `update system_settings set setting_value = $1::jsonb where category = 'patient_qr_self_service' and setting_key = 'config'`,
+            [JSON.stringify(previousSetting.rows[0].setting_value)]
+          );
         }
       }
     });

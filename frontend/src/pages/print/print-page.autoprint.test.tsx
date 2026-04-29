@@ -122,6 +122,7 @@ const {
   };
   const mockPatientQrSettings = {
     enabled: true,
+    risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
   };
   return { mockAppointmentData, mockAppointment42Updated, mockAppointment99, mockSlipSettings, mockPatientQrSettings };

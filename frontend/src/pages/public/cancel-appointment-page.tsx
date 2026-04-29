@@ -39,6 +39,7 @@ const INST_AR = "المركز الوطني للأورام بنغازي";
 const DEPT_AR = "قسم الأشعة التشخيصية";
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
+  risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,

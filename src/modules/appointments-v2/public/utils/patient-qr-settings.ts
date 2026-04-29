@@ -29,6 +29,7 @@ export interface PatientQrLocationSettings {
 
 export interface PatientQrSettings {
   enabled: boolean;
+  risproPublicBaseUrl: string;
   printQrOnAppointmentSlip: boolean;
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
@@ -73,6 +74,7 @@ export interface PatientQrSettings {
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
+  risproPublicBaseUrl: "",
   printQrOnAppointmentSlip: true,
   allowCancellation: true,
   allowAddToCalendar: true,
@@ -190,6 +192,7 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
 
   return {
     enabled: asBoolean(record.enabled, DEFAULT_SETTINGS.enabled),
+    risproPublicBaseUrl: asString(record.risproPublicBaseUrl, DEFAULT_SETTINGS.risproPublicBaseUrl),
     printQrOnAppointmentSlip: asBoolean(record.printQrOnAppointmentSlip, DEFAULT_SETTINGS.printQrOnAppointmentSlip),
     allowCancellation: asBoolean(record.allowCancellation, DEFAULT_SETTINGS.allowCancellation),
     allowAddToCalendar: asBoolean(record.allowAddToCalendar, DEFAULT_SETTINGS.allowAddToCalendar),

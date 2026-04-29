@@ -27,25 +27,25 @@ function isPrivateOrLocalHost(hostname: string): boolean {
   return false;
 }
 
-function normalizePublicBaseUrl(rawValue: string): string {
+export function normalizePublicBaseUrl(rawValue: string, settingName = "PUBLIC_APP_BASE_URL"): string {
   const trimmed = String(rawValue || "").trim();
   if (!trimmed) {
-    throw new Error("Missing required environment variable: PUBLIC_APP_BASE_URL");
+    throw new Error(`Missing required public base URL setting: ${settingName}`);
   }
 
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    throw new Error("PUBLIC_APP_BASE_URL must be an absolute URL.");
+    throw new Error(`${settingName} must be an absolute URL.`);
   }
 
   const isProduction = String(process.env.NODE_ENV || "").toLowerCase() === "production";
   if (isProduction && parsed.protocol !== "https:") {
-    throw new Error("PUBLIC_APP_BASE_URL must use https in production.");
+    throw new Error(`${settingName} must use https in production.`);
   }
   if (isProduction && isPrivateOrLocalHost(parsed.hostname)) {
-    throw new Error("PUBLIC_APP_BASE_URL cannot use localhost or private IP hosts in production.");
+    throw new Error(`${settingName} cannot use localhost or private IP hosts in production.`);
   }
 
   const normalizedPathname = parsed.pathname.replace(/\/+$/, "");

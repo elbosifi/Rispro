@@ -1,7 +1,9 @@
-import { getPublicAppBaseUrl } from "./public-cancel-config.js";
+import { readPatientQrSettings } from "./patient-qr-settings.js";
+import { buildPublicAppointmentUrlFromSettings } from "./public-appointment-url-core.js";
 
-export function buildPublicAppointmentUrl(token: string): string {
-  const cleanToken = String(token || "").trim();
-  if (!cleanToken) return "";
-  return `${getPublicAppBaseUrl()}/public/appointment?t=${encodeURIComponent(cleanToken)}`;
+export { buildPublicAppointmentUrlFromSettings } from "./public-appointment-url-core.js";
+
+export async function buildPublicAppointmentUrl(token: string): Promise<string> {
+  const settings = await readPatientQrSettings();
+  return buildPublicAppointmentUrlFromSettings(token, settings);
 }

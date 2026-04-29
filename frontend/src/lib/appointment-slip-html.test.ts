@@ -72,6 +72,7 @@ function makeSlipSettings(overrides: Partial<AppointmentSlipSettings> = {}): App
 function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
     enabled: true,
+    risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
     allowCancellation: true,
     allowAddToCalendar: true,
