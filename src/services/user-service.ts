@@ -130,3 +130,61 @@ export async function deleteUser(
 
   return removed;
 }
+
+export async function updateUserPassword(
+  userId: UserId,
+  password: string,
+  changedByUserId: NullableUserId = null
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  const cleanPassword = String(password ?? "").trim();
+
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+  if (!cleanPassword) {
+    throw new HttpError(400, "password is required.");
+  }
+
+  const currentResult = await pool.query(
+    `
+      select id, username, full_name, role, is_active, created_at, updated_at
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+
+  const previousUser = currentResult.rows[0] as UserRow | undefined;
+  if (!previousUser) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  const passwordHash = await bcrypt.hash(cleanPassword, 10);
+  const updatedResult = await pool.query(
+    `
+      update users
+      set password_hash = $2, updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, created_at, updated_at
+    `,
+    [cleanUserId, passwordHash]
+  );
+
+  const updatedUser = updatedResult.rows[0] as UserRow | undefined;
+  if (!updatedUser) {
+    throw new HttpError(500, "Failed to update user password.");
+  }
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updatedUser.id,
+    actionType: "update",
+    oldValues: previousUser,
+    newValues: updatedUser,
+    changedByUserId
+  });
+
+  return updatedUser;
+}

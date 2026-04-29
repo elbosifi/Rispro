@@ -10,6 +10,7 @@ import {
   fetchSettings,
   deleteUser,
   createUser,
+  updateUserPassword,
   exportAuditCSV,
   deleteNameDictionaryEntry,
   importNameDictionary,
@@ -321,6 +322,8 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
 
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ username: "", fullName: "", password: "", role: "receptionist" });
+  const [editingPasswordUserId, setEditingPasswordUserId] = useState<number | null>(null);
+  const [passwordDraft, setPasswordDraft] = useState("");
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const deleteMutation = useMutation({
@@ -332,6 +335,16 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
     mutationFn: (data: { username: string; fullName: string; password: string; role: string }) => createUser(data),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setShowCreate(false); setCreateForm({ username: "", fullName: "", password: "", role: "receptionist" }); setMutationError(null); },
     onError: (err: Error) => { setMutationError(err?.message || "Create failed"); }
+  });
+  const updatePasswordMutation = useMutation({
+    mutationFn: (payload: { userId: number; password: string }) => updateUserPassword(payload.userId, payload.password),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setEditingPasswordUserId(null);
+      setPasswordDraft("");
+      setMutationError(null);
+    },
+    onError: (err: Error) => { setMutationError(err?.message || "Password update failed"); }
   });
 
   if (error) {
@@ -370,22 +383,61 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
 
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
         {data?.users?.map((u) => (
-          <li key={u.id} className="py-3 flex items-center justify-between">
-            <div className="text-start">
-              <p className="font-medium text-stone-900 dark:text-white">{u.fullName}</p>
-              <p className="text-sm description-center">@{u.username} - {u.role}</p>
+          <li key={u.id} className="py-3">
+            <div className="flex items-center justify-between">
+              <div className="text-start">
+                <p className="font-medium text-stone-900 dark:text-white">{u.fullName}</p>
+                <p className="text-sm description-center">@{u.username} - {u.role}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                  {u.isActive ? t("settings.active") : t("settings.inactive")}
+                </span>
+                <button
+                  onClick={() => {
+                    setEditingPasswordUserId((current) => (current === u.id ? null : u.id));
+                    setPasswordDraft("");
+                    setMutationError(null);
+                  }}
+                  className="px-2 py-1 text-xs bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-400 rounded hover:bg-sky-200 dark:hover:bg-sky-900/50 transition-colors"
+                >
+                  Edit Password
+                </button>
+                <button
+                  onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
+                  className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
-                {u.isActive ? t("settings.active") : t("settings.inactive")}
-              </span>
-              <button
-                onClick={() => { if (window.confirm("Delete this user?")) deleteMutation.mutate(u.id); }}
-                className="px-2 py-1 text-xs bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 rounded hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-              >
-                Delete
-              </button>
-            </div>
+            {editingPasswordUserId === u.id && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <input
+                  type="password"
+                  value={passwordDraft}
+                  onChange={(e) => setPasswordDraft(e.target.value)}
+                  placeholder="New password"
+                  className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                />
+                <button
+                  onClick={() => updatePasswordMutation.mutate({ userId: u.id, password: passwordDraft })}
+                  disabled={updatePasswordMutation.isPending || !passwordDraft.trim()}
+                  className="px-2 py-1 text-xs bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white rounded transition-colors"
+                >
+                  Save Password
+                </button>
+                <button
+                  onClick={() => {
+                    setEditingPasswordUserId(null);
+                    setPasswordDraft("");
+                  }}
+                  className="px-2 py-1 text-xs bg-stone-200 dark:bg-stone-700 text-stone-700 dark:text-stone-200 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </li>
         ))}
       </ul>

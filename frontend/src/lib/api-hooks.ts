@@ -1305,6 +1305,13 @@ export async function deleteUser(userId: number) {
   return api<{ user: RawRecord }>(`/users/${userId}`, { method: "DELETE" });
 }
 
+export async function updateUserPassword(userId: number, password: string) {
+  return api<{ user: RawRecord }>(`/users/${userId}/password`, {
+    method: "PUT",
+    body: JSON.stringify({ password })
+  });
+}
+
 export async function fetchAuditEntries(limit: number): Promise<{ entries: AuditEntry[]; meta: RawRecord }> {
   const raw = await api<{ entries: RawRecord[]; meta: RawRecord }>(`/audit?limit=${limit}`);
   return {

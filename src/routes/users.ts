@@ -3,7 +3,7 @@ import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from ".
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { createUser, deleteUser, listUsers } from "../services/user-service.js";
+import { createUser, deleteUser, listUsers, updateUserPassword } from "../services/user-service.js";
 
 export const usersRouter = express.Router();
 
@@ -39,6 +39,15 @@ usersRouter.delete(
   "/:userId",
   asyncRoute(async (req: Request, res: Response) => {
     const user = await deleteUser(asString(req.params.userId), req.user!.sub);
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
+  "/:userId/password",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const user = await updateUserPassword(asString(req.params.userId), asString(body.password), req.user!.sub);
     res.json({ user });
   })
 );
