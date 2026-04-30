@@ -72,6 +72,8 @@ interface OrthancStudyModifyPreflight {
   isStable: boolean | null;
   lastUpdate: string;
   seriesCount: number | null;
+  parentPatientId: string;
+  patientStudyIds: string[];
   orthancVersion?: string;
   databaseServerIdentifier?: string;
 }
@@ -89,6 +91,7 @@ interface ConfirmComparison {
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation", "remapped", "sending"];
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
+const REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS = 60;
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
@@ -353,6 +356,22 @@ function sanitizeOrthancResponseSnippet(text: unknown, maxLength = 500): string 
   return clean.slice(0, maxLength);
 }
 
+function isOrthancTimeoutError(error: unknown): boolean {
+  return error instanceof HttpError && error.statusCode === 504;
+}
+
+function hasSameReplacementIdentity(
+  summary: OrthancPatientSummary,
+  replacement: OrthancPatientSummary
+): boolean {
+  return (
+    summary.patientId === replacement.patientId &&
+    summary.patientName === replacement.patientName &&
+    normalizePatientSex(summary.patientSex) === normalizePatientSex(replacement.patientSex) &&
+    normalizeDicomBirthDate(summary.patientBirthDate) === normalizeDicomBirthDate(replacement.patientBirthDate)
+  );
+}
+
 function readOrthancStudySeriesCount(payload: unknown): number | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -450,6 +469,134 @@ async function readStudyInstanceCountBeforeModify(sourceStudyId: string, studyPa
   }
 
   return readStudyInstanceCountFromPayload(studyPayload);
+}
+
+function readOrthancPatientStudyIds(payload: unknown): string[] {
+  if (!payload || typeof payload !== "object") {
+    return [];
+  }
+  const studies = (payload as Record<string, unknown>).Studies;
+  if (!Array.isArray(studies)) {
+    return [];
+  }
+
+  return studies
+    .map((item) => String(item || "").trim())
+    .filter((item) => !!item);
+}
+
+async function readPatientStudyIds(patientId: string): Promise<string[]> {
+  if (!patientId) {
+    return [];
+  }
+  const response = await fetchOrthancForRemap(`/patients/${encodeURIComponent(patientId)}`, { method: "GET" });
+  if (!response.ok) {
+    return [];
+  }
+  return readOrthancPatientStudyIds(response.json);
+}
+
+function readOrthancJobs(payload: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(payload)) {
+    return payload.filter((item) => !!item && typeof item === "object") as Array<Record<string, unknown>>;
+  }
+  if (payload && typeof payload === "object") {
+    const jobs = (payload as Record<string, unknown>).Jobs;
+    if (Array.isArray(jobs)) {
+      return jobs.filter((item) => !!item && typeof item === "object") as Array<Record<string, unknown>>;
+    }
+  }
+  return [];
+}
+
+function findStringLike(value: unknown, needle: string): boolean {
+  const cleanNeedle = String(needle || "").trim();
+  if (!cleanNeedle) return false;
+  const seen = new Set<unknown>();
+
+  function visit(entry: unknown): boolean {
+    if (entry == null || seen.has(entry)) return false;
+    if (typeof entry === "string") {
+      return entry.includes(cleanNeedle);
+    }
+    if (typeof entry !== "object") {
+      return String(entry).includes(cleanNeedle);
+    }
+
+    seen.add(entry);
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        if (visit(item)) return true;
+      }
+      return false;
+    }
+
+    for (const value of Object.values(entry as Record<string, unknown>)) {
+      if (visit(value)) return true;
+    }
+    return false;
+  }
+
+  return visit(value);
+}
+
+async function verifyModifiedStudyAfterTimeout(
+  preflight: OrthancStudyModifyPreflight,
+  replacement: OrthancPatientSummary
+): Promise<string | null> {
+  if (!preflight.parentPatientId) {
+    return null;
+  }
+
+  const afterStudyIds = await readPatientStudyIds(preflight.parentPatientId);
+  const beforeSet = new Set(preflight.patientStudyIds);
+  const candidates = afterStudyIds.filter((studyId) => !beforeSet.has(studyId) && studyId !== preflight.sourceStudyId);
+
+  for (const candidateId of candidates) {
+    try {
+      const summary = await readStudyPatientSummary(candidateId);
+      if (hasSameReplacementIdentity(summary, replacement)) {
+        return candidateId;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
+async function verifySendCompletionAfterTimeout(studyId: string, modalityKey: string): Promise<unknown | null> {
+  const probes: Array<{ path: string; options?: { method: string; timeoutSeconds: number } }> = [
+    { path: "/jobs?expand", options: { method: "GET", timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS } },
+    { path: "/jobs", options: { method: "GET", timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS } },
+  ];
+
+  for (const probe of probes) {
+    const response = await fetchOrthancForRemap(probe.path, probe.options);
+    if (!response.ok) {
+      continue;
+    }
+
+    const jobs = readOrthancJobs(response.json);
+    for (const job of jobs) {
+      const state = String(job.State || job.Status || "").toLowerCase();
+      if (!["success", "succeeded", "done"].includes(state)) {
+        continue;
+      }
+      if (findStringLike(job, studyId) && findStringLike(job, modalityKey)) {
+        return {
+          verifiedAfterTimeout: true,
+          source: probe.path,
+          state,
+          studyId,
+          modalityKey,
+        };
+      }
+    }
+  }
+
+  return null;
 }
 
 async function readOrthancSystemDiagnostics(): Promise<Pick<OrthancStudyModifyPreflight, "orthancVersion" | "databaseServerIdentifier">> {
@@ -600,7 +747,7 @@ function throwActiveDicomRemapJobConflict(activeJobId: number | null): never {
 }
 
 async function readStudyPatientSummary(studyId: string): Promise<OrthancPatientSummary> {
-  const response = await orthancFetch(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
+  const response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
   if (!response.ok || !response.json || typeof response.json !== "object") {
     throw new HttpError(502, `Unable to read Orthanc study summary (status=${response.status}).`);
   }
@@ -627,6 +774,9 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
   const system = await readOrthancSystemDiagnostics();
 
   if (studyResponse.ok && studyResponse.json && typeof studyResponse.json === "object") {
+    const payload = studyResponse.json as Record<string, unknown>;
+    const parentPatientId = String(payload.ParentPatient || "").trim();
+    const patientStudyIds = await readPatientStudyIds(parentPatientId);
     return {
       sourceStudyId,
       studyResponse,
@@ -634,6 +784,8 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
       isStable: readOrthancStudyIsStable(studyResponse.json),
       lastUpdate: readOrthancStudyLastUpdate(studyResponse.json),
       seriesCount: readOrthancStudySeriesCount(studyResponse.json),
+      parentPatientId,
+      patientStudyIds,
       ...system,
     };
   }
@@ -655,6 +807,8 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
       isStable: readOrthancStudyIsStable(studyResponse.json),
       lastUpdate: readOrthancStudyLastUpdate(studyResponse.json),
       seriesCount: readOrthancStudySeriesCount(studyResponse.json),
+      parentPatientId: "",
+      patientStudyIds: [],
       ...system,
     }, studyResponse)}).`
   );
@@ -779,10 +933,25 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
   let response: OrthancFetchResult | null = null;
 
   for (let attempt = 0; attempt <= backoffMs.length; attempt += 1) {
-    response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(sourceStudyId)}/modify`, {
-      method: "POST",
-      body: modifyPayload,
-    });
+    try {
+      response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(sourceStudyId)}/modify`, {
+        method: "POST",
+        body: modifyPayload,
+        timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+      });
+    } catch (error) {
+      if (!isOrthancTimeoutError(error)) {
+        throw error;
+      }
+      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, replacement);
+      if (verifiedStudyId) {
+        return verifiedStudyId;
+      }
+      throw new HttpError(
+        502,
+        `Orthanc study modify timed out and verification could not confirm modified study creation (${formatOrthancStudyDiagnostics(preflight)}).`
+      );
+    }
 
     if (response.ok || response.status !== 404 || attempt === backoffMs.length) {
       break;
@@ -840,13 +1009,14 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
 }
 
 async function ensureOrthancModalityFromPacsNode(node: PacsNodeRow, modalityKey: string): Promise<void> {
-  const response = await orthancFetch(`/modalities/${encodeURIComponent(modalityKey)}`, {
+  const response = await fetchOrthancForRemap(`/modalities/${encodeURIComponent(modalityKey)}`, {
     method: "PUT",
     body: {
       AET: node.called_ae_title,
       Host: node.host,
       Port: Number(node.port),
     },
+    timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
   });
 
   if (!response.ok) {
@@ -862,9 +1032,10 @@ async function sendStudyToOrthancModality(studyId: string, modalityKey: string):
   ];
 
   for (const payload of payloadCandidates) {
-    const response = await orthancFetch(`/modalities/${encodeURIComponent(modalityKey)}/store`, {
+    const response = await fetchOrthancForRemap(`/modalities/${encodeURIComponent(modalityKey)}/store`, {
       method: "POST",
       body: payload,
+      timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
     });
 
     if (response.ok || response.status === 202) {
@@ -878,9 +1049,10 @@ async function sendStudyToOrthancModality(studyId: string, modalityKey: string):
   ];
 
   for (const payload of studyStoreCandidates) {
-    const response = await orthancFetch(`/studies/${encodeURIComponent(studyId)}/store`, {
+    const response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}/store`, {
       method: "POST",
       body: payload,
+      timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
     });
     if (response.ok || response.status === 202) {
       return response.json ?? response.text ?? null;
@@ -1355,7 +1527,23 @@ export async function confirmDicomRemapAndSend({
 
     const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
     await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
-    const sendResult = await sendStudyToOrthancModality(modifiedStudyId, modalityKey);
+    let sendResult: unknown;
+    try {
+      sendResult = await sendStudyToOrthancModality(modifiedStudyId, modalityKey);
+    } catch (error) {
+      if (!isOrthancTimeoutError(error)) {
+        throw error;
+      }
+
+      const verifiedSendResult = await verifySendCompletionAfterTimeout(modifiedStudyId, modalityKey);
+      if (!verifiedSendResult) {
+        throw new HttpError(
+          502,
+          `Orthanc send timed out and completion could not be verified (studyId=${modifiedStudyId}, modalityKey=${modalityKey}).`
+        );
+      }
+      sendResult = verifiedSendResult;
+    }
 
     const result = await queryDicomRemapDb<DicomRemapJobRow>(
       `
@@ -1440,6 +1628,7 @@ export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId)
 }
 
 export const __dicomRemapTestables = {
+  REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
   ACTIVE_JOB_STATUSES,
   CANCELLABLE_JOB_STATUSES,
   TERMINAL_JOB_STATUSES,
@@ -1460,6 +1649,8 @@ export const __dicomRemapTestables = {
   readOrthancStudyBeforeModify,
   waitForOrthancStudyStable,
   createModifiedStudyCopy,
+  verifyModifiedStudyAfterTimeout,
+  verifySendCompletionAfterTimeout,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
   assertJobStatus,

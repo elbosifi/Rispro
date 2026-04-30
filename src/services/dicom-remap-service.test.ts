@@ -493,6 +493,158 @@ test("dicom helper: createModifiedStudyCopy retries transient modify 404 while s
   assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 2);
 });
 
+test("dicom helper: createModifiedStudyCopy treats timeout as success when modified study is verifiable", async () => {
+  const calls: string[] = [];
+  __dicomRemapTestables.setOrthancFetchForTests(async (path, options = {}) => {
+    calls.push(path);
+    if (path === "/studies/study-id") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: {
+          ID: "study-id",
+          IsStable: true,
+          LastUpdate: "20260501T100000",
+          Series: ["series-1"],
+          ParentPatient: "patient-1",
+        },
+      });
+    }
+    if (path === "/studies/study-id/statistics") {
+      return orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 11 } });
+    }
+    if (path === "/system") {
+      return orthancResult({ status: 200, ok: true, text: "{}", json: { Version: "1.12.11" } });
+    }
+    if (path === "/patients/patient-1") {
+      const firstRead = calls.filter((entry) => entry === "/patients/patient-1").length === 1;
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: { Studies: firstRead ? ["study-id"] : ["study-id", "modified-study-id"] },
+      });
+    }
+    if (path === "/studies/study-id/modify" && options.method === "POST") {
+      throw new HttpError(504, "Orthanc request timed out after 60000ms.");
+    }
+    if (path === "/studies/modified-study-id") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: {
+          MainDicomTags: {},
+          PatientMainDicomTags: {
+            PatientID: "P1",
+            PatientName: "Test^Patient",
+            PatientSex: "M",
+            PatientBirthDate: "19900101",
+          },
+        },
+      });
+    }
+    throw new Error(`Unexpected Orthanc request: ${path}`);
+  });
+
+  const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+    patientId: "P1",
+    patientName: "Test^Patient",
+    patientSex: "M",
+    patientBirthDate: "19900101",
+  });
+
+  assert.equal(modifiedStudyId, "modified-study-id");
+});
+
+test("dicom helper: createModifiedStudyCopy keeps timeout clear when verification cannot prove success", async () => {
+  __dicomRemapTestables.setOrthancFetchForTests(async (path, options = {}) => {
+    if (path === "/studies/study-id") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: {
+          ID: "study-id",
+          IsStable: true,
+          LastUpdate: "20260501T100000",
+          Series: ["series-1"],
+          ParentPatient: "patient-1",
+        },
+      });
+    }
+    if (path === "/studies/study-id/statistics") {
+      return orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 11 } });
+    }
+    if (path === "/system") {
+      return orthancResult({ status: 200, ok: true, text: "{}", json: { Version: "1.12.11" } });
+    }
+    if (path === "/patients/patient-1") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: { Studies: ["study-id"] },
+      });
+    }
+    if (path === "/studies/study-id/modify" && options.method === "POST") {
+      throw new HttpError(504, "Orthanc request timed out after 60000ms.");
+    }
+    throw new Error(`Unexpected Orthanc request: ${path}`);
+  });
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    }),
+    /timed out and verification could not confirm modified study creation/i
+  );
+});
+
+test("dicom helper: verifySendCompletionAfterTimeout finds completed job when available", async () => {
+  __dicomRemapTestables.setOrthancFetchForTests(async (path) => {
+    if (path === "/jobs?expand") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: [
+          {
+            ID: "job-1",
+            State: "Success",
+            Content: { StudyId: "modified-study-id", Modality: "RISPRO_NODE_7" },
+          },
+        ],
+      });
+    }
+    throw new Error(`Unexpected Orthanc request: ${path}`);
+  });
+
+  const verified = await __dicomRemapTestables.verifySendCompletionAfterTimeout("modified-study-id", "RISPRO_NODE_7");
+  assert.ok(verified);
+});
+
+test("dicom helper: verifySendCompletionAfterTimeout returns null when no proof exists", async () => {
+  __dicomRemapTestables.setOrthancFetchForTests(async (path) => {
+    if (path === "/jobs?expand" || path === "/jobs") {
+      return orthancResult({
+        status: 200,
+        ok: true,
+        text: "{}",
+        json: [{ ID: "job-1", State: "Running", Content: { StudyId: "another-study" } }],
+      });
+    }
+    throw new Error(`Unexpected Orthanc request: ${path}`);
+  });
+
+  const verified = await __dicomRemapTestables.verifySendCompletionAfterTimeout("modified-study-id", "RISPRO_NODE_7");
+  assert.equal(verified, null);
+});
+
 test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when study route rejects", async () => {
   const originalConsoleError = console.error;
   console.error = () => {};
