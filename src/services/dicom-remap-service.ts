@@ -610,7 +610,7 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
   );
 }
 
-async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 45_000): Promise<OrthancStudyModifyPreflight> {
+async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 60_000): Promise<OrthancStudyModifyPreflight> {
   const startedAt = Date.now();
   let lastPreflight: OrthancStudyModifyPreflight | null = null;
 
