@@ -352,6 +352,12 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modify404,
       ...stableStudyResponses(),
       modify404,
+      orthancResult({
+        status: 404,
+        ok: false,
+        text: "Bulk modify route unavailable",
+        json: { Error: "Unknown resource" },
+      }),
     ]);
 
     await assert.rejects(
@@ -362,8 +368,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
         patientBirthDate: "19900101",
       }),
       (error) => {
-        assert.match((error as Error).message, /modify endpoint rejected/i);
-        assert.match((error as Error).message, /retry exhaustion/i);
+        assert.match((error as Error).message, /bulk modify fallback both failed/i);
         assert.match((error as Error).message, /sourceStudyId=study-id/);
         assert.match((error as Error).message, /instances=465/);
         assert.match((error as Error).message, /isStable=true/);
@@ -384,7 +389,8 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
     assert.equal(calls[2]?.path, "/system");
     assert.equal(calls[3]?.path, "/studies/study-id/modify");
     assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 5);
-    assert.equal(logged.length, 1);
+    assert.equal(calls.at(-1)?.path, "/tools/bulk-modify");
+    assert.equal(logged.length, 2);
     assert.equal(logged[0]?.[0], "Orthanc study modify failed.");
     assert.deepEqual(logged[0]?.[1], {
       sourceStudyId: "study-id",
@@ -400,6 +406,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modifyResponseShape: "object(keys=Error)",
       modifyPayloadShape: "object(keys=Replace,KeepSource,Force)",
     });
+    assert.equal(logged[1]?.[0], "Orthanc bulk modify fallback failed.");
   } finally {
     console.error = originalConsoleError;
   }
@@ -484,6 +491,64 @@ test("dicom helper: createModifiedStudyCopy retries transient modify 404 while s
   assert.equal(modifiedStudyId, "modified-study-id");
   assert.deepEqual(sleeps, [500]);
   assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 2);
+});
+
+test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when study route rejects", async () => {
+  const originalConsoleError = console.error;
+  console.error = () => {};
+  try {
+    __dicomRemapTestables.setSleepForTests(async () => {});
+    const modify404 = orthancResult({
+      status: 404,
+      ok: false,
+      text: "Accessing an inexistent item",
+      json: { OrthancError: "Accessing an inexistent item" },
+    });
+    const calls = queueOrthancResults([
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      orthancResult({
+        status: 200,
+        ok: true,
+        text: JSON.stringify({ Resources: ["bulk-modified-study-id"] }),
+        json: { Resources: ["bulk-modified-study-id"] },
+      }),
+    ]);
+
+    const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    });
+
+    const bulkCall = calls.at(-1);
+    assert.equal(modifiedStudyId, "bulk-modified-study-id");
+    assert.equal(bulkCall?.path, "/tools/bulk-modify");
+    assert.equal(bulkCall?.method, "POST");
+    assert.deepEqual(bulkCall?.body, {
+      Replace: {
+        PatientID: "P1",
+        PatientName: "Test^Patient",
+        PatientSex: "M",
+        PatientBirthDate: "19900101",
+      },
+      KeepSource: true,
+      Force: true,
+      Level: "Study",
+      Resources: ["study-id"],
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("dicom helper: cancelled status is terminal and not active", () => {

@@ -218,6 +218,56 @@ function parseOrthancResourceId(payload: unknown): string {
   return "";
 }
 
+function parseOrthancModifiedStudyId(payload: unknown): string {
+  const seen = new Set<unknown>();
+
+  function visit(value: unknown): string {
+    if (!value || typeof value !== "object" || seen.has(value)) {
+      return "";
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const cleanItem = typeof item === "string" ? item.trim() : "";
+        if (cleanItem) return cleanItem;
+        const nested = visit(item);
+        if (nested) return nested;
+      }
+      return "";
+    }
+
+    const record = value as Record<string, unknown>;
+    const direct = parseOrthancResourceId(record);
+    if (direct) return direct;
+
+    const studyIdFromPath = extractOrthancIdFromPath(record.Path, "studies");
+    if (studyIdFromPath) return studyIdFromPath;
+
+    const resourceCollections = [
+      record.Resources,
+      record.resources,
+      record.Studies,
+      record.studies,
+      record.ModifiedResources,
+      record.modifiedResources,
+    ];
+    for (const collection of resourceCollections) {
+      const nested = visit(collection);
+      if (nested) return nested;
+    }
+
+    for (const nestedValue of Object.values(record)) {
+      const nested = visit(nestedValue);
+      if (nested) return nested;
+    }
+
+    return "";
+  }
+
+  return visit(payload);
+}
+
 function pushUnique(values: string[], value: unknown): void {
   const clean = String(value || "").trim();
   if (clean && !values.includes(clean)) {
@@ -652,6 +702,67 @@ function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPati
   };
 }
 
+async function tryBulkModifiedStudyCopy(
+  sourceStudyId: string,
+  modifyPayload: {
+    Replace: {
+      PatientID: string;
+      PatientName: string;
+      PatientSex: string;
+      PatientBirthDate: string;
+    };
+    KeepSource: boolean;
+    Force: boolean;
+  },
+  preflight: OrthancStudyModifyPreflight,
+  studyModifyResponse: OrthancFetchResult
+): Promise<string> {
+  const bulkPayload = {
+    ...modifyPayload,
+    Level: "Study",
+    Resources: [sourceStudyId],
+  };
+  const bulkResponse = await fetchOrthancForRemap("/tools/bulk-modify", {
+    method: "POST",
+    body: bulkPayload,
+  });
+
+  if (bulkResponse.ok) {
+    const modifiedStudyId = parseOrthancModifiedStudyId(bulkResponse.json);
+    if (modifiedStudyId) {
+      return modifiedStudyId;
+    }
+
+    throw new HttpError(
+      502,
+      `Orthanc bulk modify response did not include modified study ID (${formatOrthancStudyDiagnostics(preflight, bulkResponse)}).`
+    );
+  }
+
+  console.error("Orthanc bulk modify fallback failed.", {
+    sourceStudyId,
+    studyPreflightStatus: preflight.studyResponse.status,
+    instanceCount: preflight.instanceCount,
+    isStable: preflight.isStable,
+    lastUpdate: preflight.lastUpdate,
+    seriesCount: preflight.seriesCount,
+    orthancVersion: preflight.orthancVersion,
+    databaseServerIdentifier: preflight.databaseServerIdentifier,
+    studyModifyStatus: studyModifyResponse.status,
+    studyModifyResponseBody: sanitizeOrthancResponseSnippet(studyModifyResponse.text),
+    studyModifyResponseShape: describeOrthancPayloadShape(studyModifyResponse.json),
+    bulkModifyStatus: bulkResponse.status,
+    bulkModifyResponseBody: sanitizeOrthancResponseSnippet(bulkResponse.text),
+    bulkModifyResponseShape: describeOrthancPayloadShape(bulkResponse.json),
+    bulkModifyPayloadShape: describeOrthancPayloadShape(bulkPayload),
+  });
+
+  throw new HttpError(
+    502,
+    `Orthanc study modify and bulk modify fallback both failed (studyModify: ${formatOrthancStudyDiagnostics(preflight, studyModifyResponse)}; bulkModify: status=${bulkResponse.status}, body=${sanitizeOrthancResponseSnippet(bulkResponse.text)}, shape=${describeOrthancPayloadShape(bulkResponse.json)}).`
+  );
+}
+
 async function createModifiedStudyCopy(sourceStudyId: string, replacement: OrthancPatientSummary): Promise<string> {
   let preflight = await waitForOrthancStudyStable(sourceStudyId);
   const modifyPayload = {
@@ -709,10 +820,7 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
     });
 
     if (response.status === 404) {
-      throw new HttpError(
-        502,
-        `Orthanc modify endpoint rejected this DICOM study after retry exhaustion (${formatOrthancStudyDiagnostics(preflight, response)}).`
-      );
+      return tryBulkModifiedStudyCopy(sourceStudyId, modifyPayload, preflight, response);
     }
 
     throw new HttpError(
@@ -1343,6 +1451,7 @@ export const __dicomRemapTestables = {
   normalizePatientSex,
   normalizeDicomBirthDate,
   parseOrthancResourceId,
+  parseOrthancModifiedStudyId,
   parseOrthancUploadResponse,
   resolveStudyIdFromOrthancUploadResponse,
   readParentStudyIdForInstance,
