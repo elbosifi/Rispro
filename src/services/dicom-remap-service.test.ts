@@ -77,6 +77,29 @@ function queueOrthancResults(items: Array<ReturnType<typeof orthancResult>>) {
   return calls;
 }
 
+function stableStudyResponses(overrides: { isStable?: boolean; lastUpdate?: string; series?: string[]; count?: number } = {}) {
+  return [
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        ID: "study-id",
+        IsStable: overrides.isStable ?? true,
+        LastUpdate: overrides.lastUpdate ?? "20260430T120000",
+        Series: overrides.series ?? ["series-1"],
+      },
+    }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: overrides.count ?? 465 } }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: { Version: "1.12.11", DatabaseServerIdentifier: "dbid" },
+    }),
+  ];
+}
+
 test.afterEach(() => {
   __dicomRemapTestables.resetTestOverrides();
 });
@@ -261,6 +284,7 @@ test("dicom helper: createModifiedStudyCopy preflights source study and reports 
   const calls = queueOrthancResults([
     orthancResult({ status: 404, ok: false, text: "Unknown resource", json: { Error: "Unknown resource" } }),
     orthancResult({ status: 404, ok: false, text: "No statistics", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { Version: "1.12.11" } }),
     orthancResult({ status: 404, ok: false, text: "Unknown instance", json: { Error: "Unknown resource" } }),
   ]);
 
@@ -287,6 +311,7 @@ test("dicom helper: createModifiedStudyCopy reports source IDs that are instance
   queueOrthancResults([
     orthancResult({ status: 404, ok: false, text: "Unknown study", json: { Error: "Unknown resource" } }),
     orthancResult({ status: 404, ok: false, text: "No statistics", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { Version: "1.12.11" } }),
     orthancResult({ status: 200, ok: true, text: "{}", json: { ParentStudy: "real-study-id" } }),
   ]);
 
@@ -309,15 +334,24 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
   };
 
   try {
+    __dicomRemapTestables.setSleepForTests(async () => {});
+    const modify404 = orthancResult({
+      status: 404,
+      ok: false,
+      text: "Cannot modify study. Authorization: Basic secret-token",
+      json: { Error: "Unknown resource" },
+    });
     const calls = queueOrthancResults([
-      orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id", Series: ["series-1"] } }),
-      orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 465 } }),
-      orthancResult({
-        status: 404,
-        ok: false,
-        text: "Cannot modify study. Authorization: Basic secret-token",
-        json: { Error: "Unknown resource" },
-      }),
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
+      ...stableStudyResponses(),
+      modify404,
     ]);
 
     await assert.rejects(
@@ -329,8 +363,14 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       }),
       (error) => {
         assert.match((error as Error).message, /modify endpoint rejected/i);
+        assert.match((error as Error).message, /retry exhaustion/i);
         assert.match((error as Error).message, /sourceStudyId=study-id/);
         assert.match((error as Error).message, /instances=465/);
+        assert.match((error as Error).message, /isStable=true/);
+        assert.match((error as Error).message, /lastUpdate=20260430T120000/);
+        assert.match((error as Error).message, /series=1/);
+        assert.match((error as Error).message, /orthancVersion=1.12.11/);
+        assert.match((error as Error).message, /databaseServerIdentifier=dbid/);
         assert.match((error as Error).message, /status=404/);
         assert.match((error as Error).message, /Basic \[redacted\]/);
         assert.doesNotMatch((error as Error).message, /secret-token/);
@@ -341,13 +381,20 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
 
     assert.equal(calls[0]?.path, "/studies/study-id");
     assert.equal(calls[1]?.path, "/studies/study-id/statistics");
-    assert.equal(calls[2]?.path, "/studies/study-id/modify");
+    assert.equal(calls[2]?.path, "/system");
+    assert.equal(calls[3]?.path, "/studies/study-id/modify");
+    assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 5);
     assert.equal(logged.length, 1);
     assert.equal(logged[0]?.[0], "Orthanc study modify failed.");
     assert.deepEqual(logged[0]?.[1], {
       sourceStudyId: "study-id",
       studyPreflightStatus: 200,
       instanceCount: 465,
+      isStable: true,
+      lastUpdate: "20260430T120000",
+      seriesCount: 1,
+      orthancVersion: "1.12.11",
+      databaseServerIdentifier: "dbid",
       modifyStatus: 404,
       modifyResponseBody: "Cannot modify study. Authorization: Basic [redacted]",
       modifyResponseShape: "object(keys=Error)",
@@ -360,8 +407,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
 
 test("dicom helper: createModifiedStudyCopy sends Force true with patient identity replacement", async () => {
   const calls = queueOrthancResults([
-    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id", Series: ["series-1"] } }),
-    orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 465 } }),
+    ...stableStudyResponses(),
     orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
   ]);
 
@@ -373,9 +419,9 @@ test("dicom helper: createModifiedStudyCopy sends Force true with patient identi
   });
 
   assert.equal(modifiedStudyId, "modified-study-id");
-  assert.equal(calls[2]?.path, "/studies/study-id/modify");
-  assert.equal(calls[2]?.method, "POST");
-  assert.deepEqual(calls[2]?.body, {
+  assert.equal(calls[3]?.path, "/studies/study-id/modify");
+  assert.equal(calls[3]?.method, "POST");
+  assert.deepEqual(calls[3]?.body, {
     Replace: {
       PatientID: "RISPRO-123",
       PatientName: "Replacement^Patient",
@@ -385,6 +431,59 @@ test("dicom helper: createModifiedStudyCopy sends Force true with patient identi
     KeepSource: true,
     Force: true,
   });
+});
+
+test("dicom helper: waitForOrthancStudyStable proceeds immediately for stable studies", async () => {
+  const calls = queueOrthancResults(stableStudyResponses({ count: 3, series: ["a", "b"] }));
+
+  const preflight = await __dicomRemapTestables.waitForOrthancStudyStable("study-id");
+
+  assert.equal(preflight.isStable, true);
+  assert.equal(preflight.instanceCount, 3);
+  assert.equal(preflight.seriesCount, 2);
+  assert.equal(calls.length, 3);
+});
+
+test("dicom helper: waitForOrthancStudyStable polls until Orthanc reports stable", async () => {
+  const sleeps: number[] = [];
+  __dicomRemapTestables.setSleepForTests(async (ms) => {
+    sleeps.push(ms);
+  });
+  const calls = queueOrthancResults([
+    ...stableStudyResponses({ isStable: false, lastUpdate: "first" }),
+    ...stableStudyResponses({ isStable: true, lastUpdate: "second" }),
+  ]);
+
+  const preflight = await __dicomRemapTestables.waitForOrthancStudyStable("study-id");
+
+  assert.equal(preflight.isStable, true);
+  assert.equal(preflight.lastUpdate, "second");
+  assert.deepEqual(sleeps, [1000]);
+  assert.equal(calls.filter((call) => call.path === "/studies/study-id").length, 2);
+});
+
+test("dicom helper: createModifiedStudyCopy retries transient modify 404 while study still exists", async () => {
+  const sleeps: number[] = [];
+  __dicomRemapTestables.setSleepForTests(async (ms) => {
+    sleeps.push(ms);
+  });
+  const calls = queueOrthancResults([
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not ready", json: { Error: "Unknown resource" } }),
+    ...stableStudyResponses(),
+    orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
+  ]);
+
+  const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+    patientId: "P1",
+    patientName: "Test^Patient",
+    patientSex: "M",
+    patientBirthDate: "19900101",
+  });
+
+  assert.equal(modifiedStudyId, "modified-study-id");
+  assert.deepEqual(sleeps, [500]);
+  assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 2);
 });
 
 test("dicom helper: cancelled status is terminal and not active", () => {

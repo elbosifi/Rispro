@@ -11,6 +11,7 @@ import type { OptionalUserId, UserId } from "../types/http.js";
 type DicomRemapQuery = typeof pool.query;
 type DicomRemapAuditLogger = typeof logAuditEntry;
 type OrthancFetch = typeof orthancFetch;
+type RemapSleep = (ms: number) => Promise<void>;
 
 export type DicomRemapJobStatus =
   | "uploaded"
@@ -68,6 +69,11 @@ interface OrthancStudyModifyPreflight {
   sourceStudyId: string;
   studyResponse: OrthancFetchResult;
   instanceCount: number | null;
+  isStable: boolean | null;
+  lastUpdate: string;
+  seriesCount: number | null;
+  orthancVersion?: string;
+  databaseServerIdentifier?: string;
 }
 
 interface OrthancUploadResponseIdentifiers {
@@ -86,6 +92,7 @@ const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancell
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
+let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function joinUrl(baseUrl: string, suffix: string): string {
   const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
@@ -296,6 +303,53 @@ function sanitizeOrthancResponseSnippet(text: unknown, maxLength = 500): string 
   return clean.slice(0, maxLength);
 }
 
+function readOrthancStudySeriesCount(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const series = (payload as Record<string, unknown>).Series;
+  return Array.isArray(series) ? series.length : null;
+}
+
+function readOrthancStudyIsStable(payload: unknown): boolean | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const value = (payload as Record<string, unknown>).IsStable;
+  return typeof value === "boolean" ? value : null;
+}
+
+function readOrthancStudyLastUpdate(payload: unknown): string {
+  if (!payload || typeof payload !== "object") {
+    return "";
+  }
+  return String((payload as Record<string, unknown>).LastUpdate || "").trim();
+}
+
+function formatOrthancStudyDiagnostics(preflight: OrthancStudyModifyPreflight, response?: OrthancFetchResult): string {
+  const parts = [
+    `sourceStudyId=${preflight.sourceStudyId}`,
+    `isStable=${preflight.isStable ?? "unknown"}`,
+    `lastUpdate=${preflight.lastUpdate || "unknown"}`,
+    `series=${preflight.seriesCount ?? "unknown"}`,
+    `instances=${preflight.instanceCount ?? "unknown"}`,
+  ];
+
+  if (preflight.orthancVersion) {
+    parts.push(`orthancVersion=${preflight.orthancVersion}`);
+  }
+  if (preflight.databaseServerIdentifier) {
+    parts.push(`databaseServerIdentifier=${preflight.databaseServerIdentifier}`);
+  }
+  if (response) {
+    parts.push(`status=${response.status}`);
+    parts.push(`body=${sanitizeOrthancResponseSnippet(response.text)}`);
+    parts.push(`shape=${describeOrthancPayloadShape(response.json)}`);
+  }
+
+  return parts.join(", ");
+}
+
 async function readParentStudyIdForInstance(instanceId: string): Promise<string> {
   const response = await orthancFetch(`/instances/${encodeURIComponent(instanceId)}`, { method: "GET" });
   if (!response.ok || !response.json || typeof response.json !== "object") {
@@ -346,6 +400,19 @@ async function readStudyInstanceCountBeforeModify(sourceStudyId: string, studyPa
   }
 
   return readStudyInstanceCountFromPayload(studyPayload);
+}
+
+async function readOrthancSystemDiagnostics(): Promise<Pick<OrthancStudyModifyPreflight, "orthancVersion" | "databaseServerIdentifier">> {
+  const response = await fetchOrthancForRemap("/system", { method: "GET" });
+  if (!response.ok || !response.json || typeof response.json !== "object") {
+    return {};
+  }
+
+  const record = response.json as Record<string, unknown>;
+  return {
+    orthancVersion: String(record.Version || "").trim() || undefined,
+    databaseServerIdentifier: String(record.DatabaseServerIdentifier || "").trim() || undefined,
+  };
 }
 
 async function resolveStudyIdFromOrthancUploadResponse(
@@ -507,12 +574,17 @@ async function readStudyPatientSummary(studyId: string): Promise<OrthancPatientS
 async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<OrthancStudyModifyPreflight> {
   const studyResponse = await fetchOrthancForRemap(`/studies/${encodeURIComponent(sourceStudyId)}`, { method: "GET" });
   const instanceCount = await readStudyInstanceCountBeforeModify(sourceStudyId, studyResponse.json);
+  const system = await readOrthancSystemDiagnostics();
 
   if (studyResponse.ok && studyResponse.json && typeof studyResponse.json === "object") {
     return {
       sourceStudyId,
       studyResponse,
       instanceCount,
+      isStable: readOrthancStudyIsStable(studyResponse.json),
+      lastUpdate: readOrthancStudyLastUpdate(studyResponse.json),
+      seriesCount: readOrthancStudySeriesCount(studyResponse.json),
+      ...system,
     };
   }
 
@@ -526,7 +598,36 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
 
   throw new HttpError(
     502,
-    `DICOM remap source study no longer exists in Orthanc (sourceStudyId=${sourceStudyId}, status=${studyResponse.status}, body=${sanitizeOrthancResponseSnippet(studyResponse.text)}, shape=${describeOrthancPayloadShape(studyResponse.json)}).`
+    `DICOM remap source study no longer exists in Orthanc (${formatOrthancStudyDiagnostics({
+      sourceStudyId,
+      studyResponse,
+      instanceCount,
+      isStable: readOrthancStudyIsStable(studyResponse.json),
+      lastUpdate: readOrthancStudyLastUpdate(studyResponse.json),
+      seriesCount: readOrthancStudySeriesCount(studyResponse.json),
+      ...system,
+    }, studyResponse)}).`
+  );
+}
+
+async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 45_000): Promise<OrthancStudyModifyPreflight> {
+  const startedAt = Date.now();
+  let lastPreflight: OrthancStudyModifyPreflight | null = null;
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    const preflight = await readOrthancStudyBeforeModify(sourceStudyId);
+    lastPreflight = preflight;
+    if (preflight.isStable !== false) {
+      return preflight;
+    }
+    await sleepForDicomRemap(1_000);
+  }
+
+  throw new HttpError(
+    502,
+    `Timed out waiting for Orthanc study to become stable before DICOM remap modify (${lastPreflight
+      ? formatOrthancStudyDiagnostics(lastPreflight)
+      : `sourceStudyId=${sourceStudyId}`}).`
   );
 }
 
@@ -552,7 +653,7 @@ function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPati
 }
 
 async function createModifiedStudyCopy(sourceStudyId: string, replacement: OrthancPatientSummary): Promise<string> {
-  const preflight = await readOrthancStudyBeforeModify(sourceStudyId);
+  let preflight = await waitForOrthancStudyStable(sourceStudyId);
   const modifyPayload = {
     Replace: {
       PatientID: replacement.patientId,
@@ -563,10 +664,30 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
     KeepSource: true,
     Force: true,
   };
-  const response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(sourceStudyId)}/modify`, {
-    method: "POST",
-    body: modifyPayload,
-  });
+  const backoffMs = [500, 1_000, 2_000, 4_000];
+  let response: OrthancFetchResult | null = null;
+
+  for (let attempt = 0; attempt <= backoffMs.length; attempt += 1) {
+    response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(sourceStudyId)}/modify`, {
+      method: "POST",
+      body: modifyPayload,
+    });
+
+    if (response.ok || response.status !== 404 || attempt === backoffMs.length) {
+      break;
+    }
+
+    const retryPreflight = await readOrthancStudyBeforeModify(sourceStudyId);
+    if (!retryPreflight.studyResponse.ok) {
+      break;
+    }
+    preflight = retryPreflight;
+    await sleepForDicomRemap(backoffMs[attempt] || 0);
+  }
+
+  if (!response) {
+    throw new HttpError(502, `Orthanc study modify did not return a response (${formatOrthancStudyDiagnostics(preflight)}).`);
+  }
 
   if (!response.ok) {
     const responseSnippet = sanitizeOrthancResponseSnippet(response.text);
@@ -576,6 +697,11 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
       sourceStudyId,
       studyPreflightStatus: preflight.studyResponse.status,
       instanceCount: preflight.instanceCount,
+      isStable: preflight.isStable,
+      lastUpdate: preflight.lastUpdate,
+      seriesCount: preflight.seriesCount,
+      orthancVersion: preflight.orthancVersion,
+      databaseServerIdentifier: preflight.databaseServerIdentifier,
       modifyStatus: response.status,
       modifyResponseBody: responseSnippet,
       modifyResponseShape: responseShape,
@@ -585,13 +711,13 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
     if (response.status === 404) {
       throw new HttpError(
         502,
-        `Orthanc modify endpoint rejected this DICOM study (sourceStudyId=${sourceStudyId}, instances=${preflight.instanceCount ?? "unknown"}, status=${response.status}, body=${responseSnippet}, shape=${responseShape}).`
+        `Orthanc modify endpoint rejected this DICOM study after retry exhaustion (${formatOrthancStudyDiagnostics(preflight, response)}).`
       );
     }
 
     throw new HttpError(
       502,
-      `Orthanc study modify failed (sourceStudyId=${sourceStudyId}, instances=${preflight.instanceCount ?? "unknown"}, status=${response.status}, body=${responseSnippet}, shape=${responseShape}).`
+      `Orthanc study modify failed (${formatOrthancStudyDiagnostics(preflight, response)}).`
     );
   }
 
@@ -1223,6 +1349,7 @@ export const __dicomRemapTestables = {
   readStudyInstanceCountFromPayload,
   readStudyInstanceCountBeforeModify,
   readOrthancStudyBeforeModify,
+  waitForOrthancStudyStable,
   createModifiedStudyCopy,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
@@ -1236,9 +1363,13 @@ export const __dicomRemapTestables = {
   setOrthancFetchForTests(fetcher: OrthancFetch): void {
     fetchOrthancForRemap = fetcher;
   },
+  setSleepForTests(sleep: RemapSleep): void {
+    sleepForDicomRemap = sleep;
+  },
   resetTestOverrides(): void {
     queryDicomRemapDb = pool.query.bind(pool);
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
+    sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   },
 };
