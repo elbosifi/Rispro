@@ -358,6 +358,35 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
   }
 });
 
+test("dicom helper: createModifiedStudyCopy sends Force true with patient identity replacement", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id", Series: ["series-1"] } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 465 } }),
+    orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
+  ]);
+
+  const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+    patientId: "RISPRO-123",
+    patientName: "Replacement^Patient",
+    patientSex: "F",
+    patientBirthDate: "19850123",
+  });
+
+  assert.equal(modifiedStudyId, "modified-study-id");
+  assert.equal(calls[2]?.path, "/studies/study-id/modify");
+  assert.equal(calls[2]?.method, "POST");
+  assert.deepEqual(calls[2]?.body, {
+    Replace: {
+      PatientID: "RISPRO-123",
+      PatientName: "Replacement^Patient",
+      PatientSex: "F",
+      PatientBirthDate: "19850123",
+    },
+    KeepSource: true,
+    Force: true,
+  });
+});
+
 test("dicom helper: cancelled status is terminal and not active", () => {
   assert.equal(__dicomRemapTestables.isDicomRemapTerminalStatus("cancelled"), true);
   assert.equal(__dicomRemapTestables.isDicomRemapActiveStatus("cancelled"), false);
