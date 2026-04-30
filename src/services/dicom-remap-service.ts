@@ -58,6 +58,11 @@ interface OrthancPatientSummary {
   patientBirthDate: string;
 }
 
+interface OrthancUploadResponseIdentifiers {
+  parentStudyIds: string[];
+  instanceIds: string[];
+}
+
 interface ConfirmComparison {
   original: OrthancPatientSummary;
   replacement: OrthancPatientSummary;
@@ -171,6 +176,118 @@ function parseOrthancResourceId(payload: unknown): string {
     if (clean) return clean;
   }
   return "";
+}
+
+function pushUnique(values: string[], value: unknown): void {
+  const clean = String(value || "").trim();
+  if (clean && !values.includes(clean)) {
+    values.push(clean);
+  }
+}
+
+function extractOrthancIdFromPath(path: unknown, resourceName: "instances" | "studies"): string {
+  const clean = String(path || "").trim();
+  if (!clean) return "";
+  const match = clean.match(new RegExp(`(?:^|/)${resourceName}/([^/?#]+)`, "i"));
+  if (!match?.[1]) return "";
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
+function parseOrthancUploadResponse(payload: unknown): OrthancUploadResponseIdentifiers {
+  const identifiers: OrthancUploadResponseIdentifiers = {
+    parentStudyIds: [],
+    instanceIds: [],
+  };
+  const seen = new Set<unknown>();
+
+  function visit(value: unknown): void {
+    if (!value || typeof value !== "object" || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+
+    const record = value as Record<string, unknown>;
+    pushUnique(identifiers.parentStudyIds, record.ParentStudy);
+    pushUnique(identifiers.parentStudyIds, record.parentStudy);
+    pushUnique(identifiers.parentStudyIds, record.Parent);
+
+    const studyIdFromPath = extractOrthancIdFromPath(record.Path, "studies");
+    pushUnique(identifiers.parentStudyIds, studyIdFromPath);
+
+    const instanceIdFromPath = extractOrthancIdFromPath(record.Path, "instances");
+    pushUnique(identifiers.instanceIds, instanceIdFromPath);
+
+    const instanceId = record.ID ?? record.Id ?? record.id;
+    pushUnique(identifiers.instanceIds, instanceId);
+
+    for (const nested of Object.values(record)) {
+      visit(nested);
+    }
+  }
+
+  visit(payload);
+  return identifiers;
+}
+
+function describeOrthancPayloadShape(payload: unknown): string {
+  if (payload == null) {
+    return String(payload);
+  }
+  if (Array.isArray(payload)) {
+    const firstShape = payload.length ? describeOrthancPayloadShape(payload[0]) : "empty";
+    return `array(length=${payload.length}, first=${firstShape})`;
+  }
+  if (typeof payload !== "object") {
+    return typeof payload;
+  }
+
+  const record = payload as Record<string, unknown>;
+  const keys = Object.keys(record).slice(0, 12).join(",");
+  return `object(keys=${keys || "none"})`;
+}
+
+async function readParentStudyIdForInstance(instanceId: string): Promise<string> {
+  const response = await orthancFetch(`/instances/${encodeURIComponent(instanceId)}`, { method: "GET" });
+  if (!response.ok || !response.json || typeof response.json !== "object") {
+    throw new HttpError(502, `Unable to resolve Orthanc instance parent study (status=${response.status}).`);
+  }
+
+  const parsed = parseOrthancUploadResponse(response.json);
+  const parentStudyId = parsed.parentStudyIds[0];
+  if (!parentStudyId) {
+    throw new HttpError(502, `Orthanc instance response did not include parent study ID (status=${response.status}, shape=${describeOrthancPayloadShape(response.json)}).`);
+  }
+  return parentStudyId;
+}
+
+async function resolveStudyIdFromOrthancUploadResponse(
+  uploadResponse: OrthancFetchResult,
+  parentStudyReader: (instanceId: string) => Promise<string> = readParentStudyIdForInstance
+): Promise<string> {
+  const parsed = parseOrthancUploadResponse(uploadResponse.json);
+  const explicitStudyId = parsed.parentStudyIds[0];
+  if (explicitStudyId) {
+    return explicitStudyId;
+  }
+
+  const instanceId = parsed.instanceIds[0];
+  if (instanceId) {
+    return parentStudyReader(instanceId);
+  }
+
+  throw new HttpError(
+    502,
+    `Orthanc upload response did not include a resolvable study or instance ID (status=${uploadResponse.status}, shape=${describeOrthancPayloadShape(uploadResponse.json)}).`
+  );
 }
 
 function assertJobStatus(current: DicomRemapJobStatus, expected: DicomRemapJobStatus, message: string): void {
@@ -329,6 +446,7 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
         PatientBirthDate: replacement.patientBirthDate,
       },
       KeepSource: true,
+      Force: true,
     },
   });
 
@@ -474,10 +592,7 @@ export async function createDicomRemapUploadJob({
         );
       }
 
-      const parentStudyId = parseOrthancResourceId(uploadResponse.json);
-      if (!parentStudyId) {
-        throw new HttpError(502, "Orthanc upload response did not include parent study ID.");
-      }
+      const parentStudyId = await resolveStudyIdFromOrthancUploadResponse(uploadResponse);
       studyIds.add(parentStudyId);
     }
 
@@ -849,5 +964,9 @@ export const __dicomRemapTestables = {
   normalizePatientSex,
   normalizeDicomBirthDate,
   parseOrthancResourceId,
+  parseOrthancUploadResponse,
+  resolveStudyIdFromOrthancUploadResponse,
+  readParentStudyIdForInstance,
+  describeOrthancPayloadShape,
   assertJobStatus,
 };

@@ -62,6 +62,127 @@ test("dicom helper: Orthanc resource id parser supports common response shapes",
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({}), "");
 });
 
+test("dicom helper: Orthanc upload parser prefers explicit ParentStudy", async () => {
+  const uploadResponse = {
+    status: 200,
+    ok: true,
+    text: "",
+    json: {
+      ID: "instance-id",
+      ParentStudy: "study-id",
+      Path: "/instances/instance-id",
+    },
+  };
+
+  const parsed = __dicomRemapTestables.parseOrthancUploadResponse(uploadResponse.json);
+  assert.deepEqual(parsed.parentStudyIds, ["study-id"]);
+  assert.deepEqual(parsed.instanceIds, ["instance-id"]);
+
+  const resolved = await __dicomRemapTestables.resolveStudyIdFromOrthancUploadResponse(
+    uploadResponse,
+    async () => {
+      throw new Error("instance lookup should not be used when ParentStudy is present");
+    }
+  );
+  assert.equal(resolved, "study-id");
+});
+
+test("dicom helper: Orthanc upload resolver treats ID-only response as instance ID", async () => {
+  const seenInstanceIds: string[] = [];
+
+  const resolved = await __dicomRemapTestables.resolveStudyIdFromOrthancUploadResponse(
+    {
+      status: 200,
+      ok: true,
+      text: "",
+      json: { ID: "instance-only-id" },
+    },
+    async (instanceId) => {
+      seenInstanceIds.push(instanceId);
+      return "resolved-study-id";
+    }
+  );
+
+  assert.equal(resolved, "resolved-study-id");
+  assert.deepEqual(seenInstanceIds, ["instance-only-id"]);
+});
+
+test("dicom helper: Orthanc upload resolver extracts instance ID from Path", async () => {
+  const seenInstanceIds: string[] = [];
+
+  const resolved = await __dicomRemapTestables.resolveStudyIdFromOrthancUploadResponse(
+    {
+      status: 200,
+      ok: true,
+      text: "",
+      json: { Path: "/instances/path-instance-id" },
+    },
+    async (instanceId) => {
+      seenInstanceIds.push(instanceId);
+      return "path-study-id";
+    }
+  );
+
+  assert.equal(resolved, "path-study-id");
+  assert.deepEqual(seenInstanceIds, ["path-instance-id"]);
+});
+
+test("dicom helper: Orthanc upload parser handles array and nested shapes", async () => {
+  const uploadResponse = {
+    status: 200,
+    ok: true,
+    text: "",
+    json: [
+      {
+        Status: "Success",
+        Instance: {
+          ID: "nested-instance-id",
+          Path: "/instances/nested-instance-id",
+        },
+      },
+      {
+        Result: {
+          ParentStudy: "nested-study-id",
+        },
+      },
+    ],
+  };
+
+  const parsed = __dicomRemapTestables.parseOrthancUploadResponse(uploadResponse.json);
+  assert.deepEqual(parsed.parentStudyIds, ["nested-study-id"]);
+  assert.deepEqual(parsed.instanceIds, ["nested-instance-id"]);
+
+  const resolved = await __dicomRemapTestables.resolveStudyIdFromOrthancUploadResponse(
+    uploadResponse,
+    async () => {
+      throw new Error("instance lookup should not be used when nested ParentStudy is present");
+    }
+  );
+  assert.equal(resolved, "nested-study-id");
+});
+
+test("dicom helper: Orthanc upload resolver reports sanitized shape when no ID can be resolved", async () => {
+  await assert.rejects(
+    () => __dicomRemapTestables.resolveStudyIdFromOrthancUploadResponse(
+      {
+        status: 201,
+        ok: true,
+        text: JSON.stringify({ Sensitive: "not included in error" }),
+        json: { Status: "Success", Details: { Imported: true } },
+      },
+      async () => {
+        throw new Error("instance lookup should not be used without an instance ID");
+      }
+    ),
+    (error) => {
+      assert.match((error as Error).message, /status=201/);
+      assert.match((error as Error).message, /shape=object\(keys=Status,Details\)/);
+      assert.doesNotMatch((error as Error).message, /Sensitive|not included/);
+      return true;
+    }
+  );
+});
+
 test("dicom helper: status transition guard throws on unexpected status", () => {
   assert.throws(
     () => __dicomRemapTestables.assertJobStatus("uploaded", "awaiting_confirmation", "bad"),
