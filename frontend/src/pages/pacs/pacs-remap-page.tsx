@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 
-type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed";
+type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 
 interface RemapJob {
   id: number;
@@ -21,6 +21,7 @@ interface RemapJob {
   replacement_patient_sex: string | null;
   replacement_patient_birth_date: string | null;
   error_message: string | null;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -104,6 +105,14 @@ function isLikelyDicomClientFile(file: File): boolean {
   return true;
 }
 
+function isActiveJobStatus(status: JobStatus): boolean {
+  return ["uploaded", "awaiting_confirmation", "remapped", "sending"].includes(status);
+}
+
+function isCancellableJobStatus(status: JobStatus): boolean {
+  return ["uploaded", "awaiting_confirmation"].includes(status);
+}
+
 export default function PacsRemapPage() {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
@@ -114,6 +123,7 @@ export default function PacsRemapPage() {
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
+  const [fileInputVersion, setFileInputVersion] = useState(0);
 
   const setSelectedFiles = (incoming: FileList | null): void => {
     const all = Array.from(incoming || []);
@@ -246,6 +256,42 @@ export default function PacsRemapPage() {
 
   const canPrepare = currentJob?.status === "uploaded" && !!selectedPatientId && !!selectedDestinationKey;
   const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
+  const canCancelCurrentJob = currentJob ? isCancellableJobStatus(currentJob.status) : false;
+  const hasActiveCurrentJob = currentJob ? isActiveJobStatus(currentJob.status) : false;
+
+  const resetWorkflow = (): void => {
+    setFiles([]);
+    setJobId(null);
+    setPatientSearch("");
+    setSelectedPatientId("");
+    setSelectedDestinationKey("");
+    setErrorMessage("");
+    setSkippedFilesCount(0);
+    setFileInputVersion((value) => value + 1);
+    uploadMutation.reset();
+    prepareMutation.reset();
+    confirmSendMutation.reset();
+  };
+
+  const cancelMutation = useMutation({
+    mutationFn: async () => {
+      if (!jobId) throw new Error("Missing job ID.");
+      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${jobId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason: "Cancelled from DICOM remap page" }),
+      });
+    },
+    onSuccess: () => {
+      setErrorMessage("");
+      setJobId(null);
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+    onError: (error: unknown) => {
+      setErrorMessage(error instanceof Error ? error.message : "Cancel failed.");
+      void currentJobQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+  });
 
   const title = language === "ar" ? "رفع DICOM وإعادة ربط المريض" : "DICOM Upload + Patient Remap";
 
@@ -258,6 +304,7 @@ export default function PacsRemapPage() {
       sending: language === "ar" ? "جارٍ الإرسال" : "Sending",
       sent: language === "ar" ? "تم الإرسال" : "Sent",
       failed: language === "ar" ? "فشل" : "Failed",
+      cancelled: language === "ar" ? "ملغي" : "Cancelled",
     };
     return map[currentJob.status];
   }, [currentJob, language]);
@@ -278,6 +325,7 @@ export default function PacsRemapPage() {
           {language === "ar" ? "1) رفع الدراسة" : "1) Upload Study"}
         </h3>
         <input
+          key={`files-${fileInputVersion}`}
           type="file"
           multiple
           accept=".dcm,.dicom,.ima,application/dicom,application/octet-stream"
@@ -285,6 +333,7 @@ export default function PacsRemapPage() {
           className="input-premium w-full px-3 py-2"
         />
         <input
+          key={`directory-${fileInputVersion}`}
           type="file"
           multiple
           onChange={(event) => setSelectedFiles(event.target.files)}
@@ -313,6 +362,13 @@ export default function PacsRemapPage() {
             ? (language === "ar" ? "جارٍ الرفع..." : "Uploading...")
             : (language === "ar" ? "رفع وإنشاء مهمة" : "Upload and Create Job")}
         </button>
+        <button
+          type="button"
+          onClick={resetWorkflow}
+          className="btn-secondary px-4 py-2 rounded-lg"
+        >
+          {language === "ar" ? "إعادة ضبط" : "Reset"}
+        </button>
       </div>
 
       {currentJob && (
@@ -323,6 +379,27 @@ export default function PacsRemapPage() {
             </h3>
             <span className="text-xs px-2 py-1 rounded-full pill-soft">{statusLabel}</span>
           </div>
+          {hasActiveCurrentJob && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => cancelMutation.mutate()}
+                disabled={!canCancelCurrentJob || cancelMutation.isPending}
+                className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
+              >
+                {cancelMutation.isPending
+                  ? (language === "ar" ? "جارٍ الإلغاء..." : "Cancelling...")
+                  : (language === "ar" ? "إلغاء المهمة النشطة" : "Cancel active job")}
+              </button>
+              {!canCancelCurrentJob && (
+                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                  {language === "ar"
+                    ? "لا يمكن إيقاف مهمة بدأت المعالجة بالفعل."
+                    : "Jobs already being processed cannot be interrupted safely."}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
             <div>

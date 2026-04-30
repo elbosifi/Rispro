@@ -3,9 +3,61 @@ import assert from "node:assert/strict";
 import {
   __dicomRemapTestables,
   assertDicomRemapRouteAccess,
+  cancelDicomRemapJob,
+  confirmDicomRemapAndSend,
+  createDicomRemapUploadJob,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
+  type DicomRemapJobRow,
 } from "./dicom-remap-service.js";
+import { HttpError } from "../utils/http-error.js";
+
+function remapJob(overrides: Partial<DicomRemapJobRow> = {}): DicomRemapJobRow {
+  return {
+    id: 1,
+    created_by_user_id: 42,
+    status: "uploaded",
+    source_orthanc_study_id: "source-study-id",
+    modified_orthanc_study_id: null,
+    rispro_patient_id: null,
+    destination_pacs_key: null,
+    original_patient_id: null,
+    original_patient_name: null,
+    original_patient_sex: null,
+    original_patient_birth_date: null,
+    replacement_patient_id: null,
+    replacement_patient_name: null,
+    replacement_patient_sex: null,
+    replacement_patient_birth_date: null,
+    send_result: null,
+    error_message: null,
+    cancellation_reason: null,
+    created_at: "2026-04-30T00:00:00.000Z",
+    updated_at: "2026-04-30T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function queueQueryResults(items: Array<{ rows: unknown[] } | Error>) {
+  const calls: Array<{ sql: string; params: unknown[] | undefined }> = [];
+  const query = async (sql: unknown, params?: unknown[]) => {
+    calls.push({ sql: String(sql), params });
+    const item = items.shift();
+    if (!item) {
+      throw new Error(`Unexpected query: ${String(sql)}`);
+    }
+    if (item instanceof Error) {
+      throw item;
+    }
+    return item;
+  };
+  __dicomRemapTestables.setQueryForTests(query as never);
+  return calls;
+}
+
+test.afterEach(() => {
+  __dicomRemapTestables.resetTestOverrides();
+});
 
 test("validateDicomRemapUploadFilesInput rejects empty payloads", () => {
   assert.throws(
@@ -181,6 +233,152 @@ test("dicom helper: Orthanc upload resolver reports sanitized shape when no ID c
       return true;
     }
   );
+});
+
+test("dicom helper: cancelled status is terminal and not active", () => {
+  assert.equal(__dicomRemapTestables.isDicomRemapTerminalStatus("cancelled"), true);
+  assert.equal(__dicomRemapTestables.isDicomRemapActiveStatus("cancelled"), false);
+  assert.deepEqual(__dicomRemapTestables.TERMINAL_JOB_STATUSES, ["sent", "failed", "cancelled"]);
+  assert.deepEqual(__dicomRemapTestables.ACTIVE_JOB_STATUSES, ["uploaded", "awaiting_confirmation", "remapped", "sending"]);
+});
+
+test("cancelDicomRemapJob cancels an active owner job and audits it", async () => {
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [remapJob({ status: "cancelled", cancellation_reason: "User reset" })] },
+  ]);
+
+  const result = await cancelDicomRemapJob({
+    jobId: 1,
+    currentUserId: 42,
+    reason: "User reset",
+  });
+
+  assert.equal(result.job.status, "cancelled");
+  assert.equal(result.job.cancellation_reason, "User reset");
+  assert.equal(auditEvents.length, 1);
+});
+
+test("cancelDicomRemapJob returns an already-cancelled job safely", async () => {
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "cancelled", cancellation_reason: "Already done" })] },
+  ]);
+
+  const result = await cancelDicomRemapJob({
+    jobId: 1,
+    currentUserId: 42,
+    reason: "again",
+  });
+
+  assert.equal(result.job.status, "cancelled");
+  assert.equal(result.job.cancellation_reason, "Already done");
+});
+
+test("cancelDicomRemapJob rejects sent and failed terminal jobs", async () => {
+  for (const status of ["sent", "failed"] as const) {
+    queueQueryResults([
+      { rows: [] },
+      { rows: [remapJob({ status })] },
+    ]);
+
+    await assert.rejects(
+      () => cancelDicomRemapJob({ jobId: 1, currentUserId: 42, reason: "too late" }),
+      (error) => {
+        assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
+        assert.match((error as Error).message, /cannot be cancelled/i);
+        return true;
+      }
+    );
+    __dicomRemapTestables.resetTestOverrides();
+  }
+});
+
+test("cancelled jobs do not count as active upload blockers", () => {
+  assert.equal(__dicomRemapTestables.isDicomRemapActiveStatus("cancelled"), false);
+  assert.equal(__dicomRemapTestables.ACTIVE_JOB_STATUSES.includes("cancelled"), false);
+});
+
+test("createDicomRemapUploadJob maps upload insert races to activeJobId conflicts", async () => {
+  const uniqueError = Object.assign(new Error("duplicate key"), { code: "23505" });
+  queueQueryResults([
+    { rows: [] },
+    uniqueError,
+    { rows: [{ id: 77 }] },
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapUploadJob({
+      files: [{ fileName: "study.dcm", fileContentBase64: "AA==" }],
+      currentUserId: 42,
+    }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
+      assert.deepEqual(error instanceof HttpError ? error.details : null, { activeJobId: 77 });
+      return true;
+    }
+  );
+});
+
+test("confirmDicomRemapAndSend claim failure returns already-sent job without Orthanc calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    throw new Error("Orthanc should not be called when confirm claim fails");
+  }) as typeof fetch;
+  try {
+    queueQueryResults([
+      { rows: [] },
+      { rows: [remapJob({ status: "sent" })] },
+    ]);
+
+    const result = await confirmDicomRemapAndSend({
+      jobId: 1,
+      currentUserId: 42,
+      confirm: true,
+    });
+
+    assert.equal(result.job.status, "sent");
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("confirmDicomRemapAndSend claim failure rejects non-sent jobs before Orthanc calls", async () => {
+  const originalFetch = globalThis.fetch;
+  let fetchCalls = 0;
+  globalThis.fetch = (async () => {
+    fetchCalls += 1;
+    throw new Error("Orthanc should not be called when confirm claim fails");
+  }) as typeof fetch;
+  try {
+    queueQueryResults([
+      { rows: [] },
+      { rows: [remapJob({ status: "awaiting_confirmation" })] },
+    ]);
+
+    await assert.rejects(
+      () => confirmDicomRemapAndSend({
+        jobId: 1,
+        currentUserId: 42,
+        confirm: true,
+      }),
+      (error) => {
+        assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
+        assert.match((error as Error).message, /not awaiting confirmation/i);
+        return true;
+      }
+    );
+    assert.equal(fetchCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("dicom helper: status transition guard throws on unexpected status", () => {

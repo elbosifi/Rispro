@@ -13,6 +13,7 @@ import {
 import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.js";
 import {
   assertDicomRemapRouteAccess,
+  cancelDicomRemapJob,
   confirmDicomRemapAndSend,
   createDicomRemapUploadJob,
   getDicomRemapJob,
@@ -305,6 +306,26 @@ pacsRouter.post(
       currentUserId,
     });
 
+    res.json(result);
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/cancel",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+    const body = asUnknownRecord(request.body ?? {});
+    const result = await cancelDicomRemapJob({
+      jobId,
+      currentUserId,
+      reason: body.reason,
+    });
     res.json(result);
   })
 );
