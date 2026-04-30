@@ -55,6 +55,28 @@ function queueQueryResults(items: Array<{ rows: unknown[] } | Error>) {
   return calls;
 }
 
+function orthancResult(overrides: Partial<{ status: number; ok: boolean; text: string; json: unknown }> = {}) {
+  return {
+    status: overrides.status ?? 200,
+    ok: overrides.ok ?? true,
+    text: overrides.text ?? "",
+    json: overrides.json ?? {},
+  };
+}
+
+function queueOrthancResults(items: Array<ReturnType<typeof orthancResult>>) {
+  const calls: Array<{ path: string; method: string | undefined; body: unknown }> = [];
+  __dicomRemapTestables.setOrthancFetchForTests(async (path, options = {}) => {
+    calls.push({ path, method: options.method, body: options.body });
+    const item = items.shift();
+    if (!item) {
+      throw new Error(`Unexpected Orthanc request: ${path}`);
+    }
+    return item;
+  });
+  return calls;
+}
+
 test.afterEach(() => {
   __dicomRemapTestables.resetTestOverrides();
 });
@@ -233,6 +255,107 @@ test("dicom helper: Orthanc upload resolver reports sanitized shape when no ID c
       return true;
     }
   );
+});
+
+test("dicom helper: createModifiedStudyCopy preflights source study and reports missing study clearly", async () => {
+  const calls = queueOrthancResults([
+    orthancResult({ status: 404, ok: false, text: "Unknown resource", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 404, ok: false, text: "No statistics", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 404, ok: false, text: "Unknown instance", json: { Error: "Unknown resource" } }),
+  ]);
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("missing-study-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    }),
+    (error) => {
+      assert.match((error as Error).message, /source study no longer exists/i);
+      assert.match((error as Error).message, /sourceStudyId=missing-study-id/);
+      assert.match((error as Error).message, /status=404/);
+      return true;
+    }
+  );
+
+  assert.equal(calls[0]?.path, "/studies/missing-study-id");
+  assert.equal(calls.some((call) => call.path.includes("/modify")), false);
+});
+
+test("dicom helper: createModifiedStudyCopy reports source IDs that are instances", async () => {
+  queueOrthancResults([
+    orthancResult({ status: 404, ok: false, text: "Unknown study", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 404, ok: false, text: "No statistics", json: { Error: "Unknown resource" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ParentStudy: "real-study-id" } }),
+  ]);
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("instance-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    }),
+    /source ID is an Orthanc instance ID, not a study ID/i
+  );
+});
+
+test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnostics", async () => {
+  const originalConsoleError = console.error;
+  const logged: unknown[][] = [];
+  console.error = (...args: unknown[]) => {
+    logged.push(args);
+  };
+
+  try {
+    const calls = queueOrthancResults([
+      orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id", Series: ["series-1"] } }),
+      orthancResult({ status: 200, ok: true, text: "{}", json: { CountInstances: 465 } }),
+      orthancResult({
+        status: 404,
+        ok: false,
+        text: "Cannot modify study. Authorization: Basic secret-token",
+        json: { Error: "Unknown resource" },
+      }),
+    ]);
+
+    await assert.rejects(
+      () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+        patientId: "P1",
+        patientName: "Test^Patient",
+        patientSex: "M",
+        patientBirthDate: "19900101",
+      }),
+      (error) => {
+        assert.match((error as Error).message, /modify endpoint rejected/i);
+        assert.match((error as Error).message, /sourceStudyId=study-id/);
+        assert.match((error as Error).message, /instances=465/);
+        assert.match((error as Error).message, /status=404/);
+        assert.match((error as Error).message, /Basic \[redacted\]/);
+        assert.doesNotMatch((error as Error).message, /secret-token/);
+        assert.match((error as Error).message, /shape=object\(keys=Error\)/);
+        return true;
+      }
+    );
+
+    assert.equal(calls[0]?.path, "/studies/study-id");
+    assert.equal(calls[1]?.path, "/studies/study-id/statistics");
+    assert.equal(calls[2]?.path, "/studies/study-id/modify");
+    assert.equal(logged.length, 1);
+    assert.equal(logged[0]?.[0], "Orthanc study modify failed.");
+    assert.deepEqual(logged[0]?.[1], {
+      sourceStudyId: "study-id",
+      studyPreflightStatus: 200,
+      instanceCount: 465,
+      modifyStatus: 404,
+      modifyResponseBody: "Cannot modify study. Authorization: Basic [redacted]",
+      modifyResponseShape: "object(keys=Error)",
+      modifyPayloadShape: "object(keys=Replace,KeepSource,Force)",
+    });
+  } finally {
+    console.error = originalConsoleError;
+  }
 });
 
 test("dicom helper: cancelled status is terminal and not active", () => {
