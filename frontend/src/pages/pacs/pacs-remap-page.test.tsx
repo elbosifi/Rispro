@@ -158,8 +158,8 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
     const comboBoxes = screen.getAllByRole("combobox");
-    fireEvent.change(comboBoxes[0] as HTMLSelectElement, { target: { value: "10" } });
-    fireEvent.change(comboBoxes[1] as HTMLSelectElement, { target: { value: "1" } });
+    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "10" } });
+    fireEvent.change(comboBoxes[3] as HTMLSelectElement, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
     fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));

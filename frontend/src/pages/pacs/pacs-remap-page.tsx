@@ -110,18 +110,18 @@ function formatFallbackModalityLabel(language: string, id: number): string {
 
 function wizardStepLabel(language: string, step: RemapWizardStep): string {
   const map: Record<RemapWizardStep, string> = {
-    select_files: t(language, "pacs.remap.step1"),
-    scanning: t(language, "pacs.remap.scanningFiles"),
-    choose_study: t(language, "pacs.remap.step2"),
-    choose_patient: t(language, "pacs.remap.step3"),
-    choose_destination: t(language, "pacs.remap.step4"),
-    review: t(language, "pacs.remap.step5"),
-    uploading: t(language, "pacs.remap.processStep"),
-    orthanc_processing: t(language, "pacs.remap.processStep"),
-    remapping: t(language, "pacs.remap.processStep"),
-    sending: t(language, "pacs.remap.processStep"),
-    sent: t(language, "pacs.remap.resultStep"),
-    failed: t(language, "pacs.remap.resultStep"),
+    select_files: t(language as "ar" | "en", "pacs.remap.step1"),
+    scanning: t(language as "ar" | "en", "pacs.remap.scanningFiles"),
+    choose_study: t(language as "ar" | "en", "pacs.remap.step2"),
+    choose_patient: t(language as "ar" | "en", "pacs.remap.step3"),
+    choose_destination: t(language as "ar" | "en", "pacs.remap.step4"),
+    review: t(language as "ar" | "en", "pacs.remap.step5"),
+    uploading: t(language as "ar" | "en", "pacs.remap.processStep"),
+    orthanc_processing: t(language as "ar" | "en", "pacs.remap.processStep"),
+    remapping: t(language as "ar" | "en", "pacs.remap.processStep"),
+    sending: t(language as "ar" | "en", "pacs.remap.processStep"),
+    sent: t(language as "ar" | "en", "pacs.remap.resultStep"),
+    failed: t(language as "ar" | "en", "pacs.remap.resultStep"),
   };
   return map[step];
 }
