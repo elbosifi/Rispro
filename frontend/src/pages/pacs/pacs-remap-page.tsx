@@ -355,6 +355,13 @@ export default function PacsRemapPage() {
   const detectedStudiesCount = scanResult?.studies.length || 0;
   const hasUnparsedFiles = (scanResult?.unparsedCount || 0) > 0;
   const canUseFallbackUpload = !scanMutation.isPending && (detectedStudiesCount === 0);
+  const hasPreparedJob = currentJob?.status === "awaiting_confirmation" || currentJob?.status === "remapped" || currentJob?.status === "sending" || currentJob?.status === "sent";
+  const hasSentJob = currentJob?.status === "sent";
+  const uploadProgress = uploadMutation.isPending ? 55 : (jobId ? 70 : 0);
+  const scanProgress = scanMutation.isPending ? 25 : (scanResult ? 40 : 0);
+  const prepareProgress = hasPreparedJob ? 85 : 0;
+  const sendProgress = hasSentJob ? 100 : 0;
+  const overallProgress = Math.max(scanProgress, uploadProgress, prepareProgress, sendProgress);
 
   const canPrepare = currentJob?.status === "uploaded" && !!selectedPatientId && !!selectedDestinationKey;
   const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
@@ -495,6 +502,25 @@ export default function PacsRemapPage() {
             ? "أداة داخلية آمنة: رفع دراسة واحدة، اختيار مريض، تأكيد، ثم إرسال إلى PACS."
             : "Safe internal tool: upload one study, choose patient, confirm, then send to PACS."}
         </p>
+        <div className="mt-3 space-y-1">
+          <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
+            <div
+              className="h-full bg-teal-600 transition-all duration-300"
+              style={{ width: `${Math.min(100, Math.max(0, overallProgress))}%` }}
+            />
+          </div>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {scanMutation.isPending
+              ? (language === "ar" ? "جارٍ فحص الملفات..." : "Scanning files...")
+              : uploadMutation.isPending
+                ? (language === "ar" ? "جارٍ رفع الدراسة المختارة..." : "Uploading selected study...")
+                : hasPreparedJob
+                  ? (hasSentJob
+                    ? (language === "ar" ? "اكتملت العملية." : "Workflow completed.")
+                    : (language === "ar" ? "العملية جاهزة للتأكيد والإرسال." : "Ready for confirm and send."))
+                  : (language === "ar" ? "بانتظار اختيار الملفات." : "Waiting for folder selection.")}
+          </p>
+        </div>
       </div>
 
       <div className="card-shell p-5 space-y-4">
