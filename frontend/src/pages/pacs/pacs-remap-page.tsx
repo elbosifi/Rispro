@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
+import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 
 type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
@@ -69,6 +70,7 @@ function isCancellableJobStatus(status: JobStatus): boolean {
 
 export default function PacsRemapPage() {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
@@ -202,6 +204,7 @@ export default function PacsRemapPage() {
   const comparison = currentJobQuery.data?.comparison || null;
   const patients = patientQuery.data?.patients || [];
   const destinations = destinationsQuery.data?.destinations || [];
+  const isSupervisor = user?.role === "supervisor";
 
   const canPrepare = currentJob?.status === "uploaded" && !!selectedPatientId && !!selectedDestinationKey;
   const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
@@ -271,6 +274,40 @@ export default function PacsRemapPage() {
       setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+  });
+
+  const clearFailedStudiesMutation = useMutation({
+    mutationFn: async () => api<{
+      summary: {
+        studiesAttempted: number;
+        studiesDeleted: number;
+        studiesAlreadyMissing: number;
+        failures: Array<{ studyId?: string; orthancStatus?: number; message?: string }>;
+      };
+    }>("/pacs/remap/maintenance/clear-failed-studies", {
+      method: "POST",
+    }),
+    onSuccess: (data) => {
+      const failures = data.summary.failures.length;
+      const message = language === "ar"
+        ? `اكتملت الصيانة. تمت محاولة ${data.summary.studiesAttempted} دراسة، حذف ${data.summary.studiesDeleted}، ${data.summary.studiesAlreadyMissing} كانت محذوفة مسبقاً، وفشل ${failures}.`
+        : `Maintenance complete. Attempted ${data.summary.studiesAttempted} studies; deleted ${data.summary.studiesDeleted}; ${data.summary.studiesAlreadyMissing} already missing; ${failures} failed.`;
+      setSuccessMessage(message);
+      setErrorMessage("");
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      if (jobId) void currentJobQuery.refetch();
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof Error ? error.message : "Failed to clear failed remap studies.";
+      setErrorMessage(
+        message.includes("re-authentication") || message.includes("403")
+          ? (language === "ar"
+            ? "يلزم إعادة تحقق المشرف من صفحة الإعدادات قبل تشغيل صيانة Orthanc."
+            : "Supervisor re-authentication is required before running Orthanc maintenance.")
+          : message
+      );
+      setSuccessMessage("");
     },
   });
 
@@ -506,6 +543,36 @@ export default function PacsRemapPage() {
               ? (language === "ar" ? "جارٍ التنفيذ..." : "Processing...")
               : (language === "ar" ? "تأكيد وإرسال إلى PACS" : "Confirm and Send to PACS")}
           </button>
+        </div>
+      )}
+
+      {isSupervisor && (
+        <div className="card-shell p-5 space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+              {language === "ar" ? "صيانة Orthanc للمشرف" : "Supervisor Orthanc Maintenance"}
+            </h3>
+            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
+              {language === "ar"
+                ? "يحذف فقط دراسات Orthanc المرتبطة بمهام DICOM remap الفاشلة أو الملغاة."
+                : "Deletes only Orthanc studies linked to failed or cancelled DICOM remap jobs."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => clearFailedStudiesMutation.mutate()}
+            disabled={clearFailedStudiesMutation.isPending}
+            className="btn-secondary px-4 py-2 rounded-lg text-sm disabled:opacity-50"
+          >
+            {clearFailedStudiesMutation.isPending
+              ? (language === "ar" ? "جارٍ التنظيف..." : "Clearing...")
+              : (language === "ar" ? "تنظيف دراسات remap الفاشلة" : "Clear failed remap studies")}
+          </button>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {language === "ar"
+              ? "لا يحذف الدراسات النشطة أو المرسلة ولا يشغل إعادة الضبط الشاملة."
+              : "Does not delete active or sent job studies, and does not run hard reset."}
+          </p>
         </div>
       )}
 
