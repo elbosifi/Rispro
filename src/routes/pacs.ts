@@ -20,15 +20,18 @@ import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.
 import {
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
+  clearFailedDicomRemapOrthancStudies,
   cleanupDicomRemapUploadTempDir,
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
   type DicomRemapStagedUploadFile,
   getDicomRemapJob,
+  hardResetOrthancStudies,
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
   prepareDicomRemapConfirmation,
+  resetDicomRemapJob,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
 } from "../services/dicom-remap-service.js";
@@ -446,6 +449,46 @@ pacsRouter.post(
       reason: body.reason,
     });
     res.json(result);
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/reset",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+
+    const result = await resetDicomRemapJob({ jobId, currentUserId });
+    res.json(result);
+  })
+);
+
+pacsRouter.post(
+  "/remap/maintenance/clear-failed-studies",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const summary = await clearFailedDicomRemapOrthancStudies(currentUserId);
+    res.json({ summary });
+  })
+);
+
+pacsRouter.post(
+  "/remap/maintenance/hard-reset-orthanc",
+  ...supervisorMiddleware,
+  express.json({ limit: "1mb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const body = asUnknownRecord(request.body ?? {});
+    const summary = await hardResetOrthancStudies(currentUserId, body.confirmation);
+    res.json({ summary });
   })
 );
 

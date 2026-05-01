@@ -946,6 +946,142 @@ test("cancelDicomRemapJob rejects sent and failed terminal jobs", async () => {
   }
 });
 
+test("resetDicomRemapJob deletes linked source and modified studies, ignores 404, and audits", async () => {
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [remapJob({
+      status: "failed",
+      source_orthanc_study_id: "source-study",
+      modified_orthanc_study_id: "modified-study",
+    })] },
+    { rows: [remapJob({
+      status: "cancelled",
+      source_orthanc_study_id: "source-study",
+      modified_orthanc_study_id: "modified-study",
+      cancellation_reason: "Reset by user before retry",
+    })] },
+  ]);
+  const calls = queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: { Error: "missing" } }),
+  ]);
+
+  const result = await __dicomRemapTestables.resetDicomRemapJob({
+    jobId: 1,
+    currentUserId: 42,
+  });
+
+  assert.equal(result.job.status, "cancelled");
+  assert.equal(result.job.cancellation_reason, "Reset by user before retry");
+  assert.equal(result.summary.studiesAttempted, 2);
+  assert.equal(result.summary.studiesDeleted, 1);
+  assert.equal(result.summary.studiesAlreadyMissing, 1);
+  assert.deepEqual(calls.map((call) => call.path), ["/studies/source-study", "/studies/modified-study"]);
+  assert.equal(auditEvents.length, 1);
+});
+
+test("resetDicomRemapJob fails clearly on non-404 Orthanc delete errors", async () => {
+  queueQueryResults([
+    { rows: [remapJob({ status: "failed", source_orthanc_study_id: "source-study" })] },
+  ]);
+  queueOrthancResults([
+    orthancResult({ status: 500, ok: false, text: "Orthanc down", json: { Error: "down" } }),
+  ]);
+
+  await assert.rejects(
+    () => __dicomRemapTestables.resetDicomRemapJob({ jobId: 1, currentUserId: 42 }),
+    (error) => {
+      assert.equal(error instanceof HttpError ? error.statusCode : 0, 502);
+      assert.match((error as Error).message, /Failed to delete one or more linked Orthanc studies/);
+      return true;
+    }
+  );
+});
+
+test("resetDicomRemapJob rejects sending and sent jobs before Orthanc delete", async () => {
+  for (const status of ["sending", "sent"] as const) {
+    queueQueryResults([
+      { rows: [remapJob({ status, source_orthanc_study_id: `${status}-source` })] },
+    ]);
+
+    await assert.rejects(
+      () => __dicomRemapTestables.resetDicomRemapJob({ jobId: 1, currentUserId: 42 }),
+      (error) => {
+        assert.equal(error instanceof HttpError ? error.statusCode : 0, 409);
+        assert.match((error as Error).message, /cannot be reset after send processing has started/);
+        return true;
+      }
+    );
+  }
+});
+
+test("clearFailedDicomRemapOrthancStudies deletes only failed and cancelled job studies", async () => {
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [
+      remapJob({ id: 1, status: "failed", source_orthanc_study_id: "failed-source", modified_orthanc_study_id: "failed-modified" }),
+      remapJob({ id: 2, status: "cancelled", source_orthanc_study_id: "cancelled-source", modified_orthanc_study_id: "failed-source" }),
+    ] },
+  ]);
+  const calls = queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: {} }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+  ]);
+
+  const summary = await __dicomRemapTestables.clearFailedDicomRemapOrthancStudies(42);
+
+  assert.deepEqual(calls.map((call) => call.path), [
+    "/studies/failed-source",
+    "/studies/failed-modified",
+    "/studies/cancelled-source",
+  ]);
+  assert.equal(summary.studiesAttempted, 3);
+  assert.equal(summary.studiesDeleted, 2);
+  assert.equal(summary.studiesAlreadyMissing, 1);
+  assert.equal(auditEvents.length, 1);
+});
+
+test("hardResetOrthancStudies requires typed confirmation", async () => {
+  await assert.rejects(
+    () => __dicomRemapTestables.hardResetOrthancStudies(42, "delete"),
+    /Typed confirmation is required/
+  );
+});
+
+test("hardResetOrthancStudies deletes all Orthanc studies, marks active jobs failed, and audits", async () => {
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [] },
+  ]);
+  const calls = queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: JSON.stringify(["study-a", "study-b"]), json: ["study-a", "study-b"] }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: {} }),
+  ]);
+
+  const summary = await __dicomRemapTestables.hardResetOrthancStudies(42, "DELETE ALL ORTHANC STUDIES");
+
+  assert.deepEqual(calls.map((call) => call.path), ["/studies", "/studies/study-a", "/studies/study-b"]);
+  assert.equal(summary.totalOrthancStudiesFound, 2);
+  assert.equal(summary.deleted, 1);
+  assert.equal(summary.alreadyMissing, 1);
+  assert.deepEqual(summary.failedDeletions, []);
+  assert.equal(auditEvents.length, 1);
+});
+
 test("cancelled jobs do not count as active upload blockers", () => {
   assert.equal(__dicomRemapTestables.isDicomRemapActiveStatus("cancelled"), false);
   assert.equal(__dicomRemapTestables.ACTIVE_JOB_STATUSES.includes("cancelled"), false);

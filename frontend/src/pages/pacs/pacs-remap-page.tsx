@@ -76,6 +76,7 @@ export default function PacsRemapPage() {
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [successMessage, setSuccessMessage] = useState<string>("");
   const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
   const [fileInputVersion, setFileInputVersion] = useState(0);
 
@@ -84,6 +85,7 @@ export default function PacsRemapPage() {
     setFiles(all);
     setSkippedFilesCount(0);
     setErrorMessage("");
+    setSuccessMessage("");
   };
 
   const destinationsQuery = useQuery({
@@ -133,6 +135,7 @@ export default function PacsRemapPage() {
       setJobId(data.job.id);
       setSkippedFilesCount(data.skippedFilesCount || 0);
       setErrorMessage("");
+      setSuccessMessage("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
     onError: (error: unknown) => {
@@ -204,6 +207,7 @@ export default function PacsRemapPage() {
   const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
   const canCancelCurrentJob = currentJob ? isCancellableJobStatus(currentJob.status) : false;
   const hasActiveCurrentJob = currentJob ? isActiveJobStatus(currentJob.status) : false;
+  const canResetCurrentJob = currentJob ? !["sending", "sent"].includes(currentJob.status) : false;
 
   const resetWorkflow = (): void => {
     setFiles([]);
@@ -212,6 +216,7 @@ export default function PacsRemapPage() {
     setSelectedPatientId("");
     setSelectedDestinationKey("");
     setErrorMessage("");
+    setSuccessMessage("");
     setSkippedFilesCount(0);
     setFileInputVersion((value) => value + 1);
     uploadMutation.reset();
@@ -234,6 +239,36 @@ export default function PacsRemapPage() {
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Cancel failed.");
+      void currentJobQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+  });
+
+  const resetJobMutation = useMutation({
+    mutationFn: async () => {
+      if (!jobId) throw new Error("Missing job ID.");
+      return api<{
+        job: RemapJob;
+        summary: {
+          studiesAttempted: number;
+          studiesDeleted: number;
+          studiesAlreadyMissing: number;
+          failures: unknown[];
+        };
+      }>(`/pacs/remap/jobs/${jobId}/reset`, {
+        method: "POST",
+      });
+    },
+    onSuccess: (data) => {
+      const message = language === "ar"
+        ? `تمت إعادة الضبط. تم حذف ${data.summary.studiesDeleted} دراسة، و${data.summary.studiesAlreadyMissing} كانت محذوفة مسبقاً.`
+        : `Reset complete. Deleted ${data.summary.studiesDeleted} linked Orthanc studies; ${data.summary.studiesAlreadyMissing} were already missing.`;
+      resetWorkflow();
+      setSuccessMessage(message);
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+    onError: (error: unknown) => {
+      setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -344,6 +379,25 @@ export default function PacsRemapPage() {
                     : "Jobs already being processed cannot be interrupted safely."}
                 </p>
               )}
+            </div>
+          )}
+          {canResetCurrentJob && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => resetJobMutation.mutate()}
+                disabled={resetJobMutation.isPending}
+                className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
+              >
+                {resetJobMutation.isPending
+                  ? (language === "ar" ? "جارٍ إعادة الضبط..." : "Resetting...")
+                  : (language === "ar" ? "إعادة ضبط الرفع الحالي" : "Reset current upload")}
+              </button>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {language === "ar"
+                  ? "يحذف فقط دراسات Orthanc المرتبطة بهذه المهمة."
+                  : "Deletes only Orthanc studies linked to this job."}
+              </p>
             </div>
           )}
 
@@ -489,6 +543,12 @@ export default function PacsRemapPage() {
       {(errorMessage || currentJob?.error_message) && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {errorMessage || currentJob?.error_message}
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+          {successMessage}
         </div>
       )}
 

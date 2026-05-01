@@ -46,6 +46,20 @@ interface DicomRemapUploadProcessingResult {
   skippedFilesCount: number;
 }
 
+interface OrthancStudyDeleteResult {
+  studyId: string;
+  status: "deleted" | "already_missing" | "failed";
+  orthancStatus?: number;
+  message?: string;
+}
+
+interface OrthancResetSummary {
+  studiesAttempted: number;
+  studiesDeleted: number;
+  studiesAlreadyMissing: number;
+  failures: OrthancStudyDeleteResult[];
+}
+
 export interface DicomRemapJobRow {
   id: number;
   created_by_user_id: number;
@@ -941,6 +955,59 @@ async function readOrthancStudyExists(studyId: string): Promise<boolean> {
   );
 }
 
+function summarizeOrthancStudyDeletes(results: OrthancStudyDeleteResult[]): OrthancResetSummary {
+  return {
+    studiesAttempted: results.length,
+    studiesDeleted: results.filter((result) => result.status === "deleted").length,
+    studiesAlreadyMissing: results.filter((result) => result.status === "already_missing").length,
+    failures: results.filter((result) => result.status === "failed"),
+  };
+}
+
+async function deleteOrthancStudyIfExists(studyId: string): Promise<OrthancStudyDeleteResult> {
+  const cleanStudyId = String(studyId || "").trim();
+  if (!cleanStudyId) {
+    return { studyId: cleanStudyId, status: "already_missing", message: "empty_study_id" };
+  }
+
+  try {
+    const response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(cleanStudyId)}`, {
+      method: "DELETE",
+      timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+    });
+
+    if (response.ok) {
+      return { studyId: cleanStudyId, status: "deleted", orthancStatus: response.status };
+    }
+    if (response.status === 404) {
+      return { studyId: cleanStudyId, status: "already_missing", orthancStatus: response.status };
+    }
+    return {
+      studyId: cleanStudyId,
+      status: "failed",
+      orthancStatus: response.status,
+      message: sanitizeOrthancResponseSnippet(response.text),
+    };
+  } catch (error) {
+    return {
+      studyId: cleanStudyId,
+      status: "failed",
+      message: error instanceof Error ? error.message : "Orthanc study delete failed.",
+    };
+  }
+}
+
+function uniqueStudyIdsFromJobs(jobs: DicomRemapJobRow[]): string[] {
+  const ids = new Set<string>();
+  for (const job of jobs) {
+    for (const studyId of [job.source_orthanc_study_id, job.modified_orthanc_study_id]) {
+      const clean = String(studyId || "").trim();
+      if (clean) ids.add(clean);
+    }
+  }
+  return Array.from(ids);
+}
+
 async function markJobFailed(jobId: number, message: string): Promise<void> {
   await queryDicomRemapDb(
     `
@@ -1701,6 +1768,148 @@ export async function cancelDicomRemapJob({
   );
 }
 
+export async function resetDicomRemapJob({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow; summary: OrthancResetSummary }> {
+  const job = await loadOwnedJob(jobId, currentUserId);
+  if (job.status === "sending" || job.status === "sent") {
+    throw new HttpError(409, "This DICOM remap job cannot be reset after send processing has started.");
+  }
+
+  const studyIds = uniqueStudyIdsFromJobs([job]);
+  const results = await Promise.all(studyIds.map((studyId) => deleteOrthancStudyIfExists(studyId)));
+  const summary = summarizeOrthancStudyDeletes(results);
+
+  if (summary.failures.length > 0) {
+    throw new HttpError(502, "Failed to delete one or more linked Orthanc studies.", summary);
+  }
+
+  const updateResult = await queryDicomRemapDb<DicomRemapJobRow>(
+    `
+      update dicom_remap_jobs
+      set status = 'cancelled',
+          cancellation_reason = 'Reset by user before retry',
+          error_message = null,
+          updated_at = now()
+      where id = $1
+        and created_by_user_id = $2
+      returning *
+    `,
+    [job.id, currentUserId]
+  );
+  const resetJob = updateResult.rows[0];
+  if (!resetJob) {
+    throw new HttpError(500, "Failed to reset DICOM remap job.");
+  }
+
+  await logDicomRemapAuditEntry({
+    entityType: "dicom_remap_job",
+    entityId: resetJob.id,
+    actionType: "reset_before_retry",
+    oldValues: { status: job.status },
+    newValues: {
+      status: resetJob.status,
+      cancellationReason: resetJob.cancellation_reason,
+      deletedOrthancStudies: summary,
+    },
+    changedByUserId: currentUserId,
+  });
+
+  return { job: resetJob, summary };
+}
+
+export async function clearFailedDicomRemapOrthancStudies(currentUserId: UserId): Promise<OrthancResetSummary> {
+  const { rows } = await queryDicomRemapDb<DicomRemapJobRow>(
+    `
+      select *
+      from dicom_remap_jobs
+      where status in ('failed', 'cancelled')
+        and (
+          source_orthanc_study_id is not null
+          or modified_orthanc_study_id is not null
+        )
+    `
+  );
+
+  const studyIds = uniqueStudyIdsFromJobs(rows);
+  const results = await Promise.all(studyIds.map((studyId) => deleteOrthancStudyIfExists(studyId)));
+  const summary = summarizeOrthancStudyDeletes(results);
+
+  await logDicomRemapAuditEntry({
+    entityType: "dicom_remap_maintenance",
+    entityId: null,
+    actionType: "clear_failed_remap_orthanc_studies",
+    oldValues: null,
+    newValues: summary,
+    changedByUserId: currentUserId,
+  });
+
+  return summary;
+}
+
+export async function hardResetOrthancStudies(
+  currentUserId: UserId,
+  confirmation: unknown
+): Promise<{
+  totalOrthancStudiesFound: number;
+  deleted: number;
+  alreadyMissing: number;
+  failedDeletions: OrthancStudyDeleteResult[];
+}> {
+  if (String(confirmation || "") !== "DELETE ALL ORTHANC STUDIES") {
+    throw new HttpError(400, "Typed confirmation is required to hard reset Orthanc studies.");
+  }
+
+  const listResponse = await fetchOrthancForRemap("/studies", {
+    method: "GET",
+    timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+  });
+  if (!listResponse.ok || !Array.isArray(listResponse.json)) {
+    throw new HttpError(
+      502,
+      `Unable to list Orthanc studies before hard reset (status=${listResponse.status}, body=${sanitizeOrthancResponseSnippet(listResponse.text)}, shape=${describeOrthancPayloadShape(listResponse.json)}).`
+    );
+  }
+
+  const studyIds = listResponse.json.map((studyId) => String(studyId || "").trim()).filter((studyId) => !!studyId);
+  const results = await Promise.all(studyIds.map((studyId) => deleteOrthancStudyIfExists(studyId)));
+  const summary = summarizeOrthancStudyDeletes(results);
+
+  await queryDicomRemapDb(
+    `
+      update dicom_remap_jobs
+      set status = 'failed',
+          error_message = 'Orthanc hard reset performed',
+          updated_at = now()
+      where status = any($1::text[])
+    `,
+    [ACTIVE_JOB_STATUSES]
+  );
+
+  await logDicomRemapAuditEntry({
+    entityType: "dicom_remap_maintenance",
+    entityId: null,
+    actionType: "hard_reset_orthanc_studies",
+    oldValues: null,
+    newValues: {
+      totalOrthancStudiesFound: studyIds.length,
+      ...summary,
+    },
+    changedByUserId: currentUserId,
+  });
+
+  return {
+    totalOrthancStudiesFound: studyIds.length,
+    deleted: summary.studiesDeleted,
+    alreadyMissing: summary.studiesAlreadyMissing,
+    failedDeletions: summary.failures,
+  };
+}
+
 export async function prepareDicomRemapConfirmation({
   jobId,
   risproPatientId,
@@ -1994,6 +2203,10 @@ export const __dicomRemapTestables = {
   isLikelyDicomFile,
   isSkippableDicomRemapFolderEntry,
   isOrthancInvalidDicomUploadRejection,
+  deleteOrthancStudyIfExists,
+  resetDicomRemapJob,
+  clearFailedDicomRemapOrthancStudies,
+  hardResetOrthancStudies,
   isDicomRemapActiveStatus,
   isDicomRemapTerminalStatus,
   isDicomRemapCancellableStatus,
