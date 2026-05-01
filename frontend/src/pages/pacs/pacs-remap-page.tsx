@@ -67,6 +67,22 @@ interface PatientOption {
   date_of_birth?: string | null;
 }
 
+interface TodayStudyOption {
+  id: number;
+  patient_id: number;
+  accession_number: string;
+  appointment_date: string;
+  modality_id: number;
+  modality_name_en?: string | null;
+  modality_name_ar?: string | null;
+  exam_name_en?: string | null;
+  exam_name_ar?: string | null;
+  arabic_full_name?: string | null;
+  english_full_name?: string | null;
+  national_id?: string | null;
+  mrn?: string | null;
+}
+
 interface UploadMultipartResult {
   job: RemapJob;
   skippedFilesCount?: number;
@@ -86,6 +102,13 @@ function formatName(patient: PatientOption): string {
 
 function isCancellableJobStatus(status: JobStatus): boolean {
   return ["uploaded", "awaiting_confirmation"].includes(status);
+}
+
+function toIsoDate(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 async function uploadMultipartWithProgress(
@@ -142,6 +165,10 @@ export default function PacsRemapPage() {
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
   const [patientSearch, setPatientSearch] = useState("");
+  const [todayPatientSearch, setTodayPatientSearch] = useState("");
+  const [todayModalityFilter, setTodayModalityFilter] = useState("");
+  const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
+  const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
   const [jobId, setJobId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
@@ -159,6 +186,32 @@ export default function PacsRemapPage() {
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
     queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
+  });
+
+  const modalityLookupQuery = useQuery({
+    queryKey: ["v2", "lookups", "modalities"],
+    queryFn: () => api<{ items: Array<{ id: number; nameEn?: string; nameAr?: string; code?: string }> }>("/v2/lookups/modalities"),
+    retry: 0,
+  });
+
+  const studyDateForFilter = useMemo(() => {
+    if (studyDateMode === "custom") return customStudyDate;
+    const now = new Date();
+    if (studyDateMode === "yesterday") now.setDate(now.getDate() - 1);
+    return toIsoDate(now);
+  }, [studyDateMode, customStudyDate]);
+
+  const todayStudiesQuery = useQuery({
+    queryKey: ["v2", "appointments", "remap-picker", studyDateForFilter, todayModalityFilter, todayPatientSearch],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set("dateFrom", studyDateForFilter);
+      params.set("dateTo", studyDateForFilter);
+      if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
+      if (todayPatientSearch.trim()) params.set("q", todayPatientSearch.trim());
+      return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
+    },
+    retry: 0,
   });
 
   const patientQuery = useQuery({
@@ -503,6 +556,70 @@ export default function PacsRemapPage() {
           {scanResult && (
             <div className="card-shell p-5 space-y-4">
               <h3 className="text-sm font-semibold">Step 3: Choose RISPro patient</h3>
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-xs font-semibold">Patients with studies by date/modality</p>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                  <select
+                    value={studyDateMode}
+                    onChange={(e) => setStudyDateMode(e.target.value as "today" | "yesterday" | "custom")}
+                    className="input-premium w-full px-3 py-2"
+                  >
+                    <option value="today">Today</option>
+                    <option value="yesterday">Yesterday</option>
+                    <option value="custom">Choose date</option>
+                  </select>
+                  <input
+                    type="date"
+                    value={customStudyDate}
+                    onChange={(e) => setCustomStudyDate(e.target.value)}
+                    disabled={studyDateMode !== "custom"}
+                    className="input-premium w-full px-3 py-2 disabled:opacity-50"
+                  />
+                  <select
+                    value={todayModalityFilter}
+                    onChange={(e) => setTodayModalityFilter(e.target.value)}
+                    className="input-premium w-full px-3 py-2"
+                  >
+                    <option value="">All modalities</option>
+                    {(modalityLookupQuery.data?.items || []).map((modality) => (
+                      <option key={modality.id} value={modality.id}>
+                        {modality.nameEn || modality.nameAr || modality.code || `Modality #${modality.id}`}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={todayPatientSearch}
+                    onChange={(e) => setTodayPatientSearch(e.target.value)}
+                    placeholder="Optional patient search"
+                    className="input-premium w-full px-3 py-2"
+                  />
+                </div>
+                {todayStudiesQuery.isLoading && <p className="text-xs">Loading study-linked patients...</p>}
+                {todayStudiesQuery.error && <p className="text-xs text-red-600">Failed to load study-linked patients.</p>}
+                {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                  <div className="max-h-56 overflow-y-auto space-y-2">
+                    {(todayStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
+                      const displayName = appointment.english_full_name || appointment.arabic_full_name || `Patient #${appointment.patient_id}`;
+                      const modalityName = appointment.modality_name_en || appointment.modality_name_ar || `Modality #${appointment.modality_id}`;
+                      const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
+                      const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
+                      return (
+                        <button
+                          key={appointment.id}
+                          type="button"
+                          onClick={() => setSelectedPatientId(String(appointment.patient_id))}
+                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                        >
+                          <p><strong>{displayName}</strong></p>
+                          <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
+                          <p>{appointment.appointment_date} • {appointment.accession_number}{appointment.national_id ? ` • ${appointment.national_id}` : ""}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <input
                 type="text"
                 value={patientSearch}
