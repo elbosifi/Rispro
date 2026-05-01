@@ -140,6 +140,9 @@ const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confir
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
 const REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS = 60;
+const ORTHANC_STUDY_STABILITY_TIMEOUT_MS = 30_000;
+const ORTHANC_STUDY_STABILITY_POLL_MS = 500;
+const ORTHANC_STUDY_MODIFY_RETRY_BACKOFF_MS = [250, 500, 1_000];
 let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
@@ -1221,7 +1224,7 @@ async function readOrthancStudyBeforeModify(sourceStudyId: string): Promise<Orth
   );
 }
 
-async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 60_000): Promise<OrthancStudyModifyPreflight> {
+async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = ORTHANC_STUDY_STABILITY_TIMEOUT_MS): Promise<OrthancStudyModifyPreflight> {
   const startedAt = Date.now();
   let lastPreflight: OrthancStudyModifyPreflight | null = null;
 
@@ -1231,7 +1234,7 @@ async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 60_0
     if (preflight.isStable !== false) {
       return preflight;
     }
-    await sleepForDicomRemap(1_000);
+    await sleepForDicomRemap(ORTHANC_STUDY_STABILITY_POLL_MS);
   }
 
   throw new HttpError(
@@ -1337,7 +1340,7 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
     KeepSource: true,
     Force: true,
   };
-  const backoffMs = [500, 1_000, 2_000, 4_000];
+  const backoffMs = ORTHANC_STUDY_MODIFY_RETRY_BACKOFF_MS;
   let response: OrthancFetchResult | null = null;
 
   for (let attempt = 0; attempt <= backoffMs.length; attempt += 1) {

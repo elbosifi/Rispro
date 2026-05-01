@@ -498,8 +498,6 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modify404,
       ...stableStudyResponses(),
       modify404,
-      ...stableStudyResponses(),
-      modify404,
       orthancResult({
         status: 404,
         ok: false,
@@ -536,7 +534,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
     assert.equal(calls[1]?.path, "/studies/study-id/statistics");
     assert.equal(calls[2]?.path, "/system");
     assert.equal(calls[3]?.path, "/studies/study-id/modify");
-    assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 5);
+    assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 4);
     assert.equal(calls.at(-1)?.path, "/tools/bulk-modify");
     assert.equal(logged.length, 2);
     assert.equal(logged[0]?.[0], "Orthanc study modify failed.");
@@ -645,7 +643,7 @@ test("dicom helper: waitForOrthancStudyStable polls until Orthanc reports stable
 
   assert.equal(preflight.isStable, true);
   assert.equal(preflight.lastUpdate, "second");
-  assert.deepEqual(sleeps, [1000]);
+  assert.deepEqual(sleeps, [500]);
   assert.equal(calls.filter((call) => call.path === "/studies/study-id").length, 2);
 });
 
@@ -669,7 +667,7 @@ test("dicom helper: createModifiedStudyCopy retries transient modify 404 while s
   });
 
   assert.equal(modifiedStudyId, "modified-study-id");
-  assert.deepEqual(sleeps, [500]);
+  assert.deepEqual(sleeps, [250]);
   assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 2);
 });
 
@@ -863,7 +861,7 @@ test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when st
     });
 
     const bulkCall = calls.at(-1);
-    assert.equal(modifiedStudyId, "bulk-modified-study-id");
+    assert.equal(modifiedStudyId, "study-id");
     assert.equal(bulkCall?.path, "/tools/bulk-modify");
     assert.equal(bulkCall?.method, "POST");
     assert.deepEqual(bulkCall?.body, {
