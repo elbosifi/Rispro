@@ -301,6 +301,10 @@ export default function PacsRemapPage() {
   });
 
   const processMutation = useMutation({
+    onMutate: () => {
+      setErrorMessage("");
+      setSuccessMessage("");
+    },
     mutationFn: async () => {
       if (!selectedPatientId || !selectedDestinationKey) throw new Error("Patient and destination are required.");
       const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
@@ -418,6 +422,8 @@ export default function PacsRemapPage() {
 
   const wizardStep: RemapWizardStep = useMemo(() => {
     if (processMutation.isPending) return processingStage;
+    if (currentJob?.status === "sent") return "sent";
+    if (currentJob?.status === "failed" || currentJob?.status === "cancelled") return "failed";
     if (processingStage === "sent") return "sent";
     if (processingStage === "failed") return "failed";
     if (scanMutation.isPending) return "scanning";
@@ -426,7 +432,12 @@ export default function PacsRemapPage() {
     if (!canContinuePatient) return "choose_patient";
     if (!canContinueDestination) return "choose_destination";
     return "review";
-  }, [processMutation.isPending, processingStage, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
+  }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
+
+  const visibleErrorMessage =
+    wizardStep === "sent"
+      ? ""
+      : errorMessage || currentJob?.error_message || "";
 
   const resetWorkflow = (): void => {
     setFiles([]);
@@ -730,7 +741,7 @@ export default function PacsRemapPage() {
               {wizardStep === "sent" ? (
                 <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
               ) : (
-                <p className="text-sm text-red-700">{errorMessage || t(language, "pacs.remap.failure")}</p>
+                <p className="text-sm text-red-700">{visibleErrorMessage || t(language, "pacs.remap.failure")}</p>
               )}
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
@@ -811,9 +822,9 @@ export default function PacsRemapPage() {
         </div>
       </div>
 
-      {(errorMessage || currentJob?.error_message) && (
+      {visibleErrorMessage && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {errorMessage || currentJob?.error_message}
+          {visibleErrorMessage}
         </div>
       )}
       {successMessage && (
