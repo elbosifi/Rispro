@@ -9,6 +9,8 @@ import {
   cancelPublicAppointment,
   fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
+  type PatientQrSettings,
+  type PublicAppointmentCancelPreview,
 } from "@/lib/api-hooks";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -17,7 +19,7 @@ vi.mock("@/lib/api-hooks", () => ({
   cancelPublicAppointment: vi.fn(),
 }));
 
-function baseSettings(overrides: Record<string, unknown> = {}) {
+function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
     enabled: true,
     risproPublicBaseUrl: "https://rispro.nccb.com.ly",
@@ -92,7 +94,7 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function preview(overrides: Record<string, unknown> = {}) {
+function preview(overrides: Partial<PublicAppointmentCancelPreview> = {}): PublicAppointmentCancelPreview {
   return {
     bookingId: 12,
     patientDisplayName: "Test Patient",

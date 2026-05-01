@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
-import { fetchModalitiesSettings, fetchPatientQrSettings, savePatientQrSettings } from "@/lib/api-hooks";
+import {
+  fetchModalitiesSettings,
+  fetchPatientQrSettings,
+  savePatientQrSettings,
+  type PatientQrSettings,
+} from "@/lib/api-hooks";
 import { LanguageProvider } from "@/providers/language-provider";
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -13,7 +18,7 @@ vi.mock("@/lib/api-hooks", () => ({
   savePatientQrSettings: vi.fn(),
 }));
 
-const baseSettings = {
+const baseSettings: PatientQrSettings = {
   enabled: true,
   risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
