@@ -216,21 +216,25 @@ function assertNoDicomControlChars(value: string, fieldName: string): void {
   }
 }
 
+function dicomByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
 function normalizeDicomPatientIdForReplace(value: string): string {
   const clean = String(value || "").trim();
   assertNoDicomControlChars(clean, "PatientID");
-  if (clean.length > DICOM_IDENTITY_MAX_LENGTH) {
+  if (dicomByteLength(clean) > DICOM_IDENTITY_MAX_LENGTH) {
     throw new HttpError(400, "PatientID is too long for DICOM");
   }
   return clean;
 }
 
 function normalizeDicomPatientNameForReplace(value: string): string {
+  assertNoDicomControlChars(String(value || ""), "PatientName");
   const normalized = normalizeDicomPatientName(value);
-  assertNoDicomControlChars(normalized, "PatientName");
   const groups = normalized.split("=");
   for (const group of groups) {
-    if (group.length > DICOM_IDENTITY_MAX_LENGTH) {
+    if (dicomByteLength(group) > DICOM_IDENTITY_MAX_LENGTH) {
       throw new HttpError(400, "PatientName is too long for DICOM");
     }
   }

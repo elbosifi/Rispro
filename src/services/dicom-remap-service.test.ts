@@ -175,8 +175,24 @@ test("dicom helper: replacement identity rejects long PatientID", () => {
   );
 });
 
+test("dicom helper: replacement identity rejects PatientID by byte length", () => {
+  const tooLong = "م".repeat(33);
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientIdForReplace(tooLong),
+    /PatientID is too long for DICOM/
+  );
+});
+
 test("dicom helper: replacement identity rejects long PatientName component group", () => {
   const tooLongGroup = "B".repeat(65);
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientNameForReplace(`${tooLongGroup}=OK`),
+    /PatientName is too long for DICOM/
+  );
+});
+
+test("dicom helper: replacement identity rejects PatientName group by byte length", () => {
+  const tooLongGroup = "م".repeat(33);
   assert.throws(
     () => __dicomRemapTestables.normalizeDicomPatientNameForReplace(`${tooLongGroup}=OK`),
     /PatientName is too long for DICOM/
@@ -190,6 +206,10 @@ test("dicom helper: replacement identity rejects control characters consistently
   );
   assert.throws(
     () => __dicomRemapTestables.normalizeDicomPatientNameForReplace("Jane\u0000 Doe"),
+    /control characters/i
+  );
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientNameForReplace("Jane\nDoe"),
     /control characters/i
   );
 });
