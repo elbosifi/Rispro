@@ -27,6 +27,7 @@ import {
   createDicomRemapUploadJob,
   type DicomRemapStagedUploadFile,
   getDicomRemapJob,
+  getDicomRemapReplacementPreview,
   hardResetOrthancStudies,
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
@@ -411,6 +412,22 @@ pacsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const destinations = await listDicomRemapDestinations();
     res.json({ destinations });
+  })
+);
+
+pacsRouter.post(
+  "/remap/replacement-preview",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext };
+    await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const body = asUnknownRecord(request.body ?? {});
+    const risproPatientId = asOptionalString(body.risproPatientId);
+    if (!risproPatientId) {
+      throw new HttpError(400, "risproPatientId is required.");
+    }
+    const replacement = await getDicomRemapReplacementPreview({ risproPatientId });
+    res.json({ replacement });
   })
 );
 

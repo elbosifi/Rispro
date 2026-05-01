@@ -1550,7 +1550,7 @@ async function finalizeDicomRemapUploadJob({
   if (expectedStudyInstanceUID && summary.studyInstanceUid && summary.studyInstanceUid !== expectedStudyInstanceUID) {
     throw new HttpError(
       400,
-      `Selected StudyInstanceUID does not match uploaded study (selected=${expectedStudyInstanceUID}, uploaded=${summary.studyInstanceUid}).`
+      "Uploaded study does not match selected study. Please rescan and retry."
     );
   }
 
@@ -2132,6 +2132,23 @@ export async function prepareDicomRemapConfirmation({
   });
 
   return { job: updatedJob, comparison };
+}
+
+export async function getDicomRemapReplacementPreview({
+  risproPatientId,
+}: {
+  risproPatientId: number | string;
+}): Promise<OrthancPatientSummary> {
+  const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
+  if (!patientId) {
+    throw new HttpError(400, "risproPatientId is required.");
+  }
+  const patient = await getPatientById(patientId);
+  const replacement = formatReplacementFromPatient(patient);
+  if (!replacement.patientId || !replacement.patientName) {
+    throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
+  }
+  return replacement;
 }
 
 export async function confirmDicomRemapAndSend({

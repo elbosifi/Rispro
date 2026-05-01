@@ -1324,7 +1324,7 @@ test("createDicomRemapMultipartUploadJob rejects selectedStudyInstanceUID mismat
       tempDir,
       selectedStudyInstanceUID: "1.2.840.study.selected",
     }),
-    /Selected StudyInstanceUID does not match uploaded study/
+    /Uploaded study does not match selected study\. Please rescan and retry\./
   );
 });
 

@@ -7,6 +7,19 @@ import { useLanguage } from "@/providers/language-provider";
 import { buildDicomUploadSelectionPlan, scanDicomStudiesFromFiles, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
+type RemapWizardStep =
+  | "select_files"
+  | "scanning"
+  | "choose_study"
+  | "choose_patient"
+  | "choose_destination"
+  | "review"
+  | "uploading"
+  | "orthanc_processing"
+  | "remapping"
+  | "sending"
+  | "sent"
+  | "failed";
 
 interface RemapJob {
   id: number;
@@ -25,29 +38,23 @@ interface RemapJob {
   replacement_patient_birth_date: string | null;
   error_message: string | null;
   cancellation_reason: string | null;
-  created_at: string;
-  updated_at: string;
 }
 
 interface RemapComparison {
-  original: {
-    patientId: string;
-    patientName: string;
-    patientSex: string;
-    patientBirthDate: string;
-  };
-  replacement: {
-    patientId: string;
-    patientName: string;
-    patientSex: string;
-    patientBirthDate: string;
-  };
+  original: { patientId: string; patientName: string; patientSex: string; patientBirthDate: string };
+  replacement: { patientId: string; patientName: string; patientSex: string; patientBirthDate: string };
 }
 
 interface Destination {
   key: string;
-  id: number;
   name: string;
+}
+
+interface ReplacementPreview {
+  patientId: string;
+  patientName: string;
+  patientSex: string;
+  patientBirthDate: string;
 }
 
 interface PatientOption {
@@ -56,22 +63,13 @@ interface PatientOption {
   english_full_name?: string;
   national_id?: string | null;
   mrn?: string | null;
+  sex?: string | null;
+  date_of_birth?: string | null;
 }
 
-interface TodayStudyOption {
-  id: number;
-  patient_id: number;
-  accession_number: string;
-  appointment_date: string;
-  modality_id: number;
-  modality_name_en?: string | null;
-  modality_name_ar?: string | null;
-  exam_name_en?: string | null;
-  exam_name_ar?: string | null;
-  arabic_full_name?: string | null;
-  english_full_name?: string | null;
-  national_id?: string | null;
-  mrn?: string | null;
+interface UploadMultipartResult {
+  job: RemapJob;
+  skippedFilesCount?: number;
 }
 
 function formatBytes(bytes: number): string {
@@ -86,20 +84,47 @@ function formatName(patient: PatientOption): string {
   return patient.english_full_name || patient.arabic_full_name || `Patient #${patient.id}`;
 }
 
-function todayIsoDate(): string {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function isActiveJobStatus(status: JobStatus): boolean {
-  return ["uploaded", "awaiting_confirmation", "remapped", "sending"].includes(status);
-}
-
 function isCancellableJobStatus(status: JobStatus): boolean {
   return ["uploaded", "awaiting_confirmation"].includes(status);
+}
+
+async function uploadMultipartWithProgress(
+  formData: FormData,
+  timeoutMs: number,
+  onProgress: (loaded: number, total: number) => void
+): Promise<UploadMultipartResult> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const timer = window.setTimeout(() => xhr.abort(), timeoutMs);
+    xhr.open("POST", "/api/pacs/remap/jobs/upload-multipart", true);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) onProgress(event.loaded, event.total);
+    };
+    xhr.onreadystatechange = () => {
+      if (xhr.readyState !== XMLHttpRequest.DONE) return;
+      window.clearTimeout(timer);
+      const raw = xhr.responseText || "{}";
+      const body = (() => {
+        try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
+      })();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as UploadMultipartResult);
+        return;
+      }
+      const message = (body?.error as { message?: string } | undefined)?.message || (body?.message as string | undefined) || xhr.statusText || "Upload failed.";
+      reject(new ApiError(message, xhr.status, (body?.error as { details?: unknown } | undefined)?.details ?? body?.details));
+    };
+    xhr.onerror = () => {
+      window.clearTimeout(timer);
+      reject(new ApiError("Network error during upload.", 0));
+    };
+    xhr.onabort = () => {
+      window.clearTimeout(timer);
+      reject(new ApiError(`Request timed out after ${Math.round(timeoutMs / 1000)}s.`, 408));
+    };
+    xhr.send(formData);
+  });
 }
 
 export default function PacsRemapPage() {
@@ -107,60 +132,28 @@ export default function PacsRemapPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
-  const [jobId, setJobId] = useState<number | null>(null);
-  const [patientSearch, setPatientSearch] = useState("");
-  const [todayPatientSearch, setTodayPatientSearch] = useState("");
-  const [todayModalityFilter, setTodayModalityFilter] = useState("");
-  const [selectedPatientId, setSelectedPatientId] = useState<string>("");
-  const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
-  const [errorMessage, setErrorMessage] = useState<string>("");
-  const [successMessage, setSuccessMessage] = useState<string>("");
-  const [showReAuthModal, setShowReAuthModal] = useState(false);
-  const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
-  const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
   const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
+  const [patientSearch, setPatientSearch] = useState("");
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
   const [enableFallbackUpload, setEnableFallbackUpload] = useState(false);
+  const [confirmChecked, setConfirmChecked] = useState(false);
+  const [uploadLoaded, setUploadLoaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [processingStage, setProcessingStage] = useState<RemapWizardStep>("select_files");
   const [fileInputVersion, setFileInputVersion] = useState(0);
+  const [showReAuthModal, setShowReAuthModal] = useState(false);
+  const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
 
-  const setSelectedFiles = (incoming: FileList | null): void => {
-    const all = Array.from(incoming || []);
-    setFiles(all);
-    setSkippedFilesCount(0);
-    setErrorMessage("");
-    setSuccessMessage("");
-    setScanResult(null);
-    setSelectedStudyInstanceUid("");
-    setEnableFallbackUpload(false);
-    if (all.length === 0) {
-      scanMutation.reset();
-      return;
-    }
-    scanMutation.mutate(all);
-  };
+  const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
 
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
     queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
-  });
-
-  const modalityLookupQuery = useQuery({
-    queryKey: ["v2", "lookups", "modalities"],
-    queryFn: () => api<{ items: Array<{ id: number; nameEn?: string; nameAr?: string; code?: string }> }>("/v2/lookups/modalities"),
-  });
-
-  const todayStudiesQuery = useQuery({
-    queryKey: ["v2", "appointments", "today-remap", todayModalityFilter, todayPatientSearch],
-    queryFn: () => {
-      const date = todayIsoDate();
-      const params = new URLSearchParams();
-      params.set("dateFrom", date);
-      params.set("dateTo", date);
-      if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
-      if (todayPatientSearch.trim()) params.set("q", todayPatientSearch.trim());
-      return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
-    },
-    retry: 0,
   });
 
   const patientQuery = useQuery({
@@ -169,16 +162,29 @@ export default function PacsRemapPage() {
       const search = patientSearch.trim();
       const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(search)}`);
       const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
-      if (primaryPatients) {
-        return { patients: primaryPatients as PatientOption[] };
-      }
-
-      const fallback = await api<Record<string, unknown>>(
-        `/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`
-      );
-      const fallbackRows = Array.isArray(fallback?.rows) ? fallback.rows : [];
-      return { patients: fallbackRows as PatientOption[] };
+      if (primaryPatients) return { patients: primaryPatients as PatientOption[] };
+      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`);
+      return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
     },
+    retry: 0,
+  });
+
+  const jobsQuery = useQuery({
+    queryKey: ["pacs", "remap", "jobs"],
+    queryFn: () => api<{ jobs: RemapJob[] }>("/pacs/remap/jobs?limit=20"),
+  });
+
+  const replacementPreviewQuery = useQuery({
+    queryKey: ["pacs", "remap", "replacement-preview", selectedPatientId],
+    queryFn: async () => {
+      if (!selectedPatientId) return null;
+      const response = await api<{ replacement: ReplacementPreview }>("/pacs/remap/replacement-preview", {
+        method: "POST",
+        body: JSON.stringify({ risproPatientId: selectedPatientId }),
+      });
+      return response.replacement;
+    },
+    enabled: !!selectedPatientId,
     retry: 0,
   });
 
@@ -188,205 +194,83 @@ export default function PacsRemapPage() {
     enabled: jobId != null,
     refetchInterval: (query) => {
       const status = (query.state.data as { job?: RemapJob } | undefined)?.job?.status;
-      if (status === "remapped" || status === "sending") {
-        return 1500;
-      }
-      return false;
-    },
-  });
-
-  const jobsQuery = useQuery({
-    queryKey: ["pacs", "remap", "jobs"],
-    queryFn: () => api<{ jobs: RemapJob[] }>("/pacs/remap/jobs?limit=20"),
-  });
-
-  const uploadMutation = useMutation({
-    mutationFn: async () => {
-      if (files.length === 0) {
-        throw new Error(language === "ar" ? "يرجى اختيار ملف DICOM واحد على الأقل." : "Please choose at least one DICOM file.");
-      }
-      if (!selectedPatientId) {
-        throw new Error(language === "ar" ? "يرجى اختيار المريض قبل الرفع." : "Select a patient before upload.");
-      }
-      if (!selectedDestinationKey) {
-        throw new Error(language === "ar" ? "يرجى اختيار وجهة PACS قبل الرفع." : "Select a PACS destination before upload.");
-      }
-
-      const chosenStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
-      const hasDetectedStudies = (scanResult?.studies.length || 0) > 0;
-      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
-      const useFallback = plan.usesFallback;
-      if (hasDetectedStudies && !chosenStudy) {
-        throw new Error(language === "ar" ? "يرجى اختيار دراسة واحدة قبل الرفع." : "Please select one detected study before upload.");
-      }
-      if (!hasDetectedStudies && !useFallback) {
-        throw new Error(
-          language === "ar"
-            ? "تعذر على RISPro تحديد الدراسات بدقة. فعّل خيار الرفع المتقدم للمتابعة."
-            : "RISPro could not reliably detect studies before upload. Enable advanced fallback upload to continue."
-        );
-      }
-
-      const uploadFiles = plan.files.length > 0 ? plan.files : files;
-      if (uploadFiles.length === 0) {
-        throw new Error(language === "ar" ? "لا توجد ملفات مناسبة للرفع." : "No uploadable files were selected.");
-      }
-
-      const formData = new FormData();
-      for (const file of uploadFiles) {
-        formData.append("files", file, file.name);
-      }
-      if (chosenStudy?.studyInstanceUid) {
-        formData.append("selectedStudyInstanceUID", chosenStudy.studyInstanceUid);
-      }
-      if (!chosenStudy) {
-        formData.append("uploadMode", "fallback_all_candidates");
-      }
-
-      const uploadResult = await api<{ job: RemapJob; skippedFilesCount?: number }>("/pacs/remap/jobs/upload-multipart", {
-        method: "POST",
-        body: formData,
-      }, 600_000);
-      const prepared = await api<{ job: RemapJob; comparison: RemapComparison }>(
-        `/pacs/remap/jobs/${uploadResult.job.id}/prepare`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            risproPatientId: selectedPatientId,
-            destinationPacsKey: selectedDestinationKey,
-          }),
-        }
-      );
-      return { ...prepared, skippedFilesCount: uploadResult.skippedFilesCount || 0 };
-    },
-    onSuccess: (data) => {
-      setJobId(data.job.id);
-      setSkippedFilesCount(data.skippedFilesCount || 0);
-      setErrorMessage("");
-      setSuccessMessage("");
-      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-    },
-    onError: (error: unknown) => {
-      if (error instanceof ApiError && error.status === 409) {
-        const details = (error.details || {}) as { activeJobId?: number };
-        if (details.activeJobId) {
-          setJobId(Number(details.activeJobId));
-          setErrorMessage(
-            language === "ar"
-              ? `لديك مهمة نشطة بالفعل (#${details.activeJobId}). تم فتحها.`
-              : `You already have an active job (#${details.activeJobId}). Opened it for you.`
-          );
-          return;
-        }
-      }
-      setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
+      return status === "remapped" || status === "sending" ? 1500 : false;
     },
   });
 
   const scanMutation = useMutation({
-    mutationFn: async (selectedFiles: File[]) => scanDicomStudiesFromFiles(selectedFiles, { batchSize: 20 }),
+    mutationFn: async () => scanDicomStudiesFromFiles(files, { batchSize: 20 }),
+    onMutate: () => {
+      setProcessingStage("scanning");
+      setErrorMessage("");
+      setSuccessMessage("");
+    },
     onSuccess: (result) => {
       setScanResult(result);
-      setSkippedFilesCount(result.skippedSidecarCount);
       setEnableFallbackUpload(false);
-      if (result.studies.length === 1) {
-        setSelectedStudyInstanceUid(result.studies[0].studyInstanceUid);
-      } else {
-        setSelectedStudyInstanceUid("");
-      }
+      setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0].studyInstanceUid : "");
+      setProcessingStage("choose_study");
     },
     onError: (error: unknown) => {
-      setScanResult(null);
-      setSelectedStudyInstanceUid("");
-      setEnableFallbackUpload(false);
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
+      setProcessingStage("failed");
     },
   });
 
-  const prepareMutation = useMutation({
+  const processMutation = useMutation({
     mutationFn: async () => {
-      if (!jobId) throw new Error("Missing job ID.");
-      if (!selectedPatientId) throw new Error(language === "ar" ? "يرجى اختيار المريض." : "Select a patient.");
-      if (!selectedDestinationKey) throw new Error(language === "ar" ? "يرجى اختيار وجهة PACS." : "Select a PACS destination.");
+      if (!selectedPatientId || !selectedDestinationKey) throw new Error("Patient and destination are required.");
+      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
+      const uploadFiles = plan.files.length > 0 ? plan.files : files;
+      if (uploadFiles.length === 0) throw new Error("No uploadable files were selected.");
 
-      return api<{ job: RemapJob; comparison: RemapComparison }>(`/pacs/remap/jobs/${jobId}/prepare`, {
-        method: "POST",
-        body: JSON.stringify({
-          risproPatientId: selectedPatientId,
-          destinationPacsKey: selectedDestinationKey,
-        }),
+      setProcessingStage("uploading");
+      setUploadLoaded(0);
+      setUploadTotal(uploadFiles.reduce((sum, file) => sum + file.size, 0));
+
+      const formData = new FormData();
+      uploadFiles.forEach((file) => formData.append("files", file, file.name));
+      if (selectedStudy?.studyInstanceUid) formData.append("selectedStudyInstanceUID", selectedStudy.studyInstanceUid);
+      if (!selectedStudy) formData.append("uploadMode", "fallback_all_candidates");
+
+      const uploadResult = await uploadMultipartWithProgress(formData, 600_000, (loaded, total) => {
+        setUploadLoaded(loaded);
+        setUploadTotal(total || uploadTotal);
       });
+      setJobId(uploadResult.job.id);
+
+      setProcessingStage("orthanc_processing");
+      const prepared = await api<{ job: RemapJob; comparison: RemapComparison }>(
+        `/pacs/remap/jobs/${uploadResult.job.id}/prepare`,
+        {
+          method: "POST",
+          body: JSON.stringify({ risproPatientId: selectedPatientId, destinationPacsKey: selectedDestinationKey }),
+        },
+        120_000
+      );
+
+      setProcessingStage("sending");
+      const sent = await api<{ job: RemapJob }>(
+        `/pacs/remap/jobs/${uploadResult.job.id}/confirm-send`,
+        { method: "POST", body: JSON.stringify({ confirm: true }) },
+        180_000
+      );
+      return { uploadResult, prepared, sent };
     },
     onSuccess: () => {
+      setProcessingStage("sent");
+      setSuccessMessage(language === "ar" ? "تمت إعادة الربط والإرسال بنجاح." : "Study remapped and sent successfully.");
       setErrorMessage("");
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+      void currentJobQuery.refetch();
+    },
+    onError: (error: unknown) => {
+      setProcessingStage("failed");
+      setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Prepare failed.");
-    },
   });
-
-  const confirmSendMutation = useMutation({
-    mutationFn: async () => {
-      if (!jobId) throw new Error("Missing job ID.");
-      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${jobId}/confirm-send`, {
-        method: "POST",
-        body: JSON.stringify({ confirm: true }),
-      }, 120_000);
-    },
-    onSuccess: () => {
-      setErrorMessage("");
-      void currentJobQuery.refetch();
-      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-    },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Send failed.");
-      void currentJobQuery.refetch();
-    },
-  });
-
-  const currentJob = currentJobQuery.data?.job || null;
-  const comparison = currentJobQuery.data?.comparison || null;
-  const patients = patientQuery.data?.patients || [];
-  const destinations = destinationsQuery.data?.destinations || [];
-  const isSupervisor = user?.role === "supervisor";
-  const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
-  const detectedStudiesCount = scanResult?.studies.length || 0;
-  const hasUnparsedFiles = (scanResult?.unparsedCount || 0) > 0;
-  const canUseFallbackUpload = !scanMutation.isPending && (detectedStudiesCount === 0);
-  const hasPreparedJob = currentJob?.status === "awaiting_confirmation" || currentJob?.status === "remapped" || currentJob?.status === "sending" || currentJob?.status === "sent";
-  const hasSentJob = currentJob?.status === "sent";
-  const uploadProgress = uploadMutation.isPending ? 55 : (jobId ? 70 : 0);
-  const scanProgress = scanMutation.isPending ? 25 : (scanResult ? 40 : 0);
-  const prepareProgress = hasPreparedJob ? 85 : 0;
-  const sendProgress = hasSentJob ? 100 : 0;
-  const overallProgress = Math.max(scanProgress, uploadProgress, prepareProgress, sendProgress);
-
-  const canPrepare = currentJob?.status === "uploaded" && !!selectedPatientId && !!selectedDestinationKey;
-  const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
-  const canCancelCurrentJob = currentJob ? isCancellableJobStatus(currentJob.status) : false;
-  const hasActiveCurrentJob = currentJob ? isActiveJobStatus(currentJob.status) : false;
-  const canResetCurrentJob = currentJob ? !["sending", "sent"].includes(currentJob.status) : false;
-
-  const resetWorkflow = (): void => {
-    setFiles([]);
-    setJobId(null);
-    setPatientSearch("");
-    setSelectedPatientId("");
-    setSelectedDestinationKey("");
-    setErrorMessage("");
-    setSuccessMessage("");
-    setSkippedFilesCount(0);
-    setScanResult(null);
-    setSelectedStudyInstanceUid("");
-    setEnableFallbackUpload(false);
-    setFileInputVersion((value) => value + 1);
-    uploadMutation.reset();
-    prepareMutation.reset();
-    confirmSendMutation.reset();
-    scanMutation.reset();
-  };
 
   const cancelMutation = useMutation({
     mutationFn: async () => {
@@ -397,12 +281,8 @@ export default function PacsRemapPage() {
       });
     },
     onSuccess: () => {
-      setErrorMessage("");
-      setJobId(null);
-      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-    },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Cancel failed.");
+      setProcessingStage("failed");
+      setErrorMessage(language === "ar" ? "تم إلغاء المهمة النشطة." : "Active job cancelled.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -411,586 +291,376 @@ export default function PacsRemapPage() {
   const resetJobMutation = useMutation({
     mutationFn: async () => {
       if (!jobId) throw new Error("Missing job ID.");
-      return api<{
-        job: RemapJob;
-        summary: {
-          studiesAttempted: number;
-          studiesDeleted: number;
-          studiesAlreadyMissing: number;
-          failures: unknown[];
-        };
-      }>(`/pacs/remap/jobs/${jobId}/reset`, {
-        method: "POST",
-      });
+      return api<{ summary: { studiesDeleted: number; studiesAlreadyMissing: number } }>(`/pacs/remap/jobs/${jobId}/reset`, { method: "POST" });
     },
     onSuccess: (data) => {
-      const message = language === "ar"
-        ? `تمت إعادة الضبط. تم حذف ${data.summary.studiesDeleted} دراسة، و${data.summary.studiesAlreadyMissing} كانت محذوفة مسبقاً.`
-        : `Reset complete. Deleted ${data.summary.studiesDeleted} linked Orthanc studies; ${data.summary.studiesAlreadyMissing} were already missing.`;
       resetWorkflow();
-      setSuccessMessage(message);
+      setSuccessMessage(
+        language === "ar"
+          ? `تمت إعادة الضبط. تم حذف ${data.summary.studiesDeleted} دراسة.`
+          : `Reset complete. Deleted ${data.summary.studiesDeleted} linked Orthanc studies.`
+      );
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
-    onError: (error: unknown) => {
-      setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
-      void currentJobQuery.refetch();
-      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-    },
+    onError: (error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Reset failed."),
   });
 
   const clearFailedStudiesMutation = useMutation({
-    mutationFn: async () => api<{
-      summary: {
-        studiesAttempted: number;
-        studiesDeleted: number;
-        studiesAlreadyMissing: number;
-        failures: Array<{ studyId?: string; orthancStatus?: number; message?: string }>;
-      };
-    }>("/pacs/remap/maintenance/clear-failed-studies", {
-      method: "POST",
-    }),
-    onSuccess: (data) => {
-      const failures = data.summary.failures.length;
-      const message = language === "ar"
-        ? `اكتملت الصيانة. تمت محاولة ${data.summary.studiesAttempted} دراسة، حذف ${data.summary.studiesDeleted}، ${data.summary.studiesAlreadyMissing} كانت محذوفة مسبقاً، وفشل ${failures}.`
-        : `Maintenance complete. Attempted ${data.summary.studiesAttempted} studies; deleted ${data.summary.studiesDeleted}; ${data.summary.studiesAlreadyMissing} already missing; ${failures} failed.`;
-      setSuccessMessage(message);
+    mutationFn: async () => api("/pacs/remap/maintenance/clear-failed-studies", { method: "POST" }),
+    onSuccess: () => {
+      setSuccessMessage(language === "ar" ? "اكتملت صيانة الدراسات الفاشلة." : "Failed-study maintenance completed.");
       setErrorMessage("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
-      if (jobId) void currentJobQuery.refetch();
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Failed to clear failed remap studies.";
-      const requiresReAuth = message.includes("re-authentication") || message.includes("403");
-      if (requiresReAuth) {
+      if (message.includes("re-authentication") || message.includes("403")) {
         setRetryClearAfterReAuth(true);
         setShowReAuthModal(true);
-        setErrorMessage(
-          language === "ar"
-            ? "يلزم تأكيد هوية المشرف قبل تشغيل صيانة Orthanc."
-            : "Supervisor re-authentication is required before running Orthanc maintenance."
-        );
-      } else {
-        setErrorMessage(message);
       }
-      setSuccessMessage("");
+      setErrorMessage(message);
     },
   });
 
-  const title = language === "ar" ? "رفع DICOM وإعادة ربط المريض" : "DICOM Upload + Patient Remap";
+  const currentJob = currentJobQuery.data?.job || null;
+  const comparison = currentJobQuery.data?.comparison || null;
+  const patients = patientQuery.data?.patients || [];
+  const destinations = destinationsQuery.data?.destinations || [];
+  const selectedPatient = patients.find((patient) => String(patient.id) === selectedPatientId) || null;
+  const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
+  const canContinuePatient = !!selectedPatientId;
+  const canContinueDestination = !!selectedDestinationKey;
+  const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
+  const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
+  const isSupervisor = user?.role === "supervisor";
 
-  const statusLabel = useMemo(() => {
-    if (!currentJob) return "";
-    const map: Record<JobStatus, string> = {
-      uploaded: language === "ar" ? "تم الرفع" : "Uploaded",
-      awaiting_confirmation: language === "ar" ? "بانتظار التأكيد" : "Awaiting confirmation",
-      remapped: language === "ar" ? "تمت إعادة الربط" : "Remapped",
-      sending: language === "ar" ? "جارٍ الإرسال" : "Sending",
-      sent: language === "ar" ? "تم الإرسال" : "Sent",
-      failed: language === "ar" ? "فشل" : "Failed",
-      cancelled: language === "ar" ? "ملغي" : "Cancelled",
-    };
-    return map[currentJob.status];
-  }, [currentJob, language]);
+  const wizardStep: RemapWizardStep = useMemo(() => {
+    if (processMutation.isPending) return processingStage;
+    if (processingStage === "sent") return "sent";
+    if (processingStage === "failed") return "failed";
+    if (scanMutation.isPending) return "scanning";
+    if (!scanResult) return "select_files";
+    if (!canContinueStudy) return "choose_study";
+    if (!canContinuePatient) return "choose_patient";
+    if (!canContinueDestination) return "choose_destination";
+    return "review";
+  }, [processMutation.isPending, processingStage, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
+
+  const resetWorkflow = (): void => {
+    setFiles([]);
+    setScanResult(null);
+    setSelectedStudyInstanceUid("");
+    setSelectedPatientId("");
+    setSelectedDestinationKey("");
+    setPatientSearch("");
+    setEnableFallbackUpload(false);
+    setConfirmChecked(false);
+    setUploadLoaded(0);
+    setUploadTotal(0);
+    setJobId(null);
+    setErrorMessage("");
+    setSuccessMessage("");
+    setProcessingStage("select_files");
+    setFileInputVersion((v) => v + 1);
+    scanMutation.reset();
+    processMutation.reset();
+  };
+
+  const stepLabels = [
+    "1. Select folder",
+    "2. Choose study",
+    "3. Choose patient",
+    "4. Destination",
+    "5. Review",
+    "6. Process",
+    "7. Result",
+  ];
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      <div className="card-shell p-5">
-        <h2 className="text-xl font-bold" style={{ color: "var(--text)" }}>{title}</h2>
-        <p className="text-sm mt-1" style={{ color: "var(--text-muted)" }}>
-          {language === "ar"
-            ? "أداة داخلية آمنة: رفع دراسة واحدة، اختيار مريض، تأكيد، ثم إرسال إلى PACS."
-            : "Safe internal tool: upload one study, choose patient, confirm, then send to PACS."}
+    <div className="max-w-7xl mx-auto space-y-6">
+      <div className="card-shell p-5 space-y-2">
+        <h2 className="text-2xl font-bold" style={{ color: "var(--text)" }}>DICOM CD / Folder Remap</h2>
+        <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+          Select one study from a CD or folder, assign it to the correct RISPro patient, then send the corrected study to PACS.
         </p>
-        <div className="mt-3 space-y-1">
-          <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
-            <div
-              className="h-full bg-teal-600 transition-all duration-300"
-              style={{ width: `${Math.min(100, Math.max(0, overallProgress))}%` }}
-            />
-          </div>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {scanMutation.isPending
-              ? (language === "ar" ? "جارٍ فحص الملفات..." : "Scanning files...")
-              : uploadMutation.isPending
-                ? (language === "ar" ? "جارٍ رفع الدراسة المختارة..." : "Uploading selected study...")
-                : hasPreparedJob
-                  ? (hasSentJob
-                    ? (language === "ar" ? "اكتملت العملية." : "Workflow completed.")
-                    : (language === "ar" ? "العملية جاهزة للتأكيد والإرسال." : "Ready for confirm and send."))
-                  : (language === "ar" ? "بانتظار اختيار الملفات." : "Waiting for folder selection.")}
-          </p>
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          This tool changes DICOM patient identity before sending to PACS. Confirm the original and replacement patient details carefully.
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-xs">
+          {stepLabels.map((label) => (
+            <div key={label} className="rounded border px-2 py-1 text-center" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+              {label}
+            </div>
+          ))}
         </div>
       </div>
 
-      <div className="card-shell p-5 space-y-4">
-        <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-          {language === "ar" ? "1) اختيار الدراسة والمريض والوجهة" : "1) Select Study, Patient, and Destination"}
-        </h3>
-        <div className="rounded-lg border p-3 space-y-3">
-          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-            {language === "ar" ? "دراسات اليوم" : "Today studies"}
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-            <select
-              value={todayModalityFilter}
-              onChange={(event) => setTodayModalityFilter(event.target.value)}
-              className="input-premium w-full px-3 py-2 text-sm"
-            >
-              <option value="">{language === "ar" ? "كل الموداليتي" : "All modalities"}</option>
-              {(modalityLookupQuery.data?.items || []).map((modality) => (
-                <option key={modality.id} value={modality.id}>
-                  {modality.nameEn || modality.nameAr || modality.code || `Modality #${modality.id}`}
-                </option>
-              ))}
-            </select>
-            <input
-              type="text"
-              value={todayPatientSearch}
-              onChange={(event) => setTodayPatientSearch(event.target.value)}
-              placeholder={language === "ar" ? "بحث اختياري بالمريض" : "Optional patient search"}
-              className="input-premium w-full px-3 py-2 text-sm"
-            />
-          </div>
-          {todayStudiesQuery.isLoading && (
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="xl:col-span-2 space-y-4">
+          <div className="card-shell p-5 space-y-4">
+            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>Step 1: Select folder/files</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="remap-file-input" className="text-xs block mb-1">Select DICOM files</label>
+                <input
+                  id="remap-file-input"
+                  key={`files-${fileInputVersion}`}
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    setFiles(Array.from(event.target.files || []));
+                    setScanResult(null);
+                    setSelectedStudyInstanceUid("");
+                    setEnableFallbackUpload(false);
+                    setConfirmChecked(false);
+                    setProcessingStage("select_files");
+                  }}
+                  className="input-premium w-full px-3 py-2"
+                />
+              </div>
+              <div>
+                <label htmlFor="remap-folder-input" className="text-xs block mb-1">Select CD / Folder</label>
+                <input
+                  id="remap-folder-input"
+                  key={`folder-${fileInputVersion}`}
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    setFiles(Array.from(event.target.files || []));
+                    setScanResult(null);
+                    setSelectedStudyInstanceUid("");
+                    setEnableFallbackUpload(false);
+                    setConfirmChecked(false);
+                    setProcessingStage("select_files");
+                  }}
+                  className="input-premium w-full px-3 py-2"
+                  {...({ webkitdirectory: "true", directory: "true", mozdirectory: "true" } as Record<string, string>)}
+                />
+              </div>
+            </div>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {language === "ar" ? "جارٍ تحميل دراسات اليوم..." : "Loading today studies..."}
+              Selected files: {files.length} • Estimated size: {formatBytes(files.reduce((sum, file) => sum + file.size, 0))}
             </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => scanMutation.mutate()}
+                disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
+                className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
+              >
+                {scanMutation.isPending ? "Scanning files..." : "Scan selected folder/files"}
+              </button>
+              <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">Reset workflow</button>
+            </div>
+          </div>
+
+          {scanResult && (
+            <div className="card-shell p-5 space-y-4">
+              <h3 className="text-sm font-semibold">Step 2: Choose study</h3>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                Detected {scanResult.studies.length} studies • Skipped {scanResult.skippedSidecarCount} sidecar files • {scanResult.unparsedCount} files could not be parsed
+              </p>
+              {scanResult.studies.length > 1 && (
+                <p className="text-xs text-amber-700">Multiple studies detected. Select one study to remap.</p>
+              )}
+              {scanResult.studies.length === 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-amber-700">RISPro could not reliably detect studies before upload.</p>
+                  <label className="flex items-start gap-2 text-xs">
+                    <input type="checkbox" checked={enableFallbackUpload} onChange={(e) => setEnableFallbackUpload(e.target.checked)} />
+                    <span>Upload all DICOM-like files and let RISPro validate one study</span>
+                  </label>
+                </div>
+              )}
+              <div className="space-y-2">
+                {scanResult.studies.map((study) => (
+                  <label key={study.studyInstanceUid} className="block rounded border p-3 text-xs">
+                    <div className="flex items-start gap-2">
+                      <input
+                        type="radio"
+                        name="study"
+                        value={study.studyInstanceUid}
+                        checked={selectedStudyInstanceUid === study.studyInstanceUid}
+                        onChange={(e) => setSelectedStudyInstanceUid(e.target.value)}
+                      />
+                      <div className="space-y-1">
+                        <p><strong>Description:</strong> {study.studyDescription || "—"} | <strong>Date:</strong> {study.studyDate || "—"} | <strong>Modality:</strong> {study.modality || "—"}</p>
+                        <p><strong>PatientID:</strong> {study.patientId || "—"} | <strong>PatientName:</strong> {study.patientName || "—"}</p>
+                        <p><strong>Series:</strong> {study.seriesCount} | <strong>Files:</strong> {study.fileCount} | <strong>Size:</strong> {formatBytes(study.totalBytes)}</p>
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
           )}
-          {todayStudiesQuery.error && (
-            <p className="text-xs text-red-600">
-              {todayStudiesQuery.error instanceof Error ? todayStudiesQuery.error.message : (language === "ar" ? "تعذر تحميل دراسات اليوم." : "Failed to load today studies.")}
-            </p>
+
+          {scanResult && (
+            <div className="card-shell p-5 space-y-4">
+              <h3 className="text-sm font-semibold">Step 3: Choose RISPro patient</h3>
+              <input
+                type="text"
+                value={patientSearch}
+                onChange={(e) => setPatientSearch(e.target.value)}
+                className="input-premium w-full px-3 py-2"
+                placeholder="Search patient"
+              />
+              <select value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)} className="input-premium w-full px-3 py-2">
+                <option value="">Select patient</option>
+                {patients.map((patient) => (
+                  <option key={patient.id} value={patient.id}>
+                    {formatName(patient)} {patient.national_id ? `(${patient.national_id})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
           )}
-          {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
-            <div className="max-h-56 overflow-y-auto space-y-2">
-              {(todayStudiesQuery.data?.appointments || []).slice(0, 50).map((appointment) => {
-                const displayName = appointment.english_full_name || appointment.arabic_full_name || `Patient #${appointment.patient_id}`;
-                const modalityName = appointment.modality_name_en || appointment.modality_name_ar || `Modality #${appointment.modality_id}`;
-                const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
-                const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
-                return (
+
+          {scanResult && (
+            <div className="card-shell p-5 space-y-4">
+              <h3 className="text-sm font-semibold">Step 4: Choose PACS destination</h3>
+              <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
+                <option value="">Select destination</option>
+                {destinations.map((destination) => (
+                  <option key={destination.key} value={destination.key}>{destination.name} ({destination.key})</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {scanResult && (
+            <div className="card-shell p-5 space-y-4">
+              <h3 className="text-sm font-semibold">Step 5: Review remap</h3>
+              <div className="rounded border p-3 text-xs space-y-1">
+                <p><strong>Original PatientID:</strong> {selectedStudy?.patientId || "—"}</p>
+                <p><strong>Original PatientName:</strong> {selectedStudy?.patientName || "—"}</p>
+                <p><strong>Replacement Patient:</strong> {selectedPatient ? formatName(selectedPatient) : "—"}</p>
+                <p><strong>Replacement PatientID:</strong> {replacementPreviewQuery.data?.patientId || "—"}</p>
+                <p><strong>Replacement PatientName:</strong> {replacementPreviewQuery.data?.patientName || "—"}</p>
+                <p><strong>Replacement Sex:</strong> {replacementPreviewQuery.data?.patientSex || "—"}</p>
+                <p><strong>Replacement BirthDate:</strong> {replacementPreviewQuery.data?.patientBirthDate || "—"}</p>
+                <p><strong>Destination:</strong> {selectedDestinationKey || "—"}</p>
+                <p><strong>Study:</strong> {selectedStudy?.studyDescription || "—"} • {selectedStudy?.studyDate || "—"} • {selectedStudy?.modality || "—"}</p>
+              </div>
+              <p className="text-xs text-amber-700">
+                Only the selected study will be uploaded and remapped. Other studies in the selected folder will not be sent.
+              </p>
+              <label className="flex items-start gap-2 text-xs">
+                <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} />
+                <span>I confirm this is the correct study and correct RISPro patient.</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => processMutation.mutate()}
+                disabled={!canSubmit}
+                className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
+              >
+                Upload selected study, remap, and send to PACS
+              </button>
+            </div>
+          )}
+
+          {(wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending") && (
+            <div className="card-shell p-5 space-y-3">
+              <h3 className="text-sm font-semibold">Step 6: Process</h3>
+              <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
+                <div className="h-full bg-teal-600 transition-all duration-200" style={{ width: `${wizardStep === "uploading" ? uploadPercent : wizardStep === "orthanc_processing" ? 75 : 90}%` }} />
+              </div>
+              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+                {wizardStep === "uploading" && `Uploading selected study to RISPro (${uploadPercent}%)`}
+                {wizardStep === "orthanc_processing" && "Waiting for Orthanc study stability and remapping demographics"}
+                {wizardStep === "sending" && "Sending corrected study to PACS"}
+              </p>
+            </div>
+          )}
+
+          {(wizardStep === "sent" || wizardStep === "failed") && (
+            <div className="card-shell p-5 space-y-3">
+              <h3 className="text-sm font-semibold">Step 7: Result</h3>
+              {wizardStep === "sent" ? (
+                <p className="text-sm text-green-700">Study remapped and sent successfully.</p>
+              ) : (
+                <p className="text-sm text-red-700">{errorMessage || "Task failed. Please reset and retry."}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">Start new upload</button>
+                {jobId && (
                   <button
-                    key={appointment.id}
                     type="button"
-                    onClick={() => setSelectedPatientId(String(appointment.patient_id))}
-                    className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                    onClick={() => resetJobMutation.mutate()}
+                    disabled={resetJobMutation.isPending}
+                    className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
                   >
-                    <p><strong>{displayName}</strong></p>
-                    <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
-                    <p>{appointment.accession_number} {appointment.national_id ? `• ${appointment.national_id}` : ""}</p>
+                    Reset current upload
                   </button>
-                );
-              })}
+                )}
+              </div>
             </div>
           )}
         </div>
-        <input
-          key={`files-${fileInputVersion}`}
-          type="file"
-          multiple
-          accept=".dcm,.dicom,.ima,application/dicom,application/octet-stream"
-          onChange={(event) => setSelectedFiles(event.target.files)}
-          className="input-premium w-full px-3 py-2"
-        />
-        <input
-          key={`directory-${fileInputVersion}`}
-          type="file"
-          multiple
-          onChange={(event) => setSelectedFiles(event.target.files)}
-          className="input-premium w-full px-3 py-2"
-          {...({ webkitdirectory: "true", directory: "true", mozdirectory: "true" } as Record<string, string>)}
-        />
-        <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-          {language === "ar"
-            ? `الملفات المختارة: ${files.length}`
-            : `Selected files: ${files.length}`}
-        </p>
-        {scanMutation.isPending && (
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {language === "ar" ? "جارٍ فحص الملفات..." : "Scanning files..."}
-          </p>
-        )}
-        {scanResult && !scanMutation.isPending && (
-          <div className="rounded-lg border p-3 space-y-2 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
-            <p>
-              {language === "ar"
-                ? `تم اكتشاف ${scanResult.studies.length} دراسة`
-                : `Detected ${scanResult.studies.length} studies`}
-            </p>
-            <p>
-              {language === "ar"
-                ? `تم تجاهل ${scanResult.skippedSidecarCount} ملف جانبي`
-                : `Skipped ${scanResult.skippedSidecarCount} sidecar files`}
-            </p>
-            <p>
-              {language === "ar"
-                ? `${scanResult.unparsedCount} ملف لم يمكن تحليله`
-                : `${scanResult.unparsedCount} files could not be parsed`}
-            </p>
-            {scanResult.studies.length > 1 && (
-              <p className="text-amber-600">
-                {language === "ar"
-                  ? "تم العثور على عدة دراسات. اختر دراسة واحدة قبل الرفع."
-                  : "Multiple studies detected. Select one study before upload."}
-              </p>
-            )}
-            {scanResult.studies.length === 0 && (
-              <p className="text-amber-600">
-                {language === "ar"
-                  ? "تعذر على RISPro تحديد الدراسات قبل الرفع."
-                  : "RISPro could not reliably detect studies before upload."}
-              </p>
-            )}
-          </div>
-        )}
-        {skippedFilesCount > 0 && (
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {language === "ar"
-              ? `تم تجاهل ${skippedFilesCount} ملف غير DICOM.`
-              : `Skipped ${skippedFilesCount} non-DICOM files.`}
-          </p>
-        )}
-        {scanResult && scanResult.studies.length > 0 && (
-          <div className="space-y-2">
-            {scanResult.studies.map((study) => (
-              <label key={study.studyInstanceUid} className="block rounded-lg border p-3 cursor-pointer">
-                <div className="flex items-start gap-2">
-                  <input
-                    type="radio"
-                    name="detectedStudy"
-                    value={study.studyInstanceUid}
-                    checked={selectedStudyInstanceUid === study.studyInstanceUid}
-                    onChange={(event) => {
-                      setSelectedStudyInstanceUid(event.target.value);
-                      setEnableFallbackUpload(false);
-                    }}
-                  />
-                  <div className="text-xs space-y-1">
-                    <p><strong>{language === "ar" ? "الوصف" : "StudyDescription"}:</strong> {study.studyDescription || "—"}</p>
-                    <p><strong>{language === "ar" ? "التاريخ" : "StudyDate"}:</strong> {study.studyDate || "—"}</p>
-                    <p><strong>{language === "ar" ? "الموداليتي" : "Modality"}:</strong> {study.modality || "—"}</p>
-                    <p><strong>{language === "ar" ? "PatientID" : "PatientID"}:</strong> {study.patientId || "—"}</p>
-                    <p><strong>{language === "ar" ? "PatientName" : "PatientName"}:</strong> {study.patientName || "—"}</p>
-                    <p>
-                      <strong>{language === "ar" ? "السلاسل/الملفات/الحجم" : "Series/Files/Size"}:</strong>{" "}
-                      {study.seriesCount} / {study.fileCount} / {formatBytes(study.totalBytes)}
-                    </p>
-                  </div>
-                </div>
-              </label>
-            ))}
-          </div>
-        )}
-        {canUseFallbackUpload && (
-          <label className="flex items-start gap-2 text-xs">
-            <input
-              type="checkbox"
-              checked={enableFallbackUpload}
-              onChange={(event) => setEnableFallbackUpload(event.target.checked)}
-            />
-            <span>
-              {language === "ar"
-                ? "رفع متقدم: ارفع كل ملفات DICOM المحتملة ودع RISPro يتحقق من دراسة واحدة."
-                : "Advanced fallback: Upload all DICOM-like files and let RISPro validate one study."}
-            </span>
-          </label>
-        )}
-        {hasUnparsedFiles && selectedStudy && (
-          <p className="text-xs text-amber-600">
-            {language === "ar"
-              ? "الملفات غير المحللة لن تُرفع افتراضياً."
-              : "Unparsed files are not uploaded by default."}
-          </p>
-        )}
-        <input
-          type="text"
-          value={patientSearch}
-          onChange={(event) => setPatientSearch(event.target.value)}
-          className="input-premium w-full px-3 py-2"
-          placeholder={language === "ar" ? "ابحث عن مريض..." : "Search patient..."}
-        />
-        {patientQuery.error && (
-          <p className="text-xs text-red-600">
-            {patientQuery.error instanceof Error
-              ? patientQuery.error.message
-              : (language === "ar" ? "تعذر تحميل نتائج المرضى." : "Failed to load patient search results.")}
-          </p>
-        )}
-        <select
-          value={selectedPatientId}
-          onChange={(event) => setSelectedPatientId(event.target.value)}
-          className="input-premium w-full px-3 py-2"
-        >
-          <option value="">{language === "ar" ? "اختر المريض" : "Select patient"}</option>
-          {patients.map((patient) => (
-            <option key={patient.id} value={patient.id}>
-              {formatName(patient)} {patient.national_id ? `(${patient.national_id})` : ""}
-            </option>
-          ))}
-        </select>
-        <select
-          value={selectedDestinationKey}
-          onChange={(event) => setSelectedDestinationKey(event.target.value)}
-          className="input-premium w-full px-3 py-2"
-        >
-          <option value="">{language === "ar" ? "اختر وجهة PACS" : "Select PACS destination"}</option>
-          {destinations.map((destination) => (
-            <option key={destination.key} value={destination.key}>{destination.name}</option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => uploadMutation.mutate()}
-          disabled={
-            uploadMutation.isPending ||
-            scanMutation.isPending ||
-            files.length === 0 ||
-            !selectedPatientId ||
-            !selectedDestinationKey ||
-            (
-              (detectedStudiesCount > 0 && !selectedStudy) ||
-              (detectedStudiesCount === 0 && !enableFallbackUpload)
-            )
-          }
-          className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
-        >
-          {uploadMutation.isPending
-            ? (language === "ar" ? "جارٍ الرفع..." : "Uploading...")
-            : (language === "ar" ? "رفع الدراسة المختارة وتحضير التأكيد" : "Upload selected study")}
-        </button>
-        <button
-          type="button"
-          onClick={resetWorkflow}
-          className="btn-secondary px-4 py-2 rounded-lg"
-        >
-          {language === "ar" ? "إعادة ضبط" : "Reset"}
-        </button>
-      </div>
 
-      {currentJob && (
-        <div className="card-shell p-5 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-              {language === "ar" ? "حالة المهمة" : "Job Status"}
-            </h3>
-            <span className="text-xs px-2 py-1 rounded-full pill-soft">{statusLabel}</span>
+        <div className="space-y-4">
+          <div className="card-shell p-4 space-y-2 text-xs">
+            <h4 className="font-semibold text-sm">Summary</h4>
+            <p><strong>Current step:</strong> {wizardStep}</p>
+            <p><strong>Selected study:</strong> {selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || "—"}</p>
+            <p><strong>Original DICOM patient:</strong> {selectedStudy?.patientName || "—"} ({selectedStudy?.patientId || "—"})</p>
+            <p><strong>Selected RISPro patient:</strong> {selectedPatient ? formatName(selectedPatient) : "—"}</p>
+            <p><strong>Destination:</strong> {selectedDestinationKey || "—"}</p>
+            <p><strong>Current job status:</strong> {currentJob?.status || "—"}</p>
+            {comparison && (
+              <div className="rounded border p-2">
+                <p><strong>Replacement PatientID:</strong> {comparison.replacement.patientId || "—"}</p>
+                <p><strong>Replacement PatientName:</strong> {comparison.replacement.patientName || "—"}</p>
+              </div>
+            )}
           </div>
-          {hasActiveCurrentJob && (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => cancelMutation.mutate()}
-                disabled={!canCancelCurrentJob || cancelMutation.isPending}
-                className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
-              >
-                {cancelMutation.isPending
-                  ? (language === "ar" ? "جارٍ الإلغاء..." : "Cancelling...")
-                  : (language === "ar" ? "إلغاء المهمة النشطة" : "Cancel active job")}
-              </button>
-              {!canCancelCurrentJob && (
-                <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                  {language === "ar"
-                    ? "لا يمكن إيقاف مهمة بدأت المعالجة بالفعل."
-                    : "Jobs already being processed cannot be interrupted safely."}
-                </p>
+
+          {currentJob && (
+            <div className="card-shell p-4 space-y-2 text-xs">
+              <h4 className="font-semibold text-sm">Current Upload</h4>
+              <p>Job #{currentJob.id}</p>
+              <p>Source Study: <span className="font-mono">{currentJob.source_orthanc_study_id || "—"}</span></p>
+              <p>Modified Study: <span className="font-mono">{currentJob.modified_orthanc_study_id || "—"}</span></p>
+              {isCancellableJobStatus(currentJob.status) && (
+                <button type="button" onClick={() => cancelMutation.mutate()} disabled={cancelMutation.isPending} className="btn-secondary px-3 py-2 rounded-lg text-xs">
+                  Cancel active job
+                </button>
               )}
             </div>
           )}
-          {canResetCurrentJob && (
-            <div className="flex flex-wrap items-center gap-2">
+
+          {isSupervisor && (
+            <div className="card-shell p-4 space-y-2 text-xs">
+              <h4 className="font-semibold text-sm">Maintenance</h4>
               <button
                 type="button"
-                onClick={() => resetJobMutation.mutate()}
-                disabled={resetJobMutation.isPending}
-                className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
+                onClick={() => clearFailedStudiesMutation.mutate()}
+                disabled={clearFailedStudiesMutation.isPending}
+                className="btn-secondary px-3 py-2 rounded-lg text-xs"
               >
-                {resetJobMutation.isPending
-                  ? (language === "ar" ? "جارٍ إعادة الضبط..." : "Resetting...")
-                  : (language === "ar" ? "إعادة ضبط الرفع الحالي" : "Reset current upload")}
+                Clear failed remap studies
               </button>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                {language === "ar"
-                  ? "يحذف فقط دراسات Orthanc المرتبطة بهذه المهمة."
-                  : "Deletes only Orthanc studies linked to this job."}
-              </p>
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div>
-              <p className="font-medium">{language === "ar" ? "معرف المهمة" : "Job ID"}</p>
-              <p className="font-mono">{currentJob.id}</p>
-            </div>
-            <div>
-              <p className="font-medium">{language === "ar" ? "دراسة Orthanc الأصلية" : "Source Orthanc Study"}</p>
-              <p className="font-mono">{currentJob.source_orthanc_study_id || "—"}</p>
-            </div>
-          </div>
-
-          <div className="rounded-lg border p-3">
-            <p className="font-medium mb-2">{language === "ar" ? "بيانات المريض الأصلية (DICOM)" : "Original DICOM Patient Fields"}</p>
-            <p>{language === "ar" ? "PatientID" : "PatientID"}: {currentJob.original_patient_id || "—"}</p>
-            <p>{language === "ar" ? "PatientName" : "PatientName"}: {currentJob.original_patient_name || "—"}</p>
-            <p>{language === "ar" ? "PatientSex" : "PatientSex"}: {currentJob.original_patient_sex || "—"}</p>
-            <p>{language === "ar" ? "PatientBirthDate" : "PatientBirthDate"}: {currentJob.original_patient_birth_date || "—"}</p>
-          </div>
-        </div>
-      )}
-
-      {currentJob && currentJob.status === "uploaded" && (
-        <div className="card-shell p-5 space-y-4">
-          <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-            {language === "ar" ? "2) اختيار المريض والوجهة" : "2) Select Patient and Destination"}
-          </h3>
-
-          <input
-            type="text"
-            value={patientSearch}
-            onChange={(event) => setPatientSearch(event.target.value)}
-            className="input-premium w-full px-3 py-2"
-            placeholder={language === "ar" ? "ابحث عن مريض..." : "Search patient..."}
-          />
-          {patientQuery.error && (
-            <p className="text-xs text-red-600">
-              {patientQuery.error instanceof Error
-                ? patientQuery.error.message
-                : (language === "ar" ? "تعذر تحميل نتائج المرضى." : "Failed to load patient search results.")}
-            </p>
-          )}
-
-          <select
-            value={selectedPatientId}
-            onChange={(event) => setSelectedPatientId(event.target.value)}
-            className="input-premium w-full px-3 py-2"
-          >
-            <option value="">{language === "ar" ? "اختر المريض" : "Select patient"}</option>
-            {patients.map((patient) => (
-              <option key={patient.id} value={patient.id}>
-                {formatName(patient)} {patient.national_id ? `(${patient.national_id})` : ""}
-              </option>
-            ))}
-          </select>
-
-          <select
-            value={selectedDestinationKey}
-            onChange={(event) => setSelectedDestinationKey(event.target.value)}
-            className="input-premium w-full px-3 py-2"
-          >
-            <option value="">{language === "ar" ? "اختر وجهة PACS" : "Select PACS destination"}</option>
-            {destinations.map((destination) => (
-              <option key={destination.key} value={destination.key}>{destination.name}</option>
-            ))}
-          </select>
-
-          <button
-            type="button"
-            onClick={() => prepareMutation.mutate()}
-            disabled={!canPrepare || prepareMutation.isPending}
-            className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
-          >
-            {prepareMutation.isPending
-              ? (language === "ar" ? "جارٍ التحضير..." : "Preparing...")
-              : (language === "ar" ? "تحضير شاشة التأكيد" : "Prepare Confirmation")}
-          </button>
-        </div>
-      )}
-
-      {canConfirm && comparison && (
-        <div className="card-shell p-5 space-y-4">
-          <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-            {language === "ar" ? "3) تأكيد الإرسال" : "3) Confirm and Send"}
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="rounded-lg border p-3">
-              <p className="font-medium mb-2">{language === "ar" ? "القيم الأصلية" : "Original Values"}</p>
-              <p>PatientID: {comparison.original.patientId || "—"}</p>
-              <p>PatientName: {comparison.original.patientName || "—"}</p>
-              <p>PatientSex: {comparison.original.patientSex || "—"}</p>
-              <p>PatientBirthDate: {comparison.original.patientBirthDate || "—"}</p>
-            </div>
-            <div className="rounded-lg border p-3">
-              <p className="font-medium mb-2">{language === "ar" ? "القيم البديلة" : "Replacement Values"}</p>
-              <p>PatientID: {comparison.replacement.patientId || "—"}</p>
-              <p>PatientName: {comparison.replacement.patientName || "—"}</p>
-              <p>PatientSex: {comparison.replacement.patientSex || "—"}</p>
-              <p>PatientBirthDate: {comparison.replacement.patientBirthDate || "—"}</p>
+          <div className="card-shell p-4 space-y-2 text-xs">
+            <h4 className="font-semibold text-sm">Recent jobs</h4>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {(jobsQuery.data?.jobs || []).map((job) => (
+                <button
+                  key={job.id}
+                  type="button"
+                  onClick={() => setJobId(job.id)}
+                  className="w-full text-left rounded border p-2 hover:bg-black/5"
+                >
+                  <p className="font-mono">#{job.id} • {job.status}</p>
+                  <p className="truncate">{job.source_orthanc_study_id || "—"}</p>
+                </button>
+              ))}
             </div>
           </div>
-
-          <button
-            type="button"
-            onClick={() => confirmSendMutation.mutate()}
-            disabled={confirmSendMutation.isPending}
-            className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
-          >
-            {confirmSendMutation.isPending
-              ? (language === "ar" ? "جارٍ التنفيذ..." : "Processing...")
-              : (language === "ar" ? "تأكيد وإرسال إلى PACS" : "Confirm and Send to PACS")}
-          </button>
         </div>
-      )}
-
-      {isSupervisor && (
-        <div className="card-shell p-5 space-y-3">
-          <div>
-            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-              {language === "ar" ? "صيانة Orthanc للمشرف" : "Supervisor Orthanc Maintenance"}
-            </h3>
-            <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-              {language === "ar"
-                ? "يحذف فقط دراسات Orthanc المرتبطة بمهام DICOM remap الفاشلة أو الملغاة."
-                : "Deletes only Orthanc studies linked to failed or cancelled DICOM remap jobs."}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => clearFailedStudiesMutation.mutate()}
-            disabled={clearFailedStudiesMutation.isPending}
-            className="btn-secondary px-4 py-2 rounded-lg text-sm disabled:opacity-50"
-          >
-            {clearFailedStudiesMutation.isPending
-              ? (language === "ar" ? "جارٍ التنظيف..." : "Clearing...")
-              : (language === "ar" ? "تنظيف دراسات remap الفاشلة" : "Clear failed remap studies")}
-          </button>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-            {language === "ar"
-              ? "لا يحذف الدراسات النشطة أو المرسلة ولا يشغل إعادة الضبط الشاملة."
-              : "Does not delete active or sent job studies, and does not run hard reset."}
-          </p>
-        </div>
-      )}
-
-      <div className="card-shell p-5 space-y-3">
-        <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-          {language === "ar" ? "مهماتي الأخيرة" : "My Recent Jobs"}
-        </h3>
-        {jobsQuery.isLoading ? (
-          <p className="text-sm" style={{ color: "var(--text-muted)" }}>{language === "ar" ? "جارٍ التحميل..." : "Loading..."}</p>
-        ) : (
-          <div className="space-y-2">
-            {(jobsQuery.data?.jobs || []).map((job) => (
-              <button
-                key={job.id}
-                type="button"
-                onClick={() => {
-                  setJobId(job.id);
-                  setErrorMessage("");
-                }}
-                className="w-full text-left rounded-lg border p-3 hover:bg-black/5"
-              >
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-mono">#{job.id}</span>
-                  <span className="text-xs">{job.status}</span>
-                </div>
-                <p className="text-xs mt-1" style={{ color: "var(--text-muted)" }}>
-                  {job.source_orthanc_study_id || "—"}
-                </p>
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {(errorMessage || currentJob?.error_message) && (
@@ -998,16 +668,9 @@ export default function PacsRemapPage() {
           {errorMessage || currentJob?.error_message}
         </div>
       )}
-
       {successMessage && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
           {successMessage}
-        </div>
-      )}
-
-      {destinationsQuery.error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-          {destinationsQuery.error instanceof ApiError ? destinationsQuery.error.message : "Failed to load destinations."}
         </div>
       )}
 
