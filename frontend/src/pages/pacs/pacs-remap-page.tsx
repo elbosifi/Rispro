@@ -4,6 +4,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
+import { buildDicomUploadSelectionPlan, scanDicomStudiesFromFiles, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 
@@ -57,6 +58,14 @@ interface PatientOption {
   mrn?: string | null;
 }
 
+function formatBytes(bytes: number): string {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function formatName(patient: PatientOption): string {
   return patient.english_full_name || patient.arabic_full_name || `Patient #${patient.id}`;
 }
@@ -83,6 +92,9 @@ export default function PacsRemapPage() {
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
   const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
+  const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
+  const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
+  const [enableFallbackUpload, setEnableFallbackUpload] = useState(false);
   const [fileInputVersion, setFileInputVersion] = useState(0);
 
   const setSelectedFiles = (incoming: FileList | null): void => {
@@ -91,6 +103,14 @@ export default function PacsRemapPage() {
     setSkippedFilesCount(0);
     setErrorMessage("");
     setSuccessMessage("");
+    setScanResult(null);
+    setSelectedStudyInstanceUid("");
+    setEnableFallbackUpload(false);
+    if (all.length === 0) {
+      scanMutation.reset();
+      return;
+    }
+    scanMutation.mutate(all);
   };
 
   const destinationsQuery = useQuery({
@@ -140,9 +160,36 @@ export default function PacsRemapPage() {
       if (files.length === 0) {
         throw new Error(language === "ar" ? "يرجى اختيار ملف DICOM واحد على الأقل." : "Please choose at least one DICOM file.");
       }
+
+      const chosenStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
+      const hasDetectedStudies = (scanResult?.studies.length || 0) > 0;
+      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
+      const useFallback = plan.usesFallback;
+      if (hasDetectedStudies && !chosenStudy) {
+        throw new Error(language === "ar" ? "يرجى اختيار دراسة واحدة قبل الرفع." : "Please select one detected study before upload.");
+      }
+      if (!hasDetectedStudies && !useFallback) {
+        throw new Error(
+          language === "ar"
+            ? "تعذر على RISPro تحديد الدراسات بدقة. فعّل خيار الرفع المتقدم للمتابعة."
+            : "RISPro could not reliably detect studies before upload. Enable advanced fallback upload to continue."
+        );
+      }
+
+      const uploadFiles = plan.files.length > 0 ? plan.files : files;
+      if (uploadFiles.length === 0) {
+        throw new Error(language === "ar" ? "لا توجد ملفات مناسبة للرفع." : "No uploadable files were selected.");
+      }
+
       const formData = new FormData();
-      for (const file of files) {
+      for (const file of uploadFiles) {
         formData.append("files", file, file.name);
+      }
+      if (chosenStudy?.studyInstanceUid) {
+        formData.append("selectedStudyInstanceUID", chosenStudy.studyInstanceUid);
+      }
+      if (!chosenStudy) {
+        formData.append("uploadMode", "fallback_all_candidates");
       }
 
       return api<{ job: RemapJob; skippedFilesCount?: number }>("/pacs/remap/jobs/upload-multipart", {
@@ -171,6 +218,26 @@ export default function PacsRemapPage() {
         }
       }
       setErrorMessage(error instanceof Error ? error.message : "Upload failed.");
+    },
+  });
+
+  const scanMutation = useMutation({
+    mutationFn: async (selectedFiles: File[]) => scanDicomStudiesFromFiles(selectedFiles, { batchSize: 20 }),
+    onSuccess: (result) => {
+      setScanResult(result);
+      setSkippedFilesCount(result.skippedSidecarCount);
+      setEnableFallbackUpload(false);
+      if (result.studies.length === 1) {
+        setSelectedStudyInstanceUid(result.studies[0].studyInstanceUid);
+      } else {
+        setSelectedStudyInstanceUid("");
+      }
+    },
+    onError: (error: unknown) => {
+      setScanResult(null);
+      setSelectedStudyInstanceUid("");
+      setEnableFallbackUpload(false);
+      setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
     },
   });
 
@@ -222,6 +289,10 @@ export default function PacsRemapPage() {
   const patients = patientQuery.data?.patients || [];
   const destinations = destinationsQuery.data?.destinations || [];
   const isSupervisor = user?.role === "supervisor";
+  const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
+  const detectedStudiesCount = scanResult?.studies.length || 0;
+  const hasUnparsedFiles = (scanResult?.unparsedCount || 0) > 0;
+  const canUseFallbackUpload = !scanMutation.isPending && (detectedStudiesCount === 0);
 
   const canPrepare = currentJob?.status === "uploaded" && !!selectedPatientId && !!selectedDestinationKey;
   const canConfirm = currentJob?.status === "awaiting_confirmation" && comparison != null;
@@ -238,10 +309,14 @@ export default function PacsRemapPage() {
     setErrorMessage("");
     setSuccessMessage("");
     setSkippedFilesCount(0);
+    setScanResult(null);
+    setSelectedStudyInstanceUid("");
+    setEnableFallbackUpload(false);
     setFileInputVersion((value) => value + 1);
     uploadMutation.reset();
     prepareMutation.reset();
     confirmSendMutation.reset();
+    scanMutation.reset();
   };
 
   const cancelMutation = useMutation({
@@ -385,6 +460,44 @@ export default function PacsRemapPage() {
             ? `الملفات المختارة: ${files.length}`
             : `Selected files: ${files.length}`}
         </p>
+        {scanMutation.isPending && (
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+            {language === "ar" ? "جارٍ فحص الملفات..." : "Scanning files..."}
+          </p>
+        )}
+        {scanResult && !scanMutation.isPending && (
+          <div className="rounded-lg border p-3 space-y-2 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+            <p>
+              {language === "ar"
+                ? `تم اكتشاف ${scanResult.studies.length} دراسة`
+                : `Detected ${scanResult.studies.length} studies`}
+            </p>
+            <p>
+              {language === "ar"
+                ? `تم تجاهل ${scanResult.skippedSidecarCount} ملف جانبي`
+                : `Skipped ${scanResult.skippedSidecarCount} sidecar files`}
+            </p>
+            <p>
+              {language === "ar"
+                ? `${scanResult.unparsedCount} ملف لم يمكن تحليله`
+                : `${scanResult.unparsedCount} files could not be parsed`}
+            </p>
+            {scanResult.studies.length > 1 && (
+              <p className="text-amber-600">
+                {language === "ar"
+                  ? "تم العثور على عدة دراسات. اختر دراسة واحدة قبل الرفع."
+                  : "Multiple studies detected. Select one study before upload."}
+              </p>
+            )}
+            {scanResult.studies.length === 0 && (
+              <p className="text-amber-600">
+                {language === "ar"
+                  ? "تعذر على RISPro تحديد الدراسات قبل الرفع."
+                  : "RISPro could not reliably detect studies before upload."}
+              </p>
+            )}
+          </div>
+        )}
         {skippedFilesCount > 0 && (
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>
             {language === "ar"
@@ -392,15 +505,75 @@ export default function PacsRemapPage() {
               : `Skipped ${skippedFilesCount} non-DICOM files.`}
           </p>
         )}
+        {scanResult && scanResult.studies.length > 0 && (
+          <div className="space-y-2">
+            {scanResult.studies.map((study) => (
+              <label key={study.studyInstanceUid} className="block rounded-lg border p-3 cursor-pointer">
+                <div className="flex items-start gap-2">
+                  <input
+                    type="radio"
+                    name="detectedStudy"
+                    value={study.studyInstanceUid}
+                    checked={selectedStudyInstanceUid === study.studyInstanceUid}
+                    onChange={(event) => {
+                      setSelectedStudyInstanceUid(event.target.value);
+                      setEnableFallbackUpload(false);
+                    }}
+                  />
+                  <div className="text-xs space-y-1">
+                    <p><strong>{language === "ar" ? "الوصف" : "StudyDescription"}:</strong> {study.studyDescription || "—"}</p>
+                    <p><strong>{language === "ar" ? "التاريخ" : "StudyDate"}:</strong> {study.studyDate || "—"}</p>
+                    <p><strong>{language === "ar" ? "الموداليتي" : "Modality"}:</strong> {study.modality || "—"}</p>
+                    <p><strong>{language === "ar" ? "PatientID" : "PatientID"}:</strong> {study.patientId || "—"}</p>
+                    <p><strong>{language === "ar" ? "PatientName" : "PatientName"}:</strong> {study.patientName || "—"}</p>
+                    <p>
+                      <strong>{language === "ar" ? "السلاسل/الملفات/الحجم" : "Series/Files/Size"}:</strong>{" "}
+                      {study.seriesCount} / {study.fileCount} / {formatBytes(study.totalBytes)}
+                    </p>
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        )}
+        {canUseFallbackUpload && (
+          <label className="flex items-start gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={enableFallbackUpload}
+              onChange={(event) => setEnableFallbackUpload(event.target.checked)}
+            />
+            <span>
+              {language === "ar"
+                ? "رفع متقدم: ارفع كل ملفات DICOM المحتملة ودع RISPro يتحقق من دراسة واحدة."
+                : "Advanced fallback: Upload all DICOM-like files and let RISPro validate one study."}
+            </span>
+          </label>
+        )}
+        {hasUnparsedFiles && selectedStudy && (
+          <p className="text-xs text-amber-600">
+            {language === "ar"
+              ? "الملفات غير المحللة لن تُرفع افتراضياً."
+              : "Unparsed files are not uploaded by default."}
+          </p>
+        )}
         <button
           type="button"
           onClick={() => uploadMutation.mutate()}
-          disabled={uploadMutation.isPending || files.length === 0}
+          disabled={
+            uploadMutation.isPending ||
+            scanMutation.isPending ||
+            files.length === 0 ||
+            (
+              (detectedStudiesCount > 0 && !selectedStudy) ||
+              (detectedStudiesCount === 0 && !enableFallbackUpload)
+            )
+          }
           className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
         >
           {uploadMutation.isPending
             ? (language === "ar" ? "جارٍ الرفع..." : "Uploading...")
-            : (language === "ar" ? "رفع وإنشاء مهمة" : "Upload and Create Job")}
+            : (language === "ar" ? "رفع الدراسة المختارة" : "Upload selected study")}
         </button>
         <button
           type="button"

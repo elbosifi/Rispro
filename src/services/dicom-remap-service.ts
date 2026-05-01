@@ -105,6 +105,10 @@ interface OrthancPatientSummary {
   patientBirthDate: string;
 }
 
+interface OrthancStudySummary extends OrthancPatientSummary {
+  studyInstanceUid: string;
+}
+
 interface OrthancStudyModifyPreflight {
   sourceStudyId: string;
   studyResponse: OrthancFetchResult;
@@ -741,7 +745,7 @@ async function verifyModifiedStudyAfterTimeout(
 
   for (const candidateId of candidates) {
     try {
-      const summary = await readStudyPatientSummary(candidateId);
+      const summary = await readStudySummary(candidateId);
       if (hasSameReplacementIdentity(summary, replacement)) {
         return candidateId;
       }
@@ -1148,7 +1152,7 @@ async function assertJobSourceStudyExists(job: DicomRemapJobRow): Promise<void> 
   throw new HttpError(409, message, { jobId: job.id });
 }
 
-async function readStudyPatientSummary(studyId: string): Promise<OrthancPatientSummary> {
+async function readStudySummary(studyId: string): Promise<OrthancStudySummary> {
   const response = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
   if (!response.ok || !response.json || typeof response.json !== "object") {
     throw new HttpError(502, `Unable to read Orthanc study summary (status=${response.status}).`);
@@ -1163,6 +1167,7 @@ async function readStudyPatientSummary(studyId: string): Promise<OrthancPatientS
   const mergedTags = { ...patientMainTags, ...mainTags };
 
   return {
+    studyInstanceUid: extractTagCandidate(mergedTags, ["StudyInstanceUID"]),
     patientId: extractTagCandidate(mergedTags, ["PatientID"]),
     patientName: extractTagCandidate(mergedTags, ["PatientName"]),
     patientSex: normalizePatientSex(extractTagCandidate(mergedTags, ["PatientSex"])),
@@ -1519,12 +1524,14 @@ async function createEmptyDicomRemapUploadJob(currentUserId: UserId): Promise<Di
 async function finalizeDicomRemapUploadJob({
   job,
   studyIds,
+  selectedStudyInstanceUID,
   skippedFilesCount,
   uploadedFileCount,
   currentUserId,
 }: {
   job: DicomRemapJobRow;
   studyIds: Set<string>;
+  selectedStudyInstanceUID?: string | null;
   skippedFilesCount: number;
   uploadedFileCount: number;
   currentUserId: UserId;
@@ -1538,7 +1545,14 @@ async function finalizeDicomRemapUploadJob({
   }
 
   const sourceStudyId = Array.from(studyIds)[0];
-  const summary = await readStudyPatientSummary(sourceStudyId);
+  const summary = await readStudySummary(sourceStudyId);
+  const expectedStudyInstanceUID = String(selectedStudyInstanceUID || "").trim();
+  if (expectedStudyInstanceUID && summary.studyInstanceUid && summary.studyInstanceUid !== expectedStudyInstanceUID) {
+    throw new HttpError(
+      400,
+      `Selected StudyInstanceUID does not match uploaded study (selected=${expectedStudyInstanceUID}, uploaded=${summary.studyInstanceUid}).`
+    );
+  }
 
   const updateResult = await queryDicomRemapDb<DicomRemapJobRow>(
     `
@@ -1618,9 +1632,11 @@ export async function cleanupStaleDicomRemapUploadTempDirs(maxAgeMs = 24 * 60 * 
 
 export async function createDicomRemapUploadJob({
   files,
+  selectedStudyInstanceUID,
   currentUserId,
 }: {
   files: DicomRemapUploadFileInput[];
+  selectedStudyInstanceUID?: string | null;
   currentUserId: UserId;
 }): Promise<DicomRemapUploadProcessingResult> {
   if (!Array.isArray(files) || files.length === 0) {
@@ -1661,6 +1677,7 @@ export async function createDicomRemapUploadJob({
     return finalizeDicomRemapUploadJob({
       job,
       studyIds,
+      selectedStudyInstanceUID,
       skippedFilesCount,
       uploadedFileCount,
       currentUserId,
@@ -1673,10 +1690,12 @@ export async function createDicomRemapUploadJob({
 
 export async function createDicomRemapMultipartUploadJob({
   files,
+  selectedStudyInstanceUID,
   currentUserId,
   tempDir,
 }: {
   files: DicomRemapStagedUploadFile[];
+  selectedStudyInstanceUID?: string | null;
   currentUserId: UserId;
   tempDir?: string;
 }): Promise<DicomRemapUploadProcessingResult> {
@@ -1732,6 +1751,7 @@ export async function createDicomRemapMultipartUploadJob({
     return await finalizeDicomRemapUploadJob({
       job,
       studyIds,
+      selectedStudyInstanceUID,
       skippedFilesCount,
       uploadedFileCount,
       currentUserId,

@@ -42,9 +42,14 @@ const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
 
-async function stageDicomRemapMultipartFiles(req: Request): Promise<{ files: DicomRemapStagedUploadFile[]; tempDir: string }> {
+async function stageDicomRemapMultipartFiles(req: Request): Promise<{
+  files: DicomRemapStagedUploadFile[];
+  tempDir: string;
+  selectedStudyInstanceUID: string | null;
+}> {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-"));
   const files: DicomRemapStagedUploadFile[] = [];
+  let selectedStudyInstanceUID: string | null = null;
   const writes: Promise<void>[] = [];
 
   return new Promise((resolve, reject) => {
@@ -112,6 +117,12 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{ files: Dic
         writeStream.on("error", rejectWrite);
       }));
     });
+    busboy.on("field", (fieldName, value) => {
+      if (fieldName === "selectedStudyInstanceUID") {
+        const clean = String(value || "").trim();
+        selectedStudyInstanceUID = clean || null;
+      }
+    });
 
     busboy.on("error", fail);
     busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.")));
@@ -121,7 +132,7 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{ files: Dic
         .then(() => {
           if (settled) return;
           settled = true;
-          resolve({ files, tempDir });
+          resolve({ files, tempDir, selectedStudyInstanceUID });
         })
         .catch(fail);
     });
@@ -334,6 +345,7 @@ pacsRouter.post(
     const result = await createDicomRemapMultipartUploadJob({
       files: staged.files,
       tempDir: staged.tempDir,
+      selectedStudyInstanceUID: staged.selectedStudyInstanceUID,
       currentUserId,
     });
 
@@ -350,9 +362,11 @@ pacsRouter.post(
     const body = asUnknownRecord(request.body ?? {});
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const files = validateDicomRemapUploadFilesInput(body.files);
+    const selectedStudyInstanceUID = asOptionalString(body.selectedStudyInstanceUID);
 
     const result = await createDicomRemapUploadJob({
       files,
+      selectedStudyInstanceUID,
       currentUserId,
     });
 

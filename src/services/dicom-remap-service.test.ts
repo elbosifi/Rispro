@@ -1288,6 +1288,46 @@ test("createDicomRemapMultipartUploadJob skips sidecars and uploads accepted fil
   assert.equal(auditEvents.length, 1);
 });
 
+test("createDicomRemapMultipartUploadJob rejects selectedStudyInstanceUID mismatch", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "image-1.dcm", mimeType: "application/dicom" },
+  ]);
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "study-id" } }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: {
+          StudyInstanceUID: "1.2.840.study.actual",
+        },
+        PatientMainDicomTags: {
+          PatientID: "P1",
+          PatientName: "Original^Patient",
+          PatientSex: "M",
+          PatientBirthDate: "19900101",
+        },
+      },
+    }),
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapMultipartUploadJob({
+      currentUserId: 42,
+      files: staged,
+      tempDir,
+      selectedStudyInstanceUID: "1.2.840.study.selected",
+    }),
+    /Selected StudyInstanceUID does not match uploaded study/
+  );
+});
+
 test("createDicomRemapMultipartUploadJob skips Orthanc invalid-DICOM rejections when valid instances remain", async () => {
   const { tempDir, staged } = await makeStagedFiles([
     { fileName: "opaque-support-file", mimeType: "application/octet-stream" },
