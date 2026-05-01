@@ -88,6 +88,8 @@ interface ConfirmComparison {
   replacement: OrthancPatientSummary;
 }
 
+const DICOM_IDENTITY_MAX_LENGTH = 64;
+const DICOM_CONTROL_CHAR_PATTERN = /[\x00-\x1F\x7F]/;
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation", "remapped", "sending"];
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
@@ -206,6 +208,42 @@ function normalizeDicomPatientName(value: string): string {
   if (!clean) return "";
   if (clean.includes("^")) return clean;
   return clean.replace(/\s+/g, "^");
+}
+
+function assertNoDicomControlChars(value: string, fieldName: string): void {
+  if (DICOM_CONTROL_CHAR_PATTERN.test(value)) {
+    throw new HttpError(400, `${fieldName} contains invalid control characters.`);
+  }
+}
+
+function normalizeDicomPatientIdForReplace(value: string): string {
+  const clean = String(value || "").trim();
+  assertNoDicomControlChars(clean, "PatientID");
+  if (clean.length > DICOM_IDENTITY_MAX_LENGTH) {
+    throw new HttpError(400, "PatientID is too long for DICOM");
+  }
+  return clean;
+}
+
+function normalizeDicomPatientNameForReplace(value: string): string {
+  const normalized = normalizeDicomPatientName(value);
+  assertNoDicomControlChars(normalized, "PatientName");
+  const groups = normalized.split("=");
+  for (const group of groups) {
+    if (group.length > DICOM_IDENTITY_MAX_LENGTH) {
+      throw new HttpError(400, "PatientName is too long for DICOM");
+    }
+  }
+  return normalized;
+}
+
+function validateOrthancReplacementIdentity(replacement: OrthancPatientSummary): OrthancPatientSummary {
+  return {
+    patientId: normalizeDicomPatientIdForReplace(replacement.patientId),
+    patientName: normalizeDicomPatientNameForReplace(replacement.patientName),
+    patientSex: normalizePatientSex(replacement.patientSex),
+    patientBirthDate: normalizeDicomBirthDate(replacement.patientBirthDate),
+  };
 }
 
 function parseOrthancResourceId(payload: unknown): string {
@@ -848,12 +886,12 @@ function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPati
   const patientSex = normalizePatientSex(String(patient.sex || ""));
   const patientBirthDate = normalizeDicomBirthDate(String(patient.estimated_date_of_birth || ""));
 
-  return {
+  return validateOrthancReplacementIdentity({
     patientId,
     patientName,
     patientSex,
     patientBirthDate,
-  };
+  });
 }
 
 async function tryBulkModifiedStudyCopy(
@@ -918,13 +956,14 @@ async function tryBulkModifiedStudyCopy(
 }
 
 async function createModifiedStudyCopy(sourceStudyId: string, replacement: OrthancPatientSummary): Promise<string> {
+  const validatedReplacement = validateOrthancReplacementIdentity(replacement);
   let preflight = await waitForOrthancStudyStable(sourceStudyId);
   const modifyPayload = {
     Replace: {
-      PatientID: replacement.patientId,
-      PatientName: replacement.patientName,
-      PatientSex: replacement.patientSex,
-      PatientBirthDate: replacement.patientBirthDate,
+      PatientID: validatedReplacement.patientId,
+      PatientName: validatedReplacement.patientName,
+      PatientSex: validatedReplacement.patientSex,
+      PatientBirthDate: validatedReplacement.patientBirthDate,
     },
     KeepSource: true,
     Force: true,
@@ -943,7 +982,7 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
       if (!isOrthancTimeoutError(error)) {
         throw error;
       }
-      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, replacement);
+      const verifiedStudyId = await verifyModifiedStudyAfterTimeout(preflight, validatedReplacement);
       if (verifiedStudyId) {
         return verifiedStudyId;
       }
@@ -1639,6 +1678,9 @@ export const __dicomRemapTestables = {
   isUniqueViolation,
   normalizePatientSex,
   normalizeDicomBirthDate,
+  normalizeDicomPatientIdForReplace,
+  normalizeDicomPatientNameForReplace,
+  validateOrthancReplacementIdentity,
   parseOrthancResourceId,
   parseOrthancModifiedStudyId,
   parseOrthancUploadResponse,

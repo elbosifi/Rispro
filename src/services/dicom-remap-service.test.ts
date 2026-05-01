@@ -153,6 +153,47 @@ test("dicom helper: patient sex and birth date normalization", () => {
   assert.equal(__dicomRemapTestables.normalizeDicomBirthDate("05-04-1990"), "");
 });
 
+test("dicom helper: replacement identity validation passes normal values", () => {
+  const validated = __dicomRemapTestables.validateOrthancReplacementIdentity({
+    patientId: "  RISPRO-123  ",
+    patientName: "Jane Doe",
+    patientSex: "female",
+    patientBirthDate: "1990-01-02",
+  });
+
+  assert.equal(validated.patientId, "RISPRO-123");
+  assert.equal(validated.patientName, "Jane^Doe");
+  assert.equal(validated.patientSex, "F");
+  assert.equal(validated.patientBirthDate, "19900102");
+});
+
+test("dicom helper: replacement identity rejects long PatientID", () => {
+  const tooLong = "A".repeat(65);
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientIdForReplace(tooLong),
+    /PatientID is too long for DICOM/
+  );
+});
+
+test("dicom helper: replacement identity rejects long PatientName component group", () => {
+  const tooLongGroup = "B".repeat(65);
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientNameForReplace(`${tooLongGroup}=OK`),
+    /PatientName is too long for DICOM/
+  );
+});
+
+test("dicom helper: replacement identity rejects control characters consistently", () => {
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientIdForReplace("RISPRO-\u0007-123"),
+    /control characters/i
+  );
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientNameForReplace("Jane\u0000 Doe"),
+    /control characters/i
+  );
+});
+
 test("dicom helper: Orthanc resource id parser supports common response shapes", () => {
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ParentStudy: "abc-study" }), "abc-study");
   assert.equal(__dicomRemapTestables.parseOrthancResourceId({ ID: "new-id" }), "new-id");
@@ -438,6 +479,38 @@ test("dicom helper: createModifiedStudyCopy sends Force true with patient identi
     KeepSource: true,
     Force: true,
   });
+});
+
+test("dicom helper: createModifiedStudyCopy rejects long PatientID before Orthanc modify", async () => {
+  const calls = queueOrthancResults(stableStudyResponses());
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "X".repeat(65),
+      patientName: "Replacement^Patient",
+      patientSex: "F",
+      patientBirthDate: "19850123",
+    }),
+    /PatientID is too long for DICOM/
+  );
+
+  assert.equal(calls.some((call) => call.path.endsWith("/modify")), false);
+});
+
+test("dicom helper: createModifiedStudyCopy rejects long PatientName before Orthanc modify", async () => {
+  const calls = queueOrthancResults(stableStudyResponses());
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "RISPRO-123",
+      patientName: `${"N".repeat(65)}`,
+      patientSex: "F",
+      patientBirthDate: "19850123",
+    }),
+    /PatientName is too long for DICOM/
+  );
+
+  assert.equal(calls.some((call) => call.path.endsWith("/modify")), false);
 });
 
 test("dicom helper: waitForOrthancStudyStable proceeds immediately for stable studies", async () => {
