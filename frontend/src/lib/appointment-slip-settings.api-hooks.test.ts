@@ -42,6 +42,8 @@ describe("appointment slip settings api hooks", () => {
     expect(settings.hospitalNameAr).toBe("المركز الوطني للأورام بنغازي");
     expect(settings.departmentNameEn).toBe("Diagnostic Radiology Department");
     expect(settings.showQrCode).toBe(true);
+    expect(settings.qrModalityMode).toBe("all");
+    expect(settings.qrModalityIds).toEqual([]);
     expect(settings.showPatientCategory).toBe(false);
     expect(settings.boldAppointmentSlipText).toBe(false);
     expect(settings.barcodeValueMode).toBe("accessionNumber");
@@ -105,6 +107,8 @@ describe("appointment slip settings api hooks", () => {
       showLocation: true,
       showArrivalNote: true,
       showQrCode: true,
+      qrModalityMode: "exclude",
+      qrModalityIds: [2, 7],
       qrCaptionAr: "QR",
       qrCaptionEn: "QR",
       qrHelperTextAr: "Helper",
@@ -130,6 +134,27 @@ describe("appointment slip settings api hooks", () => {
         entries: [{ key: "config", value: payload }],
       }),
     });
+  });
+
+  it("normalizes invalid qr modality rule values safely", async () => {
+    vi.mocked(api).mockResolvedValue({
+      settings: [
+        {
+          setting_key: "config",
+          setting_value: {
+            value: {
+              qrModalityMode: "bad-mode",
+              qrModalityIds: [2, "7", null, "x", 2, -1],
+            },
+          },
+        },
+      ],
+    });
+
+    const settings = await fetchAppointmentSlipSettings();
+
+    expect(settings.qrModalityMode).toBe("all");
+    expect(settings.qrModalityIds).toEqual([2, 7]);
   });
 
   it("fetches patient QR settings from the dedicated category", async () => {
@@ -159,6 +184,31 @@ describe("appointment slip settings api hooks", () => {
     const settings = await fetchPatientQrSettings();
 
     expect(settings.risproPublicBaseUrl).toBe("https://custom.rispro.example");
+  });
+
+  it("normalizes patient QR modality scope fields safely", async () => {
+    vi.mocked(api).mockResolvedValue({
+      settings: [
+        {
+          setting_key: "config",
+          setting_value: {
+            value: {
+              reportAccessModalityMode: "bad",
+              reportAccessModalityIds: [2, "7", null, "x", 2],
+              imageAccessModalityMode: "exclude",
+              imageAccessModalityIds: [5, "5", -1, "a"],
+            },
+          },
+        },
+      ],
+    });
+
+    const settings = await fetchPatientQrSettings();
+
+    expect(settings.reportAccessModalityMode).toBe("all");
+    expect(settings.reportAccessModalityIds).toEqual([2, 7]);
+    expect(settings.imageAccessModalityMode).toBe("exclude");
+    expect(settings.imageAccessModalityIds).toEqual([5]);
   });
 
   it("default settings constants do not contain mojibake markers", () => {

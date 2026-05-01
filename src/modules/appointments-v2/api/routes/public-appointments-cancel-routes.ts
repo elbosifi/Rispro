@@ -6,7 +6,7 @@ import { cancelBooking } from "../../booking/services/cancel-booking.service.js"
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { getPublicCancelServiceUserId } from "../../public/utils/public-cancel-config.js";
 import { verifyPublicCancelToken } from "../../public/utils/public-cancel-token.js";
-import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
+import { isModalityAllowed, readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import {
   buildPublicSonicDicomImageUrl,
@@ -62,6 +62,28 @@ function reportContextFromBooking(booking: BookingDetails) {
   };
 }
 
+function canAccessReportForBooking(
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>,
+  booking: BookingDetails
+): boolean {
+  return isModalityAllowed(
+    patientQrSettings.reportAccessModalityMode,
+    patientQrSettings.reportAccessModalityIds,
+    booking.modality_id
+  );
+}
+
+function canAccessImageForBooking(
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>,
+  booking: BookingDetails
+): boolean {
+  return isModalityAllowed(
+    patientQrSettings.imageAccessModalityMode,
+    patientQrSettings.imageAccessModalityIds,
+    booking.modality_id
+  );
+}
+
 function makeReportStatusResponse(
   state: SonicDicomReportState,
   patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>,
@@ -102,6 +124,8 @@ router.get(
         reportFeature: {
           allowReportAccess: patientQrSettings.allowReportAccess,
           allowImageAccess: patientQrSettings.allowImageAccess,
+          reportAccessAllowedForModality: canAccessReportForBooking(patientQrSettings, booking),
+          imageAccessAllowedForModality: canAccessImageForBooking(patientQrSettings, booking),
           showReportPendingCard: patientQrSettings.showReportPendingCard,
           reportAccessRequiresCompletedAppointment: patientQrSettings.reportAccessRequiresCompletedAppointment,
           imageAccessRequiresCompletedAppointment: patientQrSettings.imageAccessRequiresCompletedAppointment,
@@ -117,6 +141,7 @@ router.get(
           qrReportStudyNotFoundMessage: patientQrSettings.qrReportStudyNotFoundMessage,
           qrImageStudyNotFoundMessage: patientQrSettings.qrImageStudyNotFoundMessage,
         },
+        modalityId: booking.modality_id,
         modalityNameAr: booking.modality_name_ar || "—",
         modalityNameEn: booking.modality_name_en || "—",
         examNameAr: booking.exam_name_ar || "—",
@@ -185,13 +210,19 @@ router.get(
       return;
     }
 
+    const booking = await getBookingDetails(payload.bookingId);
+    const reportModalityAllowed = canAccessReportForBooking(patientQrSettings, booking);
+    if (!reportModalityAllowed) {
+      res.json(makeReportStatusResponse("disabled", patientQrSettings, false));
+      return;
+    }
+
     const sonicSettings = await readSonicDicomReportSettings();
     if (!sonicSettings.sonicDicomReportsEnabled) {
       res.json(makeReportStatusResponse("disabled", patientQrSettings, false));
       return;
     }
 
-    const booking = await getBookingDetails(payload.bookingId);
     const context = reportContextFromBooking(booking);
     if (!context.requiresReport) {
       res.json(makeReportStatusResponse("not_required", patientQrSettings, false));
@@ -217,10 +248,14 @@ router.get(
     if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
     if (!patientQrSettings.allowImageAccess) throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "image_access_disabled" });
 
+    const booking = await getBookingDetails(payload.bookingId);
+    if (!canAccessImageForBooking(patientQrSettings, booking)) {
+      throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "image_access_modality_blocked" });
+    }
+
     const sonicSettings = await readSonicDicomReportSettings();
     if (!sonicSettings.sonicDicomReportsEnabled) throw new HttpError(403, patientQrSettings.qrImageUnavailableMessage, { code: "report_integration_disabled" });
 
-    const booking = await getBookingDetails(payload.bookingId);
     const context = reportContextFromBooking(booking);
     if (patientQrSettings.imageAccessRequiresCompletedAppointment && context.status !== "completed") {
       throw new HttpError(409, patientQrSettings.qrReportNotCompletedMessage, { code: "image_not_completed" });
@@ -254,10 +289,14 @@ router.get(
     if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
     if (!patientQrSettings.allowReportAccess) throw new HttpError(403, "Report access is disabled.", { code: "report_access_disabled" });
 
+    const booking = await getBookingDetails(payload.bookingId);
+    if (!canAccessReportForBooking(patientQrSettings, booking)) {
+      throw new HttpError(403, "Report access is disabled.", { code: "report_access_modality_blocked" });
+    }
+
     const sonicSettings = await readSonicDicomReportSettings();
     if (!sonicSettings.sonicDicomReportsEnabled) throw new HttpError(403, "Report integration is disabled.", { code: "report_integration_disabled" });
 
-    const booking = await getBookingDetails(payload.bookingId);
     const context = reportContextFromBooking(booking);
     if (!context.requiresReport) throw new HttpError(403, messageForReportState("not_required", patientQrSettings), { code: "report_not_required" });
     if (patientQrSettings.reportAccessRequiresCompletedAppointment && context.status !== "completed") {

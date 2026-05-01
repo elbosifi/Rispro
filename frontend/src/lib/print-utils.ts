@@ -304,10 +304,26 @@ function buildSlipQrPayload(
   const publicAppointmentUrl = String(apt.publicAppointmentUrl || "").trim();
   const token = String(apt.publicCancelToken || "").trim();
   if (!settings.showQrCode) return "";
+  if (!isSlipQrAllowedForModality(apt, settings)) return "";
   if (!patientQrSettings.enabled || !patientQrSettings.printQrOnAppointmentSlip) return "";
   if (publicAppointmentUrl) return publicAppointmentUrl;
   if (!token) return "";
   return "";
+}
+
+function isSlipQrAllowedForModality(apt: AppointmentWithDetails, settings: AppointmentSlipSettings): boolean {
+  const mode = settings.qrModalityMode;
+  if (mode === "all") return true;
+  const modalityId = Number(apt.modalityId);
+  if (!Number.isFinite(modalityId) || modalityId <= 0) return false;
+  const selected = new Set(
+    (settings.qrModalityIds ?? [])
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+  );
+  if (mode === "include") return selected.has(modalityId);
+  if (mode === "exclude") return !selected.has(modalityId);
+  return true;
 }
 
 function buildSlipBarcodePayload(apt: AppointmentWithDetails, settings: AppointmentSlipSettings): string {

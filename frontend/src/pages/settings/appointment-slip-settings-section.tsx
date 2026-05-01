@@ -7,6 +7,7 @@ import { useLanguage } from "@/providers/language-provider";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   fetchAppointmentSlipSettings,
+  fetchModalitiesSettings,
   fetchPatientQrSettings,
   saveAppointmentSlipSettings,
   type AppointmentSlipSettings,
@@ -33,6 +34,10 @@ function isFiniteNumber(value: string): boolean {
 function normalizeForSave(settings: AppointmentSlipSettings): AppointmentSlipSettings {
   return {
     ...settings,
+    qrModalityMode: settings.qrModalityMode,
+    qrModalityIds: Array.from(
+      new Set((settings.qrModalityIds ?? []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0))
+    ),
     safeTopMm: Number(settings.safeTopMm),
     safeBottomMm: Number(settings.safeBottomMm),
     safeLeftMm: Number(settings.safeLeftMm),
@@ -84,6 +89,10 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
   const { data: patientQrSettings } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
+  });
+  const { data: modalitiesData } = useQuery({
+    queryKey: ["modalities-settings", "active"],
+    queryFn: () => fetchModalitiesSettings(false),
   });
   const [draft, setDraft] = useState<AppointmentSlipSettings>(DEFAULT_SETTINGS);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -138,6 +147,17 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
   });
 
   const qrWarning = getQrDependencyWarning(patientQrSettings);
+  const qrModalities = useMemo(() => {
+    const rows = (modalitiesData?.modalities ?? []) as Array<Record<string, unknown>>;
+    return rows
+      .map((row) => ({
+        id: Number(row.id ?? 0),
+        nameAr: String(row.nameAr ?? row.name_ar ?? ""),
+        nameEn: String(row.nameEn ?? row.name_en ?? ""),
+        code: String(row.code ?? ""),
+      }))
+      .filter((row) => Number.isFinite(row.id) && row.id > 0);
+  }, [modalitiesData]);
 
   const handleSave = () => {
     setErrors(validation.nextErrors);
@@ -253,6 +273,46 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
 
         <FieldCard title="QR">
           <ToggleRow label={chooseLocalized(language, "إظهار QR على الوصل", "Show QR on slip")} checked={draft.showQrCode} onChange={(checked) => setDraft((current) => ({ ...current, showQrCode: checked }))} />
+          <SelectField
+            label={chooseLocalized(language, "نطاق الجهاز لطباعة QR", "QR modality scope")}
+            value={draft.qrModalityMode}
+            onChange={(value) => setDraft((current) => ({ ...current, qrModalityMode: value as AppointmentSlipSettings["qrModalityMode"] }))}
+            options={[
+              { value: "all", label: chooseLocalized(language, "كل الأجهزة", "All modalities") },
+              { value: "include", label: chooseLocalized(language, "الأجهزة المحددة فقط", "Only selected modalities") },
+              { value: "exclude", label: chooseLocalized(language, "استثناء الأجهزة المحددة", "All except selected modalities") },
+            ]}
+          />
+          {draft.qrModalityMode !== "all" ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+              {qrModalities.map((modality) => {
+                const checked = draft.qrModalityIds.includes(modality.id);
+                const label = chooseLocalized(
+                  language,
+                  modality.nameAr || modality.nameEn || modality.code || `#${modality.id}`,
+                  modality.nameEn || modality.nameAr || modality.code || `#${modality.id}`
+                );
+                return (
+                  <label key={modality.id} className="flex items-center gap-2 text-sm text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) =>
+                        setDraft((current) => ({
+                          ...current,
+                          qrModalityIds: event.target.checked
+                            ? Array.from(new Set([...current.qrModalityIds, modality.id]))
+                            : current.qrModalityIds.filter((id) => id !== modality.id),
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-slate-300 text-teal-600"
+                    />
+                    <span>{label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <InputField label="QR caption (Ar)" value={draft.qrCaptionAr} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionAr: value }))} dir="rtl" />
             <InputField label="QR caption (En)" value={draft.qrCaptionEn} onChange={(value) => setDraft((current) => ({ ...current, qrCaptionEn: value }))} dir="ltr" />

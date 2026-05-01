@@ -84,6 +84,23 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     return Number(createResult.data.booking.id);
   }
 
+  async function updatePatientQrConfig(patch: Record<string, unknown>): Promise<void> {
+    await pool.query(
+      `
+      update system_settings
+      set setting_value = jsonb_set(
+        coalesce(setting_value, '{}'::jsonb),
+        '{value}',
+        coalesce(setting_value->'value', '{}'::jsonb) || $1::jsonb,
+        true
+      )
+      where category = 'patient_qr_self_service'
+        and setting_key = 'config'
+      `,
+      [JSON.stringify(patch)]
+    );
+  }
+
   it("returns preview for a valid token", async () => {
     const bookingId = await createBooking("2026-08-01");
     const token = issuePublicCancelToken(bookingId);
@@ -188,5 +205,51 @@ describe("Public appointment cancellation flow", { skip: skipEnv }, () => {
     assert.equal(second.data.ok, true);
     assert.equal(second.data.alreadyCancelled, true);
     assert.equal(second.data.status, "cancelled");
+  });
+
+  it("blocks report endpoints when report modality scope disallows booking modality", async () => {
+    const bookingId = await createBooking("2026-08-07");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    await updatePatientQrConfig({
+      allowReportAccess: true,
+      reportAccessModalityMode: "include",
+      reportAccessModalityIds: [testData.modalityId + 1000],
+    });
+
+    const statusResponse = await fetchJson<{ state: string; canViewReport: boolean }>(
+      app.baseUrl,
+      `/api/public/appointments/report-status?t=${encodeURIComponent(token as string)}`
+    );
+    assert.equal(statusResponse.status, 200);
+    assert.equal(statusResponse.data.state, "disabled");
+    assert.equal(statusResponse.data.canViewReport, false);
+
+    const openResponse = await fetchJson<{ details?: { code?: string } }>(
+      app.baseUrl,
+      `/api/public/appointments/report-open?t=${encodeURIComponent(token as string)}`
+    );
+    assert.equal(openResponse.status, 403);
+    assert.equal(openResponse.data.details?.code, "report_access_modality_blocked");
+  });
+
+  it("blocks image-open when image modality scope disallows booking modality", async () => {
+    const bookingId = await createBooking("2026-08-08");
+    const token = issuePublicCancelToken(bookingId);
+    assert.ok(token);
+
+    await updatePatientQrConfig({
+      allowImageAccess: true,
+      imageAccessModalityMode: "exclude",
+      imageAccessModalityIds: [testData.modalityId],
+    });
+
+    const imageOpen = await fetchJson<{ details?: { code?: string } }>(
+      app.baseUrl,
+      `/api/public/appointments/image-open?t=${encodeURIComponent(token as string)}`
+    );
+    assert.equal(imageOpen.status, 403);
+    assert.equal(imageOpen.data.details?.code, "image_access_modality_blocked");
   });
 });

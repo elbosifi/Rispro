@@ -453,6 +453,8 @@ export interface PublicAppointmentCancelPreview {
   reportFeature?: {
     allowReportAccess: boolean;
     allowImageAccess: boolean;
+    reportAccessAllowedForModality?: boolean;
+    imageAccessAllowedForModality?: boolean;
     showReportPendingCard: boolean;
     reportAccessRequiresCompletedAppointment: boolean;
     imageAccessRequiresCompletedAppointment: boolean;
@@ -469,6 +471,7 @@ export interface PublicAppointmentCancelPreview {
     qrImageStudyNotFoundMessage: string;
   };
   modalityName?: string;
+  modalityId?: number;
   modalityNameAr?: string;
   modalityNameEn?: string;
   examName?: string;
@@ -512,6 +515,7 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
     bookingTime: String(preview.bookingTime ?? preview.booking_time ?? ""),
     requiresReport: Boolean(preview.requiresReport ?? preview.requires_report),
     reportFeature: preview.reportFeature as PublicAppointmentCancelPreview["reportFeature"],
+    modalityId: Number(preview.modalityId ?? preview.modality_id ?? 0) || undefined,
     modalityName: String(preview.modalityName ?? preview.modality_name ?? preview.modalityNameAr ?? preview.modality_name_ar ?? "—"),
     modalityNameAr: String(preview.modalityNameAr ?? preview.modality_name_ar ?? ""),
     modalityNameEn: String(preview.modalityNameEn ?? preview.modality_name_en ?? ""),
@@ -595,7 +599,11 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   allowReportAccess: boolean;
+  reportAccessModalityMode: "all" | "include" | "exclude";
+  reportAccessModalityIds: number[];
   allowImageAccess: boolean;
+  imageAccessModalityMode: "all" | "include" | "exclude";
+  imageAccessModalityIds: number[];
   showReportPendingCard: boolean;
   reportAccessRequiresCompletedAppointment: boolean;
   imageAccessRequiresCompletedAppointment: boolean;
@@ -640,7 +648,11 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  reportAccessModalityMode: "all",
+  reportAccessModalityIds: [],
   allowImageAccess: false,
+  imageAccessModalityMode: "all",
+  imageAccessModalityIds: [],
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
   imageAccessRequiresCompletedAppointment: true,
@@ -709,6 +721,7 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
 export type AppointmentSlipPaperMode = "blank" | "preprinted";
 export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
 export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNumber" | "bookingId";
+export type AppointmentSlipQrModalityMode = "all" | "include" | "exclude";
 
 export interface AppointmentSlipSettings {
   paperMode: AppointmentSlipPaperMode;
@@ -757,6 +770,8 @@ export interface AppointmentSlipSettings {
   showArrivalNote: boolean;
   boldAppointmentSlipText: boolean;
   showQrCode: boolean;
+  qrModalityMode: AppointmentSlipQrModalityMode;
+  qrModalityIds: number[];
   qrCaptionAr: string;
   qrCaptionEn: string;
   qrHelperTextAr: string;
@@ -821,6 +836,8 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   showArrivalNote: true,
   boldAppointmentSlipText: false,
   showQrCode: true,
+  qrModalityMode: "all",
+  qrModalityIds: [],
   qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
   qrCaptionEn: "Scan for appointment details",
   qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
@@ -865,6 +882,17 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     return fallback;
   };
   const str = (value: unknown, fallback = "") => (value == null ? fallback : String(value).trim());
+  const mode = (value: unknown): "all" | "include" | "exclude" => {
+    const normalized = String(value ?? "").trim().toLowerCase();
+    if (normalized === "include" || normalized === "exclude") return normalized;
+    return "all";
+  };
+  const numArray = (value: unknown): number[] =>
+    Array.isArray(value)
+      ? value
+          .map((item) => Number(item))
+          .filter((item, index, list) => Number.isFinite(item) && item > 0 && list.indexOf(item) === index)
+      : [];
 
   return {
     enabled: bool(record.enabled, true),
@@ -878,7 +906,11 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     showDepartmentContact: bool(record.showDepartmentContact, false),
     showLocationDirections: bool(record.showLocationDirections, false),
     allowReportAccess: bool(record.allowReportAccess, false),
+    reportAccessModalityMode: mode(record.reportAccessModalityMode),
+    reportAccessModalityIds: numArray(record.reportAccessModalityIds),
     allowImageAccess: bool(record.allowImageAccess, false),
+    imageAccessModalityMode: mode(record.imageAccessModalityMode),
+    imageAccessModalityIds: numArray(record.imageAccessModalityIds),
     showReportPendingCard: bool(record.showReportPendingCard, true),
     reportAccessRequiresCompletedAppointment: bool(record.reportAccessRequiresCompletedAppointment, true),
     imageAccessRequiresCompletedAppointment: bool(record.imageAccessRequiresCompletedAppointment, true),
@@ -977,6 +1009,12 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
   const paperMode = str(record.paperMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.paperMode);
   const languageMode = str(record.languageMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.languageMode);
   const barcodeValueMode = str(record.barcodeValueMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeValueMode);
+  const qrModalityMode = str(record.qrModalityMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrModalityMode);
+  const qrModalityIds = Array.isArray(record.qrModalityIds)
+    ? record.qrModalityIds
+        .map((value) => Number(value))
+        .filter((value, index, list) => Number.isFinite(value) && value > 0 && list.indexOf(value) === index)
+    : [];
 
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
@@ -1026,6 +1064,8 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     showArrivalNote: bool(record.showArrivalNote, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showArrivalNote),
     boldAppointmentSlipText: bool(record.boldAppointmentSlipText, DEFAULT_APPOINTMENT_SLIP_SETTINGS.boldAppointmentSlipText),
     showQrCode: bool(record.showQrCode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showQrCode),
+    qrModalityMode: qrModalityMode === "include" || qrModalityMode === "exclude" ? qrModalityMode : "all",
+    qrModalityIds,
     qrCaptionAr: str(record.qrCaptionAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionAr),
     qrCaptionEn: str(record.qrCaptionEn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrCaptionEn),
     qrHelperTextAr: str(record.qrHelperTextAr, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrHelperTextAr),

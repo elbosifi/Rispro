@@ -30,7 +30,11 @@ function baseSettings(overrides: Record<string, unknown> = {}) {
     showDepartmentContact: true,
     showLocationDirections: true,
     allowReportAccess: false,
+    reportAccessModalityMode: "all",
+    reportAccessModalityIds: [],
     allowImageAccess: false,
+    imageAccessModalityMode: "all",
+    imageAccessModalityIds: [],
     showReportPendingCard: true,
     reportAccessRequiresCompletedAppointment: true,
     imageAccessRequiresCompletedAppointment: true,
@@ -95,6 +99,7 @@ function preview(overrides: Record<string, unknown> = {}) {
     bookingDate: "2026-07-01",
     bookingTime: "10:30:00",
     requiresReport: false,
+    modalityId: 2,
     modalityNameAr: "CT",
     modalityNameEn: "CT",
     examNameAr: "CT Head",
@@ -180,6 +185,29 @@ describe("PublicCancelAppointmentPage", () => {
     renderPage();
     expect(await screen.findByRole("button", { name: /View images/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Check report/i })).toBeNull();
+  });
+
+  it("hides report and image actions when modality scope blocks access", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({
+        currentStatus: "completed",
+        requiresReport: true,
+        modalityId: 2,
+        patientQrSettings: baseSettings({
+          allowReportAccess: true,
+          reportAccessModalityMode: "include",
+          reportAccessModalityIds: [3],
+          allowImageAccess: true,
+          imageAccessModalityMode: "exclude",
+          imageAccessModalityIds: [2],
+        }),
+      })
+    );
+
+    renderPage();
+    await screen.findByText("Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR");
+    expect(screen.queryByRole("button", { name: /Check report/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /View images/i })).toBeNull();
   });
 
   it("moves from landing to confirmation and requires acknowledgement before canceling", async () => {

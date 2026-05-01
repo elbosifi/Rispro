@@ -3,6 +3,7 @@ import { getSettingsByCategory } from "../../../../services/settings-service.js"
 export type AppointmentSlipPaperMode = "blank" | "preprinted";
 export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
 export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNumber" | "bookingId";
+export type AppointmentSlipQrModalityMode = "all" | "include" | "exclude";
 
 export interface AppointmentSlipSettings {
   paperMode: AppointmentSlipPaperMode;
@@ -51,6 +52,8 @@ export interface AppointmentSlipSettings {
   showArrivalNote: boolean;
   boldAppointmentSlipText: boolean;
   showQrCode: boolean;
+  qrModalityMode: AppointmentSlipQrModalityMode;
+  qrModalityIds: number[];
   qrCaptionAr: string;
   qrCaptionEn: string;
   qrHelperTextAr: string;
@@ -115,6 +118,8 @@ const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   showArrivalNote: true,
   boldAppointmentSlipText: false,
   showQrCode: true,
+  qrModalityMode: "all",
+  qrModalityIds: [],
   qrCaptionAr: "امسح للاطلاع على تفاصيل الموعد",
   qrCaptionEn: "Scan for appointment details",
   qrHelperTextAr: "استخدم الرمز لعرض تعليمات الفحص والموقع وخدمات الموعد.",
@@ -168,6 +173,12 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
   const paperMode = asString(record.paperMode, DEFAULT_SETTINGS.paperMode);
   const languageMode = asString(record.languageMode, DEFAULT_SETTINGS.languageMode);
   const barcodeValueMode = asString(record.barcodeValueMode, DEFAULT_SETTINGS.barcodeValueMode);
+  const qrModalityMode = asString(record.qrModalityMode, DEFAULT_SETTINGS.qrModalityMode);
+  const qrModalityIds = Array.isArray(record.qrModalityIds)
+    ? record.qrModalityIds
+        .map((value) => Number(value))
+        .filter((value, index, list) => Number.isFinite(value) && value > 0 && list.indexOf(value) === index)
+    : [];
 
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
@@ -216,6 +227,8 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
     showArrivalNote: asBoolean(record.showArrivalNote, DEFAULT_SETTINGS.showArrivalNote),
     boldAppointmentSlipText: asBoolean(record.boldAppointmentSlipText, DEFAULT_SETTINGS.boldAppointmentSlipText),
     showQrCode: asBoolean(record.showQrCode, DEFAULT_SETTINGS.showQrCode),
+    qrModalityMode: qrModalityMode === "include" || qrModalityMode === "exclude" ? qrModalityMode : "all",
+    qrModalityIds,
     qrCaptionAr: asString(record.qrCaptionAr, DEFAULT_SETTINGS.qrCaptionAr),
     qrCaptionEn: asString(record.qrCaptionEn, DEFAULT_SETTINGS.qrCaptionEn),
     qrHelperTextAr: asString(record.qrHelperTextAr, DEFAULT_SETTINGS.qrHelperTextAr),

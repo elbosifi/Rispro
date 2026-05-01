@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "
 import { ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
-import { fetchPatientQrSettings, savePatientQrSettings, type PatientQrSettings } from "@/lib/api-hooks";
+import { fetchModalitiesSettings, fetchPatientQrSettings, savePatientQrSettings, type PatientQrSettings } from "@/lib/api-hooks";
 
 interface PatientQrSettingsSectionProps {
   onReAuthRequired: (key: string[]) => void;
@@ -22,7 +22,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  reportAccessModalityMode: "all",
+  reportAccessModalityIds: [],
   allowImageAccess: false,
+  imageAccessModalityMode: "all",
+  imageAccessModalityIds: [],
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
   imageAccessRequiresCompletedAppointment: true,
@@ -91,6 +95,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
 function cloneSettings(settings: PatientQrSettings): PatientQrSettings {
   return {
     ...settings,
+    reportAccessModalityIds: [...(settings.reportAccessModalityIds ?? [])],
+    imageAccessModalityIds: [...(settings.imageAccessModalityIds ?? [])],
     documentsChecklistAr: [...settings.documentsChecklistAr],
     documentsChecklistEn: [...settings.documentsChecklistEn],
     contact: { ...settings.contact },
@@ -125,6 +131,10 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
   const { data, isLoading, error } = useQuery({
     queryKey: ["patient-qr-settings"],
     queryFn: fetchPatientQrSettings,
+  });
+  const { data: modalitiesData } = useQuery({
+    queryKey: ["modalities-settings", "active"],
+    queryFn: () => fetchModalitiesSettings(false),
   });
   const [draft, setDraft] = useState<PatientQrSettings>(DEFAULT_SETTINGS);
   const [newChecklistItemAr, setNewChecklistItemAr] = useState("");
@@ -166,6 +176,18 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     if (draft.documentsChecklistEn.some((item) => !item.trim())) nextErrors.checklistEn = "All checklist items must be non-empty.";
     return { ok: Object.keys(nextErrors).length === 0, nextErrors };
   }, [draft]);
+
+  const activeModalities = useMemo(() => {
+    const rows = (modalitiesData?.modalities ?? []) as Array<Record<string, unknown>>;
+    return rows
+      .map((row) => ({
+        id: Number(row.id ?? 0),
+        nameAr: String(row.nameAr ?? row.name_ar ?? ""),
+        nameEn: String(row.nameEn ?? row.name_en ?? ""),
+        code: String(row.code ?? ""),
+      }))
+      .filter((row) => Number.isFinite(row.id) && row.id > 0);
+  }, [modalitiesData]);
 
   const updateChecklistItemAr = (index: number, value: string) => {
     setDraft((current) => {
@@ -279,6 +301,8 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
         parkingNoteAr: draft.location.parkingNoteAr.trim(),
         parkingNoteEn: draft.location.parkingNoteEn.trim(),
       },
+      reportAccessModalityIds: Array.from(new Set((draft.reportAccessModalityIds ?? []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))),
+      imageAccessModalityIds: Array.from(new Set((draft.imageAccessModalityIds ?? []).map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))),
     });
   };
 
@@ -392,7 +416,57 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       <div className="grid gap-4 lg:grid-cols-2">
         <FieldCard title={chooseLocalized(language, "التقارير في صفحة QR", "Patient QR Report Access")}>
           <ToggleRow label={chooseLocalized(language, "تفعيل الوصول للتقرير من صفحة QR", "Enable report access from patient QR page")} checked={draft.allowReportAccess} onChange={(checked) => setDraft((current) => ({ ...current, allowReportAccess: checked }))} />
+          <SelectField
+            label={chooseLocalized(language, "نطاق الأجهزة للتقارير", "Report modality scope")}
+            value={draft.reportAccessModalityMode}
+            onChange={(value) => setDraft((current) => ({ ...current, reportAccessModalityMode: value as PatientQrSettings["reportAccessModalityMode"] }))}
+            options={[
+              { value: "all", label: chooseLocalized(language, "كل الأجهزة", "All modalities") },
+              { value: "include", label: chooseLocalized(language, "الأجهزة المحددة فقط", "Only selected modalities") },
+              { value: "exclude", label: chooseLocalized(language, "استثناء الأجهزة المحددة", "All except selected modalities") },
+            ]}
+          />
+          {draft.reportAccessModalityMode !== "all" ? (
+            <ModalityChecklist
+              modalities={activeModalities}
+              selected={draft.reportAccessModalityIds}
+              language={language}
+              onToggle={(id, checked) =>
+                setDraft((current) => ({
+                  ...current,
+                  reportAccessModalityIds: checked
+                    ? Array.from(new Set([...current.reportAccessModalityIds, id]))
+                    : current.reportAccessModalityIds.filter((item) => item !== id),
+                }))
+              }
+            />
+          ) : null}
           <ToggleRow label="Enable image access from patient QR page" checked={draft.allowImageAccess} onChange={(checked) => setDraft((current) => ({ ...current, allowImageAccess: checked }))} />
+          <SelectField
+            label={chooseLocalized(language, "نطاق الأجهزة للصور", "Image modality scope")}
+            value={draft.imageAccessModalityMode}
+            onChange={(value) => setDraft((current) => ({ ...current, imageAccessModalityMode: value as PatientQrSettings["imageAccessModalityMode"] }))}
+            options={[
+              { value: "all", label: chooseLocalized(language, "كل الأجهزة", "All modalities") },
+              { value: "include", label: chooseLocalized(language, "الأجهزة المحددة فقط", "Only selected modalities") },
+              { value: "exclude", label: chooseLocalized(language, "استثناء الأجهزة المحددة", "All except selected modalities") },
+            ]}
+          />
+          {draft.imageAccessModalityMode !== "all" ? (
+            <ModalityChecklist
+              modalities={activeModalities}
+              selected={draft.imageAccessModalityIds}
+              language={language}
+              onToggle={(id, checked) =>
+                setDraft((current) => ({
+                  ...current,
+                  imageAccessModalityIds: checked
+                    ? Array.from(new Set([...current.imageAccessModalityIds, id]))
+                    : current.imageAccessModalityIds.filter((item) => item !== id),
+                }))
+              }
+            />
+          ) : null}
           <ToggleRow label={chooseLocalized(language, "اشتراط اكتمال الموعد قبل الوصول للتقرير", "Require completed appointment before report access")} checked={draft.reportAccessRequiresCompletedAppointment} onChange={(checked) => setDraft((current) => ({ ...current, reportAccessRequiresCompletedAppointment: checked }))} />
           <ToggleRow label="Require completed appointment before image access" checked={draft.imageAccessRequiresCompletedAppointment} onChange={(checked) => setDraft((current) => ({ ...current, imageAccessRequiresCompletedAppointment: checked }))} />
           <ToggleRow label="Require Report required flag before image access" checked={draft.imageAccessRequiresReportRequiredFlag} onChange={(checked) => setDraft((current) => ({ ...current, imageAccessRequiresReportRequiredFlag: checked }))} />
@@ -629,6 +703,59 @@ function Input(props: { label: string; value: string; onChange: (value: string) 
         className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
       />
       {props.error ? <p className="mt-1 text-sm text-rose-700">{props.error}</p> : null}
+    </div>
+  );
+}
+
+function SelectField(props: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
+  const id = useId();
+  return (
+    <div>
+      <label htmlFor={id} className="block text-sm font-semibold text-slate-700">
+        {props.label}
+      </label>
+      <select
+        id={id}
+        value={props.value}
+        onChange={(e) => props.onChange(e.target.value)}
+        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+      >
+        {props.options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function ModalityChecklist(props: {
+  modalities: Array<{ id: number; nameAr: string; nameEn: string; code: string }>;
+  selected: number[];
+  language: string;
+  onToggle: (id: number, checked: boolean) => void;
+}) {
+  return (
+    <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+      {props.modalities.map((modality) => {
+        const checked = props.selected.includes(modality.id);
+        const label =
+          props.language === "en"
+            ? modality.nameEn || modality.nameAr || modality.code || `#${modality.id}`
+            : modality.nameAr || modality.nameEn || modality.code || `#${modality.id}`;
+        return (
+          <label key={modality.id} className="flex items-center gap-2 text-sm text-slate-700">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(event) => props.onToggle(modality.id, event.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-teal-600"
+            />
+            <span>{label}</span>
+          </label>
+        );
+      })}
     </div>
   );
 }

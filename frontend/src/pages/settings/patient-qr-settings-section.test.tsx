@@ -4,10 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api-client";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
-import { fetchPatientQrSettings, savePatientQrSettings } from "@/lib/api-hooks";
+import { fetchModalitiesSettings, fetchPatientQrSettings, savePatientQrSettings } from "@/lib/api-hooks";
 import { LanguageProvider } from "@/providers/language-provider";
 
 vi.mock("@/lib/api-hooks", () => ({
+  fetchModalitiesSettings: vi.fn(),
   fetchPatientQrSettings: vi.fn(),
   savePatientQrSettings: vi.fn(),
 }));
@@ -24,7 +25,11 @@ const baseSettings = {
   showDepartmentContact: true,
   showLocationDirections: true,
   allowReportAccess: false,
+  reportAccessModalityMode: "all",
+  reportAccessModalityIds: [],
   allowImageAccess: false,
+  imageAccessModalityMode: "all",
+  imageAccessModalityIds: [],
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
   imageAccessRequiresCompletedAppointment: true,
@@ -100,6 +105,12 @@ function renderComponent() {
 describe("PatientQrSettingsSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(fetchModalitiesSettings).mockResolvedValue({
+      modalities: [
+        { id: 2, nameAr: "Ø±Ù†ÙŠÙ†", nameEn: "MRI", code: "MR" },
+        { id: 3, nameAr: "Ø£Ø´Ø¹Ø© Ù…Ù‚Ø·Ø¹ÙŠØ©", nameEn: "CT", code: "CT" },
+      ],
+    });
     vi.mocked(fetchPatientQrSettings).mockResolvedValue(baseSettings);
     vi.mocked(savePatientQrSettings).mockResolvedValue({});
   });
@@ -207,5 +218,29 @@ describe("PatientQrSettingsSection", () => {
     await waitFor(() => {
       expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "patient_qr_self_service"]);
     });
+  });
+
+  it("saves report/image modality scope selections", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByText("Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª ØµÙØ­Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ ÙˆØ±Ù…Ø² QR");
+
+    await user.selectOptions(screen.getByLabelText(/Report modality scope|نطاق الأجهزة للتقارير/i), "include");
+    await user.click(screen.getByRole("checkbox", { name: "MRI" }));
+
+    await user.selectOptions(screen.getByLabelText(/Image modality scope|نطاق الأجهزة للصور/i), "exclude");
+    await user.click(screen.getByRole("checkbox", { name: "CT" }));
+
+    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+
+    await waitFor(() => {
+      expect(savePatientQrSettings).toHaveBeenCalled();
+    });
+    const payload = vi.mocked(savePatientQrSettings).mock.calls[0][0];
+    expect(payload.reportAccessModalityMode).toBe("include");
+    expect(payload.reportAccessModalityIds).toEqual([2]);
+    expect(payload.imageAccessModalityMode).toBe("exclude");
+    expect(payload.imageAccessModalityIds).toEqual([3]);
   });
 });

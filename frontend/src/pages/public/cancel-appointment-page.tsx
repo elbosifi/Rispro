@@ -49,7 +49,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  reportAccessModalityMode: "all",
+  reportAccessModalityIds: [],
   allowImageAccess: false,
+  imageAccessModalityMode: "all",
+  imageAccessModalityIds: [],
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
   imageAccessRequiresCompletedAppointment: true,
@@ -192,6 +196,24 @@ function isValidUrl(value: string): boolean {
 
 function isCancellableStatus(status: string): boolean {
   return ["scheduled", "arrived", "waiting"].includes(status);
+}
+
+function isModalityAllowed(
+  mode: "all" | "include" | "exclude",
+  modalityIds: number[],
+  modalityId: number | undefined
+): boolean {
+  if (mode === "all") return true;
+  const id = Number(modalityId);
+  if (!Number.isFinite(id) || id <= 0) return mode === "exclude";
+  const selected = new Set(
+    (modalityIds ?? [])
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item) && item > 0)
+  );
+  if (mode === "include") return selected.has(id);
+  if (mode === "exclude") return !selected.has(id);
+  return true;
 }
 
 function toneClasses(tone: "neutral" | "success" | "warning" | "danger" | "info") {
@@ -499,10 +521,16 @@ function ReportCard(props: {
     },
   });
 
-  const reportEnabled = props.settings.allowReportAccess;
+  const reportModalityAllowed =
+    props.preview.reportFeature?.reportAccessAllowedForModality ??
+    isModalityAllowed(props.settings.reportAccessModalityMode, props.settings.reportAccessModalityIds, props.preview.modalityId);
+  const imageModalityAllowed =
+    props.preview.reportFeature?.imageAccessAllowedForModality ??
+    isModalityAllowed(props.settings.imageAccessModalityMode, props.settings.imageAccessModalityIds, props.preview.modalityId);
+  const reportEnabled = props.settings.allowReportAccess && reportModalityAllowed;
   const reportRequired = Boolean(props.preview.requiresReport);
   const reportVisible = reportEnabled && reportRequired;
-  const imageEnabled = props.settings.allowImageAccess;
+  const imageEnabled = props.settings.allowImageAccess && imageModalityAllowed;
   const imageCompletionOk = !props.settings.imageAccessRequiresCompletedAppointment || props.preview.currentStatus === "completed";
   const imageReportGateOk = !props.settings.imageAccessRequiresReportRequiredFlag || reportRequired;
   const canOpenImages = imageEnabled && imageCompletionOk && imageReportGateOk;

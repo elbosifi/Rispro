@@ -42,3 +42,13 @@ test("normalizeAppointmentSlipSettings defaults new slip flags to false", () => 
   assert.equal(normalized.showPatientCategory, false);
   assert.equal(normalized.boldAppointmentSlipText, false);
 });
+
+test("normalizeAppointmentSlipSettings normalizes qr modality scope safely", () => {
+  const normalized = normalizeAppointmentSlipSettings({
+    qrModalityMode: "not-valid",
+    qrModalityIds: [2, "3", null, "x", 2, -1],
+  });
+
+  assert.equal(normalized.qrModalityMode, "all");
+  assert.deepEqual(normalized.qrModalityIds, [2, 3]);
+});

@@ -39,7 +39,11 @@ export interface PatientQrSettings {
   showDepartmentContact: boolean;
   showLocationDirections: boolean;
   allowReportAccess: boolean;
+  reportAccessModalityMode: "all" | "include" | "exclude";
+  reportAccessModalityIds: number[];
   allowImageAccess: boolean;
+  imageAccessModalityMode: "all" | "include" | "exclude";
+  imageAccessModalityIds: number[];
   showReportPendingCard: boolean;
   reportAccessRequiresCompletedAppointment: boolean;
   imageAccessRequiresCompletedAppointment: boolean;
@@ -84,7 +88,11 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   showDepartmentContact: false,
   showLocationDirections: false,
   allowReportAccess: false,
+  reportAccessModalityMode: "all",
+  reportAccessModalityIds: [],
   allowImageAccess: false,
+  imageAccessModalityMode: "all",
+  imageAccessModalityIds: [],
   showReportPendingCard: true,
   reportAccessRequiresCompletedAppointment: true,
   imageAccessRequiresCompletedAppointment: true,
@@ -185,6 +193,34 @@ function asStringArray(value: unknown, fallback: string[]): string[] {
   return [...fallback];
 }
 
+function asMode(value: unknown, fallback: "all" | "include" | "exclude"): "all" | "include" | "exclude" {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "include" || raw === "exclude") return raw;
+  if (raw === "all") return "all";
+  return fallback;
+}
+
+function asNumberArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => Number(item))
+    .filter((item, index, arr) => Number.isFinite(item) && item > 0 && arr.indexOf(item) === index);
+}
+
+export function isModalityAllowed(
+  mode: "all" | "include" | "exclude",
+  modalityIds: number[],
+  modalityId: number | null | undefined
+): boolean {
+  if (mode === "all") return true;
+  const id = Number(modalityId);
+  if (!Number.isFinite(id) || id <= 0) return mode === "exclude";
+  const selected = new Set(asNumberArray(modalityIds));
+  if (mode === "include") return selected.has(id);
+  if (mode === "exclude") return !selected.has(id);
+  return true;
+}
+
 export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
   const record = (raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}) as Record<string, unknown>;
   const contactRaw = (record.contact && typeof record.contact === "object" && !Array.isArray(record.contact) ? (record.contact as Record<string, unknown>) : {}) as Record<string, unknown>;
@@ -202,7 +238,11 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     showDepartmentContact: asBoolean(record.showDepartmentContact, DEFAULT_SETTINGS.showDepartmentContact),
     showLocationDirections: asBoolean(record.showLocationDirections, DEFAULT_SETTINGS.showLocationDirections),
     allowReportAccess: asBoolean(record.allowReportAccess, DEFAULT_SETTINGS.allowReportAccess),
+    reportAccessModalityMode: asMode(record.reportAccessModalityMode, DEFAULT_SETTINGS.reportAccessModalityMode),
+    reportAccessModalityIds: asNumberArray(record.reportAccessModalityIds),
     allowImageAccess: asBoolean(record.allowImageAccess, DEFAULT_SETTINGS.allowImageAccess),
+    imageAccessModalityMode: asMode(record.imageAccessModalityMode, DEFAULT_SETTINGS.imageAccessModalityMode),
+    imageAccessModalityIds: asNumberArray(record.imageAccessModalityIds),
     showReportPendingCard: asBoolean(record.showReportPendingCard, DEFAULT_SETTINGS.showReportPendingCard),
     reportAccessRequiresCompletedAppointment: asBoolean(record.reportAccessRequiresCompletedAppointment, DEFAULT_SETTINGS.reportAccessRequiresCompletedAppointment),
     imageAccessRequiresCompletedAppointment: asBoolean(record.imageAccessRequiresCompletedAppointment, DEFAULT_SETTINGS.imageAccessRequiresCompletedAppointment),

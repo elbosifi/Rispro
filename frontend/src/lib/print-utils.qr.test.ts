@@ -129,7 +129,11 @@ function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): Pati
     showDepartmentContact: false,
     showLocationDirections: false,
     allowReportAccess: false,
+    reportAccessModalityMode: "all",
+    reportAccessModalityIds: [],
     allowImageAccess: false,
+    imageAccessModalityMode: "all",
+    imageAccessModalityIds: [],
     showReportPendingCard: true,
     reportAccessRequiresCompletedAppointment: true,
     imageAccessRequiresCompletedAppointment: true,
@@ -274,6 +278,46 @@ describe("appointment slip QR and layout behavior", () => {
 
     expect(html).not.toContain("<aside class=\"qr-block\"");
     expect(layout.qrBlock).toBeNull();
+  });
+
+  it("keeps current QR behavior in all modality mode", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ modalityId: 2 }), {
+      slipSettings: makeSlipSettings({ qrModalityMode: "all", qrModalityIds: [999] }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    expect(slip.queueQrPayload).toContain("/public/appointment?t=");
+  });
+
+  it("shows QR for included modality", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ modalityId: 2 }), {
+      slipSettings: makeSlipSettings({ qrModalityMode: "include", qrModalityIds: [2] }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    expect(slip.queueQrPayload).toContain("/public/appointment?t=");
+  });
+
+  it("hides QR for unselected include modality", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ modalityId: 3 }), {
+      slipSettings: makeSlipSettings({ qrModalityMode: "include", qrModalityIds: [2] }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    expect(slip.queueQrPayload).toBe("");
+  });
+
+  it("hides QR for excluded modality", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ modalityId: 2 }), {
+      slipSettings: makeSlipSettings({ qrModalityMode: "exclude", qrModalityIds: [2] }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    expect(slip.queueQrPayload).toBe("");
+  });
+
+  it("shows QR for non-excluded modality", () => {
+    const slip = buildAppointmentSlipData(makeAppointment({ modalityId: 3 }), {
+      slipSettings: makeSlipSettings({ qrModalityMode: "exclude", qrModalityIds: [2] }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+    expect(slip.queueQrPayload).toContain("/public/appointment?t=");
   });
 
   it("respects showAccessionBarcode", async () => {
