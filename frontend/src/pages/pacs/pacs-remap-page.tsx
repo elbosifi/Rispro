@@ -109,7 +109,12 @@ async function uploadMultipartWithProgress(
         try { return JSON.parse(raw) as Record<string, unknown>; } catch { return {}; }
       })();
       if (xhr.status >= 200 && xhr.status < 300) {
-        resolve(body as UploadMultipartResult);
+        const job = (body as { job?: unknown }).job;
+        if (!job || typeof job !== "object") {
+          reject(new ApiError("Upload response is missing job details.", xhr.status, body));
+          return;
+        }
+        resolve(body as unknown as UploadMultipartResult);
         return;
       }
       const message = (body?.error as { message?: string } | undefined)?.message || (body?.message as string | undefined) || xhr.statusText || "Upload failed.";
