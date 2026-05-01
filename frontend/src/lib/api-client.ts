@@ -46,15 +46,18 @@ export async function api<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const isFormDataBody = typeof FormData !== "undefined" && options.body instanceof FormData;
 
   try {
     const response = await fetch(`/api${path}`, {
       ...options,
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers
-      },
+      headers: isFormDataBody
+        ? options.headers
+        : {
+          "Content-Type": "application/json",
+          ...options.headers
+        },
       signal: controller.signal
     });
 

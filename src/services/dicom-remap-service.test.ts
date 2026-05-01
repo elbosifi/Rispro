@@ -1,10 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   __dicomRemapTestables,
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
   confirmDicomRemapAndSend,
+  createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
@@ -98,6 +102,23 @@ function stableStudyResponses(overrides: { isStable?: boolean; lastUpdate?: stri
       json: { Version: "1.12.11", DatabaseServerIdentifier: "dbid" },
     }),
   ];
+}
+
+async function makeStagedFiles(files: Array<{ fileName: string; content?: string; mimeType?: string }>) {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-test-"));
+  const staged = [];
+  for (const [index, file] of files.entries()) {
+    const stagedPath = path.join(tempDir, `${index}.dcm`);
+    const content = Buffer.from(file.content ?? "dicom");
+    await writeFile(stagedPath, content);
+    staged.push({
+      fileName: file.fileName,
+      mimeType: file.mimeType || "application/dicom",
+      path: stagedPath,
+      size: content.length,
+    });
+  }
+  return { tempDir, staged };
 }
 
 test.afterEach(() => {
@@ -960,6 +981,177 @@ test("createDicomRemapUploadJob skips DICOMDIR folder index files", async () => 
   assert.equal(result.job.source_orthanc_study_id, "study-id");
   assert.equal(orthancCalls.filter((call) => call.path === "/instances").length, 1);
   assert.equal(auditEvents.length, 1);
+});
+
+test("createDicomRemapMultipartUploadJob skips sidecars and uploads accepted files without Base64", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "AUTORUN.INF", mimeType: "application/octet-stream" },
+    { fileName: "DICOMDIR", mimeType: "application/octet-stream" },
+    { fileName: "viewer.exe", mimeType: "application/octet-stream" },
+    { fileName: "image-1.dcm", mimeType: "application/dicom" },
+    { fileName: "image-2.dcm", mimeType: "application/dicom" },
+  ]);
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
+  ]);
+  const calls = queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "study-id" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i2", ParentStudy: "study-id" } }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: {},
+        PatientMainDicomTags: {
+          PatientID: "P1",
+          PatientName: "Original^Patient",
+          PatientSex: "M",
+          PatientBirthDate: "19900101",
+        },
+      },
+    }),
+  ]);
+
+  const result = await createDicomRemapMultipartUploadJob({
+    currentUserId: 42,
+    files: staged,
+    tempDir,
+  });
+
+  assert.equal(result.job.source_orthanc_study_id, "study-id");
+  assert.equal(result.skippedFilesCount, 3);
+  assert.equal(calls.filter((call) => call.path === "/instances").length, 2);
+  assert.equal(auditEvents.length, 1);
+});
+
+test("createDicomRemapMultipartUploadJob rejects multiple parent studies clearly", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "image-1.dcm" },
+    { fileName: "image-2.dcm" },
+  ]);
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "study-a" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i2", ParentStudy: "study-b" } }),
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapMultipartUploadJob({
+      currentUserId: 42,
+      files: staged,
+      tempDir,
+    }),
+    /detected 2 studies/i
+  );
+});
+
+test("createDicomRemapMultipartUploadJob handles 1000+ instances for one study", async () => {
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  const fileCount = 1001;
+  const { tempDir, staged } = await makeStagedFiles(
+    Array.from({ length: fileCount }, (_, index) => ({ fileName: `image-${index}.dcm` }))
+  );
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
+  ]);
+  const orthancResponses = Array.from({ length: fileCount }, (_, index) => (
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: `i${index}`, ParentStudy: "study-id" } })
+  ));
+  orthancResponses.push(orthancResult({
+    status: 200,
+    ok: true,
+    text: "{}",
+    json: {
+      MainDicomTags: {},
+      PatientMainDicomTags: {
+        PatientID: "P1",
+        PatientName: "Original^Patient",
+        PatientSex: "M",
+        PatientBirthDate: "19900101",
+      },
+    },
+  }));
+  const calls = queueOrthancResults(orthancResponses);
+
+  const result = await createDicomRemapMultipartUploadJob({
+    currentUserId: 42,
+    files: staged,
+    tempDir,
+  });
+
+  assert.equal(result.job.source_orthanc_study_id, "study-id");
+  assert.equal(calls.filter((call) => call.path === "/instances").length, fileCount);
+});
+
+test("prepareDicomRemapConfirmation marks missing source study as stale", async () => {
+  queueQueryResults([
+    { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "stale-study" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({ status: 404, ok: false, text: "missing", json: { Error: "missing" } }),
+  ]);
+
+  const { prepareDicomRemapConfirmation } = await import("./dicom-remap-service.js");
+  await assert.rejects(
+    () => prepareDicomRemapConfirmation({
+      jobId: 1,
+      currentUserId: 42,
+      risproPatientId: 1,
+      destinationPacsKey: "1",
+    }),
+    /Source study no longer exists in Orthanc/
+  );
+});
+
+test("createDicomRemapUploadJob marks stale active job failed and creates a fresh upload", async () => {
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([
+    { rows: [remapJob({ id: 9, status: "uploaded", source_orthanc_study_id: "stale-study" })] },
+    { rows: [] },
+    { rows: [remapJob({ id: 10, status: "uploaded", source_orthanc_study_id: null })] },
+    { rows: [remapJob({ id: 10, status: "uploaded", source_orthanc_study_id: "fresh-study" })] },
+  ]);
+  queueOrthancResults([
+    orthancResult({ status: 404, ok: false, text: "missing", json: { Error: "missing" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "fresh-study" } }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: {},
+        PatientMainDicomTags: {
+          PatientID: "P1",
+          PatientName: "Original^Patient",
+          PatientSex: "M",
+          PatientBirthDate: "19900101",
+        },
+      },
+    }),
+  ]);
+
+  const result = await createDicomRemapUploadJob({
+    currentUserId: 42,
+    files: [{ fileName: "fresh.dcm", mimeType: "application/dicom", fileContentBase64: "AA==" }],
+  });
+
+  assert.equal(result.job.id, 10);
+  assert.equal(result.job.source_orthanc_study_id, "fresh-study");
 });
 
 test("confirmDicomRemapAndSend claim failure returns already-sent job without Orthanc calls", async () => {

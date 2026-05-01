@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "dicom-dimse-native": "^2.6.1",
     "dotenv": "^16.4.7",
@@ -35,6 +36,7 @@
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
+    "@types/busboy": "^1.5.4",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",

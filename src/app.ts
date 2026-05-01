@@ -22,6 +22,7 @@ import { createAppointmentsV2Router } from "./modules/appointments-v2/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
+import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +42,10 @@ function sendFrontendFile(fileName: string, cacheSeconds = 0) {
 
 export function createApp(): Application {
   const app = express();
+
+  void cleanupStaleDicomRemapUploadTempDirs().catch((error) => {
+    console.error("Failed to clean stale DICOM remap upload temp directories.", error);
+  });
 
   app.disable("x-powered-by");
   app.set("trust proxy", env.trustProxy);
@@ -66,11 +71,13 @@ export function createApp(): Application {
   const LEGACY_UPLOAD_PATH = "/api/legacy-access-viewer/upload";
   const PATIENT_IMPORT_PREFIX = "/api/settings/patient-import";
   const PACS_REMAP_UPLOAD_PATH = "/api/pacs/remap/jobs/upload";
+  const PACS_REMAP_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/upload-multipart";
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (
       req.path === LEGACY_UPLOAD_PATH ||
       req.path.startsWith(PATIENT_IMPORT_PREFIX) ||
-      req.path === PACS_REMAP_UPLOAD_PATH
+      req.path === PACS_REMAP_UPLOAD_PATH ||
+      req.path === PACS_REMAP_MULTIPART_UPLOAD_PATH
     ) {
       // Let route-specific body parsers handle it.
       return next();

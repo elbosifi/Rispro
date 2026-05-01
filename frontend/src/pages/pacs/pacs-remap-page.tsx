@@ -55,54 +55,8 @@ interface PatientOption {
   mrn?: string | null;
 }
 
-function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const value = String(reader.result || "");
-      resolve(value.includes(",") ? value.split(",").pop() || "" : value);
-    };
-    reader.onerror = () => reject(reader.error || new Error("Failed to read file."));
-    reader.readAsDataURL(file);
-  });
-}
-
 function formatName(patient: PatientOption): string {
   return patient.english_full_name || patient.arabic_full_name || `Patient #${patient.id}`;
-}
-
-function isLikelyDicomClientFile(file: File): boolean {
-  const name = String(file.name || "").toLowerCase();
-  const type = String(file.type || "").toLowerCase();
-
-  if (
-    type.includes("dicom") ||
-    name.endsWith(".dcm") ||
-    name.endsWith(".dicom") ||
-    name.endsWith(".ima")
-  ) {
-    return true;
-  }
-
-  if (
-    type.startsWith("image/") ||
-    type.startsWith("text/") ||
-    type === "application/pdf" ||
-    name.endsWith(".pdf") ||
-    name.endsWith(".txt") ||
-    name.endsWith(".csv") ||
-    name.endsWith(".json") ||
-    name.endsWith(".jpg") ||
-    name.endsWith(".jpeg") ||
-    name.endsWith(".png") ||
-    name.endsWith(".gif") ||
-    name.endsWith(".webp")
-  ) {
-    return false;
-  }
-
-  // Unknown binary file types are allowed and validated by Orthanc.
-  return true;
 }
 
 function isActiveJobStatus(status: JobStatus): boolean {
@@ -127,15 +81,9 @@ export default function PacsRemapPage() {
 
   const setSelectedFiles = (incoming: FileList | null): void => {
     const all = Array.from(incoming || []);
-    const accepted = all.filter(isLikelyDicomClientFile);
-    const skipped = all.length - accepted.length;
-    setFiles(accepted);
-    setSkippedFilesCount(skipped);
-    if (accepted.length === 0 && all.length > 0) {
-      setErrorMessage(language === "ar" ? "لم يتم العثور على ملفات DICOM في الاختيار." : "No DICOM-like files found in selection.");
-    } else {
-      setErrorMessage("");
-    }
+    setFiles(all);
+    setSkippedFilesCount(0);
+    setErrorMessage("");
   };
 
   const destinationsQuery = useQuery({
@@ -171,21 +119,19 @@ export default function PacsRemapPage() {
       if (files.length === 0) {
         throw new Error(language === "ar" ? "يرجى اختيار ملف DICOM واحد على الأقل." : "Please choose at least one DICOM file.");
       }
-      const payloadFiles = await Promise.all(
-        files.map(async (file) => ({
-          fileName: file.name,
-          mimeType: file.type || "application/dicom",
-          fileContentBase64: await fileToBase64(file),
-        }))
-      );
+      const formData = new FormData();
+      for (const file of files) {
+        formData.append("files", file, file.name);
+      }
 
-      return api<{ job: RemapJob }>("/pacs/remap/jobs/upload", {
+      return api<{ job: RemapJob; skippedFilesCount?: number }>("/pacs/remap/jobs/upload-multipart", {
         method: "POST",
-        body: JSON.stringify({ files: payloadFiles }),
+        body: formData,
       }, 600_000);
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
+      setSkippedFilesCount(data.skippedFilesCount || 0);
       setErrorMessage("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },

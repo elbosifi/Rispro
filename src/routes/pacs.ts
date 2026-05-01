@@ -1,4 +1,10 @@
 import express, { Request, Response } from "express";
+import Busboy from "busboy";
+import { randomUUID } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { requireAuth, requireSupervisor, requireRecentSupervisorReauth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
@@ -14,8 +20,11 @@ import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.
 import {
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
+  cleanupDicomRemapUploadTempDir,
   confirmDicomRemapAndSend,
+  createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
+  type DicomRemapStagedUploadFile,
   getDicomRemapJob,
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
@@ -29,6 +38,98 @@ const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSuper
 const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
+
+async function stageDicomRemapMultipartFiles(req: Request): Promise<{ files: DicomRemapStagedUploadFile[]; tempDir: string }> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-"));
+  const files: DicomRemapStagedUploadFile[] = [];
+  const writes: Promise<void>[] = [];
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let uploadFinished = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      void cleanupDicomRemapUploadTempDir(tempDir).finally(() => {
+        reject(error);
+      });
+    };
+
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: {
+        files: 5000,
+      },
+    });
+
+    const interruptUpload = () => {
+      if (settled || uploadFinished) return;
+      const error = new HttpError(400, "DICOM remap upload was interrupted. Please start a new upload.");
+      req.unpipe(busboy);
+      busboy.destroy(error);
+      fail(error);
+    };
+
+    req.on("aborted", interruptUpload);
+    req.on("close", () => {
+      const requestComplete = Boolean((req as Request & { complete?: boolean }).complete);
+      if (!requestComplete && !uploadFinished) {
+        interruptUpload();
+      }
+    });
+
+    busboy.on("file", (fieldName, file, info) => {
+      if (fieldName !== "files") {
+        file.resume();
+        return;
+      }
+
+      const fileName = path.basename(String(info.filename || "dicom.dcm"));
+      const stagedPath = path.join(tempDir, `${files.length}-${randomUUID()}.dcm`);
+      const writeStream = createWriteStream(stagedPath);
+      let size = 0;
+
+      file.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+      });
+      file.on("error", fail);
+      writeStream.on("error", fail);
+      file.pipe(writeStream);
+
+      writes.push(new Promise<void>((resolveWrite, rejectWrite) => {
+        writeStream.on("finish", () => {
+          files.push({
+            fileName,
+            mimeType: info.mimeType,
+            path: stagedPath,
+            size,
+          });
+          resolveWrite();
+        });
+        writeStream.on("error", rejectWrite);
+      }));
+    });
+
+    busboy.on("error", fail);
+    busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM upload.")));
+    busboy.on("finish", () => {
+      uploadFinished = true;
+      Promise.all(writes)
+        .then(() => {
+          if (settled) return;
+          settled = true;
+          resolve({ files, tempDir });
+        })
+        .catch(fail);
+    });
+
+    req.pipe(busboy);
+  });
+}
+
+export const __pacsRouteTestables = {
+  stageDicomRemapMultipartFiles,
+};
 
 // ---------------------------------------------------------------------------
 // PACS Node CRUD (supervisor only)
@@ -218,6 +319,24 @@ pacsRouter.post(
 // ---------------------------------------------------------------------------
 // Internal DICOM remap/send tool (authenticated users, backend-orchestrated)
 // ---------------------------------------------------------------------------
+
+pacsRouter.post(
+  "/remap/jobs/upload-multipart",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const staged = await stageDicomRemapMultipartFiles(req);
+
+    const result = await createDicomRemapMultipartUploadJob({
+      files: staged.files,
+      tempDir: staged.tempDir,
+      currentUserId,
+    });
+
+    res.status(201).json(result);
+  })
+);
 
 pacsRouter.post(
   "/remap/jobs/upload",
