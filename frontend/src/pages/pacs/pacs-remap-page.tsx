@@ -58,6 +58,22 @@ interface PatientOption {
   mrn?: string | null;
 }
 
+interface TodayStudyOption {
+  id: number;
+  patient_id: number;
+  accession_number: string;
+  appointment_date: string;
+  modality_id: number;
+  modality_name_en?: string | null;
+  modality_name_ar?: string | null;
+  exam_name_en?: string | null;
+  exam_name_ar?: string | null;
+  arabic_full_name?: string | null;
+  english_full_name?: string | null;
+  national_id?: string | null;
+  mrn?: string | null;
+}
+
 function formatBytes(bytes: number): string {
   const value = Number(bytes || 0);
   if (value < 1024) return `${value} B`;
@@ -68,6 +84,14 @@ function formatBytes(bytes: number): string {
 
 function formatName(patient: PatientOption): string {
   return patient.english_full_name || patient.arabic_full_name || `Patient #${patient.id}`;
+}
+
+function todayIsoDate(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function isActiveJobStatus(status: JobStatus): boolean {
@@ -85,6 +109,8 @@ export default function PacsRemapPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
   const [patientSearch, setPatientSearch] = useState("");
+  const [todayPatientSearch, setTodayPatientSearch] = useState("");
+  const [todayModalityFilter, setTodayModalityFilter] = useState("");
   const [selectedPatientId, setSelectedPatientId] = useState<string>("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -116,6 +142,25 @@ export default function PacsRemapPage() {
   const destinationsQuery = useQuery({
     queryKey: ["pacs", "remap", "destinations"],
     queryFn: () => api<{ destinations: Destination[] }>("/pacs/remap/destinations"),
+  });
+
+  const modalityLookupQuery = useQuery({
+    queryKey: ["v2", "lookups", "modalities"],
+    queryFn: () => api<{ items: Array<{ id: number; nameEn?: string; nameAr?: string; code?: string }> }>("/v2/lookups/modalities"),
+  });
+
+  const todayStudiesQuery = useQuery({
+    queryKey: ["v2", "appointments", "today-remap", todayModalityFilter, todayPatientSearch],
+    queryFn: () => {
+      const date = todayIsoDate();
+      const params = new URLSearchParams();
+      params.set("dateFrom", date);
+      params.set("dateTo", date);
+      if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
+      if (todayPatientSearch.trim()) params.set("q", todayPatientSearch.trim());
+      return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
+    },
+    retry: 0,
   });
 
   const patientQuery = useQuery({
@@ -160,6 +205,12 @@ export default function PacsRemapPage() {
       if (files.length === 0) {
         throw new Error(language === "ar" ? "يرجى اختيار ملف DICOM واحد على الأقل." : "Please choose at least one DICOM file.");
       }
+      if (!selectedPatientId) {
+        throw new Error(language === "ar" ? "يرجى اختيار المريض قبل الرفع." : "Select a patient before upload.");
+      }
+      if (!selectedDestinationKey) {
+        throw new Error(language === "ar" ? "يرجى اختيار وجهة PACS قبل الرفع." : "Select a PACS destination before upload.");
+      }
 
       const chosenStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
       const hasDetectedStudies = (scanResult?.studies.length || 0) > 0;
@@ -192,10 +243,21 @@ export default function PacsRemapPage() {
         formData.append("uploadMode", "fallback_all_candidates");
       }
 
-      return api<{ job: RemapJob; skippedFilesCount?: number }>("/pacs/remap/jobs/upload-multipart", {
+      const uploadResult = await api<{ job: RemapJob; skippedFilesCount?: number }>("/pacs/remap/jobs/upload-multipart", {
         method: "POST",
         body: formData,
       }, 600_000);
+      const prepared = await api<{ job: RemapJob; comparison: RemapComparison }>(
+        `/pacs/remap/jobs/${uploadResult.job.id}/prepare`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            risproPatientId: selectedPatientId,
+            destinationPacsKey: selectedDestinationKey,
+          }),
+        }
+      );
+      return { ...prepared, skippedFilesCount: uploadResult.skippedFilesCount || 0 };
     },
     onSuccess: (data) => {
       setJobId(data.job.id);
@@ -437,8 +499,66 @@ export default function PacsRemapPage() {
 
       <div className="card-shell p-5 space-y-4">
         <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>
-          {language === "ar" ? "1) رفع الدراسة" : "1) Upload Study"}
+          {language === "ar" ? "1) اختيار الدراسة والمريض والوجهة" : "1) Select Study, Patient, and Destination"}
         </h3>
+        <div className="rounded-lg border p-3 space-y-3">
+          <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>
+            {language === "ar" ? "دراسات اليوم" : "Today studies"}
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            <select
+              value={todayModalityFilter}
+              onChange={(event) => setTodayModalityFilter(event.target.value)}
+              className="input-premium w-full px-3 py-2 text-sm"
+            >
+              <option value="">{language === "ar" ? "كل الموداليتي" : "All modalities"}</option>
+              {(modalityLookupQuery.data?.items || []).map((modality) => (
+                <option key={modality.id} value={modality.id}>
+                  {modality.nameEn || modality.nameAr || modality.code || `Modality #${modality.id}`}
+                </option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={todayPatientSearch}
+              onChange={(event) => setTodayPatientSearch(event.target.value)}
+              placeholder={language === "ar" ? "بحث اختياري بالمريض" : "Optional patient search"}
+              className="input-premium w-full px-3 py-2 text-sm"
+            />
+          </div>
+          {todayStudiesQuery.isLoading && (
+            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
+              {language === "ar" ? "جارٍ تحميل دراسات اليوم..." : "Loading today studies..."}
+            </p>
+          )}
+          {todayStudiesQuery.error && (
+            <p className="text-xs text-red-600">
+              {todayStudiesQuery.error instanceof Error ? todayStudiesQuery.error.message : (language === "ar" ? "تعذر تحميل دراسات اليوم." : "Failed to load today studies.")}
+            </p>
+          )}
+          {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
+            <div className="max-h-56 overflow-y-auto space-y-2">
+              {(todayStudiesQuery.data?.appointments || []).slice(0, 50).map((appointment) => {
+                const displayName = appointment.english_full_name || appointment.arabic_full_name || `Patient #${appointment.patient_id}`;
+                const modalityName = appointment.modality_name_en || appointment.modality_name_ar || `Modality #${appointment.modality_id}`;
+                const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
+                const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
+                return (
+                  <button
+                    key={appointment.id}
+                    type="button"
+                    onClick={() => setSelectedPatientId(String(appointment.patient_id))}
+                    className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                  >
+                    <p><strong>{displayName}</strong></p>
+                    <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
+                    <p>{appointment.accession_number} {appointment.national_id ? `• ${appointment.national_id}` : ""}</p>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
         <input
           key={`files-${fileInputVersion}`}
           type="file"
@@ -557,6 +677,42 @@ export default function PacsRemapPage() {
               : "Unparsed files are not uploaded by default."}
           </p>
         )}
+        <input
+          type="text"
+          value={patientSearch}
+          onChange={(event) => setPatientSearch(event.target.value)}
+          className="input-premium w-full px-3 py-2"
+          placeholder={language === "ar" ? "ابحث عن مريض..." : "Search patient..."}
+        />
+        {patientQuery.error && (
+          <p className="text-xs text-red-600">
+            {patientQuery.error instanceof Error
+              ? patientQuery.error.message
+              : (language === "ar" ? "تعذر تحميل نتائج المرضى." : "Failed to load patient search results.")}
+          </p>
+        )}
+        <select
+          value={selectedPatientId}
+          onChange={(event) => setSelectedPatientId(event.target.value)}
+          className="input-premium w-full px-3 py-2"
+        >
+          <option value="">{language === "ar" ? "اختر المريض" : "Select patient"}</option>
+          {patients.map((patient) => (
+            <option key={patient.id} value={patient.id}>
+              {formatName(patient)} {patient.national_id ? `(${patient.national_id})` : ""}
+            </option>
+          ))}
+        </select>
+        <select
+          value={selectedDestinationKey}
+          onChange={(event) => setSelectedDestinationKey(event.target.value)}
+          className="input-premium w-full px-3 py-2"
+        >
+          <option value="">{language === "ar" ? "اختر وجهة PACS" : "Select PACS destination"}</option>
+          {destinations.map((destination) => (
+            <option key={destination.key} value={destination.key}>{destination.name}</option>
+          ))}
+        </select>
         <button
           type="button"
           onClick={() => uploadMutation.mutate()}
@@ -564,6 +720,8 @@ export default function PacsRemapPage() {
             uploadMutation.isPending ||
             scanMutation.isPending ||
             files.length === 0 ||
+            !selectedPatientId ||
+            !selectedDestinationKey ||
             (
               (detectedStudiesCount > 0 && !selectedStudy) ||
               (detectedStudiesCount === 0 && !enableFallbackUpload)
@@ -573,7 +731,7 @@ export default function PacsRemapPage() {
         >
           {uploadMutation.isPending
             ? (language === "ar" ? "جارٍ الرفع..." : "Uploading...")
-            : (language === "ar" ? "رفع الدراسة المختارة" : "Upload selected study")}
+            : (language === "ar" ? "رفع الدراسة المختارة وتحضير التأكيد" : "Upload selected study")}
         </button>
         <button
           type="button"
