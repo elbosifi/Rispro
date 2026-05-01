@@ -100,7 +100,21 @@ export default function PacsRemapPage() {
 
   const patientQuery = useQuery({
     queryKey: ["patients", "remap-search", patientSearch],
-    queryFn: () => api<{ patients: PatientOption[] }>(`/patients?q=${encodeURIComponent(patientSearch)}`),
+    queryFn: async () => {
+      const search = patientSearch.trim();
+      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(search)}`);
+      const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
+      if (primaryPatients) {
+        return { patients: primaryPatients as PatientOption[] };
+      }
+
+      const fallback = await api<Record<string, unknown>>(
+        `/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`
+      );
+      const fallbackRows = Array.isArray(fallback?.rows) ? fallback.rows : [];
+      return { patients: fallbackRows as PatientOption[] };
+    },
+    retry: 0,
   });
 
   const currentJobQuery = useQuery({
@@ -480,6 +494,13 @@ export default function PacsRemapPage() {
             className="input-premium w-full px-3 py-2"
             placeholder={language === "ar" ? "ابحث عن مريض..." : "Search patient..."}
           />
+          {patientQuery.error && (
+            <p className="text-xs text-red-600">
+              {patientQuery.error instanceof Error
+                ? patientQuery.error.message
+                : (language === "ar" ? "تعذر تحميل نتائج المرضى." : "Failed to load patient search results.")}
+            </p>
+          )}
 
           <select
             value={selectedPatientId}
