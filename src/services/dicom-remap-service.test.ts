@@ -553,6 +553,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modifyResponseBody: "Cannot modify study. Authorization: Basic [redacted]",
       modifyResponseShape: "object(keys=Error)",
       modifyPayloadShape: "object(keys=Replace,KeepSource,Force)",
+      stabilityTimedOut: false,
     });
     assert.equal(logged[1]?.[0], "Orthanc bulk modify fallback failed.");
   } finally {
@@ -671,6 +672,41 @@ test("dicom helper: createModifiedStudyCopy retries transient modify 404 while s
   assert.equal(modifiedStudyId, "modified-study-id");
   assert.deepEqual(sleeps, [500]);
   assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 2);
+});
+
+test("dicom helper: createModifiedStudyCopy proceeds after stability timeout when modify succeeds", async () => {
+  const originalConsoleWarn = console.warn;
+  const originalDateNow = Date.now;
+  console.warn = () => {};
+  __dicomRemapTestables.setSleepForTests(async () => {});
+  let studyReads = 0;
+
+  try {
+    const nowValues = [0, 0, 1];
+    Date.now = () => nowValues.shift() ?? 1;
+    const calls = queueOrthancResults([
+      ...stableStudyResponses({ isStable: false, lastUpdate: "first" }),
+      ...stableStudyResponses({ isStable: false, lastUpdate: "after-timeout" }),
+      orthancResult({ status: 200, ok: true, text: JSON.stringify({ ID: "modified-study-id" }), json: { ID: "modified-study-id" } }),
+    ]);
+
+    const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    }, {
+      stabilityTimeoutMs: 0,
+    });
+
+    studyReads = calls.filter((call) => call.path === "/studies/study-id").length;
+    assert.equal(modifiedStudyId, "modified-study-id");
+    assert.equal(studyReads, 2);
+    assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 1);
+  } finally {
+    console.warn = originalConsoleWarn;
+    Date.now = originalDateNow;
+  }
 });
 
 test("dicom helper: createModifiedStudyCopy treats timeout as success when modified study is verifiable", async () => {

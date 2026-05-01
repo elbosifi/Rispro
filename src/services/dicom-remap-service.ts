@@ -1242,6 +1242,12 @@ async function waitForOrthancStudyStable(sourceStudyId: string, timeoutMs = 60_0
   );
 }
 
+function isOrthancStudyStabilityTimeout(error: unknown): boolean {
+  return error instanceof HttpError
+    && error.statusCode === 502
+    && /Timed out waiting for Orthanc study to become stable before DICOM remap modify/i.test(error.message);
+}
+
 function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPatientById>>): OrthancPatientSummary {
   const patientId = String(
     patient.identifier_value ||
@@ -1324,9 +1330,32 @@ async function tryBulkModifiedStudyCopy(
   );
 }
 
-async function createModifiedStudyCopy(sourceStudyId: string, replacement: OrthancPatientSummary): Promise<string> {
+async function createModifiedStudyCopy(
+  sourceStudyId: string,
+  replacement: OrthancPatientSummary,
+  options: { stabilityTimeoutMs?: number } = {},
+): Promise<string> {
   const validatedReplacement = validateOrthancReplacementIdentity(replacement);
-  let preflight = await waitForOrthancStudyStable(sourceStudyId);
+  let preflight: OrthancStudyModifyPreflight;
+  let stabilityTimedOut = false;
+  try {
+    preflight = await waitForOrthancStudyStable(sourceStudyId, options.stabilityTimeoutMs);
+  } catch (error) {
+    if (!isOrthancStudyStabilityTimeout(error)) {
+      throw error;
+    }
+    preflight = await readOrthancStudyBeforeModify(sourceStudyId);
+    stabilityTimedOut = true;
+    console.warn("Orthanc study stability wait timed out; attempting modify anyway.", {
+      sourceStudyId,
+      instanceCount: preflight.instanceCount,
+      isStable: preflight.isStable,
+      lastUpdate: preflight.lastUpdate,
+      seriesCount: preflight.seriesCount,
+      orthancVersion: preflight.orthancVersion,
+      databaseServerIdentifier: preflight.databaseServerIdentifier,
+    });
+  }
   const modifyPayload = {
     Replace: {
       PatientID: validatedReplacement.patientId,
@@ -1394,6 +1423,7 @@ async function createModifiedStudyCopy(sourceStudyId: string, replacement: Ortha
       modifyResponseBody: responseSnippet,
       modifyResponseShape: responseShape,
       modifyPayloadShape: requestPayloadShape,
+      stabilityTimedOut,
     });
 
     if (response.status === 404) {
