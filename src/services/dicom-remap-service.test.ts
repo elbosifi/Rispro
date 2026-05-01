@@ -163,7 +163,43 @@ test("dicom helper: DICOM file checks are strict but predictable", () => {
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.jpg", "image/jpeg"), false);
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("notes.txt", "text/plain"), false);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("DICOMDIR"), true);
+  assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("MEDIAVIE.PRO"), true);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("image.dcm"), false);
+});
+
+test("dicom helper: Orthanc invalid-DICOM upload rejection detection is narrow", () => {
+  assert.equal(__dicomRemapTestables.isOrthancInvalidDicomUploadRejection(
+    orthancResult({
+      status: 400,
+      ok: false,
+      text: "Bad file format",
+      json: { OrthancStatus: 15 },
+    })
+  ), true);
+  assert.equal(__dicomRemapTestables.isOrthancInvalidDicomUploadRejection(
+    orthancResult({
+      status: 400,
+      ok: false,
+      text: "Cannot parse an invalid DICOM file",
+      json: { Message: "Cannot parse an invalid DICOM file" },
+    })
+  ), true);
+  assert.equal(__dicomRemapTestables.isOrthancInvalidDicomUploadRejection(
+    orthancResult({
+      status: 500,
+      ok: false,
+      text: "Bad file format",
+      json: { OrthancStatus: 15 },
+    })
+  ), false);
+  assert.equal(__dicomRemapTestables.isOrthancInvalidDicomUploadRejection(
+    orthancResult({
+      status: 401,
+      ok: false,
+      text: "Unauthorized",
+      json: { HttpError: "Unauthorized" },
+    })
+  ), false);
 });
 
 test("dicom helper: upload failure message includes sanitized Orthanc response", () => {
@@ -1030,6 +1066,136 @@ test("createDicomRemapMultipartUploadJob skips sidecars and uploads accepted fil
   assert.equal(result.skippedFilesCount, 3);
   assert.equal(calls.filter((call) => call.path === "/instances").length, 2);
   assert.equal(auditEvents.length, 1);
+});
+
+test("createDicomRemapMultipartUploadJob skips Orthanc invalid-DICOM rejections when valid instances remain", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "opaque-support-file", mimeType: "application/octet-stream" },
+    { fileName: "image-1.dcm", mimeType: "application/dicom" },
+  ]);
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
+  ]);
+  const calls = queueOrthancResults([
+    orthancResult({
+      status: 400,
+      ok: false,
+      text: "Bad file format",
+      json: { OrthancStatus: 15, Message: "Bad file format" },
+    }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "i1", ParentStudy: "study-id" } }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: {},
+        PatientMainDicomTags: {
+          PatientID: "P1",
+          PatientName: "Original^Patient",
+          PatientSex: "M",
+          PatientBirthDate: "19900101",
+        },
+      },
+    }),
+  ]);
+
+  const result = await createDicomRemapMultipartUploadJob({
+    currentUserId: 42,
+    files: staged,
+    tempDir,
+  });
+
+  assert.equal(result.job.source_orthanc_study_id, "study-id");
+  assert.equal(result.skippedFilesCount, 1);
+  assert.equal(calls.filter((call) => call.path === "/instances").length, 2);
+});
+
+test("createDicomRemapMultipartUploadJob fails when Orthanc accepts zero valid DICOM files", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "opaque-support-file", mimeType: "application/octet-stream" },
+  ]);
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({
+      status: 400,
+      ok: false,
+      text: "Cannot parse an invalid DICOM file",
+      json: { Message: "Cannot parse an invalid DICOM file" },
+    }),
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapMultipartUploadJob({
+      currentUserId: 42,
+      files: staged,
+      tempDir,
+    }),
+    /No uploadable DICOM instance files were found/
+  );
+});
+
+test("createDicomRemapMultipartUploadJob still fails on Orthanc 500 upload errors", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "image-1.dcm", mimeType: "application/dicom" },
+  ]);
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({
+      status: 500,
+      ok: false,
+      text: "Bad file format",
+      json: { OrthancStatus: 15, Message: "Bad file format" },
+    }),
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapMultipartUploadJob({
+      currentUserId: 42,
+      files: staged,
+      tempDir,
+    }),
+    /status=500/
+  );
+});
+
+test("createDicomRemapMultipartUploadJob still fails on Orthanc auth-style upload errors", async () => {
+  const { tempDir, staged } = await makeStagedFiles([
+    { fileName: "image-1.dcm", mimeType: "application/dicom" },
+  ]);
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [] },
+  ]);
+  queueOrthancResults([
+    orthancResult({
+      status: 401,
+      ok: false,
+      text: "Unauthorized",
+      json: { HttpError: "Unauthorized" },
+    }),
+  ]);
+
+  await assert.rejects(
+    () => createDicomRemapMultipartUploadJob({
+      currentUserId: 42,
+      files: staged,
+      tempDir,
+    }),
+    /status=401/
+  );
 });
 
 test("createDicomRemapMultipartUploadJob rejects multiple parent studies clearly", async () => {

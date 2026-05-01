@@ -155,6 +155,7 @@ function isSkippableDicomRemapFolderEntry(fileName: string): boolean {
     ".ico",
     ".pdf",
     ".db",
+    ".pro",
   ].some((extension) => lower.endsWith(extension));
 }
 
@@ -456,15 +457,33 @@ function formatOrthancUploadFailureMessage(fileName: string, fileIndex: number, 
   return `Orthanc rejected "${fileName}" during DICOM upload (file ${fileIndex}, status=${response.status}, body=${body || "empty"}, shape=${shape}).`;
 }
 
+function isOrthancInvalidDicomUploadRejection(response: OrthancFetchResult): boolean {
+  if (response.status !== 400) {
+    return false;
+  }
+
+  if (response.json && typeof response.json === "object") {
+    const record = response.json as Record<string, unknown>;
+    if (Number(record.OrthancStatus) === 15) {
+      return true;
+    }
+  }
+
+  const combinedBody = `${response.text || ""} ${response.json ? JSON.stringify(response.json) : ""}`;
+  return /bad file format|cannot parse an invalid dicom file/i.test(combinedBody);
+}
+
 async function uploadDicomContentToOrthanc({
   body,
   fileName,
   fileIndex,
+  tolerateInvalidDicom = false,
 }: {
   body: Buffer | Readable;
   fileName: string;
   fileIndex: number;
-}): Promise<string> {
+  tolerateInvalidDicom?: boolean;
+}): Promise<string | null> {
   const uploadResponse = await fetchOrthancForRemap("/instances", {
     method: "POST",
     body,
@@ -473,6 +492,10 @@ async function uploadDicomContentToOrthanc({
   });
 
   if (!uploadResponse.ok) {
+    if (tolerateInvalidDicom && isOrthancInvalidDicomUploadRejection(uploadResponse)) {
+      return null;
+    }
+
     const message = formatOrthancUploadFailureMessage(fileName, fileIndex, uploadResponse);
     console.error("Orthanc DICOM remap upload failed.", {
       fileName,
@@ -1523,10 +1546,15 @@ export async function createDicomRemapMultipartUploadJob({
         body: createReadStream(entry.file.path),
         fileName: entry.fileName,
         fileIndex: entry.fileIndex,
+        tolerateInvalidDicom: true,
       })));
 
-      uploadedFileCount += parentStudyIds.length;
       for (const parentStudyId of parentStudyIds) {
+        if (!parentStudyId) {
+          skippedFilesCount += 1;
+          continue;
+        }
+        uploadedFileCount += 1;
         studyIds.add(parentStudyId);
       }
     }
@@ -1965,6 +1993,7 @@ export const __dicomRemapTestables = {
   TERMINAL_JOB_STATUSES,
   isLikelyDicomFile,
   isSkippableDicomRemapFolderEntry,
+  isOrthancInvalidDicomUploadRejection,
   isDicomRemapActiveStatus,
   isDicomRemapTerminalStatus,
   isDicomRemapCancellableStatus,
