@@ -141,6 +141,28 @@ test("dicom helper: DICOM file checks are strict but predictable", () => {
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.bin", "application/octet-stream"), true);
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("image.jpg", "image/jpeg"), false);
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("notes.txt", "text/plain"), false);
+  assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("DICOMDIR"), true);
+  assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("image.dcm"), false);
+});
+
+test("dicom helper: upload failure message includes sanitized Orthanc response", () => {
+  const message = __dicomRemapTestables.formatOrthancUploadFailureMessage(
+    "bad.dcm",
+    7,
+    orthancResult({
+      status: 400,
+      ok: false,
+      text: "Task failed: invalid string length Authorization: Basic secret-token",
+      json: { HttpError: "Bad Request", Message: "Task failed: invalid string length" },
+    })
+  );
+
+  assert.match(message, /bad\.dcm/);
+  assert.match(message, /file 7/);
+  assert.match(message, /status=400/);
+  assert.match(message, /invalid string length/);
+  assert.match(message, /Basic \[redacted\]/);
+  assert.doesNotMatch(message, /secret-token/);
 });
 
 test("dicom helper: patient sex and birth date normalization", () => {
@@ -195,6 +217,14 @@ test("dicom helper: replacement identity rejects PatientName group by byte lengt
   const tooLongGroup = "م".repeat(33);
   assert.throws(
     () => __dicomRemapTestables.normalizeDicomPatientNameForReplace(`${tooLongGroup}=OK`),
+    /PatientName is too long for DICOM/
+  );
+});
+
+test("dicom helper: replacement identity rejects PatientName total byte length", () => {
+  const eachGroupFitsButTotalDoesNot = `${"A".repeat(40)}=${"B".repeat(25)}`;
+  assert.throws(
+    () => __dicomRemapTestables.normalizeDicomPatientNameForReplace(eachGroupFitsButTotalDoesNot),
     /PatientName is too long for DICOM/
   );
 });
@@ -883,6 +913,53 @@ test("createDicomRemapUploadJob maps upload insert races to activeJobId conflict
       return true;
     }
   );
+});
+
+test("createDicomRemapUploadJob skips DICOMDIR folder index files", async () => {
+  const auditEvents: unknown[] = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEvents.push(entry);
+    return {} as never;
+  });
+  queueQueryResults([
+    { rows: [] },
+    { rows: [remapJob({ status: "uploaded" })] },
+    { rows: [remapJob({ status: "uploaded", source_orthanc_study_id: "study-id" })] },
+  ]);
+  const orthancCalls = queueOrthancResults([
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: { ID: "instance-id", ParentStudy: "study-id" },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: {},
+        PatientMainDicomTags: {
+          PatientID: "P1",
+          PatientName: "Original^Patient",
+          PatientSex: "M",
+          PatientBirthDate: "19900101",
+        },
+      },
+    }),
+  ]);
+
+  const result = await createDicomRemapUploadJob({
+    currentUserId: 42,
+    files: [
+      { fileName: "DICOMDIR", mimeType: "application/octet-stream", fileContentBase64: "AA==" },
+      { fileName: "image.dcm", mimeType: "application/dicom", fileContentBase64: "AA==" },
+    ],
+  });
+
+  assert.equal(result.job.source_orthanc_study_id, "study-id");
+  assert.equal(orthancCalls.filter((call) => call.path === "/instances").length, 1);
+  assert.equal(auditEvents.length, 1);
 });
 
 test("confirmDicomRemapAndSend claim failure returns already-sent job without Orthanc calls", async () => {

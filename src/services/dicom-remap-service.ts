@@ -109,6 +109,10 @@ function sanitizeFileName(value: unknown): string {
   return String(value || "dicom.dcm").trim().replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function isSkippableDicomRemapFolderEntry(fileName: string): boolean {
+  return String(fileName || "").trim().toUpperCase() === "DICOMDIR";
+}
+
 function isDicomRemapActiveStatus(status: DicomRemapJobStatus): boolean {
   return ACTIVE_JOB_STATUSES.includes(status);
 }
@@ -232,6 +236,9 @@ function normalizeDicomPatientIdForReplace(value: string): string {
 function normalizeDicomPatientNameForReplace(value: string): string {
   assertNoDicomControlChars(String(value || ""), "PatientName");
   const normalized = normalizeDicomPatientName(value);
+  if (dicomByteLength(normalized) > DICOM_IDENTITY_MAX_LENGTH) {
+    throw new HttpError(400, "PatientName is too long for DICOM");
+  }
   const groups = normalized.split("=");
   for (const group of groups) {
     if (dicomByteLength(group) > DICOM_IDENTITY_MAX_LENGTH) {
@@ -396,6 +403,12 @@ function sanitizeOrthancResponseSnippet(text: unknown, maxLength = 500): string 
     .replace(/Bearer\s+\S+/gi, "Bearer [redacted]")
     .trim();
   return clean.slice(0, maxLength);
+}
+
+function formatOrthancUploadFailureMessage(fileName: string, fileIndex: number, response: OrthancFetchResult): string {
+  const body = sanitizeOrthancResponseSnippet(response.text);
+  const shape = describeOrthancPayloadShape(response.json);
+  return `Orthanc rejected "${fileName}" during DICOM upload (file ${fileIndex}, status=${response.status}, body=${body || "empty"}, shape=${shape}).`;
 }
 
 function isOrthancTimeoutError(error: unknown): boolean {
@@ -1166,9 +1179,15 @@ export async function createDicomRemapUploadJob({
   try {
     const studyIds = new Set<string>();
 
-    for (const file of files) {
+    let uploadedFileCount = 0;
+
+    for (const [index, file] of files.entries()) {
       const fileName = sanitizeFileName(file.fileName);
       const mimeType = String(file.mimeType || "application/octet-stream").trim();
+
+      if (isSkippableDicomRemapFolderEntry(fileName)) {
+        continue;
+      }
 
       if (!isLikelyDicomFile(fileName, mimeType)) {
         throw new HttpError(400, `File "${fileName}" is not an accepted DICOM file.`);
@@ -1176,26 +1195,42 @@ export async function createDicomRemapUploadJob({
 
       const content = decodeBase64(file.fileContentBase64);
 
-      const uploadResponse = await orthancFetch("/instances", {
+      const uploadResponse = await fetchOrthancForRemap("/instances", {
         method: "POST",
         body: content,
         contentType: "application/dicom",
       });
 
       if (!uploadResponse.ok) {
+        const message = formatOrthancUploadFailureMessage(fileName, index + 1, uploadResponse);
+        console.error("Orthanc DICOM remap upload failed.", {
+          fileName,
+          fileIndex: index + 1,
+          orthancStatus: uploadResponse.status,
+          orthancResponseBody: sanitizeOrthancResponseSnippet(uploadResponse.text),
+          orthancResponseShape: describeOrthancPayloadShape(uploadResponse.json),
+        });
+
         throw new HttpError(
           400,
-          `Orthanc rejected "${fileName}" as non-DICOM or invalid content.`,
+          message,
           {
             fileName,
+            fileIndex: index + 1,
             orthancStatus: uploadResponse.status,
-            orthancResponse: String(uploadResponse.text || "").slice(0, 400),
+            orthancResponse: sanitizeOrthancResponseSnippet(uploadResponse.text),
+            orthancResponseShape: describeOrthancPayloadShape(uploadResponse.json),
           }
         );
       }
 
+      uploadedFileCount += 1;
       const parentStudyId = await resolveStudyIdFromOrthancUploadResponse(uploadResponse);
       studyIds.add(parentStudyId);
+    }
+
+    if (uploadedFileCount === 0) {
+      throw new HttpError(400, "No uploadable DICOM instance files were found.");
     }
 
     if (studyIds.size !== 1) {
@@ -1676,6 +1711,7 @@ export const __dicomRemapTestables = {
   CANCELLABLE_JOB_STATUSES,
   TERMINAL_JOB_STATUSES,
   isLikelyDicomFile,
+  isSkippableDicomRemapFolderEntry,
   isDicomRemapActiveStatus,
   isDicomRemapTerminalStatus,
   isDicomRemapCancellableStatus,
@@ -1699,6 +1735,7 @@ export const __dicomRemapTestables = {
   verifySendCompletionAfterTimeout,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
+  formatOrthancUploadFailureMessage,
   assertJobStatus,
   setQueryForTests(query: DicomRemapQuery): void {
     queryDicomRemapDb = query;
