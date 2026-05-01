@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
+import { t } from "@/lib/i18n";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
-import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { buildDicomUploadSelectionPlan, scanDicomStudiesFromFiles, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
@@ -157,7 +157,6 @@ async function uploadMultipartWithProgress(
 
 export default function PacsRemapPage() {
   const { language } = useLanguage();
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState<File[]>([]);
   const [scanResult, setScanResult] = useState<DicomStudyScanResult | null>(null);
@@ -390,7 +389,6 @@ export default function PacsRemapPage() {
   const canContinueDestination = !!selectedDestinationKey;
   const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
-  const isSupervisor = user?.role === "supervisor";
 
   const wizardStep: RemapWizardStep = useMemo(() => {
     if (processMutation.isPending) return processingStage;
@@ -425,13 +423,13 @@ export default function PacsRemapPage() {
   };
 
   const stepLabels = [
-    "1. Select folder",
-    "2. Choose study",
-    "3. Choose patient",
-    "4. Destination",
-    "5. Review",
-    "6. Process",
-    "7. Result",
+    language === "ar" ? "1. اختيار المجلد" : "1. Select folder",
+    language === "ar" ? "2. اختيار الدراسة" : "2. Choose study",
+    language === "ar" ? "3. اختيار المريض" : "3. Choose patient",
+    language === "ar" ? "4. الوجهة" : "4. Destination",
+    language === "ar" ? "5. المراجعة" : "5. Review",
+    language === "ar" ? "6. التنفيذ" : "6. Process",
+    language === "ar" ? "7. النتيجة" : "7. Result",
   ];
 
   return (
@@ -456,10 +454,10 @@ export default function PacsRemapPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-4">
           <div className="card-shell p-5 space-y-4">
-            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>Step 1: Select folder/files</h3>
+            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label htmlFor="remap-file-input" className="text-xs block mb-1">Select DICOM files</label>
+                <label htmlFor="remap-file-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectDicomFiles")}</label>
                 <input
                   id="remap-file-input"
                   key={`files-${fileInputVersion}`}
@@ -477,7 +475,7 @@ export default function PacsRemapPage() {
                 />
               </div>
               <div>
-                <label htmlFor="remap-folder-input" className="text-xs block mb-1">Select CD / Folder</label>
+                <label htmlFor="remap-folder-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectFolder")}</label>
                 <input
                   id="remap-folder-input"
                   key={`folder-${fileInputVersion}`}
@@ -497,7 +495,7 @@ export default function PacsRemapPage() {
               </div>
             </div>
             <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              Selected files: {files.length} • Estimated size: {formatBytes(files.reduce((sum, file) => sum + file.size, 0))}
+              {t(language, "pacs.remap.selectedFiles")}: {files.length} • {t(language, "pacs.remap.estimatedSize")}: {formatBytes(files.reduce((sum, file) => sum + file.size, 0))}
             </p>
             <div className="flex items-center gap-2">
               <button
@@ -506,27 +504,33 @@ export default function PacsRemapPage() {
                 disabled={files.length === 0 || scanMutation.isPending || processMutation.isPending}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
-                {scanMutation.isPending ? "Scanning files..." : "Scan selected folder/files"}
+                {scanMutation.isPending ? t(language, "pacs.remap.scanningFiles") : t(language, "pacs.remap.scanSelected")}
               </button>
-              <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">Reset workflow</button>
+              <button type="button" onClick={resetWorkflow} className="btn-secondary px-4 py-2 rounded-lg">
+                {t(language, "pacs.remap.resetWorkflow")}
+              </button>
             </div>
           </div>
 
           {scanResult && (
             <div className="card-shell p-5 space-y-4">
-              <h3 className="text-sm font-semibold">Step 2: Choose study</h3>
+              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step2")}</h3>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                Detected {scanResult.studies.length} studies • Skipped {scanResult.skippedSidecarCount} sidecar files • {scanResult.unparsedCount} files could not be parsed
+                {t(language, "pacs.remap.detectedStudiesSummary", {
+                  count: scanResult.studies.length,
+                  skipped: scanResult.skippedSidecarCount,
+                  unparsed: scanResult.unparsedCount,
+                })}
               </p>
               {scanResult.studies.length > 1 && (
-                <p className="text-xs text-amber-700">Multiple studies detected. Select one study to remap.</p>
+                <p className="text-xs text-amber-700">{t(language, "pacs.remap.multipleStudiesWarning")}</p>
               )}
               {scanResult.studies.length === 0 && (
                 <div className="space-y-2">
-                  <p className="text-xs text-amber-700">RISPro could not reliably detect studies before upload.</p>
+                  <p className="text-xs text-amber-700">{t(language, "pacs.remap.unreliableStudyDetection")}</p>
                   <label className="flex items-start gap-2 text-xs">
                     <input type="checkbox" checked={enableFallbackUpload} onChange={(e) => setEnableFallbackUpload(e.target.checked)} />
-                    <span>Upload all DICOM-like files and let RISPro validate one study</span>
+                    <span>{t(language, "pacs.remap.fallbackUploadAll")}</span>
                   </label>
                 </div>
               )}
@@ -555,18 +559,18 @@ export default function PacsRemapPage() {
 
           {scanResult && (
             <div className="card-shell p-5 space-y-4">
-              <h3 className="text-sm font-semibold">Step 3: Choose RISPro patient</h3>
+              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step3")}</h3>
               <div className="rounded-lg border p-3 space-y-2">
-                <p className="text-xs font-semibold">Patients with studies by date/modality</p>
+                <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
                   <select
                     value={studyDateMode}
                     onChange={(e) => setStudyDateMode(e.target.value as "today" | "yesterday" | "custom")}
                     className="input-premium w-full px-3 py-2"
                   >
-                    <option value="today">Today</option>
-                    <option value="yesterday">Yesterday</option>
-                    <option value="custom">Choose date</option>
+                    <option value="today">{t(language, "pacs.remap.today")}</option>
+                    <option value="yesterday">{t(language, "pacs.remap.yesterday")}</option>
+                    <option value="custom">{t(language, "pacs.remap.chooseDate")}</option>
                   </select>
                   <input
                     type="date"
@@ -580,7 +584,7 @@ export default function PacsRemapPage() {
                     onChange={(e) => setTodayModalityFilter(e.target.value)}
                     className="input-premium w-full px-3 py-2"
                   >
-                    <option value="">All modalities</option>
+                    <option value="">{t(language, "pacs.remap.allModalities")}</option>
                     {(modalityLookupQuery.data?.items || []).map((modality) => (
                       <option key={modality.id} value={modality.id}>
                         {modality.nameEn || modality.nameAr || modality.code || `Modality #${modality.id}`}
@@ -591,12 +595,12 @@ export default function PacsRemapPage() {
                     type="text"
                     value={todayPatientSearch}
                     onChange={(e) => setTodayPatientSearch(e.target.value)}
-                    placeholder="Optional patient search"
+                    placeholder={t(language, "pacs.remap.optionalPatientSearch")}
                     className="input-premium w-full px-3 py-2"
                   />
                 </div>
-                {todayStudiesQuery.isLoading && <p className="text-xs">Loading study-linked patients...</p>}
-                {todayStudiesQuery.error && <p className="text-xs text-red-600">Failed to load study-linked patients.</p>}
+                {todayStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingStudyLinkedPatients")}</p>}
+                {todayStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedStudyLinkedPatients")}</p>}
                 {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {(todayStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
@@ -625,10 +629,10 @@ export default function PacsRemapPage() {
                 value={patientSearch}
                 onChange={(e) => setPatientSearch(e.target.value)}
                 className="input-premium w-full px-3 py-2"
-                placeholder="Search patient"
+                placeholder={t(language, "pacs.remap.searchPatient")}
               />
               <select value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)} className="input-premium w-full px-3 py-2">
-                <option value="">Select patient</option>
+                <option value="">{t(language, "pacs.remap.selectPatient")}</option>
                 {patients.map((patient) => (
                   <option key={patient.id} value={patient.id}>
                     {formatName(patient)} {patient.national_id ? `(${patient.national_id})` : ""}
@@ -640,9 +644,9 @@ export default function PacsRemapPage() {
 
           {scanResult && (
             <div className="card-shell p-5 space-y-4">
-              <h3 className="text-sm font-semibold">Step 4: Choose PACS destination</h3>
+              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step4")}</h3>
               <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
-                <option value="">Select destination</option>
+                <option value="">{t(language, "pacs.remap.selectDestination")}</option>
                 {destinations.map((destination) => (
                   <option key={destination.key} value={destination.key}>{destination.name} ({destination.key})</option>
                 ))}
@@ -652,7 +656,7 @@ export default function PacsRemapPage() {
 
           {scanResult && (
             <div className="card-shell p-5 space-y-4">
-              <h3 className="text-sm font-semibold">Step 5: Review remap</h3>
+              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step5")}</h3>
               <div className="rounded border p-3 text-xs space-y-1">
                 <p><strong>Original PatientID:</strong> {selectedStudy?.patientId || "—"}</p>
                 <p><strong>Original PatientName:</strong> {selectedStudy?.patientName || "—"}</p>
@@ -677,7 +681,7 @@ export default function PacsRemapPage() {
                 disabled={!canSubmit}
                 className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
               >
-                Upload selected study, remap, and send to PACS
+                {t(language, "pacs.remap.uploadSelectedStudy")}
               </button>
             </div>
           )}
@@ -752,19 +756,17 @@ export default function PacsRemapPage() {
             </div>
           )}
 
-          {isSupervisor && (
-            <div className="card-shell p-4 space-y-2 text-xs">
-              <h4 className="font-semibold text-sm">Maintenance</h4>
-              <button
-                type="button"
-                onClick={() => clearFailedStudiesMutation.mutate()}
-                disabled={clearFailedStudiesMutation.isPending}
-                className="btn-secondary px-3 py-2 rounded-lg text-xs"
-              >
-                Clear failed remap studies
-              </button>
-            </div>
-          )}
+          <div className="card-shell p-4 space-y-2 text-xs">
+            <h4 className="font-semibold text-sm">{t(language, "pacs.remap.maintenance")}</h4>
+            <button
+              type="button"
+              onClick={() => clearFailedStudiesMutation.mutate()}
+              disabled={clearFailedStudiesMutation.isPending}
+              className="btn-secondary px-3 py-2 rounded-lg text-xs"
+            >
+              {t(language, "pacs.remap.clearFailedStudies")}
+            </button>
+          </div>
 
           <div className="card-shell p-4 space-y-2 text-xs">
             <h4 className="font-semibold text-sm">Recent jobs</h4>

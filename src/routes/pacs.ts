@@ -39,6 +39,7 @@ import {
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 const supervisorMiddleware = [requireAuth, requireSupervisor, requireRecentSupervisorReauth];
+const supervisorNoReauthMiddleware = [requireAuth, requireSupervisor];
 const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
@@ -501,7 +502,7 @@ pacsRouter.post(
 
 pacsRouter.post(
   "/remap/maintenance/clear-failed-studies",
-  ...supervisorMiddleware,
+  ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { user: AuthenticatedUserContext };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
