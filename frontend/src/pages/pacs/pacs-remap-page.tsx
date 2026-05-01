@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
+import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 
@@ -79,6 +80,8 @@ export default function PacsRemapPage() {
   const [selectedDestinationKey, setSelectedDestinationKey] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
   const [successMessage, setSuccessMessage] = useState<string>("");
+  const [showReAuthModal, setShowReAuthModal] = useState(false);
+  const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
   const [skippedFilesCount, setSkippedFilesCount] = useState<number>(0);
   const [fileInputVersion, setFileInputVersion] = useState(0);
 
@@ -300,13 +303,18 @@ export default function PacsRemapPage() {
     },
     onError: (error: unknown) => {
       const message = error instanceof Error ? error.message : "Failed to clear failed remap studies.";
-      setErrorMessage(
-        message.includes("re-authentication") || message.includes("403")
-          ? (language === "ar"
-            ? "يلزم إعادة تحقق المشرف من صفحة الإعدادات قبل تشغيل صيانة Orthanc."
-            : "Supervisor re-authentication is required before running Orthanc maintenance.")
-          : message
-      );
+      const requiresReAuth = message.includes("re-authentication") || message.includes("403");
+      if (requiresReAuth) {
+        setRetryClearAfterReAuth(true);
+        setShowReAuthModal(true);
+        setErrorMessage(
+          language === "ar"
+            ? "يلزم تأكيد هوية المشرف قبل تشغيل صيانة Orthanc."
+            : "Supervisor re-authentication is required before running Orthanc maintenance."
+        );
+      } else {
+        setErrorMessage(message);
+      }
       setSuccessMessage("");
     },
   });
@@ -623,6 +631,22 @@ export default function PacsRemapPage() {
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {destinationsQuery.error instanceof ApiError ? destinationsQuery.error.message : "Failed to load destinations."}
         </div>
+      )}
+
+      {showReAuthModal && (
+        <SupervisorReAuthModal
+          onClose={() => {
+            setShowReAuthModal(false);
+            setRetryClearAfterReAuth(false);
+          }}
+          onSuccess={() => {
+            setShowReAuthModal(false);
+            if (retryClearAfterReAuth) {
+              setRetryClearAfterReAuth(false);
+              clearFailedStudiesMutation.mutate();
+            }
+          }}
+        />
       )}
     </div>
   );

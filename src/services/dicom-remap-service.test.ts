@@ -1050,6 +1050,90 @@ test("clearFailedDicomRemapOrthancStudies deletes only failed and cancelled job 
   assert.equal(auditEvents.length, 1);
 });
 
+test("clearFailedDicomRemapOrthancStudies discovers missing modified studies by accession/date/modality and replacement patient", async () => {
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  queueQueryResults([
+    {
+      rows: [
+        remapJob({
+          id: 1,
+          status: "failed",
+          source_orthanc_study_id: "source-study",
+          modified_orthanc_study_id: null,
+          replacement_patient_id: "RISPRO-900",
+        }),
+      ],
+    },
+  ]);
+
+  const calls = queueOrthancResults([
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: { AccessionNumber: "ACC-42", StudyDate: "20260501" },
+        PatientMainDicomTags: { PatientID: "SRC-PATIENT" },
+        Series: ["src-series-1"],
+      },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: { MainDicomTags: { Modality: "CT" } },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "[]",
+      json: ["source-study", "candidate-modified", "other-study"],
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: { AccessionNumber: "ACC-42", StudyDate: "20260501" },
+        PatientMainDicomTags: { PatientID: "RISPRO-900" },
+        Series: ["cand-series-1"],
+      },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: { MainDicomTags: { Modality: "CT" } },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: {
+        MainDicomTags: { AccessionNumber: "ACC-42", StudyDate: "20260501" },
+        PatientMainDicomTags: { PatientID: "OTHER-PATIENT" },
+        Series: ["other-series-1"],
+      },
+    }),
+    orthancResult({
+      status: 200,
+      ok: true,
+      text: "{}",
+      json: { MainDicomTags: { Modality: "CT" } },
+    }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: {} }),
+  ]);
+
+  const summary = await __dicomRemapTestables.clearFailedDicomRemapOrthancStudies(42);
+
+  const deletePaths = calls.filter((call) => call.method === "DELETE").map((call) => call.path);
+  assert.deepEqual(deletePaths, ["/studies/source-study", "/studies/candidate-modified"]);
+  assert.equal(summary.studiesAttempted, 2);
+  assert.equal(summary.studiesDeleted, 2);
+  assert.equal(summary.studiesAlreadyMissing, 0);
+});
+
 test("hardResetOrthancStudies requires typed confirmation", async () => {
   await assert.rejects(
     () => __dicomRemapTestables.hardResetOrthancStudies(42, "delete"),

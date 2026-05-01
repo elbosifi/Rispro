@@ -60,6 +60,14 @@ interface OrthancResetSummary {
   failures: OrthancStudyDeleteResult[];
 }
 
+interface OrthancStudyMatchMetadata {
+  studyId: string;
+  accessionNumber: string;
+  studyDate: string;
+  modality: string;
+  patientId: string;
+}
+
 export interface DicomRemapJobRow {
   id: number;
   created_by_user_id: number;
@@ -1008,6 +1016,101 @@ function uniqueStudyIdsFromJobs(jobs: DicomRemapJobRow[]): string[] {
   return Array.from(ids);
 }
 
+function readStringTag(tags: Record<string, unknown>, key: string): string {
+  return String(tags[key] || "").trim();
+}
+
+async function readOrthancStudyMatchMetadata(studyId: string): Promise<OrthancStudyMatchMetadata | null> {
+  const studyResponse = await fetchOrthancForRemap(`/studies/${encodeURIComponent(studyId)}`, { method: "GET" });
+  if (!studyResponse.ok || !studyResponse.json || typeof studyResponse.json !== "object") {
+    return null;
+  }
+
+  const studyPayload = studyResponse.json as Record<string, unknown>;
+  const mainTags = (studyPayload.MainDicomTags && typeof studyPayload.MainDicomTags === "object")
+    ? studyPayload.MainDicomTags as Record<string, unknown>
+    : {};
+  const patientMainTags = (studyPayload.PatientMainDicomTags && typeof studyPayload.PatientMainDicomTags === "object")
+    ? studyPayload.PatientMainDicomTags as Record<string, unknown>
+    : {};
+  const seriesIds = Array.isArray(studyPayload.Series)
+    ? studyPayload.Series.map((value) => String(value || "").trim()).filter((value) => !!value)
+    : [];
+
+  let modality = "";
+  if (seriesIds.length > 0) {
+    const seriesResponse = await fetchOrthancForRemap(`/series/${encodeURIComponent(seriesIds[0])}`, { method: "GET" });
+    if (seriesResponse.ok && seriesResponse.json && typeof seriesResponse.json === "object") {
+      const seriesPayload = seriesResponse.json as Record<string, unknown>;
+      const seriesMainTags = (seriesPayload.MainDicomTags && typeof seriesPayload.MainDicomTags === "object")
+        ? seriesPayload.MainDicomTags as Record<string, unknown>
+        : {};
+      modality = readStringTag(seriesMainTags, "Modality");
+    }
+  }
+
+  return {
+    studyId,
+    accessionNumber: readStringTag(mainTags, "AccessionNumber"),
+    studyDate: readStringTag(mainTags, "StudyDate"),
+    modality,
+    patientId: readStringTag(patientMainTags, "PatientID"),
+  };
+}
+
+async function findMissingModifiedStudyIdsForJob(job: DicomRemapJobRow, alreadyKnownStudyIds: Set<string>): Promise<string[]> {
+  if (job.modified_orthanc_study_id || !job.source_orthanc_study_id || !job.replacement_patient_id) {
+    return [];
+  }
+
+  const sourceStudyId = String(job.source_orthanc_study_id || "").trim();
+  if (!sourceStudyId) {
+    return [];
+  }
+
+  const sourceMetadata = await readOrthancStudyMatchMetadata(sourceStudyId);
+  if (!sourceMetadata || !sourceMetadata.accessionNumber || !sourceMetadata.studyDate) {
+    return [];
+  }
+
+  const studiesResponse = await fetchOrthancForRemap("/studies", { method: "GET" });
+  if (!studiesResponse.ok || !Array.isArray(studiesResponse.json)) {
+    return [];
+  }
+
+  const discovered: string[] = [];
+  const replacementPatientId = String(job.replacement_patient_id || "").trim();
+  for (const candidateRawId of studiesResponse.json) {
+    const candidateId = String(candidateRawId || "").trim();
+    if (!candidateId || candidateId === sourceStudyId || alreadyKnownStudyIds.has(candidateId)) {
+      continue;
+    }
+
+    const candidateMetadata = await readOrthancStudyMatchMetadata(candidateId);
+    if (!candidateMetadata) {
+      continue;
+    }
+
+    if (candidateMetadata.accessionNumber !== sourceMetadata.accessionNumber) {
+      continue;
+    }
+    if (candidateMetadata.studyDate !== sourceMetadata.studyDate) {
+      continue;
+    }
+    if (sourceMetadata.modality && candidateMetadata.modality && candidateMetadata.modality !== sourceMetadata.modality) {
+      continue;
+    }
+    if (candidateMetadata.patientId !== replacementPatientId) {
+      continue;
+    }
+
+    discovered.push(candidateId);
+    alreadyKnownStudyIds.add(candidateId);
+  }
+
+  return discovered;
+}
+
 async function markJobFailed(jobId: number, message: string): Promise<void> {
   await queryDicomRemapDb(
     `
@@ -1836,6 +1939,13 @@ export async function clearFailedDicomRemapOrthancStudies(currentUserId: UserId)
   );
 
   const studyIds = uniqueStudyIdsFromJobs(rows);
+  const knownStudyIds = new Set(studyIds);
+  for (const job of rows) {
+    const discovered = await findMissingModifiedStudyIdsForJob(job, knownStudyIds);
+    for (const studyId of discovered) {
+      studyIds.push(studyId);
+    }
+  }
   const results = await Promise.all(studyIds.map((studyId) => deleteOrthancStudyIfExists(studyId)));
   const summary = summarizeOrthancStudyDeletes(results);
 
