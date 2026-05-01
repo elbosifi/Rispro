@@ -353,6 +353,7 @@ export default function PacsRemapPage() {
     },
     onError: (error: unknown) => {
       setProcessingStage("failed");
+      setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -369,6 +370,7 @@ export default function PacsRemapPage() {
     },
     onSuccess: () => {
       setProcessingStage("failed");
+      setSuccessMessage("");
       setErrorMessage(language === "ar" ? "تم إلغاء المهمة النشطة." : "Active job cancelled.");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
@@ -389,7 +391,10 @@ export default function PacsRemapPage() {
       );
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
-    onError: (error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Reset failed."),
+    onError: (error: unknown) => {
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
+    },
   });
 
   const clearFailedStudiesMutation = useMutation({
@@ -400,6 +405,7 @@ export default function PacsRemapPage() {
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
     onError: (error: unknown) => {
+      setSuccessMessage("");
       const message = error instanceof Error ? error.message : "Failed to clear failed remap studies.";
       if (message.includes("re-authentication") || message.includes("403")) {
         setRetryClearAfterReAuth(true);
@@ -438,6 +444,10 @@ export default function PacsRemapPage() {
     wizardStep === "sent"
       ? ""
       : errorMessage || currentJob?.error_message || "";
+  const visibleSuccessMessage =
+    wizardStep === "failed"
+      ? ""
+      : successMessage;
 
   const resetWorkflow = (): void => {
     setFiles([]);
@@ -827,9 +837,9 @@ export default function PacsRemapPage() {
           {visibleErrorMessage}
         </div>
       )}
-      {successMessage && (
+      {visibleSuccessMessage && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {successMessage}
+          {visibleSuccessMessage}
         </div>
       )}
 
