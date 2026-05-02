@@ -2418,7 +2418,7 @@ export async function listMyDicomRemapJobs({
   return rows;
 }
 
-export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: number; name: string }>> {
+export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: number; name: string; isDefault: boolean }>> {
   const nodes = await listPacsNodes({ includeInactive: false });
   return nodes
     .filter((node) => node.is_active)
@@ -2426,6 +2426,7 @@ export async function listDicomRemapDestinations(): Promise<Array<{ key: string;
       key: String(node.id),
       id: node.id,
       name: node.name,
+      isDefault: Boolean(node.is_default),
     }));
 }
 

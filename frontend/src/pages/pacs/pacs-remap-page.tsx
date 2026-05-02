@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
@@ -48,6 +48,7 @@ interface RemapComparison {
 interface Destination {
   key: string;
   name: string;
+  isDefault?: boolean;
 }
 
 interface ReplacementPreview {
@@ -144,6 +145,15 @@ function canResendJob(job: RemapJob | null | undefined): boolean {
   if (!job) return false;
   if (!["failed", "remapped", "sent"].includes(job.status)) return false;
   return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+}
+
+function isSendFailedJob(job: RemapJob | null | undefined): boolean {
+  if (!job || job.status !== "failed") return false;
+  return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+}
+
+function oneLineReason(message: string | null | undefined): string {
+  return String(message || "").replace(/\s+/g, " ").trim();
 }
 
 function toIsoDate(value: Date): string {
@@ -468,6 +478,19 @@ export default function PacsRemapPage() {
   const comparison = currentJobQuery.data?.comparison || null;
   const patients = patientQuery.data?.patients || [];
   const destinations = destinationsQuery.data?.destinations || [];
+  const effectiveOrthancStudyId = currentJob?.modified_orthanc_study_id || currentJob?.source_orthanc_study_id || null;
+
+  useEffect(() => {
+    if (selectedDestinationKey || destinations.length === 0) {
+      return;
+    }
+    const defaultDestination = destinations.find((destination) => destination.isDefault) || null;
+    if (defaultDestination) {
+      setSelectedDestinationKey(defaultDestination.key);
+    } else if (destinations.length === 1) {
+      setSelectedDestinationKey(destinations[0]!.key);
+    }
+  }, [destinations, selectedDestinationKey]);
   const selectedPatient = patients.find((patient) => String(patient.id) === selectedPatientId) || null;
   const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
   const canContinuePatient = !!selectedPatientId;
@@ -743,7 +766,9 @@ export default function PacsRemapPage() {
               <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
                 <option value="">{t(language, "pacs.remap.selectDestination")}</option>
                 {destinations.map((destination) => (
-                  <option key={destination.key} value={destination.key}>{destination.name} ({destination.key})</option>
+                  <option key={destination.key} value={destination.key}>
+                    {destination.name} ({destination.key}){destination.isDefault ? ` • ${t(language, "pacs.remap.defaultDestinationBadge")}` : ""}
+                  </option>
                 ))}
               </select>
             </div>
@@ -861,8 +886,16 @@ export default function PacsRemapPage() {
             <div className="card-shell p-4 space-y-2 text-xs">
               <h4 className="font-semibold text-sm">{t(language, "pacs.remap.currentUpload")}</h4>
               <p>{t(language, "pacs.remap.job")} #{currentJob.id}</p>
-              <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono">{currentJob.source_orthanc_study_id || "—"}</span></p>
-              <p>{t(language, "pacs.remap.modifiedStudy")}: <span className="font-mono">{currentJob.modified_orthanc_study_id || "—"}</span></p>
+              <p>{t(language, "pacs.remap.orthancStudy")}: <span className="font-mono">{effectiveOrthancStudyId || "—"}</span></p>
+              {currentJob.source_orthanc_study_id && currentJob.modified_orthanc_study_id && currentJob.source_orthanc_study_id !== currentJob.modified_orthanc_study_id && (
+                <>
+                  <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono">{currentJob.source_orthanc_study_id}</span></p>
+                  <p>{t(language, "pacs.remap.modifiedStudy")}: <span className="font-mono">{currentJob.modified_orthanc_study_id}</span></p>
+                </>
+              )}
+              {isSendFailedJob(currentJob) && (
+                <p className="text-red-700">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(currentJob.error_message) || t(language, "pacs.remap.failedResend")}</p>
+              )}
               {isCancellableJobStatus(currentJob.status) && (
                 <button type="button" onClick={() => cancelMutation.mutate()} disabled={cancelMutation.isPending} className="btn-secondary px-3 py-2 rounded-lg text-xs">
                   {t(language, "pacs.remap.cancelActiveJob")}
@@ -905,6 +938,9 @@ export default function PacsRemapPage() {
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
                     <p className="truncate">{job.source_orthanc_study_id || "—"}</p>
+                    {isSendFailedJob(job) && (
+                      <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
+                    )}
                   </button>
                   {canResendJob(job) && (
                     <button

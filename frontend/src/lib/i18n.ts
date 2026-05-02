@@ -840,6 +840,7 @@ const en = {
   "pacs.remap.job": "Job",
   "pacs.remap.sourceStudy": "Source Study",
   "pacs.remap.modifiedStudy": "Modified Study",
+  "pacs.remap.orthancStudy": "Remapped Orthanc Study",
   "pacs.remap.cancelActiveJob": "Cancel active job",
   "pacs.remap.startNewUpload": "Start new upload",
   "pacs.remap.resetCurrentUpload": "Reset current upload",
@@ -880,6 +881,8 @@ const en = {
   "pacs.remap.resendToPacs": "Resend to PACS",
   "pacs.remap.resendSuccess": "Study sent to PACS successfully.",
   "pacs.remap.failedResend": "Failed to resend study to PACS.",
+  "pacs.remap.sendFailedBadge": "Send failed",
+  "pacs.remap.defaultDestinationBadge": "Default",
 
   "login.heading": "RISpro Reception",
   "login.description": "Sign in to access the reception workspace",
@@ -1786,6 +1789,7 @@ const ar = {
   "pacs.remap.job": "المهمة",
   "pacs.remap.sourceStudy": "الدراسة المصدر",
   "pacs.remap.modifiedStudy": "الدراسة المعدلة",
+  "pacs.remap.orthancStudy": "دراسة Orthanc المعاد ربطها",
   "pacs.remap.cancelActiveJob": "إلغاء المهمة النشطة",
   "pacs.remap.startNewUpload": "بدء رفع جديد",
   "pacs.remap.resetCurrentUpload": "إعادة ضبط الرفع الحالي",
@@ -1826,6 +1830,8 @@ const ar = {
   "pacs.remap.resendToPacs": "إعادة الإرسال إلى PACS",
   "pacs.remap.resendSuccess": "تم إرسال الدراسة إلى PACS بنجاح.",
   "pacs.remap.failedResend": "فشلت إعادة إرسال الدراسة إلى PACS.",
+  "pacs.remap.sendFailedBadge": "فشل الإرسال",
+  "pacs.remap.defaultDestinationBadge": "الافتراضي",
 
   "login.heading": "RISpro Reception",
   "login.description": "قم بتسجيل الدخول للوصول إلى مساحة عمل الاستقبال",

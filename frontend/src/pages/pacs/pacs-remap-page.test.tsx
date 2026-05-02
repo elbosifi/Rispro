@@ -88,7 +88,7 @@ describe("PacsRemapPage wizard", () => {
     FakeXHR.instances.length = 0;
     vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
     apiMock.mockImplementation((path: string) => {
-      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS" }] });
+      if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
       if (String(path).startsWith("/patients")) return Promise.resolve({ patients: [{ id: 10, english_full_name: "John Doe", national_id: "N1" }] });
       if (path === "/pacs/remap/replacement-preview") {
         return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
@@ -174,6 +174,23 @@ describe("PacsRemapPage wizard", () => {
     expect((sent?.get("risproPatientId") as string) || "").toBe("10");
     expect((sent?.get("destinationPacsKey") as string) || "").toBe("1");
     expect((sent?.get("confirm") as string) || "").toBe("true");
+  });
+
+  it("preselects the default PACS destination", async () => {
+    scanMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "A", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [new File(["1"], "a1.dcm")] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      filesByStudyUid: new Map(),
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["1"], "a1.dcm")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    const comboBoxes = screen.getAllByRole("combobox");
+    expect((comboBoxes[3] as HTMLSelectElement).value).toBe("1");
   });
 
   it("does not use FileReader/readAsDataURL for upload path", async () => {
