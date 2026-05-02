@@ -24,6 +24,27 @@ export interface UserCreatePayload {
   isActive?: boolean;
 }
 
+interface UserActorContext {
+  userId: NullableUserId;
+  role: Role;
+}
+
+async function auditSuperAdminAttempt(input: {
+  actionType: string;
+  actorUserId: NullableUserId;
+  targetUserId?: NullableUserId;
+  details: Record<string, unknown>;
+}): Promise<void> {
+  await logAuditEntry({
+    entityType: "user",
+    entityId: input.targetUserId ?? null,
+    actionType: input.actionType,
+    oldValues: null,
+    newValues: input.details,
+    changedByUserId: input.actorUserId
+  });
+}
+
 export async function listUsers(): Promise<UserRow[]> {
   const { rows } = await pool.query(`
     select id, username, full_name, role, is_active, created_at, updated_at
@@ -36,7 +57,7 @@ export async function listUsers(): Promise<UserRow[]> {
 
 export async function createUser(
   { username, fullName, password, role, isActive = true }: UserCreatePayload,
-  createdByUserId: NullableUserId = null
+  actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   if (!username || !fullName || !password || !role) {
     throw new HttpError(400, "username, fullName, password, and role are required.");
@@ -44,6 +65,19 @@ export async function createUser(
 
   if (!isRole(role)) {
     throw new HttpError(400, "role must be receptionist, supervisor, super_admin, or modality_staff.");
+  }
+
+  if (role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "create_super_admin_denied",
+      actorUserId: actor.userId,
+      details: {
+        reason: "only_super_admin_can_create_super_admin",
+        attemptedRole: role,
+        username: String(username)
+      }
+    });
+    throw new HttpError(403, "Only super_admin can create a super_admin user.");
   }
 
   const passwordHash = await bcrypt.hash(password, 10);
@@ -71,9 +105,21 @@ export async function createUser(
         actionType: "create",
         oldValues: null,
         newValues: createdUser,
-        changedByUserId: createdByUserId
+        changedByUserId: actor.userId
       }
     );
+
+    if (createdUser.role === "super_admin") {
+      await auditSuperAdminAttempt({
+        actionType: "create_super_admin_allowed",
+        actorUserId: actor.userId,
+        targetUserId: createdUser.id,
+        details: {
+          reason: "super_admin_created",
+          targetUsername: createdUser.username
+        }
+      });
+    }
 
     return createdUser;
   } catch (error) {
@@ -92,7 +138,7 @@ export async function createUser(
 
 export async function deleteUser(
   userId: UserId,
-  deletedByUserId: NullableUserId = null
+  actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   const cleanUserId = Number(userId);
 
@@ -100,8 +146,63 @@ export async function deleteUser(
     throw new HttpError(400, "userId must be a positive whole number.");
   }
 
-  if (deletedByUserId && Number(deletedByUserId) === cleanUserId) {
+  if (actor.userId && Number(actor.userId) === cleanUserId) {
     throw new HttpError(400, "You cannot delete your own account.");
+  }
+
+  const targetResult = await pool.query<{
+    id: number;
+    username: string;
+    role: Role;
+  }>(
+    `
+      select id, username, role
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+  const target = targetResult.rows[0];
+  if (!target) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  if (target.role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "delete_super_admin_denied",
+      actorUserId: actor.userId,
+      targetUserId: target.id,
+      details: {
+        reason: "only_super_admin_can_delete_super_admin",
+        targetUsername: target.username
+      }
+    });
+    throw new HttpError(403, "Only super_admin can delete a super_admin user.");
+  }
+
+  if (target.role === "super_admin") {
+    const countResult = await pool.query<{ count: string }>(
+      `
+        select count(*)::text as count
+        from users
+        where role = 'super_admin'
+          and is_active = true
+      `
+    );
+    const activeSuperAdminCount = Number(countResult.rows[0]?.count ?? "0");
+    if (activeSuperAdminCount <= 1) {
+      await auditSuperAdminAttempt({
+        actionType: "delete_super_admin_denied",
+        actorUserId: actor.userId,
+        targetUserId: target.id,
+        details: {
+          reason: "cannot_delete_last_super_admin",
+          targetUsername: target.username
+        }
+      });
+      throw new HttpError(409, "Cannot delete the last active super_admin user.");
+    }
   }
 
   const { rows } = await pool.query(
@@ -125,8 +226,20 @@ export async function deleteUser(
     actionType: "delete",
     oldValues: removed,
     newValues: null,
-    changedByUserId: deletedByUserId
+    changedByUserId: actor.userId
   });
+
+  if (removed.role === "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "delete_super_admin_allowed",
+      actorUserId: actor.userId,
+      targetUserId: removed.id,
+      details: {
+        reason: "super_admin_deleted",
+        targetUsername: removed.username
+      }
+    });
+  }
 
   return removed;
 }

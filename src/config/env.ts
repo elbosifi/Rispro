@@ -103,6 +103,9 @@ export interface EnvConfig {
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
+  seedSuperAdminUsername: string;
+  seedSuperAdminPassword: string;
+  seedSuperAdminFullName: string;
   orthancAuthEnabled: boolean;
   orthancMwlEnabled: boolean;
   orthancMwlShadowMode: boolean;
@@ -157,6 +160,9 @@ export const env: EnvConfig = {
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
   seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",
+  seedSuperAdminUsername: process.env.SEED_SUPER_ADMIN_USERNAME || "superadmin",
+  seedSuperAdminPassword: process.env.SEED_SUPER_ADMIN_PASSWORD || "superadmin",
+  seedSuperAdminFullName: process.env.SEED_SUPER_ADMIN_FULL_NAME || "Super Administrator",
   orthancAuthEnabled: readBoolean("ORTHANC_AUTH_ENABLED", false),
   orthancMwlEnabled: readBoolean("ORTHANC_MWL_ENABLED", false),
   orthancMwlShadowMode: readBoolean("ORTHANC_MWL_SHADOW_MODE", false),

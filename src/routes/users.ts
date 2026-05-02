@@ -29,7 +29,7 @@ usersRouter.post(
         role: asString(body.role),
         isActive: asOptionalBoolean(body.isActive)
       },
-      req.user!.sub
+      { userId: req.user!.sub, role: req.user!.role }
     );
     res.status(201).json({ user });
   })
@@ -38,7 +38,7 @@ usersRouter.post(
 usersRouter.delete(
   "/:userId",
   asyncRoute(async (req: Request, res: Response) => {
-    const user = await deleteUser(asString(req.params.userId), req.user!.sub);
+    const user = await deleteUser(asString(req.params.userId), { userId: req.user!.sub, role: req.user!.role });
     res.json({ user });
   })
 );

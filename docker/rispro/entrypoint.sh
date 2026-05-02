@@ -2,7 +2,7 @@
 # =============================================================================
 # RISpro Docker Entrypoint
 # =============================================================================
-# Waits for PostgreSQL, runs migrations, seeds supervisor, then starts the app.
+# Waits for PostgreSQL, runs migrations, seeds default admin accounts, then starts the app.
 # =============================================================================
 
 set -euo pipefail
@@ -102,14 +102,14 @@ run_migrations() {
 }
 
 # ---------------------------------------------------------------------------
-# Seed supervisor account (idempotent)
+# Seed admin accounts (idempotent)
 # ---------------------------------------------------------------------------
-seed_supervisor() {
-  log "Seeding supervisor account (if missing)..."
+seed_admin_accounts() {
+  log "Seeding supervisor/super_admin accounts (if missing)..."
   if npm run seed:supervisor 2>&1; then
-    log "Supervisor account seeded."
+    log "Admin account seeding completed."
   else
-    log "WARNING: Supervisor seeding skipped (may already exist or credentials missing)."
+    log "WARNING: Admin account seeding skipped (may already exist or credentials missing)."
   fi
 }
 
@@ -122,7 +122,7 @@ log "========================================"
 
 wait_for_postgres
 run_migrations
-seed_supervisor
+seed_admin_accounts
 
 log "Starting application..."
 log "========================================"
