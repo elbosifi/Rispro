@@ -62,6 +62,7 @@ import {
   previewCatalogWorkbook
 } from "../services/settings-catalog-import-export-service.js";
 import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
+import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -141,6 +142,29 @@ settingsRouter.get(
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.get(
+  "/users-and-roles/page-visibility",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const matrix = await readPageVisibilityMatrix();
+    res.json({ matrix });
+  })
+);
+
+settingsRouter.put(
+  "/users-and-roles/page-visibility",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    if (request.user.role !== "super_admin") {
+      res.status(403).json({ message: "Only super_admin can update page visibility." });
+      return;
+    }
+
+    const body = asUnknownRecord(request.body ?? {});
+    const matrix = await savePageVisibilityMatrix(body.matrix, request.user.sub as UserId);
+    res.json({ matrix });
+  })
+);
 
 settingsRouter.get(
   "/",

@@ -8,6 +8,7 @@ import {
   fetchModalitiesSettings,
   fetchNameDictionary,
   fetchSettings,
+  fetchPageVisibilityMatrix,
   deleteUser,
   createUser,
   updateUserPassword,
@@ -38,6 +39,7 @@ import {
   fetchPatientImportRows,
   selectPatientImportRows,
   confirmPatientImportBatch,
+  savePageVisibilityMatrix,
 } from "@/lib/api-hooks";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
@@ -59,6 +61,14 @@ import type {
   PatientImportBatch,
   PatientImportStagingRow
 } from "@/types/api";
+import {
+  DEFAULT_PAGE_VISIBILITY_MATRIX,
+  PAGE_VISIBILITY_ROLES,
+  PAGE_VISIBILITY_ROUTE_KEYS,
+  normalizePageVisibilityMatrix,
+  type PageVisibilityMatrix,
+  type PageVisibilityRouteKey
+} from "@/lib/page-visibility";
 
 // ---------------------------------------------------------------------------
 // Friendly label maps for scheduling config enums
@@ -171,6 +181,7 @@ type SettingsSection =
   | "dicom_gateway_monitoring"
   | "orthanc_mwl_sync"
   | "users"
+  | "role_page_access"
   | "audit_log"
   | "exam_types"
   | "modalities"
@@ -193,6 +204,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "dicom_gateway_monitoring",
   "orthanc_mwl_sync",
   "users",
+  "role_page_access",
   "audit_log",
   "exam_types",
   "modalities",
@@ -287,6 +299,7 @@ export default function SettingsPage() {
             <h3 className="text-xl font-bold text-stone-900 dark:text-white mb-4">{sectionLabel(t, section)}</h3>
 
             {section === "users" && <UsersSection onReAuthRequired={requestReAuth} />}
+            {section === "role_page_access" && <RolePageAccessSection onReAuthRequired={requestReAuth} />}
             {section === "audit_log" && <AuditSection onReAuthRequired={requestReAuth} />}
             {section === "exam_types" && <ExamTypesSection onReAuthRequired={requestReAuth} />}
             {section === "modalities" && <ModalitiesSection onReAuthRequired={requestReAuth} />}
@@ -375,6 +388,10 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
             <select value={createForm.role} onChange={(e) => setCreateForm({ ...createForm, role: e.target.value })} className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm">
               <option value="receptionist">موظف استقبال</option>
               <option value="supervisor">مشرف</option>
+              <option value="modality_staff">Technologist</option>
+              <option value="doctor">Doctor</option>
+              <option value="administrative">Administrative</option>
+              <option value="super_admin">Super Admin</option>
             </select>
           </div>
           <button onClick={() => createMutation.mutate(createForm)} disabled={createMutation.isPending || !createForm.username || !createForm.fullName || !createForm.password} className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors">إنشاء</button>
@@ -3366,6 +3383,147 @@ function SchedulingEngineConfigSection({ onReAuthRequired }: { onReAuthRequired:
           Configuration saved successfully.
         </div>
       )}
+    </div>
+  );
+}
+
+const ROLE_LABELS: Record<string, string> = {
+  receptionist: "Receptionist",
+  supervisor: "Supervisor",
+  modality_staff: "Technologist",
+  doctor: "Doctor",
+  administrative: "Administrative",
+  super_admin: "Super Admin",
+};
+
+const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
+  dashboard: "Dashboard",
+  patients: "Patients",
+  appointments: "Appointments",
+  "v2.appointments.admin": "Appointments Admin (V2)",
+  calendar: "Calendar",
+  registrations: "Registrations",
+  queue: "Queue",
+  "queue.checkin": "Queue Check-In",
+  modality: "Modality",
+  doctor: "Doctor",
+  print: "Print",
+  statistics: "Statistics",
+  pacs: "PACS",
+  legacy: "Legacy",
+  settings: "Settings",
+};
+
+function RolePageAccessSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) => void }) {
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<PageVisibilityMatrix>(DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const [message, setMessage] = useState<string>("");
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    setDraft(normalizePageVisibilityMatrix(data));
+  }, [data]);
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!draft.settings.includes("super_admin")) {
+        throw new Error("Settings access must always include Super Admin.");
+      }
+      return savePageVisibilityMatrix(draft);
+    },
+    onSuccess: async (saved) => {
+      setDraft(normalizePageVisibilityMatrix(saved));
+      setMessage("Role page visibility saved.");
+      await queryClient.invalidateQueries({ queryKey: ["settings", "users_and_roles", "page_visibility_by_role"] });
+    },
+    onError: (err: unknown) => {
+      setMessage(err instanceof Error ? err.message : "Failed to save role page visibility.");
+    },
+  });
+
+  if (error) {
+    const msg = (error as Error).message;
+    if (msg?.includes("re-authentication") || msg?.includes("403")) {
+      return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["settings", "users_and_roles", "page_visibility_by_role"])} />;
+    }
+    return <QueryError message={msg} />;
+  }
+
+  if (isLoading) return <p className="description-center">Loading role page access...</p>;
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm description-center">
+        Configure which roles can see which pages in navigation. This affects sidebar/mobile visibility only.
+      </p>
+      <div className="overflow-auto border border-stone-200 dark:border-stone-700 rounded-lg">
+        <table className="w-full min-w-[900px] text-sm">
+          <thead>
+            <tr className="bg-stone-100 dark:bg-stone-800">
+              <th className="text-start p-2 font-semibold">Page</th>
+              {PAGE_VISIBILITY_ROLES.map((role) => (
+                <th key={role} className="text-center p-2 font-semibold">{ROLE_LABELS[role]}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PAGE_VISIBILITY_ROUTE_KEYS.map((routeKey) => (
+              <tr key={routeKey} className="border-t border-stone-200 dark:border-stone-700">
+                <td className="p-2">{PAGE_LABELS[routeKey]}</td>
+                {PAGE_VISIBILITY_ROLES.map((role) => {
+                  const checked = draft[routeKey]?.includes(role) ?? false;
+                  const isSettingsSuperAdmin = routeKey === "settings" && role === "super_admin";
+                  return (
+                    <td key={`${routeKey}-${role}`} className="text-center p-2">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={isSettingsSuperAdmin}
+                        onChange={(event) => {
+                          setDraft((prev) => {
+                            const currentRoles = prev[routeKey] || [];
+                            const nextRoles = event.target.checked
+                              ? [...currentRoles, role]
+                              : currentRoles.filter((r) => r !== role);
+                            const next = {
+                              ...prev,
+                              [routeKey]: Array.from(new Set(nextRoles)),
+                            } as PageVisibilityMatrix;
+                            if (!next.settings.includes("super_admin")) {
+                              next.settings = Array.from(new Set([...next.settings, "super_admin"]));
+                            }
+                            return next;
+                          });
+                        }}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-primary text-sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+          {saveMutation.isPending ? "Saving..." : "Save"}
+        </button>
+        <button
+          className="btn-secondary text-sm"
+          onClick={() => setDraft(normalizePageVisibilityMatrix(data ?? DEFAULT_PAGE_VISIBILITY_MATRIX))}
+          disabled={saveMutation.isPending}
+        >
+          Reset
+        </button>
+      </div>
+      {message ? <div className="p-3 rounded border border-stone-200 dark:border-stone-700 text-sm">{message}</div> : null}
     </div>
   );
 }

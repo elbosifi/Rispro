@@ -64,7 +64,10 @@ export async function createUser(
   }
 
   if (!isRole(role)) {
-    throw new HttpError(400, "role must be receptionist, supervisor, super_admin, or modality_staff.");
+    throw new HttpError(
+      400,
+      "role must be receptionist, supervisor, super_admin, modality_staff, doctor, or administrative."
+    );
   }
 
   if (role === "super_admin" && actor.role !== "super_admin") {

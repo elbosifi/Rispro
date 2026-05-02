@@ -1,6 +1,14 @@
 import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { User } from "@/types/api";
 import { t, type Language } from "@/lib/i18n";
+import {
+  canRoleAccessRoute,
+  DEFAULT_PAGE_VISIBILITY_MATRIX,
+  normalizePageVisibilityMatrix,
+  type PageVisibilityMatrix
+} from "@/lib/page-visibility";
+import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import {
   LayoutGrid,
   Users,
@@ -76,12 +84,21 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
   { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
-  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor", "super_admin"] }
+  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["super_admin"] }
 ];
 
-function canAccess(item: NavItemConfig, user: User | null): boolean {
-  if (!item.roles) return true;
+function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilityMatrix): boolean {
   if (!user) return false;
+
+  if (item.route === "settings" && user.role === "super_admin") {
+    return true;
+  }
+
+  if (canRoleAccessRoute(matrix, item.route, user.role)) {
+    return true;
+  }
+
+  if (!item.roles) return false;
   return item.roles.includes(user.role);
 }
 
@@ -346,7 +363,14 @@ export function SideNav({
   isRtl: boolean;
   onNavigate: (route: string) => void;
 }) {
-  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
+  const { data: pageVisibilityMatrix } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user, matrix));
 
   return (
     <nav
@@ -412,7 +436,14 @@ export function MobileDrawer({
   onNavigate: (route: string) => void;
   onClose: () => void;
 }) {
-  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user));
+  const { data: pageVisibilityMatrix } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const matrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const visibleItems = NAV_ITEMS.filter((item) => canAccess(item, user, matrix));
 
   if (!isOpen) return null;
 

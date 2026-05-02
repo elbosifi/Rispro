@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { NAV_ITEMS, SideNav } from "./navigation";
+import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
 
 vi.mock("lucide-react", () => {
   const Icon = () => null;
@@ -26,12 +27,23 @@ vi.mock("lucide-react", () => {
   };
 });
 
+const matrixState: { value: unknown } = { value: DEFAULT_PAGE_VISIBILITY_MATRIX };
+
+vi.mock("@tanstack/react-query", async () => {
+  const actual = await vi.importActual("@tanstack/react-query");
+  return {
+    ...actual,
+    useQuery: () => ({ data: matrixState.value }),
+  };
+});
+
 describe("Navigation governance", () => {
   it("does not include V3 create route in NAV_ITEMS", () => {
     expect(NAV_ITEMS.some((item) => item.route === "v3.appointments.create")).toBe(false);
   });
 
   it("does not render V3 create nav entry for receptionist users", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(
       <SideNav
         currentRoute="appointments"
@@ -43,5 +55,129 @@ describe("Navigation governance", () => {
     );
 
     expect(screen.queryByText("Create appointment (V3)")).toBeNull();
+  });
+
+  it("receptionist does not see doctor/modality/statistics/settings by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("Doctor home")).toBeNull();
+    expect(screen.queryByText("Modality board")).toBeNull();
+    expect(screen.queryByText("Statistics")).toBeNull();
+    expect(screen.queryByText("Settings")).toBeNull();
+  });
+
+  it("doctor sees doctor page by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 2, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Doctor home")).not.toBeNull();
+  });
+
+  it("modality_staff sees modality page by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 3, username: "tech", fullName: "Tech", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Modality board")).not.toBeNull();
+  });
+
+  it("administrative sees statistics by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 4, username: "adm", fullName: "Admin", role: "administrative" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Statistics")).not.toBeNull();
+  });
+
+  it("super_admin sees settings by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 5, username: "sa", fullName: "Super", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Settings")).not.toBeNull();
+  });
+
+  it("saved config changes navigation visibility", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      doctor: ["doctor", "super_admin"],
+      statistics: ["super_admin"],
+    };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 6, username: "sup", fullName: "Supervisor", role: "supervisor" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Doctor home")).toBeNull();
+    expect(screen.queryByText("Statistics")).toBeNull();
+  });
+
+  it("failed or missing config falls back to defaults", () => {
+    matrixState.value = undefined;
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 7, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Doctor home")).not.toBeNull();
+  });
+
+  it("settings access cannot be removed from super_admin", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      settings: [],
+    };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 8, username: "sa2", fullName: "Super2", role: "super_admin" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Settings")).not.toBeNull();
   });
 });

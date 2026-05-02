@@ -1,4 +1,5 @@
 import { ApiError, api } from "@/lib/api-client";
+import { normalizePageVisibilityMatrix, type PageVisibilityMatrix } from "@/lib/page-visibility";
 import {
   mapPatient,
   mapPatients,
@@ -1268,6 +1269,19 @@ export async function completeAppointment(id: number) {
 export async function fetchSettings(category: string) {
   const raw = await api<{ settings: RawRecord[] }>(`/settings/${category}`);
   return mapSettings(raw.settings ?? []);
+}
+
+export async function fetchPageVisibilityMatrix(): Promise<PageVisibilityMatrix> {
+  const raw = await api<{ matrix?: unknown }>("/settings/users-and-roles/page-visibility");
+  return normalizePageVisibilityMatrix(raw.matrix ?? {});
+}
+
+export async function savePageVisibilityMatrix(matrix: PageVisibilityMatrix): Promise<PageVisibilityMatrix> {
+  const raw = await api<{ matrix?: unknown }>("/settings/users-and-roles/page-visibility", {
+    method: "PUT",
+    body: JSON.stringify({ matrix }),
+  });
+  return normalizePageVisibilityMatrix(raw.matrix ?? {});
 }
 
 export async function fetchSonicDicomSettings(): Promise<Record<string, unknown>> {
