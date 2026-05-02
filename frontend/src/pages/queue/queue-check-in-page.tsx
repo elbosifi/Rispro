@@ -1,21 +1,45 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
+import {
+  Activity,
+  ArrowLeft,
+  BadgeCheck,
+  Building2,
+  Clock3,
+  ScanLine,
+  Sparkles,
+  TriangleAlert,
+  Waves,
+  RefreshCw,
+  Loader2
+} from "lucide-react";
 import { ApiError } from "@/lib/api-client";
-import { fetchQueueSnapshot, scanIntoQueue } from "@/lib/api-hooks";
+import { fetchQueueSnapshot, fetchStatistics, scanIntoQueue } from "@/lib/api-hooks";
 import { chooseLocalized } from "@/lib/i18n";
+import { todayIsoDateLy, formatDateTimeLy } from "@/lib/date-format";
 import type { QueueEntry, QueueSnapshot } from "@/types/api";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
-import { Button, Input } from "@/components/shared";
+import { Button, Card, Input } from "@/components/shared";
 
-const RESET_DELAY_MS = 5000;
+const RESET_DELAY_MS = 4500;
+const FALLBACK_MODALITY_LIMIT = 6;
 
 type CheckInState =
   | { mode: "idle" }
   | { mode: "loading" }
   | { mode: "success"; entry: QueueEntry | null }
   | { mode: "error"; message: string };
+
+type ModalityRow = {
+  key: string;
+  nameAr: string;
+  nameEn: string;
+  inQueueCount: number;
+  completedCount: number;
+  totalCount: number;
+};
 
 function getLocalizedScanError(t: ReturnType<typeof useLanguage>["t"], err: unknown): string {
   if (err instanceof ApiError) {
@@ -27,21 +51,60 @@ function getLocalizedScanError(t: ReturnType<typeof useLanguage>["t"], err: unkn
   return t("queue.checkInErrorGeneric");
 }
 
+function normalizeKey(...parts: Array<string | number | null | undefined>): string {
+  return parts
+    .map((part) => String(part ?? "").trim().toLowerCase())
+    .filter(Boolean)
+    .join("||");
+}
+
+function countEnteredEntries(queue: QueueSnapshot | undefined): number {
+  return queue?.queueEntries.filter((entry) => ["arrived", "waiting"].includes(entry.appointmentStatus)).length ?? 0;
+}
+
+function countCompletedEntries(queue: QueueSnapshot | undefined): number {
+  return queue?.queueEntries.filter((entry) => entry.appointmentStatus === "completed").length ?? 0;
+}
+
+function countModalityEntries(
+  queue: QueueSnapshot | undefined,
+  predicate: (entry: QueueEntry) => boolean
+): number {
+  return queue?.queueEntries.filter(predicate).length ?? 0;
+}
+
 export default function QueueCheckInPage() {
   const { t, language, isArabic, toggleLanguage } = useLanguage();
   const { logout } = useAuth();
   const queryClient = useQueryClient();
   const inputRef = useRef<HTMLInputElement>(null);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   const [scanValue, setScanValue] = useState("");
+  const [logoFailed, setLogoFailed] = useState(false);
+  const [currentTime, setCurrentTime] = useState(() => new Date());
   const [state, setState] = useState<CheckInState>({ mode: "idle" });
+  const today = useMemo(() => todayIsoDateLy(), []);
 
-  const resetToIdle = () => {
-    setScanValue("");
-    setState({ mode: "idle" });
-    inputRef.current?.focus();
-  };
+  const queueQuery = useQuery({
+    queryKey: ["queue"],
+    queryFn: fetchQueueSnapshot,
+    refetchInterval: 10_000,
+    staleTime: 5_000
+  });
+
+  const statisticsQuery = useQuery({
+    queryKey: ["statistics", today, "check-in"],
+    queryFn: () => fetchStatistics(today, ""),
+    refetchInterval: 30_000,
+    staleTime: 15_000
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(new Date());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -52,123 +115,532 @@ export default function QueueCheckInPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (state.mode !== "loading") {
+      inputRef.current?.focus();
+    }
+  }, [state.mode]);
+
+  const resetToIdle = () => {
+    setScanValue("");
+    setState({ mode: "idle" });
+    inputRef.current?.focus();
+  };
+
+  const queue = queueQuery.data;
+  const statistics = statisticsQuery.data;
+  const queueEntries = queue?.queueEntries ?? [];
+  const statsSummary = statistics?.summary;
+
+  const enteredToday = queue?.summary.waiting_count || countEnteredEntries(queue);
+  const waitingNow = queue?.summary.waiting_count || countModalityEntries(queue, (entry) => entry.appointmentStatus === "waiting");
+  const scheduledNotArrived = queue?.summary.scheduled_count || queueEntries.filter((entry) => entry.appointmentStatus === "scheduled").length;
+  const totalAppointments = queue?.summary.total_appointments || queueEntries.length;
+  const completedToday = statsSummary?.completedCount || countCompletedEntries(queue);
+
+  const lastUpdatedAt = Math.max(queueQuery.dataUpdatedAt || 0, statisticsQuery.dataUpdatedAt || 0);
+
+  const modalityRows = useMemo<ModalityRow[]>(() => {
+    const merged = new Map<string, ModalityRow>();
+
+    const upsert = (row: ModalityRow) => {
+      const existing = merged.get(row.key);
+      if (!existing) {
+        merged.set(row.key, row);
+        return;
+      }
+
+      existing.inQueueCount = Math.max(existing.inQueueCount, row.inQueueCount);
+      existing.completedCount = Math.max(existing.completedCount, row.completedCount);
+      existing.totalCount = Math.max(existing.totalCount, row.totalCount);
+      if (!existing.nameEn && row.nameEn) existing.nameEn = row.nameEn;
+      if (!existing.nameAr && row.nameAr) existing.nameAr = row.nameAr;
+    };
+
+    for (const row of statistics?.modalityBreakdown ?? []) {
+      upsert({
+        key: normalizeKey(row.modalityId, row.modalityNameEn, row.modalityNameAr),
+        nameAr: row.modalityNameAr,
+        nameEn: row.modalityNameEn,
+        inQueueCount: row.inQueueCount,
+        completedCount: row.completedCount,
+        totalCount: row.totalCount
+      });
+    }
+
+    const queueGrouped = new Map<string, { nameAr: string; nameEn: string; total: number; inQueue: number; completed: number }>();
+    for (const entry of queueEntries) {
+      const key = normalizeKey(entry.modalityNameEn, entry.modalityNameAr);
+      const existing = queueGrouped.get(key);
+      const total = (existing?.total ?? 0) + 1;
+      const inQueue = (existing?.inQueue ?? 0) + (entry.appointmentStatus !== "scheduled" ? 1 : 0);
+      const completed = (existing?.completed ?? 0) + (entry.appointmentStatus === "completed" ? 1 : 0);
+      queueGrouped.set(key, {
+        nameAr: existing?.nameAr || entry.modalityNameAr,
+        nameEn: existing?.nameEn || entry.modalityNameEn,
+        total,
+        inQueue,
+        completed
+      });
+    }
+
+    for (const [key, row] of queueGrouped.entries()) {
+      upsert({
+        key,
+        nameAr: row.nameAr,
+        nameEn: row.nameEn,
+        inQueueCount: row.inQueue,
+        completedCount: row.completed,
+        totalCount: row.total
+      });
+    }
+
+    return Array.from(merged.values())
+      .sort((a, b) => b.inQueueCount - a.inQueueCount || b.totalCount - a.totalCount)
+      .slice(0, FALLBACK_MODALITY_LIMIT);
+  }, [queueEntries, statistics?.modalityBreakdown]);
+
   const scanMutation = useMutation({
     mutationFn: scanIntoQueue,
     onSuccess: async (result) => {
-      const snapshot = await queryClient.fetchQuery<QueueSnapshot>({
-        queryKey: ["queue"],
-        queryFn: fetchQueueSnapshot
-      });
-      const matchedEntry =
-        snapshot.queueEntries.find((entry) => entry.appointmentId === result.bookingId) ??
-        snapshot.queueEntries.find((entry) => entry.id === result.bookingId) ??
-        null;
-      setState({ mode: "success", entry: matchedEntry });
+      try {
+        const [freshQueue, freshStats] = await Promise.all([
+          fetchQueueSnapshot(),
+          fetchStatistics(today, "")
+        ]);
+        queryClient.setQueryData(["queue"], freshQueue);
+        queryClient.setQueryData(["statistics", today, "check-in"], freshStats);
+
+        const matchedEntry =
+          freshQueue.queueEntries.find((entry) => entry.appointmentId === result.bookingId) ??
+          freshQueue.queueEntries.find((entry) => entry.id === result.bookingId) ??
+          null;
+
+        setState({ mode: "success", entry: matchedEntry });
+        setScanValue("");
+        if (resetTimerRef.current !== null) {
+          clearTimeout(resetTimerRef.current);
+        }
+        resetTimerRef.current = setTimeout(() => {
+          resetToIdle();
+        }, RESET_DELAY_MS);
+      } catch {
+        setState({ mode: "success", entry: null });
+        setScanValue("");
+        resetTimerRef.current = setTimeout(() => {
+          resetToIdle();
+        }, RESET_DELAY_MS);
+      }
+    },
+    onError: (err) => {
+      setState({ mode: "error", message: getLocalizedScanError(t, err) });
       setScanValue("");
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
       if (resetTimerRef.current !== null) {
         clearTimeout(resetTimerRef.current);
       }
       resetTimerRef.current = setTimeout(() => {
         resetToIdle();
       }, RESET_DELAY_MS);
-    },
-    onError: (err) => {
-      setState({ mode: "error", message: getLocalizedScanError(t, err) });
-      setScanValue("");
-      inputRef.current?.focus();
     }
   });
-
-  const statusText = useMemo(() => {
-    if (state.mode === "loading") return t("queue.checkInProcessing");
-    if (state.mode === "error") return state.message;
-    return t("queue.checkInHint");
-  }, [state, t]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const value = scanValue.trim();
-    if (!value || scanMutation.isPending) return;
+    if (!value || scanMutation.isPending || state.mode === "loading") return;
     setState({ mode: "loading" });
     scanMutation.mutate(value);
   };
 
+  const handleResetNow = () => {
+    if (resetTimerRef.current !== null) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+    resetToIdle();
+  };
+
+  const statusText = useMemo(() => {
+    if (state.mode === "loading") return t("queue.checkInScanning");
+    if (state.mode === "error") return state.message;
+    return t("queue.checkInReady");
+  }, [state, t]);
+
+  const timeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(language === "ar" ? "ar-LY" : "en-GB", {
+        timeZone: "Africa/Tripoli",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false
+      }),
+    [language]
+  );
+
+  const currentClock = timeFormatter.format(currentTime);
+  const hospitalName = language === "ar" ? t("brand.hospitalAr") : t("brand.hospitalEn");
+  const pageTitle = t("queue.checkInTitle");
+  const subtitle = t("queue.checkInInstruction");
+  const lastUpdatedText = lastUpdatedAt ? formatDateTimeLy(new Date(lastUpdatedAt)) : t("queue.lastUpdatedUnknown");
+
   return (
     <div
-      className="min-h-screen flex flex-col px-4 py-4 sm:px-6 sm:py-6"
+      className="min-h-screen overflow-hidden"
       dir={isArabic ? "rtl" : "ltr"}
-      style={{ backgroundColor: "var(--background)" }}
+      style={{
+        background:
+          "radial-gradient(circle at top left, rgba(0, 82, 255, 0.15), transparent 35%), radial-gradient(circle at top right, rgba(14, 165, 233, 0.12), transparent 28%), linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,252,1))"
+      }}
     >
-      <div className={`flex items-center justify-between gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
-        <Button variant="ghost" size="sm" onClick={toggleLanguage}>
-          {isArabic ? "EN" : "عربي"}
-        </Button>
-        <div className={`flex items-center gap-2 ${isArabic ? "flex-row-reverse" : ""}`}>
-          <Link to="/queue">
-            <Button variant="ghost" size="sm">{t("queue.checkInBackToQueue")}</Button>
-          </Link>
-          <Button variant="ghost" size="sm" onClick={logout}>{t("common.signOut")}</Button>
-        </div>
-      </div>
+      <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 p-4 sm:p-6 lg:p-8">
+        <header className="rounded-[2rem] border border-border/70 bg-white/85 px-4 py-4 shadow-[0_20px_60px_rgba(15,23,42,0.08)] backdrop-blur-md sm:px-6">
+          <div className={`flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between ${isArabic ? "xl:flex-row-reverse" : ""}`}>
+            <div className={`flex items-center gap-4 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm">
+                {!logoFailed ? (
+                  <img
+                    src="/nccb-logo.png"
+                    alt={hospitalName}
+                    className="h-full w-full object-contain p-2"
+                    onError={() => setLogoFailed(true)}
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,var(--accent),var(--accent-secondary))] text-white">
+                    <span className="text-lg font-bold tracking-[0.2em]">NCCB</span>
+                  </div>
+                )}
+              </div>
 
-      <div className="flex-1 flex items-center justify-center">
-        <div className="w-full max-w-4xl mx-auto text-center space-y-8">
-          <h1 className="text-4xl sm:text-5xl font-display font-semibold">
-            {t("queue.checkInTitle")}
-          </h1>
-          <p className="text-muted-foreground text-lg sm:text-xl">
-            {t("queue.checkInSubtitle")}
-          </p>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <Input
-              ref={inputRef}
-              type="text"
-              value={scanValue}
-              onChange={(event) => setScanValue(event.target.value)}
-              placeholder={t("queue.checkInInputPlaceholder")}
-              dir="ltr"
-              autoCapitalize="off"
-              autoCorrect="off"
-              autoComplete="off"
-              className="h-16 sm:h-20 text-xl sm:text-2xl text-center font-mono"
-              aria-label={t("queue.checkInInputAria")}
-            />
-          </form>
-
-          {state.mode === "success" ? (
-            <div className="rounded-2xl border border-green-200 bg-green-50/70 px-6 py-8 space-y-3">
-              <p className="text-2xl sm:text-3xl font-semibold text-green-800">{t("queue.checkInSuccessTitle")}</p>
-              {state.entry ? (
-                <>
-                  <p className="text-lg sm:text-2xl font-semibold text-green-900">
-                    {t("queue.checkInQueueNumber", { number: state.entry.queueNumber })}
-                  </p>
-                  <p className="text-base sm:text-xl text-green-900">
-                    {t("queue.checkInModality", { modality: chooseLocalized(language, state.entry.modalityNameAr, state.entry.modalityNameEn) })}
-                  </p>
-                  <p className="text-base sm:text-xl text-green-900">
-                    {t("queue.checkInExam", { exam: chooseLocalized(language, state.entry.examNameAr, state.entry.examNameEn) || t("common.na") })}
-                  </p>
-                </>
-              ) : (
-                <p className="text-base sm:text-xl text-green-900">{t("queue.checkInSuccessNoDetails")}</p>
-              )}
-              <p className="text-sm text-green-700">{t("queue.checkInAutoReset")}</p>
+              <div className="space-y-1">
+                <p className="text-xs uppercase tracking-[0.28em] text-muted-foreground">{t("queue.checkInLabel")}</p>
+                <h1 className="font-display text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
+                  {hospitalName}
+                </h1>
+                <p className="text-sm text-muted-foreground sm:text-base">{pageTitle}</p>
+              </div>
             </div>
-          ) : (
-            <p
-              className={`text-base sm:text-lg ${
-                state.mode === "error" ? "text-red-600" : "text-muted-foreground"
-              }`}
-              role={state.mode === "error" ? "alert" : undefined}
+
+            <div className={`flex flex-wrap items-center gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <div className="flex items-center gap-2 text-xs uppercase tracking-[0.2em] text-muted-foreground">
+                  <Clock3 size={14} />
+                  <span>{t("queue.currentTime")}</span>
+                </div>
+                <p className="mt-1 text-lg font-semibold text-foreground">{currentClock}</p>
+              </div>
+
+              <Button variant="ghost" size="sm" onClick={toggleLanguage} className="rounded-2xl px-4">
+                {isArabic ? "EN" : "عربي"}
+              </Button>
+
+              <Link to="/queue">
+                <Button variant="ghost" size="sm" className="rounded-2xl px-4">
+                  <ArrowLeft size={16} />
+                  <span>{t("queue.checkInBackToQueue")}</span>
+                </Button>
+              </Link>
+
+              <Button variant="ghost" size="sm" onClick={logout} className="rounded-2xl px-4">
+                {t("common.signOut")}
+              </Button>
+            </div>
+          </div>
+        </header>
+
+        <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+          <section className="flex min-h-0 flex-col gap-4">
+            <Card
+              variant="featured"
+              className="relative overflow-hidden border-0 bg-[linear-gradient(135deg,rgba(0,82,255,0.95),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] text-white shadow-[0_30px_80px_rgba(0,82,255,0.22)]"
             >
-              {statusText}
-            </p>
-          )}
-        </div>
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.16),transparent_32%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.08),transparent_24%)]" />
+              <div className="relative grid gap-6 xl:grid-cols-[1.15fr_0.85fr] xl:items-center">
+                <div className="space-y-6">
+                  <div className={`flex items-center gap-3 text-white/90 ${isArabic ? "flex-row-reverse" : ""}`}>
+                    <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/18 shadow-sm">
+                      <ScanLine size={28} />
+                    </span>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.28em] text-white/70">{t("queue.checkInReadyToScan")}</p>
+                      <h2 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
+                        {state.mode === "loading" ? t("queue.checkInScanning") : t("queue.checkInReady")}
+                      </h2>
+                    </div>
+                  </div>
+
+                  <p className="max-w-2xl text-base leading-7 text-white/88 sm:text-lg">
+                    {state.mode === "idle" && subtitle}
+                    {state.mode === "loading" && t("queue.checkInScanningHint")}
+                    {state.mode === "success" && t("queue.checkInSuccessMessage")}
+                    {state.mode === "error" && t("queue.checkInErrorMessage")}
+                  </p>
+
+                  <form onSubmit={handleSubmit} className="relative">
+                    <Input
+                      ref={inputRef}
+                      type="text"
+                      value={scanValue}
+                      onChange={(event) => setScanValue(event.target.value)}
+                      placeholder={t("queue.checkInInputPlaceholder")}
+                      dir="ltr"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      inputMode="text"
+                      className="absolute left-[-9999px] top-0 h-px w-px opacity-0"
+                      aria-label={t("queue.checkInInputAria")}
+                    />
+                    <div className="flex flex-wrap items-center gap-3">
+                      <Button
+                        type="submit"
+                        variant="secondary"
+                        size="lg"
+                        disabled={scanMutation.isPending || state.mode === "loading" || !scanValue.trim()}
+                        className="rounded-full border-0 bg-white px-7 text-base font-semibold text-[var(--accent)] shadow-[0_16px_40px_rgba(15,23,42,0.16)] hover:bg-white/95"
+                      >
+                        {state.mode === "loading" ? (
+                          <>
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <span>{t("queue.checkInScanning")}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="h-5 w-5" />
+                            <span>{t("queue.checkInScanNow")}</span>
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="lg"
+                        onClick={handleResetNow}
+                        className="rounded-full border border-white/18 bg-white/10 px-7 text-white hover:bg-white/18"
+                      >
+                        <RefreshCw className="h-5 w-5" />
+                        <span>{t("queue.checkInResetNow")}</span>
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="flex justify-center xl:justify-end">
+                  {state.mode === "success" ? (
+                    <div className="w-full max-w-md rounded-[2rem] border border-white/18 bg-white/10 p-6 text-white shadow-[0_30px_70px_rgba(15,23,42,0.2)] backdrop-blur-md">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-400/20 text-emerald-200">
+                          <BadgeCheck size={34} />
+                        </span>
+                        <div>
+                          <p className="text-sm uppercase tracking-[0.24em] text-white/70">{t("queue.checkInSuccessTitle")}</p>
+                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInSuccessShort")}</h3>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 space-y-4">
+                        <div className="rounded-2xl bg-white/12 px-5 py-4">
+                          <p className="text-xs uppercase tracking-[0.22em] text-white/70">{t("queue.queueNumber")}</p>
+                          <p className="mt-2 text-4xl font-bold tracking-tight">
+                            {state.entry ? `#${state.entry.queueNumber}` : t("common.na")}
+                          </p>
+                        </div>
+
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-2xl bg-white/12 px-4 py-3">
+                            <p className="text-xs uppercase tracking-[0.18em] text-white/70">{t("queue.modality")}</p>
+                            <p className="mt-1 text-lg font-semibold">
+                              {state.entry
+                                ? chooseLocalized(language, state.entry.modalityNameAr, state.entry.modalityNameEn)
+                                : t("common.na")}
+                            </p>
+                          </div>
+                          <div className="rounded-2xl bg-white/12 px-4 py-3">
+                            <p className="text-xs uppercase tracking-[0.18em] text-white/70">{t("queue.exam")}</p>
+                            <p className="mt-1 text-lg font-semibold">
+                              {state.entry
+                                ? chooseLocalized(language, state.entry.examNameAr, state.entry.examNameEn) || t("common.na")
+                                : t("common.na")}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : state.mode === "error" ? (
+                    <div className="w-full max-w-md rounded-[2rem] border border-rose-200 bg-rose-50 px-6 py-7 text-rose-950 shadow-[0_20px_50px_rgba(244,63,94,0.12)]">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-600">
+                          <TriangleAlert size={34} />
+                        </span>
+                        <div>
+                          <p className="text-sm uppercase tracking-[0.24em] text-rose-500">{t("queue.checkInErrorTitle")}</p>
+                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInAskReception")}</h3>
+                        </div>
+                      </div>
+                      <p className="mt-5 text-base leading-7">{state.message}</p>
+                    </div>
+                  ) : (
+                    <div className="w-full max-w-md rounded-[2rem] border border-white/18 bg-white/10 px-6 py-8 text-white shadow-[0_20px_50px_rgba(15,23,42,0.14)] backdrop-blur-md">
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/12 text-white">
+                          <Waves size={34} />
+                        </span>
+                        <div>
+                          <p className="text-sm uppercase tracking-[0.24em] text-white/70">{t("queue.checkInReadyToScan")}</p>
+                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInScanHere")}</h3>
+                        </div>
+                      </div>
+                      <p className="mt-5 text-base leading-7 text-white/85">{t("queue.checkInIdleHint")}</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInMetrics")}</p>
+                    <h3 className="mt-1 text-xl font-semibold text-foreground">{t("queue.checkInTodayOverview")}</h3>
+                  </div>
+                  <Activity className="h-5 w-5 text-[var(--accent)]" />
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                  <StatTile label={t("queue.enteredToday")} value={enteredToday} accent="bg-sky-500" />
+                  <StatTile label={t("queue.completedToday")} value={completedToday} accent="bg-emerald-500" />
+                  <StatTile label={t("queue.waitingNow")} value={waitingNow} accent="bg-amber-500" />
+                  <StatTile label={t("queue.scheduledNotArrived")} value={scheduledNotArrived} accent="bg-rose-500" />
+                  <StatTile label={t("queue.totalAppointments")} value={totalAppointments} accent="bg-indigo-500" />
+                </div>
+
+                <div className="mt-4 flex items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-muted-foreground">
+                  <span>{t("queue.lastUpdated")}</span>
+                  <span className="font-medium text-foreground">{lastUpdatedText}</span>
+                </div>
+              </Card>
+
+              <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{t("queue.modalityStatus")}</p>
+                    <h3 className="mt-1 text-xl font-semibold text-foreground">{t("queue.modalityStatusHeading")}</h3>
+                  </div>
+                  <Building2 className="h-5 w-5 text-[var(--accent)]" />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  {modalityRows.length > 0 ? (
+                    modalityRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4 shadow-sm"
+                      >
+                        <div className={`flex items-start justify-between gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
+                          <div>
+                            <p className="text-lg font-semibold text-foreground">
+                              {chooseLocalized(language, row.nameAr, row.nameEn) || t("common.na")}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {t("queue.inQueue")}: {row.inQueueCount}{" "}
+                              <span className="px-1">•</span>
+                              {t("queue.completed")}: {row.completedCount}{" "}
+                              <span className="px-1">•</span>
+                              {t("queue.total")}: {row.totalCount}
+                            </p>
+                          </div>
+
+                          <div className="min-w-16 rounded-2xl bg-[linear-gradient(135deg,rgba(0,82,255,0.12),rgba(14,165,233,0.12))] px-3 py-2 text-center">
+                            <p className="text-[10px] uppercase tracking-[0.22em] text-muted-foreground">{t("queue.inQueue")}</p>
+                            <p className="text-2xl font-semibold text-[var(--accent)]">{row.inQueueCount}</p>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
+                          <div className="rounded-xl bg-white px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{t("queue.inQueue")}</p>
+                            <p className="mt-1 text-lg font-semibold text-foreground">{row.inQueueCount}</p>
+                          </div>
+                          <div className="rounded-xl bg-white px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{t("queue.completed")}</p>
+                            <p className="mt-1 text-lg font-semibold text-foreground">{row.completedCount}</p>
+                          </div>
+                          <div className="rounded-xl bg-white px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground">{t("queue.total")}</p>
+                            <p className="mt-1 text-lg font-semibold text-foreground">{row.totalCount}</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-muted-foreground">
+                      {t("queue.modalityStatusEmpty")}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            </div>
+          </section>
+
+          <aside className="flex min-h-0 flex-col gap-4">
+            <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/92 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInInstructionsTitle")}</p>
+                  <h3 className="mt-1 text-xl font-semibold text-foreground">{t("queue.checkInInstructionsHeading")}</h3>
+                </div>
+                <ScanLine className="h-5 w-5 text-[var(--accent)]" />
+              </div>
+
+              <div className="mt-4 space-y-3 text-sm leading-6 text-muted-foreground">
+                <p>{t("queue.checkInStep1")}</p>
+                <p>{t("queue.checkInStep2")}</p>
+                <p>{t("queue.checkInStep3")}</p>
+              </div>
+            </Card>
+
+            <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/92 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInLiveFeed")}</p>
+                  <h3 className="mt-1 text-xl font-semibold text-foreground">{t("queue.checkInLiveStatus")}</h3>
+                </div>
+                <Sparkles className="h-5 w-5 text-[var(--accent)]" />
+              </div>
+
+              <div className="mt-4 space-y-3">
+                <div className="rounded-2xl bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t("queue.lastUpdated")}</p>
+                  <p className="mt-1 text-base font-medium text-foreground">{lastUpdatedText}</p>
+                </div>
+                <div
+                  className={`rounded-2xl px-4 py-4 text-base font-medium ${
+                    state.mode === "error"
+                      ? "bg-rose-50 text-rose-700"
+                      : state.mode === "success"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-sky-50 text-sky-700"
+                  }`}
+                  role={state.mode === "error" ? "alert" : "status"}
+                  aria-live="polite"
+                >
+                  {statusText}
+                </div>
+              </div>
+            </Card>
+          </aside>
+        </main>
       </div>
+    </div>
+  );
+}
+
+function StatTile({ label, value, accent }: { label: string; value: number; accent: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+      <div className={`mb-3 h-2 w-12 rounded-full ${accent}`} />
+      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-3xl font-semibold tracking-tight text-foreground">{value}</p>
     </div>
   );
 }
