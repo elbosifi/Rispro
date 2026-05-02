@@ -490,6 +490,7 @@ pacsRouter.post(
   "/remap/jobs/:jobId/prepare",
   ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
+    // Legacy V1 compatibility path. The guided wizard now uses /remap/jobs/process-multipart.
     const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const jobId = asOptionalString(request.params?.jobId);
@@ -602,6 +603,7 @@ pacsRouter.post(
   "/remap/jobs/:jobId/confirm-send",
   ...authMiddleware,
   asyncRoute(async (req: Request, res: Response) => {
+    // Legacy V1 compatibility path. The guided wizard now uses /remap/jobs/process-multipart.
     const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { jobId?: string } };
     const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
     const jobId = asOptionalString(request.params?.jobId);

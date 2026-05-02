@@ -144,6 +144,24 @@ describe("PacsRemapPage wizard", () => {
     expect(FakeXHR.instances.length).toBe(0);
   });
 
+  it("marks the active wizard card after scan", async () => {
+    scanMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "A", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [new File(["1"], "a1.dcm")] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      filesByStudyUid: new Map(),
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["1"], "a1.dcm")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    const activeCards = document.querySelectorAll("[data-active-step='true']");
+    expect(activeCards.length).toBe(1);
+    expect(activeCards[0]?.textContent || "").toContain("Step 3: Choose RISPro patient");
+  });
+
   it("uploads only selected study files and includes selectedStudyInstanceUID", async () => {
     const selectedFiles = [new File(["1"], "a1.dcm"), new File(["2"], "a2.dcm")];
     scanMock.mockResolvedValue({

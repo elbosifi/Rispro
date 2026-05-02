@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
@@ -237,6 +237,7 @@ export default function PacsRemapPage() {
   const [fileInputVersion, setFileInputVersion] = useState(0);
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
+  const stepCardRefs = useRef<Partial<Record<RemapWizardStep, HTMLDivElement | null>>>({});
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
 
@@ -512,6 +513,16 @@ export default function PacsRemapPage() {
     return "review";
   }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
 
+  useEffect(() => {
+    const activeElement = stepCardRefs.current[wizardStep];
+    if (!activeElement) return;
+    const handle = window.requestAnimationFrame(() => {
+      activeElement.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
+      activeElement.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [wizardStep]);
+
   const visibleErrorMessage =
     wizardStep === "sent"
       ? ""
@@ -552,6 +563,17 @@ export default function PacsRemapPage() {
     t(language, "pacs.remap.resultStep"),
   ];
 
+  const activeCardClassName = "border-teal-500 ring-2 ring-teal-200 shadow-sm";
+  const inactiveCardClassName = "border-transparent";
+  const stepCardProps = (step: RemapWizardStep, active: boolean) => ({
+    ref: (node: HTMLDivElement | null) => {
+      stepCardRefs.current[step] = node;
+    },
+    tabIndex: -1,
+    "data-active-step": active ? "true" : "false",
+    className: `card-shell p-5 space-y-4 border transition-all duration-200 ${active ? activeCardClassName : inactiveCardClassName}`,
+  } as const);
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <div className="card-shell p-5 space-y-2">
@@ -571,7 +593,7 @@ export default function PacsRemapPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-4">
-          <div className="card-shell p-5 space-y-4">
+          <div {...stepCardProps("select_files", wizardStep === "select_files" || wizardStep === "scanning")}>
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -631,7 +653,7 @@ export default function PacsRemapPage() {
           </div>
 
           {scanResult && (
-            <div className="card-shell p-5 space-y-4">
+            <div {...stepCardProps("choose_study", wizardStep === "choose_study")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step2")}</h3>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                 {t(language, "pacs.remap.detectedStudiesSummary", {
@@ -676,7 +698,7 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div className="card-shell p-5 space-y-4">
+            <div {...stepCardProps("choose_patient", wizardStep === "choose_patient")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step3")}</h3>
               <div className="rounded-lg border p-3 space-y-2">
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
@@ -761,7 +783,7 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div className="card-shell p-5 space-y-4">
+            <div {...stepCardProps("choose_destination", wizardStep === "choose_destination")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step4")}</h3>
               <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
                 <option value="">{t(language, "pacs.remap.selectDestination")}</option>
@@ -775,7 +797,7 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div className="card-shell p-5 space-y-4">
+            <div {...stepCardProps("review", wizardStep === "review")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step5")}</h3>
               <div className="rounded border p-3 text-xs space-y-1">
                 <p><strong>{t(language, "pacs.remap.originalPatientId")}:</strong> {selectedStudy?.patientId || "—"}</p>
@@ -807,7 +829,7 @@ export default function PacsRemapPage() {
           )}
 
           {(wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending") && (
-            <div className="card-shell p-5 space-y-3">
+            <div {...stepCardProps(wizardStep === "sending" ? "sending" : "uploading", wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.processStep")}</h3>
               <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
                 <div className="h-full bg-teal-600 transition-all duration-200" style={{ width: `${wizardStep === "uploading" ? uploadPercent : wizardStep === "orthanc_processing" ? 75 : 90}%` }} />
@@ -821,7 +843,7 @@ export default function PacsRemapPage() {
           )}
 
           {(wizardStep === "sent" || wizardStep === "failed") && (
-            <div className="card-shell p-5 space-y-3">
+            <div {...stepCardProps(wizardStep, wizardStep === "sent" || wizardStep === "failed")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.resultStep")}</h3>
               {wizardStep === "sent" ? (
                 <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
