@@ -26,7 +26,7 @@ export function ProtectedRoute({
 
   if (requiredRoles && !requiredRoles.includes(user.role)) {
     return (
-      <Navigate to="/dashboard" replace />
+      <Navigate to="/" replace />
     );
   }
 

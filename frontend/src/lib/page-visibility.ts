@@ -95,3 +95,30 @@ export function canRoleAccessRoute(matrix: PageVisibilityMatrix, route: string, 
   const key = route as PageVisibilityRouteKey;
   return matrix[key].includes(role);
 }
+
+const DEFAULT_LANDING_PRIORITY: readonly PageVisibilityRouteKey[] = [
+  "queue",
+  "registrations",
+  "patients",
+  "appointments",
+  "calendar",
+  "modality",
+  "doctor",
+  "statistics",
+  "print",
+  "pacs",
+  "legacy",
+  "v2.appointments.admin",
+  "settings",
+  "queue.checkin",
+  "dashboard",
+];
+
+export function getDefaultLandingRouteForRole(matrix: PageVisibilityMatrix, role: Role): PageVisibilityRouteKey {
+  for (const route of DEFAULT_LANDING_PRIORITY) {
+    if (canRoleAccessRoute(matrix, route, role)) {
+      return route;
+    }
+  }
+  return "dashboard";
+}

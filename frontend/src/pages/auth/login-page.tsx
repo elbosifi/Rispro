@@ -14,7 +14,7 @@ export function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
 
-  const from = location.state?.from?.pathname || "/dashboard";
+  const from = location.state?.from?.pathname || "/";
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();

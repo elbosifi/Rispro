@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
 import { ProtectedRoute } from "@/components/auth/protected-route";
@@ -26,6 +27,12 @@ import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
+import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import {
+  DEFAULT_PAGE_VISIBILITY_MATRIX,
+  getDefaultLandingRouteForRole,
+  normalizePageVisibilityMatrix
+} from "@/lib/page-visibility";
 
 const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
@@ -58,6 +65,15 @@ function AppContent() {
   const { language, toggleLanguage } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const { data: pageVisibilityMatrix } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+  const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user?.role ?? "receptionist");
+  const defaultLandingPath = ROUTE_PATHS[defaultLandingRoute] || "/dashboard";
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -175,7 +191,7 @@ function AppContent() {
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
           <Routes>
-            <Route path="/" element={<DashboardPage />} />
+            <Route path="/" element={<Navigate to={defaultLandingPath} replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/patients" element={<PatientsPage />} />
             <Route path="/patients/new" element={<PatientsPage />} />
