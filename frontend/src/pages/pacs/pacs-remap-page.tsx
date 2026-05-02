@@ -21,6 +21,8 @@ type RemapWizardStep =
   | "sent"
   | "failed";
 
+type PatientLookupMode = "filtered_appointments" | "all_appointments" | "all_patients";
+
 interface RemapJob {
   id: number;
   status: JobStatus;
@@ -220,9 +222,8 @@ export default function PacsRemapPage() {
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
+  const [patientLookupMode, setPatientLookupMode] = useState<PatientLookupMode>("filtered_appointments");
   const [patientSearch, setPatientSearch] = useState("");
-  const [todayPatientSearch, setTodayPatientSearch] = useState("");
-  const [allDatesPatientSearch, setAllDatesPatientSearch] = useState("");
   const [todayModalityFilter, setTodayModalityFilter] = useState("");
   const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
@@ -260,42 +261,44 @@ export default function PacsRemapPage() {
     return toIsoDate(now);
   }, [studyDateMode, customStudyDate]);
 
+  const trimmedPatientSearch = patientSearch.trim();
+
   const todayStudiesQuery = useQuery({
-    queryKey: ["v2", "appointments", "remap-picker", studyDateForFilter, todayModalityFilter, todayPatientSearch],
+    queryKey: ["v2", "appointments", "remap-picker", studyDateForFilter, todayModalityFilter, trimmedPatientSearch, patientLookupMode],
     queryFn: () => {
       const params = new URLSearchParams();
       params.set("dateFrom", studyDateForFilter);
       params.set("dateTo", studyDateForFilter);
       if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
-      if (todayPatientSearch.trim()) params.set("q", todayPatientSearch.trim());
+      if (trimmedPatientSearch) params.set("q", trimmedPatientSearch);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
+    enabled: patientLookupMode === "filtered_appointments",
     retry: 0,
   });
 
   const allDatesStudiesQuery = useQuery({
-    queryKey: ["v2", "appointments", "remap-picker-all-dates", allDatesPatientSearch, todayModalityFilter],
+    queryKey: ["v2", "appointments", "remap-picker-all-dates", trimmedPatientSearch, todayModalityFilter, patientLookupMode],
     queryFn: () => {
       const params = new URLSearchParams();
-      params.set("q", allDatesPatientSearch.trim());
+      params.set("q", trimmedPatientSearch);
       if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
-    enabled: allDatesPatientSearch.trim().length >= 2,
+    enabled: patientLookupMode === "all_appointments" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
   const patientQuery = useQuery({
-    queryKey: ["patients", "remap-search", patientSearch],
+    queryKey: ["patients", "remap-search", trimmedPatientSearch, patientLookupMode],
     queryFn: async () => {
-      const search = patientSearch.trim();
-      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(search)}`);
+      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(trimmedPatientSearch)}`);
       const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
       if (primaryPatients) return { patients: primaryPatients as PatientOption[] };
-      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`);
+      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(trimmedPatientSearch)}&page=1&pageSize=25`);
       return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
     },
-    enabled: patientSearch.trim().length >= 2,
+    enabled: patientLookupMode === "all_patients" && trimmedPatientSearch.length >= 2,
     retry: 0,
   });
 
@@ -582,9 +585,8 @@ export default function PacsRemapPage() {
     setSelectedStudyInstanceUid("");
     setSelectedPatientId("");
     setSelectedDestinationKey("");
+    setPatientLookupMode("filtered_appointments");
     setPatientSearch("");
-    setTodayPatientSearch("");
-    setAllDatesPatientSearch("");
     setEnableFallbackUpload(false);
     setConfirmChecked(false);
     setUploadLoaded(0);
@@ -748,11 +750,21 @@ export default function PacsRemapPage() {
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step3")}</h3>
               <div className="rounded-lg border p-3 space-y-2">
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                  <select
+                    value={patientLookupMode}
+                    onChange={(e) => setPatientLookupMode(e.target.value as PatientLookupMode)}
+                    className="input-premium w-full px-3 py-2"
+                  >
+                    <option value="filtered_appointments">{t(language, "pacs.remap.lookupModeFilteredAppointments")}</option>
+                    <option value="all_appointments">{t(language, "pacs.remap.lookupModeAllAppointments")}</option>
+                    <option value="all_patients">{t(language, "pacs.remap.lookupModeAllPatients")}</option>
+                  </select>
                   <select
                     value={studyDateMode}
                     onChange={(e) => setStudyDateMode(e.target.value as "today" | "yesterday" | "custom")}
                     className="input-premium w-full px-3 py-2"
+                    disabled={patientLookupMode !== "filtered_appointments"}
                   >
                     <option value="today">{t(language, "pacs.remap.today")}</option>
                     <option value="yesterday">{t(language, "pacs.remap.yesterday")}</option>
@@ -762,13 +774,14 @@ export default function PacsRemapPage() {
                     type="date"
                     value={customStudyDate}
                     onChange={(e) => setCustomStudyDate(e.target.value)}
-                    disabled={studyDateMode !== "custom"}
+                    disabled={patientLookupMode !== "filtered_appointments" || studyDateMode !== "custom"}
                     className="input-premium w-full px-3 py-2 disabled:opacity-50"
                   />
                   <select
                     value={todayModalityFilter}
                     onChange={(e) => setTodayModalityFilter(e.target.value)}
                     className="input-premium w-full px-3 py-2"
+                    disabled={patientLookupMode === "all_patients"}
                   >
                     <option value="">{t(language, "pacs.remap.allModalities")}</option>
                     {(modalityLookupQuery.data?.items || []).map((modality) => (
@@ -779,15 +792,21 @@ export default function PacsRemapPage() {
                   </select>
                   <input
                     type="text"
-                    value={todayPatientSearch}
-                    onChange={(e) => setTodayPatientSearch(e.target.value)}
-                    placeholder={t(language, "pacs.remap.optionalPatientSearch")}
+                    value={patientSearch}
+                    onChange={(e) => setPatientSearch(e.target.value)}
+                    placeholder={
+                      patientLookupMode === "all_patients"
+                        ? t(language, "pacs.remap.searchAnyPatientPlaceholder")
+                        : patientLookupMode === "all_appointments"
+                          ? t(language, "pacs.remap.searchAllDatesPlaceholder")
+                          : t(language, "pacs.remap.optionalPatientSearch")
+                    }
                     className="input-premium w-full px-3 py-2"
                   />
                 </div>
-                {todayStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingStudyLinkedPatients")}</p>}
-                {todayStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedStudyLinkedPatients")}</p>}
-                {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                {patientLookupMode === "filtered_appointments" && todayStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingStudyLinkedPatients")}</p>}
+                {patientLookupMode === "filtered_appointments" && todayStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedStudyLinkedPatients")}</p>}
+                {patientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {(todayStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
                       const displayName = appointment.english_full_name || appointment.arabic_full_name || formatFallbackPatientLabel(language, appointment.patient_id);
@@ -809,22 +828,13 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                {patientLookupMode === "filtered_appointments" && !todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForFilter")}</p>
                 )}
-              </div>
-              <div className="rounded-lg border p-3 space-y-2">
-                <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAllDatesAppointments")}</p>
-                <input
-                  type="text"
-                  value={allDatesPatientSearch}
-                  onChange={(e) => setAllDatesPatientSearch(e.target.value)}
-                  className="input-premium w-full px-3 py-2"
-                  placeholder={t(language, "pacs.remap.searchAllDatesPlaceholder")}
-                />
-                {allDatesStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAllDatesAppointments")}</p>}
-                {allDatesStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAllDatesAppointments")}</p>}
-                {!allDatesStudiesQuery.isLoading && allDatesPatientSearch.trim().length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                {patientLookupMode === "all_appointments" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAllDatesAppointments")}</p>}
+                {patientLookupMode === "all_appointments" && allDatesStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAllDatesAppointments")}</p>}
+                {patientLookupMode === "all_appointments" && allDatesStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAllDatesAppointments")}</p>}
+                {patientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {(allDatesStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
                       const displayName = appointment.english_full_name || appointment.arabic_full_name || formatFallbackPatientLabel(language, appointment.patient_id);
@@ -846,22 +856,13 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {!allDatesStudiesQuery.isLoading && allDatesPatientSearch.trim().length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                {patientLookupMode === "all_appointments" && !allDatesStudiesQuery.isLoading && trimmedPatientSearch.length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForSearch")}</p>
                 )}
-              </div>
-              <div className="rounded-lg border p-3 space-y-2">
-                <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAnyPatient")}</p>
-                <input
-                  type="text"
-                  value={patientSearch}
-                  onChange={(e) => setPatientSearch(e.target.value)}
-                  className="input-premium w-full px-3 py-2"
-                  placeholder={t(language, "pacs.remap.searchAnyPatientPlaceholder")}
-                />
-                {patientQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAnyPatient")}</p>}
-                {patientQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAnyPatient")}</p>}
-                {!patientQuery.isLoading && patientSearch.trim().length >= 2 && directoryPatients.length > 0 && (
+                {patientLookupMode === "all_patients" && <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAnyPatient")}</p>}
+                {patientLookupMode === "all_patients" && patientQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAnyPatient")}</p>}
+                {patientLookupMode === "all_patients" && patientQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAnyPatient")}</p>}
+                {patientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length > 0 && (
                   <div className="max-h-56 overflow-y-auto space-y-2">
                     {directoryPatients.slice(0, 25).map((patient) => {
                       const isSelected = Number(selectedPatientId || 0) === Number(patient.id);
@@ -879,7 +880,7 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
-                {!patientQuery.isLoading && patientSearch.trim().length >= 2 && directoryPatients.length === 0 && (
+                {patientLookupMode === "all_patients" && !patientQuery.isLoading && trimmedPatientSearch.length >= 2 && directoryPatients.length === 0 && (
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAnyPatientMatches")}</p>
                 )}
               </div>

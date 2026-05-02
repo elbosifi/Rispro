@@ -216,7 +216,7 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
     const comboBoxes = screen.getAllByRole("combobox");
-    expect((comboBoxes[2] as HTMLSelectElement).value).toBe("1");
+    expect((comboBoxes.at(-1) as HTMLSelectElement).value).toBe("1");
   });
 
   it("does not use FileReader/readAsDataURL for upload path", async () => {
@@ -251,6 +251,7 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["1"], "a1.dcm")] } });
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
+    fireEvent.change(screen.getByDisplayValue("Appointments for selected date"), { target: { value: "all_patients" } });
     fireEvent.change(screen.getByPlaceholderText("Search by patient name, national ID, or MRN"), { target: { value: "Jane" } });
     fireEvent.click(await screen.findByRole("button", { name: /Jane Roe/i }));
     expect(await screen.findByText(/Selected without appointment/i)).toBeTruthy();
