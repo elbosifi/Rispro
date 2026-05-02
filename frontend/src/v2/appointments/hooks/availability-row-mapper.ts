@@ -41,8 +41,8 @@ export interface AvailabilityRowViewModel {
   } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
-  reasonCodes: string[];
-  hideAlways: boolean;
+  reasonCodes?: string[];
+  hideAlways?: boolean;
 }
 
 function toDayLabel(isoDate: string, language: Language): string {
