@@ -22,6 +22,21 @@ const INSERT_SQL_LEGACY = `
   ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `;
 
+async function hasOverrideTypeColumn(client: PoolClient): Promise<boolean> {
+  const { rows } = await client.query<{ exists: boolean }>(
+    `
+      select exists (
+        select 1
+        from information_schema.columns
+        where table_schema = 'appointments_v2'
+          and table_name = 'override_audit_events'
+          and column_name = 'override_type'
+      ) as exists
+    `
+  );
+  return rows[0]?.exists === true;
+}
+
 export async function recordOverrideAudit(
   client: PoolClient,
   audit: {
@@ -38,39 +53,7 @@ export async function recordOverrideAudit(
     outcome: "approved_and_booked" | "approved_but_failed" | "denied" | "cancelled";
   }
 ): Promise<void> {
-  const params = [
-    audit.bookingId,
-    audit.patientId,
-    audit.modalityId,
-    audit.examTypeId,
-    audit.bookingDate,
-    audit.requestingUserId,
-    audit.supervisorUserId,
-    audit.overrideReason,
-    audit.overrideType,
-    JSON.stringify(audit.decisionSnapshot),
-    audit.outcome,
-  ];
-
-  try {
-    await client.query(INSERT_SQL, params);
-  } catch (error) {
-    const pgCode =
-      typeof error === "object" && error != null && "code" in error
-        ? String((error as { code?: unknown }).code ?? "")
-        : "";
-    const message =
-      typeof error === "object" && error != null && "message" in error
-        ? String((error as { message?: unknown }).message ?? "")
-        : "";
-    const missingOverrideTypeColumn =
-      pgCode === "42703" &&
-      message.toLowerCase().includes("override_type");
-
-    if (!missingOverrideTypeColumn) {
-      throw error;
-    }
-
+  if (!(await hasOverrideTypeColumn(client))) {
     await client.query(INSERT_SQL_LEGACY, [
       audit.bookingId,
       audit.patientId,
@@ -83,5 +66,20 @@ export async function recordOverrideAudit(
       JSON.stringify(audit.decisionSnapshot),
       audit.outcome,
     ]);
+    return;
   }
+
+  await client.query(INSERT_SQL, [
+    audit.bookingId,
+    audit.patientId,
+    audit.modalityId,
+    audit.examTypeId,
+    audit.bookingDate,
+    audit.requestingUserId,
+    audit.supervisorUserId,
+    audit.overrideReason,
+    audit.overrideType,
+    JSON.stringify(audit.decisionSnapshot),
+    audit.outcome,
+  ]);
 }
