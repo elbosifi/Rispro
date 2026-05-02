@@ -197,8 +197,8 @@ function AppContent() {
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />
             <Route
               path="/v2/appointments/admin"
-              element={user.role === "supervisor" ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />}
-            />
+                  element={(user.role === "supervisor" || user.role === "super_admin") ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />}
+                />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

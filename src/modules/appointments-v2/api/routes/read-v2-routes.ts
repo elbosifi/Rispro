@@ -566,6 +566,7 @@ router.post(
     }
 
     const userId = Number((req as AuthedRequest).user?.sub ?? 0);
+    const userRole = (req as AuthedRequest).user?.role;
     const created = await createBooking(
       {
         patientId,
@@ -579,6 +580,7 @@ router.post(
         isWalkIn: true,
       },
       userId,
+      userRole,
       "default"
     );
 

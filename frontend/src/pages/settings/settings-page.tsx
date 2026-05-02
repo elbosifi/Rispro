@@ -1702,11 +1702,11 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},
-  allow_friday_appointments: { label: "السماح بمواعيد الجمعة", type: "dropdown", options: [
+  allow_friday_appointments: { label: "السماح بمواعيد الجمعة (للحجز العادي)", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},
-  allow_saturday_appointments: { label: "السماح بمواعيد السبت", type: "dropdown", options: [
+  allow_saturday_appointments: { label: "السماح بمواعيد السبت (للحجز العادي)", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},

@@ -6,6 +6,7 @@
  */
 
 import type { DecisionStatus, ReasonCode, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
+import type { Role } from "../../../../types/domain.js";
 
 export interface BookingDecisionInput {
   patientId: number;
@@ -17,6 +18,7 @@ export interface BookingDecisionInput {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideEvaluation?: boolean;
+  requesterRole?: Role;
 }
 
 export interface BookingDecision {

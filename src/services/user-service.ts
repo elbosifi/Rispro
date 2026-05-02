@@ -43,7 +43,7 @@ export async function createUser(
   }
 
   if (!isRole(role)) {
-    throw new HttpError(400, "role must be receptionist, supervisor, or modality_staff.");
+    throw new HttpError(400, "role must be receptionist, supervisor, super_admin, or modality_staff.");
   }
 
   const passwordHash = await bcrypt.hash(password, 10);

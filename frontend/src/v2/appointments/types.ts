@@ -5,7 +5,7 @@
  */
 
 export type CaseCategory = "oncology" | "non_oncology";
-export type CapacityResolutionMode = "standard" | "category_override" | "special_quota_extra";
+export type CapacityResolutionMode = "standard" | "category_override" | "total_capacity_override" | "special_quota_extra";
 export type DecisionStatus = "available" | "restricted" | "blocked";
 export type BookingStatus =
   | "scheduled"

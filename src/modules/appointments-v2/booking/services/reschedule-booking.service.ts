@@ -38,8 +38,11 @@ import type { CreateBookingPayload } from "../models/booking.js";
 import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
-import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import type { CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import type { Role } from "../../../../types/domain.js";
+import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
+import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -56,6 +59,7 @@ export async function rescheduleBooking(
   reportingPriorityId: number | null,
   notes: string | null,
   userId: number,
+  userRole: Role | undefined,
   override?: CreateBookingPayload["override"],
   capacityResolutionMode?: CapacityResolutionMode,
   specialReasonCode: string | null = null,
@@ -75,6 +79,7 @@ export async function rescheduleBooking(
       reportingPriorityId,
       notes,
       userId,
+      userRole,
       override,
       capacityResolutionMode,
       specialReasonCode,
@@ -102,6 +107,7 @@ async function rescheduleBookingInternal(
   reportingPriorityId: number | null,
   notes: string | null,
   userId: number,
+  userRole: Role | undefined,
   override: CreateBookingPayload["override"] | undefined,
   capacityResolutionMode: CapacityResolutionMode | undefined,
   specialReasonCode: string | null,
@@ -145,6 +151,7 @@ async function rescheduleBookingInternal(
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
+  validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode);
 
   if (effectiveExamTypeId != null) {
     const examType = await findExamTypeById(client, effectiveExamTypeId);
@@ -293,6 +300,7 @@ async function rescheduleBookingInternal(
     bookingDate: effectiveDate,
     ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
   });
+  const closedWeekdays = await loadClosedWeekdays(client);
 
   // 7. Build context and re-evaluate
   const context: RuleEvaluationContext = {
@@ -318,6 +326,8 @@ async function rescheduleBookingInternal(
     examMixQuotaRules,
     examMixQuotaRuleItems,
     currentExamMixConsumedByRuleId,
+    closedWeekdays,
+    requesterRole: userRole,
   };
 
   const pureInput: PureEvaluateInput = {
@@ -349,9 +359,12 @@ async function rescheduleBookingInternal(
     reasonCodes: decision.reasons.map((r) => r.code),
   }));
 
+  validateDecisionAuthority(decision, userRole, effectiveCapacityResolutionMode);
+
   // 7. Check if reschedule is allowed or requires override
   let wasOverride = false;
   let supervisorUserId: number | null = null;
+  const requiredOverrideTypes = resolveRequiredOverrideTypes(decision, effectiveCapacityResolutionMode);
 
   if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
     throw new SchedulingError(
@@ -362,13 +375,16 @@ async function rescheduleBookingInternal(
     );
   }
 
-  if (decision.requiresSupervisorOverride) {
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
     if (!override) {
       throw new SchedulingError(
         403,
         "Supervisor override is required for this reschedule.",
         ["override_required"]
       );
+    }
+    if (!override.reason?.trim()) {
+      throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
     }
 
     const supervisor = await authenticateSupervisor(
@@ -414,6 +430,12 @@ async function rescheduleBookingInternal(
   );
 
   if (wasOverride && supervisorUserId != null) {
+    const overrideType: SchedulingOverrideType =
+      requiredOverrideTypes.includes("total_capacity_override")
+        ? "total_capacity_override"
+        : requiredOverrideTypes.includes("category_override")
+        ? "category_override"
+        : "closed_weekday_override";
     await recordOverrideAudit(client, {
       bookingId,
       patientId: booking.patientId,
@@ -423,6 +445,7 @@ async function rescheduleBookingInternal(
       requestingUserId: userId,
       supervisorUserId,
       overrideReason: override?.reason ?? null,
+      overrideType,
       decisionSnapshot: { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
       outcome: "approved_and_booked",
     });

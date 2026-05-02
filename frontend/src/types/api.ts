@@ -1,5 +1,5 @@
 /* Re-export backend types so the frontend has a single source of truth */
-export type Role = "receptionist" | "supervisor" | "modality_staff";
+export type Role = "receptionist" | "supervisor" | "super_admin" | "modality_staff";
 
 export type AppointmentStatus =
   | "scheduled"

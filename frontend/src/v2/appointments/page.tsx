@@ -125,7 +125,7 @@ export function AppointmentsV2Page() {
           </h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {user?.role === "supervisor" && (
+          {(user?.role === "supervisor" || user?.role === "super_admin") && (
             <Button
               variant="secondary"
               type="button"
@@ -246,12 +246,12 @@ export function AppointmentsV2Page() {
           <p className="text-sm mb-4" style={{ color: "var(--text-muted)" }}>
             {t(language, "appointments.create.emptyAvailabilityPolicy")}
           </p>
-          {user?.role !== "supervisor" && (
+          {user?.role !== "supervisor" && user?.role !== "super_admin" && (
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
               {t(language, "appointments.create.askSupervisorPublish")}
             </p>
           )}
-          {user?.role === "supervisor" && (
+          {(user?.role === "supervisor" || user?.role === "super_admin") && (
          <Button
            variant="secondary"
            type="button"

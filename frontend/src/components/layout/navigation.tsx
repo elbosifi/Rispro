@@ -65,7 +65,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "dashboard", labelKey: "nav.dashboard", icon: "dashboard" },
   { route: "patients", labelKey: "nav.patients", icon: "patients" },
   { route: "appointments", labelKey: "nav.appointments", icon: "appointments" },
-  { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor"] },
+  { route: "v2.appointments.admin", labelKey: "nav.appointmentsV2Admin", icon: "appointmentsV2Admin", roles: ["supervisor", "super_admin"] },
   { route: "calendar", labelKey: "nav.calendar", icon: "calendar" },
   { route: "registrations", labelKey: "nav.registrations", icon: "registrations" },
   { route: "queue", labelKey: "nav.queue", icon: "queue" },
@@ -76,7 +76,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
   { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
-  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor"] }
+  { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["supervisor", "super_admin"] }
 ];
 
 function canAccess(item: NavItemConfig, user: User | null): boolean {

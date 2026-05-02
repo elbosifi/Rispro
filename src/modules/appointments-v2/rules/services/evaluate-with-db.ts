@@ -35,8 +35,12 @@ import {
   getSpecialQuotaBookedCount,
   getExamMixConsumedCountsByRule,
 } from "../../scheduler/repositories/capacity.repo.js";
+import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
+import type { Role } from "../../../../types/domain.js";
 
-export interface EvaluateWithDbParams extends BookingDecisionInput {}
+export interface EvaluateWithDbParams extends BookingDecisionInput {
+  requesterRole?: Role;
+}
 
 /**
  * Load context and evaluate a booking candidate against the currently
@@ -173,6 +177,7 @@ export async function evaluateWithDb(
     bookingDate: params.scheduledDate,
     ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
   });
+  const closedWeekdays = await loadClosedWeekdays(client);
 
   // 6. Build the context
   const context: RuleEvaluationContext = {
@@ -198,6 +203,8 @@ export async function evaluateWithDb(
     examMixQuotaRules,
     examMixQuotaRuleItems,
     currentExamMixConsumedByRuleId,
+    closedWeekdays,
+    requesterRole: params.requesterRole,
   };
 
   // 6. Evaluate

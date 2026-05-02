@@ -43,6 +43,7 @@ router.post(
       useSpecialQuota: body.useSpecialQuota === true,
       specialReasonCode: body.specialReasonCode ? String(body.specialReasonCode) : null,
       includeOverrideEvaluation: body.includeOverrideEvaluation === true,
+      requesterRole: req.user?.role,
     }, body.policySetKey as string | undefined);
     res.json(decision);
   })
@@ -78,6 +79,7 @@ router.get(
       useSpecialQuota: req.query.useSpecialQuota === "true",
       specialReasonCode: req.query.specialReasonCode ? String(req.query.specialReasonCode) : null,
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",
+      requesterRole: req.user?.role,
     };
 
     const client = await pool.connect();

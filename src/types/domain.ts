@@ -1,6 +1,6 @@
 import type { NullableUserId } from "./http.js";
 
-export type Role = "receptionist" | "supervisor" | "modality_staff";
+export type Role = "receptionist" | "supervisor" | "super_admin" | "modality_staff";
 export type AppointmentStatus =
   | "scheduled"
   | "arrived"

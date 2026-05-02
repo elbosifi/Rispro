@@ -71,7 +71,8 @@ export function AppointmentsV3CreatePage() {
         specialReasonOptions={specialReasons.data ?? []}
         priorityOptions={priorities.data ?? []}
         schedulingEngineEnabled
-        canUseNonStandardCapacityModes={user?.role === "supervisor"}
+        canUseNonStandardCapacityModes={user?.role === "supervisor" || user?.role === "super_admin"}
+        currentUserRole={user?.role}
         initialSelectedPatient={initialSelectedPatient}
         onCreateAppointment={createV2Booking}
         onEvaluateAvailability={evaluateV2Scheduling}

@@ -7,6 +7,7 @@
  */
 
 import type { CaseCategory, ReasonCode, CapacityResolutionMode } from "../../shared/types/common.js";
+import type { Role } from "../../../../types/domain.js";
 import type {
   ModalityBlockedRuleRow,
   ExamTypeRuleRow,
@@ -94,6 +95,12 @@ export interface RuleEvaluationContext {
    * Integrity failures are appended here before evaluation continues.
    */
   existingReasons?: ReasonCode[];
+
+  /** Friday/Saturday closed-day settings loaded from system settings. */
+  closedWeekdays?: Array<"friday" | "saturday">;
+
+  /** The role of the requesting user for role-aware evaluation outcomes. */
+  requesterRole?: Role;
 }
 
 /**

@@ -166,6 +166,7 @@ create table if not exists appointments_v2.override_audit_events (
   requesting_user_id bigint references users(id),
   supervisor_user_id bigint references users(id),
   override_reason text,
+  override_type text not null check (override_type in ('closed_weekday_override', 'category_override', 'total_capacity_override')),
   decision_snapshot jsonb not null default '{}'::jsonb,
   outcome text not null check (outcome in ('approved_and_booked', 'approved_but_failed', 'denied', 'cancelled')),
   created_at timestamptz not null default now()

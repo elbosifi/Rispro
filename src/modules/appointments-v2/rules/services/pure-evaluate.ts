@@ -125,6 +125,47 @@ function checkHardBlocks(
   return { blocked: false, overridable: reasons.length > 0, reasons, matchedIds };
 }
 
+function checkClosedWeekday(
+  input: PureEvaluateInput
+): { blocked: boolean; overridable: boolean; reasons: ReasonCode[] } {
+  const ctx = input.context;
+  const closedWeekdays = new Set(ctx.closedWeekdays ?? []);
+  if (closedWeekdays.size === 0) {
+    return { blocked: false, overridable: false, reasons: [] };
+  }
+
+  const weekday = new Date(`${input.scheduledDate}T00:00:00Z`).getUTCDay();
+  const isClosed =
+    (weekday === 5 && closedWeekdays.has("friday")) ||
+    (weekday === 6 && closedWeekdays.has("saturday"));
+  if (!isClosed) {
+    return { blocked: false, overridable: false, reasons: [] };
+  }
+
+  if (ctx.requesterRole === "receptionist" || !ctx.requesterRole) {
+    return {
+      blocked: true,
+      overridable: false,
+      reasons: [
+        reason("weekday_appointments_disabled", "error", "Appointments are disabled for this weekday."),
+        reason("closed_weekday_override_forbidden", "error", "This role cannot override disabled weekdays."),
+      ],
+    };
+  }
+
+  return {
+    blocked: false,
+    overridable: true,
+    reasons: [
+      reason(
+        "closed_weekday_override_required",
+        "warning",
+        "Disabled weekday requires an explicit override reason."
+      ),
+    ],
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Step 3: Exam/service eligibility
 // ---------------------------------------------------------------------------
@@ -231,6 +272,7 @@ function checkCapacity(
   reasons: ReasonCode[];
 } {
   const ctx = input.context;
+  const requesterRole = ctx.requesterRole;
   const reasons: ReasonCode[] = [];
   const mode = input.capacityResolutionMode;
   const modalityDailyCapacity = ctx.modalityDailyCapacity;
@@ -332,15 +374,41 @@ function checkCapacity(
     };
   }
 
+  if (mode === "total_capacity_override") {
+    return {
+      status: "available",
+      remainingStandardCapacity: totalRemaining,
+      remainingSpecialQuota: null,
+      reasons: [],
+    };
+  }
+
   if (mode === "category_override") {
     if (totalExhausted) {
       reasons.push(
         reason(
-          "standard_capacity_exhausted",
+          "modality_daily_capacity_exhausted",
           "error",
           "No remaining capacity for this modality date."
         )
       );
+      if (requesterRole === "super_admin") {
+        reasons.push(
+          reason(
+            "total_capacity_override_required",
+            "warning",
+            "Total capacity override is required to proceed."
+          )
+        );
+      } else {
+        reasons.push(
+          reason(
+            "total_capacity_override_forbidden",
+            "error",
+            "This role cannot exceed total modality daily capacity."
+          )
+        );
+      }
       return {
         status: "blocked",
         remainingStandardCapacity: 0,
@@ -359,11 +427,28 @@ function checkCapacity(
   if (totalExhausted) {
     reasons.push(
       reason(
-        "standard_capacity_exhausted",
+        "modality_daily_capacity_exhausted",
         "error",
         "No remaining capacity for this modality date."
       )
     );
+    if (requesterRole === "super_admin") {
+      reasons.push(
+        reason(
+          "total_capacity_override_required",
+          "warning",
+          "Total capacity override is required to proceed."
+        )
+      );
+    } else {
+      reasons.push(
+        reason(
+          "total_capacity_override_forbidden",
+          "error",
+          "This role cannot exceed total modality daily capacity."
+        )
+      );
+    }
     return {
       status: "blocked",
       remainingStandardCapacity: 0,
@@ -375,11 +460,28 @@ function checkCapacity(
   if (bucketExhausted) {
     reasons.push(
       reason(
-        "standard_capacity_exhausted",
+        "category_capacity_exhausted",
         "error",
         "No remaining capacity for this date and category."
       )
     );
+    if (requesterRole === "supervisor" || requesterRole === "super_admin") {
+      reasons.push(
+        reason(
+          "category_override_required",
+          "warning",
+          "Category override is required to proceed."
+        )
+      );
+    } else {
+      reasons.push(
+        reason(
+          "category_override_forbidden",
+          "error",
+          "This role cannot override category capacity."
+        )
+      );
+    }
     return {
       status: "blocked",
       remainingStandardCapacity: 0,
@@ -515,6 +617,13 @@ export async function pureEvaluate(
   }
 
   // Step 2: Hard blocks
+  const closedWeekday = checkClosedWeekday(input);
+  allReasons.push(...closedWeekday.reasons);
+  if (closedWeekday.blocked && !closedWeekday.overridable) {
+    return buildDecision(input, "blocked", false, false, null, null, allMatchedIds, allReasons);
+  }
+
+  // Step 2.5: Hard blocks
   const hardBlocks = checkHardBlocks(input);
   allMatchedIds.push(...hardBlocks.matchedIds);
   allReasons.push(...hardBlocks.reasons);
@@ -555,7 +664,7 @@ export async function pureEvaluate(
   allMatchedIds.push(...examMixCheck.matchedIds);
   allReasons.push(...examMixCheck.reasons);
 
-  const hasOverridableBlocks = hardBlocks.overridable || examCheck.overridable;
+  const hasOverridableBlocks = closedWeekday.overridable || hardBlocks.overridable || examCheck.overridable;
   const capacityExhausted = capCheck.status === "blocked" || examMixCheck.blocked;
 
   // Step 6: Determine final status with override consideration
@@ -564,15 +673,9 @@ export async function pureEvaluate(
   let suggestedMode: "standard" | "special" | "override" = "standard";
   let consumedCapacityMode: "standard" | "special" | "override" | null = "standard";
 
-  if (capacityExhausted && hasOverridableBlocks) {
-    // Both capacity exhausted AND overridable blocks
+  if (capacityExhausted) {
     displayStatus = "blocked";
-    requiresOverride = true;
-    suggestedMode = "override";
-    consumedCapacityMode = null;
-  } else if (capacityExhausted) {
-    displayStatus = "blocked";
-    suggestedMode = "override";
+    suggestedMode = "standard";
     consumedCapacityMode = null;
   } else if (hasOverridableBlocks) {
     displayStatus = "restricted";
@@ -588,7 +691,10 @@ export async function pureEvaluate(
     ) {
       suggestedMode = "special";
       consumedCapacityMode = "special";
-    } else if (input.capacityResolutionMode === "category_override") {
+    } else if (
+      input.capacityResolutionMode === "category_override" ||
+      input.capacityResolutionMode === "total_capacity_override"
+    ) {
       suggestedMode = "override";
       consumedCapacityMode = "override";
     }
@@ -596,14 +702,9 @@ export async function pureEvaluate(
   }
 
   // If override evaluation is explicitly requested, adjust
-  if (input.includeOverrideEvaluation && (hasOverridableBlocks || capacityExhausted)) {
+  if (input.includeOverrideEvaluation && hasOverridableBlocks) {
     requiresOverride = true;
     suggestedMode = "override";
-    if (!capacityExhausted && !hasOverridableBlocks) {
-      // Override requested but not actually needed
-      requiresOverride = false;
-      suggestedMode = "standard";
-    }
   }
 
   return buildDecision(

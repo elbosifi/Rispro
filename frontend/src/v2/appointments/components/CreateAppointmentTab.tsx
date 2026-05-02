@@ -29,6 +29,7 @@ import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { SectionLabel, Button, Card } from "@/components/shared";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
+import type { Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
   patientLookups: unknown;
@@ -38,6 +39,7 @@ interface CreateAppointmentTabProps {
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }>;
   schedulingEngineEnabled: boolean;
   canUseNonStandardCapacityModes?: boolean;
+  currentUserRole?: Role;
   initialSelectedPatient?: SelectedPatient | null;
   onCreateAppointment: (input: CreateBookingRequest) => Promise<BookingResponse>;
   onEvaluateAvailability: (input: {
@@ -112,6 +114,7 @@ export function CreateAppointmentTab({
   priorityOptions,
   schedulingEngineEnabled,
   canUseNonStandardCapacityModes = false,
+  currentUserRole,
   initialSelectedPatient = null,
   onCreateAppointment,
   onEvaluateAvailability,
@@ -150,6 +153,8 @@ export function CreateAppointmentTab({
   });
   const pendingDecisionRef = useRef<SchedulingDecisionDto | null>(null);
   const initialPatientAppliedRef = useRef(false);
+  const isReceptionist = currentUserRole === "receptionist";
+  const isSuperAdmin = currentUserRole === "super_admin";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -257,6 +262,9 @@ export function CreateAppointmentTab({
   }, [entityDisplayMode, form.patientId]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
+    if (isReceptionist && row.status !== "available") {
+      return;
+    }
     if (row.status === "blocked") {
       return;
     }
@@ -276,6 +284,9 @@ export function CreateAppointmentTab({
     if (!form.modalityId) return t(language, "appointments.create.missingModality");
     if (!form.examTypeId) return t(language, "appointments.create.missingExamType");
     if (!form.appointmentDate) return t(language, "appointments.create.selectedDateUnavailable");
+    if (isReceptionist && !availabilitySelectedRow) {
+      return t(language, "appointments.create.selectedDateUnavailable");
+    }
     if (form.capacityResolutionMode === "special_quota_extra" && !form.specialReasonCode) {
       return t(language, "appointments.create.specialReasonRequired");
     }
@@ -591,7 +602,13 @@ export function CreateAppointmentTab({
                 <select
                   aria-label={t(language, "appointments.create.caseCategory")}
                   value={form.caseCategory}
-                  onChange={(e) => actions.setCaseCategory(e.target.value as "oncology" | "non_oncology")}
+                  onChange={(e) => {
+                    actions.setCaseCategory(e.target.value as "oncology" | "non_oncology");
+                    setAvailabilitySelectedRow(null);
+                    setPendingDecision(null);
+                    setShowOverrideModal(false);
+                    setOverrideError(null);
+                  }}
                   className="input-premium"
                 >
                   <option value="non_oncology">{t(language, "appointments.create.nonOncology")}</option>
@@ -643,6 +660,7 @@ export function CreateAppointmentTab({
                 </span>
               </label>
 
+              {!isReceptionist && (
               <div>
                 <label className="block text-sm font-semibold mb-2 text-foreground">
                   {t(language, "appointments.create.appointmentDate")}
@@ -655,6 +673,7 @@ export function CreateAppointmentTab({
                   className="input-premium"
                 />
               </div>
+              )}
 
               <div className="xl:col-span-2">
                 <label className="block text-sm font-semibold mb-2 text-foreground">
@@ -674,9 +693,14 @@ export function CreateAppointmentTab({
                   onChangeCapacityResolutionMode={(mode) => {
                     if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
                     actions.setCapacityResolutionMode(mode);
+                    setAvailabilitySelectedRow(null);
+                    setPendingDecision(null);
+                    setShowOverrideModal(false);
+                    setOverrideError(null);
                   }}
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
                   supervisorMode={canUseNonStandardCapacityModes}
+                  superAdminMode={isSuperAdmin}
                   specialReasonCode={form.specialReasonCode}
                   onChangeSpecialReasonCode={actions.setSpecialReasonCode}
                   specialReasonConfirmed={form.specialReasonConfirmed}
@@ -686,6 +710,13 @@ export function CreateAppointmentTab({
                   options={specialReasonOptions}
                 />
               </div>
+              {isSuperAdmin && (
+                <div className="text-xs text-muted-foreground xl:col-span-2">
+                  {language === "ar"
+                    ? "تجاوز السعة الإجمالية متاح فقط عبر مسار صريح مع سبب."
+                    : "Total capacity overbooking is only available via an explicit override path with reason."}
+                </div>
+              )}
 
               {form.overrideRequired && (
                 <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>

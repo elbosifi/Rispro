@@ -436,7 +436,11 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
     );
     assert.equal(decision.displayStatus, "blocked");
     assert.equal(decision.remainingStandardCapacity, 0);
-    assert.ok(decision.reasons.some((r) => r.code === "standard_capacity_exhausted"));
+    assert.ok(
+      decision.reasons.some(
+        (r) => r.code === "category_capacity_exhausted" || r.code === "modality_daily_capacity_exhausted"
+      )
+    );
   });
 
   it("allows when no limit is configured", async () => {
@@ -478,7 +482,7 @@ describe("pureEvaluate — capacity checks (D008 step 4)", () => {
       })
     );
     assert.equal(decision.displayStatus, "blocked");
-    assert.ok(decision.reasons.some((r) => r.code === "standard_capacity_exhausted"));
+    assert.ok(decision.reasons.some((r) => r.code === "modality_daily_capacity_exhausted"));
   });
 
   it("does not derive opposite-category reserve when limit is missing", async () => {

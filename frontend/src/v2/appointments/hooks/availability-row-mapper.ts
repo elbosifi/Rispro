@@ -57,7 +57,9 @@ export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityR
   if (day.rowDisplayStatus) return day.rowDisplayStatus;
 
   if (day.decision.displayStatus === "blocked") {
-    const hasCapacityExhaustedReason = day.decision.reasons.some((r) => r.code === "standard_capacity_exhausted");
+    const hasCapacityExhaustedReason = day.decision.reasons.some(
+      (r) => r.code === "modality_daily_capacity_exhausted" || r.code === "category_capacity_exhausted"
+    );
     return hasCapacityExhaustedReason ? "full" : "blocked";
   }
 

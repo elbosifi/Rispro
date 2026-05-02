@@ -67,7 +67,7 @@ export function requireSupervisor(req: AuthRequest, _res: Response, next: NextFu
     return next(new HttpError(401, "Authentication required."));
   }
 
-  if (req.user.role !== "supervisor") {
+  if (req.user.role !== "supervisor" && req.user.role !== "super_admin") {
     return next(new HttpError(403, "Supervisor access required."));
   }
 
@@ -92,7 +92,7 @@ export function hasRecentSupervisorReauth(req: AuthRequest): boolean {
   try {
     const token = readSupervisorReauthToken(req);
 
-    if (!token || !req.user || req.user.role !== "supervisor") {
+    if (!token || !req.user || (req.user.role !== "supervisor" && req.user.role !== "super_admin")) {
       return false;
     }
 
@@ -100,7 +100,7 @@ export function hasRecentSupervisorReauth(req: AuthRequest): boolean {
     return (
       payload?.purpose === "supervisor-reauth" &&
       Number(payload?.sub) === Number(req.user.sub) &&
-      payload?.role === "supervisor"
+      (payload?.role === "supervisor" || payload?.role === "super_admin")
     );
   } catch {
     return false;

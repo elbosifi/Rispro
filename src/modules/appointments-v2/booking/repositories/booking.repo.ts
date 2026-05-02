@@ -6,6 +6,7 @@
 
 import type { PoolClient } from "pg";
 import type { Booking } from "../models/booking.js";
+import type { CapacityResolutionMode } from "../../shared/types/common.js";
 
 const INSERT_SQL = `
   insert into appointments_v2.bookings (
@@ -47,7 +48,7 @@ export async function insertBooking(
     status: string;
     notes: string | null;
     policyVersionId: number;
-    capacityResolutionMode: "standard" | "category_override" | "special_quota_extra";
+    capacityResolutionMode: CapacityResolutionMode;
     usesSpecialQuota: boolean;
     specialReasonCode: string | null;
     specialReasonNote: string | null;
@@ -205,7 +206,7 @@ export async function updateBookingForReschedule(
   newTime: string | null,
   policyVersionId: number,
   userId: number,
-  capacityResolutionMode: "standard" | "category_override" | "special_quota_extra",
+  capacityResolutionMode: CapacityResolutionMode,
   usesSpecialQuota: boolean,
   specialReasonCode: string | null,
   specialReasonNote: string | null,

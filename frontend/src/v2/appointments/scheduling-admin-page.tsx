@@ -32,7 +32,7 @@ export function SchedulingAdminV2Page() {
     [status.data?.draftSnapshot]
   );
 
-  if (user?.role !== "supervisor") {
+  if (user?.role !== "supervisor" && user?.role !== "super_admin") {
     return (
       <div style={{ padding: 24 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>Scheduling Policies</h1>

@@ -27,7 +27,7 @@ interface AuthenticatedRequest extends Request {
 }
 
 function isNonStandardCapacityResolutionMode(mode: CapacityResolutionMode): boolean {
-  return mode === "category_override" || mode === "special_quota_extra";
+  return mode === "category_override" || mode === "total_capacity_override" || mode === "special_quota_extra";
 }
 
 /**
@@ -119,7 +119,11 @@ router.post(
     const capacityResolutionMode: CapacityResolutionMode =
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
-    if (isNonStandardCapacityResolutionMode(capacityResolutionMode) && userRole !== "supervisor") {
+    if (
+      isNonStandardCapacityResolutionMode(capacityResolutionMode) &&
+      userRole !== "supervisor" &&
+      userRole !== "super_admin"
+    ) {
       res.status(403).json({
         error: "Supervisor role is required for non-standard capacity resolution mode.",
         reasonCodes: ["capacity_resolution_mode_supervisor_required"],
@@ -147,6 +151,7 @@ router.post(
         override: body.override,
       },
       userId,
+      userRole,
       body.policySetKey ?? "default"
     );
 
@@ -181,7 +186,12 @@ router.put(
     const capacityResolutionMode: CapacityResolutionMode | undefined =
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : undefined);
-    if (capacityResolutionMode && isNonStandardCapacityResolutionMode(capacityResolutionMode) && userRole !== "supervisor") {
+    if (
+      capacityResolutionMode &&
+      isNonStandardCapacityResolutionMode(capacityResolutionMode) &&
+      userRole !== "supervisor" &&
+      userRole !== "super_admin"
+    ) {
       res.status(403).json({
         error: "Supervisor role is required for non-standard capacity resolution mode.",
         reasonCodes: ["capacity_resolution_mode_supervisor_required"],
@@ -198,6 +208,7 @@ router.put(
       body.reportingPriorityId ?? null,
       body.notes ?? null,
       userId,
+      userRole,
       body.override,
       capacityResolutionMode,
       body.specialReasonCode ?? null,

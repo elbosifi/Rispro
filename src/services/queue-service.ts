@@ -548,7 +548,8 @@ export async function createWalkInQueueEntry(
       isWalkIn: true,
       notes: payload.notes ? String(payload.notes) : null,
     } as CreateBookingPayload,
-    userId
+    userId,
+    currentUser.role
   );
 
   const scanResult = await scanAppointmentIntoQueue(

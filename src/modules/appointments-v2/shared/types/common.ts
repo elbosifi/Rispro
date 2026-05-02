@@ -19,7 +19,13 @@ export type BookingStatus =
 export type CapacityResolutionMode =
   | "standard"
   | "category_override"
+  | "total_capacity_override"
   | "special_quota_extra";
+
+export type SchedulingOverrideType =
+  | "closed_weekday_override"
+  | "category_override"
+  | "total_capacity_override";
 
 export type DecisionStatus = "available" | "restricted" | "blocked";
 

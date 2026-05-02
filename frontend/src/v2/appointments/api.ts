@@ -42,7 +42,7 @@ export async function fetchV2Availability(params: {
   offset: number;
   examTypeId: number | null;
   caseCategory: "oncology" | "non_oncology";
-  capacityResolutionMode?: "standard" | "category_override" | "special_quota_extra";
+  capacityResolutionMode?: "standard" | "category_override" | "total_capacity_override" | "special_quota_extra";
   useSpecialQuota: boolean;
   specialReasonCode: string | null;
   includeOverrideCandidates: boolean;

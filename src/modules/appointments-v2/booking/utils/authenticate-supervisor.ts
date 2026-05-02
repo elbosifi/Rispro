@@ -22,7 +22,7 @@ const AUTHENTICATE_SQL = `
   select id, username, password_hash as "passwordHash", role,
     full_name as "fullName", is_active as "isActive"
   from users
-  where username = $1 and role = 'supervisor' and is_active = true
+  where username = $1 and role in ('supervisor', 'super_admin') and is_active = true
   limit 1
 `;
 

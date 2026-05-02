@@ -9,9 +9,9 @@ import type { PoolClient } from "pg";
 const INSERT_SQL = `
   insert into appointments_v2.override_audit_events (
     booking_id, patient_id, modality_id, exam_type_id, booking_date,
-    requesting_user_id, supervisor_user_id, override_reason,
+    requesting_user_id, supervisor_user_id, override_reason, override_type,
     decision_snapshot, outcome
-  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `;
 
 export async function recordOverrideAudit(
@@ -25,6 +25,7 @@ export async function recordOverrideAudit(
     requestingUserId: number | null;
     supervisorUserId: number | null;
     overrideReason: string | null;
+    overrideType: "closed_weekday_override" | "category_override" | "total_capacity_override";
     decisionSnapshot: unknown;
     outcome: "approved_and_booked" | "approved_but_failed" | "denied" | "cancelled";
   }
@@ -38,6 +39,7 @@ export async function recordOverrideAudit(
     audit.requestingUserId,
     audit.supervisorUserId,
     audit.overrideReason,
+    audit.overrideType,
     JSON.stringify(audit.decisionSnapshot),
     audit.outcome,
   ]);

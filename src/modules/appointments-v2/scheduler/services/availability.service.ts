@@ -37,6 +37,8 @@ import {
 import { addDays, todayIso } from "../../shared/utils/dates.js";
 import { pool } from "../../../../db/pool.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import type { Role } from "../../../../types/domain.js";
+import { loadClosedWeekdays } from "./closed-weekday-settings.js";
 
 export interface AvailabilityDayDto {
   date: string;
@@ -79,6 +81,7 @@ export interface GetAvailabilityParams {
   useSpecialQuota?: boolean;
   specialReasonCode?: string | null;
   includeOverrideCandidates?: boolean;
+  requesterRole?: Role;
 }
 
 export interface AvailabilityQueryResult {
@@ -86,50 +89,6 @@ export interface AvailabilityQueryResult {
   noPublishedPolicy: boolean;
 }
 
-type WeekdayName = "friday" | "saturday";
-
-function normalizeSettingToggle(value: unknown, fallbackEnabled: boolean): boolean {
-  const normalized = String(value ?? "").trim().toLowerCase();
-  if (normalized === "enabled" || normalized === "true" || normalized === "1") return true;
-  if (normalized === "disabled" || normalized === "false" || normalized === "0") return false;
-  return fallbackEnabled;
-}
-
-function weekdayNameFromIsoDate(isoDate: string): WeekdayName | "other" {
-  const day = new Date(`${isoDate}T00:00:00Z`).getUTCDay();
-  if (day === 5) return "friday";
-  if (day === 6) return "saturday";
-  return "other";
-}
-
-async function loadDisabledBookingDays(client: PoolClient): Promise<Set<WeekdayName>> {
-  const { rows } = await client.query<{ setting_key: string; setting_value: unknown }>(
-    `
-      select setting_key, setting_value
-      from system_settings
-      where category = 'scheduling_and_capacity'
-        and setting_key in (
-          'allow_friday_appointments',
-          'allow_saturday_appointments'
-        )
-    `
-  );
-
-  const valuesByKey = rows.reduce<Record<string, unknown>>((accumulator, row) => {
-    const raw = row.setting_value;
-    const nestedValue =
-      raw && typeof raw === "object" && "value" in (raw as Record<string, unknown>)
-        ? (raw as Record<string, unknown>).value
-        : raw;
-    accumulator[row.setting_key] = nestedValue;
-    return accumulator;
-  }, {});
-
-  const disabled = new Set<WeekdayName>();
-  if (!normalizeSettingToggle(valuesByKey.allow_friday_appointments, true)) disabled.add("friday");
-  if (!normalizeSettingToggle(valuesByKey.allow_saturday_appointments, true)) disabled.add("saturday");
-  return disabled;
-}
 
 export async function getAvailability(
   params: GetAvailabilityParams,
@@ -235,7 +194,7 @@ async function getAvailabilityInternal(
   const modalityTotalCapacity = modality.dailyCapacity ?? 0;
   const bucketMode: "partitioned" | "total_only" =
     activeOncology || activeNonOncology ? "partitioned" : "total_only";
-  const disabledBookingDays = await loadDisabledBookingDays(client);
+  const closedWeekdays = await loadClosedWeekdays(client);
 
   // 5. Generate dates
   const startDate = todayIso();
@@ -243,11 +202,6 @@ async function getAvailabilityInternal(
 
   for (let i = params.offset; i < params.offset + params.days; i++) {
     const date = addDays(startDate, i);
-    const weekday = weekdayNameFromIsoDate(date);
-    if (weekday !== "other" && disabledBookingDays.has(weekday)) {
-      continue;
-    }
-
     const bookedCounts = await getBookedCountsByCategoryForDate(
       client,
       params.modalityId,
@@ -326,6 +280,8 @@ async function getAvailabilityInternal(
       examMixQuotaRules,
       examMixQuotaRuleItems,
       currentExamMixConsumedByRuleId,
+      closedWeekdays,
+      requesterRole: params.requesterRole,
     };
 
     const pureInput: PureEvaluateInput = {
@@ -371,7 +327,9 @@ async function getAvailabilityInternal(
       isFull,
       rowDisplayStatus:
         decision.displayStatus === "blocked" &&
-        decision.reasons.some((r) => r.code === "standard_capacity_exhausted")
+        decision.reasons.some((r) =>
+          r.code === "modality_daily_capacity_exhausted" || r.code === "category_capacity_exhausted"
+        )
           ? "full"
           : decision.displayStatus,
       decision,
