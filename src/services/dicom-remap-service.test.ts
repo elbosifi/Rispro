@@ -11,6 +11,7 @@ import {
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
+  resendDicomRemapJobToPacs,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
   type DicomRemapJobRow,
@@ -1751,6 +1752,81 @@ test("confirmDicomRemapAndSend claim failure rejects non-sent jobs before Orthan
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("resendDicomRemapJobToPacs resends an existing remapped study and marks the job sent", async () => {
+  const auditEntries: Array<Record<string, unknown>> = [];
+  __dicomRemapTestables.setAuditLoggerForTests(async (entry) => {
+    auditEntries.push(entry as unknown as Record<string, unknown>);
+    return {} as never;
+  });
+  __dicomRemapTestables.setPacsNodeGetterForTests(async () => ({
+    id: 1,
+    called_ae_title: "DEST_AE",
+    host: "127.0.0.1",
+    port: 104,
+    is_active: true,
+  } as never));
+
+  queueQueryResults([
+    { rows: [remapJob({ id: 21, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
+    { rows: [remapJob({ id: 21, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
+    { rows: [remapJob({ id: 21, status: "sent", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1", send_result: { ok: true } })] },
+  ]);
+
+  queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "modified-study" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ok: true } }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { StoredInstances: 5 } }),
+  ]);
+
+  const result = await resendDicomRemapJobToPacs({
+    jobId: 21,
+    currentUserId: 42,
+  });
+
+  assert.equal(result.job.status, "sent");
+  assert.equal(auditEntries.some((entry) => entry.actionType === "resend_to_pacs"), true);
+});
+
+test("resendDicomRemapJobToPacs returns friendly Orthanc send errors with technical details", async () => {
+  __dicomRemapTestables.setAuditLoggerForTests(async () => ({} as never));
+  __dicomRemapTestables.setPacsNodeGetterForTests(async () => ({
+    id: 1,
+    called_ae_title: "DEST_AE",
+    host: "127.0.0.1",
+    port: 104,
+    is_active: true,
+  } as never));
+  queueQueryResults([
+    { rows: [remapJob({ id: 22, status: "failed", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
+    { rows: [remapJob({ id: 22, status: "sending", source_orthanc_study_id: "source-study", modified_orthanc_study_id: "modified-study", destination_pacs_key: "1" })] },
+    { rows: [] },
+  ]);
+
+  queueOrthancResults([
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "modified-study" } }),
+    orthancResult({ status: 200, ok: true, text: "{}", json: { ok: true } }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 404, ok: false, text: "missing", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 500, ok: false, text: "store failed", json: { Message: "store failed" } }),
+    orthancResult({ status: 500, ok: false, text: "store failed", json: { Message: "store failed" } }),
+  ]);
+
+  await assert.rejects(
+    () => resendDicomRemapJobToPacs({
+      jobId: 22,
+      currentUserId: 42,
+    }),
+    (error: unknown) => {
+      assert.ok(error instanceof HttpError);
+      assert.match(error.message, /could not send the remapped study to PACS/i);
+      assert.equal(Array.isArray((error.details as { attempts?: unknown[] } | undefined)?.attempts), true);
+      return true;
+    }
+  );
 });
 
 test("dicom helper: status transition guard throws on unexpected status", () => {

@@ -33,6 +33,7 @@ import {
   listDicomRemapDestinations,
   listMyDicomRemapJobs,
   prepareDicomRemapConfirmation,
+  resendDicomRemapJobToPacs,
   resetDicomRemapJob,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
@@ -574,6 +575,26 @@ pacsRouter.post(
     const body = asUnknownRecord(request.body ?? {});
     const summary = await hardResetOrthancStudies(currentUserId, body.confirmation);
     res.json({ summary });
+  })
+);
+
+pacsRouter.post(
+  "/remap/jobs/:jobId/resend",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { jobId?: string } };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const jobId = asOptionalString(request.params?.jobId);
+    if (!jobId) {
+      throw new HttpError(400, "jobId is required.");
+    }
+
+    const result = await resendDicomRemapJobToPacs({
+      jobId,
+      currentUserId,
+    });
+
+    res.json(result);
   })
 );
 

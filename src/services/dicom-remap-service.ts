@@ -18,6 +18,7 @@ type DicomRemapQuery = typeof pool.query;
 type DicomRemapAuditLogger = typeof logAuditEntry;
 type OrthancFetch = typeof orthancFetch;
 type RemapSleep = (ms: number) => Promise<void>;
+type PacsNodeGetter = typeof getPacsNode;
 const { DicomMessage, DicomMetaDictionary, datasetToBuffer } = dcmjs.data;
 
 export type DicomRemapJobStatus =
@@ -146,6 +147,7 @@ let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
 let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let readPacsNodeForRemap: PacsNodeGetter = getPacsNode;
 let orthancBulkModifyAvailableForTests: boolean | null = null;
 
 function joinUrl(baseUrl: string, suffix: string): string {
@@ -1609,6 +1611,7 @@ async function ensureOrthancModalityFromPacsNode(node: PacsNodeRow, modalityKey:
 }
 
 async function sendStudyToOrthancModality(studyId: string, modalityKey: string): Promise<unknown> {
+  const attempts: Array<Record<string, unknown>> = [];
   const payloadCandidates: unknown[] = [
     studyId,
     { Resources: [studyId] },
@@ -1620,6 +1623,13 @@ async function sendStudyToOrthancModality(studyId: string, modalityKey: string):
       method: "POST",
       body: payload,
       timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+    });
+    attempts.push({
+      path: `/modalities/${modalityKey}/store`,
+      status: response.status,
+      body: sanitizeOrthancResponseSnippet(response.text),
+      shape: describeOrthancPayloadShape(response.json),
+      payloadShape: describeOrthancPayloadShape(payload),
     });
 
     if (response.ok || response.status === 202) {
@@ -1638,12 +1648,164 @@ async function sendStudyToOrthancModality(studyId: string, modalityKey: string):
       body: payload,
       timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
     });
+    attempts.push({
+      path: `/studies/${studyId}/store`,
+      status: response.status,
+      body: sanitizeOrthancResponseSnippet(response.text),
+      shape: describeOrthancPayloadShape(response.json),
+      payloadShape: describeOrthancPayloadShape(payload),
+    });
     if (response.ok || response.status === 202) {
       return response.json ?? response.text ?? null;
     }
   }
 
-  throw new HttpError(502, "Orthanc store-to-modality request failed.");
+  throw new HttpError(
+    502,
+    "Orthanc could not send the remapped study to PACS. Please verify the destination and try resend.",
+    {
+      studyId,
+      modalityKey,
+      attempts,
+    }
+  );
+}
+
+function resolveSendStudyIdForJob(job: DicomRemapJobRow): string {
+  return String(job.modified_orthanc_study_id || job.source_orthanc_study_id || "").trim();
+}
+
+async function sendExistingDicomRemapJobToDestination({
+  job,
+  currentUserId,
+  auditActionType,
+  failedAuditActionType,
+}: {
+  job: DicomRemapJobRow;
+  currentUserId: UserId;
+  auditActionType: string;
+  failedAuditActionType: string;
+}): Promise<{ job: DicomRemapJobRow }> {
+  const sendStudyId = resolveSendStudyIdForJob(job);
+  if (!sendStudyId || !job.destination_pacs_key) {
+    throw new HttpError(409, "Job does not have a remapped study or destination set.");
+  }
+
+  const exists = await readOrthancStudyExists(sendStudyId);
+  if (!exists) {
+    throw new HttpError(409, "Remapped study no longer exists in Orthanc. Please upload again.");
+  }
+
+  const destinationNodeId = normalizePositiveInteger(job.destination_pacs_key, "destinationPacsKey");
+  if (!destinationNodeId) {
+    throw new HttpError(409, "destinationPacsKey is missing.");
+  }
+
+  const destinationNode = await readPacsNodeForRemap(destinationNodeId);
+  if (!destinationNode.is_active) {
+    throw new HttpError(400, "Selected PACS destination is inactive.");
+  }
+
+  let sendingJob: DicomRemapJobRow | null = null;
+  if (job.status === "sending") {
+    sendingJob = job;
+  } else {
+    const sendClaim = await queryDicomRemapDb<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set status = 'sending',
+            updated_at = now()
+        where id = $1
+          and created_by_user_id = $2
+          and status = any($3::text[])
+        returning *
+      `,
+      [job.id, currentUserId, ["remapped", "failed", "sent"]]
+    );
+
+    sendingJob = sendClaim.rows[0] || null;
+    if (!sendingJob) {
+      const currentJob = await loadOwnedJob(job.id, currentUserId);
+      throw new HttpError(409, "Job is not ready for resend.", { status: currentJob.status });
+    }
+  }
+
+  try {
+    const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
+    await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
+    let sendResult: unknown;
+    try {
+      sendResult = await sendStudyToOrthancModality(sendStudyId, modalityKey);
+    } catch (error) {
+      if (!isOrthancTimeoutError(error)) {
+        throw error;
+      }
+      const verifiedSendResult = await verifySendCompletionAfterTimeout(sendStudyId, modalityKey);
+      if (!verifiedSendResult) {
+        throw new HttpError(
+          502,
+          `Orthanc send timed out and completion could not be verified (studyId=${sendStudyId}, modalityKey=${modalityKey}).`
+        );
+      }
+      sendResult = verifiedSendResult;
+    }
+
+    const result = await queryDicomRemapDb<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set status = 'sent',
+            send_result = $2::jsonb,
+            error_message = null,
+            updated_at = now()
+        where id = $1
+        returning *
+      `,
+      [job.id, JSON.stringify(sendResult ?? {})]
+    );
+    const finalJob = result.rows[0];
+    if (!finalJob) {
+      throw new HttpError(500, "Failed to finalize DICOM remap send result.");
+    }
+
+    await logDicomRemapAuditEntry({
+      entityType: "dicom_remap_job",
+      entityId: finalJob.id,
+      actionType: auditActionType,
+      oldValues: { status: job.status },
+      newValues: {
+        status: finalJob.status,
+        sourceOrthancStudyId: finalJob.source_orthanc_study_id,
+        modifiedOrthancStudyId: finalJob.modified_orthanc_study_id,
+        destinationPacsKey: finalJob.destination_pacs_key,
+      },
+      changedByUserId: currentUserId,
+    });
+
+    return { job: finalJob };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "DICOM remap send failed.";
+    await queryDicomRemapDb<DicomRemapJobRow>(
+      `
+        update dicom_remap_jobs
+        set status = 'failed',
+            error_message = $2,
+            updated_at = now()
+        where id = $1
+      `,
+      [job.id, message]
+    );
+
+    await logDicomRemapAuditEntry({
+      entityType: "dicom_remap_job",
+      entityId: job.id,
+      actionType: failedAuditActionType,
+      oldValues: { status: sendingJob.status },
+      newValues: { status: "failed", errorMessage: message },
+      changedByUserId: currentUserId,
+    });
+
+    throw error;
+  }
 }
 
 async function loadOwnedJob(jobId: number | string, userId: UserId): Promise<DicomRemapJobRow> {
@@ -1982,7 +2144,7 @@ export async function processDicomRemapMultipartJob({
   try {
     const patient = await getPatientById(patientId);
     const replacement = formatReplacementFromPatient(patient);
-    const destinationNode = await getPacsNode(destinationNodeId);
+    const destinationNode = await readPacsNodeForRemap(destinationNodeId);
     if (!destinationNode.is_active) {
       throw new HttpError(400, "Selected PACS destination is inactive.");
     }
@@ -2126,83 +2288,28 @@ export async function processDicomRemapMultipartJob({
       changedByUserId: currentUserId,
     });
 
-    const sendingResult = await queryDicomRemapDb<DicomRemapJobRow>(
-      `
-        update dicom_remap_jobs
-        set status = 'sending',
-            updated_at = now()
-        where id = $1
-          and status = 'remapped'
-        returning *
-      `,
-      [job.id]
-    );
-    if (!sendingResult.rows[0]) {
-      throw new HttpError(409, "Job status changed before send could start.");
-    }
-
-    const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
-    await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
-    let sendResult: unknown;
-    try {
-      sendResult = await sendStudyToOrthancModality(sourceStudyId, modalityKey);
-    } catch (error) {
-      if (!isOrthancTimeoutError(error)) {
-        throw error;
-      }
-      const verifiedSendResult = await verifySendCompletionAfterTimeout(sourceStudyId, modalityKey);
-      if (!verifiedSendResult) {
-        throw new HttpError(
-          502,
-          `Orthanc send timed out and completion could not be verified (studyId=${sourceStudyId}, modalityKey=${modalityKey}).`
-        );
-      }
-      sendResult = verifiedSendResult;
-    }
-
-    const finalResult = await queryDicomRemapDb<DicomRemapJobRow>(
-      `
-        update dicom_remap_jobs
-        set status = 'sent',
-            send_result = $2::jsonb,
-            error_message = null,
-            updated_at = now()
-        where id = $1
-        returning *
-      `,
-      [job.id, JSON.stringify(sendResult ?? {})]
-    );
-    const finalJob = finalResult.rows[0];
-    if (!finalJob) {
-      throw new HttpError(500, "Failed to finalize DICOM remap send result.");
-    }
-
-    await logDicomRemapAuditEntry({
-      entityType: "dicom_remap_job",
-      entityId: finalJob.id,
-      actionType: "confirm_send",
-      oldValues: { status: remappedJob.status },
-      newValues: {
-        status: finalJob.status,
-        sourceOrthancStudyId: finalJob.source_orthanc_study_id,
-        modifiedOrthancStudyId: finalJob.modified_orthanc_study_id,
-        destinationPacsKey: finalJob.destination_pacs_key,
-      },
-      changedByUserId: currentUserId,
+    const sentResult = await sendExistingDicomRemapJobToDestination({
+      job: remappedJob,
+      currentUserId,
+      auditActionType: "confirm_send",
+      failedAuditActionType: "process_upload_send_failed",
     });
 
-    return { job: finalJob, skippedFilesCount };
+    return { job: sentResult.job, skippedFilesCount };
   } catch (error) {
     if (job) {
-      await failDicomRemapUploadJob(job.id, error);
-      await logDicomRemapAuditEntry({
-        entityType: "dicom_remap_job",
-        entityId: job.id,
-        actionType: "process_upload_send_failed",
-        oldValues: { status: job.status },
-        newValues: { status: "failed", errorMessage: error instanceof Error ? error.message : "DICOM remap send failed." },
-        changedByUserId: currentUserId,
-      });
+      const current = await loadOwnedJob(job.id, currentUserId).catch(() => null);
+      if (current && current.status !== "failed") {
+        await failDicomRemapUploadJob(job.id, error);
+        await logDicomRemapAuditEntry({
+          entityType: "dicom_remap_job",
+          entityId: job.id,
+          actionType: "process_upload_send_failed",
+          oldValues: { status: current.status },
+          newValues: { status: "failed", errorMessage: error instanceof Error ? error.message : "DICOM remap send failed." },
+          changedByUserId: currentUserId,
+        });
+      }
     }
     throw error;
   } finally {
@@ -2595,6 +2702,28 @@ export async function getDicomRemapReplacementPreview({
   return replacement;
 }
 
+export async function resendDicomRemapJobToPacs({
+  jobId,
+  currentUserId,
+}: {
+  jobId: number | string;
+  currentUserId: UserId;
+}): Promise<{ job: DicomRemapJobRow }> {
+  const job = await loadOwnedJob(jobId, currentUserId);
+  if (!["failed", "remapped", "sent"].includes(job.status)) {
+    throw new HttpError(409, "Only remapped, failed, or sent jobs can be resent to PACS.", {
+      status: job.status,
+    });
+  }
+
+  return sendExistingDicomRemapJobToDestination({
+    job,
+    currentUserId,
+    auditActionType: "resend_to_pacs",
+    failedAuditActionType: "resend_to_pacs_failed",
+  });
+}
+
 export async function confirmDicomRemapAndSend({
   jobId,
   confirm,
@@ -2653,15 +2782,6 @@ export async function confirmDicomRemapAndSend({
       throw new HttpError(409, "Replacement identity fields are missing.");
     }
 
-    const destinationNodeId = normalizePositiveInteger(job.destination_pacs_key, "destinationPacsKey");
-    if (!destinationNodeId) {
-      throw new HttpError(409, "destinationPacsKey is missing.");
-    }
-    const destinationNode = await getPacsNode(destinationNodeId);
-    if (!destinationNode.is_active) {
-      throw new HttpError(400, "Selected PACS destination is inactive.");
-    }
-
     const modifiedStudyId = await createModifiedStudyCopy(job.source_orthanc_study_id, replacement);
 
     const sendingResult = await queryDicomRemapDb<DicomRemapJobRow>(
@@ -2682,83 +2802,36 @@ export async function confirmDicomRemapAndSend({
         status: currentJob.status,
       });
     }
-
-    const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
-    await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
-    let sendResult: unknown;
-    try {
-      sendResult = await sendStudyToOrthancModality(modifiedStudyId, modalityKey);
-    } catch (error) {
-      if (!isOrthancTimeoutError(error)) {
-        throw error;
-      }
-
-      const verifiedSendResult = await verifySendCompletionAfterTimeout(modifiedStudyId, modalityKey);
-      if (!verifiedSendResult) {
-        throw new HttpError(
-          502,
-          `Orthanc send timed out and completion could not be verified (studyId=${modifiedStudyId}, modalityKey=${modalityKey}).`
-        );
-      }
-      sendResult = verifiedSendResult;
-    }
-
-    const result = await queryDicomRemapDb<DicomRemapJobRow>(
-      `
-        update dicom_remap_jobs
-        set status = 'sent',
-            send_result = $2::jsonb,
-            error_message = null,
-            updated_at = now()
-        where id = $1
-        returning *
-      `,
-      [job.id, JSON.stringify(sendResult ?? {})]
-    );
-    const finalJob = result.rows[0];
-    if (!finalJob) {
-      throw new HttpError(500, "Failed to finalize DICOM remap send result.");
-    }
-
-    await logDicomRemapAuditEntry({
-      entityType: "dicom_remap_job",
-      entityId: finalJob.id,
-      actionType: "confirm_send",
-      oldValues: { status: job.status },
-      newValues: {
-        status: finalJob.status,
-        sourceOrthancStudyId: finalJob.source_orthanc_study_id,
-        modifiedOrthancStudyId: finalJob.modified_orthanc_study_id,
-        destinationPacsKey: finalJob.destination_pacs_key,
-      },
-      changedByUserId: currentUserId,
+    return sendExistingDicomRemapJobToDestination({
+      job: sendingResult.rows[0],
+      currentUserId,
+      auditActionType: "confirm_send",
+      failedAuditActionType: "confirm_send_failed",
     });
-
-    return { job: finalJob };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "DICOM remap send failed.";
-    const failed = await queryDicomRemapDb<DicomRemapJobRow>(
-      `
-        update dicom_remap_jobs
-        set status = 'failed',
-            error_message = $2,
-            updated_at = now()
-        where id = $1
-        returning *
-      `,
-      [job.id, message]
-    );
-    const failedJob = failed.rows[0];
+    const current = await loadOwnedJob(job.id, currentUserId).catch(() => null);
+    if (current && current.status !== "failed") {
+      const message = error instanceof Error ? error.message : "DICOM remap send failed.";
+      await queryDicomRemapDb(
+        `
+          update dicom_remap_jobs
+          set status = 'failed',
+              error_message = $2,
+              updated_at = now()
+          where id = $1
+        `,
+        [job.id, message]
+      );
 
-    await logDicomRemapAuditEntry({
-      entityType: "dicom_remap_job",
-      entityId: job.id,
-      actionType: "confirm_send_failed",
-      oldValues: { status: job.status },
-      newValues: { status: "failed", errorMessage: message },
-      changedByUserId: currentUserId,
-    });
-
+      await logDicomRemapAuditEntry({
+        entityType: "dicom_remap_job",
+        entityId: job.id,
+        actionType: "confirm_send_failed",
+        oldValues: { status: current.status },
+        newValues: { status: "failed", errorMessage: message },
+        changedByUserId: currentUserId,
+      });
+    }
     throw error;
   }
 }
@@ -2833,6 +2906,9 @@ export const __dicomRemapTestables = {
     fetchOrthancForRemap = fetcher;
     orthancBulkModifyAvailableForTests = null;
   },
+  setPacsNodeGetterForTests(getter: PacsNodeGetter): void {
+    readPacsNodeForRemap = getter;
+  },
   setSleepForTests(sleep: RemapSleep): void {
     sleepForDicomRemap = sleep;
   },
@@ -2844,6 +2920,7 @@ export const __dicomRemapTestables = {
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
     sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    readPacsNodeForRemap = getPacsNode;
     orthancBulkModifyAvailableForTests = null;
   },
 };

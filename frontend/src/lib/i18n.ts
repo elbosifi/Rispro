@@ -877,6 +877,9 @@ const en = {
   "pacs.remap.uploadSelectedStudy": "Upload selected study, remap, and send to PACS",
   "pacs.remap.clearFailedStudies": "Clear failed remap studies",
   "pacs.remap.maintenance": "Maintenance",
+  "pacs.remap.resendToPacs": "Resend to PACS",
+  "pacs.remap.resendSuccess": "Study sent to PACS successfully.",
+  "pacs.remap.failedResend": "Failed to resend study to PACS.",
 
   "login.heading": "RISpro Reception",
   "login.description": "Sign in to access the reception workspace",
@@ -1820,6 +1823,9 @@ const ar = {
   "pacs.remap.uploadSelectedStudy": "رفع الدراسة المختارة وإعادة الربط والإرسال إلى PACS",
   "pacs.remap.clearFailedStudies": "تنظيف دراسات remap الفاشلة",
   "pacs.remap.maintenance": "الصيانة",
+  "pacs.remap.resendToPacs": "إعادة الإرسال إلى PACS",
+  "pacs.remap.resendSuccess": "تم إرسال الدراسة إلى PACS بنجاح.",
+  "pacs.remap.failedResend": "فشلت إعادة إرسال الدراسة إلى PACS.",
 
   "login.heading": "RISpro Reception",
   "login.description": "قم بتسجيل الدخول للوصول إلى مساحة عمل الاستقبال",

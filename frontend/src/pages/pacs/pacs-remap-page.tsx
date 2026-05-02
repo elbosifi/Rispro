@@ -140,6 +140,12 @@ function isCancellableJobStatus(status: JobStatus): boolean {
   return ["uploaded", "awaiting_confirmation"].includes(status);
 }
 
+function canResendJob(job: RemapJob | null | undefined): boolean {
+  if (!job) return false;
+  if (!["failed", "remapped", "sent"].includes(job.status)) return false;
+  return Boolean(job.destination_pacs_key && (job.modified_orthanc_study_id || job.source_orthanc_study_id));
+}
+
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -406,6 +412,35 @@ export default function PacsRemapPage() {
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
       setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+    },
+  });
+
+  const resendJobMutation = useMutation({
+    mutationFn: async (targetJobId?: number) => {
+      const resolvedJobId = targetJobId ?? jobId;
+      if (!resolvedJobId) throw new Error("Missing job ID.");
+      return api<{ job: RemapJob }>(`/pacs/remap/jobs/${resolvedJobId}/resend`, { method: "POST" });
+    },
+    onMutate: () => {
+      setProcessingStage("sending");
+      setErrorMessage("");
+      setErrorDetails("");
+      setSuccessMessage("");
+    },
+    onSuccess: (data) => {
+      setJobId(data.job.id);
+      setProcessingStage("sent");
+      setSuccessMessage(t(language, "pacs.remap.resendSuccess"));
+      void currentJobQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
+    },
+    onError: (error: unknown) => {
+      setProcessingStage("failed");
+      setSuccessMessage("");
+      setErrorMessage(error instanceof Error ? error.message : t(language, "pacs.remap.failedResend"));
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
+      void currentJobQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
   });
 
@@ -779,14 +814,26 @@ export default function PacsRemapPage() {
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
                 {jobId && (
-                  <button
-                    type="button"
-                    onClick={() => resetJobMutation.mutate()}
-                    disabled={resetJobMutation.isPending}
-                    className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
-                  >
-                    {t(language, "pacs.remap.resetCurrentUpload")}
-                  </button>
+                  <>
+                    {canResendJob(currentJob) && (
+                      <button
+                        type="button"
+                        onClick={() => resendJobMutation.mutate(jobId)}
+                        disabled={resendJobMutation.isPending}
+                        className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
+                      >
+                        {t(language, "pacs.remap.resendToPacs")}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => resetJobMutation.mutate()}
+                      disabled={resetJobMutation.isPending}
+                      className="btn-secondary px-3 py-2 rounded-lg text-sm disabled:opacity-50"
+                    >
+                      {t(language, "pacs.remap.resetCurrentUpload")}
+                    </button>
+                  </>
                 )}
               </div>
             </div>
@@ -821,6 +868,16 @@ export default function PacsRemapPage() {
                   {t(language, "pacs.remap.cancelActiveJob")}
                 </button>
               )}
+              {canResendJob(currentJob) && (
+                <button
+                  type="button"
+                  onClick={() => resendJobMutation.mutate(currentJob.id)}
+                  disabled={resendJobMutation.isPending}
+                  className="btn-secondary px-3 py-2 rounded-lg text-xs disabled:opacity-50"
+                >
+                  {t(language, "pacs.remap.resendToPacs")}
+                </button>
+              )}
             </div>
           )}
 
@@ -840,15 +897,26 @@ export default function PacsRemapPage() {
             <h4 className="font-semibold text-sm">{t(language, "pacs.remap.viewRecentJobs")}</h4>
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {(jobsQuery.data?.jobs || []).map((job) => (
-                <button
-                  key={job.id}
-                  type="button"
-                  onClick={() => setJobId(job.id)}
-                  className="w-full text-left rounded border p-2 hover:bg-black/5"
-                >
-                  <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
-                  <p className="truncate">{job.source_orthanc_study_id || "—"}</p>
-                </button>
+                <div key={job.id} className="rounded border p-2 space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setJobId(job.id)}
+                    className="w-full text-left hover:bg-black/5"
+                  >
+                    <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
+                    <p className="truncate">{job.source_orthanc_study_id || "—"}</p>
+                  </button>
+                  {canResendJob(job) && (
+                    <button
+                      type="button"
+                      onClick={() => resendJobMutation.mutate(job.id)}
+                      disabled={resendJobMutation.isPending}
+                      className="btn-secondary px-2 py-1 rounded-lg text-xs disabled:opacity-50"
+                    >
+                      {t(language, "pacs.remap.resendToPacs")}
+                    </button>
+                  )}
+                </div>
               ))}
             </div>
           </div>
