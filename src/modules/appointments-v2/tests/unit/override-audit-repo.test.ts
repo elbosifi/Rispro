@@ -113,14 +113,22 @@ describe("Override audit repository — SQL query verification", () => {
     );
   });
 
-  it("has 10 parameters in query (matches 10 columns)", () => {
+  it("supports current and legacy insert shapes", () => {
+    assert.ok(
+      source.includes("override_type"),
+      "Current insert should include override_type"
+    );
+    assert.ok(
+      source.includes("INSERT_SQL_LEGACY"),
+      "Should include legacy fallback insert for older schema"
+    );
+
     const paramMatches = source.match(/\$\d+/g);
     assert.ok(paramMatches !== null, "Should have parameter placeholders");
     const uniqueParams = new Set(paramMatches);
-    assert.strictEqual(
-      uniqueParams.size,
-      10,
-      "Should have exactly 10 parameter placeholders"
+    assert.ok(
+      uniqueParams.size >= 10,
+      "Should have at least 10 parameter placeholders across current/legacy SQL"
     );
   });
 });

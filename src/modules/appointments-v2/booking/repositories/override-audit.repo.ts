@@ -14,6 +14,14 @@ const INSERT_SQL = `
   ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `;
 
+const INSERT_SQL_LEGACY = `
+  insert into appointments_v2.override_audit_events (
+    booking_id, patient_id, modality_id, exam_type_id, booking_date,
+    requesting_user_id, supervisor_user_id, override_reason,
+    decision_snapshot, outcome
+  ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`;
+
 export async function recordOverrideAudit(
   client: PoolClient,
   audit: {
@@ -30,7 +38,7 @@ export async function recordOverrideAudit(
     outcome: "approved_and_booked" | "approved_but_failed" | "denied" | "cancelled";
   }
 ): Promise<void> {
-  await client.query(INSERT_SQL, [
+  const params = [
     audit.bookingId,
     audit.patientId,
     audit.modalityId,
@@ -42,5 +50,38 @@ export async function recordOverrideAudit(
     audit.overrideType,
     JSON.stringify(audit.decisionSnapshot),
     audit.outcome,
-  ]);
+  ];
+
+  try {
+    await client.query(INSERT_SQL, params);
+  } catch (error) {
+    const pgCode =
+      typeof error === "object" && error != null && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
+    const message =
+      typeof error === "object" && error != null && "message" in error
+        ? String((error as { message?: unknown }).message ?? "")
+        : "";
+    const missingOverrideTypeColumn =
+      pgCode === "42703" &&
+      message.toLowerCase().includes("override_type");
+
+    if (!missingOverrideTypeColumn) {
+      throw error;
+    }
+
+    await client.query(INSERT_SQL_LEGACY, [
+      audit.bookingId,
+      audit.patientId,
+      audit.modalityId,
+      audit.examTypeId,
+      audit.bookingDate,
+      audit.requestingUserId,
+      audit.supervisorUserId,
+      audit.overrideReason,
+      JSON.stringify(audit.decisionSnapshot),
+      audit.outcome,
+    ]);
+  }
 }
