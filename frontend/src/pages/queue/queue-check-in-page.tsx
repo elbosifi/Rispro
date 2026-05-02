@@ -282,6 +282,23 @@ export default function QueueCheckInPage() {
   const pageTitle = t("queue.checkInTitle");
   const subtitle = t("queue.checkInInstruction");
   const lastUpdatedText = lastUpdatedAt ? formatDateTimeLy(new Date(lastUpdatedAt)) : t("queue.lastUpdatedUnknown");
+  const hasQueueSummaryData = enteredToday > 0 || completedToday > 0 || waitingNow > 0 || scheduledNotArrived > 0 || totalAppointments > 0;
+  const heroStatusLabel =
+    state.mode === "loading"
+      ? t("queue.checkInScanning")
+      : state.mode === "success"
+        ? t("queue.checkInSuccessShort")
+        : state.mode === "error"
+          ? t("queue.checkInErrorTitle")
+          : t("queue.checkInReady");
+  const heroBodyText =
+    state.mode === "loading"
+      ? t("queue.checkInScanningHint")
+      : state.mode === "success"
+        ? t("queue.checkInSuccessMessage")
+        : state.mode === "error"
+          ? state.message
+          : subtitle;
 
   return (
     <div
@@ -347,8 +364,8 @@ export default function QueueCheckInPage() {
           </div>
         </header>
 
-        <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
-          <section className="flex min-h-0 flex-col gap-4">
+        <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,2.18fr)]">
+          <section className="flex min-h-0 flex-col gap-4 xl:order-2">
             <section className="relative min-h-[26rem] overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-6 text-white shadow-[0_30px_80px_rgba(0,82,255,0.24)] sm:p-8">
               <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.1),transparent_28%)]" />
               <div className="relative z-10 grid gap-6 xl:min-h-[22rem] xl:grid-cols-[1.1fr_0.9fr] xl:items-stretch">
@@ -576,7 +593,7 @@ export default function QueueCheckInPage() {
             </div>
           </section>
 
-          <aside className="flex min-h-0 flex-col gap-4">
+          <aside className="flex min-h-0 flex-col gap-4 xl:order-1">
             <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/92 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
               <div className="flex items-center justify-between gap-3">
                 <div>
