@@ -95,6 +95,9 @@ describe("PacsRemapPage wizard", () => {
       if (String(path).startsWith("/v2/read/appointments?q=")) {
         return Promise.resolve({ appointments: [{ id: 301, patient_id: 10, accession_number: "ACC-2", appointment_date: "2026-01-02", modality_id: 3, modality_name_en: "CT", exam_name_en: "CT Brain", english_full_name: "John Doe", national_id: "N1", mrn: "MRN-1" }] });
       }
+      if (String(path).startsWith("/patients?q=")) {
+        return Promise.resolve({ patients: [{ id: 55, english_full_name: "Jane Roe", national_id: "N55", mrn: "MRN-55" }] });
+      }
       if (path === "/pacs/remap/replacement-preview") {
         return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
       }
@@ -233,5 +236,23 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
     expect(readAsDataURL).not.toHaveBeenCalled();
+  });
+
+  it("allows selecting a RISPro patient without an appointment", async () => {
+    scanMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "A", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [new File(["1"], "a1.dcm")] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      filesByStudyUid: new Map(),
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["1"], "a1.dcm")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    fireEvent.change(screen.getByPlaceholderText("Search by patient name, national ID, or MRN"), { target: { value: "Jane" } });
+    fireEvent.click(await screen.findByRole("button", { name: /Jane Roe/i }));
+    expect(await screen.findByText(/Selected without appointment/i)).toBeTruthy();
   });
 });

@@ -51,6 +51,16 @@ interface Destination {
   isDefault?: boolean;
 }
 
+interface PatientOption {
+  id: number;
+  arabic_full_name?: string;
+  english_full_name?: string;
+  national_id?: string | null;
+  mrn?: string | null;
+  sex?: string | null;
+  date_of_birth?: string | null;
+}
+
 interface ReplacementPreview {
   patientId: string;
   patientName: string;
@@ -99,6 +109,10 @@ function formatBytes(bytes: number): string {
 
 function formatFallbackPatientLabel(language: string, id: number): string {
   return language === "ar" ? `مريض #${id}` : `Patient #${id}`;
+}
+
+function formatDirectoryPatientName(language: string, patient: PatientOption): string {
+  return patient.english_full_name || patient.arabic_full_name || formatFallbackPatientLabel(language, patient.id);
 }
 
 function formatFallbackModalityLabel(language: string, id: number): string {
@@ -206,6 +220,7 @@ export default function PacsRemapPage() {
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
+  const [patientSearch, setPatientSearch] = useState("");
   const [todayPatientSearch, setTodayPatientSearch] = useState("");
   const [allDatesPatientSearch, setAllDatesPatientSearch] = useState("");
   const [todayModalityFilter, setTodayModalityFilter] = useState("");
@@ -267,6 +282,20 @@ export default function PacsRemapPage() {
       return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
     enabled: allDatesPatientSearch.trim().length >= 2,
+    retry: 0,
+  });
+
+  const patientQuery = useQuery({
+    queryKey: ["patients", "remap-search", patientSearch],
+    queryFn: async () => {
+      const search = patientSearch.trim();
+      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(search)}`);
+      const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
+      if (primaryPatients) return { patients: primaryPatients as PatientOption[] };
+      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`);
+      return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
+    },
+    enabled: patientSearch.trim().length >= 2,
     retry: 0,
   });
 
@@ -464,6 +493,7 @@ export default function PacsRemapPage() {
   const comparison = currentJobQuery.data?.comparison || null;
   const destinations = destinationsQuery.data?.destinations || [];
   const effectiveOrthancStudyId = currentJob?.modified_orthanc_study_id || currentJob?.source_orthanc_study_id || null;
+  const directoryPatients = patientQuery.data?.patients || [];
   const appointmentPatientOptions = useMemo(() => {
     const combinedAppointments = [
       ...(todayStudiesQuery.data?.appointments || []),
@@ -476,6 +506,7 @@ export default function PacsRemapPage() {
       return true;
     });
   }, [todayStudiesQuery.data?.appointments, allDatesStudiesQuery.data?.appointments]);
+  const selectedDirectoryPatient = directoryPatients.find((patient) => String(patient.id) === selectedPatientId) || null;
 
   useEffect(() => {
     if (selectedDestinationKey || destinations.length === 0) {
@@ -489,6 +520,12 @@ export default function PacsRemapPage() {
     }
   }, [destinations, selectedDestinationKey]);
   const selectedAppointmentPatient = appointmentPatientOptions.find((appointment) => String(appointment.patient_id) === selectedPatientId) || null;
+  const selectedPatientLabel =
+    selectedAppointmentPatient
+      ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id))
+      : selectedDirectoryPatient
+        ? formatDirectoryPatientName(language, selectedDirectoryPatient)
+        : null;
   const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
   const canContinuePatient = !!selectedPatientId;
   const canContinueDestination = !!selectedDestinationKey;
@@ -545,6 +582,7 @@ export default function PacsRemapPage() {
     setSelectedStudyInstanceUid("");
     setSelectedPatientId("");
     setSelectedDestinationKey("");
+    setPatientSearch("");
     setTodayPatientSearch("");
     setAllDatesPatientSearch("");
     setEnableFallbackUpload(false);
@@ -812,11 +850,50 @@ export default function PacsRemapPage() {
                   <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForSearch")}</p>
                 )}
               </div>
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAnyPatient")}</p>
+                <input
+                  type="text"
+                  value={patientSearch}
+                  onChange={(e) => setPatientSearch(e.target.value)}
+                  className="input-premium w-full px-3 py-2"
+                  placeholder={t(language, "pacs.remap.searchAnyPatientPlaceholder")}
+                />
+                {patientQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAnyPatient")}</p>}
+                {patientQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAnyPatient")}</p>}
+                {!patientQuery.isLoading && patientSearch.trim().length >= 2 && directoryPatients.length > 0 && (
+                  <div className="max-h-56 overflow-y-auto space-y-2">
+                    {directoryPatients.slice(0, 25).map((patient) => {
+                      const isSelected = Number(selectedPatientId || 0) === Number(patient.id);
+                      return (
+                        <button
+                          key={`directory-${patient.id}`}
+                          type="button"
+                          onClick={() => setSelectedPatientId(String(patient.id))}
+                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                        >
+                          <p><strong>{formatDirectoryPatientName(language, patient)}</strong></p>
+                          <p>{patient.national_id || patient.mrn || "—"}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {!patientQuery.isLoading && patientSearch.trim().length >= 2 && directoryPatients.length === 0 && (
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAnyPatientMatches")}</p>
+                )}
+              </div>
               {selectedAppointmentPatient && (
                 <div className="rounded border p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)}</p>
                   <p><strong>{t(language, "pacs.remap.appointmentDateLabel")}:</strong> {selectedAppointmentPatient.appointment_date} • <strong>ACC</strong>: {selectedAppointmentPatient.accession_number}</p>
                   <p><strong>{t(language, "common.modality")}:</strong> {selectedAppointmentPatient.modality_name_en || selectedAppointmentPatient.modality_name_ar || formatFallbackModalityLabel(language, selectedAppointmentPatient.modality_id)}</p>
+                </div>
+              )}
+              {!selectedAppointmentPatient && selectedDirectoryPatient && (
+                <div className="rounded border p-3 text-xs space-y-1">
+                  <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {formatDirectoryPatientName(language, selectedDirectoryPatient)}</p>
+                  <p><strong>{t(language, "pacs.remap.directoryPatientBadge")}:</strong> {selectedDirectoryPatient.national_id || selectedDirectoryPatient.mrn || "—"}</p>
                 </div>
               )}
             </div>
@@ -842,7 +919,7 @@ export default function PacsRemapPage() {
               <div className="rounded border p-3 text-xs space-y-1">
                 <p><strong>{t(language, "pacs.remap.originalPatientId")}:</strong> {selectedStudy?.patientId || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.originalPatientName")}:</strong> {selectedStudy?.patientName || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {selectedAppointmentPatient ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)) : "—"}</p>
+                <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {selectedPatientLabel || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementPatientId")}:</strong> {replacementPreviewQuery.data?.patientId || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementPatientName")}:</strong> {replacementPreviewQuery.data?.patientName || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementSex")}:</strong> {replacementPreviewQuery.data?.patientSex || "—"}</p>
@@ -933,7 +1010,7 @@ export default function PacsRemapPage() {
             <p><strong>{t(language, "pacs.remap.currentStep")}:</strong> {wizardStepLabel(language, wizardStep)}</p>
             <p><strong>{t(language, "pacs.remap.selectedStudy")}:</strong> {selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.originalDICOMPatient")}:</strong> {selectedStudy?.patientName || "—"} ({selectedStudy?.patientId || "—"})</p>
-            <p><strong>{t(language, "pacs.remap.selectedRISProPatient")}:</strong> {selectedAppointmentPatient ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)) : t(language, "pacs.remap.noCurrentJob")}</p>
+            <p><strong>{t(language, "pacs.remap.selectedRISProPatient")}:</strong> {selectedPatientLabel || t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {selectedDestinationKey || t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.currentJobStatus")}:</strong> {currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob")}</p>
             {comparison && (
