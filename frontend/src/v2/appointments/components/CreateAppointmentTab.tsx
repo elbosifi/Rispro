@@ -409,7 +409,11 @@ export function CreateAppointmentTab({
         return;
       }
 
-      if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted") {
+      const selectedCapacityModeNeedsOverrideAuth =
+        form.capacityResolutionMode === "category_override" ||
+        form.capacityResolutionMode === "total_capacity_override";
+
+      if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || selectedCapacityModeNeedsOverrideAuth) {
         setPendingDecision(decision);
         setShowOverrideModal(true);
         return;
