@@ -145,6 +145,7 @@ export function CreateAppointmentTab({
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
   const [showFullDays, setShowFullDays] = useState(false);
+  const [showWeekendDays, setShowWeekendDays] = useState(false);
   const [entityDisplayMode, setEntityDisplayMode] = useState<EntityDisplayMode>(() => {
     if (typeof window === "undefined") return "both";
     const stored = window.localStorage.getItem(ENTITY_DISPLAY_MODE_STORAGE_KEY);
@@ -771,6 +772,8 @@ export function CreateAppointmentTab({
               loading={availability.isLoading}
               showFullDays={showFullDays}
               onToggleShowFullDays={() => setShowFullDays((current) => !current)}
+              showWeekendDays={showWeekendDays}
+              onToggleShowWeekendDays={() => setShowWeekendDays((current) => !current)}
               startDate={startDateFromOffset(availabilityOffset)}
               onChangeStartDate={(nextDate) => {
                 setAvailabilityOffset(offsetFromStartDate(nextDate));

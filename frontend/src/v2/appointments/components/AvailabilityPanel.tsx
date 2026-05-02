@@ -11,6 +11,8 @@ interface Props {
   emptyMessage: string;
   showFullDays: boolean;
   onToggleShowFullDays: () => void;
+  showWeekendDays: boolean;
+  onToggleShowWeekendDays: () => void;
   startDate: string;
   onChangeStartDate: (isoDate: string) => void;
   onPreviousPage: () => void;
@@ -26,6 +28,8 @@ export function AvailabilityPanel({
   emptyMessage,
   showFullDays,
   onToggleShowFullDays,
+  showWeekendDays,
+  onToggleShowWeekendDays,
   startDate,
   onChangeStartDate,
   onPreviousPage,
@@ -33,14 +37,16 @@ export function AvailabilityPanel({
   canGoPrevious,
 }: Props) {
   const { language } = useLanguage();
-  const baseRows = rows.filter((row) => !row.hideAlways);
-  const visibleRows = showFullDays ? baseRows : baseRows.filter((row) => row.status === "available");
+  const baseRows = showWeekendDays ? rows : rows.filter((row) => !row.hideAlways);
+  const visibleRows = baseRows.filter(
+    (row) => row.status === "available" || showFullDays || (showWeekendDays && row.hideAlways)
+  );
 
   if (loading) {
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
   }
 
-  if (baseRows.length === 0) {
+  if (rows.length === 0) {
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
   }
 
@@ -68,6 +74,9 @@ export function AvailabilityPanel({
           />
           <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
             {showFullDays ? t(language, "appointments.create.hideFullDays") : t(language, "appointments.create.showFullDays")}
+          </button>
+          <button type="button" onClick={onToggleShowWeekendDays} className="btn-ghost text-xs h-8 px-2">
+            {showWeekendDays ? t(language, "appointments.create.hideWeekendDays") : t(language, "appointments.create.showWeekendDays")}
           </button>
         </div>
       </div>
