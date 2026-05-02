@@ -255,6 +255,16 @@ export default function QueuePage() {
          <div className="space-y-4">
            <Card className="p-4 sm:p-5">
              <h3 className="text-lg font-semibold mb-4">{t("queue.scanAccession")}</h3>
+             <div className="mb-3">
+               <Button
+                 type="button"
+                 variant="secondary"
+                 size="sm"
+                 onClick={() => window.open("/queue/check-in", "_blank", "noopener,noreferrer")}
+               >
+                 {t("queue.openFullScreenCheckIn")}
+               </Button>
+             </div>
              <form onSubmit={handleScan} className="flex gap-2">
                <Input
                  type="text"

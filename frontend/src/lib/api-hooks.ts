@@ -1227,7 +1227,7 @@ export async function fetchStatistics(date: string, modalityId: string): Promise
 
 // -- Queue --
 export async function scanIntoQueue(scanValue: string) {
-  return api<RawRecord>("/v2/read/queue/scan", {
+  return api<{ ok: true; bookingId: number }>("/v2/read/queue/scan", {
     method: "POST",
     body: JSON.stringify({ scanValue })
   });

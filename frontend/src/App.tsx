@@ -11,6 +11,7 @@ import EditPatientPage from "@/pages/patients/edit-patient-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
 import QueuePage from "@/pages/queue/queue-page";
+import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import ModalityPage from "@/pages/modality/modality-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import PrintPage from "@/pages/print/print-page";
@@ -34,6 +35,7 @@ const ROUTE_PATHS: Record<string, string> = {
   calendar: "/calendar",
   registrations: "/registrations",
   queue: "/queue",
+  "queue.checkin": "/queue/check-in",
   modality: "/modality",
   doctor: "/doctor",
   print: "/print",
@@ -224,6 +226,14 @@ function RouterConfig() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
+      <Route
+        path="/queue/check-in"
+        element={
+          <ProtectedRoute>
+            <QueueCheckInPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/*"
         element={
