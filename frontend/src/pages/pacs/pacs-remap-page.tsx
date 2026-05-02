@@ -148,17 +148,22 @@ function toIsoDate(value: Date): string {
 }
 
 async function uploadMultipartWithProgress(
+  path: string,
   formData: FormData,
   timeoutMs: number,
-  onProgress: (loaded: number, total: number) => void
+  onProgress: (loaded: number, total: number) => void,
+  onUploadComplete?: () => void,
 ): Promise<UploadMultipartResult> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const timer = window.setTimeout(() => xhr.abort(), timeoutMs);
-    xhr.open("POST", "/api/pacs/remap/jobs/upload-multipart", true);
+    xhr.open("POST", `/api${path}`, true);
     xhr.withCredentials = true;
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress(event.loaded, event.total);
+    };
+    xhr.upload.onload = () => {
+      onUploadComplete?.();
     };
     xhr.onreadystatechange = () => {
       if (xhr.readyState !== XMLHttpRequest.DONE) return;
@@ -333,30 +338,18 @@ export default function PacsRemapPage() {
       uploadFiles.forEach((file) => formData.append("files", file, file.name));
       if (selectedStudy?.studyInstanceUid) formData.append("selectedStudyInstanceUID", selectedStudy.studyInstanceUid);
       if (!selectedStudy) formData.append("uploadMode", "fallback_all_candidates");
+      formData.append("risproPatientId", selectedPatientId);
+      formData.append("destinationPacsKey", selectedDestinationKey);
+      formData.append("confirm", "true");
 
-      const uploadResult = await uploadMultipartWithProgress(formData, 600_000, (loaded, total) => {
+      const uploadResult = await uploadMultipartWithProgress("/pacs/remap/jobs/process-multipart", formData, 900_000, (loaded, total) => {
         setUploadLoaded(loaded);
         setUploadTotal(total || uploadTotal);
+      }, () => {
+        setProcessingStage("orthanc_processing");
       });
       setJobId(uploadResult.job.id);
-
-      setProcessingStage("orthanc_processing");
-      const prepared = await api<{ job: RemapJob; comparison: RemapComparison }>(
-        `/pacs/remap/jobs/${uploadResult.job.id}/prepare`,
-        {
-          method: "POST",
-          body: JSON.stringify({ risproPatientId: selectedPatientId, destinationPacsKey: selectedDestinationKey }),
-        },
-        120_000
-      );
-
-      setProcessingStage("sending");
-      const sent = await api<{ job: RemapJob }>(
-        `/pacs/remap/jobs/${uploadResult.job.id}/confirm-send`,
-        { method: "POST", body: JSON.stringify({ confirm: true }) },
-        180_000
-      );
-      return { uploadResult, prepared, sent };
+      return { uploadResult };
     },
     onSuccess: () => {
       setProcessingStage("sent");

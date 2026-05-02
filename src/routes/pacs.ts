@@ -24,6 +24,7 @@ import {
   cleanupDicomRemapUploadTempDir,
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
+  processDicomRemapMultipartJob,
   createDicomRemapUploadJob,
   type DicomRemapStagedUploadFile,
   getDicomRemapJob,
@@ -48,10 +49,16 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
   files: DicomRemapStagedUploadFile[];
   tempDir: string;
   selectedStudyInstanceUID: string | null;
+  risproPatientId: string | null;
+  destinationPacsKey: string | null;
+  confirm: string | null;
 }> {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-remap-"));
   const files: DicomRemapStagedUploadFile[] = [];
   let selectedStudyInstanceUID: string | null = null;
+  let risproPatientId: string | null = null;
+  let destinationPacsKey: string | null = null;
+  let confirm: string | null = null;
   const writes: Promise<void>[] = [];
 
   return new Promise((resolve, reject) => {
@@ -123,6 +130,21 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
       if (fieldName === "selectedStudyInstanceUID") {
         const clean = String(value || "").trim();
         selectedStudyInstanceUID = clean || null;
+        return;
+      }
+      if (fieldName === "risproPatientId") {
+        const clean = String(value || "").trim();
+        risproPatientId = clean || null;
+        return;
+      }
+      if (fieldName === "destinationPacsKey") {
+        const clean = String(value || "").trim();
+        destinationPacsKey = clean || null;
+        return;
+      }
+      if (fieldName === "confirm") {
+        const clean = String(value || "").trim();
+        confirm = clean || null;
       }
     });
 
@@ -134,7 +156,7 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
         .then(() => {
           if (settled) return;
           settled = true;
-          resolve({ files, tempDir, selectedStudyInstanceUID });
+          resolve({ files, tempDir, selectedStudyInstanceUID, risproPatientId, destinationPacsKey, confirm });
         })
         .catch(fail);
     });
@@ -335,6 +357,37 @@ pacsRouter.post(
 // ---------------------------------------------------------------------------
 // Internal DICOM remap/send tool (authenticated users, backend-orchestrated)
 // ---------------------------------------------------------------------------
+
+pacsRouter.post(
+  "/remap/jobs/process-multipart",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    const currentUserId = await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const staged = await stageDicomRemapMultipartFiles(req);
+    const confirm = validateExplicitConfirm(staged.confirm);
+    if (!confirm) {
+      throw new HttpError(400, "Explicit confirmation is required.");
+    }
+    if (!staged.risproPatientId) {
+      throw new HttpError(400, "risproPatientId is required.");
+    }
+    if (!staged.destinationPacsKey) {
+      throw new HttpError(400, "destinationPacsKey is required.");
+    }
+
+    const result = await processDicomRemapMultipartJob({
+      files: staged.files,
+      tempDir: staged.tempDir,
+      selectedStudyInstanceUID: staged.selectedStudyInstanceUID,
+      risproPatientId: staged.risproPatientId,
+      destinationPacsKey: staged.destinationPacsKey,
+      currentUserId,
+    });
+
+    res.status(201).json(result);
+  })
+);
 
 pacsRouter.post(
   "/remap/jobs/upload-multipart",

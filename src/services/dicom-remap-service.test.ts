@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import dcmjs from "dcmjs";
 import {
   __dicomRemapTestables,
   assertDicomRemapRouteAccess,
@@ -15,6 +16,7 @@ import {
   type DicomRemapJobRow,
 } from "./dicom-remap-service.js";
 import { HttpError } from "../utils/http-error.js";
+const { datasetToBuffer, DicomMessage, DicomMetaDictionary } = dcmjs.data;
 
 function remapJob(overrides: Partial<DicomRemapJobRow> = {}): DicomRemapJobRow {
   return {
@@ -102,6 +104,36 @@ function stableStudyResponses(overrides: { isStable?: boolean; lastUpdate?: stri
       json: { Version: "1.12.11", DatabaseServerIdentifier: "dbid" },
     }),
   ];
+}
+
+function makeSyntheticDicomBuffer(overrides: Record<string, unknown> = {}): Buffer {
+  return Buffer.from(datasetToBuffer({
+    _meta: {
+      FileMetaInformationVersion: new Uint8Array([0, 1]),
+      MediaStorageSOPClassUID: "1.2.840.10008.5.1.4.1.1.2",
+      MediaStorageSOPInstanceUID: "1.2.3.4.5.6",
+      TransferSyntaxUID: "1.2.840.10008.1.2.1",
+      ImplementationClassUID: "2.25.12345",
+    },
+    SOPClassUID: "1.2.840.10008.5.1.4.1.1.2",
+    SOPInstanceUID: "1.2.3.4.5.6",
+    StudyInstanceUID: "1.2.840.113619.2.55.3.604688433.1234.1456789012.1",
+    SeriesInstanceUID: "1.2.840.113619.2.55.3.604688433.1234.1456789012.1.1",
+    PatientID: "OLDID",
+    PatientName: "OLD^PATIENT",
+    PatientSex: "M",
+    PatientBirthDate: "19900101",
+    Rows: 1,
+    Columns: 1,
+    SamplesPerPixel: 1,
+    PhotometricInterpretation: "MONOCHROME2",
+    BitsAllocated: 16,
+    BitsStored: 16,
+    HighBit: 15,
+    PixelRepresentation: 0,
+    PixelData: new Uint16Array([1]),
+    ...overrides,
+  }));
 }
 
 async function makeStagedFiles(files: Array<{ fileName: string; content?: string; mimeType?: string }>) {
@@ -299,6 +331,38 @@ test("dicom helper: replacement identity rejects control characters consistently
     () => __dicomRemapTestables.normalizeDicomPatientNameForReplace("Jane\nDoe"),
     /control characters/i
   );
+});
+
+test("dicom helper: rewriteDicomFileForRemap preserves study identity and replaces patient identity", async () => {
+  const stagedFiles = await makeStagedFiles([
+    {
+      fileName: "image-1.dcm",
+      content: makeSyntheticDicomBuffer().toString("binary"),
+      mimeType: "application/dicom",
+    },
+  ]);
+
+  await writeFile(stagedFiles.staged[0].path, makeSyntheticDicomBuffer());
+
+  const rewritten = await __dicomRemapTestables.rewriteDicomFileForRemap(stagedFiles.staged[0], {
+    patientId: "NEWID",
+    patientName: "NEW^PATIENT",
+    patientSex: "F",
+    patientBirthDate: "20000101",
+  });
+
+  assert.equal(rewritten.originalSummary.studyInstanceUid, "1.2.840.113619.2.55.3.604688433.1234.1456789012.1");
+  assert.equal(rewritten.originalSummary.patientId, "OLDID");
+  assert.equal(rewritten.originalSummary.patientName, "OLD^PATIENT");
+
+  const dicom = DicomMessage.readFile(rewritten.body.buffer.slice(rewritten.body.byteOffset, rewritten.body.byteOffset + rewritten.body.byteLength));
+  const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
+  const summary = __dicomRemapTestables.readNaturalizedStudySummary(dataset);
+  assert.equal(summary.studyInstanceUid, "1.2.840.113619.2.55.3.604688433.1234.1456789012.1");
+  assert.equal(summary.patientId, "NEWID");
+  assert.equal(summary.patientName, "NEW^PATIENT");
+  assert.equal(summary.patientSex, "F");
+  assert.equal(summary.patientBirthDate, "20000101");
 });
 
 test("dicom helper: Orthanc resource id parser supports common response shapes", () => {

@@ -43,7 +43,10 @@ class FakeXHR {
   readyState = 0;
   status = 0;
   responseText = "";
-  upload = { onprogress: null as ((event: ProgressEvent<EventTarget>) => void) | null };
+  upload = {
+    onprogress: null as ((event: ProgressEvent<EventTarget>) => void) | null,
+    onload: null as (() => void) | null,
+  };
   onreadystatechange: (() => void) | null = null;
   onerror: (() => void) | null = null;
   onabort: (() => void) | null = null;
@@ -59,8 +62,9 @@ class FakeXHR {
   }
   send(body?: Document | XMLHttpRequestBodyInit | null) {
     this.sentBody = body as FormData;
+    this.upload.onload?.();
     this.status = 201;
-    this.responseText = JSON.stringify({ job: { id: 88, status: "uploaded" }, skippedFilesCount: 0 });
+    this.responseText = JSON.stringify({ job: { id: 88, status: "sent" }, skippedFilesCount: 0 });
     this.readyState = 4;
     this.onreadystatechange?.();
   }
@@ -89,8 +93,6 @@ describe("PacsRemapPage wizard", () => {
       if (path === "/pacs/remap/replacement-preview") {
         return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
       }
-      if (String(path).includes("/prepare")) return Promise.resolve({ job: { id: 88, status: "awaiting_confirmation" }, comparison: { original: {}, replacement: {} } });
-      if (String(path).includes("/confirm-send")) return Promise.resolve({ job: { id: 88, status: "sent" } });
       if (String(path).includes("/jobs/88")) return Promise.resolve({ job: { id: 88, status: "sent" }, comparison: null });
       if (String(path).includes("/pacs/remap/jobs")) return Promise.resolve({ jobs: [] });
       return Promise.resolve({});
@@ -165,9 +167,13 @@ describe("PacsRemapPage wizard", () => {
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
     const sent = FakeXHR.instances[0]?.sentBody;
     expect(sent).toBeInstanceOf(FormData);
+    expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/process-multipart");
     const fileEntries = sent?.getAll("files") ?? [];
     expect(fileEntries).toHaveLength(2);
     expect((sent?.get("selectedStudyInstanceUID") as string) || "").toBe("1.2.3");
+    expect((sent?.get("risproPatientId") as string) || "").toBe("10");
+    expect((sent?.get("destinationPacsKey") as string) || "").toBe("1");
+    expect((sent?.get("confirm") as string) || "").toBe("true");
   });
 
   it("does not use FileReader/readAsDataURL for upload path", async () => {

@@ -72,12 +72,14 @@ export function createApp(): Application {
   const PATIENT_IMPORT_PREFIX = "/api/settings/patient-import";
   const PACS_REMAP_UPLOAD_PATH = "/api/pacs/remap/jobs/upload";
   const PACS_REMAP_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/upload-multipart";
+  const PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/process-multipart";
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (
       req.path === LEGACY_UPLOAD_PATH ||
       req.path.startsWith(PATIENT_IMPORT_PREFIX) ||
       req.path === PACS_REMAP_UPLOAD_PATH ||
-      req.path === PACS_REMAP_MULTIPART_UPLOAD_PATH
+      req.path === PACS_REMAP_MULTIPART_UPLOAD_PATH ||
+      req.path === PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH
     ) {
       // Let route-specific body parsers handle it.
       return next();
