@@ -5,6 +5,7 @@ import { t, type Language } from "@/lib/i18n";
 import {
   canRoleAccessRoute,
   DEFAULT_PAGE_VISIBILITY_MATRIX,
+  PAGE_VISIBILITY_ROUTE_KEYS,
   normalizePageVisibilityMatrix,
   type PageVisibilityMatrix
 } from "@/lib/page-visibility";
@@ -90,14 +91,13 @@ export const NAV_ITEMS: NavItemConfig[] = [
 function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilityMatrix): boolean {
   if (!user) return false;
 
-  if (item.route === "settings" && user.role === "super_admin") {
-    return true;
+  // Stage 1: for known navigation routes, the matrix is authoritative.
+  // super_admin safety for settings is enforced inside canRoleAccessRoute.
+  if ((PAGE_VISIBILITY_ROUTE_KEYS as readonly string[]).includes(item.route)) {
+    return canRoleAccessRoute(matrix, item.route, user.role);
   }
 
-  if (canRoleAccessRoute(matrix, item.route, user.role)) {
-    return true;
-  }
-
+  // Fallback only for unknown routes (defensive compatibility).
   if (!item.roles) return false;
   return item.roles.includes(user.role);
 }
