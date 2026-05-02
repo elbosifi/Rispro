@@ -5,6 +5,7 @@ import { cancelAppointment, fetchAppointments, fetchAppointmentLookups } from "@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -264,6 +265,12 @@ export default function CalendarPage() {
                     {t(language, "calendar.print")}
                   </button>
                 </div>
+                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+                  <span className="font-medium text-foreground">
+                    {selectedAppointment.arabicFullName}
+                  </span>
+                  <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
                   <Field label={t(language, "calendar.fieldModality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />
@@ -314,7 +321,10 @@ export default function CalendarPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex-1">
-                        <p className="font-medium">{apt.arabicFullName}</p>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="font-medium">{apt.arabicFullName}</p>
+                          <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
+                        </div>
                         <p className="text-xs text-muted-foreground mt-1 font-mono">
                           {apt.accessionNumber}
                         </p>

@@ -6,6 +6,7 @@ import type { AppointmentLookups } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -151,9 +152,12 @@ export default function ModalityPage() {
                   }`}
                 >
                   <div className="text-right flex-1">
-                    <p className="font-medium text-stone-900 dark:text-white">
-                      #{apt.modalitySlotNumber || "—"} • {apt.arabicFullName}
-                    </p>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <p className="font-medium text-stone-900 dark:text-white">
+                        #{apt.modalitySlotNumber || "—"} • {apt.arabicFullName}
+                      </p>
+                      <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
+                    </div>
                     <p className="text-xs text-stone-500 dark:text-stone-400 mt-1">
                       {apt.accessionNumber} • {apt.modalityNameEn} • {apt.examNameEn || "—"}
                     </p>
@@ -207,6 +211,17 @@ export default function ModalityPage() {
                 >
                   {t(language, "common.print")}
                 </button>
+              </div>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-stone-900 dark:text-white">
+                    {selectedAppointment.arabicFullName}
+                  </span>
+                  <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
+                </div>
+                <span className="text-xs text-stone-500 dark:text-stone-400">
+                  {selectedAppointment.accessionNumber}
+                </span>
               </div>
               <div className="grid grid-cols-1 gap-3 text-sm">
                 <Field label={t(language, "modality.fieldAccession")} value={selectedAppointment.accessionNumber} />

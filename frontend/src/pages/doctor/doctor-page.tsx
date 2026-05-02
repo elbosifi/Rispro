@@ -6,22 +6,17 @@ import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import type { Appointment } from "@/types/api";
-
-interface DoctorAppointment extends Appointment {
-  arabicFullName: string;
-  modalityNameEn: string;
-  examNameEn: string;
-}
+import type { AppointmentWithDetails } from "@/lib/mappers";
 
 export default function DoctorPage() {
   const { language } = useLanguage();
   const [date, setDate] = useState(todayIsoDateLy());
   const [modalityId, setModalityId] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<DoctorAppointment | null>(null);
+  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -34,7 +29,7 @@ export default function DoctorPage() {
     queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }) }),
     staleTime: 1000 * 30
   });
-  const typedAppointments = appointments as DoctorAppointment[];
+  const typedAppointments = appointments as AppointmentWithDetails[];
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -83,9 +78,12 @@ export default function DoctorPage() {
                       selectedAppointment?.id === apt.id ? "bg-teal-50 dark:bg-teal-900/20" : ""
                     }`}
                   >
-                    <p className="font-medium text-stone-900 dark:text-white">
-                      {apt.accessionNumber}
-                    </p>
+                    <div className="flex flex-wrap items-center justify-end gap-1.5">
+                      <p className="font-medium text-stone-900 dark:text-white">
+                        {apt.accessionNumber}
+                      </p>
+                      <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
+                    </div>
                     <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
                       {apt.arabicFullName} {"\u2022"} {apt.modalityNameEn}
                     </p>
@@ -120,6 +118,12 @@ export default function DoctorPage() {
                 >
                   {t(language, "common.print")}
                 </button>
+              </div>
+              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 px-3 py-2">
+                <span className="font-medium text-stone-900 dark:text-white">
+                  {selectedAppointment.arabicFullName}
+                </span>
+                <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-sm">
                 <Field label={t(language, "doctor.fieldAccession")} value={selectedAppointment.accessionNumber} />

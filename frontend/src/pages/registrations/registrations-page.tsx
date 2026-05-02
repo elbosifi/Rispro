@@ -14,6 +14,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { Card, Button, SearchInput } from "@/components/shared";
@@ -520,24 +521,23 @@ export default function RegistrationsPage() {
                       } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
                       >
                       <div className="min-w-0">
-                        <div className="flex items-start gap-1">
-                          <div className="min-w-0">
-                            <p className="truncate text-[12px] font-semibold leading-tight text-foreground">
-                              {patientName}
-                            </p>
-                            <p className="mt-0.5 truncate text-[9px] leading-none text-muted-foreground">
-                              {[
-                                apt.mrn || apt.nationalId || "—",
-                                apt.phone1 || null,
-                                [apt.sex || null, Number.isFinite(apt.ageYears) ? String(apt.ageYears) : null]
-                                  .filter(Boolean)
-                                  .join(" / ") || null,
-                              ]
-                                .filter(Boolean)
-                                .join(" • ")}
-                            </p>
-                          </div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <p className="truncate text-[12px] font-semibold leading-tight text-foreground">
+                            {patientName}
+                          </p>
+                          <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
                         </div>
+                        <p className="mt-0.5 truncate text-[9px] leading-none text-muted-foreground">
+                          {[
+                            apt.mrn || apt.nationalId || "—",
+                            apt.phone1 || null,
+                            [apt.sex || null, Number.isFinite(apt.ageYears) ? String(apt.ageYears) : null]
+                              .filter(Boolean)
+                              .join(" / ") || null,
+                          ]
+                            .filter(Boolean)
+                            .join(" • ")}
+                        </p>
                       </div>
 
                       <div className="min-w-0">
@@ -632,13 +632,20 @@ export default function RegistrationsPage() {
             <div className="border-b border-border p-3 sm:p-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <h3 className="text-sm font-semibold sm:text-base">
-                    {chooseLocalized(
-                      language,
-                      selectedAppointment.arabicFullName,
-                      selectedAppointment.englishFullName,
-                    )}
-                  </h3>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-semibold sm:text-base">
+                      {chooseLocalized(
+                        language,
+                        selectedAppointment.arabicFullName,
+                        selectedAppointment.englishFullName,
+                      )}
+                    </h3>
+                    <PatientCategoryBadge
+                      category={selectedAppointment.caseCategory}
+                      showWhenUnset={false}
+                      size="sm"
+                    />
+                  </div>
                   <p className="text-[11px] sm:text-xs text-muted-foreground">
                     {selectedAppointment.accessionNumber} •{" "}
                     {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
