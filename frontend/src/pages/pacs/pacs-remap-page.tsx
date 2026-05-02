@@ -88,6 +88,16 @@ interface UploadMultipartResult {
   skippedFilesCount?: number;
 }
 
+function formatTechnicalDetails(details: unknown): string {
+  if (!details) return "";
+  if (typeof details === "string") return details;
+  try {
+    return JSON.stringify(details, null, 2);
+  } catch {
+    return String(details);
+  }
+}
+
 function formatBytes(bytes: number): string {
   const value = Number(bytes || 0);
   if (value < 1024) return `${value} B`;
@@ -196,6 +206,7 @@ export default function PacsRemapPage() {
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
   const [jobId, setJobId] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState("");
+  const [errorDetails, setErrorDetails] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [enableFallbackUpload, setEnableFallbackUpload] = useState(false);
   const [confirmChecked, setConfirmChecked] = useState(false);
@@ -286,6 +297,7 @@ export default function PacsRemapPage() {
     onMutate: () => {
       setProcessingStage("scanning");
       setErrorMessage("");
+      setErrorDetails("");
       setSuccessMessage("");
     },
     onSuccess: (result) => {
@@ -296,6 +308,7 @@ export default function PacsRemapPage() {
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
       setProcessingStage("failed");
     },
   });
@@ -303,6 +316,7 @@ export default function PacsRemapPage() {
   const processMutation = useMutation({
     onMutate: () => {
       setErrorMessage("");
+      setErrorDetails("");
       setSuccessMessage("");
     },
     mutationFn: async () => {
@@ -348,6 +362,7 @@ export default function PacsRemapPage() {
       setProcessingStage("sent");
       setSuccessMessage(language === "ar" ? "تمت إعادة الربط والإرسال بنجاح." : "Study remapped and sent successfully.");
       setErrorMessage("");
+      setErrorDetails("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
       void currentJobQuery.refetch();
     },
@@ -355,6 +370,7 @@ export default function PacsRemapPage() {
       setProcessingStage("failed");
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Processing failed.");
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -372,6 +388,7 @@ export default function PacsRemapPage() {
       setProcessingStage("failed");
       setSuccessMessage("");
       setErrorMessage(language === "ar" ? "تم إلغاء المهمة النشطة." : "Active job cancelled.");
+      setErrorDetails("");
       void currentJobQuery.refetch();
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
@@ -389,11 +406,13 @@ export default function PacsRemapPage() {
           ? `تمت إعادة الضبط. تم حذف ${data.summary.studiesDeleted} دراسة.`
           : `Reset complete. Deleted ${data.summary.studiesDeleted} linked Orthanc studies.`
       );
+      setErrorDetails("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
     onError: (error: unknown) => {
       setSuccessMessage("");
       setErrorMessage(error instanceof Error ? error.message : "Reset failed.");
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
   });
 
@@ -402,6 +421,7 @@ export default function PacsRemapPage() {
     onSuccess: () => {
       setSuccessMessage(language === "ar" ? "اكتملت صيانة الدراسات الفاشلة." : "Failed-study maintenance completed.");
       setErrorMessage("");
+      setErrorDetails("");
       void queryClient.invalidateQueries({ queryKey: ["pacs", "remap", "jobs"] });
     },
     onError: (error: unknown) => {
@@ -412,6 +432,7 @@ export default function PacsRemapPage() {
         setShowReAuthModal(true);
       }
       setErrorMessage(message);
+      setErrorDetails(error instanceof ApiError ? formatTechnicalDetails(error.details) : "");
     },
   });
 
@@ -462,6 +483,7 @@ export default function PacsRemapPage() {
     setUploadTotal(0);
     setJobId(null);
     setErrorMessage("");
+    setErrorDetails("");
     setSuccessMessage("");
     setProcessingStage("select_files");
     setFileInputVersion((v) => v + 1);
@@ -751,7 +773,15 @@ export default function PacsRemapPage() {
               {wizardStep === "sent" ? (
                 <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>
               ) : (
-                <p className="text-sm text-red-700">{visibleErrorMessage || t(language, "pacs.remap.failure")}</p>
+                <div className="space-y-2">
+                  <p className="text-sm text-red-700">{visibleErrorMessage || t(language, "pacs.remap.failure")}</p>
+                  {errorDetails && (
+                    <details className="rounded border border-red-200 bg-red-50 p-2 text-xs text-red-700">
+                      <summary className="cursor-pointer font-medium">Technical details</summary>
+                      <pre className="mt-2 whitespace-pre-wrap break-words">{errorDetails}</pre>
+                    </details>
+                  )}
+                </div>
               )}
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={resetWorkflow} className="btn-secondary px-3 py-2 rounded-lg text-sm">{t(language, "pacs.remap.startNewUpload")}</button>
@@ -832,12 +862,12 @@ export default function PacsRemapPage() {
         </div>
       </div>
 
-      {visibleErrorMessage && (
+      {visibleErrorMessage && wizardStep !== "failed" && wizardStep !== "sent" && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
           {visibleErrorMessage}
         </div>
       )}
-      {visibleSuccessMessage && (
+      {visibleSuccessMessage && wizardStep !== "failed" && wizardStep !== "sent" && (
         <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700">
           {visibleSuccessMessage}
         </div>

@@ -500,13 +500,9 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modify404,
       ...stableStudyResponses(),
       modify404,
-      orthancResult({
-        status: 404,
-        ok: false,
-        text: "Bulk modify route unavailable",
-        json: { Error: "Unknown resource" },
-      }),
+      orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id" } }),
     ]);
+    __dicomRemapTestables.setBulkModifyRouteAvailableForTests(false);
 
     await assert.rejects(
       () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
@@ -516,18 +512,7 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
         patientBirthDate: "19900101",
       }),
       (error) => {
-        assert.match((error as Error).message, /bulk modify fallback both failed/i);
-        assert.match((error as Error).message, /sourceStudyId=study-id/);
-        assert.match((error as Error).message, /instances=465/);
-        assert.match((error as Error).message, /isStable=true/);
-        assert.match((error as Error).message, /lastUpdate=20260430T120000/);
-        assert.match((error as Error).message, /series=1/);
-        assert.match((error as Error).message, /orthancVersion=1.12.11/);
-        assert.match((error as Error).message, /databaseServerIdentifier=dbid/);
-        assert.match((error as Error).message, /status=404/);
-        assert.match((error as Error).message, /Basic \[redacted\]/);
-        assert.doesNotMatch((error as Error).message, /secret-token/);
-        assert.match((error as Error).message, /shape=object\(keys=Error\)/);
+        assert.match((error as Error).message, /Orthanc could not modify this uploaded study/i);
         return true;
       }
     );
@@ -536,9 +521,9 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
     assert.equal(calls[1]?.path, "/studies/study-id/statistics");
     assert.equal(calls[2]?.path, "/system");
     assert.equal(calls[3]?.path, "/studies/study-id/modify");
-    assert.equal(calls.filter((call) => call.path === "/studies/study-id/modify").length, 5);
-    assert.equal(calls.at(-1)?.path, "/tools/bulk-modify");
-    assert.equal(logged.length, 2);
+    assert.equal(calls[4]?.path, "/studies/study-id");
+    assert.equal(calls.some((call) => call.path === "/tools/bulk-modify"), false);
+    assert.equal(logged.length, 1);
     assert.equal(logged[0]?.[0], "Orthanc study modify failed.");
     assert.deepEqual(logged[0]?.[1], {
       sourceStudyId: "study-id",
@@ -555,7 +540,6 @@ test("dicom helper: createModifiedStudyCopy logs and reports modify 404 diagnost
       modifyPayloadShape: "object(keys=Replace,KeepSource,Force)",
       stabilityTimedOut: false,
     });
-    assert.equal(logged[1]?.[0], "Orthanc bulk modify fallback failed.");
   } finally {
     console.error = originalConsoleError;
   }
@@ -883,6 +867,7 @@ test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when st
       modify404,
       ...stableStudyResponses(),
       modify404,
+      orthancResult({ status: 200, ok: true, text: "{}", json: { ID: "study-id" } }),
       orthancResult({
         status: 200,
         ok: true,
@@ -890,6 +875,7 @@ test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when st
         json: { Resources: ["bulk-modified-study-id"] },
       }),
     ]);
+    __dicomRemapTestables.setBulkModifyRouteAvailableForTests(true);
 
     const modifiedStudyId = await __dicomRemapTestables.createModifiedStudyCopy("study-id", {
       patientId: "P1",
@@ -917,6 +903,36 @@ test("dicom helper: createModifiedStudyCopy uses study-level bulk modify when st
   } finally {
     console.error = originalConsoleError;
   }
+});
+
+test("dicom helper: createModifiedStudyCopy reports missing source study after modify 404", async () => {
+  __dicomRemapTestables.setSleepForTests(async () => {});
+  const calls = queueOrthancResults([
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+    ...stableStudyResponses(),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+    orthancResult({ status: 404, ok: false, text: "Not Found", json: { HttpStatus: 404 } }),
+  ]);
+  __dicomRemapTestables.setBulkModifyRouteAvailableForTests(false);
+
+  await assert.rejects(
+    () => __dicomRemapTestables.createModifiedStudyCopy("study-id", {
+      patientId: "P1",
+      patientName: "Test^Patient",
+      patientSex: "M",
+      patientBirthDate: "19900101",
+    }),
+    /Source study no longer exists in Orthanc\. Please reset and upload again\./i
+  );
+
+  assert.equal(calls[4]?.path, "/studies/study-id");
 });
 
 test("dicom helper: cancelled status is terminal and not active", () => {

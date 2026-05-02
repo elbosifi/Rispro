@@ -144,6 +144,7 @@ let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
 let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let orthancBulkModifyAvailableForTests: boolean | null = null;
 
 function joinUrl(baseUrl: string, suffix: string): string {
   const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
@@ -1248,6 +1249,42 @@ function isOrthancStudyStabilityTimeout(error: unknown): boolean {
     && /Timed out waiting for Orthanc study to become stable before DICOM remap modify/i.test(error.message);
 }
 
+function buildOrthancModifyTechnicalDetails(
+  preflight: OrthancStudyModifyPreflight,
+  response: OrthancFetchResult | null,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    sourceStudyId: preflight.sourceStudyId,
+    isStable: preflight.isStable,
+    lastUpdate: preflight.lastUpdate,
+    seriesCount: preflight.seriesCount,
+    instanceCount: preflight.instanceCount,
+    orthancVersion: preflight.orthancVersion,
+    databaseServerIdentifier: preflight.databaseServerIdentifier,
+    status: response?.status ?? null,
+    body: response ? sanitizeOrthancResponseSnippet(response.text) : null,
+    shape: response ? describeOrthancPayloadShape(response.json) : null,
+    ...extra,
+  };
+}
+
+async function isOrthancBulkModifyRouteAvailable(): Promise<boolean> {
+  if (orthancBulkModifyAvailableForTests != null) {
+    return orthancBulkModifyAvailableForTests;
+  }
+
+  try {
+    const response = await fetchOrthancForRemap("/tools/bulk-modify", {
+      method: "OPTIONS",
+      timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
+    });
+    return response.status !== 404;
+  } catch {
+    return false;
+  }
+}
+
 function formatReplacementFromPatient(patient: Awaited<ReturnType<typeof getPatientById>>): OrthancPatientSummary {
   const patientId = String(
     patient.identifier_value ||
@@ -1326,7 +1363,13 @@ async function tryBulkModifiedStudyCopy(
 
   throw new HttpError(
     502,
-    `Orthanc study modify and bulk modify fallback both failed (studyModify: ${formatOrthancStudyDiagnostics(preflight, studyModifyResponse)}; bulkModify: status=${bulkResponse.status}, body=${sanitizeOrthancResponseSnippet(bulkResponse.text)}, shape=${describeOrthancPayloadShape(bulkResponse.json)}).`
+    "Orthanc could not modify this uploaded study. Please reset current upload and retry.",
+    buildOrthancModifyTechnicalDetails(preflight, studyModifyResponse, {
+      bulkModifyStatus: bulkResponse.status,
+      bulkModifyBody: sanitizeOrthancResponseSnippet(bulkResponse.text),
+      bulkModifyShape: describeOrthancPayloadShape(bulkResponse.json),
+      bulkModifyRouteAvailable: true,
+    })
   );
 }
 
@@ -1366,6 +1409,13 @@ async function createModifiedStudyCopy(
     KeepSource: true,
     Force: true,
   };
+  if ((preflight.instanceCount ?? 0) <= 0) {
+    throw new HttpError(
+      409,
+      "Uploaded Orthanc study has no instances. Please reset and upload again.",
+      buildOrthancModifyTechnicalDetails(preflight, null)
+    );
+  }
   const backoffMs = [500, 1_000, 2_000, 4_000];
   let response: OrthancFetchResult | null = null;
 
@@ -1427,12 +1477,39 @@ async function createModifiedStudyCopy(
     });
 
     if (response.status === 404) {
-      return tryBulkModifiedStudyCopy(sourceStudyId, modifyPayload, preflight, response);
+      const sourceStillExists = await readOrthancStudyExists(sourceStudyId);
+      if (!sourceStillExists) {
+        throw new HttpError(
+          409,
+          "Source study no longer exists in Orthanc. Please reset and upload again.",
+          buildOrthancModifyTechnicalDetails(preflight, response, {
+            sourceStudyStillExists: false,
+            bulkModifyRouteAvailable: false,
+          })
+        );
+      }
+
+      const bulkModifyRouteAvailable = await isOrthancBulkModifyRouteAvailable();
+      if (bulkModifyRouteAvailable) {
+        return tryBulkModifiedStudyCopy(sourceStudyId, modifyPayload, preflight, response);
+      }
+
+      throw new HttpError(
+        409,
+        "Orthanc could not modify this uploaded study. Please reset current upload and retry.",
+        buildOrthancModifyTechnicalDetails(preflight, response, {
+          sourceStudyStillExists: true,
+          bulkModifyRouteAvailable: false,
+        })
+      );
     }
 
     throw new HttpError(
       502,
-      `Orthanc study modify failed (${formatOrthancStudyDiagnostics(preflight, response)}).`
+      "Orthanc could not modify this uploaded study. Please reset current upload and retry.",
+      buildOrthancModifyTechnicalDetails(preflight, response, {
+        bulkModifyRouteAvailable: false,
+      })
     );
   }
 
@@ -1699,6 +1776,11 @@ export async function createDicomRemapUploadJob({
         fileName,
         fileIndex: index + 1,
       });
+
+      if (!parentStudyId) {
+        skippedFilesCount += 1;
+        continue;
+      }
 
       uploadedFileCount += 1;
       studyIds.add(parentStudyId);
@@ -2345,9 +2427,6 @@ export async function confirmDicomRemapAndSend({
       changedByUserId: currentUserId,
     });
 
-    if (failedJob) {
-      return { job: failedJob };
-    }
     throw error;
   }
 }
@@ -2405,6 +2484,7 @@ export const __dicomRemapTestables = {
   createModifiedStudyCopy,
   verifyModifiedStudyAfterTimeout,
   verifySendCompletionAfterTimeout,
+  isOrthancBulkModifyRouteAvailable,
   describeOrthancPayloadShape,
   sanitizeOrthancResponseSnippet,
   formatOrthancUploadFailureMessage,
@@ -2417,14 +2497,19 @@ export const __dicomRemapTestables = {
   },
   setOrthancFetchForTests(fetcher: OrthancFetch): void {
     fetchOrthancForRemap = fetcher;
+    orthancBulkModifyAvailableForTests = null;
   },
   setSleepForTests(sleep: RemapSleep): void {
     sleepForDicomRemap = sleep;
+  },
+  setBulkModifyRouteAvailableForTests(value: boolean | null): void {
+    orthancBulkModifyAvailableForTests = value;
   },
   resetTestOverrides(): void {
     queryDicomRemapDb = pool.query.bind(pool);
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
     sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    orthancBulkModifyAvailableForTests = null;
   },
 };
