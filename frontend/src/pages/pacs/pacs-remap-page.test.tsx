@@ -89,7 +89,12 @@ describe("PacsRemapPage wizard", () => {
     vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
-      if (String(path).startsWith("/patients")) return Promise.resolve({ patients: [{ id: 10, english_full_name: "John Doe", national_id: "N1" }] });
+      if (String(path).startsWith("/v2/read/appointments?dateFrom=")) {
+        return Promise.resolve({ appointments: [{ id: 201, patient_id: 10, accession_number: "ACC-1", appointment_date: "2026-01-01", modality_id: 3, modality_name_en: "CT", exam_name_en: "CT Brain", english_full_name: "John Doe", national_id: "N1", mrn: "MRN-1" }] });
+      }
+      if (String(path).startsWith("/v2/read/appointments?q=")) {
+        return Promise.resolve({ appointments: [{ id: 301, patient_id: 10, accession_number: "ACC-2", appointment_date: "2026-01-02", modality_id: 3, modality_name_en: "CT", exam_name_en: "CT Brain", english_full_name: "John Doe", national_id: "N1", mrn: "MRN-1" }] });
+      }
       if (path === "/pacs/remap/replacement-preview") {
         return Promise.resolve({ replacement: { patientId: "N1", patientName: "John^Doe", patientSex: "M", patientBirthDate: "19900101" } });
       }
@@ -177,9 +182,9 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: selectedFiles } });
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
     const comboBoxes = screen.getAllByRole("combobox");
-    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "10" } });
-    fireEvent.change(comboBoxes[3] as HTMLSelectElement, { target: { value: "1" } });
+    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
     fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
@@ -208,7 +213,7 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
     await screen.findByText(/Detected 1 studies/i);
     const comboBoxes = screen.getAllByRole("combobox");
-    expect((comboBoxes[3] as HTMLSelectElement).value).toBe("1");
+    expect((comboBoxes[2] as HTMLSelectElement).value).toBe("1");
   });
 
   it("does not use FileReader/readAsDataURL for upload path", async () => {

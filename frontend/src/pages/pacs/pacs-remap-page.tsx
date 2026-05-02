@@ -58,16 +58,6 @@ interface ReplacementPreview {
   patientBirthDate: string;
 }
 
-interface PatientOption {
-  id: number;
-  arabic_full_name?: string;
-  english_full_name?: string;
-  national_id?: string | null;
-  mrn?: string | null;
-  sex?: string | null;
-  date_of_birth?: string | null;
-}
-
 interface TodayStudyOption {
   id: number;
   patient_id: number;
@@ -105,10 +95,6 @@ function formatBytes(bytes: number): string {
   if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
   if (value < 1024 * 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
   return `${(value / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatName(language: string, patient: PatientOption): string {
-  return patient.english_full_name || patient.arabic_full_name || formatFallbackPatientLabel(language, patient.id);
 }
 
 function formatFallbackPatientLabel(language: string, id: number): string {
@@ -220,8 +206,8 @@ export default function PacsRemapPage() {
   const [selectedStudyInstanceUid, setSelectedStudyInstanceUid] = useState("");
   const [selectedPatientId, setSelectedPatientId] = useState("");
   const [selectedDestinationKey, setSelectedDestinationKey] = useState("");
-  const [patientSearch, setPatientSearch] = useState("");
   const [todayPatientSearch, setTodayPatientSearch] = useState("");
+  const [allDatesPatientSearch, setAllDatesPatientSearch] = useState("");
   const [todayModalityFilter, setTodayModalityFilter] = useState("");
   const [studyDateMode, setStudyDateMode] = useState<"today" | "yesterday" | "custom">("today");
   const [customStudyDate, setCustomStudyDate] = useState(toIsoDate(new Date()));
@@ -272,16 +258,15 @@ export default function PacsRemapPage() {
     retry: 0,
   });
 
-  const patientQuery = useQuery({
-    queryKey: ["patients", "remap-search", patientSearch],
-    queryFn: async () => {
-      const search = patientSearch.trim();
-      const primary = await api<Record<string, unknown>>(`/patients?q=${encodeURIComponent(search)}`);
-      const primaryPatients = Array.isArray(primary?.patients) ? primary.patients : null;
-      if (primaryPatients) return { patients: primaryPatients as PatientOption[] };
-      const fallback = await api<Record<string, unknown>>(`/patients/directory?q=${encodeURIComponent(search)}&page=1&pageSize=25`);
-      return { patients: (Array.isArray(fallback?.rows) ? fallback.rows : []) as PatientOption[] };
+  const allDatesStudiesQuery = useQuery({
+    queryKey: ["v2", "appointments", "remap-picker-all-dates", allDatesPatientSearch, todayModalityFilter],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set("q", allDatesPatientSearch.trim());
+      if (todayModalityFilter) params.set("modalityId", todayModalityFilter);
+      return api<{ appointments: TodayStudyOption[] }>(`/v2/read/appointments?${params.toString()}`);
     },
+    enabled: allDatesPatientSearch.trim().length >= 2,
     retry: 0,
   });
 
@@ -477,9 +462,20 @@ export default function PacsRemapPage() {
 
   const currentJob = currentJobQuery.data?.job || null;
   const comparison = currentJobQuery.data?.comparison || null;
-  const patients = patientQuery.data?.patients || [];
   const destinations = destinationsQuery.data?.destinations || [];
   const effectiveOrthancStudyId = currentJob?.modified_orthanc_study_id || currentJob?.source_orthanc_study_id || null;
+  const appointmentPatientOptions = useMemo(() => {
+    const combinedAppointments = [
+      ...(todayStudiesQuery.data?.appointments || []),
+      ...(allDatesStudiesQuery.data?.appointments || []),
+    ];
+    const seen = new Set<number>();
+    return combinedAppointments.filter((appointment) => {
+      if (seen.has(appointment.patient_id)) return false;
+      seen.add(appointment.patient_id);
+      return true;
+    });
+  }, [todayStudiesQuery.data?.appointments, allDatesStudiesQuery.data?.appointments]);
 
   useEffect(() => {
     if (selectedDestinationKey || destinations.length === 0) {
@@ -492,7 +488,7 @@ export default function PacsRemapPage() {
       setSelectedDestinationKey(destinations[0]!.key);
     }
   }, [destinations, selectedDestinationKey]);
-  const selectedPatient = patients.find((patient) => String(patient.id) === selectedPatientId) || null;
+  const selectedAppointmentPatient = appointmentPatientOptions.find((appointment) => String(appointment.patient_id) === selectedPatientId) || null;
   const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
   const canContinuePatient = !!selectedPatientId;
   const canContinueDestination = !!selectedDestinationKey;
@@ -516,11 +512,22 @@ export default function PacsRemapPage() {
   useEffect(() => {
     const activeElement = stepCardRefs.current[wizardStep];
     if (!activeElement) return;
+    const rect = activeElement.getBoundingClientRect();
+    const isOutsideViewport = rect.top < 0 || rect.bottom > window.innerHeight;
+    if (!isOutsideViewport) return;
     const handle = window.requestAnimationFrame(() => {
       activeElement.scrollIntoView({ behavior: "smooth", block: "start", inline: "nearest" });
       activeElement.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(handle);
+  }, [wizardStep]);
+
+  useEffect(() => {
+    if (wizardStep !== "sent") return;
+    const handle = window.setTimeout(() => {
+      resetWorkflow();
+    }, 5000);
+    return () => window.clearTimeout(handle);
   }, [wizardStep]);
 
   const visibleErrorMessage =
@@ -538,7 +545,8 @@ export default function PacsRemapPage() {
     setSelectedStudyInstanceUid("");
     setSelectedPatientId("");
     setSelectedDestinationKey("");
-    setPatientSearch("");
+    setTodayPatientSearch("");
+    setAllDatesPatientSearch("");
     setEnableFallbackUpload(false);
     setConfirmChecked(false);
     setUploadLoaded(0);
@@ -763,22 +771,54 @@ export default function PacsRemapPage() {
                     })}
                   </div>
                 )}
+                {!todayStudiesQuery.isLoading && (todayStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForFilter")}</p>
+                )}
               </div>
-              <input
-                type="text"
-                value={patientSearch}
-                onChange={(e) => setPatientSearch(e.target.value)}
-                className="input-premium w-full px-3 py-2"
-                placeholder={t(language, "pacs.remap.searchPatient")}
-              />
-              <select value={selectedPatientId} onChange={(e) => setSelectedPatientId(e.target.value)} className="input-premium w-full px-3 py-2">
-                <option value="">{t(language, "pacs.remap.selectPatient")}</option>
-                {patients.map((patient) => (
-                  <option key={patient.id} value={patient.id}>
-                    {formatName(language, patient)} {patient.national_id ? `(${patient.national_id})` : ""}
-                  </option>
-                ))}
-              </select>
+              <div className="rounded-lg border p-3 space-y-2">
+                <p className="text-xs font-semibold">{t(language, "pacs.remap.searchAllDatesAppointments")}</p>
+                <input
+                  type="text"
+                  value={allDatesPatientSearch}
+                  onChange={(e) => setAllDatesPatientSearch(e.target.value)}
+                  className="input-premium w-full px-3 py-2"
+                  placeholder={t(language, "pacs.remap.searchAllDatesPlaceholder")}
+                />
+                {allDatesStudiesQuery.isLoading && <p className="text-xs">{t(language, "pacs.remap.loadingAllDatesAppointments")}</p>}
+                {allDatesStudiesQuery.error && <p className="text-xs text-red-600">{t(language, "pacs.remap.failedAllDatesAppointments")}</p>}
+                {!allDatesStudiesQuery.isLoading && allDatesPatientSearch.trim().length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) > 0 && (
+                  <div className="max-h-56 overflow-y-auto space-y-2">
+                    {(allDatesStudiesQuery.data?.appointments || []).slice(0, 60).map((appointment) => {
+                      const displayName = appointment.english_full_name || appointment.arabic_full_name || formatFallbackPatientLabel(language, appointment.patient_id);
+                      const modalityName = appointment.modality_name_en || appointment.modality_name_ar || formatFallbackModalityLabel(language, appointment.modality_id);
+                      const examName = appointment.exam_name_en || appointment.exam_name_ar || "";
+                      const isSelected = Number(selectedPatientId || 0) === Number(appointment.patient_id);
+                      return (
+                        <button
+                          key={`all-dates-${appointment.id}`}
+                          type="button"
+                          onClick={() => setSelectedPatientId(String(appointment.patient_id))}
+                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                        >
+                          <p><strong>{displayName}</strong></p>
+                          <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
+                          <p>{appointment.appointment_date} • {appointment.accession_number}{appointment.national_id ? ` • ${appointment.national_id}` : ""}</p>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {!allDatesStudiesQuery.isLoading && allDatesPatientSearch.trim().length >= 2 && (allDatesStudiesQuery.data?.appointments?.length || 0) === 0 && (
+                  <p className="text-xs" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.noAppointmentsForSearch")}</p>
+                )}
+              </div>
+              {selectedAppointmentPatient && (
+                <div className="rounded border p-3 text-xs space-y-1">
+                  <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)}</p>
+                  <p><strong>{t(language, "pacs.remap.appointmentDateLabel")}:</strong> {selectedAppointmentPatient.appointment_date} • <strong>ACC</strong>: {selectedAppointmentPatient.accession_number}</p>
+                  <p><strong>{t(language, "common.modality")}:</strong> {selectedAppointmentPatient.modality_name_en || selectedAppointmentPatient.modality_name_ar || formatFallbackModalityLabel(language, selectedAppointmentPatient.modality_id)}</p>
+                </div>
+              )}
             </div>
           )}
 
@@ -802,7 +842,7 @@ export default function PacsRemapPage() {
               <div className="rounded border p-3 text-xs space-y-1">
                 <p><strong>{t(language, "pacs.remap.originalPatientId")}:</strong> {selectedStudy?.patientId || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.originalPatientName")}:</strong> {selectedStudy?.patientName || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {selectedPatient ? formatName(language, selectedPatient) : "—"}</p>
+                <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {selectedAppointmentPatient ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)) : "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementPatientId")}:</strong> {replacementPreviewQuery.data?.patientId || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementPatientName")}:</strong> {replacementPreviewQuery.data?.patientName || "—"}</p>
                 <p><strong>{t(language, "pacs.remap.replacementSex")}:</strong> {replacementPreviewQuery.data?.patientSex || "—"}</p>
@@ -893,7 +933,7 @@ export default function PacsRemapPage() {
             <p><strong>{t(language, "pacs.remap.currentStep")}:</strong> {wizardStepLabel(language, wizardStep)}</p>
             <p><strong>{t(language, "pacs.remap.selectedStudy")}:</strong> {selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.originalDICOMPatient")}:</strong> {selectedStudy?.patientName || "—"} ({selectedStudy?.patientId || "—"})</p>
-            <p><strong>{t(language, "pacs.remap.selectedRISProPatient")}:</strong> {selectedPatient ? formatName(language, selectedPatient) : t(language, "pacs.remap.noCurrentJob")}</p>
+            <p><strong>{t(language, "pacs.remap.selectedRISProPatient")}:</strong> {selectedAppointmentPatient ? (selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)) : t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {selectedDestinationKey || t(language, "pacs.remap.noCurrentJob")}</p>
             <p><strong>{t(language, "pacs.remap.currentJobStatus")}:</strong> {currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob")}</p>
             {comparison && (
@@ -908,11 +948,14 @@ export default function PacsRemapPage() {
             <div className="card-shell p-4 space-y-2 text-xs">
               <h4 className="font-semibold text-sm">{t(language, "pacs.remap.currentUpload")}</h4>
               <p>{t(language, "pacs.remap.job")} #{currentJob.id}</p>
-              <p>{t(language, "pacs.remap.orthancStudy")}: <span className="font-mono">{effectiveOrthancStudyId || "—"}</span></p>
+              <p><strong>{t(language, "pacs.remap.originalDICOMPatient")}:</strong> {currentJob.original_patient_name || "—"} ({currentJob.original_patient_id || "—"})</p>
+              <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {currentJob.replacement_patient_name || "—"} ({currentJob.replacement_patient_id || "—"})</p>
+              <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {currentJob.destination_pacs_key || "—"}</p>
+              <p>{t(language, "pacs.remap.orthancStudy")}: <span className="font-mono text-[11px]">{effectiveOrthancStudyId || "—"}</span></p>
               {currentJob.source_orthanc_study_id && currentJob.modified_orthanc_study_id && currentJob.source_orthanc_study_id !== currentJob.modified_orthanc_study_id && (
                 <>
-                  <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono">{currentJob.source_orthanc_study_id}</span></p>
-                  <p>{t(language, "pacs.remap.modifiedStudy")}: <span className="font-mono">{currentJob.modified_orthanc_study_id}</span></p>
+                  <p>{t(language, "pacs.remap.sourceStudy")}: <span className="font-mono text-[11px]">{currentJob.source_orthanc_study_id}</span></p>
+                  <p>{t(language, "pacs.remap.modifiedStudy")}: <span className="font-mono text-[11px]">{currentJob.modified_orthanc_study_id}</span></p>
                 </>
               )}
               {isSendFailedJob(currentJob) && (
@@ -959,7 +1002,8 @@ export default function PacsRemapPage() {
                     className="w-full text-left hover:bg-black/5"
                   >
                     <p className="font-mono">#{job.id} • {statusLabel(language, job.status)}</p>
-                    <p className="truncate">{job.source_orthanc_study_id || "—"}</p>
+                    <p className="truncate"><strong>{job.original_patient_name || "—"}</strong></p>
+                    <p className="truncate">{job.replacement_patient_name || "—"} • {job.destination_pacs_key || "—"}</p>
                     {isSendFailedJob(job) && (
                       <p className="text-[11px] text-red-700 truncate">{t(language, "pacs.remap.sendFailedBadge")} • {oneLineReason(job.error_message) || t(language, "pacs.remap.failedResend")}</p>
                     )}
