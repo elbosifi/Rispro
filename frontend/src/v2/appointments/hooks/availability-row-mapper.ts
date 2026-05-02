@@ -41,6 +41,8 @@ export interface AvailabilityRowViewModel {
   } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
+  reasonCodes: string[];
+  hideAlways: boolean;
 }
 
 function toDayLabel(isoDate: string, language: Language): string {
@@ -79,6 +81,8 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
       ? "Restricted unless supervisor approves"
       : matchedExamRuleSummary?.effectMode ?? "";
   const reasonText = matchedExamRuleSummary ? "" : day.decision.reasons[0]?.message ?? "";
+  const reasonCodes = day.decision.reasons.map((reason) => reason.code);
+  const hideAlways = reasonCodes.includes("weekday_appointments_disabled");
 
   const hideRawCapacity = status === "blocked";
 
@@ -117,5 +121,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
       : null,
     reasonText,
     requiresSupervisorOverride: day.decision.requiresSupervisorOverride,
+    reasonCodes,
+    hideAlways,
   };
 }

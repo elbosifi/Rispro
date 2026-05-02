@@ -33,13 +33,14 @@ export function AvailabilityPanel({
   canGoPrevious,
 }: Props) {
   const { language } = useLanguage();
-  const visibleRows = showFullDays ? rows : rows.filter((row) => row.status !== "full");
+  const baseRows = rows.filter((row) => !row.hideAlways);
+  const visibleRows = showFullDays ? baseRows : baseRows.filter((row) => row.status === "available");
 
   if (loading) {
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
   }
 
-  if (rows.length === 0) {
+  if (baseRows.length === 0) {
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
   }
 
