@@ -350,6 +350,9 @@ test("dicom helper: rewriteDicomFileForRemap preserves study identity and replac
     patientName: "NEW^PATIENT",
     patientSex: "F",
     patientBirthDate: "20000101",
+  }, {
+    studyInstanceUid: "2.25.999001",
+    seriesInstanceUidByOriginal: new Map(),
   });
 
   assert.equal(rewritten.originalSummary.studyInstanceUid, "1.2.840.113619.2.55.3.604688433.1234.1456789012.1");
@@ -359,7 +362,9 @@ test("dicom helper: rewriteDicomFileForRemap preserves study identity and replac
   const dicom = DicomMessage.readFile(rewritten.body.buffer.slice(rewritten.body.byteOffset, rewritten.body.byteOffset + rewritten.body.byteLength));
   const dataset = DicomMetaDictionary.naturalizeDataset(dicom.dict) as Record<string, unknown>;
   const summary = __dicomRemapTestables.readNaturalizedStudySummary(dataset);
-  assert.equal(summary.studyInstanceUid, "1.2.840.113619.2.55.3.604688433.1234.1456789012.1");
+  assert.equal(summary.studyInstanceUid, "2.25.999001");
+  assert.notEqual(String(dataset.SeriesInstanceUID || "").trim(), "1.2.840.113619.2.55.3.604688433.1234.1456789012.1.1");
+  assert.notEqual(String(dataset.SOPInstanceUID || "").trim(), "1.2.3.4.5.6");
   assert.equal(summary.patientId, "NEWID");
   assert.equal(summary.patientName, "NEW^PATIENT");
   assert.equal(summary.patientSex, "F");

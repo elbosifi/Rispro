@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile, readdir, rm, stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -110,6 +111,11 @@ interface OrthancPatientSummary {
 
 interface OrthancStudySummary extends OrthancPatientSummary {
   studyInstanceUid: string;
+}
+
+interface DicomUidRemapPlan {
+  studyInstanceUid: string;
+  seriesInstanceUidByOriginal: Map<string, string>;
 }
 
 interface OrthancStudyModifyPreflight {
@@ -597,9 +603,29 @@ function readNaturalizedStudySummary(dataset: Record<string, unknown>): OrthancS
   };
 }
 
+function createDicomUid(): string {
+  const hex = randomUUID().replaceAll("-", "");
+  return `2.25.${BigInt(`0x${hex}`).toString(10)}`;
+}
+
+function getOrCreateSeriesInstanceUid(
+  originalSeriesInstanceUid: string,
+  plan: DicomUidRemapPlan
+): string {
+  const key = originalSeriesInstanceUid || "__missing_series_uid__";
+  const existing = plan.seriesInstanceUidByOriginal.get(key);
+  if (existing) {
+    return existing;
+  }
+  const created = createDicomUid();
+  plan.seriesInstanceUidByOriginal.set(key, created);
+  return created;
+}
+
 async function rewriteDicomFileForRemap(
   stagedFile: DicomRemapStagedUploadFile,
   replacement: OrthancPatientSummary,
+  uidPlan?: DicomUidRemapPlan,
 ): Promise<{ body: Buffer; originalSummary: OrthancStudySummary }> {
   const raw = await readFile(stagedFile.path);
   let dicomFile: { dict: Record<string, unknown>; meta: Record<string, unknown> };
@@ -624,10 +650,20 @@ async function rewriteDicomFileForRemap(
   dataset._meta = DicomMetaDictionary.naturalizeDataset(dicomFile.meta) as Record<string, unknown>;
 
   const originalSummary = readNaturalizedStudySummary(dataset);
+  const originalSeriesInstanceUid = readDicomStringValue(dataset.SeriesInstanceUID);
   dataset.PatientID = replacement.patientId;
   dataset.PatientName = replacement.patientName;
   dataset.PatientSex = replacement.patientSex;
   dataset.PatientBirthDate = replacement.patientBirthDate;
+  if (uidPlan) {
+    dataset.StudyInstanceUID = uidPlan.studyInstanceUid;
+    dataset.SeriesInstanceUID = getOrCreateSeriesInstanceUid(originalSeriesInstanceUid, uidPlan);
+    const newSopInstanceUid = createDicomUid();
+    dataset.SOPInstanceUID = newSopInstanceUid;
+    if (dataset._meta && typeof dataset._meta === "object") {
+      (dataset._meta as Record<string, unknown>).MediaStorageSOPInstanceUID = newSopInstanceUid;
+    }
+  }
 
   return {
     body: Buffer.from(datasetToBuffer(dataset)),
@@ -2156,6 +2192,10 @@ export async function processDicomRemapMultipartJob({
     let skippedFilesCount = 0;
     let originalSummary: OrthancStudySummary | null = null;
     const expectedStudyInstanceUID = String(selectedStudyInstanceUID || "").trim();
+    const uidPlan: DicomUidRemapPlan = {
+      studyInstanceUid: createDicomUid(),
+      seriesInstanceUidByOriginal: new Map<string, string>(),
+    };
     const acceptedFiles: Array<{ file: DicomRemapStagedUploadFile; fileName: string; fileIndex: number }> = [];
 
     for (const [index, file] of files.entries()) {
@@ -2176,7 +2216,7 @@ export async function processDicomRemapMultipartJob({
     }
 
     for (const entry of acceptedFiles) {
-      const rewritten = await rewriteDicomFileForRemap(entry.file, replacement);
+      const rewritten = await rewriteDicomFileForRemap(entry.file, replacement, uidPlan);
       if (!originalSummary) {
         originalSummary = rewritten.originalSummary;
       }
@@ -2213,8 +2253,19 @@ export async function processDicomRemapMultipartJob({
 
     const sourceStudyId = Array.from(studyIds)[0];
     const uploadedSummary = await readStudySummary(sourceStudyId);
-    if (expectedStudyInstanceUID && uploadedSummary.studyInstanceUid && uploadedSummary.studyInstanceUid !== expectedStudyInstanceUID) {
-      throw new HttpError(400, "Uploaded study does not match selected study. Please rescan and retry.");
+    if (!uploadedSummary.studyInstanceUid) {
+      throw new HttpError(502, "Orthanc uploaded study did not expose a StudyInstanceUID. Please reset current upload and retry.");
+    }
+    if (uploadedSummary.studyInstanceUid === expectedStudyInstanceUID) {
+      throw new HttpError(
+        502,
+        "Remapped study kept the original StudyInstanceUID. Please reset current upload and retry.",
+        {
+          originalStudyInstanceUID: expectedStudyInstanceUID,
+          uploadedStudyInstanceUID: uploadedSummary.studyInstanceUid,
+          sourceStudyId,
+        }
+      );
     }
     if (!hasSameReplacementIdentity(uploadedSummary, replacement)) {
       throw new HttpError(
