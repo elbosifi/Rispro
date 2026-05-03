@@ -139,10 +139,6 @@ settingsRouter.get(
   })
 );
 
-// Supervisor-only settings
-settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
-settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
-
 settingsRouter.get(
   "/users-and-roles/page-visibility",
   asyncRoute(async (_req: Request, res: Response) => {
@@ -150,6 +146,10 @@ settingsRouter.get(
     res.json({ matrix });
   })
 );
+
+// Supervisor-only settings
+settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
+settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
 
 settingsRouter.put(
   "/users-and-roles/page-visibility",

@@ -103,6 +103,42 @@ describe("Navigation governance", () => {
     expect(screen.queryByText("Modality board")).not.toBeNull();
   });
 
+  it("shows Patients when the fetched matrix grants modality_staff access", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      patients: ["modality_staff", "super_admin"],
+    };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 9, username: "tech2", fullName: "Tech2", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("Register patient")).not.toBeNull();
+  });
+
+  it("hides Patients when the fetched matrix excludes modality_staff", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      patients: ["receptionist", "supervisor", "doctor", "super_admin"],
+    };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 10, username: "tech3", fullName: "Tech3", role: "modality_staff" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByText("Register patient")).toBeNull();
+  });
+
   it("administrative sees statistics by default", () => {
     matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
     render(
