@@ -364,139 +364,8 @@ export default function QueueCheckInPage() {
           </div>
         </header>
 
-        <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,2.18fr)]">
+        <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(300px,0.76fr)_minmax(0,1.24fr)]">
           <section className="flex min-h-0 flex-col gap-4 xl:order-2">
-            <section className="relative min-h-[22rem] overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-5 text-white shadow-[0_30px_80px_rgba(0,82,255,0.24)] sm:p-6">
-              <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.1),transparent_28%)]" />
-              <div className="relative z-10 grid gap-4 xl:min-h-[18rem] xl:grid-cols-[1.1fr_0.9fr] xl:items-stretch">
-                <div className="flex min-h-full flex-col justify-between gap-4">
-                  <div className="space-y-4">
-                    <div className={`flex items-center gap-3 text-white/[0.92] ${isArabic ? "flex-row-reverse" : ""}`}>
-                      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.18] shadow-sm">
-                      <ScanLine size={28} />
-                      </span>
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.28em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
-                        <h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-[2rem]">
-                          {state.mode === "loading" ? t("queue.checkInScanning") : t("queue.checkInReady")}
-                        </h2>
-                      </div>
-                    </div>
-
-                    <p className="max-w-2xl text-sm leading-6 text-white/[0.88] sm:text-base">
-                      {state.mode === "idle" && subtitle}
-                      {state.mode === "loading" && t("queue.checkInScanningHint")}
-                      {state.mode === "success" && t("queue.checkInSuccessMessage")}
-                      {state.mode === "error" && t("queue.checkInErrorMessage")}
-                    </p>
-
-                    <form onSubmit={handleSubmit} className="sr-only">
-                      <label htmlFor="queue-check-in-scan" className="sr-only">
-                        {t("queue.checkInScanHere")}
-                      </label>
-                      <Input
-                        id="queue-check-in-scan"
-                        ref={inputRef}
-                        value={scanValue}
-                        onChange={(event) => setScanValue(event.target.value)}
-                        autoComplete="off"
-                        autoCapitalize="off"
-                        autoCorrect="off"
-                        spellCheck={false}
-                        inputMode="none"
-                        aria-hidden="true"
-                        tabIndex={-1}
-                        className="h-px w-px border-0 p-0 opacity-0 pointer-events-none"
-                      />
-                    </form>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="lg"
-                      onClick={handleResetNow}
-                      className="rounded-full border border-white/[0.18] bg-white/[0.10] px-7 text-white hover:bg-white/[0.18]"
-                    >
-                      <RefreshCw className="h-5 w-5" />
-                      <span>{t("queue.checkInResetNow")}</span>
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex items-stretch justify-center xl:justify-end">
-                  {state.mode === "success" ? (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] p-5 text-white shadow-[0_30px_70px_rgba(15,23,42,0.2)] backdrop-blur-md">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-400/[0.20] text-emerald-200">
-                          <BadgeCheck size={34} />
-                        </span>
-                        <div>
-                          <p className="text-sm uppercase tracking-[0.24em] text-white/[0.72]">{t("queue.checkInSuccessTitle")}</p>
-                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInSuccessShort")}</h3>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 space-y-3">
-                        <div className="rounded-2xl bg-white/[0.12] px-5 py-4">
-                          <p className="text-xs uppercase tracking-[0.22em] text-white/[0.72]">{t("queue.queueNumber")}</p>
-                          <p className="mt-2 text-4xl font-bold tracking-tight">
-                            {state.entry ? `#${state.entry.queueNumber}` : t("common.na")}
-                          </p>
-                        </div>
-
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div className="rounded-2xl bg-white/[0.12] px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.18em] text-white/[0.72]">{t("queue.modality")}</p>
-                            <p className="mt-1 text-lg font-semibold">
-                              {state.entry
-                                ? chooseLocalized(language, state.entry.modalityNameAr, state.entry.modalityNameEn)
-                                : t("common.na")}
-                            </p>
-                          </div>
-                          <div className="rounded-2xl bg-white/[0.12] px-4 py-3">
-                            <p className="text-xs uppercase tracking-[0.18em] text-white/[0.72]">{t("queue.exam")}</p>
-                            <p className="mt-1 text-lg font-semibold">
-                              {state.entry
-                                ? chooseLocalized(language, state.entry.examNameAr, state.entry.examNameEn) || t("common.na")
-                                : t("common.na")}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : state.mode === "error" ? (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-rose-200 bg-white px-5 py-6 text-rose-950 shadow-[0_20px_50px_rgba(244,63,94,0.12)]">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-600">
-                          <TriangleAlert size={34} />
-                        </span>
-                        <div>
-                          <p className="text-sm uppercase tracking-[0.24em] text-rose-500">{t("queue.checkInErrorTitle")}</p>
-                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInAskReception")}</h3>
-                        </div>
-                      </div>
-                      <p className="mt-5 text-base leading-7">{state.message}</p>
-                    </div>
-                  ) : (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] px-5 py-6 text-white shadow-[0_20px_50px_rgba(15,23,42,0.14)] backdrop-blur-md">
-                      <div className="flex items-center gap-3">
-                        <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[0.12] text-white">
-                          <Waves size={34} />
-                        </span>
-                        <div>
-                          <p className="text-sm uppercase tracking-[0.24em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
-                          <h3 className="mt-1 text-2xl font-semibold">{t("queue.checkInScanHere")}</h3>
-                        </div>
-                      </div>
-                      <p className="mt-5 text-base leading-7 text-white/[0.88]">{t("queue.checkInIdleHint")}</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
-
             <div className="grid gap-4 lg:grid-cols-2">
               <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/90 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
                 <div className="flex items-center justify-between gap-3">
@@ -610,35 +479,117 @@ export default function QueueCheckInPage() {
               </div>
             </Card>
 
-            <Card className="rounded-[1.75rem] border border-slate-200/80 bg-white/92 p-5 shadow-[0_16px_40px_rgba(15,23,42,0.07)]">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{t("queue.checkInLiveFeed")}</p>
-                  <h3 className="mt-1 text-xl font-semibold text-foreground">{t("queue.checkInLiveStatus")}</h3>
+            <section className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-4 text-white shadow-[0_24px_60px_rgba(0,82,255,0.22)] sm:p-5">
+              <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.1),transparent_28%)]" />
+              <div className="relative z-10 space-y-4">
+                <div className={`flex items-center gap-3 text-white/[0.92] ${isArabic ? "flex-row-reverse" : ""}`}>
+                  <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/[0.18] shadow-sm">
+                    <ScanLine size={24} />
+                  </span>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.28em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
+                    <h2 className="mt-1 text-xl font-semibold tracking-tight sm:text-[1.65rem]">
+                      {state.mode === "loading" ? t("queue.checkInScanning") : t("queue.checkInReady")}
+                    </h2>
+                  </div>
                 </div>
-                <Sparkles className="h-5 w-5 text-[var(--accent)]" />
-              </div>
 
-              <div className="mt-4 space-y-3">
-                <div className="rounded-2xl bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{t("queue.lastUpdated")}</p>
-                  <p className="mt-1 text-base font-medium text-foreground">{lastUpdatedText}</p>
+                <p className="text-sm leading-6 text-white/[0.88]">
+                  {state.mode === "idle" && subtitle}
+                  {state.mode === "loading" && t("queue.checkInScanningHint")}
+                  {state.mode === "success" && t("queue.checkInSuccessMessage")}
+                  {state.mode === "error" && t("queue.checkInErrorMessage")}
+                </p>
+
+                <div className={`grid gap-3 ${state.mode === "idle" ? "sm:grid-cols-[1.1fr_0.9fr]" : ""}`}>
+                  <div
+                    className={`rounded-[1.5rem] border border-white/[0.16] px-4 py-4 ${
+                      state.mode === "error"
+                        ? "bg-rose-500/10"
+                        : state.mode === "success"
+                          ? "bg-emerald-500/10"
+                          : "bg-white/[0.10]"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-[0.22em] text-white/[0.72]">
+                          {state.mode === "error" ? t("queue.checkInErrorTitle") : t("queue.checkInLiveStatus")}
+                        </p>
+                        <p className="mt-1 text-base font-semibold">
+                          {state.mode === "error"
+                            ? t("queue.checkInAskReception")
+                            : state.mode === "success"
+                              ? t("queue.checkInSuccessShort")
+                              : t("queue.checkInScanHere")}
+                        </p>
+                      </div>
+                      {state.mode === "error" ? (
+                        <TriangleAlert size={24} className="text-rose-100" />
+                      ) : state.mode === "success" ? (
+                        <BadgeCheck size={24} className="text-emerald-100" />
+                      ) : (
+                        <Waves size={24} className="text-white/[0.8]" />
+                      )}
+                    </div>
+
+                    <p className="mt-3 text-sm leading-6 text-white/[0.88]">
+                      {state.mode === "error"
+                        ? state.message
+                        : state.mode === "success"
+                          ? (state.entry
+                              ? `${chooseLocalized(language, state.entry.modalityNameAr, state.entry.modalityNameEn)} • ${chooseLocalized(language, state.entry.examNameAr, state.entry.examNameEn) || t("common.na")}`
+                              : t("queue.checkInSuccessMessage"))
+                          : t("queue.checkInIdleHint")}
+                    </p>
+                  </div>
+
+                  <div className={`rounded-[1.5rem] border border-white/[0.16] px-4 py-4 ${state.mode === "idle" ? "bg-white/[0.08]" : "bg-white/[0.10]"}`}>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-white/[0.72]">
+                      {t("queue.lastUpdated")}
+                    </p>
+                    <p className="mt-1 text-base font-semibold">{lastUpdatedText}</p>
+                    <div className="mt-3 flex items-center gap-2 rounded-2xl bg-white/[0.10] px-3 py-2 text-sm">
+                      <Sparkles className="h-4 w-4" />
+                      <span>{statusText}</span>
+                    </div>
+                  </div>
                 </div>
-                <div
-                  className={`rounded-2xl px-4 py-4 text-base font-medium ${
-                    state.mode === "error"
-                      ? "bg-rose-50 text-rose-700"
-                      : state.mode === "success"
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-sky-50 text-sky-700"
-                  }`}
-                  role={state.mode === "error" ? "alert" : "status"}
-                  aria-live="polite"
-                >
-                  {statusText}
+
+                <form onSubmit={handleSubmit} className="sr-only">
+                  <label htmlFor="queue-check-in-scan" className="sr-only">
+                    {t("queue.checkInScanHere")}
+                  </label>
+                  <Input
+                    id="queue-check-in-scan"
+                    ref={inputRef}
+                    value={scanValue}
+                    onChange={(event) => setScanValue(event.target.value)}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    inputMode="none"
+                    aria-hidden="true"
+                    tabIndex={-1}
+                    className="h-px w-px border-0 p-0 opacity-0 pointer-events-none"
+                  />
+                </form>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="lg"
+                    onClick={handleResetNow}
+                    className="rounded-full border border-white/[0.18] bg-white/[0.10] px-6 text-white hover:bg-white/[0.18]"
+                  >
+                    <RefreshCw className="h-5 w-5" />
+                    <span>{t("queue.checkInResetNow")}</span>
+                  </Button>
                 </div>
               </div>
-            </Card>
+            </section>
           </aside>
         </main>
       </div>
