@@ -40,7 +40,7 @@ function modalityLabel(code: string, language: "ar" | "en"): string {
       case "RF":
         return "الأشعة التداخلية";
       case "MG":
-        return "تصوير الثدي";
+        return "الماموقرام";
       case "PT":
         return "PET";
       case "NM":

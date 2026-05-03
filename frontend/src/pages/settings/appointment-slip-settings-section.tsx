@@ -120,7 +120,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
         nextErrors[String(key)] = `${label} must be a valid number.`;
       }
     }
-    if (draft.hospitalNameAr.includes("المركز الوطني لعلاج الأورام بنغازي")) {
+    if (draft.hospitalNameAr.includes("المركز الوطني للأورام بنغازي")) {
       nextErrors.hospitalNameAr = "Use المركز الوطني للأورام بنغازي.";
     }
     return { ok: Object.keys(nextErrors).length === 0, nextErrors };
