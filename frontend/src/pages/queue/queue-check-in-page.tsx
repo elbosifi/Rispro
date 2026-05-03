@@ -366,24 +366,24 @@ export default function QueueCheckInPage() {
 
         <main className="grid flex-1 gap-4 xl:grid-cols-[minmax(320px,0.82fr)_minmax(0,2.18fr)]">
           <section className="flex min-h-0 flex-col gap-4 xl:order-2">
-            <section className="relative min-h-[26rem] overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-6 text-white shadow-[0_30px_80px_rgba(0,82,255,0.24)] sm:p-8">
+            <section className="relative min-h-[22rem] overflow-hidden rounded-[2rem] border border-white/20 bg-[linear-gradient(135deg,rgba(0,82,255,0.97),rgba(10,132,255,0.92)_45%,rgba(15,118,110,0.92))] p-5 text-white shadow-[0_30px_80px_rgba(0,82,255,0.24)] sm:p-6">
               <div className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.18),transparent_34%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.1),transparent_28%)]" />
-              <div className="relative z-10 grid gap-6 xl:min-h-[22rem] xl:grid-cols-[1.1fr_0.9fr] xl:items-stretch">
-                <div className="flex min-h-full flex-col justify-between gap-6">
-                  <div className="space-y-6">
+              <div className="relative z-10 grid gap-4 xl:min-h-[18rem] xl:grid-cols-[1.1fr_0.9fr] xl:items-stretch">
+                <div className="flex min-h-full flex-col justify-between gap-4">
+                  <div className="space-y-4">
                     <div className={`flex items-center gap-3 text-white/[0.92] ${isArabic ? "flex-row-reverse" : ""}`}>
-                      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/[0.18] shadow-sm">
+                      <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/[0.18] shadow-sm">
                       <ScanLine size={28} />
                       </span>
                       <div>
                         <p className="text-xs uppercase tracking-[0.28em] text-white/[0.72]">{t("queue.checkInReadyToScan")}</p>
-                        <h2 className="mt-1 text-3xl font-semibold tracking-tight sm:text-4xl">
+                        <h2 className="mt-1 text-2xl font-semibold tracking-tight sm:text-[2rem]">
                           {state.mode === "loading" ? t("queue.checkInScanning") : t("queue.checkInReady")}
                         </h2>
                       </div>
                     </div>
 
-                    <p className="max-w-2xl text-base leading-7 text-white/[0.88] sm:text-lg">
+                    <p className="max-w-2xl text-sm leading-6 text-white/[0.88] sm:text-base">
                       {state.mode === "idle" && subtitle}
                       {state.mode === "loading" && t("queue.checkInScanningHint")}
                       {state.mode === "success" && t("queue.checkInSuccessMessage")}
@@ -427,7 +427,7 @@ export default function QueueCheckInPage() {
 
                 <div className="flex items-stretch justify-center xl:justify-end">
                   {state.mode === "success" ? (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] p-6 text-white shadow-[0_30px_70px_rgba(15,23,42,0.2)] backdrop-blur-md">
+                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] p-5 text-white shadow-[0_30px_70px_rgba(15,23,42,0.2)] backdrop-blur-md">
                       <div className="flex items-center gap-3">
                         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-400/[0.20] text-emerald-200">
                           <BadgeCheck size={34} />
@@ -438,7 +438,7 @@ export default function QueueCheckInPage() {
                         </div>
                       </div>
 
-                      <div className="mt-6 space-y-4">
+                      <div className="mt-5 space-y-3">
                         <div className="rounded-2xl bg-white/[0.12] px-5 py-4">
                           <p className="text-xs uppercase tracking-[0.22em] text-white/[0.72]">{t("queue.queueNumber")}</p>
                           <p className="mt-2 text-4xl font-bold tracking-tight">
@@ -467,7 +467,7 @@ export default function QueueCheckInPage() {
                       </div>
                     </div>
                   ) : state.mode === "error" ? (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-rose-200 bg-white px-6 py-7 text-rose-950 shadow-[0_20px_50px_rgba(244,63,94,0.12)]">
+                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-rose-200 bg-white px-5 py-6 text-rose-950 shadow-[0_20px_50px_rgba(244,63,94,0.12)]">
                       <div className="flex items-center gap-3">
                         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-rose-500/10 text-rose-600">
                           <TriangleAlert size={34} />
@@ -480,7 +480,7 @@ export default function QueueCheckInPage() {
                       <p className="mt-5 text-base leading-7">{state.message}</p>
                     </div>
                   ) : (
-                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] px-6 py-8 text-white shadow-[0_20px_50px_rgba(15,23,42,0.14)] backdrop-blur-md">
+                    <div className="flex w-full max-w-md flex-col justify-center rounded-[2rem] border border-white/[0.18] bg-white/[0.10] px-5 py-6 text-white shadow-[0_20px_50px_rgba(15,23,42,0.14)] backdrop-blur-md">
                       <div className="flex items-center gap-3">
                         <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-white/[0.12] text-white">
                           <Waves size={34} />
