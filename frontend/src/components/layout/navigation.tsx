@@ -44,6 +44,7 @@ type NavIcon =
   | "print"
   | "statistics"
   | "pacs"
+  | "pacsRemap"
   | "settings"
   | "legacy";
 
@@ -63,6 +64,7 @@ interface NavItemConfig {
     | "nav.print"
     | "nav.statistics"
     | "nav.pacs"
+    | "nav.pacsRemap"
     | "nav.settings"
     | "nav.legacyReception";
   icon: NavIcon;
@@ -83,6 +85,7 @@ export const NAV_ITEMS: NavItemConfig[] = [
   { route: "print", labelKey: "nav.print", icon: "print" },
   { route: "statistics", labelKey: "nav.statistics", icon: "statistics" },
   { route: "pacs", labelKey: "nav.pacs", icon: "pacs" },
+  { route: "pacs.remap", labelKey: "nav.pacsRemap", icon: "pacsRemap" },
   { route: "legacy", labelKey: "nav.legacyReception", icon: "legacy" },
   { route: "settings", labelKey: "nav.settings", icon: "settings", roles: ["super_admin"] }
 ];
@@ -95,6 +98,9 @@ function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilit
   }
 
   if (canRoleAccessRoute(matrix, item.route, user.role)) {
+    return true;
+  }
+  if (item.route === "pacs.remap" && canRoleAccessRoute(matrix, "pacs", user.role)) {
     return true;
   }
 
@@ -116,6 +122,7 @@ const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {
   print: Printer,
   statistics: BarChart3,
   pacs: Database,
+  pacsRemap: Database,
   settings: Settings,
   legacy: History
 };

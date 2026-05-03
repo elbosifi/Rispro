@@ -49,6 +49,7 @@ const ROUTE_PATHS: Record<string, string> = {
   statistics: "/statistics",
   search: "/search",
   pacs: "/pacs",
+  "pacs.remap": "/pacs/remap",
   settings: "/settings",
   legacy: "/legacy-access-viewer",
   "v2.appointments.admin": "/v2/appointments/admin",
@@ -89,7 +90,7 @@ function AppContent() {
   const currentRoute = (() => {
     const pathname = location.pathname;
     if (pathname.startsWith("/pacs/remap")) {
-      return "pacs";
+      return "pacs.remap";
     }
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
@@ -127,6 +128,8 @@ function AppContent() {
         return language === "ar" ? "البحث" : "Search";
       case "pacs":
         return language === "ar" ? "PACS" : "PACS";
+      case "pacs.remap":
+        return language === "ar" ? "إعادة ربط PACS" : "PACS Remap";
       case "settings":
         return language === "ar" ? "الإعدادات" : "Settings";
       case "legacy":

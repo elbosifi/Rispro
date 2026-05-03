@@ -69,6 +69,7 @@ const en = {
   "nav.statistics": "Statistics",
   "nav.search": "Search patients",
   "nav.pacs": "PACS",
+  "nav.pacsRemap": "PACS remap",
   "nav.settings": "Settings",
   "nav.legacyReception": "Legacy Reception",
 
@@ -1182,6 +1183,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "nav.statistics": "الإحصائيات",
   "nav.search": "بحث المرضى",
   "nav.pacs": "أرشيف الصور",
+  "nav.pacsRemap": "إعادة ربط PACS",
   "nav.settings": "الإعدادات",
   "nav.legacyReception": "الاستقبال القديم",
 
