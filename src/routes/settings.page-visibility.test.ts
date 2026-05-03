@@ -109,6 +109,7 @@ test("settings page visibility route permissions", async () => {
 
     assert.equal(initial.status, 200);
     const originalMatrix = initial.data.matrix;
+    assert.ok(Array.isArray(originalMatrix["pacs.remap"]));
 
     const anonymous = await requestJson<{ message?: string }>(server.baseUrl, "/api/settings/users-and-roles/page-visibility");
     assert.equal(anonymous.status, 401);
@@ -133,9 +134,11 @@ test("settings page visibility route permissions", async () => {
     assert.equal(denied.status, 403);
 
     const existingPatients = Array.isArray(originalMatrix.patients) ? originalMatrix.patients : [];
+    const existingPacsRemap = Array.isArray(originalMatrix["pacs.remap"]) ? originalMatrix["pacs.remap"] : [];
     const updatedMatrix = {
       ...originalMatrix,
       patients: ["modality_staff", ...existingPatients.filter((role) => role !== "modality_staff")],
+      "pacs.remap": ["doctor", ...existingPacsRemap.filter((role) => role !== "doctor")],
     };
 
     const allowed = await requestJson<{ matrix: Record<string, unknown> }>(
@@ -151,6 +154,8 @@ test("settings page visibility route permissions", async () => {
     assert.equal(allowed.status, 200);
     assert.equal(Array.isArray(allowed.data.matrix.patients), true);
     assert.equal((allowed.data.matrix.patients as unknown[]).includes("modality_staff"), true);
+    assert.equal(Array.isArray(allowed.data.matrix["pacs.remap"]), true);
+    assert.equal((allowed.data.matrix["pacs.remap"] as unknown[]).includes("doctor"), true);
 
     const restored = await requestJson<{ matrix: Record<string, unknown> }>(
       server.baseUrl,

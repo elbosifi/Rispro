@@ -3415,6 +3415,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   print: "Print",
   statistics: "Statistics",
   pacs: "PACS",
+  "pacs.remap": "PACS remap",
   legacy: "Legacy",
   settings: "Settings",
 };
