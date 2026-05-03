@@ -1,4 +1,5 @@
 export interface RegistrationsFilters {
+  dateMode: "all" | "single" | "range";
   date: string;
   dateFrom: string;
   dateTo: string;
@@ -8,16 +9,19 @@ export interface RegistrationsFilters {
 }
 
 export function buildRegistrationAppointmentQuery(filters: RegistrationsFilters) {
-  // Single-date selection should behave like a bounded range so the backend
-  // never receives an open-ended appointment query.
-  const effectiveDateFrom = filters.date || filters.dateFrom;
-  const effectiveDateTo = filters.date || filters.dateTo;
-
-  return {
-    dateFrom: effectiveDateFrom,
-    dateTo: effectiveDateTo,
+  const query: Record<string, string | string[]> = {
     modalityId: filters.modalityId,
     q: filters.query,
     status: filters.statuses,
   };
+
+  if (filters.dateMode === "single") {
+    query.dateFrom = filters.date;
+    query.dateTo = filters.date;
+  } else if (filters.dateMode === "range") {
+    query.dateFrom = filters.dateFrom;
+    query.dateTo = filters.dateTo;
+  }
+
+  return query;
 }

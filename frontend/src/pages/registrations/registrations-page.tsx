@@ -26,9 +26,10 @@ import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
+  dateMode: "single",
   date: todayIsoDateLy(),
-  dateFrom: todayIsoDateLy(),
-  dateTo: todayIsoDateLy(),
+  dateFrom: "",
+  dateTo: "",
   modalityId: "",
   query: "",
   statuses: ["scheduled", "arrived", "waiting"],
@@ -102,17 +103,16 @@ export default function RegistrationsPage() {
   });
 
   const modalities = lookups?.modalities ?? [];
-  const listWindowLabel = filters.date
-    ? formatDateLy(filters.date)
-    : `${filters.dateFrom ? formatDateLy(filters.dateFrom) : "—"} - ${filters.dateTo ? formatDateLy(filters.dateTo) : "—"}`;
+  const listWindowLabel =
+    filters.dateMode === "all"
+      ? t("registrations.allDates")
+      : filters.dateMode === "single"
+        ? formatDateLy(filters.date)
+        : `${filters.dateFrom ? formatDateLy(filters.dateFrom) : "—"} - ${filters.dateTo ? formatDateLy(filters.dateTo) : "—"}`;
   const todayValue = todayIsoDateLy();
   const tomorrowValue = isoDateDaysFromNow(1);
-  const isTodayShortcutActive =
-    filters.date === todayValue && filters.dateFrom === todayValue && filters.dateTo === todayValue;
-  const isTomorrowShortcutActive =
-    filters.date === tomorrowValue &&
-    filters.dateFrom === tomorrowValue &&
-    filters.dateTo === tomorrowValue;
+  const isTodayShortcutActive = filters.dateMode === "single" && filters.date === todayValue;
+  const isTomorrowShortcutActive = filters.dateMode === "single" && filters.date === tomorrowValue;
 
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
     key: K,
@@ -121,23 +121,56 @@ export default function RegistrationsPage() {
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
-  const handleDateChange = (key: "date" | "dateFrom" | "dateTo", value: string) => {
+  const handleDateModeChange = (dateMode: RegistrationsFilters["dateMode"]) => {
     setFilters((current) => {
-      if (key === "date") {
+      if (dateMode === "all") {
         return {
           ...current,
-          date: value,
+          dateMode,
+          date: "",
           dateFrom: "",
           dateTo: "",
         };
       }
 
+      if (dateMode === "single") {
+        return {
+          ...current,
+          dateMode,
+          date: current.date || current.dateFrom || current.dateTo || todayValue,
+          dateFrom: "",
+          dateTo: "",
+        };
+      }
+
+      const baseDate = current.date || current.dateFrom || current.dateTo || todayValue;
       return {
         ...current,
-        [key]: value,
+        dateMode,
         date: "",
+        dateFrom: current.dateFrom || baseDate,
+        dateTo: current.dateTo || baseDate,
       };
     });
+  };
+
+  const handleSingleDateChange = (value: string) => {
+    setFilters((current) => ({
+      ...current,
+      dateMode: "single",
+      date: value,
+      dateFrom: "",
+      dateTo: "",
+    }));
+  };
+
+  const handleRangeDateChange = (key: "dateFrom" | "dateTo", value: string) => {
+    setFilters((current) => ({
+      ...current,
+      dateMode: "range",
+      [key]: value,
+      date: "",
+    }));
   };
 
   const handleStatusToggle = (status: string) => {
@@ -159,12 +192,12 @@ export default function RegistrationsPage() {
   };
 
   const handleTodayShortcut = () => {
-    const today = todayIsoDateLy();
     setFilters({
       ...DEFAULT_FILTERS,
-      date: today,
-      dateFrom: today,
-      dateTo: today,
+      dateMode: "single",
+      date: todayValue,
+      dateFrom: "",
+      dateTo: "",
       modalityId: filters.modalityId,
       query: filters.query,
       statuses: filters.statuses,
@@ -176,9 +209,10 @@ export default function RegistrationsPage() {
     const value = isoDateDaysFromNow(1);
     setFilters({
       ...DEFAULT_FILTERS,
+      dateMode: "single",
       date: value,
-      dateFrom: value,
-      dateTo: value,
+      dateFrom: "",
+      dateTo: "",
       modalityId: filters.modalityId,
       query: filters.query,
       statuses: filters.statuses,
@@ -368,24 +402,66 @@ export default function RegistrationsPage() {
               {t("registrations.dateFilters")}
             </p>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{t("registrations.dateFiltersHint")}</p>
-            <div className="mt-3 grid grid-cols-1 gap-3">
-              <DateInput
-                label={t("registrations.date")}
-                value={filters.date}
-                onChange={(value) => handleDateChange("date", value)}
-              />
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <DateInput
-                  label={t("registrations.dateFrom")}
-                  value={filters.dateFrom}
-                  onChange={(value) => handleDateChange("dateFrom", value)}
-                />
-                <DateInput
-                  label={t("registrations.dateTo")}
-                  value={filters.dateTo}
-                  onChange={(value) => handleDateChange("dateTo", value)}
-                />
-              </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleDateModeChange("all")}
+                aria-pressed={filters.dateMode === "all"}
+                className={filters.dateMode === "all" ? ACTIVE_FILTER_PILL_CLASS : undefined}
+              >
+                {t("registrations.allDates")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleDateModeChange("single")}
+                aria-pressed={filters.dateMode === "single"}
+                className={filters.dateMode === "single" ? ACTIVE_FILTER_PILL_CLASS : undefined}
+              >
+                {t("registrations.singleDate")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => handleDateModeChange("range")}
+                aria-pressed={filters.dateMode === "range"}
+                className={filters.dateMode === "range" ? ACTIVE_FILTER_PILL_CLASS : undefined}
+              >
+                {t("registrations.dateRange")}
+              </Button>
+            </div>
+
+            <div className="mt-3">
+              {filters.dateMode === "all" ? (
+                <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                  {t("registrations.allDatesHint")}
+                </div>
+              ) : filters.dateMode === "single" ? (
+                <div className="max-w-sm">
+                  <DateInput
+                    label={t("registrations.date")}
+                    value={filters.date}
+                    onChange={handleSingleDateChange}
+                  />
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <DateInput
+                    label={t("registrations.dateFrom")}
+                    value={filters.dateFrom}
+                    onChange={(value) => handleRangeDateChange("dateFrom", value)}
+                  />
+                  <DateInput
+                    label={t("registrations.dateTo")}
+                    value={filters.dateTo}
+                    onChange={(value) => handleRangeDateChange("dateTo", value)}
+                  />
+                </div>
+              )}
             </div>
           </div>
 
