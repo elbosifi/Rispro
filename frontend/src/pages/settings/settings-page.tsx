@@ -168,6 +168,11 @@ function _friendlyCaseCategory(value: string): string {
 // Export for testing
 export { _friendlyRuleType as friendlyRuleType, _friendlyEffectMode as friendlyEffectMode, _friendlyWeekday as friendlyWeekday, _friendlyCaseCategory as friendlyCaseCategory };
 
+export function isReAuthRequiredError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err || "");
+  return message.includes("re-authentication") || message.includes("403");
+}
+
 type SettingsSection =
   | "menu"
   | "patient_registration"
@@ -3444,6 +3449,10 @@ function RolePageAccessSection({ onReAuthRequired }: { onReAuthRequired: (key: s
       await queryClient.invalidateQueries({ queryKey: ["settings", "users_and_roles", "page_visibility_by_role"] });
     },
     onError: (err: unknown) => {
+      if (isReAuthRequiredError(err)) {
+        onReAuthRequired(["settings", "users_and_roles", "page_visibility_by_role"]);
+        return;
+      }
       setMessage(err instanceof Error ? err.message : "Failed to save role page visibility.");
     },
   });
