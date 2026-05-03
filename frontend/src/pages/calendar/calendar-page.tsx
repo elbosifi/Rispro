@@ -1,16 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { cancelAppointment, fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
+import { useQuery } from "@tanstack/react-query";
+import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
-import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import { pushToast } from "@/lib/toast";
-import { Button, Card, Badge, SectionLabel } from "@/components/shared";
+import { Button, Card, Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
 
 interface CalendarDay {
@@ -23,36 +21,25 @@ interface CalendarDay {
   isSelected: boolean;
 }
 
+interface ModalitySummary {
+  key: string;
+  modalityId: number | null;
+  label: string;
+  total: number;
+  oncology: number;
+  nonOncology: number;
+  appointments: AppointmentWithDetails[];
+}
+
 export default function CalendarPage() {
   const { language } = useLanguage();
   const today = new Date();
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
   const [modalityFilter, setModalityFilter] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
+  const [selectedModalitySummaryKey, setSelectedModalitySummaryKey] = useState<string | null>(null);
+  const [isModalityModalOpen, setIsModalityModalOpen] = useState(false);
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
-  const cancelMutation = useMutation({
-    mutationFn: (appointmentId: number) => cancelAppointment(appointmentId, "Cancelled from calendar"),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      queryClient.invalidateQueries({ queryKey: ["registrations"] });
-      queryClient.invalidateQueries({ queryKey: ["queue"] });
-      pushToast({
-        type: "success",
-        title: t(language, "queue.cancelledTitle"),
-        message: t(language, "queue.cancelledMessage")
-      });
-      setSelectedAppointment(null);
-    },
-    onError: (err: any) => {
-      pushToast({
-        type: "error",
-        title: t(language, "queue.cancelFailedTitle"),
-        message: err?.message || t(language, "queue.cancelFailedMessage")
-      });
-    }
-  });
 
   // Load appointments for the displayed month range
   const startDate = formatDate(new Date(displayDate.getFullYear(), displayDate.getMonth(), 1));
@@ -90,6 +77,11 @@ export default function CalendarPage() {
 
   // Selected day appointments
   const selectedAppointments = useMemo(() => groupedByDate[selectedDate] || [], [groupedByDate, selectedDate]);
+  const selectedDateSummaries = useMemo(() => buildSelectedDaySummaries(selectedAppointments, language), [selectedAppointments, language]);
+  const selectedModalitySummary = useMemo(
+    () => selectedDateSummaries.find((summary) => summary.key === selectedModalitySummaryKey) || null,
+    [selectedDateSummaries, selectedModalitySummaryKey]
+  );
 
   const prevMonth = () => {
     setDisplayDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
@@ -107,7 +99,22 @@ export default function CalendarPage() {
 
   const selectDay = (date: string) => {
     setSelectedDate(date);
-    setSelectedAppointment(null);
+    setSelectedModalitySummaryKey(null);
+    setIsModalityModalOpen(false);
+  };
+
+  const openModalitySummary = (summary: ModalitySummary) => {
+    setSelectedModalitySummaryKey(summary.key);
+    setIsModalityModalOpen(true);
+  };
+
+  const openRegistrationsForSummary = (summary: ModalitySummary) => {
+    const params = new URLSearchParams();
+    params.set("date", selectedDate);
+    if (summary.modalityId != null) {
+      params.set("modalityId", String(summary.modalityId));
+    }
+    navigate(`/registrations?${params.toString()}`);
   };
 
   return (
@@ -218,15 +225,15 @@ export default function CalendarPage() {
           </div>
         </Card>
 
-        {/* Sidebar: Selected Day Details */}
+        {/* Sidebar: Selected Day Registration Summary */}
         <div>
           <Card className="overflow-hidden sticky top-6">
-            <div className="p-4 border-b border-border">
+            <div className="p-4 border-b border-border" data-testid="selected-day-summary">
               <h3 className="font-semibold text-lg">
-                {selectedDate === formatDate(new Date()) ? t(language, "calendar.todayAppointments") : t(language, "calendar.dayAppointments", { date: formatDateDisplay(selectedDate) })}
+                {selectedDate === formatDate(new Date()) ? t(language, "calendar.todayRegistrations") : t(language, "calendar.dayRegistrations", { date: formatDateDisplay(selectedDate) })}
               </h3>
               <p className="text-sm text-muted-foreground mt-1">
-                {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.appointmentCount", { count: 1 }) : t(language, "calendar.appointmentCountPlural", { count: selectedAppointments.length })}
+                {selectedAppointments.length} {selectedAppointments.length === 1 ? t(language, "calendar.registrationCount", { count: 1 }) : t(language, "calendar.registrationCountPlural", { count: selectedAppointments.length })}
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button
@@ -245,116 +252,145 @@ export default function CalendarPage() {
                 </Button>
               </div>
             </div>
-            {selectedAppointment && (
-              <div className="p-3 border-b border-border bg-accent/5">
-                <div className="flex items-start justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-semibold text-base">
-                      {selectedAppointment.accessionNumber}
-                    </h4>
-                    {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
-                      <Badge variant="warning" size="sm">
-                        {t(language, "calendar.printBadge")}
-                      </Badge>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
-                    className="text-accent underline underline-offset-2 text-xs sm:text-sm whitespace-nowrap"
-                  >
-                    {t(language, "calendar.print")}
-                  </button>
-                </div>
-                <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
-                  <span className="font-medium text-foreground">
-                    {selectedAppointment.arabicFullName}
-                  </span>
-                  <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <Field label={t(language, "calendar.fieldPatient")} value={selectedAppointment.arabicFullName} />
-                  <Field label={t(language, "calendar.fieldModality")} value={chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)} />
-                  <Field label={t(language, "calendar.fieldExam")} value={chooseLocalized(language, selectedAppointment.examNameAr, selectedAppointment.examNameEn) || "—"} />
-                  <Field label={t(language, "calendar.fieldPriority")} value={selectedAppointment.priorityNameEn || t(language, "appointmentEditor.normal")} />
-                  <Field label={t(language, "calendar.fieldNotes")} value={selectedAppointment.notes || "—"} />
-                </div>
-                <div className="mt-3">
-                  {["scheduled", "arrived", "waiting"].includes(selectedAppointment.status) && (
-                    <div className="mb-3 flex justify-end">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        style={{ color: "#ef4444" }}
-                        onClick={() => {
-                          if (!window.confirm(t(language, "common.confirmCancelAppointment"))) return;
-                          cancelMutation.mutate(selectedAppointment.id);
-                        }}
-                      >
-                        {t(language, "queue.cancelAppointment")}
-                      </Button>
-                    </div>
-                  )}
-                  <AppointmentEditor
-                    appointment={selectedAppointment}
-                    lookups={lookups}
-                    onUpdated={(updated) => setSelectedAppointment(updated)}
-                    onDeleted={() => setSelectedAppointment(null)}
-                  />
-                </div>
-              </div>
-            )}
             {isLoading ? (
               <div className="p-8 text-center text-muted-foreground">{t(language, "calendar.loading")}</div>
-            ) : selectedAppointments.length === 0 ? (
+            ) : selectedDateSummaries.length === 0 ? (
               <div className="p-12 text-center text-muted-foreground">
-                {t(language, "calendar.noAppointments")}
+                {t(language, "calendar.noRegistrations")}
               </div>
             ) : (
-              <ul className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                {selectedAppointments.map((apt) => (
-                  <li
-                    key={apt.id}
-                    onClick={() => setSelectedAppointment(apt)}
-                    className={`p-4 hover:bg-muted/50 transition-colors cursor-pointer ${
-                      selectedAppointment?.id === apt.id ? "bg-accent/10" : ""
-                    }`}
+              <div className="p-4 space-y-3 max-h-[600px] overflow-y-auto" data-testid="selected-day-summary-list">
+                {selectedDateSummaries.map((summary) => (
+                  <button
+                    key={summary.key}
+                    type="button"
+                    onClick={() => openModalitySummary(summary)}
+                    data-testid={`modality-summary-${summary.key}`}
+                    aria-label={`${summary.label} ${t(language, "calendar.totalRegistrations", { count: summary.total })}`}
+                    className="w-full rounded-xl border border-border bg-muted/20 p-4 text-left transition-colors hover:bg-muted/50"
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <p className="font-medium">{apt.arabicFullName}</p>
-                          <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-1 font-mono">
-                          {apt.accessionNumber}
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{summary.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {t(language, "calendar.totalRegistrations", { count: summary.total })}
                         </p>
                       </div>
-                      <StatusBadge language={language} status={apt.status} />
+                      <Badge variant="info" size="sm">
+                        {summary.total}
+                      </Badge>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn)}</span>
-                      <div className="flex items-center gap-2">
-                        <span>#{apt.dailySequence}</span>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void printAppointmentSlipById(apt.id, language);
-                          }}
-                          className="text-accent underline underline-offset-2"
-                        >
-                          {t(language, "calendar.print")}
-                        </button>
-                      </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                      <SummaryStat label={t(language, "calendar.totalLabel")} value={summary.total} />
+                      <SummaryStat label={t(language, "calendar.oncologyLabel")} value={summary.oncology} />
+                      <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={summary.nonOncology} />
                     </div>
-                  </li>
+                  </button>
                 ))}
-              </ul>
+              </div>
             )}
           </Card>
         </div>
       </div>
+
+      <Dialog open={isModalityModalOpen && !!selectedModalitySummary} onClose={() => setIsModalityModalOpen(false)}>
+        <DialogContent maxWidth="860px">
+          {selectedModalitySummary && (
+            <>
+              <DialogHeader>
+                <div>
+                  <DialogTitle>{selectedModalitySummary.label}</DialogTitle>
+                  <DialogDescription>
+                    {t(language, "calendar.dayRegistrations", { date: formatDateDisplay(selectedDate) })} • {t(language, "calendar.totalRegistrations", { count: selectedModalitySummary.total })}
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+                <SummaryStat label={t(language, "calendar.totalLabel")} value={selectedModalitySummary.total} />
+                <SummaryStat label={t(language, "calendar.oncologyLabel")} value={selectedModalitySummary.oncology} />
+                <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={selectedModalitySummary.nonOncology} />
+              </div>
+
+              <div className="mt-4 space-y-2 max-h-[55vh] overflow-y-auto">
+                {selectedModalitySummary.appointments.map((appointment) => (
+                  <div key={appointment.id} className="rounded-xl border border-border p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="font-medium">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
+                          <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
+                          <StatusBadge language={language} status={appointment.status} />
+                        </div>
+                        <p className="mt-1 text-xs text-muted-foreground font-mono">{appointment.accessionNumber}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {[
+                            chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn),
+                            chooseLocalized(language, appointment.examNameAr, appointment.examNameEn),
+                            appointment.bookingTime || formatDateDisplay(appointment.appointmentDate),
+                          ].filter(Boolean).join(" • ")}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void printAppointmentSlipById(appointment.id, language)}
+                        >
+                          {t(language, "calendar.print")}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => openRegistrationsForSummary(selectedModalitySummary)}
+                        >
+                          {t(language, "calendar.openRegistrations")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+function buildSelectedDaySummaries(
+  appointments: AppointmentWithDetails[],
+  language: "ar" | "en"
+): ModalitySummary[] {
+  const buckets = new Map<string, ModalitySummary>();
+  appointments.forEach((appointment) => {
+    const modalityId = Number.isFinite(appointment.modalityId) ? appointment.modalityId : null;
+    const label = chooseLocalized(language, appointment.modalityNameAr, appointment.modalityNameEn) || t(language, "calendar.other");
+    const key = modalityId != null ? `modality:${modalityId}` : `label:${label}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        key,
+        modalityId,
+        label,
+        total: 0,
+        oncology: 0,
+        nonOncology: 0,
+        appointments: [],
+      });
+    }
+    const bucket = buckets.get(key)!;
+    bucket.total += 1;
+    if (appointment.caseCategory === "oncology") bucket.oncology += 1;
+    if (appointment.caseCategory === "non_oncology") bucket.nonOncology += 1;
+    bucket.appointments.push(appointment);
+  });
+
+  return Array.from(buckets.values()).sort((a, b) => {
+    if (b.total !== a.total) return b.total - a.total;
+    return a.label.localeCompare(b.label);
+  });
 }
 
 function buildCalendarGrid(
@@ -425,11 +461,11 @@ function StatusBadge({ language, status }: { language: "ar" | "en"; status: stri
   );
 }
 
-function Field({ label, value }: { label: string; value: any }) {
+function SummaryStat({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-xl border border-border bg-muted/30 p-2.5">
       <p className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground mb-0.5">{label}</p>
-      <p className="text-sm font-medium leading-snug break-words">{value ?? "—"}</p>
+      <p className="text-sm font-medium leading-snug break-words">{value}</p>
     </div>
   );
 }
