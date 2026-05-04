@@ -310,7 +310,7 @@ export async function listOrthancRemoteModalities(): Promise<{ modalities: Ortha
   const keys = await listRemoteModalityKeys(settings);
   const modalities = await Promise.all(keys.map(async (key) => {
     try {
-      const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}`, { settings });
+      const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}/configuration`, { settings });
       if (!response.ok) {
         return { key, aet: "", host: "", port: null, configurationError: `Orthanc read failed (status=${response.status}).` };
       }
@@ -347,7 +347,7 @@ export async function upsertOrthancRemoteModality({
   const settings = await resolveSettings();
   const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(cleanKey)}`, {
     method: "PUT",
-    body: { AET: modality.aet, Host: modality.host, Port: modality.port },
+    body: [modality.aet, modality.host, modality.port],
     settings,
   });
   if (!response.ok) {
