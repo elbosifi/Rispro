@@ -48,7 +48,7 @@ type OrthancModalityFormState = {
   key: string;
   aet: string;
   host: string;
-  port: number;
+  port: number | "";
 };
 
 type AutoCompletionDraft = {
@@ -121,7 +121,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const toOrthancPayload = (form: OrthancModalityFormState) => ({
     aet: form.aet,
     host: form.host,
-    port: form.port
+    port: Number(form.port)
   });
 
   const createMutation = useMutation({
@@ -242,7 +242,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       key: modality.key,
       aet: modality.aet,
       host: modality.host,
-      port: modality.port ?? 104
+      port: modality.port ?? ""
     });
   };
 
@@ -531,39 +531,51 @@ function OrthancModalityForm({
   return (
     <div className="p-4 bg-stone-50 dark:bg-stone-700/50 rounded-lg space-y-3 text-sm">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <input
-          value={form.key}
-          onChange={(e) => onChange({ ...form, key: e.target.value })}
-          placeholder="Orthanc key (e.g. CT_REMOTE)"
-          disabled={keyReadOnly}
-          className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono disabled:opacity-60"
-        />
-        <input
-          value={form.host}
-          onChange={(e) => onChange({ ...form, host: e.target.value })}
-          placeholder="Host (IP or hostname)"
-          className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
-        />
-        <input
-          type="number"
-          value={form.port}
-          onChange={(e) => onChange({ ...form, port: parseInt(e.target.value) || 104 })}
-          placeholder="Port"
-          className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
-        />
-        <input
-          value={form.aet}
-          onChange={(e) => onChange({ ...form, aet: e.target.value.toUpperCase() })}
-          placeholder="Remote AET"
-          maxLength={16}
-          className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
-        />
+        <label className="space-y-1">
+          <span className="block text-xs text-stone-500">Orthanc key</span>
+          <input
+            value={form.key}
+            onChange={(e) => onChange({ ...form, key: e.target.value })}
+            placeholder="Orthanc key (e.g. CT_REMOTE)"
+            disabled={keyReadOnly}
+            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono disabled:opacity-60"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-xs text-stone-500">Remote AET</span>
+          <input
+            value={form.aet}
+            onChange={(e) => onChange({ ...form, aet: e.target.value.toUpperCase() })}
+            placeholder="Remote AET"
+            maxLength={16}
+            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-xs text-stone-500">Host</span>
+          <input
+            value={form.host}
+            onChange={(e) => onChange({ ...form, host: e.target.value })}
+            placeholder="Host (IP or hostname)"
+            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm font-mono"
+          />
+        </label>
+        <label className="space-y-1">
+          <span className="block text-xs text-stone-500">Port</span>
+          <input
+            type="number"
+            value={form.port}
+            onChange={(e) => onChange({ ...form, port: e.target.value === "" ? "" : Number(e.target.value) })}
+            placeholder="Port"
+            className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+          />
+        </label>
       </div>
       <div className="flex gap-2">
         <button
           type="button"
           onClick={onSubmit}
-          disabled={isPending || !form.key || !form.host || !form.aet}
+          disabled={isPending || !form.key || !form.host || !form.aet || form.port === ""}
           className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white text-sm rounded transition-colors"
         >
           {isPending ? "Saving..." : "Save"}
