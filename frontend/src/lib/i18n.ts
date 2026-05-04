@@ -936,7 +936,7 @@ const en = {
   "pacs.remap.sendFailedBadge": "Send failed",
   "pacs.remap.defaultDestinationBadge": "Default",
 
-  "login.heading": "RISpro Reception",
+  "login.heading": "Rispro Radiology Information System",
   "login.description": "Sign in to access the reception workspace",
   "login.signingIn": "Signing in...",
   "login.signIn": "Sign in",
@@ -2050,7 +2050,7 @@ const ar = {  "brand.hospitalName": "المركز الوطني للأورام ب
   "pacs.remap.sendFailedBadge": "فشل الإرسال",
   "pacs.remap.defaultDestinationBadge": "الافتراضي",
 
-  "login.heading": "RISpro Reception",
+  "login.heading": "نظام معلومات الأشعة Rispro",
   "login.description": "قم بتسجيل الدخول للوصول إلى مساحة عمل الاستقبال",
   "login.signingIn": "جاري تسجيل الدخول...",
   "login.signIn": "تسجيل دخول",

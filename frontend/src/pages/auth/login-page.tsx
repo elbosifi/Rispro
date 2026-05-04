@@ -42,17 +42,17 @@ export function LoginPage() {
         <div className="card-shell p-8 relative">
 
           {/* Header */}
-          <div className="text-center space-y-3 mb-8">
+          <div className="text-center space-y-4 mb-8">
             {/* Logo */}
             <div
-              className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border bg-white shadow-sm"
+              className="mx-auto flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border bg-white shadow-sm"
               style={{ borderColor: "var(--border)" }}
             >
               {!logoFailed ? (
                 <img
                   src="/assets/nccb-logo.png"
                   alt="National Cancer Center Benghazi logo"
-                  className="h-full w-full object-contain p-1.5"
+                  className="h-full w-full object-contain p-2"
                   onError={() => setLogoFailed(true)}
                 />
               ) : (
@@ -62,12 +62,12 @@ export function LoginPage() {
                     background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))"
                   }}
                 >
-                  <span className="text-[0.7rem] font-bold tracking-[0.24em]">NCCB</span>
+                  <span className="text-sm font-bold tracking-[0.24em]">NCCB</span>
                 </div>
               )}
             </div>
             <div>
-              <h1 className="text-2xl font-extrabold text-embossed" style={{ color: "var(--accent)" }}>
+              <h1 className="text-2xl font-extrabold text-embossed sm:text-3xl" style={{ color: "var(--accent)" }}>
                 {t(language, "login.heading")}
               </h1>
               <p className="mt-1 text-xs font-mono-data" style={{ color: "var(--text-muted)" }}>
@@ -160,7 +160,7 @@ export function LoginPage() {
         <div className="mt-4 text-center">
           <div className="inline-flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-[0.15em] font-mono-data" style={{ color: "var(--text-muted)" }}>
-              RISpro Reception v2.0
+              Rispro Radiology Information System v2.0
             </span>
           </div>
         </div>
