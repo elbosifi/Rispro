@@ -45,9 +45,11 @@ type OrthancFetchResponse = {
   text: string;
   json: unknown;
 };
+type OrthancPacsAuditLogger = typeof logAuditEntry;
 
 let orthancFetchForPacs: typeof orthancFetch = orthancFetch;
 let orthancSettingsForTests: ResolvedOrthancSettings | null = null;
+let logOrthancPacsAuditEntry: OrthancPacsAuditLogger = logAuditEntry;
 
 export function __setOrthancPacsFetchForTests(mockFetch: typeof orthancFetch): void {
   orthancFetchForPacs = mockFetch;
@@ -63,6 +65,14 @@ export function __setOrthancPacsSettingsForTests(settings: ResolvedOrthancSettin
 
 export function __resetOrthancPacsSettingsForTests(): void {
   orthancSettingsForTests = null;
+}
+
+export function __setOrthancPacsAuditLoggerForTests(logger: OrthancPacsAuditLogger): void {
+  logOrthancPacsAuditEntry = logger;
+}
+
+export function __resetOrthancPacsAuditLoggerForTests(): void {
+  logOrthancPacsAuditEntry = logAuditEntry;
 }
 
 function joinUrl(baseUrl: string, suffix: string): string {
@@ -249,13 +259,31 @@ function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
 
 function extractTags(payload: unknown): UnknownRecord {
   const source = record(payload);
-  return {
-    ...source,
-    ...record(source.Tags),
-    ...record(source.NormalizedTags),
-    ...record(source.MainDicomTags),
-    ...record(source.PatientMainDicomTags),
+  const tags: UnknownRecord = {};
+  const addTags = (value: unknown): void => {
+    const sourceTags = record(value);
+    for (const [key, tagValue] of Object.entries(sourceTags)) {
+      tags[key] = tagValue;
+      const compactDicomTag = key.replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+      if (compactDicomTag.length === 8) {
+        tags[compactDicomTag] = tagValue;
+      }
+      const tagName = firstString(record(tagValue).Name, record(tagValue).name);
+      if (tagName) {
+        tags[tagName] = tagValue;
+      }
+    }
   };
+
+  addTags(source);
+  addTags(source.Content);
+  addTags(source.content);
+  addTags(source.Tags);
+  addTags(source.NormalizedTags);
+  addTags(source.MainDicomTags);
+  addTags(source.PatientMainDicomTags);
+
+  return tags;
 }
 
 function studyFromPayload(payload: unknown): OrthancPacsStudySummary {
@@ -354,7 +382,7 @@ export async function upsertOrthancRemoteModality({
     throw new HttpError(502, `Orthanc modality save failed (status=${response.status}).`);
   }
 
-  await logAuditEntry({
+  await logOrthancPacsAuditEntry({
     entityType: "orthanc_remote_modality",
     entityId: null,
     actionType: "upsert",
@@ -383,7 +411,7 @@ export async function deleteOrthancRemoteModality({
     throw new HttpError(502, `Orthanc modality delete failed (status=${response.status}).`);
   }
 
-  await logAuditEntry({
+  await logOrthancPacsAuditEntry({
     entityType: "orthanc_remote_modality",
     entityId: null,
     actionType: "delete",
@@ -481,7 +509,7 @@ export async function searchOrthancPacsStudies({
     ? await searchLocal(criteria, settings)
     : await searchRemote(key, criteria, settings);
 
-  await logAuditEntry({
+  await logOrthancPacsAuditEntry({
     entityType: "integration",
     entityId: null,
     actionType: "orthanc_pacs_search",
@@ -532,7 +560,7 @@ export async function testOrthancPacsTarget({
     throw new HttpError(502, `Orthanc PACS target test failed (status=${response.status}).`);
   }
 
-  await logAuditEntry({
+  await logOrthancPacsAuditEntry({
     entityType: "integration",
     entityId: null,
     actionType: "orthanc_pacs_test",
