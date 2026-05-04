@@ -4,12 +4,14 @@ import { createApp } from "./app.js";
 import { pool } from "./db/pool.js";
 import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
 import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js";
+import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
 let isShuttingDown = false;
 let dicomGateway: DicomGatewayServer | null = null;
 let orthancMwlWorker: OrthancMwlWorker | null = null;
+let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -37,6 +39,14 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
       await orthancMwlWorker.stop();
     } catch (error) {
       console.error("Failed to stop Orthanc MWL worker.", error);
+    }
+  }
+
+  if (pacsAutoCompletionWorker) {
+    try {
+      await pacsAutoCompletionWorker.stop();
+    } catch (error) {
+      console.error("Failed to stop PACS auto-completion worker.", error);
     }
   }
 
@@ -125,6 +135,16 @@ async function start(): Promise<void> {
     startupSummary.orthanc_mwl = "initialization_failed";
   }
 
+  try {
+    const { startAppointmentsV2PacsAutoCompletionWorker } = await import("./services/appointments-v2-pacs-auto-completion-worker.js");
+    pacsAutoCompletionWorker = await startAppointmentsV2PacsAutoCompletionWorker();
+    startupSummary.pacs_auto_completion = "enabled";
+  } catch (error) {
+    console.error("PACS auto-completion worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.pacs_auto_completion = "initialization_failed";
+  }
+
   server.listen(env.port, async () => {
     // Print startup summary
     console.log("");
@@ -165,6 +185,10 @@ async function start(): Promise<void> {
     if (orthancSettings?.enabled) {
       console.log(`    Base URL:       ${orthancSettings.baseUrl || "(unset)"}`);
     }
+
+    console.log("");
+    console.log("  PACS Auto-Completion:");
+    console.log(`    Worker:         ${startupSummary.pacs_auto_completion || "disabled"}`);
 
     if (env.risproMppsMode === "internal_bridge") {
       console.log("");

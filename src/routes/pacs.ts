@@ -18,6 +18,12 @@ import {
 } from "../services/pacs-node-service.js";
 import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.js";
 import {
+  listPacsAutoCompletionSettings,
+  listPacsAutoCompletionTargets,
+  testPacsAutoCompletionForModality,
+  upsertPacsAutoCompletionSetting,
+} from "../services/appointments-v2-pacs-auto-completion-worker.js";
+import {
   assertDicomRemapRouteAccess,
   cancelDicomRemapJob,
   clearFailedDicomRemapOrthancStudies,
@@ -169,6 +175,63 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
 export const __pacsRouteTestables = {
   stageDicomRemapMultipartFiles,
 };
+
+// ---------------------------------------------------------------------------
+// Orthanc-backed V2 PACS auto-completion settings
+// ---------------------------------------------------------------------------
+
+pacsRouter.get(
+  "/orthanc-verification-targets",
+  ...authMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json(await listPacsAutoCompletionTargets());
+  })
+);
+
+pacsRouter.get(
+  "/auto-completion-settings",
+  ...supervisorMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    const settings = await listPacsAutoCompletionSettings();
+    res.json({ settings });
+  })
+);
+
+pacsRouter.put(
+  "/auto-completion-settings/:modalityId",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { modalityId?: string } };
+    const modalityId = asOptionalString(request.params?.modalityId);
+    if (!modalityId) {
+      throw new HttpError(400, "modalityId is required.");
+    }
+    const setting = await upsertPacsAutoCompletionSetting(
+      modalityId,
+      asUnknownRecord(request.body ?? {}),
+      request.user.sub as UserId
+    );
+    res.json({ setting });
+  })
+);
+
+pacsRouter.post(
+  "/auto-completion-settings/:modalityId/test",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; params?: { modalityId?: string } };
+    const modalityId = asOptionalString(request.params?.modalityId);
+    if (!modalityId) {
+      throw new HttpError(400, "modalityId is required.");
+    }
+    const body = asUnknownRecord(request.body ?? {});
+    const result = await testPacsAutoCompletionForModality({
+      modalityId,
+      bookingId: asOptionalString(body.bookingId),
+    });
+    res.json(result);
+  })
+);
 
 // ---------------------------------------------------------------------------
 // PACS Node CRUD (supervisor only)
