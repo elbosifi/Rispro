@@ -593,9 +593,96 @@ render_orthanc_config() {
   local auth_enabled_json='false'
   local users_block='{}'
   local orthanc_dicom_block=''
+  local dicom_modalities_json='{}'
+
+  if command -v node >/dev/null 2>&1; then
+    dicom_modalities_json="$(
+      ORTHANC_CONFIG_FILE="${ORTHANC_CONFIG_FILE}" ORTHANC_USERNAME="${ORTHANC_USERNAME:-}" ORTHANC_PASSWORD="${ORTHANC_PASSWORD:-}" node <<'EOF_NODE' 2>/dev/null || printf '{}'
+const fs = require('fs');
+const baseUrl = 'http://127.0.0.1:8042';
+const configFile = process.env.ORTHANC_CONFIG_FILE || '';
+const username = process.env.ORTHANC_USERNAME || '';
+const password = process.env.ORTHANC_PASSWORD || '';
+const headers = username ? { Authorization: `Basic ${Buffer.from(`${username}:${password}`).toString('base64')}` } : {};
+const compact = {};
+
+function normalizeModality(config) {
+  if (Array.isArray(config) && config.length >= 3) {
+    const aet = String(config[0] || '').trim();
+    const host = String(config[1] || '').trim();
+    const port = Number(config[2]);
+    return aet && host && Number.isInteger(port) && port > 0 && port <= 65535 ? [aet, host, port] : null;
+  }
+  if (config && typeof config === 'object') {
+    const aet = config.AET || config.Aet || config.aet;
+    const host = config.Host || config.host;
+    const port = Number(config.Port ?? config.port);
+    return aet && host && Number.isInteger(port) && port > 0 && port <= 65535 ? [aet, host, port] : null;
+  }
+  return null;
+}
+
+function remember(key, config) {
+  if (!key || key === 'local') return;
+  const normalized = normalizeModality(config);
+  if (normalized) compact[key] = normalized;
+}
+
+async function readJson(path) {
+  const response = await fetch(`${baseUrl}${path}`, { headers });
+  if (!response.ok) throw new Error(`Orthanc ${path} failed: ${response.status}`);
+  return await response.json();
+}
+
+try {
+  if (configFile && fs.existsSync(configFile)) {
+    const existing = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    const existingModalities = existing && existing.DicomModalities;
+    if (existingModalities && typeof existingModalities === 'object' && !Array.isArray(existingModalities)) {
+      for (const [key, config] of Object.entries(existingModalities)) {
+        remember(key, config);
+      }
+    }
+  }
+} catch {
+}
+
+(async () => {
+  try {
+    const keys = await readJson('/modalities');
+    if (Array.isArray(keys)) {
+      for (const key of keys) {
+        if (!key || key === 'local') continue;
+        const config = await readJson(`/modalities/${encodeURIComponent(key)}/configuration`);
+        remember(key, config);
+      }
+    }
+  } catch {
+  }
+
+  process.stdout.write(JSON.stringify(compact));
+})();
+EOF_NODE
+    )"
+  fi
+
+  if [ -z "$dicom_modalities_json" ]; then
+    dicom_modalities_json='{}'
+  fi
 
   if [ "$RISPRO_DICOM_MODE" = "orthanc_internal" ]; then
-    orthanc_dicom_block=$'  "DicomModalities": {},\n  "DicomCheckCalledAet": false,\n  "DicomCheckModalityHost": false,\n  "DicomAlwaysAllowEcho": true,\n  "DicomAlwaysAllowStore": true,\n  "DicomAlwaysAllowFind": true,\n  "DicomAlwaysAllowFindWorklist": true,\n  "DicomAlwaysAllowGet": true,\n  "DicomAlwaysAllowMove": true,'
+    orthanc_dicom_block=$(cat <<EOF_DICOM
+  "DicomModalities": ${dicom_modalities_json},
+  "DicomCheckCalledAet": false,
+  "DicomCheckModalityHost": false,
+  "DicomAlwaysAllowEcho": true,
+  "DicomAlwaysAllowStore": true,
+  "DicomAlwaysAllowFind": true,
+  "DicomAlwaysAllowFindWorklist": true,
+  "DicomAlwaysAllowGet": true,
+  "DicomAlwaysAllowMove": true,
+EOF_DICOM
+)
   elif [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
     auth_enabled_json='true'
     users_block="{\"$(json_escape "$ORTHANC_USERNAME")\": \"$(json_escape "$ORTHANC_PASSWORD")\"}"

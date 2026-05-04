@@ -145,6 +145,16 @@ async function start(): Promise<void> {
     startupSummary.pacs_auto_completion = "initialization_failed";
   }
 
+  try {
+    const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
+    const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
+    startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
+  } catch (error) {
+    console.warn("Orthanc PACS modality sync failed. Continuing startup.");
+    logError(error);
+    startupSummary.orthanc_pacs_modalities = "sync_failed";
+  }
+
   server.listen(env.port, async () => {
     // Print startup summary
     console.log("");
@@ -189,6 +199,7 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  PACS Auto-Completion:");
     console.log(`    Worker:         ${startupSummary.pacs_auto_completion || "disabled"}`);
+    console.log(`    Modalities:     ${startupSummary.orthanc_pacs_modalities || "not_synced"}`);
 
     if (env.risproMppsMode === "internal_bridge") {
       console.log("");

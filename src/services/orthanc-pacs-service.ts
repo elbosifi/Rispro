@@ -1,5 +1,6 @@
 import { HttpError } from "../utils/http-error.js";
 import { validateIsoDate } from "../utils/date.js";
+import { pool } from "../db/pool.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
 import type { OptionalUserId, UnknownRecord } from "../types/http.js";
@@ -50,6 +51,9 @@ type OrthancPacsAuditLogger = typeof logAuditEntry;
 let orthancFetchForPacs: typeof orthancFetch = orthancFetch;
 let orthancSettingsForTests: ResolvedOrthancSettings | null = null;
 let logOrthancPacsAuditEntry: OrthancPacsAuditLogger = logAuditEntry;
+
+const ORTHANC_MODALITIES_SETTINGS_CATEGORY = "pacs";
+const ORTHANC_MODALITIES_SETTINGS_KEY = "orthanc_remote_modalities";
 
 export function __setOrthancPacsFetchForTests(mockFetch: typeof orthancFetch): void {
   orthancFetchForPacs = mockFetch;
@@ -333,8 +337,102 @@ function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModali
   };
 }
 
+function normalizeStoredModality(value: unknown): OrthancRemoteModality | null {
+  const data = record(value);
+  const key = firstString(data.key);
+  if (!key) return null;
+  return {
+    key,
+    aet: firstString(data.aet, data.AET),
+    host: firstString(data.host, data.Host),
+    port: parseOrthancPort(data.port ?? data.Port),
+    configurationError: null,
+  };
+}
+
+async function loadStoredOrthancRemoteModalities(): Promise<OrthancRemoteModality[]> {
+  const { rows } = await pool.query(
+    `
+      select setting_value
+      from system_settings
+      where category = $1 and setting_key = $2
+      limit 1
+    `,
+    [ORTHANC_MODALITIES_SETTINGS_CATEGORY, ORTHANC_MODALITIES_SETTINGS_KEY]
+  );
+  const payload = record(rows[0]?.setting_value);
+  const values = Array.isArray(payload.value) ? payload.value : [];
+  return values.map(normalizeStoredModality).filter((item): item is OrthancRemoteModality => Boolean(item));
+}
+
+async function saveStoredOrthancRemoteModalities(modalities: OrthancRemoteModality[], currentUserId: OptionalUserId): Promise<void> {
+  const normalized = modalities
+    .filter((modality) => modality.key && modality.aet && modality.host && modality.port != null)
+    .map((modality) => ({
+      key: modality.key,
+      aet: modality.aet,
+      host: modality.host,
+      port: modality.port,
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+  await pool.query(
+    `
+      insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+      values ($1, $2, $3::jsonb, $4)
+      on conflict (category, setting_key)
+      do update set
+        setting_value = excluded.setting_value,
+        updated_by_user_id = excluded.updated_by_user_id,
+        updated_at = now()
+    `,
+    [
+      ORTHANC_MODALITIES_SETTINGS_CATEGORY,
+      ORTHANC_MODALITIES_SETTINGS_KEY,
+      JSON.stringify({ value: normalized }),
+      currentUserId,
+    ]
+  );
+}
+
+async function putOrthancRemoteModality(modality: OrthancRemoteModality, settings: ResolvedOrthancSettings): Promise<void> {
+  if (!modality.aet || !modality.host || modality.port == null) {
+    throw new HttpError(400, `Orthanc modality ${modality.key} is missing AET, host, or port.`);
+  }
+  const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(modality.key)}`, {
+    method: "PUT",
+    body: [modality.aet, modality.host, modality.port],
+    settings,
+  });
+  if (!response.ok) {
+    throw new HttpError(502, `Orthanc modality save failed for ${modality.key} (status=${response.status}).`);
+  }
+}
+
+export async function syncStoredOrthancRemoteModalitiesToOrthanc(): Promise<{ synced: number }> {
+  const settings = await resolveSettings();
+  const stored = await loadStoredOrthancRemoteModalities();
+  let synced = 0;
+  for (const modality of stored) {
+    try {
+      await putOrthancRemoteModality(modality, settings);
+      synced += 1;
+    } catch (error) {
+      console.warn(
+        JSON.stringify({
+          type: "orthanc_remote_modality_sync_failed",
+          key: modality.key,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      );
+    }
+  }
+  return { synced };
+}
+
 export async function listOrthancRemoteModalities(): Promise<{ modalities: OrthancRemoteModality[] }> {
   const settings = await resolveSettings();
+  await syncStoredOrthancRemoteModalitiesToOrthanc().catch(() => undefined);
   const keys = await listRemoteModalityKeys(settings);
   const modalities = await Promise.all(keys.map(async (key) => {
     try {
@@ -373,14 +471,14 @@ export async function upsertOrthancRemoteModality({
     port: normalizePort(payload.port ?? payload.Port),
   };
   const settings = await resolveSettings();
-  const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(cleanKey)}`, {
-    method: "PUT",
-    body: [modality.aet, modality.host, modality.port],
-    settings,
-  });
-  if (!response.ok) {
-    throw new HttpError(502, `Orthanc modality save failed (status=${response.status}).`);
-  }
+  await putOrthancRemoteModality(modality, settings);
+
+  const stored = await loadStoredOrthancRemoteModalities();
+  const next = [
+    ...stored.filter((item) => item.key !== cleanKey),
+    modality,
+  ];
+  await saveStoredOrthancRemoteModalities(next, currentUserId);
 
   await logOrthancPacsAuditEntry({
     entityType: "orthanc_remote_modality",
@@ -410,6 +508,9 @@ export async function deleteOrthancRemoteModality({
   if (!response.ok && response.status !== 404) {
     throw new HttpError(502, `Orthanc modality delete failed (status=${response.status}).`);
   }
+
+  const stored = await loadStoredOrthancRemoteModalities();
+  await saveStoredOrthancRemoteModalities(stored.filter((item) => item.key !== cleanKey), currentUserId);
 
   await logOrthancPacsAuditEntry({
     entityType: "orthanc_remote_modality",
