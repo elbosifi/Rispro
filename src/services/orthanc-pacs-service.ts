@@ -15,7 +15,8 @@ export interface OrthancRemoteModality {
   key: string;
   aet: string;
   host: string;
-  port: number;
+  port: number | null;
+  configurationError?: string | null;
 }
 
 export interface OrthancPacsStudySummary {
@@ -198,6 +199,11 @@ function normalizePort(value: unknown): number {
   return port;
 }
 
+function parseOrthancPort(value: unknown): number | null {
+  const port = Number(value);
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+}
+
 function dicomDate(value: unknown): string {
   const clean = firstString(value).trim();
   if (!clean) return "";
@@ -279,19 +285,23 @@ async function listRemoteModalityKeys(settings: ResolvedOrthancSettings): Promis
 
 function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModality {
   if (Array.isArray(payload)) {
+    const port = parseOrthancPort(payload[2]);
     return {
       key,
       aet: firstString(payload[0]),
       host: firstString(payload[1]),
-      port: normalizePort(payload[2] ?? 104),
+      port,
+      configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
     };
   }
   const data = record(payload);
+  const port = parseOrthancPort(data.Port ?? data.port);
   return {
     key,
     aet: firstString(data.AET, data.Aet, data.aet),
     host: firstString(data.Host, data.host),
-    port: normalizePort(data.Port ?? data.port ?? 104),
+    port,
+    configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
   };
 }
 
@@ -299,11 +309,21 @@ export async function listOrthancRemoteModalities(): Promise<{ modalities: Ortha
   const settings = await resolveSettings();
   const keys = await listRemoteModalityKeys(settings);
   const modalities = await Promise.all(keys.map(async (key) => {
-    const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}`, { settings });
-    if (!response.ok) {
-      throw new HttpError(502, `Orthanc modality read failed for ${key} (status=${response.status}).`);
+    try {
+      const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}`, { settings });
+      if (!response.ok) {
+        return { key, aet: "", host: "", port: null, configurationError: `Orthanc read failed (status=${response.status}).` };
+      }
+      return modalityFromPayload(key, response.json);
+    } catch (error) {
+      return {
+        key,
+        aet: "",
+        host: "",
+        port: null,
+        configurationError: error instanceof Error ? error.message : String(error),
+      };
     }
-    return modalityFromPayload(key, response.json);
   }));
   return { modalities };
 }

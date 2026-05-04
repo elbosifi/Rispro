@@ -10,7 +10,8 @@ interface OrthancRemoteModality {
   key: string;
   aet: string;
   host: string;
-  port: number;
+  port: number | null;
+  configurationError?: string | null;
 }
 
 type OrthancTargetType = "local" | "remote_modality";
@@ -223,7 +224,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     }
   });
 
-  const settingsError = error || autoSettingsQuery.error;
+  const settingsError = autoSettingsQuery.error;
   if (settingsError) {
     const status = settingsError instanceof ApiError ? settingsError.status : undefined;
     const msg = (settingsError as Error).message;
@@ -233,7 +234,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     return <QueryError message={msg} />;
   }
 
-  if (isLoading || autoSettingsQuery.isLoading) return <p className="text-sm text-stone-500 dark:text-stone-400">{t(language, "common.loading")}</p>;
+  if (autoSettingsQuery.isLoading) return <p className="text-sm text-stone-500 dark:text-stone-400">{t(language, "common.loading")}</p>;
 
   const startEdit = (modality: OrthancRemoteModality) => {
     setEditingKey(modality.key);
@@ -241,7 +242,7 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       key: modality.key,
       aet: modality.aet,
       host: modality.host,
-      port: modality.port
+      port: modality.port ?? 104
     });
   };
 
@@ -251,6 +252,16 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
           {mutationError}
           <button type="button" onClick={() => setMutationError(null)} className="ml-2 underline">{t(language, "common.dismiss")}</button>
+        </div>
+      )}
+
+      {error && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+          <p className="font-medium">Could not load Orthanc remote modalities</p>
+          <p className="text-xs mt-1">{(error as Error).message}</p>
+          <button type="button" onClick={() => queryClient.invalidateQueries({ queryKey: ["pacs", "orthanc-modalities"] })} className="mt-2 underline">
+            Retry
+          </button>
         </div>
       )}
 
@@ -296,8 +307,13 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     <span className="px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded">Orthanc</span>
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
-                    {modality.host}:{modality.port} | AET: {modality.aet}
+                    {modality.host || "missing-host"}:{modality.port ?? "invalid-port"} | AET: {modality.aet || "missing-aet"}
                   </div>
+                  {modality.configurationError && (
+                    <div className="text-xs mt-1 text-red-600 dark:text-red-400">
+                      {modality.configurationError}
+                    </div>
+                  )}
                   {testResult?.key === modality.key && (
                     <div className={`text-xs mt-1 ${testResult.ok ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
                       {testResult.ok ? "OK" : "Failed"} {testResult.message}
