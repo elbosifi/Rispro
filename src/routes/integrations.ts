@@ -6,7 +6,11 @@ import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js
 import { asUnknownRecord } from "../utils/records.js";
 import { isValidNationalId } from "../utils/national-id.js";
 import { getIntegrationStatus, preparePrintJob, prepareScanSession } from "../services/integration-service.js";
-import { runPacsCFind, searchPacsStudies, testPacsConnection } from "../services/pacs-service.js";
+import {
+  runOrthancPacsCFind,
+  searchOrthancPacsStudies,
+  testOrthancPacsTarget,
+} from "../services/orthanc-pacs-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface IntegrationsAuthRequest {
@@ -77,7 +81,7 @@ integrationsRouter.post(
     if (!isValidNationalId(patientNationalId)) {
       throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
-    const studies = await runPacsCFind({
+    const studies = await runOrthancPacsCFind({
       patientNationalId,
       currentUserId: requireUserSub(request)
     });
@@ -94,11 +98,12 @@ integrationsRouter.post(
     if (!isValidNationalId(patientNationalId)) {
       throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
-    const studies = await searchPacsStudies({
+    const result = await searchOrthancPacsStudies({
       criteria: { ...body, patientNationalId, patientId: patientNationalId },
+      targetKey: asOptionalString(body.targetKey) || "local",
       currentUserId: requireUserSub(request)
     });
-    res.json({ studies });
+    res.json({ studies: result.studies, target: result.target });
   })
 );
 
@@ -107,7 +112,10 @@ integrationsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as IntegrationsAuthRequest;
     const body = asUnknownRecord(request.body);
-    await testPacsConnection({ currentUserId: requireUserSub(request), overrides: body });
-    res.json({ ok: true });
+    const result = await testOrthancPacsTarget({
+      currentUserId: requireUserSub(request),
+      targetKey: asOptionalString(body.targetKey) || "local",
+    });
+    res.json(result);
   })
 );

@@ -35,8 +35,20 @@ describe("PacsSettingsSection auto-completion controls", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
-      if (path === "/pacs/nodes") {
-        return { nodes: [] };
+      if (path === "/pacs/orthanc-modalities") {
+        return { modalities: [{ key: "CT_REMOTE", aet: "CTPACS", host: "10.0.0.5", port: 104 }] };
+      }
+      if (path === "/pacs/orthanc-modalities/MR_REMOTE" && options?.method === "PUT") {
+        return { modality: { key: "MR_REMOTE", aet: "MRPACS", host: "10.0.0.6", port: 104 } };
+      }
+      if (path === "/pacs/orthanc-modalities/CT_REMOTE" && options?.method === "PUT") {
+        return { modality: { key: "CT_REMOTE", aet: "CTPACS", host: "10.0.0.5", port: 11112 } };
+      }
+      if (path === "/pacs/orthanc-modalities/CT_REMOTE" && options?.method === "DELETE") {
+        return { ok: true };
+      }
+      if (path === "/pacs/test" && options?.method === "POST") {
+        return { ok: true, target: { key: "CT_REMOTE", name: "CT_REMOTE" } };
       }
       if (path === "/pacs/orthanc-verification-targets") {
         return {
@@ -119,6 +131,47 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(payload.pollIntervalMinutes).toBe(5);
     expect(payload.lookbackHours).toBe(12);
     expect(payload.stopAfterHours).toBe(36);
+  });
+
+  it("manages Orthanc remote modalities", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const user = userEvent.setup();
+    renderComponent();
+
+    expect(await screen.findByText("Orthanc remote modalities")).toBeTruthy();
+    expect(screen.getAllByText("CT_REMOTE").length).toBeGreaterThan(0);
+    expect(screen.getByText(/10\.0\.0\.5:104/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Add Orthanc modality" }));
+    await user.type(screen.getByPlaceholderText("Orthanc key (e.g. CT_REMOTE)"), "MR_REMOTE");
+    await user.type(screen.getByPlaceholderText("Host (IP or hostname)"), "10.0.0.6");
+    await user.clear(screen.getByPlaceholderText("Port"));
+    await user.type(screen.getByPlaceholderText("Port"), "104");
+    await user.type(screen.getByPlaceholderText("Remote AET"), "MRPACS");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        "/pacs/orthanc-modalities/MR_REMOTE",
+        expect.objectContaining({ method: "PUT" })
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Test CT_REMOTE" }));
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        "/pacs/test",
+        expect.objectContaining({ method: "POST" })
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete CT_REMOTE" }));
+    await waitFor(() => {
+      expect(api).toHaveBeenCalledWith(
+        "/pacs/orthanc-modalities/CT_REMOTE",
+        expect.objectContaining({ method: "DELETE" })
+      );
+    });
   });
 
   it("calls the test endpoint without completing a booking", async () => {

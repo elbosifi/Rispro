@@ -8,7 +8,7 @@ import path from "node:path";
 import { requireAuth, requireSupervisor, requireRecentSupervisorReauth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
+import { asOptionalString } from "../utils/request-coercion.js";
 import { HttpError } from "../utils/http-error.js";
 import {
   listPacsNodes,
@@ -16,7 +16,14 @@ import {
   updatePacsNode,
   deletePacsNode
 } from "../services/pacs-node-service.js";
-import { testPacsConnection, searchPacsStudies } from "../services/pacs-service.js";
+import {
+  deleteOrthancRemoteModality,
+  listOrthancPacsTargets,
+  listOrthancRemoteModalities,
+  searchOrthancPacsStudies,
+  testOrthancPacsTarget,
+  upsertOrthancRemoteModality,
+} from "../services/orthanc-pacs-service.js";
 import {
   listPacsAutoCompletionSettings,
   listPacsAutoCompletionTargets,
@@ -241,15 +248,66 @@ pacsRouter.get(
   "/nodes/available",
   ...authMiddleware,
   asyncRoute(async (_req: Request, res: Response) => {
-    const nodes = await listPacsNodes();
+    const { targets } = await listOrthancPacsTargets();
     res.json({
-      nodes: nodes.map((node) => ({
-        id: node.id,
-        name: node.name,
-        is_active: node.is_active,
-        is_default: node.is_default
+      deprecated: true,
+      replacement: "/api/pacs/orthanc-targets",
+      nodes: targets.map((target) => ({
+        id: target.key,
+        key: target.key,
+        name: target.name,
+        is_active: true,
+        is_default: target.isDefault,
+        orthanc_target_type: target.type
       }))
     });
+  })
+);
+
+pacsRouter.get(
+  "/orthanc-targets",
+  ...authMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json(await listOrthancPacsTargets());
+  })
+);
+
+pacsRouter.get(
+  "/orthanc-modalities",
+  ...supervisorMiddleware,
+  asyncRoute(async (_req: Request, res: Response) => {
+    res.json(await listOrthancRemoteModalities());
+  })
+);
+
+pacsRouter.put(
+  "/orthanc-modalities/:key",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { body?: unknown; user: AuthenticatedUserContext; params?: { key?: string } };
+    const key = asOptionalString(request.params?.key);
+    if (!key) {
+      throw new HttpError(400, "Orthanc modality key is required.");
+    }
+    const result = await upsertOrthancRemoteModality({
+      key,
+      payload: asUnknownRecord(request.body ?? {}),
+      currentUserId: request.user.sub as UserId,
+    });
+    res.json(result);
+  })
+);
+
+pacsRouter.delete(
+  "/orthanc-modalities/:key",
+  ...supervisorMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext; params?: { key?: string } };
+    const key = asOptionalString(request.params?.key);
+    if (!key) {
+      throw new HttpError(400, "Orthanc modality key is required.");
+    }
+    res.json(await deleteOrthancRemoteModality({ key, currentUserId: request.user.sub as UserId }));
   })
 );
 
@@ -314,29 +372,11 @@ pacsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});
-    const nodeId = asOptionalUserId(body.nodeId);
-
-    const overrides: UnknownRecord = {};
-
-    if (nodeId) {
-      const { getPacsNode } = await import("../services/pacs-node-service.js");
-      const node = await getPacsNode(nodeId);
-      overrides.enabled = "enabled";
-      overrides.host = node.host;
-      overrides.port = node.port;
-      overrides.calledAeTitle = node.called_ae_title;
-      overrides.callingAeTitle = node.calling_ae_title;
-      overrides.timeoutSeconds = node.timeout_seconds;
-    } else if (body.host) {
-      overrides.host = body.host;
-      overrides.port = body.port;
-      overrides.calledAeTitle = body.calledAeTitle;
-      overrides.callingAeTitle = body.callingAeTitle;
-      overrides.timeoutSeconds = body.timeoutSeconds;
-    }
-
-    await testPacsConnection({ currentUserId: request.user.sub as UserId, overrides });
-    res.json({ ok: true });
+    const result = await testOrthancPacsTarget({
+      targetKey: asOptionalString(body.targetKey) || asOptionalString(body.nodeId) || "local",
+      currentUserId: request.user.sub as UserId,
+    });
+    res.json(result);
   })
 );
 
@@ -350,7 +390,7 @@ pacsRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});
-    const nodeId = asOptionalUserId(body.nodeId);
+    const targetKey = asOptionalString(body.targetKey) || asOptionalString(body.nodeId) || "local";
 
     // Build search criteria
     const criteria: Record<string, unknown> = {};
@@ -387,34 +427,17 @@ pacsRouter.post(
       throw new HttpError(400, "At least one search field is required (national ID, patient name, accession number, study date, or modality).");
     }
 
-    // If nodeId provided, use that node; otherwise use default
-    if (nodeId) {
-      const { getPacsNode } = await import("../services/pacs-node-service.js");
-      const node = await getPacsNode(nodeId);
+    const result = await searchOrthancPacsStudies({
+      criteria,
+      targetKey,
+      currentUserId: request.user.sub as UserId
+    });
 
-      if (!node) {
-        throw new HttpError(404, "PACS node not found.");
-      }
-
-      const { searchPacsStudiesWithNode } = await import("../services/pacs-service.js");
-      const studies = await searchPacsStudiesWithNode({
-        criteria,
-        node,
-        currentUserId: request.user.sub as UserId
-      });
-
-      res.json({ studies, node: { id: node.id, name: node.name } });
-    } else {
-      const { resolveDefaultPacsNodeForSearch, searchPacsStudiesWithNode } = await import("../services/pacs-service.js");
-      const defaultNode = await resolveDefaultPacsNodeForSearch();
-      const studies = await searchPacsStudiesWithNode({
-        criteria,
-        node: defaultNode,
-        currentUserId: request.user.sub as UserId
-      });
-
-      res.json({ studies, node: { id: defaultNode.id, name: defaultNode.name } });
-    }
+    res.json({
+      studies: result.studies,
+      target: result.target,
+      node: { id: result.target.key, name: result.target.name }
+    });
   })
 );
 

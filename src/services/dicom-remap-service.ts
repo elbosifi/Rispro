@@ -9,7 +9,6 @@ import dcmjs from "dcmjs";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
-import { getPacsNode, listPacsNodes, type PacsNodeRow } from "./pacs-node-service.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
 import { getPatientById } from "./patient-service.js";
@@ -19,7 +18,6 @@ type DicomRemapQuery = typeof pool.query;
 type DicomRemapAuditLogger = typeof logAuditEntry;
 type OrthancFetch = typeof orthancFetch;
 type RemapSleep = (ms: number) => Promise<void>;
-type PacsNodeGetter = typeof getPacsNode;
 const { DicomMessage, DicomMetaDictionary, datasetToBuffer } = dcmjs.data;
 
 export type DicomRemapJobStatus =
@@ -153,7 +151,6 @@ let queryDicomRemapDb: DicomRemapQuery = pool.query.bind(pool);
 let logDicomRemapAuditEntry: DicomRemapAuditLogger = logAuditEntry;
 let fetchOrthancForRemap: OrthancFetch;
 let sleepForDicomRemap: RemapSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-let readPacsNodeForRemap: PacsNodeGetter = getPacsNode;
 let orthancBulkModifyAvailableForTests: boolean | null = null;
 
 function joinUrl(baseUrl: string, suffix: string): string {
@@ -1630,22 +1627,6 @@ async function createModifiedStudyCopy(
   return modifiedStudyId;
 }
 
-async function ensureOrthancModalityFromPacsNode(node: PacsNodeRow, modalityKey: string): Promise<void> {
-  const response = await fetchOrthancForRemap(`/modalities/${encodeURIComponent(modalityKey)}`, {
-    method: "PUT",
-    body: {
-      AET: node.called_ae_title,
-      Host: node.host,
-      Port: Number(node.port),
-    },
-    timeoutSeconds: REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
-  });
-
-  if (!response.ok) {
-    throw new HttpError(502, `Failed to register Orthanc modality destination (status=${response.status}).`);
-  }
-}
-
 async function sendStudyToOrthancModality(studyId: string, modalityKey: string): Promise<unknown> {
   const attempts: Array<Record<string, unknown>> = [];
   const payloadCandidates: unknown[] = [
@@ -1711,6 +1692,20 @@ function resolveSendStudyIdForJob(job: DicomRemapJobRow): string {
   return String(job.modified_orthanc_study_id || job.source_orthanc_study_id || "").trim();
 }
 
+function normalizeOrthancModalityKey(value: unknown, fieldName = "destinationPacsKey"): string {
+  const key = normalizeOptionalText(value);
+  if (!key) {
+    throw new HttpError(400, `${fieldName} is required.`);
+  }
+  if (key === "local") {
+    throw new HttpError(400, "Local Orthanc index cannot be used as a send destination.");
+  }
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(key)) {
+    throw new HttpError(400, `${fieldName} must be an Orthanc remote modality key.`);
+  }
+  return key;
+}
+
 async function sendExistingDicomRemapJobToDestination({
   job,
   currentUserId,
@@ -1732,15 +1727,7 @@ async function sendExistingDicomRemapJobToDestination({
     throw new HttpError(409, "Remapped study no longer exists in Orthanc. Please upload again.");
   }
 
-  const destinationNodeId = normalizePositiveInteger(job.destination_pacs_key, "destinationPacsKey");
-  if (!destinationNodeId) {
-    throw new HttpError(409, "destinationPacsKey is missing.");
-  }
-
-  const destinationNode = await readPacsNodeForRemap(destinationNodeId);
-  if (!destinationNode.is_active) {
-    throw new HttpError(400, "Selected PACS destination is inactive.");
-  }
+  const modalityKey = normalizeOrthancModalityKey(job.destination_pacs_key);
 
   let sendingJob: DicomRemapJobRow | null = null;
   if (job.status === "sending") {
@@ -1767,8 +1754,6 @@ async function sendExistingDicomRemapJobToDestination({
   }
 
   try {
-    const modalityKey = `RISPRO_NODE_${destinationNode.id}`;
-    await ensureOrthancModalityFromPacsNode(destinationNode, modalityKey);
     let sendResult: unknown;
     try {
       sendResult = await sendStudyToOrthancModality(sendStudyId, modalityKey);
@@ -2167,12 +2152,9 @@ export async function processDicomRemapMultipartJob({
   }
 
   const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
-  const destinationNodeId = normalizePositiveInteger(destinationPacsKey, "destinationPacsKey");
+  const destinationModalityKey = normalizeOrthancModalityKey(destinationPacsKey);
   if (!patientId) {
     throw new HttpError(400, "risproPatientId is required.");
-  }
-  if (!destinationNodeId) {
-    throw new HttpError(400, "destinationPacsKey is required.");
   }
 
   let job: DicomRemapJobRow | null = null;
@@ -2180,11 +2162,6 @@ export async function processDicomRemapMultipartJob({
   try {
     const patient = await getPatientById(patientId);
     const replacement = formatReplacementFromPatient(patient);
-    const destinationNode = await readPacsNodeForRemap(destinationNodeId);
-    if (!destinationNode.is_active) {
-      throw new HttpError(400, "Selected PACS destination is inactive.");
-    }
-
     job = await createEmptyDicomRemapUploadJob(currentUserId);
 
     const studyIds = new Set<string>();
@@ -2306,7 +2283,7 @@ export async function processDicomRemapMultipartJob({
         sourceStudyId,
         sourceStudyId,
         patientId,
-        String(destinationNode.id),
+        destinationModalityKey,
         originalSummary.patientId,
         originalSummary.patientName,
         originalSummary.patientSex,
@@ -2418,16 +2395,21 @@ export async function listMyDicomRemapJobs({
   return rows;
 }
 
-export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: number; name: string; isDefault: boolean }>> {
-  const nodes = await listPacsNodes({ includeInactive: false });
-  return nodes
-    .filter((node) => node.is_active)
-    .map((node) => ({
-      key: String(node.id),
-      id: node.id,
-      name: node.name,
-      isDefault: Boolean(node.is_default),
-    }));
+export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: string; name: string; isDefault: boolean }>> {
+  const response = await fetchOrthancForRemap("/modalities");
+  if (!response.ok) {
+    throw new HttpError(502, `Failed to list Orthanc PACS destinations (status=${response.status}).`);
+  }
+  const keys = Array.isArray(response.json)
+    ? response.json.map((value) => normalizeOptionalText(value)).filter(Boolean)
+    : Object.keys(response.json && typeof response.json === "object" ? response.json as Record<string, unknown> : {});
+
+  return keys.sort((a, b) => a.localeCompare(b)).map((key, index) => ({
+    key,
+    id: key,
+    name: key,
+    isDefault: index === 0,
+  }));
 }
 
 export async function cancelDicomRemapJob({
@@ -2659,20 +2641,12 @@ export async function prepareDicomRemapConfirmation({
   await assertJobSourceStudyExists(job);
 
   const patientId = normalizePositiveInteger(risproPatientId, "risproPatientId");
-  const destinationNodeId = normalizePositiveInteger(destinationPacsKey, "destinationPacsKey");
+  const destinationModalityKey = normalizeOrthancModalityKey(destinationPacsKey);
   if (!patientId) {
     throw new HttpError(400, "risproPatientId is required.");
   }
-  if (!destinationNodeId) {
-    throw new HttpError(400, "destinationPacsKey is required.");
-  }
 
   const patient = await getPatientById(patientId);
-  const destinationNode = await getPacsNode(destinationNodeId);
-  if (!destinationNode.is_active) {
-    throw new HttpError(400, "Selected PACS destination is inactive.");
-  }
-
   const replacement = formatReplacementFromPatient(patient);
   if (!replacement.patientId || !replacement.patientName) {
     throw new HttpError(400, "Selected patient does not have enough identity fields for DICOM replacement.");
@@ -2697,7 +2671,7 @@ export async function prepareDicomRemapConfirmation({
     [
       job.id,
       patient.id,
-      String(destinationNode.id),
+      destinationModalityKey,
       replacement.patientId,
       replacement.patientName,
       replacement.patientSex,
@@ -2958,8 +2932,8 @@ export const __dicomRemapTestables = {
     fetchOrthancForRemap = fetcher;
     orthancBulkModifyAvailableForTests = null;
   },
-  setPacsNodeGetterForTests(getter: PacsNodeGetter): void {
-    readPacsNodeForRemap = getter;
+  setPacsNodeGetterForTests(_getter: unknown): void {
+    // Deprecated compatibility no-op. DICOM remap destinations now come from Orthanc modalities.
   },
   setSleepForTests(sleep: RemapSleep): void {
     sleepForDicomRemap = sleep;
@@ -2972,7 +2946,6 @@ export const __dicomRemapTestables = {
     logDicomRemapAuditEntry = logAuditEntry;
     fetchOrthancForRemap = orthancFetch;
     sleepForDicomRemap = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-    readPacsNodeForRemap = getPacsNode;
     orthancBulkModifyAvailableForTests = null;
   },
 };

@@ -1,0 +1,525 @@
+import { HttpError } from "../utils/http-error.js";
+import { validateIsoDate } from "../utils/date.js";
+import { logAuditEntry } from "./audit-service.js";
+import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
+import type { OptionalUserId, UnknownRecord } from "../types/http.js";
+
+export interface OrthancPacsTarget {
+  type: "local" | "remote_modality";
+  key: string;
+  name: string;
+  isDefault: boolean;
+}
+
+export interface OrthancRemoteModality {
+  key: string;
+  aet: string;
+  host: string;
+  port: number;
+}
+
+export interface OrthancPacsStudySummary {
+  patientId: string;
+  patientName: string;
+  accessionNumber: string;
+  modality: string;
+  description: string;
+  studyDescription: string;
+  studyDate: string;
+  studyInstanceUid: string;
+}
+
+export interface OrthancPacsSearchCriteria {
+  patientId?: string;
+  patientNationalId?: string;
+  patientName?: string;
+  accessionNumber?: string;
+  studyDate?: string;
+  modality?: string;
+}
+
+type OrthancFetchResponse = {
+  status: number;
+  ok: boolean;
+  text: string;
+  json: unknown;
+};
+
+let orthancFetchForPacs: typeof orthancFetch = orthancFetch;
+let orthancSettingsForTests: ResolvedOrthancSettings | null = null;
+
+export function __setOrthancPacsFetchForTests(mockFetch: typeof orthancFetch): void {
+  orthancFetchForPacs = mockFetch;
+}
+
+export function __resetOrthancPacsFetchForTests(): void {
+  orthancFetchForPacs = orthancFetch;
+}
+
+export function __setOrthancPacsSettingsForTests(settings: ResolvedOrthancSettings): void {
+  orthancSettingsForTests = settings;
+}
+
+export function __resetOrthancPacsSettingsForTests(): void {
+  orthancSettingsForTests = null;
+}
+
+function joinUrl(baseUrl: string, suffix: string): string {
+  const cleanBase = baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl;
+  const cleanSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
+  return `${cleanBase}${cleanSuffix}`;
+}
+
+async function resolveSettings(): Promise<ResolvedOrthancSettings> {
+  const settings = orthancSettingsForTests ?? await resolveOrthancSettings();
+  if (!settings.baseUrl) {
+    throw new HttpError(400, "Orthanc base URL is not configured.");
+  }
+  return settings;
+}
+
+async function orthancFetch(
+  path: string,
+  options: {
+    method?: string;
+    body?: unknown;
+    settings?: ResolvedOrthancSettings;
+    timeoutSeconds?: number;
+  } = {}
+): Promise<OrthancFetchResponse> {
+  const settings = options.settings ?? await resolveSettings();
+  const timeoutSeconds = options.timeoutSeconds ?? settings.timeoutSeconds;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, timeoutSeconds) * 1000);
+
+  try {
+    const headers: Record<string, string> = { Accept: "application/json" };
+    if (settings.username) {
+      headers.Authorization = `Basic ${Buffer.from(`${settings.username}:${settings.password}`).toString("base64")}`;
+    }
+
+    const init: RequestInit & { dispatcher?: unknown } = {
+      method: options.method || "GET",
+      headers,
+      signal: controller.signal,
+    };
+
+    if (options.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(options.body);
+    }
+
+    if (!settings.verifyTls && settings.baseUrl.toLowerCase().startsWith("https://")) {
+      // @ts-ignore undici is available at runtime in this repo; type declarations are not installed.
+      const undici = await import("undici");
+      init.dispatcher = new undici.Agent({ connect: { rejectUnauthorized: false } });
+    }
+
+    const response = await fetch(joinUrl(settings.baseUrl, path), init);
+    const text = await response.text();
+    let json: unknown = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+    return { status: response.status, ok: response.ok, text, json };
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new HttpError(502, `Orthanc request timed out after ${Math.max(1, timeoutSeconds)}s.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function record(value: unknown): UnknownRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
+}
+
+function firstString(...values: unknown[]): string {
+  for (const value of values) {
+    if (value == null) continue;
+    if (typeof value === "string" || typeof value === "number") {
+      const clean = String(value).trim();
+      if (clean) return clean;
+      continue;
+    }
+    if (Array.isArray(value)) {
+      const nested = firstString(...value);
+      if (nested) return nested;
+      continue;
+    }
+    if (typeof value === "object") {
+      const item = value as UnknownRecord;
+      const nested = firstString(item.Value, item.value, item.Alphabetic);
+      if (nested) return nested;
+    }
+  }
+  return "";
+}
+
+function normalizeModalityKey(value: unknown): string {
+  const key = firstString(value);
+  if (!key) {
+    throw new HttpError(400, "Orthanc modality key is required.");
+  }
+  if (key === "local") {
+    throw new HttpError(400, "local is reserved for the Orthanc local index.");
+  }
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(key)) {
+    throw new HttpError(400, "Orthanc modality key may contain letters, numbers, underscore, dash, dot, and colon only.");
+  }
+  return key;
+}
+
+function normalizeAeTitle(value: unknown): string {
+  const aet = firstString(value).toUpperCase();
+  if (!/^[A-Z0-9_]{1,16}$/.test(aet)) {
+    throw new HttpError(400, "AET must be 1-16 chars using A-Z, 0-9, or underscore.");
+  }
+  return aet;
+}
+
+function normalizeHost(value: unknown): string {
+  const host = firstString(value);
+  if (!host || host.includes("://") || host.includes("/") || host.includes("?") || host.includes("#")) {
+    throw new HttpError(400, "Host must be a bare hostname or IP address.");
+  }
+  return host;
+}
+
+function normalizePort(value: unknown): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new HttpError(400, "Port must be an integer between 1 and 65535.");
+  }
+  return port;
+}
+
+function dicomDate(value: unknown): string {
+  const clean = firstString(value).trim();
+  if (!clean) return "";
+  if (/^\d{8}$/.test(clean)) return clean;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    validateIsoDate(clean, "studyDate");
+    return clean.replaceAll("-", "");
+  }
+  throw new HttpError(400, "studyDate must be in YYYY-MM-DD format.");
+}
+
+function normalizeCriteria(payload: OrthancPacsSearchCriteria | UnknownRecord): OrthancPacsSearchCriteria {
+  const criteria = {
+    patientId: firstString(payload.patientId, payload.patientNationalId).replace(/\D/g, "") || firstString(payload.patientId),
+    patientNationalId: firstString(payload.patientNationalId).replace(/\D/g, ""),
+    patientName: firstString(payload.patientName),
+    accessionNumber: firstString(payload.accessionNumber),
+    studyDate: dicomDate(payload.studyDate),
+    modality: firstString(payload.modality).toUpperCase(),
+  };
+
+  if (!criteria.patientId && !criteria.patientName && !criteria.accessionNumber && !criteria.studyDate && !criteria.modality) {
+    throw new HttpError(400, "At least one PACS search field is required.");
+  }
+
+  return criteria;
+}
+
+function buildStudyQuery(criteria: OrthancPacsSearchCriteria): UnknownRecord {
+  return {
+    Level: "Study",
+    Query: {
+      PatientID: criteria.patientId || criteria.patientNationalId || "",
+      PatientName: criteria.patientName ? `*${criteria.patientName}*` : "",
+      AccessionNumber: criteria.accessionNumber || "",
+      StudyDate: criteria.studyDate || "",
+      ModalitiesInStudy: criteria.modality || "",
+      StudyInstanceUID: "",
+      StudyDescription: "",
+    },
+  };
+}
+
+function extractTags(payload: unknown): UnknownRecord {
+  const source = record(payload);
+  return {
+    ...source,
+    ...record(source.Tags),
+    ...record(source.NormalizedTags),
+    ...record(source.MainDicomTags),
+    ...record(source.PatientMainDicomTags),
+  };
+}
+
+function studyFromPayload(payload: unknown): OrthancPacsStudySummary {
+  const tags = extractTags(payload);
+  const studyDescription = firstString(tags.StudyDescription, tags["00081030"]);
+  return {
+    patientId: firstString(tags.PatientID, tags["00100020"]),
+    patientName: firstString(tags.PatientName, tags["00100010"]),
+    accessionNumber: firstString(tags.AccessionNumber, tags["00080050"]),
+    modality: firstString(tags.Modality, tags.ModalitiesInStudy, tags["00080060"], tags["00080061"]),
+    description: studyDescription,
+    studyDescription,
+    studyDate: firstString(tags.StudyDate, tags["00080020"]),
+    studyInstanceUid: firstString(tags.StudyInstanceUID, tags.StudyInstanceUid, tags["0020000D"]),
+  };
+}
+
+async function listRemoteModalityKeys(settings: ResolvedOrthancSettings): Promise<string[]> {
+  const response = await orthancFetchForPacs("/modalities", { settings });
+  if (!response.ok) {
+    throw new HttpError(502, `Orthanc modality list failed (status=${response.status}).`);
+  }
+  return Array.isArray(response.json)
+    ? response.json.map((value) => firstString(value)).filter(Boolean).sort((a, b) => a.localeCompare(b))
+    : Object.keys(record(response.json)).sort((a, b) => a.localeCompare(b));
+}
+
+function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModality {
+  if (Array.isArray(payload)) {
+    return {
+      key,
+      aet: firstString(payload[0]),
+      host: firstString(payload[1]),
+      port: normalizePort(payload[2] ?? 104),
+    };
+  }
+  const data = record(payload);
+  return {
+    key,
+    aet: firstString(data.AET, data.Aet, data.aet),
+    host: firstString(data.Host, data.host),
+    port: normalizePort(data.Port ?? data.port ?? 104),
+  };
+}
+
+export async function listOrthancRemoteModalities(): Promise<{ modalities: OrthancRemoteModality[] }> {
+  const settings = await resolveSettings();
+  const keys = await listRemoteModalityKeys(settings);
+  const modalities = await Promise.all(keys.map(async (key) => {
+    const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}`, { settings });
+    if (!response.ok) {
+      throw new HttpError(502, `Orthanc modality read failed for ${key} (status=${response.status}).`);
+    }
+    return modalityFromPayload(key, response.json);
+  }));
+  return { modalities };
+}
+
+export async function upsertOrthancRemoteModality({
+  key,
+  payload,
+  currentUserId,
+}: {
+  key: unknown;
+  payload: UnknownRecord;
+  currentUserId: OptionalUserId;
+}): Promise<{ modality: OrthancRemoteModality }> {
+  const cleanKey = normalizeModalityKey(key);
+  const modality: OrthancRemoteModality = {
+    key: cleanKey,
+    aet: normalizeAeTitle(payload.aet ?? payload.AET ?? payload.calledAeTitle),
+    host: normalizeHost(payload.host ?? payload.Host),
+    port: normalizePort(payload.port ?? payload.Port),
+  };
+  const settings = await resolveSettings();
+  const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(cleanKey)}`, {
+    method: "PUT",
+    body: { AET: modality.aet, Host: modality.host, Port: modality.port },
+    settings,
+  });
+  if (!response.ok) {
+    throw new HttpError(502, `Orthanc modality save failed (status=${response.status}).`);
+  }
+
+  await logAuditEntry({
+    entityType: "orthanc_remote_modality",
+    entityId: null,
+    actionType: "upsert",
+    oldValues: null,
+    newValues: modality,
+    changedByUserId: currentUserId,
+  });
+
+  return { modality };
+}
+
+export async function deleteOrthancRemoteModality({
+  key,
+  currentUserId,
+}: {
+  key: unknown;
+  currentUserId: OptionalUserId;
+}): Promise<{ ok: true }> {
+  const cleanKey = normalizeModalityKey(key);
+  const settings = await resolveSettings();
+  const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(cleanKey)}`, {
+    method: "DELETE",
+    settings,
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new HttpError(502, `Orthanc modality delete failed (status=${response.status}).`);
+  }
+
+  await logAuditEntry({
+    entityType: "orthanc_remote_modality",
+    entityId: null,
+    actionType: "delete",
+    oldValues: { key: cleanKey },
+    newValues: null,
+    changedByUserId: currentUserId,
+  });
+
+  return { ok: true };
+}
+
+export async function listOrthancPacsTargets(): Promise<{ targets: OrthancPacsTarget[] }> {
+  const settings = await resolveSettings();
+  const remoteKeys = await listRemoteModalityKeys(settings).catch(() => []);
+  return {
+    targets: [
+      { type: "local", key: "local", name: "Local Orthanc index", isDefault: true },
+      ...remoteKeys.map((key) => ({ type: "remote_modality" as const, key, name: key, isDefault: false })),
+    ],
+  };
+}
+
+async function searchLocal(criteria: OrthancPacsSearchCriteria, settings: ResolvedOrthancSettings): Promise<OrthancPacsStudySummary[]> {
+  const response = await orthancFetchForPacs("/tools/find", {
+    method: "POST",
+    body: buildStudyQuery(criteria),
+    settings,
+  });
+  if (!response.ok || !Array.isArray(response.json)) {
+    throw new HttpError(502, `Orthanc local study search failed (status=${response.status}).`);
+  }
+
+  const studyIds = response.json.map((value) => firstString(value)).filter(Boolean);
+  const studies = await Promise.all(studyIds.map(async (studyId) => {
+    const detail = await orthancFetchForPacs(`/studies/${encodeURIComponent(studyId)}`, { settings });
+    if (!detail.ok) {
+      throw new HttpError(502, `Orthanc study read failed (status=${detail.status}).`);
+    }
+    return studyFromPayload(detail.json);
+  }));
+  return studies;
+}
+
+async function searchRemote(targetKey: string, criteria: OrthancPacsSearchCriteria, settings: ResolvedOrthancSettings): Promise<OrthancPacsStudySummary[]> {
+  if (!targetKey || targetKey === "local") {
+    return searchLocal(criteria, settings);
+  }
+
+  const query = await orthancFetchForPacs(`/modalities/${encodeURIComponent(targetKey)}/query`, {
+    method: "POST",
+    body: buildStudyQuery(criteria),
+    settings,
+  });
+  if (!query.ok) {
+    throw new HttpError(502, `Orthanc remote query failed (status=${query.status}).`);
+  }
+
+  const queryId = firstString(record(query.json).ID, record(query.json).Id, record(query.json).id);
+  if (!queryId) {
+    throw new HttpError(502, "Orthanc remote query did not return a query ID.");
+  }
+
+  const answers = await orthancFetchForPacs(`/queries/${encodeURIComponent(queryId)}/answers`, { settings });
+  if (!answers.ok || !Array.isArray(answers.json)) {
+    throw new HttpError(502, `Orthanc remote query answers failed (status=${answers.status}).`);
+  }
+
+  const answerIds = answers.json.map((value) => firstString(value)).filter(Boolean);
+  return Promise.all(answerIds.map(async (answerId) => {
+    const answer = await orthancFetchForPacs(`/queries/${encodeURIComponent(queryId)}/answers/${encodeURIComponent(answerId)}/content`, { settings });
+    if (!answer.ok) {
+      throw new HttpError(502, `Orthanc remote answer read failed (status=${answer.status}).`);
+    }
+    return studyFromPayload(answer.json);
+  }));
+}
+
+export async function searchOrthancPacsStudies({
+  criteria: rawCriteria,
+  targetKey = "local",
+  currentUserId,
+}: {
+  criteria: OrthancPacsSearchCriteria | UnknownRecord;
+  targetKey?: string | null;
+  currentUserId: OptionalUserId;
+}): Promise<{ studies: OrthancPacsStudySummary[]; target: OrthancPacsTarget }> {
+  const settings = await resolveSettings();
+  const criteria = normalizeCriteria(rawCriteria);
+  const key = firstString(targetKey) || "local";
+  const target: OrthancPacsTarget = key === "local"
+    ? { type: "local", key: "local", name: "Local Orthanc index", isDefault: true }
+    : { type: "remote_modality", key, name: key, isDefault: false };
+
+  const studies = key === "local"
+    ? await searchLocal(criteria, settings)
+    : await searchRemote(key, criteria, settings);
+
+  await logAuditEntry({
+    entityType: "integration",
+    entityId: null,
+    actionType: "orthanc_pacs_search",
+    oldValues: null,
+    newValues: {
+      criteria,
+      target,
+      resultCount: studies.length,
+    },
+    changedByUserId: currentUserId,
+  });
+
+  return { studies, target };
+}
+
+export async function runOrthancPacsCFind({
+  patientNationalId,
+  currentUserId,
+}: {
+  patientNationalId?: string;
+  currentUserId: OptionalUserId;
+}): Promise<OrthancPacsStudySummary[]> {
+  const result = await searchOrthancPacsStudies({
+    criteria: { patientId: patientNationalId, patientNationalId },
+    targetKey: "local",
+    currentUserId,
+  });
+  return result.studies;
+}
+
+export async function testOrthancPacsTarget({
+  targetKey = "local",
+  currentUserId,
+}: {
+  targetKey?: string | null;
+  currentUserId: OptionalUserId;
+}): Promise<{ ok: true; target: OrthancPacsTarget }> {
+  const settings = await resolveSettings();
+  const key = firstString(targetKey) || "local";
+  const target: OrthancPacsTarget = key === "local"
+    ? { type: "local", key: "local", name: "Local Orthanc index", isDefault: true }
+    : { type: "remote_modality", key, name: key, isDefault: false };
+
+  const response = key === "local"
+    ? await orthancFetchForPacs("/system", { settings })
+    : await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}/echo`, { method: "POST", settings });
+  if (!response.ok) {
+    throw new HttpError(502, `Orthanc PACS target test failed (status=${response.status}).`);
+  }
+
+  await logAuditEntry({
+    entityType: "integration",
+    entityId: null,
+    actionType: "orthanc_pacs_test",
+    oldValues: null,
+    newValues: { target },
+    changedByUserId: currentUserId,
+  });
+
+  return { ok: true, target };
+}

@@ -17,8 +17,9 @@ export interface PacsStudy {
 }
 
 interface PacsNode {
-  id: number;
+  key: string;
   name: string;
+  type?: "local" | "remote_modality";
   is_active: boolean;
   is_default: boolean;
 }
@@ -88,17 +89,16 @@ export default function PacsPage() {
   const [accessionNumber, setAccessionNumber] = useState("");
   const [studyDate, setStudyDate] = useState("");
   const [modality, setModality] = useState("");
-  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null);
+  const [selectedTargetKey, setSelectedTargetKey] = useState("local");
 
   const [searchResults, setSearchResults] = useState<PacsStudy[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState("");
-  const [selectedNode, setSelectedNode] = useState<{ id: number; name: string } | null>(null);
+  const [selectedTarget, setSelectedTarget] = useState<{ key: string; name: string } | null>(null);
 
-  // Fetch available PACS nodes
-  const { data: nodesData } = useQuery<{ nodes: PacsNode[] }>({
-    queryKey: ["pacs", "available-nodes"],
-    queryFn: () => api<{ nodes: PacsNode[] }>("/pacs/nodes/available")
+  const { data: targetsData } = useQuery<{ targets: Array<{ key: string; name: string; type: "local" | "remote_modality"; isDefault: boolean }> }>({
+    queryKey: ["pacs", "orthanc-targets"],
+    queryFn: () => api<{ targets: Array<{ key: string; name: string; type: "local" | "remote_modality"; isDefault: boolean }> }>("/pacs/orthanc-targets")
   });
 
   const searchMutation = useMutation({
@@ -111,16 +111,16 @@ export default function PacsPage() {
       if (accessionNumber.trim()) body.accessionNumber = accessionNumber.trim();
       if (studyDate) body.studyDate = studyDate;
       if (modality) body.modality = modality;
-      if (selectedNodeId) body.nodeId = selectedNodeId;
+      body.targetKey = selectedTargetKey || "local";
 
-      return api<{ studies: PacsStudy[]; node?: { id: number; name: string } }>("/pacs/search", {
+      return api<{ studies: PacsStudy[]; target?: { key: string; name: string } }>("/pacs/search", {
         method: "POST",
         body: JSON.stringify(body)
       });
     },
     onSuccess: (data) => {
       setSearchResults(data.studies ?? []);
-      setSelectedNode(data.node ?? null);
+      setSelectedTarget(data.target ?? null);
       setIsSearching(false);
     },
     onError: (err: unknown) => {
@@ -148,7 +148,7 @@ export default function PacsPage() {
     setIsSearching(true);
     setError("");
     setSearchResults([]);
-    setSelectedNode(null);
+    setSelectedTarget(null);
     searchMutation.mutate();
   };
 
@@ -158,14 +158,19 @@ export default function PacsPage() {
     setAccessionNumber("");
     setStudyDate("");
     setModality("");
-    setSelectedNodeId(null);
+    setSelectedTargetKey("local");
     setSearchResults([]);
     setError("");
-    setSelectedNode(null);
+    setSelectedTarget(null);
   };
 
-  const activeNodes = (nodesData?.nodes ?? []).filter((n) => n.is_active);
-  const defaultNode = activeNodes.find((n) => n.is_default);
+  const activeTargets: PacsNode[] = (targetsData?.targets ?? []).map((target) => ({
+    key: target.key,
+    name: target.name,
+    type: target.type,
+    is_active: true,
+    is_default: target.isDefault
+  }));
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -285,22 +290,20 @@ export default function PacsPage() {
             </div>
           </div>
 
-          {/* PACS Node selector */}
-          {activeNodes.length > 1 && (
+          {activeTargets.length > 1 && (
             <div>
               <label className="block text-xs font-mono-data uppercase tracking-[0.06em] mb-1" style={{ color: "var(--text-muted)" }}>
                 <Monitor className="w-3 h-3 inline mr-1" />
-                {t(language, "pacs.fieldPacsNode")}
+                Orthanc target
               </label>
               <select
-                value={selectedNodeId ?? ""}
-                onChange={(e) => setSelectedNodeId(e.target.value ? parseInt(e.target.value) : null)}
+                value={selectedTargetKey}
+                onChange={(e) => setSelectedTargetKey(e.target.value || "local")}
                 className="input-premium w-full px-4 py-2.5 rounded-lg outline-none font-mono-data"
                 style={{ color: "var(--text)" }}
               >
-                <option value="">{defaultNode ? `${defaultNode.name} ${language === "ar" ? "(افتراضي)" : "(default)"}` : t(language, "pacs.defaultNode")}</option>
-                {activeNodes.filter((n) => !n.is_default).map((node) => (
-                  <option key={node.id} value={node.id}>{node.name}</option>
+                {activeTargets.map((target) => (
+                  <option key={target.key} value={target.key}>{target.name}{target.is_default ? " (default)" : ""}</option>
                 ))}
               </select>
             </div>
@@ -341,9 +344,9 @@ export default function PacsPage() {
               {t(language, "pacs.studies", { count: searchResults.length })}
             </h3>
           </div>
-          {selectedNode && (
+          {selectedTarget && (
             <span className="text-xs font-mono-data pill-soft px-2 py-0.5 rounded-full" style={{ color: "var(--text-muted)" }}>
-              Node: {selectedNode.name}
+              Orthanc target: {selectedTarget.name}
             </span>
           )}
         </div>
