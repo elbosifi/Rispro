@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { User } from "@/types/api";
 import { t, type Language } from "@/lib/i18n";
@@ -132,6 +132,63 @@ function NavIconGlyph({ icon, size = 20 }: { icon: NavIcon; size?: number }) {
   return <LucideIcon size={size} strokeWidth={1.5} />;
 }
 
+function useLiveStatusTime(language: Language) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(new Date());
+    }, 30_000);
+
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const locale = language === "ar" ? "ar-LY" : "en-US";
+  const date = new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  }).format(now);
+  const time = new Intl.DateTimeFormat(locale, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).format(now);
+
+  return { date, time };
+}
+
+function StatusChip({ language }: { language: Language }) {
+  const { date, time } = useLiveStatusTime(language);
+
+  return (
+    <div
+      className="hidden xl:flex items-center gap-3 px-3 py-1.5 rounded-xl border"
+      style={{
+        backgroundColor: "var(--card)",
+        borderColor: "var(--border)",
+        boxShadow: "var(--shadow-sm)"
+      }}
+    >
+      <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--accent) 12%, var(--muted))", color: "var(--accent)" }}>
+        <CalendarDays className="h-4 w-4" />
+      </div>
+      <div className="leading-tight">
+        <span className="block text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
+          {language === "ar" ? "الوقت والتاريخ" : "Date & time"}
+        </span>
+        <span className="block text-sm font-medium text-foreground">
+          {date}
+        </span>
+        <span className="block text-[11px] font-mono text-muted-foreground">
+          {time}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }) {
   return (
     <div
@@ -147,6 +204,20 @@ function PanelHeader({ language, isRtl }: { language: Language; isRtl: boolean }
         <span className="h-2 w-2 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
         <span className="text-xs uppercase tracking-[0.15em] opacity-80 font-mono">{t(language, "shell.systemOnline")}</span>
       </div>
+    </div>
+  );
+}
+
+function StatusFooter({ language, label }: { language: Language; label: string }) {
+  const { date, time } = useLiveStatusTime(language);
+
+  return (
+    <div className="flex flex-col items-center gap-1 text-center">
+      <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-[11px] font-medium text-foreground">{date}</span>
+      <span className="text-[11px] font-mono text-muted-foreground">{time}</span>
     </div>
   );
 }
@@ -193,7 +264,9 @@ function NavButton({
       >
         <NavIconGlyph icon={item.icon} size={16} />
       </span>
-      <span className={`flex-1 leading-tight text-[0.72rem] uppercase tracking-[0.08em] ${isRtl ? "text-end" : "text-start"}`}>{label}</span>
+      <span className="flex-1 text-center leading-tight text-[0.72rem] uppercase tracking-[0.08em]">
+        {label}
+      </span>
       {isActive && (
         <span className="h-1.5 w-1.5 rounded-full bg-accent shadow-[0_0_6px_var(--accent)]" />
       )}
@@ -319,6 +392,8 @@ export function TopBar({
             {isRtl ? "EN" : "عربي"}
           </button>
 
+          <StatusChip language={language} />
+
           {/* User badge */}
           {user && (
             <div
@@ -424,11 +499,7 @@ export function SideNav({
           backgroundColor: "var(--muted)"
         }}
       >
-        <div className="flex items-center justify-center gap-2">
-          <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-            {t(language, "shell.mwlActive")}
-          </span>
-        </div>
+        <StatusFooter language={language} label={t(language, "shell.mwlActive")} />
       </div>
     </nav>
   );
@@ -516,11 +587,7 @@ export function MobileDrawer({
           className="p-3 text-center border-t mt-2"
           style={{ borderColor: "var(--border)" }}
         >
-          <div className="flex items-center justify-center gap-2">
-            <span className="text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
-              {t(language, "shell.systemOperational")}
-            </span>
-          </div>
+          <StatusFooter language={language} label={t(language, "shell.systemOperational")} />
         </div>
       </div>
     </div>

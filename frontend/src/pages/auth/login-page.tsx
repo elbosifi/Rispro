@@ -3,7 +3,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
-import { Lock, User, Power, Shield } from "lucide-react";
+import { Lock, User, Power } from "lucide-react";
 
 export function LoginPage() {
   const { language } = useLanguage();
@@ -13,6 +13,7 @@ export function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [logoFailed, setLogoFailed] = useState(false);
 
   const from = location.state?.from?.pathname || "/";
 
@@ -42,16 +43,28 @@ export function LoginPage() {
 
           {/* Header */}
           <div className="text-center space-y-3 mb-8">
-            {/* Logo badge */}
+            {/* Logo */}
             <div
-              className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl text-white relative"
-              style={{
-                background: "linear-gradient(135deg, var(--accent), #c0392b)",
-                boxShadow: "4px 4px 8px rgba(166, 50, 60, 0.4), -4px -4px 8px rgba(255, 100, 110, 0.3)"
-              }}
+              className="mx-auto flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl border bg-white shadow-sm"
+              style={{ borderColor: "var(--border)" }}
             >
-              <Shield size={28} strokeWidth={1.5} />
-              <span className="absolute -top-1 -right-1 h-3 w-3 rounded-full bg-green-400 shadow-[0_0_8px_rgba(34,197,94,0.8)]" />
+              {!logoFailed ? (
+                <img
+                  src="/assets/nccb-logo.png"
+                  alt="National Cancer Center Benghazi logo"
+                  className="h-full w-full object-contain p-1.5"
+                  onError={() => setLogoFailed(true)}
+                />
+              ) : (
+                <div
+                  className="flex h-full w-full items-center justify-center text-white relative"
+                  style={{
+                    background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))"
+                  }}
+                >
+                  <span className="text-[0.7rem] font-bold tracking-[0.24em]">NCCB</span>
+                </div>
+              )}
             </div>
             <div>
               <h1 className="text-2xl font-extrabold text-embossed" style={{ color: "var(--accent)" }}>
