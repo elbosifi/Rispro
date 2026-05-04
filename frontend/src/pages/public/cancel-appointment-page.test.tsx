@@ -7,6 +7,7 @@ import { ApiError } from "@/lib/api-client";
 import PublicCancelAppointmentPage, { createCalendarBlob } from "./cancel-appointment-page";
 import {
   cancelPublicAppointment,
+  fetchPublicPushConfig,
   fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
   type PatientQrSettings,
@@ -17,6 +18,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPublicAppointmentCancelPreview: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
   cancelPublicAppointment: vi.fn(),
+  fetchPublicPushConfig: vi.fn(),
+  subscribePublicPush: vi.fn(),
+  unsubscribePublicPush: vi.fn(),
+  testPublicPush: vi.fn(),
 }));
 
 function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
@@ -58,6 +63,41 @@ function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSett
     qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
     qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
     pageTitleAr: "خدمة المريض عبر رمز QR",
+    webPushEnabled: false,
+    webPushDefaultReminder24h: true,
+    webPushDefaultRescheduled: true,
+    webPushDefaultCancelled: true,
+    webPushDefaultChanged: true,
+    webPushDefaultReportReady: true,
+    webPushDefaultImageReady: false,
+    webPushCardTitleAr: "تذكير وتنبيهات الموعد",
+    webPushCardTitleEn: "Appointment reminders and alerts",
+    webPushCardBodyAr: "يمكنك تفعيل تنبيهات المتصفح لهذا الموعد.",
+    webPushCardBodyEn: "You can enable browser notifications for this appointment.",
+    webPushSubscribeButtonAr: "تفعيل التنبيهات",
+    webPushSubscribeButtonEn: "Enable notifications",
+    webPushUnsubscribeButtonAr: "إيقاف التنبيهات",
+    webPushUnsubscribeButtonEn: "Disable notifications",
+    webPushTestButtonAr: "إرسال تنبيه تجريبي",
+    webPushTestButtonEn: "Send test notification",
+    webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
+    webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+    webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
+    webPushDeniedMessageEn: "Notification permission was denied in this browser.",
+    webPushAppointmentReminder24hTitle: "Appointment reminder",
+    webPushAppointmentReminder24hBody: "You have an appointment soon. Open your appointment page for details.",
+    webPushAppointmentRescheduledTitle: "Appointment updated",
+    webPushAppointmentRescheduledBody: "Your appointment date or time changed. Open your appointment page for details.",
+    webPushAppointmentCancelledTitle: "Appointment cancelled",
+    webPushAppointmentCancelledBody: "Your appointment has been cancelled. Open your appointment page for details.",
+    webPushAppointmentChangedTitle: "Appointment updated",
+    webPushAppointmentChangedBody: "Your appointment details changed. Open your appointment page for details.",
+    webPushReportReadyTitle: "Report ready",
+    webPushReportReadyBody: "Your report is ready. Open your appointment page for access options.",
+    webPushImageReadyTitle: "Images ready",
+    webPushImageReadyBody: "Your images are ready. Open your appointment page for access options.",
+    webPushTestTitle: "Notifications enabled",
+    webPushTestBody: "Browser notifications are enabled for this appointment.",
     pageTitleEn: "Patient QR Service",
     introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
     introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -146,6 +186,34 @@ describe("PublicCancelAppointmentPage", () => {
       bookingId: 12,
       status: "cancelled",
     });
+    vi.mocked(fetchPublicPushConfig).mockResolvedValue({
+      enabled: false,
+      vapidPublicKey: "",
+      defaults: {
+        appointmentReminder24h: true,
+        appointmentRescheduled: true,
+        appointmentCancelled: true,
+        appointmentChanged: true,
+        reportReady: true,
+        imageReady: false,
+      },
+      labels: {
+        cardTitleAr: "تذكير وتنبيهات الموعد",
+        cardTitleEn: "Appointment reminders and alerts",
+        cardBodyAr: "يمكنك تفعيل تنبيهات المتصفح لهذا الموعد.",
+        cardBodyEn: "You can enable browser notifications for this appointment.",
+        subscribeButtonAr: "تفعيل التنبيهات",
+        subscribeButtonEn: "Enable notifications",
+        unsubscribeButtonAr: "إيقاف التنبيهات",
+        unsubscribeButtonEn: "Disable notifications",
+        testButtonAr: "إرسال تنبيه تجريبي",
+        testButtonEn: "Send test notification",
+        unsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
+        unsupportedMessageEn: "Browser notifications are not supported on this device.",
+        deniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
+        deniedMessageEn: "Notification permission was denied in this browser.",
+      },
+    });
   });
 
   it("shows the landing page first and keeps the destructive action hidden until requested", async () => {
@@ -189,6 +257,45 @@ describe("PublicCancelAppointmentPage", () => {
     expect(screen.queryByRole("button", { name: /Check report/i })).toBeNull();
   });
 
+  it("shows a notification card when patient web push is enabled", async () => {
+    vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
+      preview({ patientQrSettings: baseSettings({ webPushEnabled: true }) })
+    );
+    vi.mocked(fetchPublicPushConfig).mockResolvedValueOnce({
+      enabled: true,
+      vapidPublicKey: "public-key",
+      defaults: {
+        appointmentReminder24h: true,
+        appointmentRescheduled: true,
+        appointmentCancelled: true,
+        appointmentChanged: true,
+        reportReady: true,
+        imageReady: false,
+      },
+      labels: {
+        cardTitleAr: "تنبيهات الموعد",
+        cardTitleEn: "Appointment alerts",
+        cardBodyAr: "فعّل التنبيهات لهذا الموعد.",
+        cardBodyEn: "Enable alerts for this appointment.",
+        subscribeButtonAr: "تفعيل التنبيهات",
+        subscribeButtonEn: "Enable notifications",
+        unsubscribeButtonAr: "إيقاف التنبيهات",
+        unsubscribeButtonEn: "Disable notifications",
+        testButtonAr: "إرسال تنبيه تجريبي",
+        testButtonEn: "Send test notification",
+        unsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
+        unsupportedMessageEn: "Browser notifications are not supported on this device.",
+        deniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
+        deniedMessageEn: "Notification permission was denied in this browser.",
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText("تنبيهات الموعد")).toBeTruthy();
+    expect(screen.getByText("تنبيهات المتصفح غير مدعومة على هذا الجهاز.")).toBeTruthy();
+  });
+
   it("hides report and image actions when modality scope blocks access", async () => {
     vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValueOnce(
       preview({
@@ -207,7 +314,7 @@ describe("PublicCancelAppointmentPage", () => {
     );
 
     renderPage();
-    await screen.findByText("Ø®Ø¯Ù…Ø© Ø§Ù„Ù…Ø±ÙŠØ¶ Ø¹Ø¨Ø± Ø±Ù…Ø² QR");
+    await screen.findByRole("heading", { name: /QR/i });
     expect(screen.queryByRole("button", { name: /Check report/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /View images/i })).toBeNull();
   });

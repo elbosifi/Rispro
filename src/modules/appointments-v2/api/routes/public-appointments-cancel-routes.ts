@@ -18,12 +18,28 @@ import {
 } from "../../../../services/sonicdicom-report-service.js";
 import { readSonicDicomReportSettings } from "../../../../services/sonicdicom-report-settings.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
+import {
+  enqueuePatientNotificationEvent,
+  getBookingNotificationContext,
+  getPatientWebPushPublicConfig,
+  prepareDueNotificationDeliveries,
+  processPatientPushDeliveries,
+  unsubscribePatientPush,
+  upsertPatientPushSubscription,
+  type BrowserPushSubscriptionInput,
+  type PatientPushPreferences,
+} from "../../../../services/patient-web-push-service.js";
 
 const router = Router();
 const reportRateLimiter = createRateLimiter({
   windowMs: 60_000,
   maxRequests: 20,
   message: "Too many report access requests. Please try again later.",
+});
+const pushRateLimiter = createRateLimiter({
+  windowMs: 60_000,
+  maxRequests: 20,
+  message: "Too many notification requests. Please try again later.",
 });
 
 function readToken(req: Request): string {
@@ -97,6 +113,54 @@ function makeReportStatusResponse(
     checkButtonLabel: patientQrSettings.qrReportCheckButtonLabel,
     viewButtonLabel: patientQrSettings.qrReportViewButtonLabel,
   };
+}
+
+function defaultPushPreferences(
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>
+): PatientPushPreferences {
+  return {
+    appointmentReminder24h: patientQrSettings.webPushDefaultReminder24h,
+    appointmentRescheduled: patientQrSettings.webPushDefaultRescheduled,
+    appointmentCancelled: patientQrSettings.webPushDefaultCancelled,
+    appointmentChanged: patientQrSettings.webPushDefaultChanged,
+    reportReady: patientQrSettings.webPushDefaultReportReady,
+    imageReady: patientQrSettings.webPushDefaultImageReady,
+  };
+}
+
+function normalizePushPreferences(
+  raw: unknown,
+  patientQrSettings: Awaited<ReturnType<typeof readPatientQrSettings>>
+): PatientPushPreferences {
+  const record = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const defaults = defaultPushPreferences(patientQrSettings);
+  const bool = (value: unknown, fallback: boolean) => (typeof value === "boolean" ? value : fallback);
+  return {
+    appointmentReminder24h: bool(record.appointmentReminder24h, defaults.appointmentReminder24h),
+    appointmentRescheduled: bool(record.appointmentRescheduled, defaults.appointmentRescheduled),
+    appointmentCancelled: bool(record.appointmentCancelled, defaults.appointmentCancelled),
+    appointmentChanged: bool(record.appointmentChanged, defaults.appointmentChanged),
+    reportReady: bool(record.reportReady, defaults.reportReady),
+    imageReady: bool(record.imageReady, defaults.imageReady),
+  };
+}
+
+function readPushSubscription(body: unknown): BrowserPushSubscriptionInput {
+  const record = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : {};
+  const subscription = record.subscription && typeof record.subscription === "object" && !Array.isArray(record.subscription)
+    ? (record.subscription as BrowserPushSubscriptionInput)
+    : (record as BrowserPushSubscriptionInput);
+  return subscription;
+}
+
+async function readVerifiedPushContext(req: Request) {
+  const token = readToken(req);
+  const payload = verifyPublicCancelToken(token);
+  const patientQrSettings = await readPatientQrSettings();
+  if (!patientQrSettings.enabled) throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
+  const context = await getBookingNotificationContext(payload.bookingId);
+  if (!context) throw new HttpError(404, "Appointment was not found.", { code: "booking_not_found" });
+  return { payload, patientQrSettings, context };
 }
 
 router.get(
@@ -190,6 +254,86 @@ router.post(
 
       throw error;
     }
+  })
+);
+
+router.get(
+  "/push-config",
+  pushRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const { patientQrSettings } = await readVerifiedPushContext(req);
+    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    res.json({
+      ...publicConfig,
+      labels: {
+        cardTitleAr: patientQrSettings.webPushCardTitleAr,
+        cardTitleEn: patientQrSettings.webPushCardTitleEn,
+        cardBodyAr: patientQrSettings.webPushCardBodyAr,
+        cardBodyEn: patientQrSettings.webPushCardBodyEn,
+        subscribeButtonAr: patientQrSettings.webPushSubscribeButtonAr,
+        subscribeButtonEn: patientQrSettings.webPushSubscribeButtonEn,
+        unsubscribeButtonAr: patientQrSettings.webPushUnsubscribeButtonAr,
+        unsubscribeButtonEn: patientQrSettings.webPushUnsubscribeButtonEn,
+        testButtonAr: patientQrSettings.webPushTestButtonAr,
+        testButtonEn: patientQrSettings.webPushTestButtonEn,
+        unsupportedMessageAr: patientQrSettings.webPushUnsupportedMessageAr,
+        unsupportedMessageEn: patientQrSettings.webPushUnsupportedMessageEn,
+        deniedMessageAr: patientQrSettings.webPushDeniedMessageAr,
+        deniedMessageEn: patientQrSettings.webPushDeniedMessageEn,
+      },
+    });
+  })
+);
+
+router.post(
+  "/push-subscribe",
+  pushRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const { patientQrSettings, context } = await readVerifiedPushContext(req);
+    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    if (!publicConfig.enabled) throw new HttpError(503, "Web Push is disabled.", { code: "web_push_disabled" });
+
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await upsertPatientPushSubscription({
+      bookingId: context.bookingId,
+      patientId: context.patientId,
+      subscription: readPushSubscription(body),
+      preferences: normalizePushPreferences(body.preferences, patientQrSettings),
+      userAgent: req.get("user-agent") ?? null,
+    });
+    res.json({ ok: true, subscriptionId: result.subscriptionId, bookingSubscriptionId: result.bookingSubscriptionId });
+  })
+);
+
+router.post(
+  "/push-unsubscribe",
+  pushRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const { context } = await readVerifiedPushContext(req);
+    const result = await unsubscribePatientPush({
+      bookingId: context.bookingId,
+      subscription: readPushSubscription(req.body ?? {}),
+    });
+    res.json({ ok: true, disabled: result.disabled });
+  })
+);
+
+router.post(
+  "/push-test",
+  pushRateLimiter,
+  asyncRoute(async (req: Request, res: Response) => {
+    const { patientQrSettings, context } = await readVerifiedPushContext(req);
+    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    if (!publicConfig.enabled) throw new HttpError(503, "Web Push is disabled.", { code: "web_push_disabled" });
+
+    const event = await enqueuePatientNotificationEvent({
+      bookingId: context.bookingId,
+      eventType: "test",
+      dedupeKey: `test:${context.bookingId}:${Date.now()}`,
+    });
+    await prepareDueNotificationDeliveries(10).catch(() => ({ events: 0, deliveries: 0 }));
+    const delivery = await processPatientPushDeliveries(10).catch(() => ({ attempted: 0, sent: 0, failed: 0 }));
+    res.json({ ok: true, eventId: event.eventId, attempted: delivery.attempted, sent: delivery.sent });
   })
 );
 

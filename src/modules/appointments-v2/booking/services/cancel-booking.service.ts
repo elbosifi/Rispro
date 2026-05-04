@@ -12,6 +12,7 @@ import { findBookingById, updateBookingStatus } from "../repositories/booking.re
 import type { Booking } from "../models/booking.js";
 import { CANCELLABLE_STATUSES } from "../../shared/types/common.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 
 export interface CancelBookingResult {
   booking: Booking;
@@ -27,6 +28,7 @@ export async function cancelBooking(
   });
 
   scheduleBookingWorklistSync(bookingId);
+  void safeEnqueuePatientNotificationEvent({ bookingId, eventType: "appointment_cancelled" });
   return result;
 }
 

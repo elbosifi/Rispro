@@ -1,4 +1,4 @@
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Loader2,
   MapPin,
+  Bell,
   Phone,
   ShieldCheck,
   Sparkles,
@@ -24,9 +25,15 @@ import { chooseLocalized } from "@/lib/i18n";
 import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
+  fetchPublicPushConfig,
   fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
+  subscribePublicPush,
+  testPublicPush,
+  unsubscribePublicPush,
+  type PatientPushPreferences,
   type PatientQrSettings,
+  type PublicPushConfigResponse,
   type PublicAppointmentCancelPreview,
   type PublicAppointmentCancelResult,
   type PublicReportStatusResponse,
@@ -75,6 +82,41 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
   qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
   pageTitleAr: "خدمة المريض عبر رمز QR",
+  webPushEnabled: false,
+  webPushDefaultReminder24h: true,
+  webPushDefaultRescheduled: true,
+  webPushDefaultCancelled: true,
+  webPushDefaultChanged: true,
+  webPushDefaultReportReady: true,
+  webPushDefaultImageReady: false,
+  webPushCardTitleAr: "تذكير وتنبيهات الموعد",
+  webPushCardTitleEn: "Appointment reminders and alerts",
+  webPushCardBodyAr: "يمكنك تفعيل تنبيهات المتصفح لهذا الموعد.",
+  webPushCardBodyEn: "You can enable browser notifications for this appointment.",
+  webPushSubscribeButtonAr: "تفعيل التنبيهات",
+  webPushSubscribeButtonEn: "Enable notifications",
+  webPushUnsubscribeButtonAr: "إيقاف التنبيهات",
+  webPushUnsubscribeButtonEn: "Disable notifications",
+  webPushTestButtonAr: "إرسال تنبيه تجريبي",
+  webPushTestButtonEn: "Send test notification",
+  webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
+  webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
+  webPushDeniedMessageEn: "Notification permission was denied in this browser.",
+  webPushAppointmentReminder24hTitle: "Appointment reminder",
+  webPushAppointmentReminder24hBody: "You have an appointment soon. Open your appointment page for details.",
+  webPushAppointmentRescheduledTitle: "Appointment updated",
+  webPushAppointmentRescheduledBody: "Your appointment date or time changed. Open your appointment page for details.",
+  webPushAppointmentCancelledTitle: "Appointment cancelled",
+  webPushAppointmentCancelledBody: "Your appointment has been cancelled. Open your appointment page for details.",
+  webPushAppointmentChangedTitle: "Appointment updated",
+  webPushAppointmentChangedBody: "Your appointment details changed. Open your appointment page for details.",
+  webPushReportReadyTitle: "Report ready",
+  webPushReportReadyBody: "Your report is ready. Open your appointment page for access options.",
+  webPushImageReadyTitle: "Images ready",
+  webPushImageReadyBody: "Your images are ready. Open your appointment page for access options.",
+  webPushTestTitle: "Notifications enabled",
+  webPushTestBody: "Browser notifications are enabled for this appointment.",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -605,6 +647,198 @@ function ReportCard(props: {
   );
 }
 
+function urlBase64ToUint8Array(value: string): Uint8Array {
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  const base64 = `${value}${padding}`.replace(/-/g, "+").replace(/_/g, "/");
+  const raw = window.atob(base64);
+  const output = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) output[index] = raw.charCodeAt(index);
+  return output;
+}
+
+function pushSupported(): boolean {
+  return typeof window !== "undefined" && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+}
+
+function NotificationPreferenceRow(props: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+      <span>{props.label}</span>
+      <input
+        type="checkbox"
+        checked={props.checked}
+        onChange={(event) => props.onChange(event.target.checked)}
+        className="h-5 w-5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+      />
+    </label>
+  );
+}
+
+function PushNotificationCard(props: { token: string; settings: PatientQrSettings }) {
+  const [config, setConfig] = useState<PublicPushConfigResponse | null>(null);
+  const [preferences, setPreferences] = useState<PatientPushPreferences>({
+    appointmentReminder24h: props.settings.webPushDefaultReminder24h,
+    appointmentRescheduled: props.settings.webPushDefaultRescheduled,
+    appointmentCancelled: props.settings.webPushDefaultCancelled,
+    appointmentChanged: props.settings.webPushDefaultChanged,
+    reportReady: props.settings.webPushDefaultReportReady,
+    imageReady: props.settings.webPushDefaultImageReady,
+  });
+  const [subscription, setSubscription] = useState<PushSubscription | null>(null);
+  const [status, setStatus] = useState<"idle" | "loading" | "subscribed" | "unsubscribed" | "unsupported" | "denied" | "error">("idle");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!props.settings.webPushEnabled || !props.token) return;
+    void fetchPublicPushConfig(props.token)
+      .then(async (nextConfig) => {
+        if (cancelled) return;
+        setConfig(nextConfig);
+        setPreferences(nextConfig.defaults);
+        if (!nextConfig.enabled) return;
+        if (!pushSupported()) {
+          setStatus("unsupported");
+          return;
+        }
+        const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+        const existing = await registration.pushManager.getSubscription();
+        if (!cancelled && existing) {
+          setSubscription(existing);
+          setStatus("subscribed");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [props.settings.webPushEnabled, props.token]);
+
+  if (!props.settings.webPushEnabled) return null;
+  if (config && !config.enabled) return null;
+
+  const labels = config?.labels;
+  const cardTitle = labels?.cardTitleAr || props.settings.webPushCardTitleAr;
+  const cardBody = labels?.cardBodyAr || props.settings.webPushCardBodyAr;
+  const unsupportedMessage = labels?.unsupportedMessageAr || props.settings.webPushUnsupportedMessageAr;
+  const deniedMessage = labels?.deniedMessageAr || props.settings.webPushDeniedMessageAr;
+
+  const updatePreference = (key: keyof PatientPushPreferences, checked: boolean) => {
+    setPreferences((current) => ({ ...current, [key]: checked }));
+  };
+
+  const handleSubscribe = async () => {
+    if (!config?.enabled || !config.vapidPublicKey) return;
+    if (!pushSupported()) {
+      setStatus("unsupported");
+      return;
+    }
+    setStatus("loading");
+    setMessage("");
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission === "denied") {
+        setStatus("denied");
+        return;
+      }
+      if (permission !== "granted") {
+        setStatus("idle");
+        return;
+      }
+      const registration = await navigator.serviceWorker.register("/rispro-push-sw.js");
+      const existing = await registration.pushManager.getSubscription();
+      const nextSubscription =
+        existing ??
+        (await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey),
+        }));
+      await subscribePublicPush(props.token, nextSubscription.toJSON(), preferences);
+      setSubscription(nextSubscription);
+      setStatus("subscribed");
+      setMessage("تم تفعيل التنبيهات لهذا الموعد.");
+    } catch {
+      setStatus("error");
+      setMessage("تعذر تفعيل التنبيهات الآن.");
+    }
+  };
+
+  const handleUnsubscribe = async () => {
+    if (!subscription) return;
+    setStatus("loading");
+    setMessage("");
+    try {
+      await unsubscribePublicPush(props.token, subscription.toJSON());
+      await subscription.unsubscribe().catch(() => false);
+      setSubscription(null);
+      setStatus("unsubscribed");
+      setMessage("تم إيقاف التنبيهات لهذا الموعد.");
+    } catch {
+      setStatus("error");
+      setMessage("تعذر إيقاف التنبيهات الآن.");
+    }
+  };
+
+  const handleTest = async () => {
+    setMessage("");
+    try {
+      await testPublicPush(props.token);
+      setMessage("تم إرسال تنبيه تجريبي.");
+    } catch {
+      setMessage("تعذر إرسال التنبيه التجريبي الآن.");
+    }
+  };
+
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="rounded-full bg-sky-50 p-2 text-sky-700">
+          <Bell className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">{cardTitle}</h3>
+          <p className="mt-1 text-sm leading-7 text-slate-600">
+            {status === "unsupported" ? unsupportedMessage : status === "denied" ? deniedMessage : cardBody}
+          </p>
+        </div>
+      </div>
+
+      {status !== "unsupported" && status !== "denied" ? (
+        <div className="space-y-2">
+          <NotificationPreferenceRow label="تذكير قبل الموعد" checked={preferences.appointmentReminder24h} onChange={(checked) => updatePreference("appointmentReminder24h", checked)} />
+          <NotificationPreferenceRow label="تغيير تاريخ أو وقت الموعد" checked={preferences.appointmentRescheduled} onChange={(checked) => updatePreference("appointmentRescheduled", checked)} />
+          <NotificationPreferenceRow label="إلغاء الموعد" checked={preferences.appointmentCancelled} onChange={(checked) => updatePreference("appointmentCancelled", checked)} />
+          <NotificationPreferenceRow label="تحديث تفاصيل الموعد" checked={preferences.appointmentChanged} onChange={(checked) => updatePreference("appointmentChanged", checked)} />
+          <NotificationPreferenceRow label="جاهزية التقرير" checked={preferences.reportReady} onChange={(checked) => updatePreference("reportReady", checked)} />
+        </div>
+      ) : null}
+
+      {message ? <p className="mt-3 text-sm leading-7 text-slate-600">{message}</p> : null}
+
+      {status !== "unsupported" && status !== "denied" ? (
+        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+          {subscription ? (
+            <ActionButton tone="neutral" disabled={status === "loading"} onClick={handleUnsubscribe} icon={<Bell className="h-4 w-4" />}>
+              {labels?.unsubscribeButtonAr || props.settings.webPushUnsubscribeButtonAr}
+            </ActionButton>
+          ) : (
+            <ActionButton tone="primary" disabled={status === "loading" || !config?.enabled} onClick={handleSubscribe} icon={status === "loading" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}>
+              {labels?.subscribeButtonAr || props.settings.webPushSubscribeButtonAr}
+            </ActionButton>
+          )}
+          {subscription ? (
+            <ActionButton tone="neutral" disabled={status === "loading"} onClick={handleTest} icon={<Bell className="h-4 w-4" />}>
+              {labels?.testButtonAr || props.settings.webPushTestButtonAr}
+            </ActionButton>
+          ) : null}
+        </div>
+      ) : null}
+    </Card>
+  );
+}
+
 function addDays(date: Date, amount: number): Date {
   const result = new Date(date);
   result.setDate(result.getDate() + amount);
@@ -991,6 +1225,8 @@ export default function PublicCancelAppointmentPage() {
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
           <ReportCard token={token} preview={preview} settings={settings} />
+
+          <PushNotificationCard token={token} settings={settings} />
 
           {modalityInstructionsText ? (
             <InstructionCard

@@ -40,6 +40,7 @@ import { findModalityById } from "../../catalog/repositories/modality-catalog.re
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import type { CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
@@ -49,6 +50,9 @@ export interface RescheduleBookingResult {
   decisionSnapshot: unknown;
   wasOverride: boolean;
   previousDate: string;
+  previousTime: string | null;
+  dateTimeChanged: boolean;
+  patientVisibleDetailsChanged: boolean;
 }
 
 export async function rescheduleBooking(
@@ -95,6 +99,19 @@ export async function rescheduleBooking(
   });
 
   scheduleBookingWorklistSync(bookingId);
+  if (result.dateTimeChanged) {
+    void safeEnqueuePatientNotificationEvent({
+      bookingId,
+      eventType: "appointment_rescheduled",
+      dedupeSuffix: `${result.previousDate}:${result.previousTime ?? ""}->${result.booking.bookingDate}:${result.booking.bookingTime ?? ""}`,
+    });
+  } else if (result.patientVisibleDetailsChanged) {
+    void safeEnqueuePatientNotificationEvent({
+      bookingId,
+      eventType: "appointment_changed",
+      dedupeSuffix: `${result.booking.updatedAt ?? Date.now()}`,
+    });
+  }
   return result;
 }
 
@@ -142,6 +159,8 @@ async function rescheduleBookingInternal(
 
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
+  const previousExamTypeId = booking.examTypeId;
+  const previousRequiresReport = booking.requiresReport;
   const bookingModalityId = Number(booking.modalityId);
   const effectiveDate = newDate ?? previousDate;
   const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
@@ -181,6 +200,7 @@ async function rescheduleBookingInternal(
       effectiveReportingPriorityId,
       effectiveNotes,
       effectiveRequiresReport,
+      booking.requiresReport,
       effectiveStudyInstanceUid,
       override,
       rescheduleReason
@@ -473,6 +493,11 @@ async function rescheduleBookingInternal(
     decisionSnapshot: decision,
     wasOverride,
     previousDate,
+    previousTime,
+    dateTimeChanged: previousDate !== updatedBooking.bookingDate || String(previousTime ?? "") !== String(updatedBooking.bookingTime ?? ""),
+    patientVisibleDetailsChanged:
+      Number(previousExamTypeId ?? -1) !== Number(updatedBooking.examTypeId ?? -1) ||
+      Boolean(previousRequiresReport) !== Boolean(updatedBooking.requiresReport),
   };
 }
 
@@ -490,6 +515,7 @@ async function rescheduleTimeOnly(
   reportingPriorityId: number | null,
   notes: string | null,
   requiresReport: boolean,
+  previousRequiresReport: boolean,
   studyInstanceUid: string | null,
   override: CreateBookingPayload["override"] | undefined,
   rescheduleReason: string | null
@@ -518,5 +544,8 @@ async function rescheduleTimeOnly(
     decisionSnapshot: null,
     wasOverride: false,
     previousDate,
+    previousTime,
+    dateTimeChanged: String(previousTime ?? "") !== String(updatedBooking.bookingTime ?? ""),
+    patientVisibleDetailsChanged: Boolean(previousRequiresReport) !== Boolean(updatedBooking.requiresReport),
   };
 }

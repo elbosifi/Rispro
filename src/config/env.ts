@@ -120,6 +120,16 @@ export interface EnvConfig {
   mppsAuthEnabled: boolean;
   mppsUsername: string;
   mppsPassword: string;
+  webPushEnabled: boolean;
+  webPushVapidPublicKey: string;
+  webPushVapidPrivateKey: string;
+  webPushVapidSubject: string;
+  webPushReminderHours: number;
+  webPushWorkerIntervalSeconds: number;
+  webPushDeliveryMaxAttempts: number;
+  webPushReportReadyScanIntervalSeconds: number;
+  webPushReportReadyLookbackDays: number;
+  webPushReportReadyMaxChecksPerRun: number;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -177,6 +187,16 @@ export const env: EnvConfig = {
   mppsAuthEnabled: readBoolean("MPPS_AUTH_ENABLED", false),
   mppsUsername: String(process.env.MPPS_USERNAME || "").trim(),
   mppsPassword: String(process.env.MPPS_PASSWORD || ""),
+  webPushEnabled: readBoolean("WEB_PUSH_ENABLED", false),
+  webPushVapidPublicKey: String(process.env.WEB_PUSH_VAPID_PUBLIC_KEY || "").trim(),
+  webPushVapidPrivateKey: String(process.env.WEB_PUSH_VAPID_PRIVATE_KEY || "").trim(),
+  webPushVapidSubject: String(process.env.WEB_PUSH_VAPID_SUBJECT || "").trim(),
+  webPushReminderHours: readPositiveInteger("WEB_PUSH_REMINDER_HOURS", 24),
+  webPushWorkerIntervalSeconds: readPositiveInteger("WEB_PUSH_WORKER_INTERVAL_SECONDS", 60),
+  webPushDeliveryMaxAttempts: readPositiveInteger("WEB_PUSH_DELIVERY_MAX_ATTEMPTS", 5),
+  webPushReportReadyScanIntervalSeconds: readPositiveInteger("WEB_PUSH_REPORT_READY_SCAN_INTERVAL_SECONDS", 300),
+  webPushReportReadyLookbackDays: readPositiveInteger("WEB_PUSH_REPORT_READY_LOOKBACK_DAYS", 14),
+  webPushReportReadyMaxChecksPerRun: readPositiveInteger("WEB_PUSH_REPORT_READY_MAX_CHECKS_PER_RUN", 25),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
@@ -201,4 +221,14 @@ if (env.risproMppsMode === "internal_bridge" && !env.mppsBridgeAeTitle) {
 
 if (env.mppsAuthEnabled && (!env.mppsUsername || !env.mppsPassword)) {
   throw new Error("MPPS_USERNAME and MPPS_PASSWORD are required when MPPS_AUTH_ENABLED=true.");
+}
+
+if (env.webPushEnabled) {
+  if (!env.webPushVapidPublicKey || !env.webPushVapidPrivateKey || !env.webPushVapidSubject) {
+    throw new Error("WEB_PUSH_ENABLED=true requires WEB_PUSH_VAPID_PUBLIC_KEY, WEB_PUSH_VAPID_PRIVATE_KEY, and WEB_PUSH_VAPID_SUBJECT.");
+  }
+
+  if (!/^(mailto:.+@.+|https?:\/\/.+)/i.test(env.webPushVapidSubject)) {
+    throw new Error("WEB_PUSH_VAPID_SUBJECT must be a mailto: address or absolute http(s) URL when WEB_PUSH_ENABLED=true.");
+  }
 }

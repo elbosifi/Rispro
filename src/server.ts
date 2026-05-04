@@ -5,6 +5,7 @@ import { pool } from "./db/pool.js";
 import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
 import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js";
 import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
+import type { PatientNotificationWorker } from "./services/patient-notification-worker.js";
 
 const app = createApp();
 const server: Server = http.createServer(app);
@@ -12,6 +13,7 @@ let isShuttingDown = false;
 let dicomGateway: DicomGatewayServer | null = null;
 let orthancMwlWorker: OrthancMwlWorker | null = null;
 let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
+let patientNotificationWorker: PatientNotificationWorker | null = null;
 
 function logError(error: unknown): void {
   console.error(error);
@@ -47,6 +49,14 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
       await pacsAutoCompletionWorker.stop();
     } catch (error) {
       console.error("Failed to stop PACS auto-completion worker.", error);
+    }
+  }
+
+  if (patientNotificationWorker) {
+    try {
+      await patientNotificationWorker.stop();
+    } catch (error) {
+      console.error("Failed to stop patient notification worker.", error);
     }
   }
 
@@ -146,6 +156,20 @@ async function start(): Promise<void> {
   }
 
   try {
+    const { startPatientNotificationWorker } = await import("./services/patient-notification-worker.js");
+    patientNotificationWorker = await startPatientNotificationWorker();
+    startupSummary.patient_notifications = env.webPushEnabled ? "enabled" : "disabled";
+  } catch (error) {
+    if (env.webPushEnabled) {
+      console.error("Patient Web Push worker initialization failed while WEB_PUSH_ENABLED=true.");
+      throw error;
+    }
+    console.error("Patient Web Push worker initialization failed. Continuing because WEB_PUSH_ENABLED=false.");
+    logError(error);
+    startupSummary.patient_notifications = "initialization_failed";
+  }
+
+  try {
     const { syncStoredOrthancRemoteModalitiesToOrthanc } = await import("./services/orthanc-pacs-service.js");
     const result = await syncStoredOrthancRemoteModalitiesToOrthanc();
     startupSummary.orthanc_pacs_modalities = `synced_${result.synced}`;
@@ -199,6 +223,10 @@ async function start(): Promise<void> {
     console.log("");
     console.log("  PACS Auto-Completion:");
     console.log(`    Worker:         ${startupSummary.pacs_auto_completion || "disabled"}`);
+
+    console.log("");
+    console.log("  Patient Web Push:");
+    console.log(`    Worker:         ${startupSummary.patient_notifications || "disabled"}`);
     console.log(`    Modalities:     ${startupSummary.orthanc_pacs_modalities || "not_synced"}`);
 
     if (env.risproMppsMode === "internal_bridge") {

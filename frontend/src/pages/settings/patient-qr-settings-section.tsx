@@ -48,6 +48,41 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   qrReportStudyNotFoundMessage: "Your study is not available in the report system yet. Please try again later.",
   qrImageStudyNotFoundMessage: "Your study images are not available yet. Please try again later.",
   pageTitleAr: "خدمة المريض عبر رمز QR",
+  webPushEnabled: false,
+  webPushDefaultReminder24h: true,
+  webPushDefaultRescheduled: true,
+  webPushDefaultCancelled: true,
+  webPushDefaultChanged: true,
+  webPushDefaultReportReady: true,
+  webPushDefaultImageReady: false,
+  webPushCardTitleAr: "تذكير وتنبيهات الموعد",
+  webPushCardTitleEn: "Appointment reminders and alerts",
+  webPushCardBodyAr: "يمكنك تفعيل تنبيهات المتصفح لهذا الموعد.",
+  webPushCardBodyEn: "You can enable browser notifications for this appointment.",
+  webPushSubscribeButtonAr: "تفعيل التنبيهات",
+  webPushSubscribeButtonEn: "Enable notifications",
+  webPushUnsubscribeButtonAr: "إيقاف التنبيهات",
+  webPushUnsubscribeButtonEn: "Disable notifications",
+  webPushTestButtonAr: "إرسال تنبيه تجريبي",
+  webPushTestButtonEn: "Send test notification",
+  webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
+  webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
+  webPushDeniedMessageEn: "Notification permission was denied in this browser.",
+  webPushAppointmentReminder24hTitle: "Appointment reminder",
+  webPushAppointmentReminder24hBody: "You have an appointment soon. Open your appointment page for details.",
+  webPushAppointmentRescheduledTitle: "Appointment updated",
+  webPushAppointmentRescheduledBody: "Your appointment date or time changed. Open your appointment page for details.",
+  webPushAppointmentCancelledTitle: "Appointment cancelled",
+  webPushAppointmentCancelledBody: "Your appointment has been cancelled. Open your appointment page for details.",
+  webPushAppointmentChangedTitle: "Appointment updated",
+  webPushAppointmentChangedBody: "Your appointment details changed. Open your appointment page for details.",
+  webPushReportReadyTitle: "Report ready",
+  webPushReportReadyBody: "Your report is ready. Open your appointment page for access options.",
+  webPushImageReadyTitle: "Images ready",
+  webPushImageReadyBody: "Your images are ready. Open your appointment page for access options.",
+  webPushTestTitle: "Notifications enabled",
+  webPushTestBody: "Browser notifications are enabled for this appointment.",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -410,6 +445,31 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm input-rtl"
             />
           </div>
+        </FieldCard>
+
+        <FieldCard title={chooseLocalized(language, "تنبيهات المتصفح للمرضى", "Patient Browser Notifications")}>
+          <ToggleRow label="Enable Web Push notification card" checked={draft.webPushEnabled} onChange={(checked) => setDraft((current) => ({ ...current, webPushEnabled: checked }))} />
+          <ToggleRow label="Default: 24-hour reminder" checked={draft.webPushDefaultReminder24h} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultReminder24h: checked }))} />
+          <ToggleRow label="Default: rescheduled" checked={draft.webPushDefaultRescheduled} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultRescheduled: checked }))} />
+          <ToggleRow label="Default: cancelled" checked={draft.webPushDefaultCancelled} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultCancelled: checked }))} />
+          <ToggleRow label="Default: changed" checked={draft.webPushDefaultChanged} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultChanged: checked }))} />
+          <ToggleRow label="Default: report ready" checked={draft.webPushDefaultReportReady} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultReportReady: checked }))} />
+          <ToggleRow label="Default: image ready" checked={draft.webPushDefaultImageReady} onChange={(checked) => setDraft((current) => ({ ...current, webPushDefaultImageReady: checked }))} />
+          <Input label="Card title" value={draft.webPushCardTitleEn} onChange={(value) => setDraft((current) => ({ ...current, webPushCardTitleEn: value }))} />
+          <Textarea label="Card body" value={draft.webPushCardBodyEn} onChange={(value) => setDraft((current) => ({ ...current, webPushCardBodyEn: value }))} />
+          <Input label="Subscribe button" value={draft.webPushSubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushSubscribeButtonEn: value }))} />
+          <Input label="Unsubscribe button" value={draft.webPushUnsubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushUnsubscribeButtonEn: value }))} />
+          <Input label="Test button" value={draft.webPushTestButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushTestButtonEn: value }))} />
+          <Input label="Reminder notification title" value={draft.webPushAppointmentReminder24hTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitle: value }))} />
+          <Textarea label="Reminder notification body" value={draft.webPushAppointmentReminder24hBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hBody: value }))} />
+          <Input label="Rescheduled notification title" value={draft.webPushAppointmentRescheduledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledTitle: value }))} />
+          <Textarea label="Rescheduled notification body" value={draft.webPushAppointmentRescheduledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledBody: value }))} />
+          <Input label="Cancelled notification title" value={draft.webPushAppointmentCancelledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledTitle: value }))} />
+          <Textarea label="Cancelled notification body" value={draft.webPushAppointmentCancelledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledBody: value }))} />
+          <Input label="Changed notification title" value={draft.webPushAppointmentChangedTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedTitle: value }))} />
+          <Textarea label="Changed notification body" value={draft.webPushAppointmentChangedBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedBody: value }))} />
+          <Input label="Report-ready notification title" value={draft.webPushReportReadyTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyTitle: value }))} />
+          <Textarea label="Report-ready notification body" value={draft.webPushReportReadyBody} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyBody: value }))} />
         </FieldCard>
       </div>
 
