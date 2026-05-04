@@ -164,25 +164,22 @@ function StatusChip({ language }: { language: Language }) {
 
   return (
     <div
-      className="hidden xl:flex items-center gap-3 px-3 py-1.5 rounded-xl border"
+      className="hidden xl:inline-flex items-center gap-2.5 max-w-[30vw] min-w-0 shrink-0 px-3 py-1.5 rounded-xl border"
       style={{
         backgroundColor: "var(--card)",
         borderColor: "var(--border)",
         boxShadow: "var(--shadow-sm)"
       }}
     >
-      <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--accent) 12%, var(--muted))", color: "var(--accent)" }}>
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: "color-mix(in srgb, var(--accent) 12%, var(--muted))", color: "var(--accent)" }}>
         <CalendarDays className="h-4 w-4" />
       </div>
-      <div className="leading-tight">
-        <span className="block text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
+      <div className="min-w-0 leading-tight">
+        <span className="block truncate text-[10px] uppercase tracking-[0.15em] font-mono text-muted-foreground">
           {language === "ar" ? "الوقت والتاريخ" : "Date & time"}
         </span>
-        <span className="block text-sm font-medium text-foreground">
-          {date}
-        </span>
-        <span className="block text-[11px] font-mono text-muted-foreground">
-          {time}
+        <span className="block truncate text-[11px] font-medium text-foreground">
+          {date} <span className="mx-1 text-muted-foreground">•</span> {time}
         </span>
       </div>
     </div>
@@ -307,38 +304,42 @@ export function TopBar({
       }}
     >
       <div className={`relative flex items-center justify-between h-12 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
-        {/* Mobile menu button */}
-        <button
-          className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
-          style={{
-            color: "var(--foreground)",
-            backgroundColor: "transparent",
-            borderColor: "var(--border)"
-          }}
-          onClick={onMobileNavToggle}
-          aria-label={t(language, "shell.toggleNav")}
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-
-        {/* Brand */}
-        <div className={`flex items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
-          <div
-            className="hidden sm:flex h-9 w-9 items-center justify-center rounded-xl text-white relative"
+        <div className={`flex min-w-0 flex-1 items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
+          {/* Mobile menu button */}
+          <button
+            className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
             style={{
-              background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
-              boxShadow: "var(--shadow-accent)"
+              color: "var(--foreground)",
+              backgroundColor: "transparent",
+              borderColor: "var(--border)"
             }}
+            onClick={onMobileNavToggle}
+            aria-label={t(language, "shell.toggleNav")}
           >
-            {/* Power LED */}
-            <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
-            <span className="text-xs font-bold">R</span>
+            <Menu className="w-5 h-5" />
+          </button>
+
+          {/* Brand */}
+          <div className={`flex min-w-0 items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
+            <div
+              className="hidden sm:flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-white relative"
+              style={{
+                background: "linear-gradient(135deg, var(--accent), var(--accent-secondary))",
+                boxShadow: "var(--shadow-accent)"
+              }}
+            >
+              {/* Power LED */}
+              <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-green-400 shadow-[0_0_6px_rgba(34,197,94,0.8)]" />
+              <span className="text-xs font-bold">R</span>
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-display" style={{ color: "var(--foreground)" }}>
+                {t(language, "shell.reception")}
+              </h1>
+            </div>
           </div>
-          <div>
-            <h1 className="text-base font-display" style={{ color: "var(--foreground)" }}>
-              {t(language, "shell.reception")}
-            </h1>
-          </div>
+
+          <StatusChip language={language} />
         </div>
 
         {/* Center page banner */}
@@ -359,7 +360,7 @@ export function TopBar({
         )}
 
         {/* Actions */}
-        <div className={`flex items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
+        <div className={`flex flex-shrink-0 items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
           {pageAction && <div className="pointer-events-auto">{pageAction}</div>}
 
           {/* Undo */}
@@ -391,8 +392,6 @@ export function TopBar({
             <Languages className="w-4 h-4" />
             {isRtl ? "EN" : "عربي"}
           </button>
-
-          <StatusChip language={language} />
 
           {/* User badge */}
           {user && (
