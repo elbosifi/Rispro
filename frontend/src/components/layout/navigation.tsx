@@ -305,8 +305,6 @@ export function TopBar({
     >
       <div className={`relative flex items-center justify-between h-12 px-4 lg:px-6 gap-3 ${isRtl ? "flex-row-reverse" : ""}`}>
         <div className={`flex min-w-0 flex-1 items-center gap-3 ${isRtl ? "flex-row-reverse text-end" : ""}`}>
-          <StatusChip language={language} />
-
           {/* Mobile menu button */}
           <button
             className="lg:hidden p-2 rounded-lg border transition-all duration-150 active:translate-y-[1px]"
@@ -340,6 +338,8 @@ export function TopBar({
               </h1>
             </div>
           </div>
+
+          <StatusChip language={language} />
         </div>
 
         {/* Center page banner */}
