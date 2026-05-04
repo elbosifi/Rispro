@@ -26,7 +26,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/shared";
-import { fetchAppointmentLookups, fetchModalityWorklist, completeAppointment } from "@/lib/api-hooks";
+import { fetchAppointmentLookups, fetchModalityWorklist, fetchStatistics, completeAppointment } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
@@ -149,6 +149,14 @@ export default function ModalityPage() {
     refetchInterval: 15_000,
   });
 
+  const { data: statistics } = useQuery({
+    queryKey: ["modality-statistics", modalityId, date, scope],
+    queryFn: () => fetchStatistics(scope === "all" ? "" : date, modalityId),
+    enabled: !!modalityId,
+    staleTime: 1000 * 10,
+    refetchInterval: 15_000,
+  });
+
   const selectedAppointment = useMemo(
     () => appointments.find((appointment) => appointment.id === selectedAppointmentId) ?? null,
     [appointments, selectedAppointmentId]
@@ -175,6 +183,7 @@ export default function ModalityPage() {
     mutationFn: completeAppointment,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
+      await queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
       setConfirmTargetId(null);
       setConfirmVerified(false);
     },
@@ -204,10 +213,18 @@ export default function ModalityPage() {
     [appointments, date]
   );
 
-  const waitingCount = activeAppointments.filter((appointment) => appointment.status === "waiting").length;
-  const arrivedCount = activeAppointments.filter((appointment) => appointment.status === "arrived").length;
-  const inProgressCount = activeAppointments.filter((appointment) => appointment.status === "in-progress").length;
-  const completedCount = appointments.filter((appointment) => appointment.status === "completed").length;
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const row of statistics?.statusBreakdown ?? []) {
+      counts.set(row.status, row.count);
+    }
+    return counts;
+  }, [statistics]);
+
+  const waitingStatisticsCount = statusCounts.get("waiting") ?? 0;
+  const arrivedStatisticsCount = statusCounts.get("arrived") ?? 0;
+  const inProgressStatisticsCount = statusCounts.get("in-progress") ?? 0;
+  const completedCount = statusCounts.get("completed") ?? 0;
   const activeCount = activeAppointments.length;
   const historyCount = historyAppointments.length;
 
@@ -230,6 +247,7 @@ export default function ModalityPage() {
 
   const handleRefresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
+    void queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
   };
 
   const handlePrint = (appointmentId: number) => {
@@ -386,19 +404,19 @@ export default function ModalityPage() {
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard
                 label={t(language, "status.waiting")}
-                value={waitingCount}
+                value={waitingStatisticsCount}
                 tone="amber"
                 icon={<Clock3 size={20} />}
               />
               <MetricCard
                 label={t(language, "status.arrived")}
-                value={arrivedCount}
+                value={arrivedStatisticsCount}
                 tone="sky"
                 icon={<BadgeCheck size={20} />}
               />
               <MetricCard
                 label={t(language, "status.in-progress")}
-                value={inProgressCount}
+                value={inProgressStatisticsCount}
                 tone="indigo"
                 icon={<TimerReset size={20} />}
               />
