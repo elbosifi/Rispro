@@ -103,6 +103,16 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushTestBody: "Browser notifications are enabled for this appointment.",
   webPushTestTitleAr: "تم تفعيل التنبيهات",
   webPushTestBodyAr: "تم تفعيل تنبيهات المتصفح لهذا الموعد.",
+  whatsappQrLinkMessageAr: "يرجى فتح صفحة الموعد من هنا:\n{link}",
+  whatsappQrLinkMessageEn: "Please open your appointment page here:\n{link}",
+  whatsappReminderMessageAr: "تذكير: لديك موعد بتاريخ {date}. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappReminderMessageEn: "Reminder: you have an appointment on {date}. Please open your appointment page for details:\n{link}",
+  whatsappRescheduledMessageAr: "تم تغيير موعدك. يرجى فتح صفحة الموعد لمعرفة التاريخ والوقت المحدثين:\n{link}",
+  whatsappRescheduledMessageEn: "Your appointment has been rescheduled. Please open your appointment page for the updated date and time:\n{link}",
+  whatsappChangedMessageAr: "تم تحديث تفاصيل موعدك. يرجى فتح صفحة الموعد لمعرفة آخر المعلومات:\n{link}",
+  whatsappChangedMessageEn: "Your appointment details have been updated. Please open your appointment page for the latest information:\n{link}",
+  whatsappCancelledMessageAr: "تم إلغاء موعدك. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappCancelledMessageEn: "Your appointment has been cancelled. Please open your appointment page for details:\n{link}",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -725,6 +735,32 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           <div className="grid grid-cols-2 gap-2">
             <Textarea dir="ltr" label={chooseLocalized(language, "ملاحظة (En)", "Note (En)")} value={draft.contact.noteEn} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteEn: value } }))} />
             <Textarea dir="rtl" label={chooseLocalized(language, "ملاحظة قصيرة", "Note (Ar)")} value={draft.contact.noteAr} onChange={(value) => setDraft((current) => ({ ...current, contact: { ...current.contact, noteAr: value } }))} />
+          </div>
+        </FieldCard>
+
+        <FieldCard title={chooseLocalized(language, "قوالب رسائل واتساب", "WhatsApp Message Templates")}>
+          <p className="text-sm leading-6 text-slate-600">
+            {chooseLocalized(language, "يمكنك استخدام {link} لرابط صفحة الموعد و {date} لتاريخ الموعد.", "Use {link} for the patient QR page link and {date} for the appointment date.")}
+          </p>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label={chooseLocalized(language, "رابط صفحة الموعد (En)", "QR link message (En)")} value={draft.whatsappQrLinkMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappQrLinkMessageEn: value }))} />
+            <Textarea dir="rtl" label={chooseLocalized(language, "رابط صفحة الموعد", "QR link message (Ar)")} value={draft.whatsappQrLinkMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappQrLinkMessageAr: value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label={chooseLocalized(language, "تذكير الموعد (En)", "Reminder message (En)")} value={draft.whatsappReminderMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappReminderMessageEn: value }))} />
+            <Textarea dir="rtl" label={chooseLocalized(language, "تذكير الموعد", "Reminder message (Ar)")} value={draft.whatsappReminderMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappReminderMessageAr: value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label={chooseLocalized(language, "تغيير الموعد (En)", "Rescheduled message (En)")} value={draft.whatsappRescheduledMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappRescheduledMessageEn: value }))} />
+            <Textarea dir="rtl" label={chooseLocalized(language, "تغيير الموعد", "Rescheduled message (Ar)")} value={draft.whatsappRescheduledMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappRescheduledMessageAr: value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label={chooseLocalized(language, "تحديث تفاصيل الموعد (En)", "Changed details message (En)")} value={draft.whatsappChangedMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappChangedMessageEn: value }))} />
+            <Textarea dir="rtl" label={chooseLocalized(language, "تحديث تفاصيل الموعد", "Changed details message (Ar)")} value={draft.whatsappChangedMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappChangedMessageAr: value }))} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <Textarea dir="ltr" label={chooseLocalized(language, "إلغاء الموعد (En)", "Cancellation message (En)")} value={draft.whatsappCancelledMessageEn} onChange={(value) => setDraft((current) => ({ ...current, whatsappCancelledMessageEn: value }))} />
+            <Textarea dir="rtl" label={chooseLocalized(language, "إلغاء الموعد", "Cancellation message (Ar)")} value={draft.whatsappCancelledMessageAr} onChange={(value) => setDraft((current) => ({ ...current, whatsappCancelledMessageAr: value }))} />
           </div>
         </FieldCard>
 

@@ -11,6 +11,8 @@ const rescheduleService = readFileSync("src/modules/appointments-v2/booking/serv
 const appointmentsRoutes = readFileSync("src/modules/appointments-v2/api/routes/appointments-v2-routes.ts", "utf8");
 const readRoutes = readFileSync("src/modules/appointments-v2/api/routes/read-v2-routes.ts", "utf8");
 const registrationsPage = readFileSync("frontend/src/pages/registrations/registrations-page.tsx", "utf8");
+const patientQrSettings = readFileSync("src/modules/appointments-v2/public/utils/patient-qr-settings.ts", "utf8");
+const patientQrSettingsSection = readFileSync("frontend/src/pages/settings/patient-qr-settings-section.tsx", "utf8");
 
 test("patient web push schema uses corrected subscription and delivery model", () => {
   assert.match(migration, /create table if not exists patient_web_push_subscriptions/);
@@ -91,4 +93,7 @@ test("registrations provide WhatsApp messages with patient QR link templates", (
   assert.match(registrationsPage, /appointment_changed/);
   assert.match(registrationsPage, /appointment_cancelled/);
   assert.match(registrationsPage, /whatsappMessage/);
+  assert.match(patientQrSettings, /whatsappQrLinkMessageAr/);
+  assert.match(patientQrSettings, /whatsappCancelledMessageEn/);
+  assert.match(patientQrSettingsSection, /WhatsApp Message Templates/);
 });

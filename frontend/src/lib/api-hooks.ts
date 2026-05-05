@@ -745,6 +745,16 @@ export interface PatientQrSettings {
   webPushTestBody: string;
   webPushTestTitleAr: string;
   webPushTestBodyAr: string;
+  whatsappQrLinkMessageAr: string;
+  whatsappQrLinkMessageEn: string;
+  whatsappReminderMessageAr: string;
+  whatsappReminderMessageEn: string;
+  whatsappRescheduledMessageAr: string;
+  whatsappRescheduledMessageEn: string;
+  whatsappChangedMessageAr: string;
+  whatsappChangedMessageEn: string;
+  whatsappCancelledMessageAr: string;
+  whatsappCancelledMessageEn: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -850,6 +860,16 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   webPushTestBody: "Browser notifications are enabled for this appointment.",
   webPushTestTitleAr: "تم تفعيل التنبيهات",
   webPushTestBodyAr: "تم تفعيل تنبيهات المتصفح لهذا الموعد.",
+  whatsappQrLinkMessageAr: "يرجى فتح صفحة الموعد من هنا:\n{link}",
+  whatsappQrLinkMessageEn: "Please open your appointment page here:\n{link}",
+  whatsappReminderMessageAr: "تذكير: لديك موعد بتاريخ {date}. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappReminderMessageEn: "Reminder: you have an appointment on {date}. Please open your appointment page for details:\n{link}",
+  whatsappRescheduledMessageAr: "تم تغيير موعدك. يرجى فتح صفحة الموعد لمعرفة التاريخ والوقت المحدثين:\n{link}",
+  whatsappRescheduledMessageEn: "Your appointment has been rescheduled. Please open your appointment page for the updated date and time:\n{link}",
+  whatsappChangedMessageAr: "تم تحديث تفاصيل موعدك. يرجى فتح صفحة الموعد لمعرفة آخر المعلومات:\n{link}",
+  whatsappChangedMessageEn: "Your appointment details have been updated. Please open your appointment page for the latest information:\n{link}",
+  whatsappCancelledMessageAr: "تم إلغاء موعدك. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappCancelledMessageEn: "Your appointment has been cancelled. Please open your appointment page for details:\n{link}",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -1162,6 +1182,16 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     webPushTestBody: str(record.webPushTestBody, DEFAULT_PATIENT_QR_SETTINGS.webPushTestBody),
     webPushTestTitleAr: str(record.webPushTestTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushTestTitleAr),
     webPushTestBodyAr: str(record.webPushTestBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushTestBodyAr),
+    whatsappQrLinkMessageAr: str(record.whatsappQrLinkMessageAr, DEFAULT_PATIENT_QR_SETTINGS.whatsappQrLinkMessageAr),
+    whatsappQrLinkMessageEn: str(record.whatsappQrLinkMessageEn, DEFAULT_PATIENT_QR_SETTINGS.whatsappQrLinkMessageEn),
+    whatsappReminderMessageAr: str(record.whatsappReminderMessageAr, DEFAULT_PATIENT_QR_SETTINGS.whatsappReminderMessageAr),
+    whatsappReminderMessageEn: str(record.whatsappReminderMessageEn, DEFAULT_PATIENT_QR_SETTINGS.whatsappReminderMessageEn),
+    whatsappRescheduledMessageAr: str(record.whatsappRescheduledMessageAr, DEFAULT_PATIENT_QR_SETTINGS.whatsappRescheduledMessageAr),
+    whatsappRescheduledMessageEn: str(record.whatsappRescheduledMessageEn, DEFAULT_PATIENT_QR_SETTINGS.whatsappRescheduledMessageEn),
+    whatsappChangedMessageAr: str(record.whatsappChangedMessageAr, DEFAULT_PATIENT_QR_SETTINGS.whatsappChangedMessageAr),
+    whatsappChangedMessageEn: str(record.whatsappChangedMessageEn, DEFAULT_PATIENT_QR_SETTINGS.whatsappChangedMessageEn),
+    whatsappCancelledMessageAr: str(record.whatsappCancelledMessageAr, DEFAULT_PATIENT_QR_SETTINGS.whatsappCancelledMessageAr),
+    whatsappCancelledMessageEn: str(record.whatsappCancelledMessageEn, DEFAULT_PATIENT_QR_SETTINGS.whatsappCancelledMessageEn),
     pageTitleAr: str(record.pageTitleAr, DEFAULT_PATIENT_QR_SETTINGS.pageTitleAr),
     pageTitleEn: str(record.pageTitleEn, DEFAULT_PATIENT_QR_SETTINGS.pageTitleEn),
     introTextAr: str(record.introTextAr, DEFAULT_PATIENT_QR_SETTINGS.introTextAr),

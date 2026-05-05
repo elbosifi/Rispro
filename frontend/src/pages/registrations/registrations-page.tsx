@@ -356,12 +356,13 @@ export default function RegistrationsPage() {
   const whatsappTemplateText = (template: string, appointment: AppointmentWithDetails): string => {
     const link = String(appointment.publicAppointmentUrl || "").trim();
     const date = formatDateLy(appointment.appointmentDate);
+    const settings = patientQrSettings;
     const templates: Record<string, string> = {
-      qr_link: t("registrations.whatsappMessageQrLink"),
-      appointment_reminder: t("registrations.whatsappMessageReminder"),
-      appointment_rescheduled: t("registrations.whatsappMessageRescheduled"),
-      appointment_changed: t("registrations.whatsappMessageChanged"),
-      appointment_cancelled: t("registrations.whatsappMessageCancelled"),
+      qr_link: chooseLocalized(language, settings?.whatsappQrLinkMessageAr, settings?.whatsappQrLinkMessageEn) || t("registrations.whatsappMessageQrLink"),
+      appointment_reminder: chooseLocalized(language, settings?.whatsappReminderMessageAr, settings?.whatsappReminderMessageEn) || t("registrations.whatsappMessageReminder"),
+      appointment_rescheduled: chooseLocalized(language, settings?.whatsappRescheduledMessageAr, settings?.whatsappRescheduledMessageEn) || t("registrations.whatsappMessageRescheduled"),
+      appointment_changed: chooseLocalized(language, settings?.whatsappChangedMessageAr, settings?.whatsappChangedMessageEn) || t("registrations.whatsappMessageChanged"),
+      appointment_cancelled: chooseLocalized(language, settings?.whatsappCancelledMessageAr, settings?.whatsappCancelledMessageEn) || t("registrations.whatsappMessageCancelled"),
     };
     return String(templates[template] || templates.qr_link)
       .replace(/\{link\}/g, link)

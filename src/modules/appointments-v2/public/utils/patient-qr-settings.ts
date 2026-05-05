@@ -119,6 +119,16 @@ export interface PatientQrSettings {
   webPushTestBody: string;
   webPushTestTitleAr: string;
   webPushTestBodyAr: string;
+  whatsappQrLinkMessageAr: string;
+  whatsappQrLinkMessageEn: string;
+  whatsappReminderMessageAr: string;
+  whatsappReminderMessageEn: string;
+  whatsappRescheduledMessageAr: string;
+  whatsappRescheduledMessageEn: string;
+  whatsappChangedMessageAr: string;
+  whatsappChangedMessageEn: string;
+  whatsappCancelledMessageAr: string;
+  whatsappCancelledMessageEn: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -224,6 +234,16 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushTestBody: "Browser notifications are enabled for this appointment.",
   webPushTestTitleAr: "تم تفعيل التنبيهات",
   webPushTestBodyAr: "تم تفعيل تنبيهات المتصفح لهذا الموعد.",
+  whatsappQrLinkMessageAr: "يرجى فتح صفحة الموعد من هنا:\n{link}",
+  whatsappQrLinkMessageEn: "Please open your appointment page here:\n{link}",
+  whatsappReminderMessageAr: "تذكير: لديك موعد بتاريخ {date}. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappReminderMessageEn: "Reminder: you have an appointment on {date}. Please open your appointment page for details:\n{link}",
+  whatsappRescheduledMessageAr: "تم تغيير موعدك. يرجى فتح صفحة الموعد لمعرفة التاريخ والوقت المحدثين:\n{link}",
+  whatsappRescheduledMessageEn: "Your appointment has been rescheduled. Please open your appointment page for the updated date and time:\n{link}",
+  whatsappChangedMessageAr: "تم تحديث تفاصيل موعدك. يرجى فتح صفحة الموعد لمعرفة آخر المعلومات:\n{link}",
+  whatsappChangedMessageEn: "Your appointment details have been updated. Please open your appointment page for the latest information:\n{link}",
+  whatsappCancelledMessageAr: "تم إلغاء موعدك. يرجى فتح صفحة الموعد للاطلاع على التفاصيل:\n{link}",
+  whatsappCancelledMessageEn: "Your appointment has been cancelled. Please open your appointment page for details:\n{link}",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -428,6 +448,16 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     webPushTestBody: asString(record.webPushTestBody, DEFAULT_SETTINGS.webPushTestBody),
     webPushTestTitleAr: asString(record.webPushTestTitleAr, DEFAULT_SETTINGS.webPushTestTitleAr),
     webPushTestBodyAr: asString(record.webPushTestBodyAr, DEFAULT_SETTINGS.webPushTestBodyAr),
+    whatsappQrLinkMessageAr: asString(record.whatsappQrLinkMessageAr, DEFAULT_SETTINGS.whatsappQrLinkMessageAr),
+    whatsappQrLinkMessageEn: asString(record.whatsappQrLinkMessageEn, DEFAULT_SETTINGS.whatsappQrLinkMessageEn),
+    whatsappReminderMessageAr: asString(record.whatsappReminderMessageAr, DEFAULT_SETTINGS.whatsappReminderMessageAr),
+    whatsappReminderMessageEn: asString(record.whatsappReminderMessageEn, DEFAULT_SETTINGS.whatsappReminderMessageEn),
+    whatsappRescheduledMessageAr: asString(record.whatsappRescheduledMessageAr, DEFAULT_SETTINGS.whatsappRescheduledMessageAr),
+    whatsappRescheduledMessageEn: asString(record.whatsappRescheduledMessageEn, DEFAULT_SETTINGS.whatsappRescheduledMessageEn),
+    whatsappChangedMessageAr: asString(record.whatsappChangedMessageAr, DEFAULT_SETTINGS.whatsappChangedMessageAr),
+    whatsappChangedMessageEn: asString(record.whatsappChangedMessageEn, DEFAULT_SETTINGS.whatsappChangedMessageEn),
+    whatsappCancelledMessageAr: asString(record.whatsappCancelledMessageAr, DEFAULT_SETTINGS.whatsappCancelledMessageAr),
+    whatsappCancelledMessageEn: asString(record.whatsappCancelledMessageEn, DEFAULT_SETTINGS.whatsappCancelledMessageEn),
     pageTitleAr: asString(record.pageTitleAr, DEFAULT_SETTINGS.pageTitleAr),
     pageTitleEn: asString(record.pageTitleEn, DEFAULT_SETTINGS.pageTitleEn),
     introTextAr: asString(record.introTextAr, DEFAULT_SETTINGS.introTextAr),
