@@ -158,6 +158,12 @@ function oneLineReason(message: string | null | undefined): string {
   return String(message || "").replace(/\s+/g, " ").trim();
 }
 
+function stepTone(index: number, activeIndex: number): string {
+  if (index < activeIndex) return "border-teal-500 bg-teal-50 text-teal-800";
+  if (index === activeIndex) return "border-teal-600 bg-teal-600 text-white shadow-sm";
+  return "border-slate-200 bg-white/70 text-slate-500";
+}
+
 function toIsoDate(value: Date): string {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -637,9 +643,15 @@ export default function PacsRemapPage() {
     t(language, "pacs.remap.processStep"),
     t(language, "pacs.remap.resultStep"),
   ];
+  const canonicalWizardOrder: RemapWizardStep[] = ["select_files", "choose_study", "choose_patient", "choose_destination", "review", "uploading", "sent"];
+  const currentStepIndex = Math.max(0, canonicalWizardOrder.findIndex((step) => (
+    step === focusedWizardStep ||
+    (step === "uploading" && ["scanning", "orthanc_processing", "remapping", "sending"].includes(focusedWizardStep)) ||
+    (step === "sent" && focusedWizardStep === "failed")
+  )));
 
-  const activeCardClassName = "border-teal-500 ring-2 ring-teal-200 shadow-sm";
-  const inactiveCardClassName = "border-transparent";
+  const activeCardClassName = "border-teal-500 ring-2 ring-teal-100 shadow-md shadow-teal-900/5";
+  const inactiveCardClassName = "border-slate-200/70";
   const stepCardProps = (step: RemapWizardStep, active: boolean) => ({
     ref: (node: HTMLDivElement | null) => {
       stepCardRefs.current[step] = node;
@@ -651,15 +663,28 @@ export default function PacsRemapPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <div className="card-shell p-5 space-y-2">
-        <h2 className="text-2xl font-bold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.title")}</h2>
-        <p className="text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.subtitle")}</p>
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-          {t(language, "pacs.remap.safetyBanner")}
+      <div className="card-shell overflow-hidden border border-slate-200/70">
+        <div className="relative p-5 space-y-4 bg-gradient-to-br from-slate-50 via-white to-teal-50/60">
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-teal-700">
+                {language === "ar" ? "أداة آمنة لإعادة الربط" : "Safe DICOM remap"}
+              </p>
+              <h2 className="text-2xl font-bold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.title")}</h2>
+              <p className="max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.subtitle")}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 shadow-sm md:max-w-sm">
+              <strong className="block text-amber-950">{language === "ar" ? "تحقق قبل الإرسال" : "Verify before sending"}</strong>
+              {t(language, "pacs.remap.safetyBanner")}
+            </div>
+          </div>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-7 gap-2 text-xs">
-          {stepLabels.map((label) => (
-            <div key={label} className="rounded border px-2 py-1 text-center" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+        <div className="grid grid-cols-2 gap-2 border-t border-slate-200/70 bg-white/80 p-3 text-xs md:grid-cols-7">
+          {stepLabels.map((label, index) => (
+            <div key={label} className={`rounded-xl border px-3 py-2 text-center font-medium transition-colors ${stepTone(index, currentStepIndex)}`}>
+              <span className="mx-auto mb-1 flex h-5 w-5 items-center justify-center rounded-full bg-current/10 text-[10px]">
+                {index + 1}
+              </span>
               {label}
             </div>
           ))}
@@ -669,9 +694,14 @@ export default function PacsRemapPage() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-4">
           <div {...stepCardProps("select_files", focusedWizardStep === "select_files" || focusedWizardStep === "scanning")}>
-            <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <h3 className="text-base font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
+              <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+                {language === "ar" ? "معاينة سريعة أولا" : "Fast preview first"}
+              </span>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
+              <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50/60 p-4">
                 <label htmlFor="remap-file-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectDicomFiles")}</label>
                 <input
                   id="remap-file-input"
@@ -689,7 +719,7 @@ export default function PacsRemapPage() {
                   className="input-premium w-full px-3 py-2"
                 />
               </div>
-              <div>
+              <div className="rounded-2xl border border-dashed border-teal-300 bg-teal-50/50 p-4">
                 <label htmlFor="remap-folder-input" className="text-xs block mb-1">{t(language, "pacs.remap.selectFolder")}</label>
                 <input
                   id="remap-folder-input"
@@ -709,10 +739,15 @@ export default function PacsRemapPage() {
                 />
               </div>
             </div>
-            <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-              {t(language, "pacs.remap.selectedFiles")}: {files.length} • {t(language, "pacs.remap.estimatedSize")}: {formatBytes(files.reduce((sum, file) => sum + file.size, 0))}
-            </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap gap-2 text-xs">
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                {t(language, "pacs.remap.selectedFiles")}: <strong>{files.length}</strong>
+              </span>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+                {t(language, "pacs.remap.estimatedSize")}: <strong>{formatBytes(files.reduce((sum, file) => sum + file.size, 0))}</strong>
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => scanMutation.mutate()}
@@ -729,14 +764,16 @@ export default function PacsRemapPage() {
 
           {scanResult && (
             <div {...stepCardProps("choose_study", focusedWizardStep === "choose_study")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step2")}</h3>
-              <p className="text-xs" style={{ color: "var(--text-muted)" }}>
-                {t(language, "pacs.remap.detectedStudiesSummary", {
-                  count: scanResult.studies.length,
-                  skipped: scanResult.skippedSidecarCount,
-                  unparsed: scanResult.unparsedCount,
-                })}
-              </p>
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step2")}</h3>
+                <p className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">
+                  {t(language, "pacs.remap.detectedStudiesSummary", {
+                    count: scanResult.studies.length,
+                    skipped: scanResult.skippedSidecarCount,
+                    unparsed: scanResult.unparsedCount,
+                  })}
+                </p>
+              </div>
               {scanResult.studies.length > 1 && (
                 <p className="text-xs text-amber-700">{t(language, "pacs.remap.multipleStudiesWarning")}</p>
               )}
@@ -749,9 +786,11 @@ export default function PacsRemapPage() {
                   </label>
                 </div>
               )}
-              <div className="space-y-2">
-                {scanResult.studies.map((study) => (
-                  <label key={study.studyInstanceUid} className="block rounded border p-3 text-xs">
+              <div className="grid grid-cols-1 gap-3">
+                {scanResult.studies.map((study) => {
+                  const isSelected = selectedStudyInstanceUid === study.studyInstanceUid;
+                  return (
+                  <label key={study.studyInstanceUid} className={`block cursor-pointer rounded-2xl border p-4 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 hover:border-teal-300 hover:bg-slate-50"}`}>
                     <div className="flex items-start gap-2">
                       <input
                         type="radio"
@@ -759,23 +798,42 @@ export default function PacsRemapPage() {
                         value={study.studyInstanceUid}
                         checked={selectedStudyInstanceUid === study.studyInstanceUid}
                         onChange={(e) => setSelectedStudyInstanceUid(e.target.value)}
+                        className="mt-1"
                       />
-                      <div className="space-y-1">
-                        <p><strong>{t(language, "pacs.remap.studyDescription")}:</strong> {study.studyDescription || "—"} | <strong>{t(language, "pacs.remap.studyDate")}:</strong> {study.studyDate || "—"} | <strong>{t(language, "pacs.remap.studyModality")}:</strong> {study.modality || "—"}</p>
-                        <p><strong>{t(language, "pacs.remap.studyPatientId")}:</strong> {study.patientId || "—"} | <strong>{t(language, "pacs.remap.studyPatientName")}:</strong> {study.patientName || "—"}</p>
-                        <p><strong>{t(language, "pacs.remap.studySeries")}:</strong> {study.seriesCount} | <strong>{t(language, "pacs.remap.studyFiles")}:</strong> {study.fileCount} | <strong>{t(language, "pacs.remap.studySize")}:</strong> {formatBytes(study.totalBytes)}</p>
+                      <div className="min-w-0 flex-1 space-y-3">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold" style={{ color: "var(--text)" }}>{study.studyDescription || study.modality || "—"}</p>
+                            <p className="font-mono text-[11px]" style={{ color: "var(--text-muted)" }}>{study.studyInstanceUid}</p>
+                          </div>
+                          {isSelected && <span className="rounded-full bg-teal-600 px-2 py-1 text-[11px] font-medium text-white">{language === "ar" ? "مختارة" : "Selected"}</span>}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+                          <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientName")}</span><strong>{study.patientName || "—"}</strong></div>
+                          <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyPatientId")}</span><strong>{study.patientId || "—"}</strong></div>
+                          <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyDate")}</span><strong>{study.studyDate || "—"}</strong></div>
+                          <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyModality")}</span><strong>{study.modality || "—"}</strong></div>
+                          <div className="rounded-lg bg-white/70 p-2"><span className="block text-slate-500">{t(language, "pacs.remap.studyFiles")}</span><strong>{study.fileCount} • {formatBytes(study.totalBytes)}</strong></div>
+                        </div>
                       </div>
                     </div>
                   </label>
-                ))}
+                );})}
               </div>
             </div>
           )}
 
           {scanResult && (
             <div {...stepCardProps("choose_patient", focusedWizardStep === "choose_patient")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step3")}</h3>
-              <div className="rounded-lg border p-3 space-y-2">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step3")}</h3>
+                {selectedPatientLabel && (
+                  <span className="rounded-full bg-teal-50 px-3 py-1 text-xs font-medium text-teal-800">
+                    {language === "ar" ? "مريض RISPro محدد" : "RISPro patient selected"}
+                  </span>
+                )}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3 space-y-3">
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
                   <select
@@ -845,7 +903,7 @@ export default function PacsRemapPage() {
                           key={appointment.id}
                           type="button"
                           onClick={() => setSelectedPatientId(String(appointment.patient_id))}
-                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
                           <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
@@ -873,7 +931,7 @@ export default function PacsRemapPage() {
                           key={`all-dates-${appointment.id}`}
                           type="button"
                           onClick={() => setSelectedPatientId(String(appointment.patient_id))}
-                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{displayName}</strong></p>
                           <p>{modalityName}{examName ? ` • ${examName}` : ""}</p>
@@ -898,7 +956,7 @@ export default function PacsRemapPage() {
                           key={`directory-${patient.id}`}
                           type="button"
                           onClick={() => setSelectedPatientId(String(patient.id))}
-                          className={`w-full text-left rounded border p-2 text-xs ${isSelected ? "border-teal-500 bg-teal-50" : "hover:bg-black/5"}`}
+                          className={`w-full text-left rounded-xl border p-3 text-xs transition-all ${isSelected ? "border-teal-500 bg-teal-50 shadow-sm" : "border-slate-200 bg-white hover:border-teal-300 hover:bg-teal-50/40"}`}
                         >
                           <p><strong>{formatDirectoryPatientName(language, patient)}</strong></p>
                           <p>{patient.national_id || patient.mrn || "—"}</p>
@@ -912,14 +970,14 @@ export default function PacsRemapPage() {
                 )}
               </div>
               {selectedAppointmentPatient && (
-                <div className="rounded border p-3 text-xs space-y-1">
+                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {selectedAppointmentPatient.english_full_name || selectedAppointmentPatient.arabic_full_name || formatFallbackPatientLabel(language, selectedAppointmentPatient.patient_id)}</p>
                   <p><strong>{t(language, "pacs.remap.appointmentDateLabel")}:</strong> {selectedAppointmentPatient.appointment_date} • <strong>ACC</strong>: {selectedAppointmentPatient.accession_number}</p>
                   <p><strong>{t(language, "common.modality")}:</strong> {selectedAppointmentPatient.modality_name_en || selectedAppointmentPatient.modality_name_ar || formatFallbackModalityLabel(language, selectedAppointmentPatient.modality_id)}</p>
                 </div>
               )}
               {!selectedAppointmentPatient && selectedDirectoryPatient && (
-                <div className="rounded border p-3 text-xs space-y-1">
+                <div className="rounded-2xl border border-teal-300 bg-teal-50 p-3 text-xs space-y-1">
                   <p><strong>{t(language, "pacs.remap.selectedAppointmentPatient")}:</strong> {formatDirectoryPatientName(language, selectedDirectoryPatient)}</p>
                   <p><strong>{t(language, "pacs.remap.directoryPatientBadge")}:</strong> {selectedDirectoryPatient.national_id || selectedDirectoryPatient.mrn || "—"}</p>
                 </div>
@@ -929,22 +987,36 @@ export default function PacsRemapPage() {
 
           {scanResult && (
             <div {...stepCardProps("choose_destination", focusedWizardStep === "choose_destination")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step4")}</h3>
-              <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
-                <option value="">{t(language, "pacs.remap.selectDestination")}</option>
-                {destinations.map((destination) => (
-                  <option key={destination.key} value={destination.key}>
-                    {destination.name} ({destination.key}){destination.isDefault ? ` • ${t(language, "pacs.remap.defaultDestinationBadge")}` : ""}
-                  </option>
-                ))}
-              </select>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step4")}</h3>
+                {selectedDestinationKey && (
+                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-700">
+                    {selectedDestinationKey}
+                  </span>
+                )}
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-3">
+                <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
+                  <option value="">{t(language, "pacs.remap.selectDestination")}</option>
+                  {destinations.map((destination) => (
+                    <option key={destination.key} value={destination.key}>
+                      {destination.name} ({destination.key}){destination.isDefault ? ` • ${t(language, "pacs.remap.defaultDestinationBadge")}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           )}
 
           {scanResult && (
             <div {...stepCardProps("review", focusedWizardStep === "review")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step5")}</h3>
-              <div className="overflow-hidden rounded border text-xs">
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <h3 className="text-base font-semibold">{t(language, "pacs.remap.step5")}</h3>
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800">
+                  {language === "ar" ? "نقطة تحقق نهائية" : "Final safety checkpoint"}
+                </span>
+              </div>
+              <div className="overflow-x-auto rounded-2xl border border-slate-200 text-xs">
                 <table className="w-full border-collapse">
                   <thead className="bg-black/5">
                     <tr>
@@ -990,24 +1062,42 @@ export default function PacsRemapPage() {
               <p className="text-xs text-amber-700">
                 {t(language, "pacs.remap.selectedStudyOnly")}
               </p>
-              <label className="flex items-start gap-2 text-xs">
-                <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} />
-                <span>{t(language, "pacs.remap.confirmIdentity")}</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => processMutation.mutate()}
-                disabled={!canSubmit}
-                className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
-              >
-                {t(language, "pacs.remap.uploadSelectedStudy")}
-              </button>
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 space-y-3">
+                <label className="flex items-start gap-2 text-xs font-medium text-amber-950">
+                  <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} className="mt-0.5" />
+                  <span>{t(language, "pacs.remap.confirmIdentity")}</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => processMutation.mutate()}
+                  disabled={!canSubmit}
+                  className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {t(language, "pacs.remap.uploadSelectedStudy")}
+                </button>
+              </div>
             </div>
           )}
 
           {(wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending") && (
             <div {...stepCardProps(wizardStep === "sending" ? "sending" : "uploading", wizardStep === "uploading" || wizardStep === "orthanc_processing" || wizardStep === "sending")}>
-              <h3 className="text-sm font-semibold">{t(language, "pacs.remap.processStep")}</h3>
+              <h3 className="text-base font-semibold">{t(language, "pacs.remap.processStep")}</h3>
+              <div className="grid grid-cols-3 gap-2 text-xs">
+                {[
+                  { key: "uploading", label: language === "ar" ? "رفع" : "Upload" },
+                  { key: "orthanc_processing", label: language === "ar" ? "معالجة" : "Rewrite" },
+                  { key: "sending", label: language === "ar" ? "إرسال" : "Send" },
+                ].map((stage) => {
+                  const activeStages = ["uploading", "orthanc_processing", "sending"];
+                  const currentIndex = activeStages.indexOf(wizardStep);
+                  const stageIndex = activeStages.indexOf(stage.key);
+                  return (
+                    <div key={stage.key} className={`rounded-xl border px-3 py-2 text-center font-medium ${stageIndex <= currentIndex ? "border-teal-500 bg-teal-50 text-teal-800" : "border-slate-200 bg-white text-slate-500"}`}>
+                      {stage.label}
+                    </div>
+                  );
+                })}
+              </div>
               <div className="h-2 w-full rounded bg-black/10 overflow-hidden">
                 <div className="h-full bg-teal-600 transition-all duration-200" style={{ width: `${wizardStep === "uploading" ? uploadPercent : wizardStep === "orthanc_processing" ? 75 : 90}%` }} />
               </div>
@@ -1065,14 +1155,28 @@ export default function PacsRemapPage() {
         </div>
 
         <div className="space-y-4">
-          <div className="card-shell p-4 space-y-2 text-xs">
-            <h4 className="font-semibold text-sm">{t(language, "pacs.remap.summary")}</h4>
-            <p><strong>{t(language, "pacs.remap.currentStep")}:</strong> {wizardStepLabel(language, wizardStep)}</p>
-            <p><strong>{t(language, "pacs.remap.selectedStudy")}:</strong> {selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob")}</p>
-            <p><strong>{t(language, "pacs.remap.originalDICOMPatient")}:</strong> {selectedStudy?.patientName || "—"} ({selectedStudy?.patientId || "—"})</p>
-            <p><strong>{t(language, "pacs.remap.selectedRISProPatient")}:</strong> {selectedPatientLabel || t(language, "pacs.remap.noCurrentJob")}</p>
-            <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {selectedDestinationKey || t(language, "pacs.remap.noCurrentJob")}</p>
-            <p><strong>{t(language, "pacs.remap.currentJobStatus")}:</strong> {currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob")}</p>
+          <div className="card-shell sticky top-4 p-4 space-y-3 text-xs">
+            <div>
+              <h4 className="font-semibold text-sm">{t(language, "pacs.remap.summary")}</h4>
+              <p style={{ color: "var(--text-muted)" }}>{t(language, "pacs.remap.currentStep")}: {wizardStepLabel(language, wizardStep)}</p>
+            </div>
+            <div className="space-y-2">
+              {[
+                { label: t(language, "pacs.remap.selectedStudy"), value: selectedStudy?.studyDescription || selectedStudy?.studyInstanceUid || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedStudy },
+                { label: t(language, "pacs.remap.originalDICOMPatient"), value: `${selectedStudy?.patientName || "—"} (${selectedStudy?.patientId || "—"})`, ready: !!selectedStudy?.patientName || !!selectedStudy?.patientId },
+                { label: t(language, "pacs.remap.selectedRISProPatient"), value: selectedPatientLabel || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedPatientLabel },
+                { label: t(language, "pacs.remap.destinationLabel"), value: selectedDestinationKey || t(language, "pacs.remap.noCurrentJob"), ready: !!selectedDestinationKey },
+                { label: t(language, "pacs.remap.currentJobStatus"), value: currentJob?.status ? statusLabel(language, currentJob.status) : t(language, "pacs.remap.noCurrentJob"), ready: !!currentJob?.status },
+              ].map((item) => (
+                <div key={item.label} className="rounded-xl border border-slate-200 bg-white/80 p-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="font-medium text-slate-500">{item.label}</span>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${item.ready ? "bg-teal-500" : "bg-slate-300"}`} />
+                  </div>
+                  <p className="mt-1 font-semibold" style={{ color: "var(--text)" }}>{item.value}</p>
+                </div>
+              ))}
+            </div>
             {comparison && (
               <div className="rounded border p-2">
                 <p><strong>{t(language, "pacs.remap.replacementPatientId")}:</strong> {comparison.replacement.patientId || "—"}</p>
