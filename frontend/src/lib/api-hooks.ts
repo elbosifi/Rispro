@@ -496,16 +496,16 @@ export interface PublicAppointmentCancelResult {
 
 export async function fetchPublicAppointmentCancelPreview(token: string): Promise<PublicAppointmentCancelPreview> {
   const query = new URLSearchParams({ t: token });
-  const raw = await api<{ preview: RawRecord; settings?: PatientQrSettings | RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
+  const raw = await api<{ preview: RawRecord; settings?: RawRecord | RawRecord[] }>(`/public/appointments/cancel-preview?${query.toString()}`);
   const preview = raw.preview ?? {};
 
-  // Handle both array format (raw records) and object format (already normalized)
+  // Handle both array format (raw records) and object format from the public endpoint.
   let patientQrSettings: PatientQrSettings | undefined;
   if (raw.settings) {
     if (Array.isArray(raw.settings)) {
       patientQrSettings = raw.settings.length > 0 ? sanitizePatientQrTextEncoding(normalizePatientQrSettings(raw.settings[0])) : undefined;
     } else {
-      patientQrSettings = sanitizePatientQrTextEncoding(raw.settings as PatientQrSettings);
+      patientQrSettings = sanitizePatientQrTextEncoding(normalizePatientQrSettings(raw.settings));
     }
   }
 

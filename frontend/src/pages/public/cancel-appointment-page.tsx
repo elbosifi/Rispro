@@ -717,13 +717,13 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
   }, [props.settings.webPushEnabled, props.token]);
 
   if (!props.settings.webPushEnabled) return null;
-  if (config && !config.enabled) return null;
 
   const labels = config?.labels;
   const cardTitle = labels?.cardTitleAr || props.settings.webPushCardTitleAr;
   const cardBody = labels?.cardBodyAr || props.settings.webPushCardBodyAr;
   const unsupportedMessage = labels?.unsupportedMessageAr || props.settings.webPushUnsupportedMessageAr;
   const deniedMessage = labels?.deniedMessageAr || props.settings.webPushDeniedMessageAr;
+  const serverDisabled = Boolean(config && !config.enabled);
 
   const updatePreference = (key: keyof PatientPushPreferences, checked: boolean) => {
     setPreferences((current) => ({ ...current, [key]: checked }));
@@ -800,12 +800,18 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
         <div>
           <h3 className="text-base font-extrabold text-slate-900">{cardTitle}</h3>
           <p className="mt-1 text-sm leading-7 text-slate-600">
-            {status === "unsupported" ? unsupportedMessage : status === "denied" ? deniedMessage : cardBody}
+            {serverDisabled
+              ? "ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ø§Ù„Ù…ØªØµÙØ­ ØºÙŠØ± Ù…ØªØ§Ø­Ø© Ø­Ø§Ù„ÙŠØ§. ÙŠØ±Ø¬Ù‰ Ø¥ÙƒÙ…Ø§Ù„ Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª Web Push ÙÙŠ Ø§Ù„Ø®Ø§Ø¯Ù…."
+              : status === "unsupported"
+                ? unsupportedMessage
+                : status === "denied"
+                  ? deniedMessage
+                  : cardBody}
           </p>
         </div>
       </div>
 
-      {status !== "unsupported" && status !== "denied" ? (
+      {!serverDisabled && status !== "unsupported" && status !== "denied" ? (
         <div className="space-y-2">
           <NotificationPreferenceRow label="تذكير قبل الموعد" checked={preferences.appointmentReminder24h} onChange={(checked) => updatePreference("appointmentReminder24h", checked)} />
           <NotificationPreferenceRow label="تغيير تاريخ أو وقت الموعد" checked={preferences.appointmentRescheduled} onChange={(checked) => updatePreference("appointmentRescheduled", checked)} />
@@ -817,7 +823,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
 
       {message ? <p className="mt-3 text-sm leading-7 text-slate-600">{message}</p> : null}
 
-      {status !== "unsupported" && status !== "denied" ? (
+      {!serverDisabled && status !== "unsupported" && status !== "denied" ? (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           {subscription ? (
             <ActionButton tone="neutral" disabled={status === "loading"} onClick={handleUnsubscribe} icon={<Bell className="h-4 w-4" />}>
