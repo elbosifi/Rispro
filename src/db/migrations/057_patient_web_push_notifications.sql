@@ -128,18 +128,32 @@ set setting_value = jsonb_build_object(
     'webPushDeniedMessageEn', 'Notification permission was denied in this browser.',
     'webPushAppointmentReminder24hTitle', 'Appointment reminder',
     'webPushAppointmentReminder24hBody', 'You have an appointment soon. Open your appointment page for details.',
+    'webPushAppointmentReminder24hTitleAr', 'تذكير بالموعد',
+    'webPushAppointmentReminder24hBodyAr', 'لديك موعد قريب. افتح صفحة الموعد للاطلاع على التفاصيل.',
     'webPushAppointmentRescheduledTitle', 'Appointment updated',
     'webPushAppointmentRescheduledBody', 'Your appointment date or time changed. Open your appointment page for details.',
+    'webPushAppointmentRescheduledTitleAr', 'تم تحديث الموعد',
+    'webPushAppointmentRescheduledBodyAr', 'تم تغيير تاريخ أو وقت الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.',
     'webPushAppointmentCancelledTitle', 'Appointment cancelled',
     'webPushAppointmentCancelledBody', 'Your appointment has been cancelled. Open your appointment page for details.',
+    'webPushAppointmentCancelledTitleAr', 'تم إلغاء الموعد',
+    'webPushAppointmentCancelledBodyAr', 'تم إلغاء موعدك. افتح صفحة الموعد للاطلاع على التفاصيل.',
     'webPushAppointmentChangedTitle', 'Appointment updated',
     'webPushAppointmentChangedBody', 'Your appointment details changed. Open your appointment page for details.',
+    'webPushAppointmentChangedTitleAr', 'تم تحديث الموعد',
+    'webPushAppointmentChangedBodyAr', 'تم تحديث تفاصيل الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.',
     'webPushReportReadyTitle', 'Report ready',
     'webPushReportReadyBody', 'Your report is ready. Open your appointment page for access options.',
+    'webPushReportReadyTitleAr', 'التقرير جاهز',
+    'webPushReportReadyBodyAr', 'تقريرك جاهز. افتح صفحة الموعد للاطلاع على خيارات الوصول.',
     'webPushImageReadyTitle', 'Images ready',
     'webPushImageReadyBody', 'Your images are ready. Open your appointment page for access options.',
+    'webPushImageReadyTitleAr', 'الصور جاهزة',
+    'webPushImageReadyBodyAr', 'صورك جاهزة. افتح صفحة الموعد للاطلاع على خيارات الوصول.',
     'webPushTestTitle', 'Notifications enabled',
-    'webPushTestBody', 'Browser notifications are enabled for this appointment.'
+    'webPushTestBody', 'Browser notifications are enabled for this appointment.',
+    'webPushTestTitleAr', 'تم تفعيل التنبيهات',
+    'webPushTestBodyAr', 'تم تفعيل تنبيهات المتصفح لهذا الموعد.'
   )
 )
 where category = 'patient_qr_self_service'

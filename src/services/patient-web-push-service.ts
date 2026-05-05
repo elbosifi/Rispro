@@ -273,19 +273,19 @@ export async function getPatientWebPushPublicConfig(settings: PatientQrSettings)
 function templateForEvent(settings: PatientQrSettings, eventType: PatientNotificationEventType): NotificationTemplate {
   switch (eventType) {
     case "appointment_reminder_24h":
-      return { title: settings.webPushAppointmentReminder24hTitle, body: settings.webPushAppointmentReminder24hBody };
+      return { title: settings.webPushAppointmentReminder24hTitleAr || settings.webPushAppointmentReminder24hTitle, body: settings.webPushAppointmentReminder24hBodyAr || settings.webPushAppointmentReminder24hBody };
     case "appointment_rescheduled":
-      return { title: settings.webPushAppointmentRescheduledTitle, body: settings.webPushAppointmentRescheduledBody };
+      return { title: settings.webPushAppointmentRescheduledTitleAr || settings.webPushAppointmentRescheduledTitle, body: settings.webPushAppointmentRescheduledBodyAr || settings.webPushAppointmentRescheduledBody };
     case "appointment_cancelled":
-      return { title: settings.webPushAppointmentCancelledTitle, body: settings.webPushAppointmentCancelledBody };
+      return { title: settings.webPushAppointmentCancelledTitleAr || settings.webPushAppointmentCancelledTitle, body: settings.webPushAppointmentCancelledBodyAr || settings.webPushAppointmentCancelledBody };
     case "appointment_changed":
-      return { title: settings.webPushAppointmentChangedTitle, body: settings.webPushAppointmentChangedBody };
+      return { title: settings.webPushAppointmentChangedTitleAr || settings.webPushAppointmentChangedTitle, body: settings.webPushAppointmentChangedBodyAr || settings.webPushAppointmentChangedBody };
     case "report_ready":
-      return { title: settings.webPushReportReadyTitle, body: settings.webPushReportReadyBody };
+      return { title: settings.webPushReportReadyTitleAr || settings.webPushReportReadyTitle, body: settings.webPushReportReadyBodyAr || settings.webPushReportReadyBody };
     case "image_ready":
-      return { title: settings.webPushImageReadyTitle, body: settings.webPushImageReadyBody };
+      return { title: settings.webPushImageReadyTitleAr || settings.webPushImageReadyTitle, body: settings.webPushImageReadyBodyAr || settings.webPushImageReadyBody };
     case "test":
-      return { title: settings.webPushTestTitle, body: settings.webPushTestBody };
+      return { title: settings.webPushTestTitleAr || settings.webPushTestTitle, body: settings.webPushTestBodyAr || settings.webPushTestBody };
   }
 }
 

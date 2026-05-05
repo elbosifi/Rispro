@@ -707,18 +707,32 @@ export interface PatientQrSettings {
   webPushDeniedMessageEn: string;
   webPushAppointmentReminder24hTitle: string;
   webPushAppointmentReminder24hBody: string;
+  webPushAppointmentReminder24hTitleAr: string;
+  webPushAppointmentReminder24hBodyAr: string;
   webPushAppointmentRescheduledTitle: string;
   webPushAppointmentRescheduledBody: string;
+  webPushAppointmentRescheduledTitleAr: string;
+  webPushAppointmentRescheduledBodyAr: string;
   webPushAppointmentCancelledTitle: string;
   webPushAppointmentCancelledBody: string;
+  webPushAppointmentCancelledTitleAr: string;
+  webPushAppointmentCancelledBodyAr: string;
   webPushAppointmentChangedTitle: string;
   webPushAppointmentChangedBody: string;
+  webPushAppointmentChangedTitleAr: string;
+  webPushAppointmentChangedBodyAr: string;
   webPushReportReadyTitle: string;
   webPushReportReadyBody: string;
+  webPushReportReadyTitleAr: string;
+  webPushReportReadyBodyAr: string;
   webPushImageReadyTitle: string;
   webPushImageReadyBody: string;
+  webPushImageReadyTitleAr: string;
+  webPushImageReadyBodyAr: string;
   webPushTestTitle: string;
   webPushTestBody: string;
+  webPushTestTitleAr: string;
+  webPushTestBodyAr: string;
   pageTitleAr: string;
   pageTitleEn: string;
   introTextAr: string;
@@ -792,18 +806,32 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
   webPushAppointmentReminder24hBody: "You have an appointment soon. Open your appointment page for details.",
+  webPushAppointmentReminder24hTitleAr: "تذكير بالموعد",
+  webPushAppointmentReminder24hBodyAr: "لديك موعد قريب. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentRescheduledTitle: "Appointment updated",
   webPushAppointmentRescheduledBody: "Your appointment date or time changed. Open your appointment page for details.",
+  webPushAppointmentRescheduledTitleAr: "تم تحديث الموعد",
+  webPushAppointmentRescheduledBodyAr: "تم تغيير تاريخ أو وقت الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentCancelledTitle: "Appointment cancelled",
   webPushAppointmentCancelledBody: "Your appointment has been cancelled. Open your appointment page for details.",
+  webPushAppointmentCancelledTitleAr: "تم إلغاء الموعد",
+  webPushAppointmentCancelledBodyAr: "تم إلغاء موعدك. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentChangedTitle: "Appointment updated",
   webPushAppointmentChangedBody: "Your appointment details changed. Open your appointment page for details.",
+  webPushAppointmentChangedTitleAr: "تم تحديث الموعد",
+  webPushAppointmentChangedBodyAr: "تم تحديث تفاصيل الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushReportReadyTitle: "Report ready",
   webPushReportReadyBody: "Your report is ready. Open your appointment page for access options.",
+  webPushReportReadyTitleAr: "التقرير جاهز",
+  webPushReportReadyBodyAr: "تقريرك جاهز. افتح صفحة الموعد للاطلاع على خيارات الوصول.",
   webPushImageReadyTitle: "Images ready",
   webPushImageReadyBody: "Your images are ready. Open your appointment page for access options.",
+  webPushImageReadyTitleAr: "الصور جاهزة",
+  webPushImageReadyBodyAr: "صورك جاهزة. افتح صفحة الموعد للاطلاع على خيارات الوصول.",
   webPushTestTitle: "Notifications enabled",
   webPushTestBody: "Browser notifications are enabled for this appointment.",
+  webPushTestTitleAr: "تم تفعيل التنبيهات",
+  webPushTestBodyAr: "تم تفعيل تنبيهات المتصفح لهذا الموعد.",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -1084,18 +1112,32 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     webPushDeniedMessageEn: str(record.webPushDeniedMessageEn, DEFAULT_PATIENT_QR_SETTINGS.webPushDeniedMessageEn),
     webPushAppointmentReminder24hTitle: str(record.webPushAppointmentReminder24hTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentReminder24hTitle),
     webPushAppointmentReminder24hBody: str(record.webPushAppointmentReminder24hBody, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentReminder24hBody),
+    webPushAppointmentReminder24hTitleAr: str(record.webPushAppointmentReminder24hTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentReminder24hTitleAr),
+    webPushAppointmentReminder24hBodyAr: str(record.webPushAppointmentReminder24hBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentReminder24hBodyAr),
     webPushAppointmentRescheduledTitle: str(record.webPushAppointmentRescheduledTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentRescheduledTitle),
     webPushAppointmentRescheduledBody: str(record.webPushAppointmentRescheduledBody, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentRescheduledBody),
+    webPushAppointmentRescheduledTitleAr: str(record.webPushAppointmentRescheduledTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentRescheduledTitleAr),
+    webPushAppointmentRescheduledBodyAr: str(record.webPushAppointmentRescheduledBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentRescheduledBodyAr),
     webPushAppointmentCancelledTitle: str(record.webPushAppointmentCancelledTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentCancelledTitle),
     webPushAppointmentCancelledBody: str(record.webPushAppointmentCancelledBody, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentCancelledBody),
+    webPushAppointmentCancelledTitleAr: str(record.webPushAppointmentCancelledTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentCancelledTitleAr),
+    webPushAppointmentCancelledBodyAr: str(record.webPushAppointmentCancelledBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentCancelledBodyAr),
     webPushAppointmentChangedTitle: str(record.webPushAppointmentChangedTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentChangedTitle),
     webPushAppointmentChangedBody: str(record.webPushAppointmentChangedBody, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentChangedBody),
+    webPushAppointmentChangedTitleAr: str(record.webPushAppointmentChangedTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentChangedTitleAr),
+    webPushAppointmentChangedBodyAr: str(record.webPushAppointmentChangedBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentChangedBodyAr),
     webPushReportReadyTitle: str(record.webPushReportReadyTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushReportReadyTitle),
     webPushReportReadyBody: str(record.webPushReportReadyBody, DEFAULT_PATIENT_QR_SETTINGS.webPushReportReadyBody),
+    webPushReportReadyTitleAr: str(record.webPushReportReadyTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushReportReadyTitleAr),
+    webPushReportReadyBodyAr: str(record.webPushReportReadyBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushReportReadyBodyAr),
     webPushImageReadyTitle: str(record.webPushImageReadyTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushImageReadyTitle),
     webPushImageReadyBody: str(record.webPushImageReadyBody, DEFAULT_PATIENT_QR_SETTINGS.webPushImageReadyBody),
+    webPushImageReadyTitleAr: str(record.webPushImageReadyTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushImageReadyTitleAr),
+    webPushImageReadyBodyAr: str(record.webPushImageReadyBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushImageReadyBodyAr),
     webPushTestTitle: str(record.webPushTestTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushTestTitle),
     webPushTestBody: str(record.webPushTestBody, DEFAULT_PATIENT_QR_SETTINGS.webPushTestBody),
+    webPushTestTitleAr: str(record.webPushTestTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushTestTitleAr),
+    webPushTestBodyAr: str(record.webPushTestBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushTestBodyAr),
     pageTitleAr: str(record.pageTitleAr, DEFAULT_PATIENT_QR_SETTINGS.pageTitleAr),
     pageTitleEn: str(record.pageTitleEn, DEFAULT_PATIENT_QR_SETTINGS.pageTitleEn),
     introTextAr: str(record.introTextAr, DEFAULT_PATIENT_QR_SETTINGS.introTextAr),

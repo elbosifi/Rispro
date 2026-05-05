@@ -71,18 +71,32 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
   webPushAppointmentReminder24hBody: "You have an appointment soon. Open your appointment page for details.",
+  webPushAppointmentReminder24hTitleAr: "تذكير بالموعد",
+  webPushAppointmentReminder24hBodyAr: "لديك موعد قريب. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentRescheduledTitle: "Appointment updated",
   webPushAppointmentRescheduledBody: "Your appointment date or time changed. Open your appointment page for details.",
+  webPushAppointmentRescheduledTitleAr: "تم تحديث الموعد",
+  webPushAppointmentRescheduledBodyAr: "تم تغيير تاريخ أو وقت الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentCancelledTitle: "Appointment cancelled",
   webPushAppointmentCancelledBody: "Your appointment has been cancelled. Open your appointment page for details.",
+  webPushAppointmentCancelledTitleAr: "تم إلغاء الموعد",
+  webPushAppointmentCancelledBodyAr: "تم إلغاء موعدك. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushAppointmentChangedTitle: "Appointment updated",
   webPushAppointmentChangedBody: "Your appointment details changed. Open your appointment page for details.",
+  webPushAppointmentChangedTitleAr: "تم تحديث الموعد",
+  webPushAppointmentChangedBodyAr: "تم تحديث تفاصيل الموعد. افتح صفحة الموعد للاطلاع على التفاصيل.",
   webPushReportReadyTitle: "Report ready",
   webPushReportReadyBody: "Your report is ready. Open your appointment page for access options.",
+  webPushReportReadyTitleAr: "التقرير جاهز",
+  webPushReportReadyBodyAr: "تقريرك جاهز. افتح صفحة الموعد للاطلاع على خيارات الوصول.",
   webPushImageReadyTitle: "Images ready",
   webPushImageReadyBody: "Your images are ready. Open your appointment page for access options.",
+  webPushImageReadyTitleAr: "الصور جاهزة",
+  webPushImageReadyBodyAr: "صورك جاهزة. افتح صفحة الموعد للاطلاع على خيارات الوصول.",
   webPushTestTitle: "Notifications enabled",
   webPushTestBody: "Browser notifications are enabled for this appointment.",
+  webPushTestTitleAr: "تم تفعيل التنبيهات",
+  webPushTestBodyAr: "تم تفعيل تنبيهات المتصفح لهذا الموعد.",
   pageTitleEn: "Patient QR Service",
   introTextAr: "يمكنك مراجعة تفاصيل الموعد والتعليمات ومعلومات القسم من هذه الصفحة.",
   introTextEn: "You can review appointment details, instructions, and department information from this page.",
@@ -460,16 +474,34 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           <Input label="Subscribe button" value={draft.webPushSubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushSubscribeButtonEn: value }))} />
           <Input label="Unsubscribe button" value={draft.webPushUnsubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushUnsubscribeButtonEn: value }))} />
           <Input label="Test button" value={draft.webPushTestButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushTestButtonEn: value }))} />
-          <Input label="Reminder notification title" value={draft.webPushAppointmentReminder24hTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitle: value }))} />
-          <Textarea label="Reminder notification body" value={draft.webPushAppointmentReminder24hBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hBody: value }))} />
-          <Input label="Rescheduled notification title" value={draft.webPushAppointmentRescheduledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledTitle: value }))} />
-          <Textarea label="Rescheduled notification body" value={draft.webPushAppointmentRescheduledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledBody: value }))} />
-          <Input label="Cancelled notification title" value={draft.webPushAppointmentCancelledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledTitle: value }))} />
-          <Textarea label="Cancelled notification body" value={draft.webPushAppointmentCancelledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledBody: value }))} />
-          <Input label="Changed notification title" value={draft.webPushAppointmentChangedTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedTitle: value }))} />
-          <Textarea label="Changed notification body" value={draft.webPushAppointmentChangedBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedBody: value }))} />
-          <Input label="Report-ready notification title" value={draft.webPushReportReadyTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyTitle: value }))} />
-          <Textarea label="Report-ready notification body" value={draft.webPushReportReadyBody} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyBody: value }))} />
+          <Input label="Reminder notification title (Arabic)" value={draft.webPushAppointmentReminder24hTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitleAr: value }))} />
+          <Textarea label="Reminder notification body (Arabic)" value={draft.webPushAppointmentReminder24hBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hBodyAr: value }))} />
+          <Input label="Reminder notification title (English)" value={draft.webPushAppointmentReminder24hTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitle: value }))} />
+          <Textarea label="Reminder notification body (English)" value={draft.webPushAppointmentReminder24hBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hBody: value }))} />
+          <Input label="Rescheduled notification title (Arabic)" value={draft.webPushAppointmentRescheduledTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledTitleAr: value }))} />
+          <Textarea label="Rescheduled notification body (Arabic)" value={draft.webPushAppointmentRescheduledBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledBodyAr: value }))} />
+          <Input label="Rescheduled notification title (English)" value={draft.webPushAppointmentRescheduledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledTitle: value }))} />
+          <Textarea label="Rescheduled notification body (English)" value={draft.webPushAppointmentRescheduledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentRescheduledBody: value }))} />
+          <Input label="Cancelled notification title (Arabic)" value={draft.webPushAppointmentCancelledTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledTitleAr: value }))} />
+          <Textarea label="Cancelled notification body (Arabic)" value={draft.webPushAppointmentCancelledBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledBodyAr: value }))} />
+          <Input label="Cancelled notification title (English)" value={draft.webPushAppointmentCancelledTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledTitle: value }))} />
+          <Textarea label="Cancelled notification body (English)" value={draft.webPushAppointmentCancelledBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentCancelledBody: value }))} />
+          <Input label="Changed notification title (Arabic)" value={draft.webPushAppointmentChangedTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedTitleAr: value }))} />
+          <Textarea label="Changed notification body (Arabic)" value={draft.webPushAppointmentChangedBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedBodyAr: value }))} />
+          <Input label="Changed notification title (English)" value={draft.webPushAppointmentChangedTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedTitle: value }))} />
+          <Textarea label="Changed notification body (English)" value={draft.webPushAppointmentChangedBody} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentChangedBody: value }))} />
+          <Input label="Report-ready notification title (Arabic)" value={draft.webPushReportReadyTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyTitleAr: value }))} />
+          <Textarea label="Report-ready notification body (Arabic)" value={draft.webPushReportReadyBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyBodyAr: value }))} />
+          <Input label="Report-ready notification title (English)" value={draft.webPushReportReadyTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyTitle: value }))} />
+          <Textarea label="Report-ready notification body (English)" value={draft.webPushReportReadyBody} onChange={(value) => setDraft((current) => ({ ...current, webPushReportReadyBody: value }))} />
+          <Input label="Image-ready notification title (Arabic)" value={draft.webPushImageReadyTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushImageReadyTitleAr: value }))} />
+          <Textarea label="Image-ready notification body (Arabic)" value={draft.webPushImageReadyBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushImageReadyBodyAr: value }))} />
+          <Input label="Image-ready notification title (English)" value={draft.webPushImageReadyTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushImageReadyTitle: value }))} />
+          <Textarea label="Image-ready notification body (English)" value={draft.webPushImageReadyBody} onChange={(value) => setDraft((current) => ({ ...current, webPushImageReadyBody: value }))} />
+          <Input label="Test notification title (Arabic)" value={draft.webPushTestTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushTestTitleAr: value }))} />
+          <Textarea label="Test notification body (Arabic)" value={draft.webPushTestBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushTestBodyAr: value }))} />
+          <Input label="Test notification title (English)" value={draft.webPushTestTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushTestTitle: value }))} />
+          <Textarea label="Test notification body (English)" value={draft.webPushTestBody} onChange={(value) => setDraft((current) => ({ ...current, webPushTestBody: value }))} />
         </FieldCard>
       </div>
 
