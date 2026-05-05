@@ -250,7 +250,11 @@ export async function getPatientWebPushPublicConfig(settings: PatientQrSettings)
   vapidPublicKey: string;
   defaults: PatientPushPreferences;
 }> {
-  const config = await resolveWebPushConfig(settings);
+  let config = await resolveWebPushConfig(settings);
+  if (settings.webPushEnabled && !config.enabled) {
+    await ensurePatientWebPushConfig({ settings });
+    config = await resolveWebPushConfig(settings);
+  }
   const enabled = Boolean(settings.webPushEnabled && config.enabled && config.publicKey);
   return {
     enabled,

@@ -36,6 +36,13 @@ test("push payload is generic and click URL uses a freshly minted token", () => 
   assert.doesNotMatch(sanitizeBody, /patientDisplayName|patientName|accessionNumber|modalityName|examName|diagnosis|oncology|reportText/);
 });
 
+test("public push config self-heals VAPID settings when the QR card is enabled", () => {
+  const configBody = pushService.slice(pushService.indexOf("export async function getPatientWebPushPublicConfig"), pushService.indexOf("function templateForEvent"));
+  assert.match(configBody, /settings\.webPushEnabled && !config\.enabled/);
+  assert.match(configBody, /ensurePatientWebPushConfig\(\{ settings \}\)/);
+  assert.match(configBody, /vapidPublicKey: enabled \? config\.publicKey : ""/);
+});
+
 test("reminder and report-ready workers enforce scheduling and final status rules", () => {
   assert.match(worker, /make_interval\(hours => \$1\)/);
   assert.match(worker, /scheduled_for/);
