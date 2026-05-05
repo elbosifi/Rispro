@@ -1,4 +1,4 @@
-# RISpro Reception Module V1 Specification
+# NCCB Diagnostic Radiology Module V1 Specification
 
 This document is the final V1 specification for the reception module prototype.
 

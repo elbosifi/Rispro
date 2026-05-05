@@ -9,7 +9,7 @@ source "${SCRIPT_DIR}/docker-deployment-lib.sh"
 
 print_header() {
   printf '\n===================================================\n'
-  printf '  RISpro Reception - Docker Setup\n'
+  printf '  NCCB Diagnostic Radiology - Docker Setup\n'
   printf '===================================================\n'
 }
 

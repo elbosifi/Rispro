@@ -1,4 +1,4 @@
-# RISpro Reception - TypeScript Migration & Code Quality Report
+# NCCB Diagnostic Radiology - TypeScript Migration & Code Quality Report
 
 ## Executive Summary
 

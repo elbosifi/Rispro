@@ -1,4 +1,4 @@
-# RISpro Reception - Deployment Guide
+# NCCB Diagnostic Radiology - Deployment Guide
 
 ## Prerequisites
 

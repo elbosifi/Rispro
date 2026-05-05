@@ -1,8 +1,8 @@
-# RISpro Reception - Project Context
+# NCCB Diagnostic Radiology - Project Context
 
 ## Project Overview
 
-**RISpro Reception** is a Radiology Information System (RIS) web application for medical imaging centers. It handles patient registration, appointment scheduling, queue management, and integration with PACS/DICOM systems.
+**NCCB Diagnostic Radiology** is a Radiology Information System (RIS) web application for medical imaging centers. It handles patient registration, appointment scheduling, queue management, and integration with PACS/DICOM systems.
 
 ### Architecture
 

@@ -292,7 +292,7 @@ const copy = {
       settings: "Settings"
     },
     login: {
-      title: "Welcome to RISpro Reception",
+      title: "Welcome to NCCB Diagnostic Radiology",
       body: "Sign in with your account to begin reception work. Sessions are secured by the backend.",
       signIn: "Sign in",
       username: "Username",
@@ -816,7 +816,7 @@ const copy = {
       settings: "الإعدادات"
     },
     login: {
-      title: "مرحباً بك في RISpro Reception",
+      title: "مرحباً بك في NCCB Diagnostic Radiology",
       body: "سجّل الدخول بحسابك لبدء العمل . الجلسات مؤمنة عبر الخادم.",
       signIn: "تسجيل الدخول",
       username: "اسم المستخدم",

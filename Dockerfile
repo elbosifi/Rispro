@@ -1,5 +1,5 @@
 # =============================================================================
-# RISpro Reception - Production Dockerfile (Multi-Stage Build)
+# NCCB Diagnostic Radiology - Production Dockerfile (Multi-Stage Build)
 # =============================================================================
 # Stage 1: Build frontend assets
 # Stage 2: Build the MWL-only DCMTK 3.6.9 toolchain from the OFFIS release tarball

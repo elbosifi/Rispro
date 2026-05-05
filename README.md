@@ -1,6 +1,6 @@
-# RISpro Reception
+# NCCB Diagnostic Radiology
 
-RISpro Reception is now a real Node.js + PostgreSQL web app for the currently implemented workflows:
+NCCB Diagnostic Radiology is now a real Node.js + PostgreSQL web app for the currently implemented workflows:
 
 - real username/password login with cookie-based sessions
 - patient registration saved to PostgreSQL

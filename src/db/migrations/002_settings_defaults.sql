@@ -5,7 +5,7 @@
 
 insert into system_settings (category, setting_key, setting_value)
 values
-  ('general_system', 'site_name', '{"value":"RISpro Reception"}'::jsonb),
+  ('general_system', 'site_name', '{"value":"NCCB Diagnostic Radiology"}'::jsonb),
   ('general_system', 'default_route_after_login', '{"value":"dashboard"}'::jsonb),
   ('general_system', 'business_day_start', '{"value":"07:00"}'::jsonb),
   ('general_system', 'time_zone', '{"value":"Africa/Tripoli"}'::jsonb),

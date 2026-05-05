@@ -1,4 +1,4 @@
-# RISpro Reception - Docker Deployment Guide
+# NCCB Diagnostic Radiology - Docker Deployment Guide
 
 ## Quick Start
 
@@ -215,7 +215,7 @@ The app then:
 
 ```
 ========================================
-  RISpro Reception - Startup Summary
+  NCCB Diagnostic Radiology - Startup Summary
 ========================================
   Backend:        http://localhost:3000
   Environment:    production

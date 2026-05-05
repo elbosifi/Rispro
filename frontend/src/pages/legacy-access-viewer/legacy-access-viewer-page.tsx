@@ -120,7 +120,7 @@ function printCurrentStyle(row: AppointmentRow): void {
       </style></head>
       <body>
         <div class="slip">
-          <div class="header"><p class="brand">RISpro Reception</p><p style="margin:0;font-size:10px;color:#888">Appointment Slip</p></div>
+          <div class="header"><p class="brand">NCCB Diagnostic Radiology</p><p style="margin:0;font-size:10px;color:#888">Appointment Slip</p></div>
           <div class="meta">
             <div class="field"><span class="label">التاريخ</span><span class="value">${escapeHtml(formatDisplayDate(row.date))}</span></div>
             <div class="field"><span class="label">الوقت</span><span class="value">${escapeHtml(row.time ?? "—")}</span></div>

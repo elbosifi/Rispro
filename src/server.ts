@@ -183,7 +183,7 @@ async function start(): Promise<void> {
     // Print startup summary
     console.log("");
     console.log("========================================");
-    console.log("  RISpro Reception - Startup Summary");
+    console.log("  NCCB Diagnostic Radiology - Startup Summary");
     console.log("========================================");
     console.log(`  Backend:        http://localhost:${env.port}`);
     console.log(`  Environment:    ${env.nodeEnv}`);

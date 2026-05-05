@@ -1,5 +1,5 @@
 # =============================================================================
-# RISpro Reception - Docker Compose Override (Internal PostgreSQL)
+# NCCB Diagnostic Radiology - Docker Compose Override (Internal PostgreSQL)
 # =============================================================================
 # Adds a PostgreSQL service and configures the app to depend on it.
 # Use together with the base compose file:
