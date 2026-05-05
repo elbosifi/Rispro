@@ -5,6 +5,7 @@ import {
   fetchAppointments,
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
+  getAppointmentById,
   fetchPatientQrSettings,
   sendPatientWebPushNotification,
 } from "@/lib/api-hooks";
@@ -25,6 +26,16 @@ import {
 } from "@/lib/print-utils";
 import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
+import {
+  fetchV2Availability,
+  rescheduleV2Booking,
+} from "@/v2/appointments/api";
+import {
+  RESCHEDULABLE_STATUSES,
+  type AvailabilityDayDto,
+  type BookingStatus,
+  type RescheduleBookingRequest,
+} from "@/v2/appointments/types";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
   dateMode: "single",
@@ -49,7 +60,7 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [manageTab, setManageTab] = useState<"details" | "documents" | "cancel">("details");
+  const [manageTab, setManageTab] = useState<"details" | "documents" | "reschedule" | "cancel">("details");
   const [notificationAppointment, setNotificationAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [notificationMode, setNotificationMode] = useState<"template" | "custom">("template");
@@ -61,6 +72,11 @@ export default function RegistrationsPage() {
   const [whatsappMode, setWhatsappMode] = useState<"template" | "custom">("template");
   const [whatsappTemplate, setWhatsappTemplate] = useState("qr_link");
   const [whatsappMessage, setWhatsappMessage] = useState("");
+  const [rescheduleDate, setRescheduleDate] = useState("");
+  const [rescheduleReason, setRescheduleReason] = useState("");
+  const [overrideUsername, setOverrideUsername] = useState("");
+  const [overridePassword, setOverridePassword] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -91,6 +107,37 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
+  const selectedCanReschedule = Boolean(
+    selectedAppointment && RESCHEDULABLE_STATUSES.includes(selectedAppointment.status as BookingStatus)
+  );
+  const { data: rescheduleAvailability, isLoading: rescheduleAvailabilityLoading, isError: rescheduleAvailabilityError, error: rescheduleAvailabilityErrorValue } = useQuery({
+    queryKey: [
+      "registration-reschedule-availability",
+      selectedAppointment?.id,
+      selectedAppointment?.modalityId,
+      selectedAppointment?.examTypeId,
+      selectedAppointment?.caseCategory,
+    ],
+    queryFn: () => {
+      if (!selectedAppointment) throw new Error("No appointment selected.");
+      return fetchV2Availability({
+        modalityId: Number(selectedAppointment.modalityId),
+        days: 60,
+        offset: 0,
+        examTypeId: selectedAppointment.examTypeId ?? null,
+        caseCategory: selectedAppointment.caseCategory ?? "non_oncology",
+        useSpecialQuota: false,
+        specialReasonCode: null,
+        includeOverrideCandidates: true,
+      });
+    },
+    enabled:
+      manageTab === "reschedule" &&
+      selectedCanReschedule &&
+      selectedAppointment != null &&
+      Number.isFinite(Number(selectedAppointment.modalityId)),
+    staleTime: 1000 * 30,
+  });
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
@@ -110,6 +157,44 @@ export default function RegistrationsPage() {
         type: "error",
         title: t("registrations.cancelFailedTitle"),
         message: err?.message || t("registrations.cancelFailedMessage"),
+      });
+    },
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: async (input: {
+      appointment: AppointmentWithDetails;
+      newDate: string;
+      payload: RescheduleBookingRequest;
+    }) => {
+      await rescheduleV2Booking(input.appointment.id, input.payload);
+      return getAppointmentById(input.appointment.id);
+    },
+    meta: {
+      suppressGlobalToast: true,
+    },
+    onSuccess: (updated, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      queryClient.invalidateQueries({ queryKey: ["registration-reschedule-availability"] });
+      setSelectedAppointment(updated);
+      setRescheduleDate("");
+      setRescheduleReason("");
+      setOverrideUsername("");
+      setOverridePassword("");
+      setOverrideReason("");
+      pushToast({
+        type: "success",
+        title: t("registrations.rescheduleSuccessTitle"),
+        message: `${formatDateLy(variables.appointment.appointmentDate)} → ${formatDateLy(variables.newDate)}`,
+      });
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: t("registrations.rescheduleFailedTitle"),
+        message: err?.message || t("registrations.rescheduleFailedMessage"),
       });
     },
   });
@@ -312,6 +397,11 @@ export default function RegistrationsPage() {
     setManageTab("details");
   };
 
+  const openReschedule = (appointment: AppointmentWithDetails) => {
+    setSelectedAppointment(appointment);
+    setManageTab("reschedule");
+  };
+
   const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
     setNotificationAppointment(appointment);
     setNotificationMode("template");
@@ -389,6 +479,14 @@ export default function RegistrationsPage() {
   };
 
   useEffect(() => {
+    setRescheduleDate("");
+    setRescheduleReason("");
+    setOverrideUsername("");
+    setOverridePassword("");
+    setOverrideReason("");
+  }, [selectedAppointment?.id, manageTab]);
+
+  useEffect(() => {
     let cancelled = false;
     const settingsReady =
       (!slipSettingsLoading || Boolean(slipSettingsError)) &&
@@ -464,6 +562,42 @@ export default function RegistrationsPage() {
       </div>
     );
   }
+
+  const selectableRescheduleDates: AvailabilityDayDto[] = (rescheduleAvailability?.items ?? [])
+    .filter((item) => item.decision.displayStatus !== "blocked")
+    .filter((item) => item.date !== selectedAppointment?.appointmentDate);
+  const selectedRescheduleDay = selectableRescheduleDates.find((item) => item.date === rescheduleDate) ?? null;
+  const selectedRequiresOverride = Boolean(selectedRescheduleDay?.decision.requiresSupervisorOverride);
+  const canSubmitReschedule =
+    Boolean(selectedAppointment && rescheduleDate) &&
+    !rescheduleMutation.isPending &&
+    (!selectedRequiresOverride ||
+      (overrideUsername.trim().length > 0 &&
+        overridePassword.trim().length > 0 &&
+        overrideReason.trim().length > 0));
+
+  const submitReschedule = () => {
+    if (!selectedAppointment || !rescheduleDate || !canSubmitReschedule) return;
+    const payload: RescheduleBookingRequest = {
+      bookingDate: rescheduleDate,
+      bookingTime: null,
+      rescheduleReason: rescheduleReason.trim() || null,
+      ...(selectedRequiresOverride
+        ? {
+            override: {
+              supervisorUsername: overrideUsername.trim(),
+              supervisorPassword: overridePassword,
+              reason: overrideReason.trim(),
+            },
+          }
+        : {}),
+    };
+    rescheduleMutation.mutate({
+      appointment: selectedAppointment,
+      newDate: rescheduleDate,
+      payload,
+    });
+  };
 
   return (
     <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 space-y-3 sm:space-y-4">
@@ -774,6 +908,20 @@ export default function RegistrationsPage() {
                       </div>
 
                       <div className="flex justify-end gap-1">
+                        {RESCHEDULABLE_STATUSES.includes(apt.status as BookingStatus) ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openReschedule(apt);
+                            }}
+                            className="h-7 px-2 text-[9px]"
+                          >
+                            {t("registrations.reschedule")}
+                          </Button>
+                        ) : null}
                         {apt.phone1 ? (
                           <Button
                             type="button"
@@ -964,6 +1112,15 @@ export default function RegistrationsPage() {
                 <Button
                   type="button"
                   size="sm"
+                  variant={manageTab === "reschedule" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => setManageTab("reschedule")}
+                >
+                  {t("registrations.reschedule")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   variant={manageTab === "cancel" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
                   onClick={() => setManageTab("cancel")}
@@ -990,6 +1147,159 @@ export default function RegistrationsPage() {
                   appointmentRefType="v2_booking"
                   title={t("registrations.requestDocuments")}
                 />
+              ) : null}
+
+              {manageTab === "reschedule" ? (
+                selectedCanReschedule ? (
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3">
+                    <div className="mb-3">
+                      <h4 className="text-sm font-semibold">{t("registrations.reschedule")}</h4>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {t("registrations.rescheduleHint")}
+                      </p>
+                    </div>
+
+                    {rescheduleAvailabilityLoading ? (
+                      <div className="rounded-xl border border-border bg-background p-3 text-xs text-muted-foreground">
+                        {t("common.loading")}
+                      </div>
+                    ) : rescheduleAvailabilityError ? (
+                      <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                        {(rescheduleAvailabilityErrorValue as Error | undefined)?.message ||
+                          t("registrations.rescheduleAvailabilityFailed")}
+                      </div>
+                    ) : selectableRescheduleDates.length === 0 ? (
+                      <div className="rounded-xl border border-border bg-background p-3 text-xs text-muted-foreground">
+                        {t("registrations.rescheduleNoDates")}
+                      </div>
+                    ) : (
+                      <form
+                        className="space-y-3"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          submitReschedule();
+                        }}
+                      >
+                        <div>
+                          <label htmlFor="registration-reschedule-date" className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                            {t("registrations.rescheduleNewDate")}
+                          </label>
+                          <select
+                            id="registration-reschedule-date"
+                            value={rescheduleDate}
+                            onChange={(e) => setRescheduleDate(e.target.value)}
+                            className="input-premium w-full min-h-10"
+                          >
+                            <option value="">{t("registrations.rescheduleSelectDate")}</option>
+                            {selectableRescheduleDates.map((item) => (
+                              <option key={item.date} value={item.date}>
+                                {formatDateLy(item.date)}
+                                {item.decision.requiresSupervisorOverride
+                                  ? ` - ${t("registrations.rescheduleOverrideRequired")}`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedRescheduleDay ? (
+                          <div
+                            className={`rounded-xl border p-3 text-xs ${
+                              selectedRequiresOverride
+                                ? "border-amber-200 bg-amber-50 text-amber-900"
+                                : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                            }`}
+                          >
+                            {selectedRequiresOverride
+                              ? t("registrations.rescheduleRestricted")
+                              : t("registrations.rescheduleAvailable")}
+                            {selectedRescheduleDay.decision.reasons.length > 0 ? (
+                              <ul className="mt-1 list-disc space-y-1 ps-4">
+                                {selectedRescheduleDay.decision.reasons.map((reason, index) => (
+                                  <li key={`${reason.code}-${index}`}>{reason.message || reason.code}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div>
+                          <label htmlFor="registration-reschedule-reason" className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                            {t("registrations.rescheduleReason")}
+                          </label>
+                          <textarea
+                            id="registration-reschedule-reason"
+                            value={rescheduleReason}
+                            onChange={(e) => setRescheduleReason(e.target.value)}
+                            rows={2}
+                            className="input-premium w-full resize-none"
+                            placeholder={t("registrations.rescheduleReasonPlaceholder")}
+                          />
+                        </div>
+
+                        {selectedRequiresOverride ? (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                            <p className="mb-3 text-xs font-medium text-amber-900">
+                              {t("registrations.rescheduleSupervisorRequired")}
+                            </p>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div>
+                                <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                                  {t("appointments.create.supervisorUsername")}
+                                </label>
+                                <input
+                                  value={overrideUsername}
+                                  onChange={(e) => setOverrideUsername(e.target.value)}
+                                  className="input-premium w-full min-h-10"
+                                  autoComplete="username"
+                                />
+                              </div>
+                              <div>
+                                <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                                  {t("appointments.create.password")}
+                                </label>
+                                <input
+                                  type="password"
+                                  value={overridePassword}
+                                  onChange={(e) => setOverridePassword(e.target.value)}
+                                  className="input-premium w-full min-h-10"
+                                  autoComplete="current-password"
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                                {t("appointments.create.overrideReason")}
+                              </label>
+                              <input
+                                value={overrideReason}
+                                onChange={(e) => setOverrideReason(e.target.value)}
+                                className="input-premium w-full min-h-10"
+                                placeholder={t("appointments.create.overrideReasonPlaceholder")}
+                              />
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className={isRtl ? "flex justify-start" : "flex justify-end"}>
+                          <Button
+                            type="submit"
+                            size="sm"
+                            disabled={!canSubmitReschedule}
+                          >
+                            {rescheduleMutation.isPending
+                              ? t("appointments.v2.rescheduling")
+                              : t("registrations.reschedule")}
+                          </Button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                    {t("registrations.rescheduleNotAllowed")}
+                  </div>
+                )
               ) : null}
 
               {manageTab === "cancel" ? (
