@@ -101,6 +101,12 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushTestButtonEn: "Send test notification",
   webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
   webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushIosHelpButtonAr: "طريقة التفعيل على iPhone",
+  webPushIosHelpButtonEn: "How to enable on iPhone",
+  webPushIosHelpTitleAr: "لتفعيل التنبيهات على iPhone",
+  webPushIosHelpTitleEn: "To enable notifications on iPhone",
+  webPushIosHelpBodyAr: "افتح هذه الصفحة في Safari، اضغط زر المشاركة، اختر إضافة إلى الشاشة الرئيسية، ثم افتح RISpro من الأيقونة الجديدة وفعّل التنبيهات من هناك. يتطلب ذلك iOS 16.4 أو أحدث.",
+  webPushIosHelpBodyEn: "Open this page in Safari, tap Share, choose Add to Home Screen, then open RISpro from the new icon and enable notifications there. This requires iOS 16.4 or later.",
   webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
@@ -701,6 +707,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
   const [subscription, setSubscription] = useState<PushSubscription | null>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "subscribed" | "unsubscribed" | "unsupported" | "denied" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [showIosHelp, setShowIosHelp] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -832,6 +839,24 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
           <NotificationPreferenceRow label="إلغاء الموعد" checked={preferences.appointmentCancelled} onChange={(checked) => updatePreference("appointmentCancelled", checked)} />
           <NotificationPreferenceRow label="تحديث تفاصيل الموعد" checked={preferences.appointmentChanged} onChange={(checked) => updatePreference("appointmentChanged", checked)} />
           <NotificationPreferenceRow label="جاهزية التقرير" checked={preferences.reportReady} onChange={(checked) => updatePreference("reportReady", checked)} />
+        </div>
+      ) : null}
+
+      {!serverDisabled && status === "unsupported" ? (
+        <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50 p-3 text-sm leading-7 text-slate-700">
+          <button
+            type="button"
+            onClick={() => setShowIosHelp((current) => !current)}
+            className="font-extrabold text-sky-800 underline-offset-4 hover:underline"
+          >
+            {labels?.iosHelpButtonAr || props.settings.webPushIosHelpButtonAr || props.settings.webPushIosHelpButtonEn}
+          </button>
+          {showIosHelp ? (
+            <div className="mt-3">
+              <p className="font-extrabold text-slate-900">{labels?.iosHelpTitleAr || props.settings.webPushIosHelpTitleAr || props.settings.webPushIosHelpTitleEn}</p>
+              <p className="mt-1">{labels?.iosHelpBodyAr || props.settings.webPushIosHelpBodyAr || props.settings.webPushIosHelpBodyEn}</p>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

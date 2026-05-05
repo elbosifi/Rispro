@@ -83,6 +83,12 @@ export interface PatientQrSettings {
   webPushTestButtonEn: string;
   webPushUnsupportedMessageAr: string;
   webPushUnsupportedMessageEn: string;
+  webPushIosHelpButtonAr: string;
+  webPushIosHelpButtonEn: string;
+  webPushIosHelpTitleAr: string;
+  webPushIosHelpTitleEn: string;
+  webPushIosHelpBodyAr: string;
+  webPushIosHelpBodyEn: string;
   webPushDeniedMessageAr: string;
   webPushDeniedMessageEn: string;
   webPushAppointmentReminder24hTitle: string;
@@ -182,6 +188,12 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushTestButtonEn: "Send test notification",
   webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
   webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushIosHelpButtonAr: "طريقة التفعيل على iPhone",
+  webPushIosHelpButtonEn: "How to enable on iPhone",
+  webPushIosHelpTitleAr: "لتفعيل التنبيهات على iPhone",
+  webPushIosHelpTitleEn: "To enable notifications on iPhone",
+  webPushIosHelpBodyAr: "افتح هذه الصفحة في Safari، اضغط زر المشاركة، اختر إضافة إلى الشاشة الرئيسية، ثم افتح RISpro من الأيقونة الجديدة وفعّل التنبيهات من هناك. يتطلب ذلك iOS 16.4 أو أحدث.",
+  webPushIosHelpBodyEn: "Open this page in Safari, tap Share, choose Add to Home Screen, then open RISpro from the new icon and enable notifications there. This requires iOS 16.4 or later.",
   webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
@@ -380,6 +392,12 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     webPushTestButtonEn: asString(record.webPushTestButtonEn, DEFAULT_SETTINGS.webPushTestButtonEn),
     webPushUnsupportedMessageAr: asString(record.webPushUnsupportedMessageAr, DEFAULT_SETTINGS.webPushUnsupportedMessageAr),
     webPushUnsupportedMessageEn: asString(record.webPushUnsupportedMessageEn, DEFAULT_SETTINGS.webPushUnsupportedMessageEn),
+    webPushIosHelpButtonAr: asString(record.webPushIosHelpButtonAr, DEFAULT_SETTINGS.webPushIosHelpButtonAr),
+    webPushIosHelpButtonEn: asString(record.webPushIosHelpButtonEn, DEFAULT_SETTINGS.webPushIosHelpButtonEn),
+    webPushIosHelpTitleAr: asString(record.webPushIosHelpTitleAr, DEFAULT_SETTINGS.webPushIosHelpTitleAr),
+    webPushIosHelpTitleEn: asString(record.webPushIosHelpTitleEn, DEFAULT_SETTINGS.webPushIosHelpTitleEn),
+    webPushIosHelpBodyAr: asString(record.webPushIosHelpBodyAr, DEFAULT_SETTINGS.webPushIosHelpBodyAr),
+    webPushIosHelpBodyEn: asString(record.webPushIosHelpBodyEn, DEFAULT_SETTINGS.webPushIosHelpBodyEn),
     webPushDeniedMessageAr: asString(record.webPushDeniedMessageAr, DEFAULT_SETTINGS.webPushDeniedMessageAr),
     webPushDeniedMessageEn: asString(record.webPushDeniedMessageEn, DEFAULT_SETTINGS.webPushDeniedMessageEn),
     webPushAppointmentReminder24hTitle: asString(record.webPushAppointmentReminder24hTitle, DEFAULT_SETTINGS.webPushAppointmentReminder24hTitle),

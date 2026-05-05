@@ -587,6 +587,12 @@ export interface PublicPushConfigResponse {
     testButtonEn: string;
     unsupportedMessageAr: string;
     unsupportedMessageEn: string;
+    iosHelpButtonAr: string;
+    iosHelpButtonEn: string;
+    iosHelpTitleAr: string;
+    iosHelpTitleEn: string;
+    iosHelpBodyAr: string;
+    iosHelpBodyEn: string;
     deniedMessageAr: string;
     deniedMessageEn: string;
   };
@@ -703,6 +709,12 @@ export interface PatientQrSettings {
   webPushTestButtonEn: string;
   webPushUnsupportedMessageAr: string;
   webPushUnsupportedMessageEn: string;
+  webPushIosHelpButtonAr: string;
+  webPushIosHelpButtonEn: string;
+  webPushIosHelpTitleAr: string;
+  webPushIosHelpTitleEn: string;
+  webPushIosHelpBodyAr: string;
+  webPushIosHelpBodyEn: string;
   webPushDeniedMessageAr: string;
   webPushDeniedMessageEn: string;
   webPushAppointmentReminder24hTitle: string;
@@ -802,6 +814,12 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   webPushTestButtonEn: "Send test notification",
   webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
   webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushIosHelpButtonAr: "طريقة التفعيل على iPhone",
+  webPushIosHelpButtonEn: "How to enable on iPhone",
+  webPushIosHelpTitleAr: "لتفعيل التنبيهات على iPhone",
+  webPushIosHelpTitleEn: "To enable notifications on iPhone",
+  webPushIosHelpBodyAr: "افتح هذه الصفحة في Safari، اضغط زر المشاركة، اختر إضافة إلى الشاشة الرئيسية، ثم افتح RISpro من الأيقونة الجديدة وفعّل التنبيهات من هناك. يتطلب ذلك iOS 16.4 أو أحدث.",
+  webPushIosHelpBodyEn: "Open this page in Safari, tap Share, choose Add to Home Screen, then open RISpro from the new icon and enable notifications there. This requires iOS 16.4 or later.",
   webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
@@ -1108,6 +1126,12 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     webPushTestButtonEn: str(record.webPushTestButtonEn, DEFAULT_PATIENT_QR_SETTINGS.webPushTestButtonEn),
     webPushUnsupportedMessageAr: str(record.webPushUnsupportedMessageAr, DEFAULT_PATIENT_QR_SETTINGS.webPushUnsupportedMessageAr),
     webPushUnsupportedMessageEn: str(record.webPushUnsupportedMessageEn, DEFAULT_PATIENT_QR_SETTINGS.webPushUnsupportedMessageEn),
+    webPushIosHelpButtonAr: str(record.webPushIosHelpButtonAr, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpButtonAr),
+    webPushIosHelpButtonEn: str(record.webPushIosHelpButtonEn, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpButtonEn),
+    webPushIosHelpTitleAr: str(record.webPushIosHelpTitleAr, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpTitleAr),
+    webPushIosHelpTitleEn: str(record.webPushIosHelpTitleEn, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpTitleEn),
+    webPushIosHelpBodyAr: str(record.webPushIosHelpBodyAr, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpBodyAr),
+    webPushIosHelpBodyEn: str(record.webPushIosHelpBodyEn, DEFAULT_PATIENT_QR_SETTINGS.webPushIosHelpBodyEn),
     webPushDeniedMessageAr: str(record.webPushDeniedMessageAr, DEFAULT_PATIENT_QR_SETTINGS.webPushDeniedMessageAr),
     webPushDeniedMessageEn: str(record.webPushDeniedMessageEn, DEFAULT_PATIENT_QR_SETTINGS.webPushDeniedMessageEn),
     webPushAppointmentReminder24hTitle: str(record.webPushAppointmentReminder24hTitle, DEFAULT_PATIENT_QR_SETTINGS.webPushAppointmentReminder24hTitle),

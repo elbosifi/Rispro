@@ -67,6 +67,12 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   webPushTestButtonEn: "Send test notification",
   webPushUnsupportedMessageAr: "تنبيهات المتصفح غير مدعومة على هذا الجهاز.",
   webPushUnsupportedMessageEn: "Browser notifications are not supported on this device.",
+  webPushIosHelpButtonAr: "طريقة التفعيل على iPhone",
+  webPushIosHelpButtonEn: "How to enable on iPhone",
+  webPushIosHelpTitleAr: "لتفعيل التنبيهات على iPhone",
+  webPushIosHelpTitleEn: "To enable notifications on iPhone",
+  webPushIosHelpBodyAr: "افتح هذه الصفحة في Safari، اضغط زر المشاركة، اختر إضافة إلى الشاشة الرئيسية، ثم افتح RISpro من الأيقونة الجديدة وفعّل التنبيهات من هناك. يتطلب ذلك iOS 16.4 أو أحدث.",
+  webPushIosHelpBodyEn: "Open this page in Safari, tap Share, choose Add to Home Screen, then open RISpro from the new icon and enable notifications there. This requires iOS 16.4 or later.",
   webPushDeniedMessageAr: "تم رفض إذن التنبيهات من المتصفح.",
   webPushDeniedMessageEn: "Notification permission was denied in this browser.",
   webPushAppointmentReminder24hTitle: "Appointment reminder",
@@ -474,6 +480,12 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
           <Input label="Subscribe button" value={draft.webPushSubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushSubscribeButtonEn: value }))} />
           <Input label="Unsubscribe button" value={draft.webPushUnsubscribeButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushUnsubscribeButtonEn: value }))} />
           <Input label="Test button" value={draft.webPushTestButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushTestButtonEn: value }))} />
+          <Input label="iPhone help button (Arabic)" value={draft.webPushIosHelpButtonAr} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpButtonAr: value }))} />
+          <Input label="iPhone help button (English)" value={draft.webPushIosHelpButtonEn} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpButtonEn: value }))} />
+          <Input label="iPhone help title (Arabic)" value={draft.webPushIosHelpTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpTitleAr: value }))} />
+          <Textarea label="iPhone help body (Arabic)" value={draft.webPushIosHelpBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpBodyAr: value }))} />
+          <Input label="iPhone help title (English)" value={draft.webPushIosHelpTitleEn} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpTitleEn: value }))} />
+          <Textarea label="iPhone help body (English)" value={draft.webPushIosHelpBodyEn} onChange={(value) => setDraft((current) => ({ ...current, webPushIosHelpBodyEn: value }))} />
           <Input label="Reminder notification title (Arabic)" value={draft.webPushAppointmentReminder24hTitleAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitleAr: value }))} />
           <Textarea label="Reminder notification body (Arabic)" value={draft.webPushAppointmentReminder24hBodyAr} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hBodyAr: value }))} />
           <Input label="Reminder notification title (English)" value={draft.webPushAppointmentReminder24hTitle} onChange={(value) => setDraft((current) => ({ ...current, webPushAppointmentReminder24hTitle: value }))} />
