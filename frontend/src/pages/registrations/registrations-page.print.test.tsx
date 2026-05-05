@@ -227,7 +227,7 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
-    await userEvent.click(within(row).getByRole("button", { name: "View Appointment Link" }));
+    await userEvent.click(within(row).getByRole("button", { name: "Link" }));
 
     await waitFor(() => {
       expect(mockPushToast).toHaveBeenCalledWith(
@@ -269,7 +269,7 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
-    await userEvent.click(within(row).getByRole("button", { name: "View Appointment Link" }));
+    await userEvent.click(within(row).getByRole("button", { name: "Link" }));
 
     await waitFor(() => {
       expect(mockPushToast).toHaveBeenCalledWith(
@@ -282,7 +282,7 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
-  it("opens reschedule from the row and submits only reschedule fields", async () => {
+  it("keeps row reschedule absent and submits reschedule only from the manage drawer", async () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
@@ -290,7 +290,9 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
-    await userEvent.click(within(row).getByRole("button", { name: "Reschedule" }));
+    expect(within(row).queryByRole("button", { name: "Reschedule" })).toBeNull();
+    await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
 
     await waitFor(() => {
       expect(useV2AvailabilityMock).toHaveBeenCalledWith(
@@ -315,6 +317,44 @@ describe("RegistrationsPage print actions", () => {
         rescheduleReason: "Patient requested later date",
       });
     });
+  });
+
+  it("shows the category legend and marks oncology rows for color coding", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      {
+        id: 9,
+        modalityId: 1,
+        examTypeId: 3,
+        accessionNumber: "ACC-9",
+        dailySequence: 1,
+        patientId: 1,
+        caseCategory: "oncology",
+        arabicFullName: "Oncology Patient",
+        englishFullName: "Oncology Patient",
+        modalityNameAr: "CT",
+        modalityNameEn: "CT",
+        examNameAr: "CT Head",
+        examNameEn: "CT Head",
+        priorityNameAr: null,
+        priorityNameEn: null,
+        appointmentDate: "2027-01-03",
+        status: "scheduled",
+        isWalkIn: false,
+        notes: null,
+        publicAppointmentUrl: null,
+      },
+    ]);
+
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-9")).toBeTruthy();
+    });
+
+    expect(screen.getByLabelText("Patient category legend")).toBeTruthy();
+    const row = screen.getByText("ACC-9").closest('[role="button"]') as HTMLElement;
+    expect(row.getAttribute("data-category")).toBe("oncology");
+    expect(row.getAttribute("aria-label")).toContain("Oncology");
   });
 
   it("shows reschedule in the manage drawer", async () => {

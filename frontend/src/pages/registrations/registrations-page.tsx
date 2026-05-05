@@ -411,11 +411,6 @@ export default function RegistrationsPage() {
     setManageTab("details");
   };
 
-  const openReschedule = (appointment: AppointmentWithDetails) => {
-    setSelectedAppointment(appointment);
-    setManageTab("reschedule");
-  };
-
   const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
     setNotificationAppointment(appointment);
     setNotificationMode("template");
@@ -846,12 +841,25 @@ export default function RegistrationsPage() {
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-1.5 border-b border-border p-3.5 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 border-b border-border p-3.5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h3 className="text-lg font-semibold">{t("registrations.title")}</h3>
             <p className="text-xs sm:text-sm text-muted-foreground">
               {appointments.length} {language === "ar" ? "موعد" : "appointments"} {listWindowLabel}
             </p>
+            <div
+              className="mt-2 flex flex-wrap items-center gap-2 text-[10px] font-medium text-muted-foreground"
+              aria-label={t("registrations.categoryLegend")}
+            >
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">
+                <span className="h-2.5 w-2.5 rounded-sm border border-rose-300 bg-rose-100" aria-hidden="true" />
+                {t("appointments.create.oncology")}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2 py-1 text-sky-700">
+                <span className="h-2.5 w-2.5 rounded-sm border border-sky-300 bg-sky-100" aria-hidden="true" />
+                {t("appointments.create.nonOncology")}
+              </span>
+            </div>
           </div>
           <Button type="button" variant="secondary" size="sm" className="h-8 px-3 text-xs" onClick={handlePrintVisibleList}>
             {t("registrations.print")}
@@ -859,10 +867,10 @@ export default function RegistrationsPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <div className="min-w-[1140px]">
-            <div className="grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_1.5fr] gap-1.5 border-b border-border bg-muted/40 px-3 py-1.5 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          <div className="min-w-[1240px]">
+            <div className="grid grid-cols-[minmax(250px,1.7fr)_minmax(112px,0.72fr)_minmax(180px,1.05fr)_minmax(108px,0.62fr)_minmax(110px,0.58fr)_minmax(86px,0.42fr)_minmax(330px,1.05fr)] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-[8px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
-              <div>{t("registrations.print")}</div>
+              <div>{t("registrations.accession")}</div>
               <div>{t("registrations.modality")}</div>
               <div>{t("registrations.date")}</div>
               <div>{t("registrations.statusCol")}</div>
@@ -887,6 +895,36 @@ export default function RegistrationsPage() {
                   const examName = chooseLocalized(language, apt.examNameAr, apt.examNameEn);
                   const priorityName = chooseLocalized(language, apt.priorityNameAr, apt.priorityNameEn);
                   const notesText = String(apt.notes || "").trim();
+                  const categoryLabel =
+                    apt.caseCategory === "oncology"
+                      ? t("appointments.create.oncology")
+                      : apt.caseCategory === "non_oncology"
+                        ? t("appointments.create.nonOncology")
+                        : t("registrations.categoryUnknown");
+                  const categoryRowClass =
+                    apt.caseCategory === "oncology"
+                      ? "border-l-4 border-l-rose-300 bg-rose-50/55 hover:bg-rose-50/80"
+                      : apt.caseCategory === "non_oncology"
+                        ? "border-l-4 border-l-sky-200 bg-sky-50/25 hover:bg-sky-50/45"
+                        : `border-l-4 border-l-transparent ${
+                            index % 2 === 0 ? "bg-background hover:bg-muted/40" : "bg-muted/20 hover:bg-muted/40"
+                          }`;
+                  const statusToneClass =
+                    apt.status === "arrived"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : apt.status === "waiting"
+                        ? "bg-amber-100 text-amber-700"
+                        : apt.status === "completed"
+                          ? "bg-slate-100 text-slate-700"
+                          : apt.status === "cancelled" || apt.status === "voided" || apt.status === "discontinued"
+                            ? "bg-rose-100 text-rose-700"
+                            : "bg-blue-100 text-blue-700";
+                  const rowTitle = [
+                    `${t("registrations.patientCategory")}: ${categoryLabel}`,
+                    notesText ? `${t("registrations.notes")}: ${notesText}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" | ");
 
                   return (
                     <div
@@ -894,23 +932,24 @@ export default function RegistrationsPage() {
                       role="button"
                       tabIndex={0}
                       onClick={() => openSlipPreview(apt)}
-                      title={notesText ? `Notes: ${notesText}` : undefined}
+                      title={rowTitle}
+                      aria-label={`${patientName} ${apt.accessionNumber} ${categoryLabel} ${statusLabel(language, apt.status)}`}
+                      data-category={apt.caseCategory || "unknown"}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
                           openSlipPreview(apt);
                         }
                       }}
-                      className={`grid grid-cols-[1.92fr_0.92fr_1.2fr_0.8fr_0.88fr_0.72fr_1.5fr] gap-1.5 px-3 py-1.5 transition-colors outline-none cursor-pointer ${
-                        index % 2 === 0 ? "bg-background" : "bg-muted/25"
-                      } ${isSelected ? "ring-1 ring-accent/30 bg-accent/5" : "hover:bg-muted/40"}`}
+                      className={`grid grid-cols-[minmax(250px,1.7fr)_minmax(112px,0.72fr)_minmax(180px,1.05fr)_minmax(108px,0.62fr)_minmax(110px,0.58fr)_minmax(86px,0.42fr)_minmax(330px,1.05fr)] items-center gap-2 px-3 py-2 transition-colors outline-none cursor-pointer ${categoryRowClass} ${
+                        isSelected ? "ring-1 ring-accent/30" : ""
+                      }`}
                       >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <p className="truncate text-[12px] font-semibold leading-tight text-foreground">
                             {patientName}
                           </p>
-                          <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
                           {apt.patientWebPushSubscribed ? (
                             <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-700">
                               {t("registrations.webPushBadge")}
@@ -919,6 +958,7 @@ export default function RegistrationsPage() {
                         </div>
                         <p className="mt-0.5 truncate text-[9px] leading-none text-muted-foreground">
                           {[
+                            categoryLabel,
                             apt.mrn || apt.nationalId || "—",
                             apt.phone1 || null,
                             [apt.sex || null, Number.isFinite(apt.ageYears) ? String(apt.ageYears) : null]
@@ -947,30 +987,48 @@ export default function RegistrationsPage() {
                       <div className="text-[11px] leading-tight text-foreground">{formatDateLy(apt.appointmentDate)}</div>
 
                       <div>
-                        <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-medium text-blue-700">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[9px] font-semibold ${statusToneClass}`}>
                           {statusLabel(language, apt.status)}
                         </span>
                       </div>
 
                       <div className="min-w-0 text-[9px] leading-snug text-muted-foreground">
-                        <p className="truncate">{apt.isWalkIn ? t("registrations.yes") : t("registrations.no")}</p>
+                        <span
+                          className={`inline-flex rounded-full border px-2 py-0.5 font-semibold ${
+                            apt.isWalkIn
+                              ? "border-amber-200 bg-amber-50 text-amber-700"
+                              : "border-slate-200 bg-white/70 text-slate-600"
+                          }`}
+                        >
+                          {apt.isWalkIn ? t("registrations.yes") : t("registrations.no")}
+                        </span>
                       </div>
 
-                      <div className="flex justify-end gap-1">
-                        {RESCHEDULABLE_STATUSES.includes(apt.status as BookingStatus) ? (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openReschedule(apt);
-                            }}
-                            className="h-7 px-2 text-[9px]"
-                          >
-                            {t("registrations.reschedule")}
-                          </Button>
-                        ) : null}
+                      <div className="flex flex-wrap justify-end gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void printAppointmentSlipById(apt.id, language);
+                          }}
+                          className="h-7 min-w-[52px] px-2 text-[9px]"
+                        >
+                          {t("registrations.print")}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 min-w-[48px] px-2 text-[9px]"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void handleViewAppointmentLink(apt);
+                          }}
+                        >
+                          {t("registrations.link")}
+                        </Button>
                         {apt.phone1 ? (
                           <Button
                             type="button"
@@ -980,7 +1038,7 @@ export default function RegistrationsPage() {
                               e.stopPropagation();
                               openWhatsappDialog(apt);
                             }}
-                            className="h-7 px-2 text-[9px]"
+                            className="h-7 min-w-[68px] px-2 text-[9px]"
                           >
                             {t("registrations.whatsapp")}
                           </Button>
@@ -994,7 +1052,7 @@ export default function RegistrationsPage() {
                               e.stopPropagation();
                               openPatientNotificationDialog(apt);
                             }}
-                            className="h-7 px-2 text-[9px]"
+                            className="h-7 min-w-[54px] px-2 text-[9px]"
                           >
                             {t("registrations.webPushSend")}
                           </Button>
@@ -1003,31 +1061,7 @@ export default function RegistrationsPage() {
                           type="button"
                           size="sm"
                           variant="secondary"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void printAppointmentSlipById(apt.id, language);
-                          }}
-                          className="h-7 px-2 text-[9px]"
-                        >
-                          {t("registrations.print")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[9px]"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void handleViewAppointmentLink(apt);
-                          }}
-                        >
-                          {t("registrations.viewAppointmentLink")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className="h-7 px-2 text-[9px]"
+                          className="h-7 min-w-[58px] px-2 text-[9px]"
                           onClick={(e) => {
                             e.stopPropagation();
                             manageAppointment(apt);
