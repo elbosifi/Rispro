@@ -55,6 +55,7 @@ import {
   normalizeOrthancSettingsEntries,
   validateOrthancSettingsEntries
 } from "../services/orthanc-settings-resolver.js";
+import { SANTE_HL7_CATEGORY, validateSanteSettingsEntries } from "../services/sante-worklist-settings-resolver.js";
 import {
   applyCatalogImport,
   exportCatalogWorkbook,
@@ -552,6 +553,10 @@ settingsRouter.put(
     if (category === "orthanc_mwl_sync") {
       entries = normalizeOrthancSettingsEntries(entries);
       validateOrthancSettingsEntries(entries);
+    }
+
+    if (category === SANTE_HL7_CATEGORY) {
+      validateSanteSettingsEntries(entries);
     }
 
     const settings = await upsertSettings(category, entries, request.user.sub as UserId);

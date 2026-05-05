@@ -4,6 +4,7 @@ import { createApp } from "./app.js";
 import { pool } from "./db/pool.js";
 import type { DicomGatewayServer } from "./services/dicom-gateway-service.js";
 import type { OrthancMwlWorker } from "./services/orthanc-mwl-worker-service.js";
+import type { SanteWorklistWorker } from "./services/sante-worklist-worker-service.js";
 import type { AppointmentsV2PacsAutoCompletionWorker } from "./services/appointments-v2-pacs-auto-completion-worker.js";
 import type { PatientNotificationWorker } from "./services/patient-notification-worker.js";
 
@@ -12,6 +13,7 @@ const server: Server = http.createServer(app);
 let isShuttingDown = false;
 let dicomGateway: DicomGatewayServer | null = null;
 let orthancMwlWorker: OrthancMwlWorker | null = null;
+let santeWorklistWorker: SanteWorklistWorker | null = null;
 let pacsAutoCompletionWorker: AppointmentsV2PacsAutoCompletionWorker | null = null;
 let patientNotificationWorker: PatientNotificationWorker | null = null;
 
@@ -41,6 +43,14 @@ async function shutdown(signal: "SIGINT" | "SIGTERM"): Promise<void> {
       await orthancMwlWorker.stop();
     } catch (error) {
       console.error("Failed to stop Orthanc MWL worker.", error);
+    }
+  }
+
+  if (santeWorklistWorker) {
+    try {
+      await santeWorklistWorker.stop();
+    } catch (error) {
+      console.error("Failed to stop Sante Worklist HL7 worker.", error);
     }
   }
 
@@ -99,8 +109,10 @@ async function start(): Promise<void> {
     // Auto-seed DICOM gateway defaults if missing (zero-config installation)
     const { seedDicomGatewayDefaultsIfMissing } = await import("./services/dicom-settings-resolver.js");
     const { seedOrthancMwlDefaultsIfMissing } = await import("./services/orthanc-settings-resolver.js");
+    const { seedSanteWorklistDefaultsIfMissing } = await import("./services/sante-worklist-settings-resolver.js");
     await seedDicomGatewayDefaultsIfMissing();
     await seedOrthancMwlDefaultsIfMissing();
+    await seedSanteWorklistDefaultsIfMissing();
 
     // Auto-create directories and rebuild worklists
     const { ensureDicomGatewayLayout, rebuildAllV2DicomWorklistSources } = await import("./services/dicom-service.js");
@@ -143,6 +155,18 @@ async function start(): Promise<void> {
     console.error("Orthanc MWL worker initialization failed. Continuing without blocking startup.");
     logError(error);
     startupSummary.orthanc_mwl = "initialization_failed";
+  }
+
+  try {
+    const { startSanteWorklistWorker } = await import("./services/sante-worklist-worker-service.js");
+    const { resolveSanteWorklistSettings } = await import("./services/sante-worklist-settings-resolver.js");
+    const santeSettings = await resolveSanteWorklistSettings();
+    santeWorklistWorker = await startSanteWorklistWorker();
+    startupSummary.sante_hl7 = santeSettings.enabled ? `enabled_${santeSettings.mode}` : "disabled";
+  } catch (error) {
+    console.error("Sante HL7 file-drop worker initialization failed. Continuing without blocking startup.");
+    logError(error);
+    startupSummary.sante_hl7 = "initialization_failed";
   }
 
   try {
@@ -219,6 +243,10 @@ async function start(): Promise<void> {
     if (orthancSettings?.enabled) {
       console.log(`    Base URL:       ${orthancSettings.baseUrl || "(unset)"}`);
     }
+
+    console.log("");
+    console.log("  Sante Worklist HL7:");
+    console.log(`    Worker:         ${startupSummary.sante_hl7 || "disabled"}`);
 
     console.log("");
     console.log("  PACS Auto-Completion:");
