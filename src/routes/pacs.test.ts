@@ -79,3 +79,57 @@ test("pacs remap multipart staging keeps normal completed upload staged for serv
     await cleanupDicomRemapUploadTempDir(staged.tempDir);
   }
 });
+
+test("pacs remap preview multipart staging rejects missing files", async () => {
+  const boundary = "preview-empty-boundary";
+  const req = multipartRequest(boundary);
+  const promise = __pacsRouteTestables.stageDicomRemapPreviewMultipartFiles(req as unknown as Request);
+
+  await waitForListener(req, "close");
+  req.complete = true;
+  req.end([
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="fileMetadata"',
+    "",
+    "[]",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n"));
+
+  await assert.rejects(
+    () => promise,
+    /At least one DICOM preview file is required\./
+  );
+});
+
+test("pacs remap preview multipart staging does not require confirm or remap fields", async () => {
+  const boundary = "preview-normal-boundary";
+  const req = multipartRequest(boundary);
+  const promise = __pacsRouteTestables.stageDicomRemapPreviewMultipartFiles(req as unknown as Request);
+
+  await waitForListener(req, "close");
+  req.complete = true;
+  req.end([
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="fileMetadata"',
+    "",
+    JSON.stringify([{ fileName: "image.dcm", filePath: "CD/image.dcm", fileSize: 2048 }]),
+    `--${boundary}`,
+    'Content-Disposition: form-data; name="files"; filename="image.dcm"',
+    "Content-Type: application/dicom",
+    "",
+    "DICOM",
+    `--${boundary}--`,
+    "",
+  ].join("\r\n"));
+
+  const staged = await promise;
+  try {
+    assert.equal(staged.files.length, 1);
+    assert.equal(staged.files[0]?.originalFileName, "image.dcm");
+    assert.equal(staged.files[0]?.originalFilePath, "CD/image.dcm");
+    assert.equal(staged.files[0]?.originalFileSize, 2048);
+  } finally {
+    await cleanupDicomRemapUploadTempDir(staged.tempDir);
+  }
+});

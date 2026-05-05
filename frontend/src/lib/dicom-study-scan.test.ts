@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   buildDicomUploadSelectionPlan,
+  DICOM_PREVIEW_HEADER_BYTES,
   isSkippableDicomSidecarFile,
+  previewDicomStudiesFromFiles,
   scanDicomStudiesFromFiles,
   type DicomStudyScanResult,
 } from "./dicom-study-scan";
@@ -153,5 +155,43 @@ describe("dicom study scan", () => {
     expect(isSkippableDicomSidecarFile("viewer.exe")).toBe(true);
     expect(isSkippableDicomSidecarFile("scan1.dcm")).toBe(false);
   });
-});
 
+  it("preview upload sends bounded header slices instead of full files", async () => {
+    const fetchMock = vi.fn(async (_path: string, init?: RequestInit) => {
+      const body = init?.body as FormData;
+      const uploaded = body.getAll("files") as Blob[];
+      expect(uploaded).toHaveLength(1);
+      expect(uploaded[0]?.size).toBe(DICOM_PREVIEW_HEADER_BYTES);
+      return {
+        ok: true,
+        json: async () => ({
+          studies: [{
+            studyInstanceUid: "1.2.3",
+            studyDate: "",
+            studyDescription: "",
+            modality: "",
+            patientId: "",
+            patientName: "",
+            seriesCount: 1,
+            fileCount: 1,
+            totalBytes: DICOM_PREVIEW_HEADER_BYTES + 100,
+            files: [{ previewIndex: 0, fileName: "large.dcm" }],
+          }],
+          skippedSidecarCount: 0,
+          unparsedCount: 0,
+          fallbackUploadFiles: [],
+          unparsedFiles: [],
+          previewOnly: true,
+        }),
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await previewDicomStudiesFromFiles([makeFile("large.dcm", DICOM_PREVIEW_HEADER_BYTES + 100)]);
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/pacs/remap/preview-multipart", expect.objectContaining({
+      method: "POST",
+      credentials: "include",
+    }));
+  });
+});

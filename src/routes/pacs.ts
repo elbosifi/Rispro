@@ -39,7 +39,11 @@ import {
   createDicomRemapMultipartUploadJob,
   processDicomRemapMultipartJob,
   createDicomRemapUploadJob,
+  DICOM_REMAP_PREVIEW_HEADER_BYTES,
+  previewDicomRemapMultipartUpload,
   type DicomRemapStagedUploadFile,
+  type DicomRemapPreviewFileMetadata,
+  type DicomRemapPreviewStagedFile,
   getDicomRemapJob,
   getDicomRemapReplacementPreview,
   hardResetOrthancStudies,
@@ -179,8 +183,134 @@ async function stageDicomRemapMultipartFiles(req: Request): Promise<{
   });
 }
 
+async function stageDicomRemapPreviewMultipartFiles(req: Request): Promise<{
+  files: DicomRemapPreviewStagedFile[];
+  tempDir: string;
+}> {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-preview-"));
+  const files: DicomRemapPreviewStagedFile[] = [];
+  let metadata: DicomRemapPreviewFileMetadata[] = [];
+  const writes: Promise<void>[] = [];
+  let fileIndex = 0;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let uploadFinished = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      void cleanupDicomRemapUploadTempDir(tempDir).finally(() => {
+        reject(error);
+      });
+    };
+
+    const busboy = Busboy({
+      headers: req.headers,
+      limits: {
+        files: 256,
+        fileSize: DICOM_REMAP_PREVIEW_HEADER_BYTES,
+      },
+    });
+
+    const interruptUpload = () => {
+      if (settled || uploadFinished) return;
+      const error = new HttpError(400, "DICOM remap preview upload was interrupted. Please rescan.");
+      req.unpipe(busboy);
+      busboy.destroy(error);
+      fail(error);
+    };
+
+    req.on("aborted", interruptUpload);
+    req.on("close", () => {
+      const requestComplete = Boolean((req as Request & { complete?: boolean }).complete);
+      if (!requestComplete && !uploadFinished) {
+        interruptUpload();
+      }
+    });
+
+    busboy.on("file", (fieldName, file, info) => {
+      if (fieldName !== "files") {
+        file.resume();
+        return;
+      }
+
+      const previewIndex = fileIndex;
+      fileIndex += 1;
+      const stagedPath = path.join(tempDir, `${previewIndex}-${randomUUID()}.dcm`);
+      const writeStream = createWriteStream(stagedPath);
+      let size = 0;
+      let truncated = false;
+
+      file.on("data", (chunk: Buffer) => {
+        size += chunk.length;
+      });
+      file.on("limit", () => {
+        truncated = true;
+      });
+      file.on("error", fail);
+      writeStream.on("error", fail);
+      file.pipe(writeStream);
+
+      writes.push(new Promise<void>((resolveWrite, rejectWrite) => {
+        writeStream.on("finish", () => {
+          if (truncated) {
+            rejectWrite(new HttpError(413, "DICOM preview files must contain only bounded header slices."));
+            return;
+          }
+          const meta = metadata[previewIndex] || {};
+          const originalName = path.basename(String(meta.fileName || info.filename || "dicom.dcm"));
+          const originalPath = String(meta.filePath || originalName).trim() || originalName;
+          const originalSize = Number(meta.fileSize || size);
+          files.push({
+            previewIndex,
+            fileName: originalName,
+            originalFileName: originalName,
+            originalFilePath: originalPath,
+            originalFileSize: Number.isFinite(originalSize) && originalSize > 0 ? originalSize : size,
+            mimeType: info.mimeType,
+            path: stagedPath,
+            size,
+          });
+          resolveWrite();
+        });
+        writeStream.on("error", rejectWrite);
+      }));
+    });
+
+    busboy.on("field", (fieldName, value) => {
+      if (fieldName !== "fileMetadata") return;
+      try {
+        const parsed = JSON.parse(String(value || "[]")) as unknown;
+        metadata = Array.isArray(parsed) ? parsed as DicomRemapPreviewFileMetadata[] : [];
+      } catch {
+        metadata = [];
+      }
+    });
+
+    busboy.on("error", fail);
+    busboy.on("filesLimit", () => fail(new HttpError(413, "Too many files in DICOM preview upload.")));
+    busboy.on("finish", () => {
+      uploadFinished = true;
+      Promise.all(writes)
+        .then(() => {
+          if (settled) return;
+          if (files.length === 0) {
+            fail(new HttpError(400, "At least one DICOM preview file is required."));
+            return;
+          }
+          settled = true;
+          resolve({ files: files.sort((a, b) => a.previewIndex - b.previewIndex), tempDir });
+        })
+        .catch(fail);
+    });
+
+    req.pipe(busboy);
+  });
+}
+
 export const __pacsRouteTestables = {
   stageDicomRemapMultipartFiles,
+  stageDicomRemapPreviewMultipartFiles,
 };
 
 // ---------------------------------------------------------------------------
@@ -444,6 +574,24 @@ pacsRouter.post(
 // ---------------------------------------------------------------------------
 // Internal DICOM remap/send tool (authenticated users, backend-orchestrated)
 // ---------------------------------------------------------------------------
+
+pacsRouter.post(
+  "/remap/preview-multipart",
+  ...authMiddleware,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as { user: AuthenticatedUserContext };
+    await assertDicomRemapRouteAccess(request.user.sub as UserId);
+    const staged = await stageDicomRemapPreviewMultipartFiles(req);
+    // Preview is informational only: final /process-multipart remains authoritative
+    // for study identity checks, patient replacement, Orthanc ingest, and PACS send.
+    const result = await previewDicomRemapMultipartUpload({
+      files: staged.files,
+      tempDir: staged.tempDir,
+    });
+
+    res.json(result);
+  })
+);
 
 pacsRouter.post(
   "/remap/jobs/process-multipart",

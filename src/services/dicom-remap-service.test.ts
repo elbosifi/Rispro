@@ -11,6 +11,7 @@ import {
   confirmDicomRemapAndSend,
   createDicomRemapMultipartUploadJob,
   createDicomRemapUploadJob,
+  previewDicomRemapMultipartUpload,
   resendDicomRemapJobToPacs,
   validateDicomRemapUploadFilesInput,
   validateExplicitConfirm,
@@ -369,6 +370,45 @@ test("dicom helper: rewriteDicomFileForRemap preserves study identity and replac
   assert.equal(summary.patientName, "NEW^PATIENT");
   assert.equal(summary.patientSex, "F");
   assert.equal(summary.patientBirthDate, "20000101");
+});
+
+test("dicom preview: parses bounded headers without Orthanc upload, rewrite, or send", async () => {
+  let orthancCalled = false;
+  __dicomRemapTestables.setOrthancFetchForTests(async () => {
+    orthancCalled = true;
+    throw new Error("preview must not call Orthanc");
+  });
+
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "rispro-dicom-preview-test-"));
+  const stagedPath = path.join(tempDir, "preview.dcm");
+  const body = makeSyntheticDicomBuffer({
+    StudyDescription: "Preview Study",
+    StudyDate: "20260505",
+    Modality: "CT",
+  });
+  await writeFile(stagedPath, body.subarray(0, __dicomRemapTestables.DICOM_REMAP_PREVIEW_HEADER_BYTES));
+
+  const result = await previewDicomRemapMultipartUpload({
+    tempDir,
+    files: [{
+      previewIndex: 0,
+      fileName: "preview.dcm",
+      originalFileName: "preview.dcm",
+      originalFilePath: "CD/STUDY/preview.dcm",
+      originalFileSize: body.length,
+      mimeType: "application/dicom",
+      path: stagedPath,
+      size: Math.min(body.length, __dicomRemapTestables.DICOM_REMAP_PREVIEW_HEADER_BYTES),
+    }],
+  });
+
+  assert.equal(orthancCalled, false);
+  assert.equal(result.previewOnly, true);
+  assert.equal(result.studies.length, 1);
+  assert.equal(result.studies[0]?.studyInstanceUid, "1.2.840.113619.2.55.3.604688433.1234.1456789012.1");
+  assert.equal(result.studies[0]?.patientId, "OLDID");
+  assert.equal(result.studies[0]?.patientName, "OLD^PATIENT");
+  assert.equal(result.studies[0]?.studyDescription, "Preview Study");
 });
 
 test("dicom helper: Orthanc resource id parser supports common response shapes", () => {

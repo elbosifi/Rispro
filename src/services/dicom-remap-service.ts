@@ -116,6 +116,47 @@ interface DicomUidRemapPlan {
   seriesInstanceUidByOriginal: Map<string, string>;
 }
 
+export interface DicomRemapPreviewFileMetadata {
+  fileName?: unknown;
+  filePath?: unknown;
+  fileSize?: unknown;
+}
+
+export interface DicomRemapPreviewStagedFile extends DicomRemapStagedUploadFile {
+  previewIndex: number;
+  originalFileName: string;
+  originalFilePath: string;
+  originalFileSize: number;
+}
+
+interface DicomRemapPreviewEntry {
+  previewIndex: number;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  studyInstanceUid: string;
+  seriesInstanceUid: string;
+  sopInstanceUid: string;
+  studyDate: string;
+  studyDescription: string;
+  modality: string;
+  patientId: string;
+  patientName: string;
+}
+
+interface DicomRemapPreviewStudySummary {
+  studyInstanceUid: string;
+  studyDate: string;
+  studyDescription: string;
+  modality: string;
+  patientId: string;
+  patientName: string;
+  seriesCount: number;
+  fileCount: number;
+  totalBytes: number;
+  files: DicomRemapPreviewEntry[];
+}
+
 interface OrthancStudyModifyPreflight {
   sourceStudyId: string;
   studyResponse: OrthancFetchResult;
@@ -143,6 +184,7 @@ const DICOM_IDENTITY_MAX_LENGTH = 64;
 const DICOM_CONTROL_CHAR_PATTERN = /[\x00-\x1F\x7F]/;
 const DICOM_REMAP_UPLOAD_CONCURRENCY = 2;
 const DICOM_REMAP_TEMP_PREFIX = "rispro-dicom-remap-";
+export const DICOM_REMAP_PREVIEW_HEADER_BYTES = 512 * 1024;
 const ACTIVE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation", "remapped", "sending"];
 const CANCELLABLE_JOB_STATUSES: DicomRemapJobStatus[] = ["uploaded", "awaiting_confirmation"];
 const TERMINAL_JOB_STATUSES: DicomRemapJobStatus[] = ["sent", "failed", "cancelled"];
@@ -287,6 +329,10 @@ function normalizeDicomBirthDate(value: string): string {
   return "";
 }
 
+function normalizeDicomUid(value: string): string {
+  return String(value || "").replace(/\0/g, "").trim();
+}
+
 function normalizeDicomPatientName(value: string): string {
   const clean = String(value || "").trim();
   if (!clean) return "";
@@ -311,6 +357,115 @@ function readDicomStringValue(value: unknown): string {
     return readDicomStringValue(record.Alphabetic ?? record.Value ?? "");
   }
   return "";
+}
+
+function readDicomPreviewString(buffer: Buffer, offset: number, length: number): string {
+  return buffer
+    .subarray(offset, Math.min(buffer.length, offset + Math.max(0, length)))
+    .toString("latin1")
+    .replace(/\0/g, "")
+    .trim();
+}
+
+function readDicomPreviewUint16(buffer: Buffer, offset: number): number | null {
+  if (offset + 2 > buffer.length) return null;
+  return buffer.readUInt16LE(offset);
+}
+
+function readDicomPreviewUint32(buffer: Buffer, offset: number): number | null {
+  if (offset + 4 > buffer.length) return null;
+  return buffer.readUInt32LE(offset);
+}
+
+function dicomPreviewTagKey(group: number, element: number): string {
+  return `${group.toString(16).padStart(4, "0")}${element.toString(16).padStart(4, "0")}`;
+}
+
+const DICOM_PREVIEW_LONG_VR = new Set(["OB", "OD", "OF", "OL", "OW", "SQ", "UC", "UR", "UT", "UN"]);
+const DICOM_PREVIEW_TARGET_TAGS = new Set([
+  "00020010",
+  "00080018",
+  "00080020",
+  "00080060",
+  "00081030",
+  "00100010",
+  "00100020",
+  "0020000d",
+  "0020000e",
+]);
+
+function parseDicomPreviewElements(buffer: Buffer, startOffset: number, explicitVr: boolean): Record<string, string> {
+  const tags: Record<string, string> = {};
+  let offset = startOffset;
+
+  while (offset + 8 <= buffer.length) {
+    const group = readDicomPreviewUint16(buffer, offset);
+    const element = readDicomPreviewUint16(buffer, offset + 2);
+    if (group == null || element == null) break;
+    const key = dicomPreviewTagKey(group, element);
+    if (key === "7fe00010") break;
+
+    let valueOffset = offset + 8;
+    let valueLength: number | null = null;
+    if (explicitVr) {
+      const vr = buffer.subarray(offset + 4, offset + 6).toString("latin1");
+      if (DICOM_PREVIEW_LONG_VR.has(vr)) {
+        valueLength = readDicomPreviewUint32(buffer, offset + 8);
+        valueOffset = offset + 12;
+      } else {
+        valueLength = readDicomPreviewUint16(buffer, offset + 6);
+        valueOffset = offset + 8;
+      }
+    } else {
+      valueLength = readDicomPreviewUint32(buffer, offset + 4);
+      valueOffset = offset + 8;
+    }
+
+    if (valueLength == null || valueLength === 0xffffffff || valueLength < 0) break;
+    const nextOffset = valueOffset + valueLength + (valueLength % 2);
+    if (valueOffset > buffer.length) break;
+
+    if (DICOM_PREVIEW_TARGET_TAGS.has(key)) {
+      const value = readDicomPreviewString(buffer, valueOffset, valueLength);
+      if (value) tags[key] = value;
+      if (tags["0020000d"] && tags["00100010"] && tags["00100020"] && tags["00080020"] && tags["00080060"]) {
+        break;
+      }
+    }
+
+    if (nextOffset <= offset) break;
+    offset = nextOffset;
+  }
+
+  return tags;
+}
+
+function parseDicomPreviewTags(buffer: Buffer): Record<string, string> {
+  const hasPreamble = buffer.length >= 132 && buffer.subarray(128, 132).toString("latin1") === "DICM";
+  const datasetStart = hasPreamble ? 132 : 0;
+  const metaTags = hasPreamble ? parseDicomPreviewElements(buffer, datasetStart, true) : {};
+  const transferSyntax = metaTags["00020010"] || "";
+  const explicitVr = transferSyntax !== "1.2.840.10008.1.2";
+
+  if (!hasPreamble) {
+    const explicitTags = parseDicomPreviewElements(buffer, 0, true);
+    if (explicitTags["0020000d"]) return explicitTags;
+    return parseDicomPreviewElements(buffer, 0, false);
+  }
+
+  let offset = datasetStart;
+  while (offset + 8 <= buffer.length) {
+    const group = readDicomPreviewUint16(buffer, offset);
+    if (group == null || group !== 0x0002) break;
+    const vr = buffer.subarray(offset + 4, offset + 6).toString("latin1");
+    const isLongVr = DICOM_PREVIEW_LONG_VR.has(vr);
+    const length = isLongVr ? readDicomPreviewUint32(buffer, offset + 8) : readDicomPreviewUint16(buffer, offset + 6);
+    const valueOffset = isLongVr ? offset + 12 : offset + 8;
+    if (length == null || length === 0xffffffff) break;
+    offset = valueOffset + length + (length % 2);
+  }
+
+  return parseDicomPreviewElements(buffer, offset, explicitVr);
 }
 
 function assertNoDicomControlChars(value: string, fieldName: string): void {
@@ -1989,6 +2144,165 @@ export async function cleanupStaleDicomRemapUploadTempDirs(maxAgeMs = 24 * 60 * 
   }));
 }
 
+function pickPreviewDisplayValue(existing: string, next: string): string {
+  if (!existing && next) return next;
+  return existing;
+}
+
+function summarizeDicomRemapPreview(entries: DicomRemapPreviewEntry[]): DicomRemapPreviewStudySummary[] {
+  const map = new Map<string, DicomRemapPreviewStudySummary & { seriesSet: Set<string> }>();
+  for (const entry of entries) {
+    const existing = map.get(entry.studyInstanceUid);
+    if (!existing) {
+      const seriesSet = new Set<string>();
+      if (entry.seriesInstanceUid) seriesSet.add(entry.seriesInstanceUid);
+      map.set(entry.studyInstanceUid, {
+        studyInstanceUid: entry.studyInstanceUid,
+        studyDate: entry.studyDate,
+        studyDescription: entry.studyDescription,
+        modality: entry.modality,
+        patientId: entry.patientId,
+        patientName: entry.patientName,
+        seriesCount: 0,
+        fileCount: 1,
+        totalBytes: entry.fileSize,
+        files: [entry],
+        seriesSet,
+      });
+      continue;
+    }
+
+    existing.studyDate = pickPreviewDisplayValue(existing.studyDate, entry.studyDate);
+    existing.studyDescription = pickPreviewDisplayValue(existing.studyDescription, entry.studyDescription);
+    existing.modality = pickPreviewDisplayValue(existing.modality, entry.modality);
+    existing.patientId = pickPreviewDisplayValue(existing.patientId, entry.patientId);
+    existing.patientName = pickPreviewDisplayValue(existing.patientName, entry.patientName);
+    existing.fileCount += 1;
+    existing.totalBytes += entry.fileSize;
+    existing.files.push(entry);
+    if (entry.seriesInstanceUid) existing.seriesSet.add(entry.seriesInstanceUid);
+  }
+
+  return Array.from(map.values())
+    .map((value) => ({
+      studyInstanceUid: value.studyInstanceUid,
+      studyDate: value.studyDate,
+      studyDescription: value.studyDescription,
+      modality: value.modality,
+      patientId: value.patientId,
+      patientName: value.patientName,
+      seriesCount: value.seriesSet.size || 1,
+      fileCount: value.fileCount,
+      totalBytes: value.totalBytes,
+      files: value.files,
+    }))
+    .sort((a, b) => b.fileCount - a.fileCount || b.totalBytes - a.totalBytes);
+}
+
+export async function previewDicomRemapMultipartUpload({
+  files,
+  tempDir,
+}: {
+  files: DicomRemapPreviewStagedFile[];
+  tempDir?: string;
+}): Promise<{
+  studies: DicomRemapPreviewStudySummary[];
+  skippedSidecarCount: number;
+  unparsedCount: number;
+  totalFileCount: number;
+  dicomLikeFileCount: number;
+  parsedDicomFileCount: number;
+  fallbackUploadFiles: DicomRemapPreviewEntry[];
+  unparsedFiles: Array<{
+    previewIndex: number;
+    fileName: string;
+    filePath: string;
+    fileSize: number;
+    reason: string;
+  }>;
+  previewOnly: true;
+  maxHeaderBytes: number;
+}> {
+  if (!Array.isArray(files) || files.length === 0) {
+    throw new HttpError(400, "At least one DICOM preview file is required.");
+  }
+
+  try {
+    const parsedEntries: DicomRemapPreviewEntry[] = [];
+    const unparsedFiles: Array<{
+      previewIndex: number;
+      fileName: string;
+      filePath: string;
+      fileSize: number;
+      reason: string;
+    }> = [];
+    let skippedSidecarCount = 0;
+    let dicomLikeFileCount = 0;
+
+    for (const file of files) {
+      const fileName = sanitizeFileName(file.originalFileName || file.fileName);
+      const filePath = String(file.originalFilePath || fileName).trim() || fileName;
+      const fileSize = Number.isFinite(file.originalFileSize) && file.originalFileSize > 0 ? file.originalFileSize : file.size;
+      const mimeType = String(file.mimeType || "application/octet-stream").trim();
+
+      if (isSkippableDicomRemapFolderEntry(fileName)) {
+        skippedSidecarCount += 1;
+        continue;
+      }
+      if (!isLikelyDicomFile(fileName, mimeType)) {
+        continue;
+      }
+
+      dicomLikeFileCount += 1;
+      const raw = await readFile(file.path);
+      const tags = parseDicomPreviewTags(raw.subarray(0, DICOM_REMAP_PREVIEW_HEADER_BYTES));
+      const studyInstanceUid = normalizeDicomUid(tags["0020000d"]);
+      if (!studyInstanceUid) {
+        unparsedFiles.push({
+          previewIndex: file.previewIndex,
+          fileName,
+          filePath,
+          fileSize,
+          reason: "missing_or_unreadable_study_uid",
+        });
+        continue;
+      }
+
+      parsedEntries.push({
+        previewIndex: file.previewIndex,
+        fileName,
+        filePath,
+        fileSize,
+        studyInstanceUid,
+        seriesInstanceUid: normalizeDicomUid(tags["0020000e"]),
+        sopInstanceUid: normalizeDicomUid(tags["00080018"]),
+        studyDate: String(tags["00080020"] || "").trim(),
+        studyDescription: String(tags["00081030"] || "").trim(),
+        modality: String(tags["00080060"] || "").trim(),
+        patientId: String(tags["00100020"] || "").trim(),
+        patientName: normalizeDicomPatientName(String(tags["00100010"] || "").trim()),
+      });
+    }
+
+    return {
+      studies: summarizeDicomRemapPreview(parsedEntries),
+      skippedSidecarCount,
+      unparsedCount: unparsedFiles.length,
+      totalFileCount: files.length,
+      dicomLikeFileCount,
+      parsedDicomFileCount: parsedEntries.length,
+      fallbackUploadFiles: parsedEntries,
+      unparsedFiles,
+      previewOnly: true,
+      maxHeaderBytes: DICOM_REMAP_PREVIEW_HEADER_BYTES,
+    };
+  } finally {
+    if (tempDir) {
+      await cleanupDicomRemapUploadTempDir(tempDir);
+    }
+  }
+}
+
 export async function createDicomRemapUploadJob({
   files,
   selectedStudyInstanceUID,
@@ -2884,6 +3198,7 @@ export async function assertDicomRemapRouteAccess(currentUserId: OptionalUserId)
 export const __dicomRemapTestables = {
   REMAP_ORTHANC_OPERATION_TIMEOUT_SECONDS,
   DICOM_REMAP_UPLOAD_CONCURRENCY,
+  DICOM_REMAP_PREVIEW_HEADER_BYTES,
   ACTIVE_JOB_STATUSES,
   CANCELLABLE_JOB_STATUSES,
   TERMINAL_JOB_STATUSES,

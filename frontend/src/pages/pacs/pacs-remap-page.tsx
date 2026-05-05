@@ -4,7 +4,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { statusLabel, t } from "@/lib/i18n";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { useLanguage } from "@/providers/language-provider";
-import { buildDicomUploadSelectionPlan, scanDicomStudiesFromFiles, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
+import { buildDicomUploadSelectionPlan, previewDicomStudiesFromFiles, scanDicomStudiesFromFiles, type DicomStudyScanResult } from "@/lib/dicom-study-scan";
 
 type JobStatus = "uploaded" | "awaiting_confirmation" | "remapped" | "sending" | "sent" | "failed" | "cancelled";
 type RemapWizardStep =
@@ -332,7 +332,13 @@ export default function PacsRemapPage() {
   });
 
   const scanMutation = useMutation({
-    mutationFn: async () => scanDicomStudiesFromFiles(files, { batchSize: 20 }),
+    mutationFn: async () => {
+      try {
+        return await previewDicomStudiesFromFiles(files);
+      } catch {
+        return scanDicomStudiesFromFiles(files, { batchSize: 20 });
+      }
+    },
     onMutate: () => {
       setProcessingStage("scanning");
       setErrorMessage("");
@@ -360,7 +366,15 @@ export default function PacsRemapPage() {
     },
     mutationFn: async () => {
       if (!selectedPatientId || !selectedDestinationKey) throw new Error("Patient and destination are required.");
-      const plan = buildDicomUploadSelectionPlan(scanResult, selectedStudyInstanceUid, enableFallbackUpload);
+      let authoritativeScanResult = scanResult;
+      if (scanResult?.previewOnly) {
+        // The fast preview is informational only. Before the confirmed upload,
+        // rebuild the full local file map so /process-multipart receives the
+        // selected study files and still performs authoritative backend checks.
+        authoritativeScanResult = await scanDicomStudiesFromFiles(files, { batchSize: 20 });
+        setScanResult(authoritativeScanResult);
+      }
+      const plan = buildDicomUploadSelectionPlan(authoritativeScanResult, selectedStudyInstanceUid, enableFallbackUpload);
       const uploadFiles = plan.files.length > 0 ? plan.files : files;
       if (uploadFiles.length === 0) throw new Error("No uploadable files were selected.");
 
@@ -370,8 +384,9 @@ export default function PacsRemapPage() {
 
       const formData = new FormData();
       uploadFiles.forEach((file) => formData.append("files", file, file.name));
-      if (selectedStudy?.studyInstanceUid) formData.append("selectedStudyInstanceUID", selectedStudy.studyInstanceUid);
-      if (!selectedStudy) formData.append("uploadMode", "fallback_all_candidates");
+      const selectedUidForUpload = plan.selectedStudyInstanceUid || selectedStudyInstanceUid;
+      if (selectedUidForUpload) formData.append("selectedStudyInstanceUID", selectedUidForUpload);
+      if (!selectedUidForUpload) formData.append("uploadMode", "fallback_all_candidates");
       formData.append("risproPatientId", selectedPatientId);
       formData.append("destinationPacsKey", selectedDestinationKey);
       formData.append("confirm", "true");

@@ -3,6 +3,8 @@ import * as dicomParser from "dicom-parser";
 const INITIAL_SCAN_BYTES = 512 * 1024;
 const RETRY_SCAN_BYTES = 2 * 1024 * 1024;
 const DEFAULT_BATCH_SIZE = 20;
+export const DICOM_PREVIEW_HEADER_BYTES = INITIAL_SCAN_BYTES;
+const MAX_PREVIEW_SAMPLE_FILES = 96;
 
 const SKIPPABLE_FILE_NAMES = new Set([
   "DICOMDIR",
@@ -33,6 +35,7 @@ const SKIPPABLE_EXTENSIONS = new Set([
 
 export interface DicomScanFileEntry {
   file: File;
+  previewIndex?: number;
   fileName: string;
   filePath: string;
   fileSize: number;
@@ -76,6 +79,8 @@ export interface DicomStudyScanResult {
   parsedDicomFileCount: number;
   fallbackUploadFiles: File[];
   unparsedFiles: DicomScanUnparsedEntry[];
+  previewOnly?: boolean;
+  maxHeaderBytes?: number;
 }
 
 export interface DicomUploadSelectionPlan {
@@ -135,6 +140,81 @@ function pickStudyDisplayValue(existing: string, next: string): string {
 function getFilePath(file: File): string {
   const withRelativePath = file as File & { webkitRelativePath?: string };
   return String(withRelativePath.webkitRelativePath || file.name || "").trim() || sanitizeFileName(file.name);
+}
+
+function selectPreviewSampleFiles(candidateFiles: File[], maxFiles = MAX_PREVIEW_SAMPLE_FILES): File[] {
+  if (candidateFiles.length <= maxFiles) return candidateFiles;
+  const selectedIndexes = new Set<number>();
+  const leadingCount = Math.min(24, maxFiles);
+  for (let index = 0; index < leadingCount; index += 1) {
+    selectedIndexes.add(index);
+  }
+  const remainingSlots = maxFiles - selectedIndexes.size;
+  for (let slot = 0; slot < remainingSlots; slot += 1) {
+    const index = Math.floor((slot * (candidateFiles.length - 1)) / Math.max(1, remainingSlots - 1));
+    selectedIndexes.add(index);
+  }
+  return Array.from(selectedIndexes)
+    .sort((a, b) => a - b)
+    .slice(0, maxFiles)
+    .map((index) => candidateFiles[index]!)
+    .filter(Boolean);
+}
+
+function rehydratePreviewResult(result: DicomStudyScanResult, sampledFiles: File[]): DicomStudyScanResult {
+  const fileByPreviewIndex = new Map<number, File>();
+  sampledFiles.forEach((file, previewIndex) => fileByPreviewIndex.set(previewIndex, file));
+
+  const studies = (result.studies || []).map((study) => ({
+    ...study,
+    files: (study.files || []).map((entry) => ({
+      ...entry,
+      file: fileByPreviewIndex.get(Number(entry.previewIndex)) || sampledFiles[0] || new File([], entry.fileName || "dicom.dcm"),
+    })),
+  }));
+
+  return {
+    ...result,
+    studies,
+    fallbackUploadFiles: sampledFiles,
+    previewOnly: true,
+  };
+}
+
+export async function previewDicomStudiesFromFiles(files: File[]): Promise<DicomStudyScanResult> {
+  const allFiles = Array.isArray(files) ? files : [];
+  const candidateFiles = allFiles.filter(isLikelyDicomCandidate);
+  const sampledFiles = selectPreviewSampleFiles(candidateFiles);
+  if (sampledFiles.length === 0) {
+    throw new Error("No DICOM-like files were found for preview.");
+  }
+
+  const formData = new FormData();
+  formData.append("fileMetadata", JSON.stringify(sampledFiles.map((file) => ({
+    fileName: sanitizeFileName(file.name),
+    filePath: getFilePath(file),
+    fileSize: Number(file.size || 0),
+  }))));
+
+  sampledFiles.forEach((file) => {
+    formData.append("files", file.slice(0, DICOM_PREVIEW_HEADER_BYTES), file.name);
+  });
+
+  const response = await fetch("/api/pacs/remap/preview-multipart", {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+  if (!response.ok) {
+    throw new Error(response.statusText || "DICOM preview failed.");
+  }
+
+  const result = await response.json() as DicomStudyScanResult;
+  if ((result.studies || []).length === 0) {
+    throw new Error("DICOM preview did not find a study.");
+  }
+
+  return rehydratePreviewResult(result, sampledFiles);
 }
 
 async function parseDicomHeader(file: File): Promise<DicomScanFileEntry | null> {

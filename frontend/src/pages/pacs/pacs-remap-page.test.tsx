@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import PacsRemapPage from "./pacs-remap-page";
 
 const apiMock = vi.fn();
+const previewMock = vi.fn();
 const scanMock = vi.fn();
 const buildPlanMock = vi.fn();
 
@@ -33,6 +34,7 @@ vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
 }));
 
 vi.mock("@/lib/dicom-study-scan", () => ({
+  previewDicomStudiesFromFiles: (...args: unknown[]) => previewMock(...args),
   scanDicomStudiesFromFiles: (...args: unknown[]) => scanMock(...args),
   buildDicomUploadSelectionPlan: (...args: unknown[]) => buildPlanMock(...args),
 }));
@@ -86,6 +88,7 @@ describe("PacsRemapPage wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     FakeXHR.instances.length = 0;
+    previewMock.mockRejectedValue(new Error("preview unavailable"));
     vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
@@ -116,6 +119,44 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.change(fileInput, { target: { files: [file] } });
     expect(scanMock).not.toHaveBeenCalled();
     expect(FakeXHR.instances.length).toBe(0);
+  });
+
+  it("clicking scan uses preview endpoint path before heavy process upload", async () => {
+    previewMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "Preview", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "Preview^Patient", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [new File(["1"], "a1.dcm")] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      fallbackUploadFiles: [],
+      unparsedFiles: [],
+      previewOnly: true,
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    expect(previewMock).toHaveBeenCalledTimes(1);
+    expect(scanMock).not.toHaveBeenCalled();
+    expect(FakeXHR.instances.length).toBe(0);
+  });
+
+  it("renders study cards from preview response", async () => {
+    previewMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "9.8.7", studyDescription: "Fast Preview Study", studyDate: "20260505", modality: "MR", patientId: "PX", patientName: "Fast^Patient", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [new File(["1"], "p1.dcm")] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      fallbackUploadFiles: [],
+      unparsedFiles: [],
+      previewOnly: true,
+    });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: [new File(["x"], "a.dcm")] } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    expect((await screen.findAllByText(/Fast Preview Study/i)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Fast\^Patient/i)).length).toBeGreaterThan(0);
   });
 
   it("requires explicit study selection when multiple studies detected", async () => {
@@ -200,6 +241,44 @@ describe("PacsRemapPage wizard", () => {
     expect((sent?.get("risproPatientId") as string) || "").toBe("10");
     expect((sent?.get("destinationPacsKey") as string) || "").toBe("1");
     expect((sent?.get("confirm") as string) || "").toBe("true");
+  });
+
+  it("final confirmed action still posts full files to process-multipart after fast preview", async () => {
+    const fullFiles = [new File(["full-1"], "full1.dcm"), new File(["full-2"], "full2.dcm")];
+    previewMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "Preview", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [fullFiles[0]] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      fallbackUploadFiles: [fullFiles[0]],
+      unparsedFiles: [],
+      previewOnly: true,
+    });
+    scanMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "Preview", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 2, totalBytes: 20, files: fullFiles },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      fallbackUploadFiles: fullFiles,
+      unparsedFiles: [],
+    });
+    buildPlanMock.mockReturnValue({ files: fullFiles, selectedStudyInstanceUid: "1.2.3", usesFallback: false });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: fullFiles } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
+    const comboBoxes = screen.getAllByRole("combobox");
+    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+
+    await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
+    expect(scanMock).toHaveBeenCalledTimes(1);
+    expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/process-multipart");
+    expect(FakeXHR.instances[0]?.sentBody?.getAll("files")).toHaveLength(2);
   });
 
   it("preselects the default PACS destination", async () => {
