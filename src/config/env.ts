@@ -118,6 +118,7 @@ export interface EnvConfig {
   santeHl7Enabled: boolean;
   santeHl7OutputFolderPath: string;
   santeHl7AllowedBasePaths: string;
+  santeHl7HostOutboxHint: string;
   mppsBridgePort: number;
   mppsBridgeAeTitle: string;
   mppsAuthEnabled: boolean;
@@ -188,6 +189,7 @@ export const env: EnvConfig = {
   santeHl7Enabled: readBoolean("SANTE_HL7_ENABLED", false),
   santeHl7OutputFolderPath: String(process.env.SANTE_HL7_OUTPUT_FOLDER_PATH || "").trim(),
   santeHl7AllowedBasePaths: String(process.env.SANTE_HL7_ALLOWED_BASE_PATHS || "storage/sante-hl7-output").trim(),
+  santeHl7HostOutboxHint: String(process.env.SANTE_HL7_HOST_OUTBOX_HINT || "").trim(),
   mppsBridgePort: readPositiveInteger("MPPS_BRIDGE_PORT", 11113),
   mppsBridgeAeTitle: String(process.env.MPPS_BRIDGE_AE_TITLE || "RISPRO_MPPS").trim(),
   mppsAuthEnabled: readBoolean("MPPS_AUTH_ENABLED", false),

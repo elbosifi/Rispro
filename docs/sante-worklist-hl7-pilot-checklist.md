@@ -12,20 +12,21 @@ RISpro remains the source of truth for patients, appointments, accession numbers
 
 ## Backend Path Setup
 
-- Mount the Sante import folder or share into the RISpro backend/container.
-- Ensure the mount path is inside `SANTE_HL7_ALLOWED_BASE_PATHS`.
-- Default allowed base path is `storage/sante-hl7-output`.
-- Configure the UI output folder path as the backend/container path, not a browser or workstation path.
+- The Docker setup/update scripts create `storage/sante-hl7-outbox` on the RISpro host.
+- Docker bind-mounts that host folder into the RISpro backend at `/app/storage/sante-hl7-outbox`.
+- The default allowed base path is `/app/storage/sante-hl7-outbox`.
+- Configure the UI output folder path as `/app/storage/sante-hl7-outbox`.
+- If Sante needs a Windows share path, share the RISpro host folder `storage/sante-hl7-outbox` from Windows and point Sante Worklist Server to that share.
 - Use Settings -> Sante Worklist Server -> Test Folder Access before enabling shadow mode.
 
 ## Pilot Steps
 
 1. Apply database migrations.
-2. Confirm `SANTE_HL7_ALLOWED_BASE_PATHS` includes the backend-visible mounted folder.
+2. Confirm `SANTE_HL7_ALLOWED_BASE_PATHS` includes `/app/storage/sante-hl7-outbox`.
 3. Open Settings -> Sante Worklist Server.
 4. Set mode to `shadow`.
 5. Keep internal MWL active.
-6. Set output folder path and file extension to match Sante import settings.
+6. Set output folder path to `/app/storage/sante-hl7-outbox` and file extension to match Sante import settings.
 7. Run Test Folder Access.
 8. Send Synthetic Test HL7 and confirm Sante imports or marks it as expected.
 9. Create a non-critical test appointment and confirm RISpro queues/writes an HL7 file.
@@ -45,4 +46,3 @@ RISpro remains the source of truth for patients, appointments, accession numbers
 - Set Settings -> Sante Worklist Server -> Enabled to Disabled.
 - Internal RISpro MWL and Orthanc/current MWL remain available.
 - Existing Sante files already dropped into the import folder are controlled by Sante import behavior.
-

@@ -52,12 +52,13 @@ export interface SanteHl7Summary {
     lastError: string;
     updatedAt: string;
   }>;
-  settings: {
-    enabled: boolean;
-    mode: string;
-    outputFolderPath: string;
-    allowedBasePaths: string[];
-  };
+    settings: {
+      enabled: boolean;
+      mode: string;
+      outputFolderPath: string;
+      allowedBasePaths: string[];
+      hostOutboxHint: string;
+    };
 }
 
 const ACTIVE_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
@@ -656,6 +657,7 @@ export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
       mode: settings.mode,
       outputFolderPath: settings.outputFolderPath,
       allowedBasePaths: settings.allowedBasePaths,
+      hostOutboxHint: settings.hostOutboxHint,
     },
   };
 }

@@ -40,6 +40,7 @@ export interface ResolvedSanteWorklistSettings {
   patientIdField: "identifier_value" | "mrn" | "national_id" | "patient_id";
   patientNameField: "english_full_name" | "arabic_full_name";
   allowedBasePaths: string[];
+  hostOutboxHint: string;
 }
 
 export const SANTE_HL7_DEFAULTS: Record<string, string> = {
@@ -257,6 +258,7 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
       : "identifier_value",
     patientNameField: db.patient_name_field === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
     allowedBasePaths,
+    hostOutboxHint: normalizeOptionalText(env.santeHl7HostOutboxHint),
   };
 }
 
@@ -269,4 +271,3 @@ export async function testSanteOutputFolderAccess(folderPath?: string): Promise<
   await fs.access(target, fs.constants.W_OK);
   return { ok: true, path: target, message: "Folder is backend-visible and writable." };
 }
-

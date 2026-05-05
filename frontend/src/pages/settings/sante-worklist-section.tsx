@@ -47,6 +47,7 @@ type SummaryResponse = {
       mode: string;
       outputFolderPath: string;
       allowedBasePaths: string[];
+      hostOutboxHint: string;
     };
   };
 };
@@ -242,6 +243,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <div className="p-3 rounded-lg border border-stone-200 dark:border-stone-700 text-xs space-y-1">
             <p>Resolved mode: {summary?.settings.mode || "unknown"}</p>
             <p>Resolved folder: {summary?.settings.outputFolderPath || "(empty)"}</p>
+            <p>Host folder to share/copy: {summary?.settings.hostOutboxHint || "(not provided by deployment)"}</p>
             <p>Allowed bases: {(summary?.settings.allowedBasePaths || []).join(", ") || "(none)"}</p>
           </div>
         </div>
@@ -349,4 +351,3 @@ function QueryError({ message }: { message: string }) {
     </div>
   );
 }
-

@@ -31,6 +31,7 @@ function settings(): ResolvedSanteWorklistSettings {
     patientIdField: "identifier_value",
     patientNameField: "english_full_name",
     allowedBasePaths: ["storage/sante-hl7-output"],
+    hostOutboxHint: "storage/sante-hl7-output",
   };
 }
 
@@ -66,4 +67,3 @@ test("buildSanteOrmO01Message escapes HL7 separators", () => {
   assert.match(message.message, /Pipe\\F\\Caret\\S\\Amp\\T\\Back\\E\\Name/);
   assert.match(message.message, /\rORC\|XO\|/);
 });
-
