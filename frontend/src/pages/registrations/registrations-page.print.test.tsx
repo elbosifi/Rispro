@@ -11,6 +11,7 @@ const fetchAppointmentLookupsMock = vi.fn();
 const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
+const sendPatientWebPushNotificationMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
 const rescheduleV2BookingMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
@@ -24,7 +25,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettingsMock(...args),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
-  sendPatientWebPushNotification: vi.fn(),
+  sendPatientWebPushNotification: (...args: unknown[]) => sendPatientWebPushNotificationMock(...args),
 }));
 
 vi.mock("@/v2/appointments/api", () => ({
@@ -70,6 +71,8 @@ describe("RegistrationsPage print actions", () => {
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockPushToast.mockReset();
+    sendPatientWebPushNotificationMock.mockReset();
+    sendPatientWebPushNotificationMock.mockResolvedValue({});
     getAppointmentByIdMock.mockReset();
     useV2AvailabilityMock.mockReset();
     rescheduleV2BookingMock.mockReset();
@@ -94,6 +97,8 @@ describe("RegistrationsPage print actions", () => {
         status: "scheduled",
         isWalkIn: false,
         notes: null,
+        phone1: "0912345678",
+        patientWebPushSubscribed: true,
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
       },
     ]);
@@ -154,6 +159,8 @@ describe("RegistrationsPage print actions", () => {
       status: "scheduled",
       isWalkIn: false,
       notes: null,
+      phone1: "0912345678",
+      patientWebPushSubscribed: true,
       publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
     });
     fetchAppointmentLookupsMock.mockResolvedValue({
@@ -177,6 +184,91 @@ describe("RegistrationsPage print actions", () => {
     await waitFor(() => {
       expect(mockPrintAppointmentSlipById).toHaveBeenCalledWith(7, "en");
     });
+  });
+
+  it("renders fixed icon action slots with stable labels", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
+
+    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const actionLabels = within(row)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+
+    expect(actionLabels).toEqual(["Print", "Link", "WhatsApp", "Notify", "Manage"]);
+  });
+
+  it("keeps WhatsApp and Notify action slots disabled when unavailable", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      {
+        id: 10,
+        modalityId: 1,
+        examTypeId: 3,
+        accessionNumber: "ACC-10",
+        dailySequence: 1,
+        patientId: 1,
+        caseCategory: "non_oncology",
+        arabicFullName: "Unavailable Actions",
+        englishFullName: "Unavailable Actions",
+        modalityNameAr: "CT",
+        modalityNameEn: "CT",
+        examNameAr: "CT Head",
+        examNameEn: "CT Head",
+        priorityNameAr: null,
+        priorityNameEn: null,
+        appointmentDate: "2027-01-03",
+        status: "scheduled",
+        isWalkIn: false,
+        notes: null,
+        phone1: null,
+        patientWebPushSubscribed: false,
+        publicAppointmentUrl: null,
+      },
+    ]);
+
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-10")).toBeTruthy();
+    });
+
+    const row = screen.getByText("ACC-10").closest('[role="button"]') as HTMLElement;
+    const buttons = within(row).getAllByRole("button") as HTMLButtonElement[];
+
+    expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+      "Print",
+      "Link",
+      "WhatsApp",
+      "Notify",
+      "Manage",
+    ]);
+    expect(buttons[2].disabled).toBe(true);
+    expect(buttons[3].disabled).toBe(true);
+    expect(buttons[2].getAttribute("title")).toBe("No patient phone number is available for this registration.");
+    expect(buttons[3].getAttribute("title")).toBe("Web notifications not enabled");
+  });
+
+  it("opens WhatsApp and Notify dialogs from the icon actions", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
+
+    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "WhatsApp" }));
+    expect(screen.getByText("Send WhatsApp message")).toBeTruthy();
+
+    await userEvent.click(screen.getByTestId("registrations-whatsapp-backdrop"));
+    await waitFor(() => {
+      expect(screen.queryByText("Send WhatsApp message")).toBeNull();
+    });
+
+    await userEvent.click(within(row).getByRole("button", { name: "Notify" }));
+    expect(screen.getByText("Send patient notification")).toBeTruthy();
   });
 
   it("prints directly from the preview modal confirm button", async () => {
