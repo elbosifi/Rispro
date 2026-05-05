@@ -833,7 +833,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
         </div>
       </div>
 
-      {showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
+      {!subscription && !showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
         <div className="mt-4">
           <ActionButton tone={showOptions ? "neutral" : "primary"} disabled={status === "loading" || !config?.enabled} onClick={() => setShowOptions((current) => !current)} icon={<Bell className="h-4 w-4" />}>
             {showOptions ? "إخفاء خيارات التنبيهات" : subscription ? "إدارة التنبيهات" : labels?.subscribeButtonAr || props.settings.webPushSubscribeButtonAr}
@@ -841,7 +841,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
         </div>
       ) : null}
 
-      {showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
+      {!subscription && showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
         <div className="space-y-2">
           <NotificationPreferenceRow label="تذكير قبل الموعد" checked={preferences.appointmentReminder24h} onChange={(checked) => updatePreference("appointmentReminder24h", checked)} />
           <NotificationPreferenceRow label="تغيير تاريخ أو وقت الموعد" checked={preferences.appointmentRescheduled} onChange={(checked) => updatePreference("appointmentRescheduled", checked)} />
@@ -871,7 +871,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
 
       {message ? <p className="mt-3 text-sm leading-7 text-slate-600">{message}</p> : null}
 
-      {!serverDisabled && status !== "unsupported" && status !== "denied" ? (
+      {!serverDisabled && status !== "unsupported" && status !== "denied" && (subscription || showOptions) ? (
         <div className="mt-4 flex flex-col gap-3 sm:flex-row">
           {subscription ? (
             <ActionButton tone="neutral" disabled={status === "loading"} onClick={handleUnsubscribe} icon={<Bell className="h-4 w-4" />}>

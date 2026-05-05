@@ -17,6 +17,12 @@ import { listBookingsService } from "../../booking/services/list-bookings.servic
 import type { CreateAppointmentDto, UpdateAppointmentDto } from "../../api/dto/appointment.dto.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import type { CapacityResolutionMode } from "../../shared/types/common.js";
+import {
+  enqueueStaffPatientWebPushMessage,
+  prepareDueNotificationDeliveries,
+  processPatientPushDeliveries,
+  type PatientNotificationEventType,
+} from "../../../../services/patient-web-push-service.js";
 
 const router = Router();
 
@@ -249,6 +255,64 @@ router.post(
       booking: result.booking,
       previousStatus: result.previousStatus,
     });
+  })
+);
+
+/**
+ * POST /api/v2/appointments/:id/patient-notification
+ * Send a generic browser notification to a patient already subscribed from the QR page.
+ */
+router.post(
+  "/:id/patient-notification",
+  asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
+    const bookingId = parseInt(String(req.params.id), 10);
+    if (isNaN(bookingId)) {
+      res.status(400).json({ error: "Invalid booking ID" });
+      return;
+    }
+
+    const body = (req.body ?? {}) as {
+      title?: unknown;
+      message?: unknown;
+      templateEventType?: unknown;
+    };
+    const allowedTemplates = new Set<PatientNotificationEventType>([
+      "appointment_reminder_24h",
+      "appointment_rescheduled",
+      "appointment_cancelled",
+      "appointment_changed",
+      "report_ready",
+      "image_ready",
+      "test",
+    ]);
+    const requestedTemplate = String(body.templateEventType || "");
+    const templateEventType = allowedTemplates.has(requestedTemplate as PatientNotificationEventType)
+      ? (requestedTemplate as PatientNotificationEventType)
+      : undefined;
+
+    const result = await enqueueStaffPatientWebPushMessage({
+      bookingId,
+      title: body.title,
+      body: body.message,
+      templateEventType,
+    });
+
+    void (async () => {
+      try {
+        await prepareDueNotificationDeliveries(10);
+        await processPatientPushDeliveries(10);
+      } catch (error) {
+        console.warn(
+          JSON.stringify({
+            type: "staff_patient_web_push_delivery_failed",
+            bookingId,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        );
+      }
+    })();
+
+    res.status(202).json(result);
   })
 );
 

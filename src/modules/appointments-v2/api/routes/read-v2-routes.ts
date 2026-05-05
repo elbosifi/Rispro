@@ -150,6 +150,14 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          (
+            select count(*)::int
+            from patient_web_push_booking_subscriptions bs
+            join patient_web_push_subscriptions s on s.id = bs.subscription_id
+            where bs.booking_id = b.id
+              and bs.enabled = true
+              and s.enabled = true
+          ) as patient_web_push_subscription_count,
           null::int as modality_slot_number
         from appointments_v2.bookings b
         join patients p on p.id = b.patient_id
@@ -236,6 +244,14 @@ router.get(
           et.specific_instruction_en as exam_specific_instruction_en,
           rp.name_ar as priority_name_ar,
           rp.name_en as priority_name_en,
+          (
+            select count(*)::int
+            from patient_web_push_booking_subscriptions bs
+            join patient_web_push_subscriptions s on s.id = bs.subscription_id
+            where bs.booking_id = b.id
+              and bs.enabled = true
+              and s.enabled = true
+          ) as patient_web_push_subscription_count,
           null::int as modality_slot_number
         from appointments_v2.bookings b
         join patients p on p.id = b.patient_id

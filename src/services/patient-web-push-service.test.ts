@@ -3,10 +3,14 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const migration = readFileSync("src/db/migrations/057_patient_web_push_notifications.sql", "utf8");
+const staffMessageMigration = readFileSync("src/db/migrations/059_patient_web_push_staff_message.sql", "utf8");
 const pushService = readFileSync("src/services/patient-web-push-service.ts", "utf8");
 const worker = readFileSync("src/services/patient-notification-worker.ts", "utf8");
 const cancelService = readFileSync("src/modules/appointments-v2/booking/services/cancel-booking.service.ts", "utf8");
 const rescheduleService = readFileSync("src/modules/appointments-v2/booking/services/reschedule-booking.service.ts", "utf8");
+const appointmentsRoutes = readFileSync("src/modules/appointments-v2/api/routes/appointments-v2-routes.ts", "utf8");
+const readRoutes = readFileSync("src/modules/appointments-v2/api/routes/read-v2-routes.ts", "utf8");
+const registrationsPage = readFileSync("frontend/src/pages/registrations/registrations-page.tsx", "utf8");
 
 test("patient web push schema uses corrected subscription and delivery model", () => {
   assert.match(migration, /create table if not exists patient_web_push_subscriptions/);
@@ -58,4 +62,23 @@ test("booking workflows enqueue notifications without blocking workflow completi
   assert.match(rescheduleService, /eventType: "appointment_changed"/);
   assert.match(rescheduleService, /if \(result\.dateTimeChanged\)/);
   assert.match(rescheduleService, /else if \(result\.patientVisibleDetailsChanged\)/);
+});
+
+test("staff can send generic patient web push messages only when subscribed", () => {
+  assert.match(staffMessageMigration, /'staff_message'/);
+  assert.match(pushService, /"staff_message"/);
+  assert.match(pushService, /hasActivePatientWebPushSubscription/);
+  assert.match(pushService, /patient_web_push_not_subscribed/);
+  assert.match(pushService, /eventType: "staff_message"/);
+  assert.match(appointmentsRoutes, /\/:id\/patient-notification/);
+  assert.match(appointmentsRoutes, /prepareDueNotificationDeliveries\(10\)/);
+  assert.match(appointmentsRoutes, /processPatientPushDeliveries\(10\)/);
+});
+
+test("registrations expose subscription badge and staff notification action", () => {
+  assert.match(readRoutes, /patient_web_push_subscription_count/);
+  assert.match(registrationsPage, /patientWebPushSubscribed/);
+  assert.match(registrationsPage, /webPushBadge/);
+  assert.match(registrationsPage, /sendPatientWebPushNotification/);
+  assert.match(registrationsPage, /webPushPrivacyHint/);
 });

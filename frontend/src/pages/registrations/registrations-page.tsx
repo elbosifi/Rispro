@@ -6,6 +6,7 @@ import {
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
   fetchPatientQrSettings,
+  sendPatientWebPushNotification,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
@@ -49,6 +50,12 @@ export default function RegistrationsPage() {
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
   const [manageTab, setManageTab] = useState<"details" | "documents" | "cancel">("details");
+  const [notificationAppointment, setNotificationAppointment] =
+    useState<AppointmentWithDetails | null>(null);
+  const [notificationMode, setNotificationMode] = useState<"template" | "custom">("template");
+  const [notificationTemplate, setNotificationTemplate] = useState("appointment_reminder_24h");
+  const [notificationTitle, setNotificationTitle] = useState("");
+  const [notificationMessage, setNotificationMessage] = useState("");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -102,6 +109,34 @@ export default function RegistrationsPage() {
     },
   });
 
+  const sendNotificationMutation = useMutation({
+    mutationFn: async () => {
+      if (!notificationAppointment) throw new Error("No appointment selected.");
+      return sendPatientWebPushNotification(notificationAppointment.id, {
+        templateEventType: notificationMode === "template" ? notificationTemplate : undefined,
+        title: notificationMode === "custom" ? notificationTitle : undefined,
+        message: notificationMode === "custom" ? notificationMessage : undefined,
+      });
+    },
+    onSuccess: () => {
+      pushToast({
+        type: "success",
+        title: t("registrations.webPushSendSuccessTitle"),
+        message: t("registrations.webPushSendSuccessMessage"),
+      });
+      setNotificationAppointment(null);
+      setNotificationTitle("");
+      setNotificationMessage("");
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: t("registrations.webPushSendFailedTitle"),
+        message: err?.message || t("registrations.webPushSendFailedMessage"),
+      });
+    },
+  });
+
   const modalities = lookups?.modalities ?? [];
   const listWindowLabel =
     filters.dateMode === "all"
@@ -113,6 +148,14 @@ export default function RegistrationsPage() {
   const tomorrowValue = isoDateDaysFromNow(1);
   const isTodayShortcutActive = filters.dateMode === "single" && filters.date === todayValue;
   const isTomorrowShortcutActive = filters.dateMode === "single" && filters.date === tomorrowValue;
+  const notificationTemplates = [
+    { value: "appointment_reminder_24h", label: t("registrations.webPushTemplateReminder") },
+    { value: "appointment_rescheduled", label: t("registrations.webPushTemplateRescheduled") },
+    { value: "appointment_changed", label: t("registrations.webPushTemplateChanged") },
+    { value: "appointment_cancelled", label: t("registrations.webPushTemplateCancelled") },
+    { value: "report_ready", label: t("registrations.webPushTemplateReportReady") },
+    { value: "test", label: t("registrations.webPushTemplateTest") },
+  ];
 
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
     key: K,
@@ -256,6 +299,17 @@ export default function RegistrationsPage() {
     setSelectedAppointment(appointment);
     setManageTab("details");
   };
+
+  const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
+    setNotificationAppointment(appointment);
+    setNotificationMode("template");
+    setNotificationTemplate("appointment_reminder_24h");
+    setNotificationTitle("");
+    setNotificationMessage("");
+  };
+
+  const canSendCustomNotification =
+    notificationMode === "template" || (notificationTitle.trim().length > 0 && notificationMessage.trim().length > 0);
 
   const closeManageDrawer = () => {
     setSelectedAppointment(null);
@@ -602,6 +656,11 @@ export default function RegistrationsPage() {
                             {patientName}
                           </p>
                           <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
+                          {apt.patientWebPushSubscribed ? (
+                            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[8px] font-semibold text-emerald-700">
+                              {t("registrations.webPushBadge")}
+                            </span>
+                          ) : null}
                         </div>
                         <p className="mt-0.5 truncate text-[9px] leading-none text-muted-foreground">
                           {[
@@ -643,6 +702,20 @@ export default function RegistrationsPage() {
                       </div>
 
                       <div className="flex justify-end gap-1">
+                        {apt.patientWebPushSubscribed ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPatientNotificationDialog(apt);
+                            }}
+                            className="h-7 px-2 text-[9px]"
+                          >
+                            {t("registrations.webPushSend")}
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           size="sm"
@@ -861,6 +934,131 @@ export default function RegistrationsPage() {
               ) : null}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {notificationAppointment ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-4"
+          onClick={() => setNotificationAppointment(null)}
+          role="presentation"
+          data-testid="patient-web-push-message-backdrop"
+        >
+          <form
+            className="w-full max-w-[520px] rounded-2xl border border-border bg-background p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!canSendCustomNotification || sendNotificationMutation.isPending) return;
+              sendNotificationMutation.mutate();
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">{t("registrations.webPushDialogTitle")}</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {chooseLocalized(
+                    language,
+                    notificationAppointment.arabicFullName,
+                    notificationAppointment.englishFullName,
+                  )}
+                </p>
+              </div>
+              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                {t("registrations.webPushBadge")}
+              </span>
+            </div>
+
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-900">
+              {t("registrations.webPushPrivacyHint")}
+            </p>
+
+            <div className="mt-3 flex rounded-xl border border-border bg-muted/20 p-1">
+              <button
+                type="button"
+                className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-medium transition-colors ${
+                  notificationMode === "template" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+                onClick={() => setNotificationMode("template")}
+              >
+                {t("registrations.webPushUseTemplate")}
+              </button>
+              <button
+                type="button"
+                className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-medium transition-colors ${
+                  notificationMode === "custom" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+                onClick={() => setNotificationMode("custom")}
+              >
+                {t("registrations.webPushCustom")}
+              </button>
+            </div>
+
+            {notificationMode === "template" ? (
+              <div className="mt-3">
+                <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                  {t("registrations.webPushTemplate")}
+                </label>
+                <select
+                  value={notificationTemplate}
+                  onChange={(e) => setNotificationTemplate(e.target.value)}
+                  className="input-premium w-full min-h-10"
+                >
+                  {notificationTemplates.map((entry) => (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                    {t("registrations.webPushTitle")}
+                  </label>
+                  <input
+                    value={notificationTitle}
+                    onChange={(e) => setNotificationTitle(e.target.value)}
+                    maxLength={80}
+                    className="input-premium w-full min-h-10"
+                    placeholder={t("registrations.webPushTitlePlaceholder")}
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                    {t("registrations.webPushMessage")}
+                  </label>
+                  <textarea
+                    value={notificationMessage}
+                    onChange={(e) => setNotificationMessage(e.target.value)}
+                    maxLength={180}
+                    rows={4}
+                    className="input-premium w-full resize-none"
+                    placeholder={t("registrations.webPushMessagePlaceholder")}
+                  />
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setNotificationAppointment(null)}
+              >
+                {t("toast.close")}
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={!canSendCustomNotification || sendNotificationMutation.isPending}
+              >
+                {sendNotificationMutation.isPending ? t("common.loading") : t("registrations.webPushSend")}
+              </Button>
+            </div>
+          </form>
         </div>
       ) : null}
 

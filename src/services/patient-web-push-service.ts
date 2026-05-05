@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { PoolClient } from "pg";
 import webPush, { type PushSubscription } from "web-push";
 import { env } from "../config/env.js";
@@ -16,6 +16,7 @@ export const PATIENT_NOTIFICATION_EVENT_TYPES = [
   "report_ready",
   "image_ready",
   "test",
+  "staff_message",
 ] as const;
 
 export const PATIENT_NOTIFICATION_EVENT_STATUSES = ["pending", "processing", "sent", "failed", "skipped"] as const;
@@ -286,6 +287,8 @@ function templateForEvent(settings: PatientQrSettings, eventType: PatientNotific
       return { title: settings.webPushImageReadyTitleAr || settings.webPushImageReadyTitle, body: settings.webPushImageReadyBodyAr || settings.webPushImageReadyBody };
     case "test":
       return { title: settings.webPushTestTitleAr || settings.webPushTestTitle, body: settings.webPushTestBodyAr || settings.webPushTestBody };
+    case "staff_message":
+      return { title: settings.webPushTestTitleAr || settings.webPushTestTitle, body: settings.webPushTestBodyAr || settings.webPushTestBody };
   }
 }
 
@@ -304,6 +307,7 @@ function preferenceColumnForEvent(eventType: PatientNotificationEventType): stri
     case "image_ready":
       return "image_ready";
     case "test":
+    case "staff_message":
       return null;
   }
 }
@@ -467,6 +471,7 @@ export async function enqueuePatientNotificationEvent(input: {
   scheduledFor?: Date;
   dedupeKey?: string;
   dedupeSuffix?: string;
+  payload?: Record<string, unknown>;
   client?: PoolClient;
 }): Promise<{ eventId: number | null; created: boolean }> {
   if (!isValidEventType(input.eventType)) return { eventId: null, created: false };
@@ -492,11 +497,68 @@ export async function enqueuePatientNotificationEvent(input: {
       input.eventType,
       dedupeKey,
       input.scheduledFor ?? new Date(),
-      JSON.stringify({ title: template.title, body: template.body }),
+      JSON.stringify({ title: template.title, body: template.body, ...(input.payload ?? {}) }),
     ]
   );
   const row = result.rows[0];
   return { eventId: row ? Number(row.id) : null, created: Boolean(row?.inserted) };
+}
+
+export async function hasActivePatientWebPushSubscription(bookingId: number): Promise<{ subscribed: boolean; count: number }> {
+  const result = await pool.query<{ count: number }>(
+    `
+      select count(*)::int as count
+      from patient_web_push_booking_subscriptions bs
+      join patient_web_push_subscriptions s on s.id = bs.subscription_id
+      where bs.booking_id = $1
+        and bs.enabled = true
+        and s.enabled = true
+    `,
+    [bookingId]
+  );
+  const count = Number(result.rows[0]?.count ?? 0);
+  return { subscribed: count > 0, count };
+}
+
+const STAFF_MESSAGE_TITLE_MAX = 80;
+const STAFF_MESSAGE_BODY_MAX = 180;
+
+function normalizeStaffMessagePart(value: unknown, maxLength: number): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+export async function enqueueStaffPatientWebPushMessage(input: {
+  bookingId: number;
+  title?: unknown;
+  body?: unknown;
+  templateEventType?: PatientNotificationEventType;
+}): Promise<{ eventId: number | null; created: boolean }> {
+  const active = await hasActivePatientWebPushSubscription(input.bookingId);
+  if (!active.subscribed) {
+    throw new HttpError(409, "Patient is not subscribed to browser notifications for this appointment.", {
+      code: "patient_web_push_not_subscribed",
+    });
+  }
+
+  const settings = await readPatientQrSettings();
+  const template =
+    input.templateEventType && input.templateEventType !== "staff_message"
+      ? templateForEvent(settings, input.templateEventType)
+      : null;
+  const title = normalizeStaffMessagePart(input.title ?? template?.title ?? "", STAFF_MESSAGE_TITLE_MAX);
+  const body = normalizeStaffMessagePart(input.body ?? template?.body ?? "", STAFF_MESSAGE_BODY_MAX);
+
+  if (!title || !body) {
+    throw new HttpError(400, "Notification title and message are required.", { code: "invalid_patient_web_push_message" });
+  }
+
+  return enqueuePatientNotificationEvent({
+    bookingId: input.bookingId,
+    eventType: "staff_message",
+    dedupeKey: `staff_message:${input.bookingId}:${Date.now()}:${randomUUID()}`,
+    scheduledFor: new Date(),
+    payload: { title, body },
+  });
 }
 
 export async function safeEnqueuePatientNotificationEvent(input: {

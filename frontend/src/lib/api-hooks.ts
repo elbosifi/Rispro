@@ -1436,6 +1436,16 @@ export async function deleteAppointment(id: number, voidReason: string) {
   return { ok: true };
 }
 
+export async function sendPatientWebPushNotification(
+  id: number,
+  payload: { title?: string; message?: string; templateEventType?: string }
+) {
+  return api<{ eventId: number | null; created: boolean }>(`/v2/appointments/${id}/patient-notification`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 // -- Registrations / Calendar / Modality / Doctor / Print (shared) --
 export async function fetchAppointments(params: Record<string, string | string[]>) {
   const query = new URLSearchParams();
