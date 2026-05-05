@@ -41,6 +41,7 @@ export interface ResolvedSanteWorklistSettings {
   patientNameField: "english_full_name" | "arabic_full_name";
   allowedBasePaths: string[];
   hostOutboxHint: string;
+  windowsShareSourceHint: string;
 }
 
 export const SANTE_HL7_DEFAULTS: Record<string, string> = {
@@ -259,6 +260,7 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
     patientNameField: db.patient_name_field === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
     allowedBasePaths,
     hostOutboxHint: normalizeOptionalText(env.santeHl7HostOutboxHint),
+    windowsShareSourceHint: normalizeOptionalText(env.santeHl7WindowsShareSourceHint || env.santeHl7HostOutboxHint),
   };
 }
 

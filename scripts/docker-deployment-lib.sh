@@ -9,6 +9,25 @@ ORTHANC_CONFIG_FILE="${ORTHANC_CONFIG_DIR}/orthanc.json"
 SANTE_HL7_HOST_OUTBOX_DIR="${PROJECT_ROOT}/storage/sante-hl7-outbox"
 SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
 
+windows_path_hint() {
+  local value="$1"
+  case "$value" in
+    /[a-zA-Z]/*)
+      local drive="${value:1:1}"
+      local rest="${value:3}"
+      printf '%s:\\%s' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's|/|\\|g')"
+      ;;
+    /mnt/[a-zA-Z]/*)
+      local drive="${value:5:1}"
+      local rest="${value:7}"
+      printf '%s:\\%s' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's|/|\\|g')"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
+
 log()  { printf '[INFO] %s\n' "$*"; }
 ok()   { printf '[OK]   %s\n' "$*"; }
 warn() { printf '[WARN] %s\n' "$*"; }
@@ -207,6 +226,7 @@ load_existing_config() {
   CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH="$(read_env_value SANTE_HL7_OUTPUT_FOLDER_PATH)"
   CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS="$(read_env_value SANTE_HL7_ALLOWED_BASE_PATHS)"
   CURRENT_SANTE_HL7_HOST_OUTBOX_HINT="$(read_env_value SANTE_HL7_HOST_OUTBOX_HINT)"
+  CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="$(read_env_value SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT)"
   CURRENT_DB_HOST="$(extract_db_url_host "${CURRENT_DATABASE_URL}")"
   CURRENT_DB_PORT="$(extract_db_url_port "${CURRENT_DATABASE_URL}")"
   CURRENT_DB_NAME="${CURRENT_DB_NAME:-$(extract_db_url_name "${CURRENT_DATABASE_URL}")}"
@@ -261,6 +281,7 @@ hydrate_deployment_config_from_current_env() {
   SANTE_HL7_OUTPUT_FOLDER_PATH="${CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_ALLOWED_BASE_PATHS="${CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_HOST_OUTBOX_HINT="${CURRENT_SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   MPPS_BRIDGE_PORT="${CURRENT_MPPS_BRIDGE_PORT:-11113}"
   MPPS_BRIDGE_AE_TITLE="${CURRENT_MPPS_BRIDGE_AE_TITLE:-RISPRO_MPPS}"
@@ -397,6 +418,7 @@ collect_deployment_config() {
   SANTE_HL7_OUTPUT_FOLDER_PATH="${CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_ALLOWED_BASE_PATHS="${CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_HOST_OUTBOX_HINT="${CURRENT_SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   if [ "$RISPRO_DB_MODE" = "internal" ]; then
     DB_USER="${CURRENT_DB_USER:-rispro}"
@@ -508,6 +530,7 @@ preflight_validate_env() {
   SANTE_HL7_OUTPUT_FOLDER_PATH="${SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_ALLOWED_BASE_PATHS="${SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
   SANTE_HL7_HOST_OUTBOX_HINT="${SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   if [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
     [ -n "$ORTHANC_USERNAME" ] || { err 'ORTHANC_USERNAME is required when ORTHANC_AUTH_ENABLED=true.'; return 1; }
@@ -600,6 +623,7 @@ SANTE_HL7_ENABLED=${SANTE_HL7_ENABLED}
 SANTE_HL7_OUTPUT_FOLDER_PATH=${SANTE_HL7_OUTPUT_FOLDER_PATH}
 SANTE_HL7_ALLOWED_BASE_PATHS=${SANTE_HL7_ALLOWED_BASE_PATHS}
 SANTE_HL7_HOST_OUTBOX_HINT=${SANTE_HL7_HOST_OUTBOX_HINT}
+SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT=${SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT}
 
 # -- MPPS Bridge --
 MPPS_BRIDGE_PORT=${MPPS_BRIDGE_PORT}
@@ -835,9 +859,9 @@ print_deployment_summary() {
     printf '  MPPS Bridge:     127.0.0.1:%s (AE: %s)\n' "$MPPS_BRIDGE_PORT" "$MPPS_BRIDGE_AE_TITLE"
   fi
 
-  printf '  Sante HL7 host:  %s\n' "$SANTE_HL7_HOST_OUTBOX_DIR"
+  printf '  Sante HL7 share: %s\n' "$SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT"
   printf '  Sante HL7 UI:    %s\n' "$SANTE_HL7_CONTAINER_OUTBOX_DIR"
-  printf '  Sante note:      Share the host folder above with the Sante Worklist Server if needed.\n'
+  printf '  Sante note:      Share the Windows folder above with the Sante Worklist Server if needed.\n'
 
   printf '\n  Supervisor username: %s\n' "$SEED_SUPERVISOR_USERNAME"
   printf '  Supervisor password: %s\n\n' "$SEED_SUPERVISOR_PASSWORD"

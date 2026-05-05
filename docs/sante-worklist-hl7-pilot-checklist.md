@@ -16,7 +16,8 @@ RISpro remains the source of truth for patients, appointments, accession numbers
 - Docker bind-mounts that host folder into the RISpro backend at `/app/storage/sante-hl7-outbox`.
 - The default allowed base path is `/app/storage/sante-hl7-outbox`.
 - Configure the UI output folder path as `/app/storage/sante-hl7-outbox`.
-- If Sante needs a Windows share path, share the RISpro host folder `storage/sante-hl7-outbox` from Windows and point Sante Worklist Server to that share.
+- The RISpro UI shows a "Windows folder to share" path. Use that Windows path when creating the network share.
+- If Sante needs a UNC path, share that Windows folder from the RISpro host and point Sante Worklist Server to the resulting share, for example `\\RISPRO-HOST\sante-hl7-outbox`.
 - Use Settings -> Sante Worklist Server -> Test Folder Access before enabling shadow mode.
 
 ## Pilot Steps

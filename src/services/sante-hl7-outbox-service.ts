@@ -58,6 +58,7 @@ export interface SanteHl7Summary {
       outputFolderPath: string;
       allowedBasePaths: string[];
       hostOutboxHint: string;
+      windowsShareSourceHint: string;
     };
 }
 
@@ -658,6 +659,7 @@ export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
       outputFolderPath: settings.outputFolderPath,
       allowedBasePaths: settings.allowedBasePaths,
       hostOutboxHint: settings.hostOutboxHint,
+      windowsShareSourceHint: settings.windowsShareSourceHint,
     },
   };
 }
