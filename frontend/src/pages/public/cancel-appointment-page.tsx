@@ -708,6 +708,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
   const [status, setStatus] = useState<"idle" | "loading" | "subscribed" | "unsubscribed" | "unsupported" | "denied" | "error">("idle");
   const [message, setMessage] = useState("");
   const [showIosHelp, setShowIosHelp] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -832,7 +833,15 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
         </div>
       </div>
 
-      {!serverDisabled && status !== "unsupported" && status !== "denied" ? (
+      {showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
+        <div className="mt-4">
+          <ActionButton tone={showOptions ? "neutral" : "primary"} disabled={status === "loading" || !config?.enabled} onClick={() => setShowOptions((current) => !current)} icon={<Bell className="h-4 w-4" />}>
+            {showOptions ? "إخفاء خيارات التنبيهات" : subscription ? "إدارة التنبيهات" : labels?.subscribeButtonAr || props.settings.webPushSubscribeButtonAr}
+          </ActionButton>
+        </div>
+      ) : null}
+
+      {showOptions && !serverDisabled && status !== "unsupported" && status !== "denied" ? (
         <div className="space-y-2">
           <NotificationPreferenceRow label="تذكير قبل الموعد" checked={preferences.appointmentReminder24h} onChange={(checked) => updatePreference("appointmentReminder24h", checked)} />
           <NotificationPreferenceRow label="تغيير تاريخ أو وقت الموعد" checked={preferences.appointmentRescheduled} onChange={(checked) => updatePreference("appointmentRescheduled", checked)} />
