@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { fetchAppointments, fetchPatientQrSettings, getAppointmentById } from "@/lib/api-hooks";
+import { fetchAppointments, fetchPatientQrSettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
@@ -124,6 +124,11 @@ export function CreateAppointmentTab({
     queryFn: fetchPatientQrSettings,
     staleTime: 60_000,
   });
+  const { data: queueArrivalSettings } = useQuery({
+    queryKey: ["settings", "queue_and_arrival"],
+    queryFn: () => fetchSettings("queue_and_arrival"),
+    staleTime: 60_000,
+  });
   const { form, actions } = useCreateAppointmentForm({
     oncology: patientQrSettings?.defaultReportRequiredForOncology ?? true,
     nonOncology: patientQrSettings?.defaultReportRequiredForNonOncology ?? false,
@@ -156,6 +161,8 @@ export function CreateAppointmentTab({
   const initialPatientAppliedRef = useRef(false);
   const isReceptionist = currentUserRole === "receptionist";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "disabled").trim().toLowerCase();
+  const isWalkInEnabled = queueArrivalSettings != null && ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -638,16 +645,18 @@ export function CreateAppointmentTab({
                 </select>
               </div>
 
-              <label className="flex items-center gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50 xl:col-span-2">
-                <input
-                  type="checkbox"
-                  id="isWalkIn"
-                  checked={form.isWalkIn}
-                  onChange={(e) => actions.setIsWalkIn(e.target.checked)}
-                  className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
-                />
-                <span className="text-sm sm:text-base font-semibold text-foreground">{t(language, "appointments.create.walkIn")}</span>
-              </label>
+              {isWalkInEnabled && (
+                <label className="flex items-center gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50 xl:col-span-2">
+                  <input
+                    type="checkbox"
+                    id="isWalkIn"
+                    checked={form.isWalkIn}
+                    onChange={(e) => actions.setIsWalkIn(e.target.checked)}
+                    className="w-5 h-5 cursor-pointer accent-[var(--accent)]"
+                  />
+                  <span className="text-sm sm:text-base font-semibold text-foreground">{t(language, "appointments.create.walkIn")}</span>
+                </label>
+              )}
 
               <label className="flex items-start gap-3 cursor-pointer user-select-none p-2.5 rounded-lg hover:bg-muted/50 xl:col-span-2">
                 <input

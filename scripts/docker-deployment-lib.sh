@@ -6,6 +6,27 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PROJECT_ROOT}/.env"
 ORTHANC_CONFIG_DIR="${PROJECT_ROOT}/docker/orthanc/generated"
 ORTHANC_CONFIG_FILE="${ORTHANC_CONFIG_DIR}/orthanc.json"
+SANTE_HL7_HOST_OUTBOX_DIR="${PROJECT_ROOT}/storage/sante-hl7-outbox"
+SANTE_HL7_CONTAINER_OUTBOX_DIR="/app/storage/sante-hl7-outbox"
+
+windows_path_hint() {
+  local value="$1"
+  case "$value" in
+    /[a-zA-Z]/*)
+      local drive="${value:1:1}"
+      local rest="${value:3}"
+      printf '%s:\\%s' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's|/|\\|g')"
+      ;;
+    /mnt/[a-zA-Z]/*)
+      local drive="${value:5:1}"
+      local rest="${value:7}"
+      printf '%s:\\%s' "$(printf '%s' "$drive" | tr '[:lower:]' '[:upper:]')" "$(printf '%s' "$rest" | sed 's|/|\\|g')"
+      ;;
+    *)
+      printf '%s' "$value"
+      ;;
+  esac
+}
 
 log()  { printf '[INFO] %s\n' "$*"; }
 ok()   { printf '[OK]   %s\n' "$*"; }
@@ -201,6 +222,11 @@ load_existing_config() {
   CURRENT_ORTHANC_MWL_ENABLED="$(read_env_value ORTHANC_MWL_ENABLED)"
   CURRENT_ORTHANC_MWL_SHADOW_MODE="$(read_env_value ORTHANC_MWL_SHADOW_MODE)"
   CURRENT_ORTHANC_WORKLIST_TARGET="$(read_env_value ORTHANC_WORKLIST_TARGET)"
+  CURRENT_SANTE_HL7_ENABLED="$(read_env_value SANTE_HL7_ENABLED)"
+  CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH="$(read_env_value SANTE_HL7_OUTPUT_FOLDER_PATH)"
+  CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS="$(read_env_value SANTE_HL7_ALLOWED_BASE_PATHS)"
+  CURRENT_SANTE_HL7_HOST_OUTBOX_HINT="$(read_env_value SANTE_HL7_HOST_OUTBOX_HINT)"
+  CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="$(read_env_value SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT)"
   CURRENT_DB_HOST="$(extract_db_url_host "${CURRENT_DATABASE_URL}")"
   CURRENT_DB_PORT="$(extract_db_url_port "${CURRENT_DATABASE_URL}")"
   CURRENT_DB_NAME="${CURRENT_DB_NAME:-$(extract_db_url_name "${CURRENT_DATABASE_URL}")}"
@@ -250,6 +276,12 @@ hydrate_deployment_config_from_current_env() {
   ORTHANC_AUTH_ENABLED="false"
   ORTHANC_USERNAME=""
   ORTHANC_PASSWORD=""
+
+  SANTE_HL7_ENABLED="${CURRENT_SANTE_HL7_ENABLED:-false}"
+  SANTE_HL7_OUTPUT_FOLDER_PATH="${CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_ALLOWED_BASE_PATHS="${CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_HOST_OUTBOX_HINT="${CURRENT_SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   MPPS_BRIDGE_PORT="${CURRENT_MPPS_BRIDGE_PORT:-11113}"
   MPPS_BRIDGE_AE_TITLE="${CURRENT_MPPS_BRIDGE_AE_TITLE:-RISPRO_MPPS}"
@@ -382,6 +414,11 @@ collect_deployment_config() {
   ORTHANC_AUTH_ENABLED="false"
   ORTHANC_USERNAME=""
   ORTHANC_PASSWORD=""
+  SANTE_HL7_ENABLED="${CURRENT_SANTE_HL7_ENABLED:-false}"
+  SANTE_HL7_OUTPUT_FOLDER_PATH="${CURRENT_SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_ALLOWED_BASE_PATHS="${CURRENT_SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_HOST_OUTBOX_HINT="${CURRENT_SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${CURRENT_SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   if [ "$RISPRO_DB_MODE" = "internal" ]; then
     DB_USER="${CURRENT_DB_USER:-rispro}"
@@ -490,6 +527,10 @@ preflight_validate_env() {
   fi
 
   validate_positive_integer "$ORTHANC_TIMEOUT_SECONDS" 'ORTHANC_TIMEOUT_SECONDS' || return 1
+  SANTE_HL7_OUTPUT_FOLDER_PATH="${SANTE_HL7_OUTPUT_FOLDER_PATH:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_ALLOWED_BASE_PATHS="${SANTE_HL7_ALLOWED_BASE_PATHS:-$SANTE_HL7_CONTAINER_OUTBOX_DIR}"
+  SANTE_HL7_HOST_OUTBOX_HINT="${SANTE_HL7_HOST_OUTBOX_HINT:-$SANTE_HL7_HOST_OUTBOX_DIR}"
+  SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT="${SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT:-$(windows_path_hint "$SANTE_HL7_HOST_OUTBOX_DIR")}"
 
   if [ "$ORTHANC_AUTH_ENABLED" = "true" ]; then
     [ -n "$ORTHANC_USERNAME" ] || { err 'ORTHANC_USERNAME is required when ORTHANC_AUTH_ENABLED=true.'; return 1; }
@@ -572,6 +613,17 @@ ORTHANC_AUTH_ENABLED=${ORTHANC_AUTH_ENABLED}
 ORTHANC_USERNAME=${ORTHANC_USERNAME}
 ORTHANC_PASSWORD=${ORTHANC_PASSWORD}
 ORTHANC_WORKLIST_TARGET=${ORTHANC_WORKLIST_TARGET}
+
+# -- Sante Worklist Server HL7 File-Drop --
+# The deployment scripts create and bind-mount this host folder:
+#   ${SANTE_HL7_HOST_OUTBOX_DIR}
+# RISpro writes inside the container at:
+#   ${SANTE_HL7_CONTAINER_OUTBOX_DIR}
+SANTE_HL7_ENABLED=${SANTE_HL7_ENABLED}
+SANTE_HL7_OUTPUT_FOLDER_PATH=${SANTE_HL7_OUTPUT_FOLDER_PATH}
+SANTE_HL7_ALLOWED_BASE_PATHS=${SANTE_HL7_ALLOWED_BASE_PATHS}
+SANTE_HL7_HOST_OUTBOX_HINT=${SANTE_HL7_HOST_OUTBOX_HINT}
+SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT=${SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT}
 
 # -- MPPS Bridge --
 MPPS_BRIDGE_PORT=${MPPS_BRIDGE_PORT}
@@ -730,12 +782,14 @@ build_compose_args() {
 
 run_compose_preflight() {
   log "Running deployment preflight validation..."
+  mkdir -p "${SANTE_HL7_HOST_OUTBOX_DIR}"
   preflight_validate_env
   write_env_file
   render_orthanc_config
   build_compose_args
   "${COMPOSE_CMD[@]}" "${COMPOSE_FILES[@]}" config >/dev/null
   ok "Deployment configuration is valid."
+  ok "Sante HL7 host outbox folder is ready: ${SANTE_HL7_HOST_OUTBOX_DIR}"
 }
 
 wait_for_app_health() {
@@ -804,6 +858,10 @@ print_deployment_summary() {
   if [ "$RISPRO_MPPS_MODE" = "internal_bridge" ]; then
     printf '  MPPS Bridge:     127.0.0.1:%s (AE: %s)\n' "$MPPS_BRIDGE_PORT" "$MPPS_BRIDGE_AE_TITLE"
   fi
+
+  printf '  Sante HL7 share: %s\n' "$SANTE_HL7_WINDOWS_SHARE_SOURCE_HINT"
+  printf '  Sante HL7 UI:    %s\n' "$SANTE_HL7_CONTAINER_OUTBOX_DIR"
+  printf '  Sante note:      Share the Windows folder above with the Sante Worklist Server if needed.\n'
 
   printf '\n  Supervisor username: %s\n' "$SEED_SUPERVISOR_USERNAME"
   printf '  Supervisor password: %s\n\n' "$SEED_SUPERVISOR_PASSWORD"

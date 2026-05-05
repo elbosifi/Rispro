@@ -51,6 +51,7 @@ import DicomGatewaySettingsSection from "./dicom-gateway-section";
 import DicomDevicesSection from "./dicom-devices-section";
 import DicomMonitoringSection from "./dicom-monitoring-section";
 import OrthancMwlSection from "./orthanc-mwl-section";
+import SanteWorklistSection from "./sante-worklist-section";
 import PacsSettingsSection from "./pacs-settings-section";
 import AppointmentSlipSettingsSection from "./appointment-slip-settings-section";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
@@ -185,6 +186,7 @@ type SettingsSection =
   | "dicom_gateway_devices"
   | "dicom_gateway_monitoring"
   | "orthanc_mwl_sync"
+  | "sante_worklist_hl7"
   | "users"
   | "role_page_access"
   | "audit_log"
@@ -208,6 +210,7 @@ const SECTION_KEYS: SettingsSection[] = [
   "dicom_gateway_devices",
   "dicom_gateway_monitoring",
   "orthanc_mwl_sync",
+  "sante_worklist_hl7",
   "users",
   "role_page_access",
   "audit_log",
@@ -233,6 +236,9 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   }
   if (section === "sonicdicom_reports") {
     return "SonicDICOM Reports";
+  }
+  if (section === "sante_worklist_hl7") {
+    return "Sante Worklist Server";
   }
   return _t(`settings.section.${section}` as TranslationKey);
 }
@@ -323,6 +329,7 @@ export default function SettingsPage() {
             {section === "dicom_gateway_devices" && <DicomDevicesSection onReAuthRequired={requestReAuth} />}
             {section === "dicom_gateway_monitoring" && <DicomMonitoringSection onReAuthRequired={requestReAuth} />}
             {section === "orthanc_mwl_sync" && <OrthancMwlSection onReAuthRequired={requestReAuth} />}
+            {section === "sante_worklist_hl7" && <SanteWorklistSection onReAuthRequired={requestReAuth} />}
             {section === "backup_restore" && <BackupRestoreSection ref={backupRestoreRef} onReAuthRequired={requestReAuth} />}
 
             {showReAuthModal && <SupervisorReAuthModal onClose={() => setShowReAuthModal(false)} onSuccess={handleReAuthSuccess} />}

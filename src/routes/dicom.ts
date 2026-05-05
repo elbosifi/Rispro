@@ -31,6 +31,13 @@ import {
   resetOrthancMwlWindow
 } from "../services/orthanc-mwl-reconcile-service.js";
 import {
+  getSanteHl7Summary,
+  reconcileSanteHl7Window,
+  retrySanteOutbox,
+  sendSyntheticSanteTestFile,
+} from "../services/sante-hl7-outbox-service.js";
+import { testSanteOutputFolderAccess } from "../services/sante-worklist-settings-resolver.js";
+import {
   getAllServiceStatuses,
   getServiceStatus
 } from "../services/dicom-gateway-registry.js";
@@ -201,10 +208,67 @@ dicomRouter.post(
   })
 );
 
+dicomRouter.get(
+  "/sante-hl7/summary",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const summary = await getSanteHl7Summary();
+    res.json({ ok: true, summary });
+  })
+);
+
+dicomRouter.post(
+  "/sante-hl7/test-folder",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body ?? {});
+    const result = await testSanteOutputFolderAccess(String(body.outputFolderPath || "").trim());
+    res.json(result);
+  })
+);
+
+dicomRouter.post(
+  "/sante-hl7/test-file",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
+    const result = await sendSyntheticSanteTestFile(request.user.sub as UserId);
+    res.status(202).json({ ok: true, synthetic: true, ...result });
+  })
+);
+
+dicomRouter.post(
+  "/sante-hl7/retry/:outboxId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
+    const outboxId = Number(req.params.outboxId);
+    const result = await retrySanteOutbox(outboxId, request.user.sub as UserId);
+    res.json(result);
+  })
+);
+
+dicomRouter.post(
+  "/sante-hl7/reconcile",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body ?? {});
+    const dateFrom = String(body.dateFrom || "").trim();
+    const dateTo = String(body.dateTo || "").trim();
+    const modalityCode = String(body.modalityCode || "").trim() || undefined;
+    const apply = body.apply === true || String(body.apply || "").toLowerCase() === "true";
+    const limitRaw = Number(body.limit);
+    if (!dateFrom || !dateTo) throw new HttpError(400, "dateFrom and dateTo are required.");
+    const result = await reconcileSanteHl7Window({
+      dateFrom,
+      dateTo,
+      modalityCode,
+      apply,
+      limit: Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000,
+    });
+    res.json({ ok: true, result });
+  })
+);
+
 dicomRouter.post(
   "/service/:serviceName/start",
   asyncRoute(async (req: Request, res: Response) => {
-    const { serviceName } = req.params;
+    const serviceName = String(req.params.serviceName || "");
 
     if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
@@ -229,7 +293,7 @@ dicomRouter.post(
 dicomRouter.post(
   "/service/:serviceName/stop",
   asyncRoute(async (req: Request, res: Response) => {
-    const { serviceName } = req.params;
+    const serviceName = String(req.params.serviceName || "");
 
     if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
@@ -249,7 +313,7 @@ dicomRouter.post(
 dicomRouter.post(
   "/service/:serviceName/restart",
   asyncRoute(async (req: Request, res: Response) => {
-    const { serviceName } = req.params;
+    const serviceName = String(req.params.serviceName || "");
 
     if (!["mwl", "worklistBuilder"].includes(serviceName)) {
       throw new HttpError(400, `Unknown service: ${serviceName}`);
@@ -342,7 +406,7 @@ dicomRouter.post(
 dicomRouter.post(
   "/rebuild/:bookingId",
   asyncRoute(async (req: Request, res: Response) => {
-    const bookingId = parseInt(req.params.bookingId, 10);
+    const bookingId = parseInt(String(req.params.bookingId || ""), 10);
 
     if (isNaN(bookingId) || bookingId <= 0) {
       throw new HttpError(400, "Invalid booking ID.");
@@ -364,7 +428,7 @@ dicomRouter.post(
 dicomRouter.post(
   "/test-worklist/:bookingId",
   asyncRoute(async (req: Request, res: Response) => {
-    const bookingId = parseInt(req.params.bookingId, 10);
+    const bookingId = parseInt(String(req.params.bookingId || ""), 10);
 
     if (isNaN(bookingId) || bookingId <= 0) {
       throw new HttpError(400, "Invalid booking ID.");

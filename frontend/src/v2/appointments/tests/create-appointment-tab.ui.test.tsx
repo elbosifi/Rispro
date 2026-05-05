@@ -27,6 +27,7 @@ const mockGetAppointmentById = vi.fn(async (id: number) => ({
   id,
   publicAppointmentUrl: `https://rispro.nccb.com.ly/public/appointment?t=token-${id}`,
 }));
+const mockQueueWalkInEnabled = { current: true };
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
   async () => []
 );
@@ -55,15 +56,27 @@ vi.mock("@/lib/appointment-printing", () => ({
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({
-    data: {
-      defaultReportRequiredForOncology: true,
-      defaultReportRequiredForNonOncology: false,
-    },
-    isLoading: false,
-    isError: false,
-    error: null,
-  }),
+  useQuery: (options?: { queryKey?: unknown[] }) => {
+    const key = Array.isArray(options?.queryKey) ? options.queryKey.join(":") : "";
+    if (key.includes("queue_and_arrival")) {
+      return {
+        data: { walk_in_queue: mockQueueWalkInEnabled.current ? "enabled" : "disabled" },
+        isLoading: false,
+        isError: false,
+        error: null,
+      };
+    }
+
+    return {
+      data: {
+        defaultReportRequiredForOncology: true,
+        defaultReportRequiredForNonOncology: false,
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+    };
+  },
 }));
 
 vi.mock("@/components/documents/request-documents-panel", () => ({
@@ -758,9 +771,10 @@ describe("CreateAppointmentTab UI interactions", () => {
   });
 
   describe("success state actions", () => {
-    beforeEach(() => {
-      mockRowsRef.current = availabilityRowsWithAvailable;
-    });
+  beforeEach(() => {
+    mockRowsRef.current = availabilityRowsWithAvailable;
+    mockQueueWalkInEnabled.current = true;
+  });
 
     function setupSuccess() {
       const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
@@ -1126,6 +1140,13 @@ describe("safety modal interactions", () => {
 
       const callArg = onCreateAppointment.mock.calls[0][0];
       expect(callArg.isWalkIn).toBe(true);
+    });
+
+    it("hides walk-in option when walk-in queue setting is disabled", async () => {
+      mockQueueWalkInEnabled.current = false;
+      setupWithSafetyWarning();
+
+      expect(screen.queryByRole("checkbox", { name: "Walk-in patient" })).toBeNull();
     });
   });
 });
