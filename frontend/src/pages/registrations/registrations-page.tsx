@@ -1016,7 +1016,7 @@ export default function RegistrationsPage() {
                             e.stopPropagation();
                             void printAppointmentSlipById(apt.id, language);
                           }}
-                          className="h-8 w-8 p-0"
+                          className="!h-8 !min-h-8 !w-8 !p-0"
                         >
                           <Printer size={15} strokeWidth={1.8} aria-hidden="true" />
                         </Button>
@@ -1026,7 +1026,7 @@ export default function RegistrationsPage() {
                           variant="ghost"
                           aria-label={t("registrations.link")}
                           title={t("registrations.viewAppointmentLink")}
-                          className="h-8 w-8 p-0"
+                          className="!h-8 !min-h-8 !w-8 !p-0"
                           onClick={(e) => {
                             e.stopPropagation();
                             void handleViewAppointmentLink(apt);
@@ -1045,7 +1045,7 @@ export default function RegistrationsPage() {
                             e.stopPropagation();
                             openWhatsappDialog(apt);
                           }}
-                          className={`h-8 w-8 p-0 ${apt.phone1 ? "text-emerald-700" : "opacity-35"}`}
+                          className={`!h-8 !min-h-8 !w-8 !p-0 ${apt.phone1 ? "text-emerald-700" : "opacity-35"}`}
                         >
                           <span className={`inline-flex h-5 w-5 items-center justify-center rounded-full text-[8px] font-black ${
                             apt.phone1 ? "bg-emerald-500 text-white" : "bg-muted text-muted-foreground"
@@ -1068,7 +1068,7 @@ export default function RegistrationsPage() {
                             e.stopPropagation();
                             openPatientNotificationDialog(apt);
                           }}
-                          className={`h-8 w-8 p-0 ${apt.patientWebPushSubscribed ? "" : "opacity-35"}`}
+                          className={`!h-8 !min-h-8 !w-8 !p-0 ${apt.patientWebPushSubscribed ? "" : "opacity-35"}`}
                         >
                           <Bell size={15} strokeWidth={1.8} aria-hidden="true" />
                         </Button>
@@ -1078,7 +1078,7 @@ export default function RegistrationsPage() {
                           variant="secondary"
                           aria-label={t("registrations.manage")}
                           title={t("registrations.manage")}
-                          className="h-8 w-8 p-0"
+                          className="!h-8 !min-h-8 !w-8 !p-0"
                           onClick={(e) => {
                             e.stopPropagation();
                             manageAppointment(apt);
