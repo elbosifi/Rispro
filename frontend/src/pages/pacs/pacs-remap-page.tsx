@@ -236,6 +236,7 @@ export default function PacsRemapPage() {
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [processingStage, setProcessingStage] = useState<RemapWizardStep>("select_files");
+  const [focusStepOverride, setFocusStepOverride] = useState<RemapWizardStep | null>(null);
   const [fileInputVersion, setFileInputVersion] = useState(0);
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
@@ -341,6 +342,7 @@ export default function PacsRemapPage() {
     },
     onMutate: () => {
       setProcessingStage("scanning");
+      setFocusStepOverride(null);
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -350,6 +352,7 @@ export default function PacsRemapPage() {
       setEnableFallbackUpload(false);
       setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0].studyInstanceUid : "");
       setProcessingStage("choose_study");
+      setFocusStepOverride("choose_study");
     },
     onError: (error: unknown) => {
       setErrorMessage(error instanceof Error ? error.message : "Failed to scan DICOM files.");
@@ -563,9 +566,17 @@ export default function PacsRemapPage() {
     if (!canContinueDestination) return "choose_destination";
     return "review";
   }, [processMutation.isPending, processingStage, currentJob?.status, scanMutation.isPending, scanResult, canContinueStudy, canContinuePatient, canContinueDestination]);
+  const focusedWizardStep = focusStepOverride || wizardStep;
 
   useEffect(() => {
-    const activeElement = stepCardRefs.current[wizardStep];
+    if (!focusStepOverride) return;
+    if (focusStepOverride === "choose_study" && (selectedPatientId || processingStage !== "choose_study")) {
+      setFocusStepOverride(null);
+    }
+  }, [focusStepOverride, selectedPatientId, processingStage]);
+
+  useEffect(() => {
+    const activeElement = stepCardRefs.current[focusedWizardStep];
     if (!activeElement) return;
     const rect = activeElement.getBoundingClientRect();
     const isOutsideViewport = rect.top < 0 || rect.bottom > window.innerHeight;
@@ -575,7 +586,7 @@ export default function PacsRemapPage() {
       activeElement.focus({ preventScroll: true });
     });
     return () => window.cancelAnimationFrame(handle);
-  }, [wizardStep]);
+  }, [focusedWizardStep]);
 
   useEffect(() => {
     if (wizardStep !== "sent") return;
@@ -611,6 +622,7 @@ export default function PacsRemapPage() {
     setErrorDetails("");
     setSuccessMessage("");
     setProcessingStage("select_files");
+    setFocusStepOverride(null);
     setFileInputVersion((v) => v + 1);
     scanMutation.reset();
     processMutation.reset();
@@ -656,7 +668,7 @@ export default function PacsRemapPage() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div className="xl:col-span-2 space-y-4">
-          <div {...stepCardProps("select_files", wizardStep === "select_files" || wizardStep === "scanning")}>
+          <div {...stepCardProps("select_files", focusedWizardStep === "select_files" || focusedWizardStep === "scanning")}>
             <h3 className="text-sm font-semibold" style={{ color: "var(--text)" }}>{t(language, "pacs.remap.step1")}</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
@@ -716,7 +728,7 @@ export default function PacsRemapPage() {
           </div>
 
           {scanResult && (
-            <div {...stepCardProps("choose_study", wizardStep === "choose_study")}>
+            <div {...stepCardProps("choose_study", focusedWizardStep === "choose_study")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step2")}</h3>
               <p className="text-xs" style={{ color: "var(--text-muted)" }}>
                 {t(language, "pacs.remap.detectedStudiesSummary", {
@@ -761,7 +773,7 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div {...stepCardProps("choose_patient", wizardStep === "choose_patient")}>
+            <div {...stepCardProps("choose_patient", focusedWizardStep === "choose_patient")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step3")}</h3>
               <div className="rounded-lg border p-3 space-y-2">
                 <p className="text-xs font-semibold">{t(language, "pacs.remap.patientsByDateModality")}</p>
@@ -916,7 +928,7 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div {...stepCardProps("choose_destination", wizardStep === "choose_destination")}>
+            <div {...stepCardProps("choose_destination", focusedWizardStep === "choose_destination")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step4")}</h3>
               <select value={selectedDestinationKey} onChange={(e) => setSelectedDestinationKey(e.target.value)} className="input-premium w-full px-3 py-2">
                 <option value="">{t(language, "pacs.remap.selectDestination")}</option>
@@ -930,18 +942,50 @@ export default function PacsRemapPage() {
           )}
 
           {scanResult && (
-            <div {...stepCardProps("review", wizardStep === "review")}>
+            <div {...stepCardProps("review", focusedWizardStep === "review")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.step5")}</h3>
-              <div className="rounded border p-3 text-xs space-y-1">
-                <p><strong>{t(language, "pacs.remap.originalPatientId")}:</strong> {selectedStudy?.patientId || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.originalPatientName")}:</strong> {selectedStudy?.patientName || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatient")}:</strong> {selectedPatientLabel || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatientId")}:</strong> {replacementPreviewQuery.data?.patientId || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementPatientName")}:</strong> {replacementPreviewQuery.data?.patientName || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementSex")}:</strong> {replacementPreviewQuery.data?.patientSex || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.replacementBirthDate")}:</strong> {replacementPreviewQuery.data?.patientBirthDate || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.destinationLabel")}:</strong> {selectedDestinationKey || "—"}</p>
-                <p><strong>{t(language, "pacs.remap.studyLabel")}:</strong> {selectedStudy?.studyDescription || "—"} • {selectedStudy?.studyDate || "—"} • {selectedStudy?.modality || "—"}</p>
+              <div className="overflow-hidden rounded border text-xs">
+                <table className="w-full border-collapse">
+                  <thead className="bg-black/5">
+                    <tr>
+                      <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "الحقل" : "Field"}</th>
+                      <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "القيمة الأصلية من DICOM" : "Original DICOM"}</th>
+                      <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "القيمة بعد الاستبدال" : "Replacement / Target"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "المريض" : "Patient"}</th>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientName || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientName || selectedPatientLabel || "—"}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">PatientID</th>
+                      <td className="px-3 py-2 font-mono">{selectedStudy?.patientId || "—"}</td>
+                      <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientId || "—"}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "الجنس" : "Sex"}</th>
+                      <td className="px-3 py-2 font-mono">—</td>
+                      <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientSex || "—"}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">{language === "ar" ? "تاريخ الميلاد" : "Birth date"}</th>
+                      <td className="px-3 py-2 font-mono">—</td>
+                      <td className="px-3 py-2 font-mono">{replacementPreviewQuery.data?.patientBirthDate || "—"}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.studyLabel")}</th>
+                      <td className="px-3 py-2">{selectedStudy?.studyDescription || "—"} • {selectedStudy?.studyDate || "—"} • {selectedStudy?.modality || "—"}</td>
+                      <td className="px-3 py-2">{language === "ar" ? "نفس الدراسة المختارة" : "Selected study only"}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <th scope="row" className="px-3 py-2 text-left font-medium">{t(language, "pacs.remap.destinationLabel")}</th>
+                      <td className="px-3 py-2">—</td>
+                      <td className="px-3 py-2 font-mono">{selectedDestinationKey || "—"}</td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
               <p className="text-xs text-amber-700">
                 {t(language, "pacs.remap.selectedStudyOnly")}
@@ -976,7 +1020,7 @@ export default function PacsRemapPage() {
           )}
 
           {(wizardStep === "sent" || wizardStep === "failed") && (
-            <div {...stepCardProps(wizardStep, wizardStep === "sent" || wizardStep === "failed")}>
+            <div {...stepCardProps(wizardStep, focusedWizardStep === "sent" || focusedWizardStep === "failed")}>
               <h3 className="text-sm font-semibold">{t(language, "pacs.remap.resultStep")}</h3>
               {wizardStep === "sent" ? (
                 <p className="text-sm text-green-700">{t(language, "pacs.remap.success")}</p>

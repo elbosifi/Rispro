@@ -208,7 +208,7 @@ describe("PacsRemapPage wizard", () => {
     await screen.findByText(/Detected 1 studies/i);
     const activeCards = document.querySelectorAll("[data-active-step='true']");
     expect(activeCards.length).toBe(1);
-    expect(activeCards[0]?.textContent || "").toContain("Step 3: Choose RISPro patient");
+    expect(activeCards[0]?.textContent || "").toContain("Step 2: Choose study");
   });
 
   it("uploads only selected study files and includes selectedStudyInstanceUID", async () => {
