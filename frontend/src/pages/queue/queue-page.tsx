@@ -31,8 +31,8 @@ export default function QueuePage() {
     queryFn: () => fetchSettings("queue_and_arrival"),
     staleTime: 1000 * 60 * 5
   });
-  const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "enabled").trim().toLowerCase();
-  const isWalkInEnabled = ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
+  const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "disabled").trim().toLowerCase();
+  const isWalkInEnabled = queueArrivalSettings != null && ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
 
   // Debounced patient search
   const debouncedPatientSearch = useCallback((query: string) => {
