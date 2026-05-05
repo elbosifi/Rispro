@@ -82,3 +82,13 @@ test("registrations expose subscription badge and staff notification action", ()
   assert.match(registrationsPage, /sendPatientWebPushNotification/);
   assert.match(registrationsPage, /webPushPrivacyHint/);
 });
+
+test("registrations provide WhatsApp messages with patient QR link templates", () => {
+  assert.match(registrationsPage, /openWhatsappDialog/);
+  assert.match(registrationsPage, /https:\/\/wa\.me\/\$\{phone\}\?text=/);
+  assert.match(registrationsPage, /publicAppointmentUrl/);
+  assert.match(registrationsPage, /appointment_rescheduled/);
+  assert.match(registrationsPage, /appointment_changed/);
+  assert.match(registrationsPage, /appointment_cancelled/);
+  assert.match(registrationsPage, /whatsappMessage/);
+});

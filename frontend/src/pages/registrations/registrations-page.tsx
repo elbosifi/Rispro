@@ -56,6 +56,11 @@ export default function RegistrationsPage() {
   const [notificationTemplate, setNotificationTemplate] = useState("appointment_reminder_24h");
   const [notificationTitle, setNotificationTitle] = useState("");
   const [notificationMessage, setNotificationMessage] = useState("");
+  const [whatsappAppointment, setWhatsappAppointment] =
+    useState<AppointmentWithDetails | null>(null);
+  const [whatsappMode, setWhatsappMode] = useState<"template" | "custom">("template");
+  const [whatsappTemplate, setWhatsappTemplate] = useState("qr_link");
+  const [whatsappMessage, setWhatsappMessage] = useState("");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -155,6 +160,13 @@ export default function RegistrationsPage() {
     { value: "appointment_cancelled", label: t("registrations.webPushTemplateCancelled") },
     { value: "report_ready", label: t("registrations.webPushTemplateReportReady") },
     { value: "test", label: t("registrations.webPushTemplateTest") },
+  ];
+  const whatsappTemplates = [
+    { value: "qr_link", label: t("registrations.whatsappTemplateQrLink") },
+    { value: "appointment_reminder", label: t("registrations.whatsappTemplateReminder") },
+    { value: "appointment_rescheduled", label: t("registrations.whatsappTemplateRescheduled") },
+    { value: "appointment_changed", label: t("registrations.whatsappTemplateChanged") },
+    { value: "appointment_cancelled", label: t("registrations.whatsappTemplateCancelled") },
   ];
 
   const handleFilterChange = <K extends keyof RegistrationsFilters>(
@@ -310,6 +322,65 @@ export default function RegistrationsPage() {
 
   const canSendCustomNotification =
     notificationMode === "template" || (notificationTitle.trim().length > 0 && notificationMessage.trim().length > 0);
+
+  const normalizeWhatsappPhone = (phone: string | null | undefined): string => {
+    let digits = String(phone || "").replace(/\D/g, "");
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    if (digits.startsWith("0")) digits = `218${digits.slice(1)}`;
+    return digits;
+  };
+
+  const openWhatsappDialog = (appointment: AppointmentWithDetails) => {
+    if (!appointment.phone1) {
+      pushToast({
+        type: "error",
+        title: t("registrations.whatsappUnavailableTitle"),
+        message: t("registrations.whatsappNoPhone"),
+      });
+      return;
+    }
+    if (!appointment.publicAppointmentUrl) {
+      pushToast({
+        type: "error",
+        title: t("registrations.whatsappUnavailableTitle"),
+        message: t("registrations.appointmentLinkUnavailable"),
+      });
+      return;
+    }
+    setWhatsappAppointment(appointment);
+    setWhatsappMode("template");
+    setWhatsappTemplate("qr_link");
+    setWhatsappMessage("");
+  };
+
+  const whatsappTemplateText = (template: string, appointment: AppointmentWithDetails): string => {
+    const link = String(appointment.publicAppointmentUrl || "").trim();
+    const date = formatDateLy(appointment.appointmentDate);
+    const templates: Record<string, string> = {
+      qr_link: t("registrations.whatsappMessageQrLink"),
+      appointment_reminder: t("registrations.whatsappMessageReminder"),
+      appointment_rescheduled: t("registrations.whatsappMessageRescheduled"),
+      appointment_changed: t("registrations.whatsappMessageChanged"),
+      appointment_cancelled: t("registrations.whatsappMessageCancelled"),
+    };
+    return String(templates[template] || templates.qr_link)
+      .replace(/\{link\}/g, link)
+      .replace(/\{date\}/g, date);
+  };
+
+  const currentWhatsappMessage = whatsappAppointment
+    ? whatsappMode === "template"
+      ? whatsappTemplateText(whatsappTemplate, whatsappAppointment)
+      : whatsappMessage.trim()
+    : "";
+
+  const sendWhatsappMessage = () => {
+    if (!whatsappAppointment) return;
+    const phone = normalizeWhatsappPhone(whatsappAppointment.phone1);
+    if (!phone || !currentWhatsappMessage) return;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(currentWhatsappMessage)}`, "_blank", "noopener,noreferrer");
+    setWhatsappAppointment(null);
+  };
 
   const closeManageDrawer = () => {
     setSelectedAppointment(null);
@@ -702,6 +773,20 @@ export default function RegistrationsPage() {
                       </div>
 
                       <div className="flex justify-end gap-1">
+                        {apt.phone1 ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openWhatsappDialog(apt);
+                            }}
+                            className="h-7 px-2 text-[9px]"
+                          >
+                            {t("registrations.whatsapp")}
+                          </Button>
+                        ) : null}
                         {apt.patientWebPushSubscribed ? (
                           <Button
                             type="button"
@@ -934,6 +1019,115 @@ export default function RegistrationsPage() {
               ) : null}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {whatsappAppointment ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-3 py-4"
+          onClick={() => setWhatsappAppointment(null)}
+          role="presentation"
+          data-testid="registrations-whatsapp-backdrop"
+        >
+          <form
+            className="w-full max-w-[560px] rounded-2xl border border-border bg-background p-4 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              sendWhatsappMessage();
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold">{t("registrations.whatsappDialogTitle")}</h3>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {chooseLocalized(
+                    language,
+                    whatsappAppointment.arabicFullName,
+                    whatsappAppointment.englishFullName,
+                  )}{" "}
+                  • {whatsappAppointment.phone1}
+                </p>
+              </div>
+              <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700">
+                WhatsApp
+              </span>
+            </div>
+
+            <div className="mt-3 flex rounded-xl border border-border bg-muted/20 p-1">
+              <button
+                type="button"
+                className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-medium transition-colors ${
+                  whatsappMode === "template" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+                onClick={() => setWhatsappMode("template")}
+              >
+                {t("registrations.webPushUseTemplate")}
+              </button>
+              <button
+                type="button"
+                className={`min-h-9 flex-1 rounded-lg px-3 text-xs font-medium transition-colors ${
+                  whatsappMode === "custom" ? "bg-background shadow-sm" : "text-muted-foreground"
+                }`}
+                onClick={() => setWhatsappMode("custom")}
+              >
+                {t("registrations.webPushCustom")}
+              </button>
+            </div>
+
+            {whatsappMode === "template" ? (
+              <div className="mt-3">
+                <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                  {t("registrations.webPushTemplate")}
+                </label>
+                <select
+                  value={whatsappTemplate}
+                  onChange={(e) => setWhatsappTemplate(e.target.value)}
+                  className="input-premium w-full min-h-10"
+                >
+                  {whatsappTemplates.map((entry) => (
+                    <option key={entry.value} value={entry.value}>
+                      {entry.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="mt-3">
+                <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                  {t("registrations.whatsappCustomMessage")}
+                </label>
+                <textarea
+                  value={whatsappMessage}
+                  onChange={(e) => setWhatsappMessage(e.target.value)}
+                  rows={5}
+                  className="input-premium w-full resize-none"
+                  placeholder={t("registrations.whatsappCustomPlaceholder")}
+                />
+              </div>
+            )}
+
+            <div className="mt-3 rounded-xl border border-border bg-muted/20 p-3">
+              <p className="mb-1 text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                {t("registrations.whatsappPreview")}
+              </p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{currentWhatsappMessage || "—"}</p>
+            </div>
+
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setWhatsappAppointment(null)}
+              >
+                {t("toast.close")}
+              </Button>
+              <Button type="submit" size="sm" disabled={!currentWhatsappMessage}>
+                {t("registrations.whatsappOpen")}
+              </Button>
+            </div>
+          </form>
         </div>
       ) : null}
 
