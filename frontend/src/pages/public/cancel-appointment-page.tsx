@@ -753,7 +753,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
         existing ??
         (await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey),
+          applicationServerKey: urlBase64ToUint8Array(config.vapidPublicKey).buffer as ArrayBuffer,
         }));
       await subscribePublicPush(props.token, nextSubscription.toJSON(), preferences);
       setSubscription(nextSubscription);

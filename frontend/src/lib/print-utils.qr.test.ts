@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
+import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, DEFAULT_PATIENT_QR_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import {
   buildAppointmentSlipLayoutModel,
   buildAppointmentSlipData,
@@ -118,6 +118,7 @@ function makeSlipSettings(overrides: Partial<AppointmentSlipSettings> = {}): App
 
 function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
+    ...DEFAULT_PATIENT_QR_SETTINGS,
     enabled: true,
     risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
@@ -188,7 +189,7 @@ function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): Pati
       parkingNoteEn: "",
     },
     ...overrides,
-  };
+  } as PatientQrSettings;
 }
 
 describe("appointment slip QR and layout behavior", () => {

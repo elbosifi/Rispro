@@ -7,6 +7,7 @@ import PatientQrSettingsSection from "./patient-qr-settings-section";
 import {
   fetchModalitiesSettings,
   fetchPatientQrSettings,
+  DEFAULT_PATIENT_QR_SETTINGS,
   savePatientQrSettings,
   type PatientQrSettings,
 } from "@/lib/api-hooks";
@@ -19,6 +20,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 const baseSettings: PatientQrSettings = {
+  ...DEFAULT_PATIENT_QR_SETTINGS,
   enabled: true,
   risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,

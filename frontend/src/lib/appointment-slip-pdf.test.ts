@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it, vi, afterAll } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
+import { DEFAULT_APPOINTMENT_SLIP_SETTINGS, DEFAULT_PATIENT_QR_SETTINGS, type AppointmentSlipSettings, type PatientQrSettings } from "@/lib/api-hooks";
 import {
   buildAppointmentSlipData,
   buildAppointmentSlipLayoutModel,
@@ -142,6 +142,7 @@ function makeSlipSettings(overrides: Partial<AppointmentSlipSettings> = {}): App
 
 function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
+    ...DEFAULT_PATIENT_QR_SETTINGS,
     enabled: true,
     risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
@@ -212,7 +213,7 @@ function makePatientQrSettings(overrides: Partial<PatientQrSettings> = {}): Pati
       parkingNoteEn: "",
     },
     ...overrides,
-  };
+  } as PatientQrSettings;
 }
 
 describe("appointment slip PDF", () => {
