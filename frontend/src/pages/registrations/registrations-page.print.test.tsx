@@ -11,7 +11,7 @@ const fetchAppointmentLookupsMock = vi.fn();
 const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
-const fetchV2AvailabilityMock = vi.fn();
+const useV2AvailabilityMock = vi.fn();
 const rescheduleV2BookingMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
 const mockPrintAppointmentSlipById = vi.fn();
@@ -28,7 +28,7 @@ vi.mock("@/lib/api-hooks", () => ({
 }));
 
 vi.mock("@/v2/appointments/api", () => ({
-  fetchV2Availability: (...args: unknown[]) => fetchV2AvailabilityMock(...args),
+  useV2Availability: (...args: unknown[]) => useV2AvailabilityMock(...args),
   rescheduleV2Booking: (...args: unknown[]) => rescheduleV2BookingMock(...args),
   useV2ExamTypes: () => ({ data: [], isLoading: false }),
 }));
@@ -71,7 +71,7 @@ describe("RegistrationsPage print actions", () => {
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockPushToast.mockReset();
     getAppointmentByIdMock.mockReset();
-    fetchV2AvailabilityMock.mockReset();
+    useV2AvailabilityMock.mockReset();
     rescheduleV2BookingMock.mockReset();
     fetchAppointmentsMock.mockResolvedValue([
       {
@@ -97,35 +97,41 @@ describe("RegistrationsPage print actions", () => {
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=sample-token",
       },
     ]);
-    fetchV2AvailabilityMock.mockResolvedValue({
-      items: [
-        {
-          date: "2027-01-04",
-          bucketMode: "partitioned",
-          modalityTotalCapacity: 10,
-          bookedTotal: 2,
-          oncology: { reserved: 2, filled: 0, remaining: 2 },
-          nonOncology: { reserved: 8, filled: 2, remaining: 6 },
-          specialQuotaSummary: null,
-          dailyCapacity: 10,
-          bookedCount: 2,
-          remainingCapacity: 8,
-          isFull: false,
-          decision: {
-            isAllowed: true,
-            requiresSupervisorOverride: false,
-            displayStatus: "available",
-            suggestedBookingMode: "standard",
-            consumedCapacityMode: "standard",
-            remainingStandardCapacity: 8,
-            remainingSpecialQuota: null,
-            matchedRuleIds: [],
-            reasons: [],
-            policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "hash" },
-            decisionTrace: { evaluatedAt: "2026-01-01T00:00:00Z", input: null },
+    useV2AvailabilityMock.mockReturnValue({
+      data: {
+        items: [
+          {
+            date: "2027-01-04",
+            bucketMode: "partitioned",
+            modalityTotalCapacity: 10,
+            bookedTotal: 2,
+            oncology: { reserved: 2, filled: 0, remaining: 2 },
+            nonOncology: { reserved: 8, filled: 2, remaining: 6 },
+            specialQuotaSummary: null,
+            dailyCapacity: 10,
+            bookedCount: 2,
+            remainingCapacity: 8,
+            isFull: false,
+            decision: {
+              isAllowed: true,
+              requiresSupervisorOverride: false,
+              displayStatus: "available",
+              suggestedBookingMode: "standard",
+              consumedCapacityMode: "standard",
+              remainingStandardCapacity: 8,
+              remainingSpecialQuota: null,
+              matchedRuleIds: [],
+              reasons: [],
+              policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "hash" },
+              decisionTrace: { evaluatedAt: "2026-01-01T00:00:00Z", input: null },
+            },
           },
-        },
-      ],
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
     });
     rescheduleV2BookingMock.mockResolvedValue({ booking: { id: 7 }, previousDate: "2027-01-03" });
     getAppointmentByIdMock.mockResolvedValue({
@@ -287,10 +293,10 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(within(row).getByRole("button", { name: "Reschedule" }));
 
     await waitFor(() => {
-      expect(fetchV2AvailabilityMock).toHaveBeenCalledWith(
+      expect(useV2AvailabilityMock).toHaveBeenCalledWith(
         expect.objectContaining({
           modalityId: 1,
-          days: 60,
+          days: 14,
           examTypeId: 3,
           caseCategory: "non_oncology",
           includeOverrideCandidates: true,
@@ -298,7 +304,7 @@ describe("RegistrationsPage print actions", () => {
       );
     });
 
-    await userEvent.selectOptions(screen.getByLabelText("New date"), "2027-01-04");
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-04 available/i }));
     await userEvent.type(screen.getByLabelText("Reason"), "Patient requested later date");
     await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
 
