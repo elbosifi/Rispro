@@ -63,6 +63,8 @@ import {
 } from "../services/settings-catalog-import-export-service.js";
 import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
 import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
+import { ensurePatientWebPushConfig } from "../services/patient-web-push-service.js";
+import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -171,6 +173,24 @@ settingsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const settings = await listSettingsCatalog();
     res.json({ settings });
+  })
+);
+
+settingsRouter.post(
+  "/patient-web-push/ensure-config",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const settings = await readPatientQrSettings();
+    const config = await ensurePatientWebPushConfig({
+      updatedByUserId: request.user.sub as UserId,
+      settings,
+    });
+    res.json({
+      enabled: config.enabled,
+      generated: config.generated,
+      source: config.source,
+      publicKeyConfigured: Boolean(config.publicKey),
+    });
   })
 );
 

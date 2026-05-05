@@ -158,13 +158,13 @@ async function start(): Promise<void> {
   try {
     const { startPatientNotificationWorker } = await import("./services/patient-notification-worker.js");
     patientNotificationWorker = await startPatientNotificationWorker();
-    startupSummary.patient_notifications = env.webPushEnabled ? "enabled" : "disabled";
+    startupSummary.patient_notifications = "started";
   } catch (error) {
     if (env.webPushEnabled) {
       console.error("Patient Web Push worker initialization failed while WEB_PUSH_ENABLED=true.");
       throw error;
     }
-    console.error("Patient Web Push worker initialization failed. Continuing because WEB_PUSH_ENABLED=false.");
+    console.error("Patient Web Push worker initialization failed. Continuing; patient Web Push can be reconfigured from settings.");
     logError(error);
     startupSummary.patient_notifications = "initialization_failed";
   }

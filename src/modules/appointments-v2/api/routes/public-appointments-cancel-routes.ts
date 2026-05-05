@@ -262,7 +262,7 @@ router.get(
   pushRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const { patientQrSettings } = await readVerifiedPushContext(req);
-    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    const publicConfig = await getPatientWebPushPublicConfig(patientQrSettings);
     res.json({
       ...publicConfig,
       labels: {
@@ -290,7 +290,7 @@ router.post(
   pushRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const { patientQrSettings, context } = await readVerifiedPushContext(req);
-    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    const publicConfig = await getPatientWebPushPublicConfig(patientQrSettings);
     if (!publicConfig.enabled) throw new HttpError(503, "Web Push is disabled.", { code: "web_push_disabled" });
 
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -323,7 +323,7 @@ router.post(
   pushRateLimiter,
   asyncRoute(async (req: Request, res: Response) => {
     const { patientQrSettings, context } = await readVerifiedPushContext(req);
-    const publicConfig = getPatientWebPushPublicConfig(patientQrSettings);
+    const publicConfig = await getPatientWebPushPublicConfig(patientQrSettings);
     if (!publicConfig.enabled) throw new HttpError(503, "Web Push is disabled.", { code: "web_push_disabled" });
 
     const event = await enqueuePatientNotificationEvent({

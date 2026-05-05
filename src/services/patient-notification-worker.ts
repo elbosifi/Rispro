@@ -3,6 +3,7 @@ import { pool } from "../db/pool.js";
 import {
   enqueuePatientNotificationEvent,
   getBookingNotificationContext,
+  isPatientWebPushConfigured,
   prepareDueNotificationDeliveries,
   processPatientPushDeliveries,
   validateWebPushStartupConfig,
@@ -29,9 +30,9 @@ function combineAppointmentTimestampSql(): string {
 }
 
 export async function enqueueDueAppointmentReminderEvents(limit = 100): Promise<{ enqueued: number }> {
-  if (!env.webPushEnabled) return { enqueued: 0 };
   const settings = await readPatientQrSettings();
   if (!settings.webPushEnabled) return { enqueued: 0 };
+  if (!(await isPatientWebPushConfigured(settings))) return { enqueued: 0 };
 
   const appointmentAtSql = combineAppointmentTimestampSql();
   const { rows } = await pool.query<{
@@ -94,9 +95,9 @@ export async function enqueueDueAppointmentReminderEvents(limit = 100): Promise<
 }
 
 export async function enqueueReadyReportEvents(options: { limit?: number } = {}): Promise<{ checked: number; enqueued: number }> {
-  if (!env.webPushEnabled) return { checked: 0, enqueued: 0 };
   const settings = await readPatientQrSettings();
   if (!settings.webPushEnabled || !settings.allowReportAccess) return { checked: 0, enqueued: 0 };
+  if (!(await isPatientWebPushConfigured(settings))) return { checked: 0, enqueued: 0 };
 
   const limit = Math.max(1, Math.min(options.limit ?? env.webPushReportReadyMaxChecksPerRun, env.webPushReportReadyMaxChecksPerRun));
   const { rows } = await pool.query<{ booking_id: number }>(
@@ -159,7 +160,7 @@ export async function runPatientNotificationWorkerTick(): Promise<{
   deliveriesSent: number;
   deliveriesFailed: number;
 }> {
-  if (tickRunning || workerStopped || !env.webPushEnabled) {
+  if (tickRunning || workerStopped) {
     return {
       remindersEnqueued: 0,
       reportReadyChecked: 0,
@@ -219,10 +220,6 @@ export async function startPatientNotificationWorker(options?: {
   intervalMs?: number;
 }): Promise<PatientNotificationWorker> {
   workerStopped = false;
-  if (!env.webPushEnabled) {
-    return { stop: async () => { workerStopped = true; } };
-  }
-
   validateWebPushStartupConfig();
   const intervalMs = Math.max(10_000, options?.intervalMs ?? env.webPushWorkerIntervalSeconds * 1000);
   await runPatientNotificationWorkerTick();

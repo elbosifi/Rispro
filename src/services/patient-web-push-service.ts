@@ -79,6 +79,15 @@ interface DeliveryClaimRow {
 }
 
 let vapidConfigured = false;
+let configuredVapidPublicKey = "";
+
+interface ResolvedWebPushConfig {
+  enabled: boolean;
+  publicKey: string;
+  privateKey: string;
+  subject: string;
+  source: "env" | "settings" | "disabled";
+}
 
 function isValidEventType(value: string): value is PatientNotificationEventType {
   return (PATIENT_NOTIFICATION_EVENT_TYPES as readonly string[]).includes(value);
@@ -110,27 +119,142 @@ export function validateWebPushStartupConfig(): void {
   try {
     webPush.setVapidDetails(env.webPushVapidSubject, env.webPushVapidPublicKey, env.webPushVapidPrivateKey);
     vapidConfigured = true;
+    configuredVapidPublicKey = env.webPushVapidPublicKey;
   } catch (error) {
     throw new Error(`Invalid WEB_PUSH_* VAPID configuration: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
-function configureVapidIfNeeded(): boolean {
-  if (!env.webPushEnabled) return false;
-  if (vapidConfigured) return true;
-  validateWebPushStartupConfig();
-  return true;
+function isValidVapidSubject(value: string): boolean {
+  return /^(mailto:.+@.+|https?:\/\/.+)/i.test(String(value || "").trim());
 }
 
-export function getPatientWebPushPublicConfig(settings: PatientQrSettings): {
+function envWebPushConfig(): ResolvedWebPushConfig | null {
+  if (!env.webPushEnabled) return null;
+  if (!env.webPushVapidPublicKey || !env.webPushVapidPrivateKey || !env.webPushVapidSubject) {
+    throw new Error("WEB_PUSH_ENABLED=true requires complete VAPID configuration.");
+  }
+  if (!isValidVapidSubject(env.webPushVapidSubject)) {
+    throw new Error("WEB_PUSH_VAPID_SUBJECT must be a mailto: address or absolute http(s) URL when WEB_PUSH_ENABLED=true.");
+  }
+  return {
+    enabled: true,
+    publicKey: env.webPushVapidPublicKey,
+    privateKey: env.webPushVapidPrivateKey,
+    subject: env.webPushVapidSubject,
+    source: "env",
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
+  return {};
+}
+
+function readStoredValue(settingValue: unknown): Record<string, unknown> {
+  const record = asRecord(settingValue);
+  return asRecord(record.value ?? record);
+}
+
+function defaultVapidSubject(settings?: PatientQrSettings): string {
+  const publicBaseUrl = String(settings?.risproPublicBaseUrl || "").trim();
+  if (/^https?:\/\//i.test(publicBaseUrl)) return publicBaseUrl;
+  return "mailto:admin@rispro.local";
+}
+
+async function readStoredWebPushConfig(): Promise<ResolvedWebPushConfig | null> {
+  const { rows } = await pool.query(
+    `
+      select setting_value
+      from system_settings
+      where category = 'patient_web_push' and setting_key = 'config'
+      limit 1
+    `
+  );
+  const value = readStoredValue(rows[0]?.setting_value);
+  const publicKey = String(value.vapidPublicKey || "").trim();
+  const privateKey = String(value.vapidPrivateKey || "").trim();
+  const subject = String(value.vapidSubject || "").trim();
+  const enabled = value.enabled !== false;
+  if (!enabled || !publicKey || !privateKey || !subject || !isValidVapidSubject(subject)) return null;
+  return { enabled: true, publicKey, privateKey, subject, source: "settings" };
+}
+
+async function resolveWebPushConfig(settings?: PatientQrSettings): Promise<ResolvedWebPushConfig> {
+  const envConfig = envWebPushConfig();
+  if (envConfig) return envConfig;
+  const storedConfig = await readStoredWebPushConfig();
+  if (storedConfig && (!settings || settings.webPushEnabled)) return storedConfig;
+  return { enabled: false, publicKey: "", privateKey: "", subject: "", source: "disabled" };
+}
+
+async function configureVapidIfNeeded(): Promise<boolean> {
+  const config = await resolveWebPushConfig();
+  if (!config.enabled) return false;
+  if (vapidConfigured && configuredVapidPublicKey === config.publicKey) return true;
+  try {
+    webPush.setVapidDetails(config.subject, config.publicKey, config.privateKey);
+    vapidConfigured = true;
+    configuredVapidPublicKey = config.publicKey;
+    return true;
+  } catch (error) {
+    console.error("Invalid patient Web Push VAPID configuration.", error);
+    return false;
+  }
+}
+
+export async function isPatientWebPushConfigured(settings?: PatientQrSettings): Promise<boolean> {
+  const config = await resolveWebPushConfig(settings);
+  return Boolean(config.enabled && config.publicKey);
+}
+
+export async function ensurePatientWebPushConfig(options: { updatedByUserId?: number | string | null; settings?: PatientQrSettings } = {}): Promise<{ enabled: boolean; generated: boolean; publicKey: string; source: string }> {
+  const envConfig = envWebPushConfig();
+  if (envConfig) return { enabled: true, generated: false, publicKey: envConfig.publicKey, source: envConfig.source };
+
+  const existing = await readStoredWebPushConfig();
+  if (existing) return { enabled: true, generated: false, publicKey: existing.publicKey, source: existing.source };
+
+  const keys = webPush.generateVAPIDKeys();
+  const subject = defaultVapidSubject(options.settings);
+  const settingValue = {
+    value: {
+      enabled: true,
+      vapidPublicKey: keys.publicKey,
+      vapidPrivateKey: keys.privateKey,
+      vapidSubject: subject,
+      generatedAt: new Date().toISOString(),
+    },
+  };
+
+  await pool.query(
+    `
+      insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+      values ('patient_web_push', 'config', $1::jsonb, $2)
+      on conflict (category, setting_key)
+      do update set
+        setting_value = excluded.setting_value,
+        updated_by_user_id = excluded.updated_by_user_id,
+        updated_at = now()
+    `,
+    [JSON.stringify(settingValue), options.updatedByUserId ?? null]
+  );
+
+  vapidConfigured = false;
+  configuredVapidPublicKey = "";
+  return { enabled: true, generated: true, publicKey: keys.publicKey, source: "settings" };
+}
+
+export async function getPatientWebPushPublicConfig(settings: PatientQrSettings): Promise<{
   enabled: boolean;
   vapidPublicKey: string;
   defaults: PatientPushPreferences;
-} {
-  const enabled = Boolean(env.webPushEnabled && settings.webPushEnabled && env.webPushVapidPublicKey);
+}> {
+  const config = await resolveWebPushConfig(settings);
+  const enabled = Boolean(settings.webPushEnabled && config.enabled && config.publicKey);
   return {
     enabled,
-    vapidPublicKey: enabled ? env.webPushVapidPublicKey : "",
+    vapidPublicKey: enabled ? config.publicKey : "",
     defaults: {
       appointmentReminder24h: settings.webPushDefaultReminder24h,
       appointmentRescheduled: settings.webPushDefaultRescheduled,
@@ -236,7 +360,7 @@ export async function upsertPatientPushSubscription(input: {
   preferences: PatientPushPreferences;
   userAgent?: string | null;
 }): Promise<{ subscriptionId: number; bookingSubscriptionId: number; subscriptionHash: string }> {
-  if (!env.webPushEnabled) {
+  if (!(await isPatientWebPushConfigured())) {
     throw new HttpError(503, "Web Push is disabled.", { code: "web_push_disabled" });
   }
   const normalized = normalizeSubscription(input.subscription);
@@ -562,7 +686,7 @@ async function updateEventStatusFromDeliveries(eventId: number): Promise<void> {
 }
 
 export async function processPatientPushDeliveries(limit = 50): Promise<{ attempted: number; sent: number; failed: number }> {
-  if (!configureVapidIfNeeded()) return { attempted: 0, sent: 0, failed: 0 };
+  if (!(await configureVapidIfNeeded())) return { attempted: 0, sent: 0, failed: 0 };
 
   const deliveries = await claimPendingDeliveries(limit);
   let sent = 0;

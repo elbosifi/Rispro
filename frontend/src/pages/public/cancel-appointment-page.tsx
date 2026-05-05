@@ -801,7 +801,7 @@ function PushNotificationCard(props: { token: string; settings: PatientQrSetting
           <h3 className="text-base font-extrabold text-slate-900">{cardTitle}</h3>
           <p className="mt-1 text-sm leading-7 text-slate-600">
             {serverDisabled
-              ? "ØªÙ†Ø¨ÙŠÙ‡Ø§Øª Ø§Ù„Ù…ØªØµÙØ­ ØºÙŠØ± Ù…ØªØ§Ø­Ø© Ø­Ø§Ù„ÙŠØ§. ÙŠØ±Ø¬Ù‰ Ø¥ÙƒÙ…Ø§Ù„ Ø¥Ø¹Ø¯Ø§Ø¯Ø§Øª Web Push ÙÙŠ Ø§Ù„Ø®Ø§Ø¯Ù…."
+              ? "Browser notifications are not available yet. Web Push must be enabled on the server with valid VAPID keys."
               : status === "unsupported"
                 ? unsupportedMessage
                 : status === "denied"

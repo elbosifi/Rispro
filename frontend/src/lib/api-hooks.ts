@@ -1312,12 +1312,19 @@ export async function fetchPatientQrSettings(): Promise<PatientQrSettings> {
 }
 
 export async function savePatientQrSettings(payload: PatientQrSettings) {
-  return api<RawRecord>("/settings/patient_qr_self_service", {
+  const result = await api<RawRecord>("/settings/patient_qr_self_service", {
     method: "PUT",
     body: JSON.stringify({
       entries: [{ key: "config", value: payload }],
     }),
   });
+  if (payload.webPushEnabled) {
+    await api<RawRecord>("/settings/patient-web-push/ensure-config", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+  return result;
 }
 
 export async function fetchAppointmentSlipSettings(): Promise<AppointmentSlipSettings> {
