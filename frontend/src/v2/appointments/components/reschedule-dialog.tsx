@@ -15,23 +15,36 @@ import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import type {
   SchedulingDecisionDto,
   CaseCategory,
   CreateBookingRequest,
   BookingWithPatientInfo,
   AvailabilityDayDto,
+  CapacityResolutionMode,
+  SpecialReasonCodeDto,
 } from "../types";
+import type { Role } from "@/types/api";
 
 interface RescheduleDialogProps {
   booking: BookingWithPatientInfo;
   availabilityItems: AvailabilityDayDto[];
   caseCategory: CaseCategory;
   examTypeId: number | null;
+  canUseNonStandardCapacityModes?: boolean;
+  currentUserRole?: Role;
+  specialReasonOptions?: SpecialReasonCodeDto[];
   onReschedule: (
     newDate: string,
     newTime: string | null,
-    override?: CreateBookingRequest["override"]
+    override?: CreateBookingRequest["override"],
+    capacity?: {
+      capacityResolutionMode: CapacityResolutionMode;
+      useSpecialQuota: boolean;
+      specialReasonCode: string | null;
+      specialReasonNote: string | null;
+    }
   ) => Promise<void>;
   onCancel: () => void;
   error?: string | null;
@@ -42,6 +55,9 @@ export function RescheduleDialog({
   availabilityItems,
   caseCategory,
   examTypeId,
+  canUseNonStandardCapacityModes = false,
+  currentUserRole,
+  specialReasonOptions = [],
   onReschedule,
   onCancel,
   error,
@@ -53,6 +69,10 @@ export function RescheduleDialog({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [evaluating, setEvaluating] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [capacityResolutionMode, setCapacityResolutionMode] = useState<CapacityResolutionMode>("standard");
+  const [specialReasonCode, setSpecialReasonCode] = useState("");
+  const [specialReasonConfirmed, setSpecialReasonConfirmed] = useState(false);
+  const [specialReasonNote, setSpecialReasonNote] = useState("");
 
   // Override state
   const [showOverride, setShowOverride] = useState(false);
@@ -86,19 +106,24 @@ export function RescheduleDialog({
     setEvaluationError(null);
     setShowOverride(false);
 
+    const effectiveCapacityResolutionMode = canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
     evaluateV2Scheduling({
       patientId: booking.patientId,
       modalityId: booking.modalityId,
       examTypeId,
       scheduledDate: newDate,
       caseCategory,
-      useSpecialQuota: false,
-      specialReasonCode: null,
+      capacityResolutionMode: effectiveCapacityResolutionMode,
+      useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
+      specialReasonCode: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonCode || null : null,
       includeOverrideEvaluation: true,
     })
       .then((result) => {
         setDecision(result);
-        if (result.requiresSupervisorOverride) {
+        const selectedCapacityModeNeedsOverrideAuth =
+          effectiveCapacityResolutionMode === "category_override" ||
+          effectiveCapacityResolutionMode === "total_capacity_override";
+        if (result.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) {
           setShowOverride(true);
         }
       })
@@ -110,15 +135,36 @@ export function RescheduleDialog({
       .finally(() => {
         setEvaluating(false);
       });
-  }, [newDate, booking, examTypeId, caseCategory]);
+  }, [newDate, booking, examTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language]);
+
+  const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
+  const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+  const isSuperAdmin = currentUserRole === "super_admin";
+  const effectiveCapacityResolutionMode = canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
+  const selectedCapacityModeNeedsOverrideAuth =
+    effectiveCapacityResolutionMode === "category_override" ||
+    effectiveCapacityResolutionMode === "total_capacity_override";
+  const specialQuotaNeedsDetails = effectiveCapacityResolutionMode === "special_quota_extra";
+
+  useEffect(() => {
+    if (capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable) {
+      setCapacityResolutionMode("standard");
+      setSpecialReasonCode("");
+      setSpecialReasonConfirmed(false);
+      setSpecialReasonNote("");
+    }
+  }, [capacityResolutionMode, hasSpecialQuotaAvailable]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!newDate) return;
+    if (specialQuotaNeedsDetails && (!specialReasonCode || !specialReasonConfirmed)) {
+      return;
+    }
 
     // If override is required, validate supervisor fields
-    if (decision?.requiresSupervisorOverride) {
+    if (decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) {
       if (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()) {
         return;
       }
@@ -127,7 +173,7 @@ export function RescheduleDialog({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const override = decision?.requiresSupervisorOverride
+      const override = decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth
         ? {
             supervisorUsername: overrideUsername.trim(),
             supervisorPassword: overridePassword,
@@ -135,7 +181,12 @@ export function RescheduleDialog({
           }
         : undefined;
 
-      await onReschedule(newDate, null, override);
+      await onReschedule(newDate, null, override, {
+        capacityResolutionMode: effectiveCapacityResolutionMode,
+        useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
+        specialReasonCode: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonCode || null : null,
+        specialReasonNote: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonNote.trim() || null : null,
+      });
     } catch (err) {
       const message = err instanceof Error ? err.message : t(language, "appointments.v2.unknownError");
       setSubmitError(`${language === "ar" ? "تعذر إعادة جدولة الحجز:" : "Could not reschedule booking:"} ${message}`);
@@ -152,7 +203,7 @@ export function RescheduleDialog({
   // - Exclude the current booking date
   // - Keep restricted dates (override possible) and available dates
   const selectableDates = availabilityItems
-    .filter((item) => item.decision.displayStatus !== "blocked")
+    .filter((item) => (item.rowDisplayStatus ?? item.decision.displayStatus) !== "blocked")
     .filter((item) => item.date !== booking.bookingDate);
 
   return (
@@ -244,9 +295,13 @@ export function RescheduleDialog({
                 >
                   <option value="">{t(language, "appointments.v2.selectaDate")}</option>
                   {selectableDates.map((item) => {
-                    const isRestricted = item.decision.displayStatus === "restricted";
+                    const rowStatus = item.rowDisplayStatus ?? item.decision.displayStatus;
+                    const isRestricted = rowStatus === "restricted";
+                    const isFull = rowStatus === "full";
                     const label = isRestricted
                       ? `${item.date} — Restricted (override required)`
+                      : isFull
+                      ? `${item.date} — Full (override required)`
                       : item.date;
                     return (
                       <option key={item.date} value={item.date}>
@@ -261,6 +316,33 @@ export function RescheduleDialog({
                 </p>
               )}
             </div>
+
+            {canUseNonStandardCapacityModes && (
+              <SpecialQuotaSection
+                capacityResolutionMode={capacityResolutionMode}
+                onChangeCapacityResolutionMode={(mode) => {
+                  if (mode === "special_quota_extra" && !hasSpecialQuotaAvailable) return;
+                  setCapacityResolutionMode(mode);
+                  setDecision(null);
+                  setEvaluationError(null);
+                  setSubmitError(null);
+                  setShowOverride(false);
+                  setOverrideUsername("");
+                  setOverridePassword("");
+                  setOverrideReason("");
+                }}
+                specialQuotaAvailable={hasSpecialQuotaAvailable}
+                supervisorMode={canUseNonStandardCapacityModes}
+                superAdminMode={isSuperAdmin}
+                specialReasonCode={specialReasonCode}
+                onChangeSpecialReasonCode={setSpecialReasonCode}
+                specialReasonConfirmed={specialReasonConfirmed}
+                onChangeSpecialReasonConfirmed={setSpecialReasonConfirmed}
+                specialReasonNote={specialReasonNote}
+                onChangeSpecialReasonNote={setSpecialReasonNote}
+                options={specialReasonOptions}
+              />
+            )}
 
             {/* Decision Status */}
             {evaluating && (
@@ -320,7 +402,7 @@ export function RescheduleDialog({
             )}
 
             {/* Override Fields */}
-            {showOverride && decision?.requiresSupervisorOverride && (
+            {showOverride && (decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div>
                   <label
@@ -403,6 +485,7 @@ export function RescheduleDialog({
                    !!evaluationError ||
                    evaluating ||
                    submitting ||
+                   (specialQuotaNeedsDetails && (!specialReasonCode || !specialReasonConfirmed)) ||
                    (showOverride &&
                      (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()))
                  }

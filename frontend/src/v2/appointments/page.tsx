@@ -13,9 +13,10 @@ import { useAuth } from "@/providers/auth-provider";
 import { Button, Card, LoadingState } from "@/components/shared";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions } from "./api";
-import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, ExamTypeDto, ModalityDto } from "./types";
+import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions, useV2SpecialReasonCodes } from "./api";
+import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, ExamTypeDto, ModalityDto, CapacityResolutionMode, SpecialReasonCodeDto } from "./types";
 import { RESCHEDULABLE_STATUSES, CANCELLABLE_STATUSES } from "./types";
+import type { Role } from "@/types/api";
 import { StatusBadge } from "./components/status-badge";
 import { BookingForm } from "./components/booking-form";
 import { CancelConfirmDialog } from "./components/cancel-confirm-dialog";
@@ -55,6 +56,7 @@ export function AppointmentsV2Page() {
   const { user } = useAuth();
   const { language } = useLanguage();
   const lookups = useV2Lookups();
+  const specialReasons = useV2SpecialReasonCodes();
   const [modalityId, setModalityId] = useState<number | null>(null);
   const [examTypeId, setExamTypeId] = useState<number | null>(null);
   const [caseCategory, setCaseCategory] = useState<CaseCategory>("non_oncology");
@@ -90,9 +92,10 @@ export function AppointmentsV2Page() {
           offset: 0,
           examTypeId,
           caseCategory,
+          capacityResolutionMode: "standard",
           useSpecialQuota: false,
           specialReasonCode: null,
-          includeOverrideCandidates: false,
+          includeOverrideCandidates: true,
         }
       : undefined
   );
@@ -318,6 +321,9 @@ export function AppointmentsV2Page() {
               <BookingsList
                 modalityId={modalityId}
                 availabilityItems={availability.data?.items ?? []}
+                canUseNonStandardCapacityModes={user?.role === "supervisor" || user?.role === "super_admin"}
+                currentUserRole={user?.role}
+                specialReasonOptions={specialReasons.data ?? []}
                 onBookingCancelled={() => {
                   availability.refetch();
                   bookings.refetch();
@@ -442,10 +448,20 @@ function AvailabilityTable({ items, language }: AvailabilityTableProps) {
 interface BookingsListProps {
   modalityId: number;
   availabilityItems: AvailabilityDayDto[];
+  canUseNonStandardCapacityModes?: boolean;
+  currentUserRole?: Role;
+  specialReasonOptions?: SpecialReasonCodeDto[];
   onBookingCancelled: () => void;
 }
 
-function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: BookingsListProps) {
+function BookingsList({
+  modalityId,
+  availabilityItems,
+  canUseNonStandardCapacityModes = false,
+  currentUserRole,
+  specialReasonOptions = [],
+  onBookingCancelled,
+}: BookingsListProps) {
   const { language } = useLanguage();
   const cancelMutation = useV2CancelBooking();
   const rescheduleMutation = useV2RescheduleBooking();
@@ -501,7 +517,13 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
   const handleReschedule = async (
     newDate: string,
     _newTime: string | null,
-    override?: { supervisorUsername: string; supervisorPassword: string; reason: string }
+    override?: { supervisorUsername: string; supervisorPassword: string; reason: string },
+    capacity?: {
+      capacityResolutionMode: CapacityResolutionMode;
+      useSpecialQuota: boolean;
+      specialReasonCode: string | null;
+      specialReasonNote: string | null;
+    }
   ) => {
     if (!rescheduleTarget) return;
     if (!RESCHEDULABLE_STATUSES.includes(rescheduleTarget.status)) {
@@ -517,6 +539,14 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
         input: {
           bookingDate: newDate,
           bookingTime: _newTime,
+          ...(capacity
+            ? {
+                capacityResolutionMode: capacity.capacityResolutionMode,
+                useSpecialQuota: capacity.useSpecialQuota,
+                specialReasonCode: capacity.specialReasonCode,
+                specialReasonNote: capacity.specialReasonNote,
+              }
+            : {}),
           ...(override ? { override } : {}),
         },
       });
@@ -702,6 +732,9 @@ function BookingsList({ modalityId, availabilityItems, onBookingCancelled }: Boo
           availabilityItems={availabilityItems}
           caseCategory={rescheduleTarget.caseCategory}
           examTypeId={rescheduleTarget.examTypeId}
+          canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
+          currentUserRole={currentUserRole}
+          specialReasonOptions={specialReasonOptions}
           onReschedule={handleReschedule}
           onCancel={handleRescheduleCancel}
           error={rescheduleError}
