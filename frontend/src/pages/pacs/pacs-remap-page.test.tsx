@@ -230,7 +230,8 @@ describe("PacsRemapPage wizard", () => {
     const comboBoxes = screen.getAllByRole("combobox");
     fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
-    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+    const uploadButton = await screen.findByRole("button", { name: "Upload selected study, remap, and send to PACS" });
+    fireEvent.click(uploadButton);
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
     const sent = FakeXHR.instances[0]?.sentBody;
     expect(sent).toBeInstanceOf(FormData);
@@ -272,8 +273,14 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
     const comboBoxes = screen.getAllByRole("combobox");
     fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
+    expect(await screen.findByText(/Verifying selected study files/i)).toBeTruthy();
+    await waitFor(() => expect(scanMock).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/CD study contents/i)).toBeTruthy();
+    expect(await screen.findByText(/full1\.dcm/i)).toBeTruthy();
+    expect(await screen.findByText(/full2\.dcm/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
-    fireEvent.click(screen.getByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+    const uploadButton = await screen.findByRole("button", { name: "Upload selected study, remap, and send to PACS" });
+    fireEvent.click(uploadButton);
 
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
     expect(scanMock).toHaveBeenCalledTimes(1);

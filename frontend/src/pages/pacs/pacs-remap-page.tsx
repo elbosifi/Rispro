@@ -243,10 +243,12 @@ export default function PacsRemapPage() {
   const [uploadTotal, setUploadTotal] = useState(0);
   const [processingStage, setProcessingStage] = useState<RemapWizardStep>("select_files");
   const [focusStepOverride, setFocusStepOverride] = useState<RemapWizardStep | null>(null);
+  const [reviewScanPending, setReviewScanPending] = useState(false);
   const [fileInputVersion, setFileInputVersion] = useState(0);
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [retryClearAfterReAuth, setRetryClearAfterReAuth] = useState(false);
   const stepCardRefs = useRef<Partial<Record<RemapWizardStep, HTMLDivElement | null>>>({});
+  const reviewScanInFlightRef = useRef(false);
 
   const selectedStudy = scanResult?.studies.find((study) => study.studyInstanceUid === selectedStudyInstanceUid) || null;
 
@@ -349,6 +351,7 @@ export default function PacsRemapPage() {
     onMutate: () => {
       setProcessingStage("scanning");
       setFocusStepOverride(null);
+      setReviewScanPending(false);
       setErrorMessage("");
       setErrorDetails("");
       setSuccessMessage("");
@@ -556,7 +559,8 @@ export default function PacsRemapPage() {
   const canContinueStudy = !!selectedStudy || (scanResult?.studies.length === 0 && enableFallbackUpload);
   const canContinuePatient = !!selectedPatientId;
   const canContinueDestination = !!selectedDestinationKey;
-  const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !processMutation.isPending;
+  const reviewNeedsFullScan = Boolean(scanResult?.previewOnly && canContinueStudy && canContinuePatient && canContinueDestination);
+  const canSubmit = canContinueStudy && canContinuePatient && canContinueDestination && confirmChecked && !reviewNeedsFullScan && !reviewScanPending && !processMutation.isPending;
   const uploadPercent = uploadTotal > 0 ? Math.min(100, Math.round((uploadLoaded / uploadTotal) * 100)) : 0;
 
   const wizardStep: RemapWizardStep = useMemo(() => {
@@ -580,6 +584,40 @@ export default function PacsRemapPage() {
       setFocusStepOverride(null);
     }
   }, [focusStepOverride, selectedPatientId, processingStage]);
+
+  useEffect(() => {
+    if (!reviewNeedsFullScan || reviewScanInFlightRef.current || files.length === 0) return;
+    let cancelled = false;
+    reviewScanInFlightRef.current = true;
+    setReviewScanPending(true);
+    setErrorMessage("");
+    setErrorDetails("");
+
+    scanDicomStudiesFromFiles(files, { batchSize: 20 })
+      .then((result) => {
+        if (cancelled) return;
+        setScanResult(result);
+        if (selectedStudyInstanceUid && result.studies.some((study) => study.studyInstanceUid === selectedStudyInstanceUid)) {
+          setSelectedStudyInstanceUid(selectedStudyInstanceUid);
+        } else {
+          setSelectedStudyInstanceUid(result.studies.length === 1 ? result.studies[0].studyInstanceUid : "");
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setErrorMessage(error instanceof Error ? error.message : "Failed to verify DICOM files for review.");
+        setProcessingStage("failed");
+      })
+      .finally(() => {
+        reviewScanInFlightRef.current = false;
+        if (!cancelled) setReviewScanPending(false);
+      });
+
+    return () => {
+      cancelled = true;
+      reviewScanInFlightRef.current = false;
+    };
+  }, [reviewNeedsFullScan, files, selectedStudyInstanceUid]);
 
   useEffect(() => {
     const activeElement = stepCardRefs.current[focusedWizardStep];
@@ -629,6 +667,7 @@ export default function PacsRemapPage() {
     setSuccessMessage("");
     setProcessingStage("select_files");
     setFocusStepOverride(null);
+    setReviewScanPending(false);
     setFileInputVersion((v) => v + 1);
     scanMutation.reset();
     processMutation.reset();
@@ -1016,6 +1055,14 @@ export default function PacsRemapPage() {
                   {language === "ar" ? "نقطة تحقق نهائية" : "Final safety checkpoint"}
                 </span>
               </div>
+              {(reviewNeedsFullScan || reviewScanPending) && (
+                <div className="rounded-2xl border border-teal-200 bg-teal-50 px-3 py-2 text-xs text-teal-900">
+                  <strong className="block">{language === "ar" ? "جاري التحقق من ملفات الدراسة" : "Verifying selected study files"}</strong>
+                  {language === "ar"
+                    ? "المعاينة السريعة حددت معلومات المريض. يجري الآن قراءة ملفات القرص قبل السماح بالإرسال النهائي."
+                    : "Fast preview identified the patient/study. RISPro is now reading the CD files before final confirmed upload is enabled."}
+                </div>
+              )}
               <div className="overflow-x-auto rounded-2xl border border-slate-200 text-xs">
                 <table className="w-full border-collapse">
                   <thead className="bg-black/5">
@@ -1062,6 +1109,65 @@ export default function PacsRemapPage() {
               <p className="text-xs text-amber-700">
                 {t(language, "pacs.remap.selectedStudyOnly")}
               </p>
+              <div className="rounded-2xl border border-slate-200 bg-white text-xs">
+                <div className="flex flex-col gap-1 border-b border-slate-200 bg-slate-50 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <h4 className="font-semibold">{language === "ar" ? "محتويات الدراسة من القرص" : "CD study contents"}</h4>
+                    <p className="text-slate-500">
+                      {language === "ar"
+                        ? "هذه هي ملفات الدراسة التي سيتم رفعها بعد التأكيد."
+                        : "These are the selected study files that will be uploaded after confirmation."}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-700">
+                    {selectedStudy?.files.length || 0} {language === "ar" ? "ملفات" : "files"}
+                  </span>
+                </div>
+                {selectedStudy?.files.length ? (
+                  <div className="max-h-72 overflow-auto">
+                    <table className="w-full min-w-[720px] border-collapse">
+                      <thead className="sticky top-0 bg-white shadow-sm">
+                        <tr>
+                          <th scope="col" className="px-3 py-2 text-left font-semibold">#</th>
+                          <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "المسار / الملف" : "Path / file"}</th>
+                          <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "الحجم" : "Size"}</th>
+                          <th scope="col" className="px-3 py-2 text-left font-semibold">{language === "ar" ? "السلسلة" : "Series"}</th>
+                          <th scope="col" className="px-3 py-2 text-left font-semibold">SOP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedStudy.files.slice(0, 200).map((entry, index) => {
+                          const fileEntry = entry as typeof entry & { name?: string; size?: number };
+                          const fileName = fileEntry.filePath || fileEntry.fileName || fileEntry.file?.name || fileEntry.name || "—";
+                          const fileSize = fileEntry.fileSize || fileEntry.file?.size || fileEntry.size || 0;
+                          return (
+                            <tr key={`${fileName}-${index}`} className="border-t border-slate-100">
+                              <td className="px-3 py-2 text-slate-500">{index + 1}</td>
+                              <td className="px-3 py-2 font-mono text-[11px]">{fileName}</td>
+                              <td className="px-3 py-2">{formatBytes(fileSize)}</td>
+                              <td className="px-3 py-2 font-mono text-[11px]">{fileEntry.seriesInstanceUid || "—"}</td>
+                              <td className="px-3 py-2 font-mono text-[11px]">{fileEntry.sopInstanceUid || "—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {selectedStudy.files.length > 200 && (
+                      <p className="border-t border-slate-100 px-3 py-2 text-slate-500">
+                        {language === "ar"
+                          ? `تم عرض أول 200 ملف من ${selectedStudy.files.length}.`
+                          : `Showing first 200 of ${selectedStudy.files.length} files.`}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="px-3 py-3 text-slate-500">
+                    {reviewScanPending || reviewNeedsFullScan
+                      ? (language === "ar" ? "جاري قراءة ملفات القرص..." : "Reading CD files...")
+                      : (language === "ar" ? "لم يتم العثور على ملفات للدراسة المختارة." : "No files found for the selected study.")}
+                  </p>
+                )}
+              </div>
               <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-3 space-y-3">
                 <label className="flex items-start gap-2 text-xs font-medium text-amber-950">
                   <input type="checkbox" checked={confirmChecked} onChange={(e) => setConfirmChecked(e.target.checked)} className="mt-0.5" />
@@ -1073,7 +1179,9 @@ export default function PacsRemapPage() {
                   disabled={!canSubmit}
                   className="btn-primary px-4 py-2 rounded-lg disabled:opacity-50"
                 >
-                  {t(language, "pacs.remap.uploadSelectedStudy")}
+                  {reviewNeedsFullScan || reviewScanPending
+                    ? (language === "ar" ? "جاري التحقق من ملفات القرص..." : "Verifying CD files...")
+                    : t(language, "pacs.remap.uploadSelectedStudy")}
                 </button>
               </div>
             </div>
