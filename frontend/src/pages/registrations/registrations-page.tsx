@@ -29,15 +29,19 @@ import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 import {
   rescheduleV2Booking,
+  useV2SpecialReasonCodes,
 } from "@/v2/appointments/api";
 import {
   RESCHEDULABLE_STATUSES,
   type BookingStatus,
+  type CapacityResolutionMode,
   type RescheduleBookingRequest,
 } from "@/v2/appointments/types";
 import { AvailabilityPanel } from "@/v2/appointments/components/AvailabilityPanel";
+import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSection";
 import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
+import { useAuth } from "@/providers/auth-provider";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
   dateMode: "single",
@@ -78,6 +82,7 @@ function offsetFromStartDate(isoDate: string): number {
 
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
+  const { user } = useAuth();
   const isRtl = language === "ar";
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
@@ -109,6 +114,11 @@ export default function RegistrationsPage() {
   const [rescheduleOverrideError, setRescheduleOverrideError] = useState<string | null>(null);
   const [rescheduleOverrideLoading, setRescheduleOverrideLoading] = useState(false);
   const [pendingReschedulePayload, setPendingReschedulePayload] = useState<RescheduleBookingRequest | null>(null);
+  const [rescheduleCapacityResolutionMode, setRescheduleCapacityResolutionMode] =
+    useState<CapacityResolutionMode>("standard");
+  const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
+  const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
+  const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -139,19 +149,36 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
+  const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes();
   const selectedCanReschedule = Boolean(
     selectedAppointment && RESCHEDULABLE_STATUSES.includes(selectedAppointment.status as BookingStatus)
   );
+  const canUseNonStandardCapacityModes = user?.role === "supervisor" || user?.role === "super_admin";
+  const isSuperAdmin = user?.role === "super_admin";
   const rescheduleAvailability = useAppointmentAvailability({
     patientId: manageTab === "reschedule" && selectedCanReschedule ? selectedAppointment?.patientId ?? null : null,
     modalityId: selectedAppointment?.modalityId ?? null,
     examTypeId: selectedAppointment?.examTypeId ?? null,
     caseCategory: selectedAppointment?.caseCategory ?? "non_oncology",
-    capacityResolutionMode: "standard",
-    specialReasonCode: null,
+    capacityResolutionMode: canUseNonStandardCapacityModes ? rescheduleCapacityResolutionMode : "standard",
+    specialReasonCode:
+      canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+        ? rescheduleSpecialReasonCode || null
+        : null,
     days: 14,
     offset: rescheduleOffset,
   });
+  const selectedRescheduleAvailabilityItem = rescheduleAvailability.rawItems.find(
+    (item) => item.date === rescheduleDate
+  );
+  const rescheduleSpecialQuotaAvailable =
+    (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+  const rescheduleCapacityModeNeedsOverrideAuth =
+    canUseNonStandardCapacityModes &&
+    (rescheduleCapacityResolutionMode === "category_override" ||
+      rescheduleCapacityResolutionMode === "total_capacity_override");
+  const rescheduleSpecialQuotaNeedsDetails =
+    canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra";
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
@@ -199,6 +226,10 @@ export default function RegistrationsPage() {
       setRescheduleOverrideOpen(false);
       setPendingReschedulePayload(null);
       setRescheduleOverrideError(null);
+      setRescheduleCapacityResolutionMode("standard");
+      setRescheduleSpecialReasonCode("");
+      setRescheduleSpecialReasonConfirmed(false);
+      setRescheduleSpecialReasonNote("");
       pushToast({
         type: "success",
         title: t("registrations.rescheduleSuccessTitle"),
@@ -495,7 +526,20 @@ export default function RegistrationsPage() {
     setRescheduleOverrideOpen(false);
     setPendingReschedulePayload(null);
     setRescheduleOverrideError(null);
+    setRescheduleCapacityResolutionMode("standard");
+    setRescheduleSpecialReasonCode("");
+    setRescheduleSpecialReasonConfirmed(false);
+    setRescheduleSpecialReasonNote("");
   }, [selectedAppointment?.id, manageTab]);
+
+  useEffect(() => {
+    if (rescheduleCapacityResolutionMode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) {
+      setRescheduleCapacityResolutionMode("standard");
+      setRescheduleSpecialReasonCode("");
+      setRescheduleSpecialReasonConfirmed(false);
+      setRescheduleSpecialReasonNote("");
+    }
+  }, [rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable]);
 
   useEffect(() => {
     let cancelled = false;
@@ -576,6 +620,8 @@ export default function RegistrationsPage() {
 
   const canSubmitReschedule =
     Boolean(selectedAppointment && rescheduleDate && rescheduleSelectedRow) &&
+    (!rescheduleSpecialQuotaNeedsDetails ||
+      (Boolean(rescheduleSpecialReasonCode) && rescheduleSpecialReasonConfirmed)) &&
     !rescheduleMutation.isPending;
 
   const buildReschedulePayload = (): RescheduleBookingRequest | null => {
@@ -583,6 +629,17 @@ export default function RegistrationsPage() {
     return {
       bookingDate: rescheduleDate,
       bookingTime: null,
+      capacityResolutionMode: canUseNonStandardCapacityModes ? rescheduleCapacityResolutionMode : "standard",
+      useSpecialQuota:
+        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra",
+      specialReasonCode:
+        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+          ? rescheduleSpecialReasonCode || null
+          : null,
+      specialReasonNote:
+        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+          ? rescheduleSpecialReasonNote.trim() || null
+          : null,
       rescheduleReason: rescheduleReason.trim() || null,
     };
   };
@@ -605,7 +662,8 @@ export default function RegistrationsPage() {
     if (
       rescheduleSelectedRow?.requiresSupervisorOverride ||
       rescheduleSelectedRow?.status === "restricted" ||
-      rescheduleSelectedRow?.status === "full"
+      rescheduleSelectedRow?.status === "full" ||
+      rescheduleCapacityModeNeedsOverrideAuth
     ) {
       setPendingReschedulePayload(payload);
       setRescheduleOverrideError(null);
@@ -1328,6 +1386,29 @@ export default function RegistrationsPage() {
                           />
                         </div>
 
+                        {canUseNonStandardCapacityModes ? (
+                          <SpecialQuotaSection
+                            capacityResolutionMode={rescheduleCapacityResolutionMode}
+                            onChangeCapacityResolutionMode={(mode) => {
+                              if (mode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) return;
+                              setRescheduleCapacityResolutionMode(mode);
+                              setRescheduleOverrideError(null);
+                              setRescheduleOverrideOpen(false);
+                              setPendingReschedulePayload(null);
+                            }}
+                            specialQuotaAvailable={rescheduleSpecialQuotaAvailable}
+                            supervisorMode={canUseNonStandardCapacityModes}
+                            superAdminMode={isSuperAdmin}
+                            specialReasonCode={rescheduleSpecialReasonCode}
+                            onChangeSpecialReasonCode={setRescheduleSpecialReasonCode}
+                            specialReasonConfirmed={rescheduleSpecialReasonConfirmed}
+                            onChangeSpecialReasonConfirmed={setRescheduleSpecialReasonConfirmed}
+                            specialReasonNote={rescheduleSpecialReasonNote}
+                            onChangeSpecialReasonNote={setRescheduleSpecialReasonNote}
+                            options={specialReasonOptions}
+                          />
+                        ) : null}
+
                         <div>
                           <label htmlFor="registration-reschedule-reason" className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
                             {t("registrations.rescheduleReason")}
@@ -1344,7 +1425,8 @@ export default function RegistrationsPage() {
 
                         {rescheduleSelectedRow?.requiresSupervisorOverride ||
                         rescheduleSelectedRow?.status === "restricted" ||
-                        rescheduleSelectedRow?.status === "full" ? (
+                        rescheduleSelectedRow?.status === "full" ||
+                        rescheduleCapacityModeNeedsOverrideAuth ? (
                           <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                             {t("registrations.rescheduleSupervisorRequired")}
                           </div>
