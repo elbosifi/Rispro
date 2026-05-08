@@ -66,10 +66,10 @@ async function voidBookingInternal(
   }
 
   if (["arrived", "waiting"].includes(booking.status)) {
-    if (userRole !== "supervisor") {
+    if (!["receptionist", "supervisor", "super_admin"].includes(userRole ?? "")) {
       throw new SchedulingError(
         403,
-        "Only supervisor can void arrived or waiting bookings.",
+        "Only receptionist, supervisor, or super_admin can void arrived or waiting bookings.",
         ["booking_void_supervisor_required"]
       );
     }

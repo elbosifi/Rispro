@@ -470,6 +470,73 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
   });
 
   describe("Void guards", () => {
+    it("should allow receptionist, supervisor, and super_admin to void arrived or waiting bookings", async () => {
+      guard();
+      const { pool } = await import("../../../../db/pool.js");
+      const cases = [
+        { role: "receptionist", bookingStatus: "arrived" },
+        { role: "supervisor", bookingStatus: "waiting" },
+        { role: "super_admin", bookingStatus: "arrived" },
+      ] as const;
+
+      for (const testCase of cases) {
+        const createResult = await fetch("/api/v2/appointments", {
+          method: "POST",
+          body: {
+            patientId: testData.patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: "2026-06-01",
+            caseCategory: "non_oncology",
+          },
+        });
+        const bookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+        await pool.query(`update appointments_v2.bookings set status = $2 where id = $1`, [
+          bookingId,
+          testCase.bookingStatus,
+        ]);
+
+        const { status, data } = await fetch(`/api/v2/appointments/${bookingId}/void`, {
+          method: "POST",
+          cookie: createTestAuthCookie(testData.userId, testCase.role),
+          body: { voidReason: `${testCase.role} correction` },
+        });
+
+        assert.equal(status, 200);
+        const booking = (data as Record<string, unknown>).booking as Record<string, unknown>;
+        assert.equal(booking.status, "voided");
+        assert.equal((data as Record<string, unknown>).previousStatus, testCase.bookingStatus);
+      }
+    });
+
+    it("should reject doctor voiding arrived or waiting bookings", async () => {
+      guard();
+      const { pool } = await import("../../../../db/pool.js");
+
+      for (const bookingStatus of ["arrived", "waiting"] as const) {
+        const createResult = await fetch("/api/v2/appointments", {
+          method: "POST",
+          body: {
+            patientId: testData.patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: "2026-06-01",
+            caseCategory: "non_oncology",
+          },
+        });
+        const bookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+        await pool.query(`update appointments_v2.bookings set status = $2 where id = $1`, [bookingId, bookingStatus]);
+
+        const { status } = await fetch(`/api/v2/appointments/${bookingId}/void`, {
+          method: "POST",
+          cookie: createTestAuthCookie(testData.userId, "doctor"),
+          body: { voidReason: "Doctor correction" },
+        });
+
+        assert.equal(status, 403);
+      }
+    });
+
     it("should reject voiding completed/no-show/cancelled/discontinued/already-voided bookings", async () => {
       guard();
       const { pool } = await import("../../../../db/pool.js");
