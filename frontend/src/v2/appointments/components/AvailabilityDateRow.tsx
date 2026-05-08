@@ -166,7 +166,7 @@ export function AvailabilityDateRow({
   const isClickable =
     status === "available" ||
     status === "restricted" ||
-    (status === "full" && requiresSupervisorOverride);
+    (status === "full" && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
   const isBlockedLike = status === "blocked";
 
   const statusColor =
