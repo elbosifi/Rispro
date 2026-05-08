@@ -178,8 +178,14 @@ export default function RegistrationsPage() {
   );
   const rescheduleSpecialQuotaAvailable =
     (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+  const rescheduleAnySpecialQuotaAvailable = rescheduleAvailability.rawItems.some(
+    (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
+  );
   const canUseRescheduleSpecialQuota =
-    isSuperAdmin || rescheduleSpecialQuotaAvailable || rescheduleCapacityResolutionMode === "special_quota_extra";
+    isSuperAdmin ||
+    rescheduleSpecialQuotaAvailable ||
+    rescheduleAnySpecialQuotaAvailable ||
+    rescheduleCapacityResolutionMode === "special_quota_extra";
   const canUseSelectedRescheduleCapacityMode =
     rescheduleCapacityResolutionMode === "special_quota_extra"
       ? canUseRescheduleSpecialQuota

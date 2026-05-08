@@ -205,7 +205,14 @@ export function CreateAppointmentTab({
       item.date === form.appointmentDate &&
       (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
-  const canUseSpecialQuotaMode = isSuperAdmin || hasSpecialQuotaAvailable || form.capacityResolutionMode === "special_quota_extra";
+  const hasAnySpecialQuotaAvailable = (availability.rawItems ?? []).some(
+    (item) => (item.specialQuotaSummary?.remaining ?? 0) > 0
+  );
+  const canUseSpecialQuotaMode =
+    isSuperAdmin ||
+    hasSpecialQuotaAvailable ||
+    hasAnySpecialQuotaAvailable ||
+    form.capacityResolutionMode === "special_quota_extra";
   const canUseSelectedCapacityMode =
     form.capacityResolutionMode === "special_quota_extra"
       ? canUseSpecialQuotaMode

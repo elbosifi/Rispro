@@ -108,7 +108,12 @@ export function RescheduleDialog({
 
     const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
     const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
-    const canUseSpecialQuotaMode = currentUserRole === "super_admin" || hasSpecialQuotaAvailable || capacityResolutionMode === "special_quota_extra";
+    const hasAnySpecialQuotaAvailable = availabilityItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
+    const canUseSpecialQuotaMode =
+      currentUserRole === "super_admin" ||
+      hasSpecialQuotaAvailable ||
+      hasAnySpecialQuotaAvailable ||
+      capacityResolutionMode === "special_quota_extra";
     const effectiveCapacityResolutionMode =
       capacityResolutionMode === "special_quota_extra"
         ? canUseSpecialQuotaMode ? capacityResolutionMode : "standard"
@@ -145,8 +150,10 @@ export function RescheduleDialog({
 
   const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
   const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+  const hasAnySpecialQuotaAvailable = availabilityItems.some((item) => (item.specialQuotaSummary?.remaining ?? 0) > 0);
   const isSuperAdmin = currentUserRole === "super_admin";
-  const canUseSpecialQuotaMode = isSuperAdmin || hasSpecialQuotaAvailable || capacityResolutionMode === "special_quota_extra";
+  const canUseSpecialQuotaMode =
+    isSuperAdmin || hasSpecialQuotaAvailable || hasAnySpecialQuotaAvailable || capacityResolutionMode === "special_quota_extra";
   const effectiveCapacityResolutionMode =
     capacityResolutionMode === "special_quota_extra"
       ? canUseSpecialQuotaMode ? capacityResolutionMode : "standard"
