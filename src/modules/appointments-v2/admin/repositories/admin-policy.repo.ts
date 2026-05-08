@@ -397,8 +397,11 @@ const UPSERT_SPECIAL_REASON_CODE_SQL = `
     updated_by_user_id = excluded.updated_by_user_id
 `;
 
-const DELETE_UNUSED_SPECIAL_REASON_CODES_SQL = `
-  delete from appointments_v2.special_reason_codes
+const DEACTIVATE_UNUSED_SPECIAL_REASON_CODES_SQL = `
+  update appointments_v2.special_reason_codes
+  set is_active = false,
+      updated_at = now(),
+      updated_by_user_id = $2
   where code <> all($1::text[])
 `;
 
@@ -650,12 +653,16 @@ export async function upsertSpecialReasonCodes(
     ]);
   }
 
-  // Remove codes no longer in the snapshot.
-  // When the incoming list is empty, delete ALL codes.
+  // Removed codes are deactivated, not deleted, so historical bookings can
+  // still resolve their labels on appointment slips and audit views.
   const codeList = codes.map((c) => c.code);
   if (codeList.length === 0) {
-    await client.query(`delete from appointments_v2.special_reason_codes`);
+    await client.query(
+      `update appointments_v2.special_reason_codes
+       set is_active = false, updated_at = now(), updated_by_user_id = $1`,
+      [userId]
+    );
   } else {
-    await client.query(DELETE_UNUSED_SPECIAL_REASON_CODES_SQL, [codeList]);
+    await client.query(DEACTIVATE_UNUSED_SPECIAL_REASON_CODES_SQL, [codeList, userId]);
   }
 }

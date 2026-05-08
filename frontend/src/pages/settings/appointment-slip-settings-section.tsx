@@ -263,6 +263,7 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
               ["showDate", chooseLocalized(language, "التاريخ", "Date")],
               ["showTime", chooseLocalized(language, "الوقت", "Time")],
               ["showWalkIn", chooseLocalized(language, "حالة Walk-in", "Walk-in")],
+              ["showSpecialReason", chooseLocalized(language, "سبب الحصة الخاصة", "Special reason")],
               ["showLocation", chooseLocalized(language, "الموقع", "Location")],
               ["showArrivalNote", chooseLocalized(language, "ملاحظة الحضور", "Arrival note")],
             ]}

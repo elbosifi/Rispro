@@ -213,6 +213,8 @@ export interface Appointment {
   accessionNumber: string;
   requiresReport?: boolean;
   studyInstanceUid?: string | null;
+  specialReasonCode?: string | null;
+  specialReasonNote?: string | null;
   appointmentDate: string;
   bookingTime?: string | null;
   dailySequence: number;

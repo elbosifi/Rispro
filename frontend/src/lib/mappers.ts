@@ -86,6 +86,8 @@ export interface AppointmentWithDetails extends Appointment {
   examNameEn: string | null;
   examSpecificInstructionAr: string | null;
   examSpecificInstructionEn: string | null;
+  specialReasonLabelAr: string | null;
+  specialReasonLabelEn: string | null;
   priorityNameAr: string | null;
   priorityNameEn: string | null;
   modalitySlotNumber: number | null;
@@ -226,6 +228,8 @@ export function mapAppointment(raw: RawRecord): Appointment {
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     requiresReport: bool(raw, 'requires_report', bool(raw, 'requiresReport', false)),
     studyInstanceUid: strOrNull(raw, 'study_instance_uid') ?? strOrNull(raw, 'studyInstanceUid'),
+    specialReasonCode: strOrNull(raw, 'special_reason_code') ?? strOrNull(raw, 'specialReasonCode'),
+    specialReasonNote: strOrNull(raw, 'special_reason_note') ?? strOrNull(raw, 'specialReasonNote'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),
     bookingTime: strOrNull(raw, 'booking_time') ?? strOrNull(raw, 'bookingTime'),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
@@ -280,6 +284,8 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
       strOrNull(raw, 'exam_specific_instruction_ar') ?? strOrNull(raw, 'examSpecificInstructionAr'),
     examSpecificInstructionEn:
       strOrNull(raw, 'exam_specific_instruction_en') ?? strOrNull(raw, 'examSpecificInstructionEn'),
+    specialReasonLabelAr: strOrNull(raw, 'special_reason_label_ar') ?? strOrNull(raw, 'specialReasonLabelAr'),
+    specialReasonLabelEn: strOrNull(raw, 'special_reason_label_en') ?? strOrNull(raw, 'specialReasonLabelEn'),
     // Priority fields
     priorityNameAr: strOrNull(raw, 'priority_name_ar') ?? strOrNull(raw, 'priorityNameAr'),
     priorityNameEn: strOrNull(raw, 'priority_name_en') ?? strOrNull(raw, 'priorityNameEn'),

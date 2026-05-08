@@ -7,8 +7,8 @@
  * authoritative persisted snapshot loaded from DB.
  *
  * NOTE: specialReasonCodes are global config and are NOT copied per-version.
- * They are loaded globally by loadPolicySnapshot() and included in snapshots
- * for display, but are never written by draft operations.
+ * They are loaded globally by loadPolicySnapshot() and edited by draft saves
+ * through the global special_reason_codes table.
  */
 
 import type { PoolClient } from "pg";
@@ -232,6 +232,5 @@ async function copySnapshotIntoVersion(
   }
 
   // NOTE: specialReasonCodes are global/live config. We do NOT copy them
-  // per-version. They are loaded globally by loadPolicySnapshot() and appear
-  // in all snapshots for display, but are managed independently of drafts.
+  // per-version. They are loaded globally by loadPolicySnapshot().
 }

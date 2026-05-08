@@ -325,6 +325,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
       b.case_category,
       b.requires_report,
       b.study_instance_uid,
+      b.special_reason_code,
+      b.special_reason_note,
       b.status,
       b.notes,
       b.is_walk_in,
@@ -341,6 +343,8 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     bb.booking_time,
     bb.requires_report,
     bb.study_instance_uid,
+    bb.special_reason_code,
+    bb.special_reason_note,
     (
       select count(*)
       from appointments_v2.bookings seq
@@ -382,12 +386,15 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     et.name_en as exam_name_en,
     et.specific_instruction_ar as exam_specific_instruction_ar,
     et.specific_instruction_en as exam_specific_instruction_en,
+    src.label_ar as special_reason_label_ar,
+    src.label_en as special_reason_label_en,
     rp.name_ar as priority_name_ar,
     rp.name_en as priority_name_en
   from booking_base bb
   join patients p on p.id = bb.patient_id
   join modalities m on m.id = bb.modality_id
   left join exam_types et on et.id = bb.exam_type_id
+  left join appointments_v2.special_reason_codes src on src.code = bb.special_reason_code
   left join reporting_priorities rp on rp.id = bb.reporting_priority_id
 `;
 
@@ -396,6 +403,8 @@ export interface BookingPrintDetailsRow {
   accession_number: string;
   requires_report: boolean;
   study_instance_uid: string | null;
+  special_reason_code: string | null;
+  special_reason_note: string | null;
   appointment_date: string;
   booking_time: string | null;
   daily_sequence: number;
@@ -427,6 +436,8 @@ export interface BookingPrintDetailsRow {
   exam_name_en: string | null;
   exam_specific_instruction_ar: string | null;
   exam_specific_instruction_en: string | null;
+  special_reason_label_ar: string | null;
+  special_reason_label_en: string | null;
   priority_name_ar: string | null;
   priority_name_en: string | null;
 }

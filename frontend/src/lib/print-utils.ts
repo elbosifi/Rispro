@@ -374,6 +374,19 @@ function buildInstructionText(
   return sections;
 }
 
+function buildSpecialReasonField(apt: AppointmentWithDetails): SlipField | null {
+  const fallbackCode = String(apt.specialReasonCode || "").trim();
+  const valueAr = String(apt.specialReasonLabelAr || fallbackCode).trim();
+  const valueEn = String(apt.specialReasonLabelEn || fallbackCode).trim();
+  if (!valueAr && !valueEn) return null;
+  return {
+    labelAr: "سبب الحصة الخاصة",
+    labelEn: "Special Reason",
+    valueAr: valueAr || valueEn,
+    valueEn: valueEn || valueAr,
+  };
+}
+
 function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData, settings: AppointmentSlipSettings): SlipField[] {
   const fields: SlipField[] = [];
   if (settings.showPatientCategory && apt.caseCategory) {
@@ -396,6 +409,10 @@ function buildSlipFields(apt: AppointmentWithDetails, slip: AppointmentSlipData,
   if (settings.showDate) fields.push({ labelAr: "Ø§Ù„ØªØ§Ø±ÙŠØ®", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
   if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "Ø§Ù„ÙˆÙ‚Øª", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
   if (settings.showWalkIn) fields.push({ labelAr: "Ø­Ø§Ù„Ø© Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showSpecialReason) {
+    const specialReasonField = buildSpecialReasonField(apt);
+    if (specialReasonField) fields.push(specialReasonField);
+  }
   if (settings.showLocation && slip.locationText) fields.push({ labelAr: "Ø§Ù„Ù…ÙˆÙ‚Ø¹", labelEn: "Location", valueAr: slip.locationText, valueEn: slip.locationText });
   if (settings.showArrivalNote) fields.push({ labelAr: "ملاحظة الحضور", labelEn: "Arrival Note", valueAr: slip.arrivalNote, valueEn: slip.arrivalNote });
   return fields;
@@ -423,6 +440,10 @@ function buildSlipFieldsClean(apt: AppointmentWithDetails, slip: AppointmentSlip
   if (settings.showDate) fields.push({ labelAr: "التاريخ", labelEn: "Date", valueAr: slip.appointmentDate, valueEn: slip.appointmentDate });
   if (settings.showTime && slip.bookingTime) fields.push({ labelAr: "الوقت", labelEn: "Time", valueAr: slip.bookingTime, valueEn: slip.bookingTime });
   if (settings.showWalkIn) fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: slip.walkInLabel, valueEn: slip.walkInLabel });
+  if (settings.showSpecialReason) {
+    const specialReasonField = buildSpecialReasonField(apt);
+    if (specialReasonField) fields.push(specialReasonField);
+  }
   return fields;
 }
 
@@ -451,6 +472,10 @@ function buildSlipFieldsLocalized(apt: AppointmentWithDetails, slip: Appointment
     const walkInValueAr = apt.isWalkIn ? "نعم" : "لا";
     const walkInValueEn = apt.isWalkIn ? "Yes" : "No";
     fields.push({ labelAr: "حالة Walk-in", labelEn: "Walk-in", valueAr: walkInValueAr, valueEn: walkInValueEn });
+  }
+  if (settings.showSpecialReason) {
+    const specialReasonField = buildSpecialReasonField(apt);
+    if (specialReasonField) fields.push(specialReasonField);
   }
   return fields;
 }

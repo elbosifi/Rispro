@@ -6,9 +6,8 @@
  * provided snapshot, then the authoritative snapshot is reloaded from DB
  * and the config hash is recomputed from that persisted data.
  *
- * NOTE: specialReasonCodes are global config and are NOT written per-version.
- * They are loaded globally by loadPolicySnapshot() and included in the returned
- * snapshot for display, but draft save does NOT mutate the global table.
+ * NOTE: specialReasonCodes are global config. They are edited from the policy
+ * draft UI, but saved to the global special_reason_codes table, not per-version.
  */
 
 import type { PoolClient } from "pg";
@@ -25,6 +24,7 @@ import {
   insertExamTypeRule,
   insertExamTypeSpecialQuota,
   insertExamMixQuotaRule,
+  upsertSpecialReasonCodes,
   type PolicyVersionRow,
 } from "../repositories/admin-policy.repo.js";
 import type { PolicySnapshotDto } from "../../api/dto/admin-scheduling.dto.js";
@@ -74,6 +74,7 @@ async function savePolicyDraftInternal(
 
   await validateCategoryCapacityPolicy(client, policySnapshot);
   await validateSpecialQuotaPolicy(client, policySnapshot);
+  validateSpecialReasonCodes(policySnapshot);
   validateExamMixPolicy(policySnapshot);
 
   // 3. Delete all existing versioned rules for this version (authoritative replace)
@@ -151,11 +152,18 @@ async function savePolicyDraftInternal(
     });
   }
 
-  // NOTE: specialReasonCodes are global/live config. We do NOT mutate the
-  // global special_reason_codes table during draft save. This preserves draft
-  // isolation — two concurrent drafts cannot overwrite each other's special
-  // reason codes. The codes are loaded globally by loadPolicySnapshot() and
-  // appear in the snapshot for display, but are managed separately.
+  if (Array.isArray(policySnapshot.specialReasonCodes)) {
+    await upsertSpecialReasonCodes(
+      client,
+      policySnapshot.specialReasonCodes.map((code) => ({
+        code: code.code.trim(),
+        labelAr: code.labelAr.trim(),
+        labelEn: code.labelEn.trim(),
+        isActive: code.isActive,
+      })),
+      userId
+    );
+  }
 
   // 5. Reload the authoritative persisted snapshot from DB.
   // This gives us the canonical representation (DB-assigned IDs, canonical
@@ -189,6 +197,39 @@ async function savePolicyDraftInternal(
     version: refreshed,
     configHash,
   };
+}
+
+function validateSpecialReasonCodes(policySnapshot: PolicySnapshotDto): void {
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  const seenCodes = new Set<string>();
+
+  if (!Array.isArray(policySnapshot.specialReasonCodes)) return;
+
+  policySnapshot.specialReasonCodes.forEach((row, index) => {
+    const code = String(row.code ?? "").trim();
+    const labelAr = String(row.labelAr ?? "").trim();
+    const labelEn = String(row.labelEn ?? "").trim();
+
+    if (!code) {
+      fieldErrors.push({ field: `specialReasonCodes[${index}].code`, code: "special_reason_code_required", message: "Special reason code is required." });
+    } else if (!/^[a-zA-Z0-9_-]+$/.test(code)) {
+      fieldErrors.push({ field: `specialReasonCodes[${index}].code`, code: "special_reason_code_invalid", message: "Use letters, numbers, underscores, or hyphens only." });
+    } else if (seenCodes.has(code)) {
+      fieldErrors.push({ field: `specialReasonCodes[${index}].code`, code: "special_reason_code_duplicate", message: "Special reason code must be unique." });
+    }
+
+    if (!labelAr) {
+      fieldErrors.push({ field: `specialReasonCodes[${index}].labelAr`, code: "special_reason_label_ar_required", message: "Arabic label is required." });
+    }
+    if (!labelEn) {
+      fieldErrors.push({ field: `specialReasonCodes[${index}].labelEn`, code: "special_reason_label_en_required", message: "English label is required." });
+    }
+    seenCodes.add(code);
+  });
+
+  if (fieldErrors.length > 0) {
+    throw new SchedulingError(400, "Invalid special reason code configuration.", ["special_reason_codes_invalid"], fieldErrors);
+  }
 }
 
 async function validateSpecialQuotaPolicy(

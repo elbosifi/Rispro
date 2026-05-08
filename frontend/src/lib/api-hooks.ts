@@ -962,6 +962,7 @@ export interface AppointmentSlipSettings {
   showDate: boolean;
   showTime: boolean;
   showWalkIn: boolean;
+  showSpecialReason: boolean;
   showLocation: boolean;
   showArrivalNote: boolean;
   boldAppointmentSlipText: boolean;
@@ -1028,6 +1029,7 @@ export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   showDate: true,
   showTime: true,
   showWalkIn: true,
+  showSpecialReason: false,
   showLocation: true,
   showArrivalNote: true,
   boldAppointmentSlipText: false,
@@ -1321,6 +1323,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
     showDate: bool(record.showDate, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showDate),
     showTime: bool(record.showTime, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showTime),
     showWalkIn: bool(record.showWalkIn, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showWalkIn),
+    showSpecialReason: bool(record.showSpecialReason, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showSpecialReason),
     showLocation: bool(record.showLocation, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showLocation),
     showArrivalNote: bool(record.showArrivalNote, DEFAULT_APPOINTMENT_SLIP_SETTINGS.showArrivalNote),
     boldAppointmentSlipText: bool(record.boldAppointmentSlipText, DEFAULT_APPOINTMENT_SLIP_SETTINGS.boldAppointmentSlipText),
