@@ -4,7 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { HttpError } from "../utils/http-error.js";
-import { buildBackupSnapshot, previewBackupRestore, restoreBackupSnapshot } from "../services/admin-service.js";
+import { buildBackupSnapshot, previewBackupRestore, restoreBackupSnapshot, scheduleSystemRestart } from "../services/admin-service.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -41,6 +41,14 @@ adminRouter.post(
   asyncRoute(async (req: Request, res: Response) => {
     const body = asUnknownRecord(req.body);
     const result = await restoreBackupSnapshot(body.backup, req.user!.sub, body.passphrase, body.confirmation);
+    res.json(result);
+  })
+);
+
+adminRouter.post(
+  "/system/restart",
+  asyncRoute(async (req: Request, res: Response) => {
+    const result = await scheduleSystemRestart(req.user!.sub);
     res.json(result);
   })
 );

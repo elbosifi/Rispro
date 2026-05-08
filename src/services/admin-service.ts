@@ -145,6 +145,12 @@ export interface RestoreResult {
   restartRequired: true;
 }
 
+export interface RestartResult {
+  ok: true;
+  restartScheduled: true;
+  message: string;
+}
+
 function quoteIdent(value: string): string {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
     throw new HttpError(400, `Invalid identifier: ${value}`);
@@ -861,4 +867,25 @@ export async function restoreBackupSnapshot(
     }
     client.release();
   }
+}
+
+export async function scheduleSystemRestart(currentUserId: NullableUserId): Promise<RestartResult> {
+  await logAuditEntry({
+    entityType: "system",
+    entityId: null,
+    actionType: "restart_requested",
+    oldValues: null,
+    newValues: { requestedAt: new Date().toISOString() },
+    changedByUserId: currentUserId
+  });
+
+  setTimeout(() => {
+    process.kill(process.pid, "SIGTERM");
+  }, 750).unref();
+
+  return {
+    ok: true,
+    restartScheduled: true,
+    message: "RISpro restart has been requested. Wait a few seconds, then refresh if the page does not reconnect automatically."
+  };
 }

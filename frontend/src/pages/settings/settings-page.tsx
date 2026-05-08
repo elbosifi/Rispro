@@ -2457,6 +2457,8 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
   const [previewBusy, setPreviewBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreComplete, setRestoreComplete] = useState(false);
+  const [restartBusy, setRestartBusy] = useState(false);
+  const [restartRequested, setRestartRequested] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
   const [restorePreview, setRestorePreview] = useState<{
@@ -2645,6 +2647,41 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     }
   };
 
+  const handleSystemRestart = async () => {
+    if (!confirm("Restart RISpro now? The app may be unavailable for a few seconds while it starts again.")) {
+      return;
+    }
+
+    setRestartBusy(true);
+    setRestoreMessage(null);
+    try {
+      const response = await fetch("/api/admin/system/restart", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "system", "restart"]);
+          throw new Error("Recent supervisor re-authentication is required. Click Restart again after re-auth.");
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      const result = await response.json();
+      setRestartRequested(true);
+      setRestoreMessage({
+        type: "success",
+        text: result.message || "RISpro restart requested. Wait a few seconds, then refresh if needed."
+      });
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Restart request failed." });
+    } finally {
+      setRestartBusy(false);
+    }
+  };
+
   // Auto-retry restore after successful re-auth
   const handleReAuthSuccess = async () => {
     if (pendingPayload) {
@@ -2679,6 +2716,14 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
           <p className="font-semibold">Restore completed successfully.</p>
           <p className="mt-1">Patients, appointments, documents, settings, and encrypted runtime variables were restored. Restart RISpro to apply restored environment variables.</p>
+          <button
+            type="button"
+            onClick={handleSystemRestart}
+            disabled={restartBusy || restartRequested}
+            className="btn-primary text-sm mt-3 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {restartRequested ? "Restart requested" : restartBusy ? "Requesting restart..." : "Restart RISpro safely"}
+          </button>
         </div>
       )}
 
