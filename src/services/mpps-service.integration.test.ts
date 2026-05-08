@@ -1,4 +1,4 @@
-import { after, before, describe, it } from "node:test";
+import { after, before, describe, it, type SuiteContext } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 import { pool } from "../db/pool.js";
@@ -21,9 +21,9 @@ describe("mpps-service integration", () => {
   let testData: Awaited<ReturnType<typeof seedTestData>>;
   let bookingIds: number[] = [];
 
-  before(async function () {
+  before(async (t: SuiteContext) => {
     if (!isDatabaseAvailable() || !(await canReachDatabase())) {
-      this.skip();
+      (t as unknown as { skip: () => void }).skip();
       return;
     }
 

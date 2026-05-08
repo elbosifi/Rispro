@@ -32,6 +32,7 @@ function settings(): ResolvedSanteWorklistSettings {
     patientNameField: "english_full_name",
     allowedBasePaths: ["storage/sante-hl7-output"],
     hostOutboxHint: "storage/sante-hl7-output",
+    windowsShareSourceHint: "storage/sante-hl7-output",
   };
 }
 

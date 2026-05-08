@@ -155,6 +155,7 @@ async function orthancFetch(
     }
 
     if (!settings.verifyTls && settings.baseUrl.toLowerCase().startsWith("https://")) {
+      // @ts-ignore undici is available at runtime in this repo; type declarations are not installed.
       const undici = await import("undici");
       requestInit.dispatcher = new undici.Agent({
         connect: { rejectUnauthorized: false },

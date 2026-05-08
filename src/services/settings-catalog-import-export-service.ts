@@ -545,7 +545,7 @@ function buildDraftRows(
         ? "invalid"
         : !existing
           ? "create"
-          : examTypeHasChanges(existing, row, modality.id)
+          : examTypeHasChanges(existing, row, modality?.id ?? existing.modality_id)
             ? "update"
             : "skip";
     return {
@@ -752,7 +752,7 @@ export async function applyCatalogImport(
     nameAr: row.nameAr,
     descriptionEn: row.descriptionEn,
     descriptionAr: row.descriptionAr,
-    durationMinutes: row.durationMinutes == null || row.durationMinutes === "" ? null : Number(row.durationMinutes),
+    durationMinutes: row.durationMinutes == null ? null : Number(row.durationMinutes),
     active: Boolean(row.active)
   }));
   const allErrors = [

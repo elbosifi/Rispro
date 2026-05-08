@@ -50,15 +50,19 @@ interface SqlReadinessRow {
   Status?: number | null;
 }
 
+interface SqlRequest {
+  input: (name: string, type: unknown, value: unknown) => unknown;
+  query: <T = unknown>(sql: string) => Promise<{ recordset: T[] }>;
+}
+
+interface SqlConnectionPool {
+  connect: () => Promise<void>;
+  close: () => Promise<void>;
+  request: () => SqlRequest;
+}
+
 type SqlModule = {
-  ConnectionPool: new (config: unknown) => {
-    connect: () => Promise<void>;
-    close: () => Promise<void>;
-    request: () => {
-      input: (name: string, type: unknown, value: unknown) => unknown;
-      query: <T = unknown>(sql: string) => Promise<{ recordset: T[] }>;
-    };
-  };
+  ConnectionPool: new (config: unknown) => SqlConnectionPool;
   NVarChar: (size?: number) => unknown;
 };
 
@@ -86,7 +90,7 @@ async function loadSqlModule(): Promise<SqlModule | null> {
 
 async function withSqlConnection<T>(
   settings: SonicDicomReportSettings,
-  work: (ctx: { sql: SqlModule; pool: any }) => Promise<T>
+  work: (ctx: { sql: SqlModule; pool: SqlConnectionPool }) => Promise<T>
 ): Promise<T> {
   const sql = await loadSqlModule();
   if (!sql) throw new HttpError(503, "mssql module loaded but ConnectionPool constructor was not found");
@@ -116,7 +120,7 @@ async function withSqlConnection<T>(
 }
 
 async function queryStudyUidByAccession(
-  pool: any,
+  pool: SqlConnectionPool,
   sql: SqlModule,
   dicomDb: string,
   accessionNumber: string
@@ -133,7 +137,7 @@ async function queryStudyUidByAccession(
 }
 
 async function querySqlReportReadinessByAccession(
-  pool: any,
+  pool: SqlConnectionPool,
   sql: SqlModule,
   dicomDb: string,
   reportDb: string,
@@ -177,7 +181,7 @@ async function querySqlReportReadinessByAccession(
 }
 
 async function queryReportStatusByReportNo(
-  pool: any,
+  pool: SqlConnectionPool,
   sql: SqlModule,
   reportDb: string,
   reportNo: string
@@ -410,7 +414,7 @@ export async function testSonicDicomSqlReadiness(input: {
       const statusLookup = await withSqlConnection(settings, async ({ sql, pool }) =>
         queryReportStatusByReportNo(pool, sql, reportDb, reportNo)
       );
-      const mapped = statusLookup.foundRow
+      const mapped: ReportStatusResult = statusLookup.foundRow
         ? mapStatusCode(settings, statusLookup.statusCode)
         : { state: "no_report", canViewReport: false, source: "sonicdicom" as const };
       return {
