@@ -8,6 +8,9 @@ import {
   useV2SavePolicyDraft,
   useV2PolicyPreview,
   useV2PublishPolicyDraft,
+  useV2Lookups,
+  useV2ExamTypeCatalog,
+  useV2PolicyUsers,
 } from "./api";
 import { PolicyStatusPanel } from "./components/policy-status-panel";
 import { LivePolicyPanel } from "./components/live-policy-panel";
@@ -24,6 +27,9 @@ export function SchedulingAdminV2Page() {
   const createDraft = useV2CreatePolicyDraft();
   const saveDraft = useV2SavePolicyDraft();
   const publishDraft = useV2PublishPolicyDraft();
+  const lookups = useV2Lookups();
+  const examTypeCatalog = useV2ExamTypeCatalog();
+  const policyUsers = useV2PolicyUsers();
 
   const draftVersionId = status.data?.draft?.id ?? null;
   const preview = useV2PolicyPreview(draftVersionId);
@@ -54,7 +60,12 @@ export function SchedulingAdminV2Page() {
       <PolicyStatusPanel status={status.data} />
 
       {status.data?.publishedSnapshot ? (
-        <LivePolicyPanel snapshot={status.data.publishedSnapshot} />
+        <LivePolicyPanel
+          snapshot={status.data.publishedSnapshot}
+          modalities={lookups.data?.modalities ?? []}
+          examTypes={examTypeCatalog.data ?? []}
+          policyUsers={policyUsers.data ?? []}
+        />
       ) : (
         <div
           style={{

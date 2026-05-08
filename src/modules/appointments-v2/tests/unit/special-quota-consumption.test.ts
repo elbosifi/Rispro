@@ -99,6 +99,8 @@ describe("Special quota consumption — pureEvaluate", () => {
       useSpecialQuota: true,
       context: makeContext({
         currentBookedCount: 5, // category exhausted
+        currentBookedCountTotal: 5,
+        modalityDailyCapacity: 6,
         currentSpecialQuotaBookedCount: 0,
       }),
     });
@@ -106,8 +108,28 @@ describe("Special quota consumption — pureEvaluate", () => {
     const decision = await pureEvaluate(input);
 
     assert.strictEqual(decision.displayStatus, "available");
+    assert.strictEqual(decision.remainingStandardCapacity, 1);
+    assert.strictEqual(decision.remainingSpecialQuota, 3);
+  });
+
+  it("blocks special_quota_extra when modality total capacity is exhausted", async () => {
+    const input = makeInput({
+      capacityResolutionMode: "special_quota_extra",
+      useSpecialQuota: true,
+      context: makeContext({
+        currentBookedCount: 5,
+        currentBookedCountTotal: 5,
+        modalityDailyCapacity: 5,
+        currentSpecialQuotaBookedCount: 0,
+      }),
+    });
+
+    const decision = await pureEvaluate(input);
+
+    assert.strictEqual(decision.displayStatus, "blocked");
     assert.strictEqual(decision.remainingStandardCapacity, 0);
     assert.strictEqual(decision.remainingSpecialQuota, 3);
+    assert.ok(decision.reasons.some((reason) => reason.code === "modality_daily_capacity_exhausted"));
   });
 
   it("returns available with standard capacity when not exhausted (ignores special quota)", async () => {

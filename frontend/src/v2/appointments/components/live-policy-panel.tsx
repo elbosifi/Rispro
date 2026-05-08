@@ -6,11 +6,14 @@
  */
 
 import { useState } from "react";
-import type { PolicySnapshotDto } from "../types";
+import type { ExamTypeDto, ModalityDto, PolicySnapshotDto, PolicyUserDto } from "../types";
 import { useLanguage } from "@/providers/language-provider";
 
 interface LivePolicyPanelProps {
   snapshot: PolicySnapshotDto;
+  modalities?: ModalityDto[];
+  examTypes?: ExamTypeDto[];
+  policyUsers?: PolicyUserDto[];
 }
 
 function formatDate(dateStr: string | null): string {
@@ -43,7 +46,36 @@ function ReadOnlyField({ label, value }: { label: string; value: string | number
   );
 }
 
-export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
+function formatModality(modalityId: number, modalities: ModalityDto[], language: string): string {
+  const modality = modalities.find((row) => row.id === modalityId);
+  if (!modality) return `ID: ${modalityId}`;
+  const name = language === "ar" ? modality.nameAr || modality.name : modality.nameEn || modality.name;
+  return modality.code ? `${name} (${modality.code})` : name;
+}
+
+function formatExamTypes(examTypeIds: number[], examTypes: ExamTypeDto[], language: string): string {
+  if (examTypeIds.length === 0) return "—";
+  return examTypeIds
+    .map((examTypeId) => {
+      const examType = examTypes.find((row) => row.id === examTypeId);
+      if (!examType) return `ID: ${examTypeId}`;
+      const name = language === "ar" ? examType.nameAr || examType.name : examType.nameEn || examType.name;
+      return examType.code ? `${name} (${examType.code})` : name;
+    })
+    .join(", ");
+}
+
+function formatAllowedUsers(userIds: number[], policyUsers: PolicyUserDto[]): string {
+  if (userIds.length === 0) return "Super admin only";
+  return userIds
+    .map((userId) => {
+      const user = policyUsers.find((row) => row.id === userId);
+      return user ? `${user.fullName || user.username} (${user.username})` : `ID: ${userId}`;
+    })
+    .join(", ");
+}
+
+export function LivePolicyPanel({ snapshot, modalities = [], examTypes = [], policyUsers = [] }: LivePolicyPanelProps) {
   const { language } = useLanguage();
   const [copied, setCopied] = useState(false);
 
@@ -112,7 +144,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                   gap: 8,
                 }}
               >
-                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={formatModality(row.modalityId, modalities, language)} />
                 <ReadOnlyField label={language === "ar" ? "الفئة" : "Category"} value={row.caseCategory === "oncology" ? (language === "ar" ? "أورام" : "Oncology") : (language === "ar" ? "غير أورام" : "Non-oncology")} />
                 <ReadOnlyField label={language === "ar" ? "الحد اليومي" : "Daily limit"} value={row.dailyLimit} />
                 <ReadOnlyField label={language === "ar" ? "الحالة" : "Status"} value={row.isActive ? (language === "ar" ? "نشط" : "Active") : (language === "ar" ? "غير نشط" : "Inactive")} />
@@ -160,7 +192,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                     gap: 8,
                   }}
                 >
-                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label={language === "ar" ? "الجهاز" : "Modality"} value={formatModality(row.modalityId, modalities, language)} />
                 <ReadOnlyField label={language === "ar" ? "نوع القاعدة" : "Rule type"} value={ruleTypeLabel} />
                 <ReadOnlyField label={language === "ar" ? "التاريخ/التواريخ" : "Date(s)"} value={dateDisplay} />
                 <ReadOnlyField label={language === "ar" ? "قابل للتجاوز" : "Overridable"} value={row.isOverridable ? (language === "ar" ? "نعم" : "Yes") : (language === "ar" ? "لا" : "No")} />
@@ -213,11 +245,11 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                     gap: 8,
                   }}
                 >
-                  <ReadOnlyField label="Modality" value={`ID: ${row.modalityId}`} />
+                  <ReadOnlyField label="Modality" value={formatModality(row.modalityId, modalities, language)} />
                   <ReadOnlyField label="Rule type" value={ruleTypeLabel} />
                   <ReadOnlyField label="Date(s)" value={dateDisplay} />
                   <ReadOnlyField label="Effect" value={effectLabel} />
-                  <ReadOnlyField label="Exam type IDs" value={row.examTypeIds.join(", ") || "—"} />
+                  <ReadOnlyField label="Exam types" value={formatExamTypes(row.examTypeIds, examTypes, language)} />
                   <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
                   {row.title && <ReadOnlyField label="Title" value={row.title} />}
                   {row.notes && <ReadOnlyField label="Notes" value={row.notes} />}
@@ -245,11 +277,11 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                   gap: 8,
                 }}
               >
-                <ReadOnlyField label="Modality" value={`ID: ${row.modalityId}`} />
+                <ReadOnlyField label="Modality" value={formatModality(row.modalityId, modalities, language)} />
                 <ReadOnlyField label="Title" value={row.title ?? "—"} />
                 <ReadOnlyField label="Rule type" value={row.ruleType} />
                 <ReadOnlyField label="Daily limit" value={row.dailyLimit} />
-                <ReadOnlyField label="Exam type IDs" value={row.examTypeIds.join(", ") || "—"} />
+                <ReadOnlyField label="Exam types" value={formatExamTypes(row.examTypeIds, examTypes, language)} />
                 <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
               </div>
             ))
@@ -274,9 +306,9 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
                   gap: 8,
                 }}
               >
-                <ReadOnlyField label="Exam type ID" value={row.examTypeId} />
+                <ReadOnlyField label="Exam type" value={formatExamTypes([row.examTypeId], examTypes, language)} />
                 <ReadOnlyField label="Extra slots/day" value={row.dailyExtraSlots} />
-                <ReadOnlyField label="Allowed users" value={(row.allowedUserIds ?? []).join(", ") || "Super admin only"} />
+                <ReadOnlyField label="Allowed users" value={formatAllowedUsers(row.allowedUserIds ?? [], policyUsers)} />
                 <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
               </div>
             ))

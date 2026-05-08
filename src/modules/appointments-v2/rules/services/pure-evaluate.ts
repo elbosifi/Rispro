@@ -371,6 +371,21 @@ function checkCapacity(
   }
 
   if (mode === "special_quota_extra") {
+    if (totalExhausted) {
+      reasons.push(
+        reason(
+          "modality_daily_capacity_exhausted",
+          "error",
+          "No remaining capacity for this modality date."
+        )
+      );
+      return {
+        status: "blocked",
+        remainingStandardCapacity: 0,
+        remainingSpecialQuota: remainingSpecialQuota ?? 0,
+        reasons,
+      };
+    }
     if (remainingSpecialQuota != null && remainingSpecialQuota > 0) {
       return {
         status: "available",

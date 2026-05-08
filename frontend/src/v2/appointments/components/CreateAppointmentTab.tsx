@@ -277,14 +277,15 @@ export function CreateAppointmentTab({
   }, [entityDisplayMode, form.patientId]);
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
-    if (isReceptionist && row.status !== "available") {
+    const hasRowSpecialQuota = (row.specialQuotaRemaining ?? 0) > 0;
+    if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota)) {
       return;
     }
     if (row.status === "blocked") {
       return;
     }
 
-    if (row.status === "full" && !row.requiresSupervisorOverride) {
+    if (row.status === "full" && !row.requiresSupervisorOverride && !hasRowSpecialQuota) {
       return;
     }
 
