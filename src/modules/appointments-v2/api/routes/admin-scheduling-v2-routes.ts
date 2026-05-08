@@ -14,6 +14,7 @@ import { savePolicyDraft } from "../../admin/services/save-policy-draft.service.
 import { publishPolicy } from "../../admin/services/publish-policy.service.js";
 import { previewPolicyImpact } from "../../admin/services/preview-policy-impact.service.js";
 import { getPolicyStatus } from "../../admin/services/get-policy-status.service.js";
+import { listUsers } from "../../../../services/user-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import type {
   CreatePolicyDraftDto,
@@ -30,6 +31,27 @@ router.use(requireSupervisor);
 interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
+
+/**
+ * GET /api/v2/scheduling/admin/users
+ * Return active users for policy allow-list selectors.
+ */
+router.get(
+  "/users",
+  asyncRoute(async (_req: AuthenticatedRequest, res: Response) => {
+    const users = await listUsers();
+    res.json({
+      items: users
+        .filter((user) => user.is_active && user.role !== "super_admin")
+        .map((user) => ({
+          id: user.id,
+          username: user.username,
+          fullName: user.full_name,
+          role: user.role,
+        })),
+    });
+  })
+);
 
 /**
  * GET /api/v2/scheduling/admin/policy

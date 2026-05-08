@@ -348,6 +348,7 @@ async function rescheduleBookingInternal(
     currentExamMixConsumedByRuleId,
     closedWeekdays,
     requesterRole: userRole,
+    requesterUserId: userId,
   };
 
   const pureInput: PureEvaluateInput = {

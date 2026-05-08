@@ -276,6 +276,7 @@ export function LivePolicyPanel({ snapshot }: LivePolicyPanelProps) {
               >
                 <ReadOnlyField label="Exam type ID" value={row.examTypeId} />
                 <ReadOnlyField label="Extra slots/day" value={row.dailyExtraSlots} />
+                <ReadOnlyField label="Allowed users" value={(row.allowedUserIds ?? []).join(", ") || "Super admin only"} />
                 <ReadOnlyField label="Status" value={row.isActive ? "Active" : "Inactive"} />
               </div>
             ))

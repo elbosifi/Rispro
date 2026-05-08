@@ -356,6 +356,12 @@ const INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL = `
     is_active as "isActive"
 `;
 
+const INSERT_EXAM_TYPE_SPECIAL_QUOTA_USER_SQL = `
+  insert into appointments_v2.exam_type_special_quota_users (quota_id, user_id)
+  values ($1, $2)
+  on conflict do nothing
+`;
+
 const INSERT_EXAM_MIX_QUOTA_RULE_SQL = `
   insert into appointments_v2.exam_mix_quota_rules (
     policy_version_id, modality_id, title, rule_type, specific_date, start_date, end_date,
@@ -552,13 +558,14 @@ export interface InsertedExamTypeSpecialQuota {
   id: number;
   examTypeId: number;
   dailyExtraSlots: number;
+  allowedUserIds: number[];
   isActive: boolean;
 }
 
 export async function insertExamTypeSpecialQuota(
   client: PoolClient,
   policyVersionId: number,
-  rule: { examTypeId: number; dailyExtraSlots: number; isActive: boolean }
+  rule: { examTypeId: number; dailyExtraSlots: number; allowedUserIds?: number[]; isActive: boolean }
 ): Promise<InsertedExamTypeSpecialQuota> {
   const result = await client.query<InsertedExamTypeSpecialQuota>(INSERT_EXAM_TYPE_SPECIAL_QUOTA_SQL, [
     policyVersionId,
@@ -566,7 +573,12 @@ export async function insertExamTypeSpecialQuota(
     rule.dailyExtraSlots,
     rule.isActive,
   ]);
-  return result.rows[0];
+  const inserted = result.rows[0];
+  const allowedUserIds = [...new Set((rule.allowedUserIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+  for (const userId of allowedUserIds) {
+    await client.query(INSERT_EXAM_TYPE_SPECIAL_QUOTA_USER_SQL, [inserted.id, userId]);
+  }
+  return { ...inserted, allowedUserIds };
 }
 
 export interface InsertedExamMixQuotaRule {

@@ -9,6 +9,7 @@ interface Props {
   specialQuotaAvailable: boolean;
   supervisorMode?: boolean;
   superAdminMode?: boolean;
+  allowCategoryOverride?: boolean;
   specialReasonCode: string;
   onChangeSpecialReasonCode: (value: string) => void;
   specialReasonConfirmed: boolean;
@@ -23,6 +24,7 @@ export function SpecialQuotaSection({
   onChangeCapacityResolutionMode,
   specialQuotaAvailable,
   supervisorMode = true,
+  allowCategoryOverride = supervisorMode,
   specialReasonCode,
   onChangeSpecialReasonCode,
   specialReasonConfirmed,
@@ -50,7 +52,9 @@ export function SpecialQuotaSection({
         className="input-premium"
       >
         <option value="standard">{t(language, "appointments.create.standardBooking")}</option>
-        <option value="category_override">{t(language, "appointments.create.categoryOverride")}</option>
+        {allowCategoryOverride && (
+          <option value="category_override">{t(language, "appointments.create.categoryOverride")}</option>
+        )}
         {superAdminMode && (
           <option value="total_capacity_override">
             {language === "ar" ? "تجاوز السعة الإجمالية (مدير أعلى فقط)" : "Total capacity override (super admin only)"}

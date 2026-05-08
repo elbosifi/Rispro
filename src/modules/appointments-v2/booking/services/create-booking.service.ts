@@ -263,6 +263,7 @@ async function createBookingInternal(
     currentExamMixConsumedByRuleId,
     closedWeekdays,
     requesterRole: userRole,
+    requesterUserId: userId,
   };
 
   const pureInput: PureEvaluateInput = {

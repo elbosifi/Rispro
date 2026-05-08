@@ -158,7 +158,7 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
           },
         ],
         examTypeSpecialQuotas: [
-          { id: 4, examTypeId, dailyExtraSlots: 5, isActive: true },
+          { id: 4, examTypeId, dailyExtraSlots: 5, allowedUserIds: [testData.userId], isActive: true },
         ],
         specialReasonCodes: [
           { code: "test_urgent", labelAr: "عاجل اختبار", labelEn: "Test urgent case", isActive: true },
@@ -221,6 +221,11 @@ describe("Policy draft persistence — integration tests", { skip: skipEnv }, ()
         savedDraft.examTypeSpecialQuotas[0].dailyExtraSlots,
         5,
         "Special quota should be persisted"
+      );
+      assert.deepStrictEqual(
+        savedDraft.examTypeSpecialQuotas[0].allowedUserIds,
+        [testData.userId],
+        "Special quota allowed users should be persisted"
       );
     });
   });

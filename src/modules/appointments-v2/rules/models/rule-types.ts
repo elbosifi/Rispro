@@ -77,6 +77,7 @@ export interface ExamTypeSpecialQuotaRow {
   policyVersionId: number;
   examTypeId: number;
   dailyExtraSlots: number;
+  allowedUserIds: number[];
   isActive: boolean;
 }
 

@@ -106,7 +106,13 @@ export function RescheduleDialog({
     setEvaluationError(null);
     setShowOverride(false);
 
-    const effectiveCapacityResolutionMode = canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
+    const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
+    const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+    const canUseSpecialQuotaMode = currentUserRole === "super_admin" || hasSpecialQuotaAvailable || capacityResolutionMode === "special_quota_extra";
+    const effectiveCapacityResolutionMode =
+      capacityResolutionMode === "special_quota_extra"
+        ? canUseSpecialQuotaMode ? capacityResolutionMode : "standard"
+        : canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
     evaluateV2Scheduling({
       patientId: booking.patientId,
       modalityId: booking.modalityId,
@@ -135,12 +141,16 @@ export function RescheduleDialog({
       .finally(() => {
         setEvaluating(false);
       });
-  }, [newDate, booking, examTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language]);
+  }, [newDate, booking, examTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language, availabilityItems, currentUserRole]);
 
   const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
   const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
   const isSuperAdmin = currentUserRole === "super_admin";
-  const effectiveCapacityResolutionMode = canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
+  const canUseSpecialQuotaMode = isSuperAdmin || hasSpecialQuotaAvailable || capacityResolutionMode === "special_quota_extra";
+  const effectiveCapacityResolutionMode =
+    capacityResolutionMode === "special_quota_extra"
+      ? canUseSpecialQuotaMode ? capacityResolutionMode : "standard"
+      : canUseNonStandardCapacityModes ? capacityResolutionMode : "standard";
   const selectedCapacityModeNeedsOverrideAuth =
     effectiveCapacityResolutionMode === "category_override" ||
     effectiveCapacityResolutionMode === "total_capacity_override";
@@ -317,7 +327,7 @@ export function RescheduleDialog({
               )}
             </div>
 
-            {canUseNonStandardCapacityModes && (
+            {(canUseNonStandardCapacityModes || canUseSpecialQuotaMode) && (
               <SpecialQuotaSection
                 capacityResolutionMode={capacityResolutionMode}
                 onChangeCapacityResolutionMode={(mode) => {
@@ -332,8 +342,9 @@ export function RescheduleDialog({
                   setOverrideReason("");
                 }}
                 specialQuotaAvailable={hasSpecialQuotaAvailable}
-                supervisorMode={canUseNonStandardCapacityModes}
+                supervisorMode={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
                 superAdminMode={isSuperAdmin}
+                allowCategoryOverride={canUseNonStandardCapacityModes}
                 specialReasonCode={specialReasonCode}
                 onChangeSpecialReasonCode={setSpecialReasonCode}
                 specialReasonConfirmed={specialReasonConfirmed}

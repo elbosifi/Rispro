@@ -109,14 +109,19 @@ export async function loadCategoryDailyLimits(
 }
 
 const LOAD_SPECIAL_QUOTAS_SQL = `
-  select id,
-         policy_version_id as "policyVersionId",
-         exam_type_id as "examTypeId",
-         daily_extra_slots as "dailyExtraSlots",
-         is_active as "isActive"
-  from appointments_v2.exam_type_special_quotas
-  where policy_version_id = $1
-    and is_active = true
+  select q.id,
+         q.policy_version_id as "policyVersionId",
+         q.exam_type_id as "examTypeId",
+         q.daily_extra_slots as "dailyExtraSlots",
+         coalesce(array_agg(qu.user_id order by qu.user_id)
+           filter (where qu.user_id is not null), '{}') as "allowedUserIds",
+         q.is_active as "isActive"
+  from appointments_v2.exam_type_special_quotas q
+  left join appointments_v2.exam_type_special_quota_users qu
+    on qu.quota_id = q.id
+  where q.policy_version_id = $1
+    and q.is_active = true
+  group by q.id
 `;
 
 export async function loadExamTypeSpecialQuotas(
@@ -126,7 +131,10 @@ export async function loadExamTypeSpecialQuotas(
   const result = await client.query<ExamTypeSpecialQuotaRow>(LOAD_SPECIAL_QUOTAS_SQL, [
     policyVersionId,
   ]);
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    allowedUserIds: Array.isArray(row.allowedUserIds) ? row.allowedUserIds.map(Number) : [],
+  }));
 }
 
 // ---------------------------------------------------------------------------

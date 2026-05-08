@@ -19,6 +19,7 @@ export interface BookingDecisionInput {
   specialReasonCode?: string | null;
   includeOverrideEvaluation?: boolean;
   requesterRole?: Role;
+  requesterUserId?: number | null;
 }
 
 export interface BookingDecision {

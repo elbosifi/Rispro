@@ -149,16 +149,24 @@ async function listExamTypeSpecialQuotas(
 ): Promise<PolicyExamTypeSpecialQuotaDto[]> {
   const SQL = `
     select
-      id,
-      exam_type_id as "examTypeId",
-      daily_extra_slots as "dailyExtraSlots",
-      is_active as "isActive"
-    from appointments_v2.exam_type_special_quotas
-    where policy_version_id = $1
-    order by id asc
+      q.id,
+      q.exam_type_id as "examTypeId",
+      q.daily_extra_slots as "dailyExtraSlots",
+      coalesce(array_agg(qu.user_id order by qu.user_id)
+        filter (where qu.user_id is not null), '{}') as "allowedUserIds",
+      q.is_active as "isActive"
+    from appointments_v2.exam_type_special_quotas q
+    left join appointments_v2.exam_type_special_quota_users qu
+      on qu.quota_id = q.id
+    where q.policy_version_id = $1
+    group by q.id
+    order by q.id asc
   `;
   const result = await client.query<PolicyExamTypeSpecialQuotaDto>(SQL, [versionId]);
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    allowedUserIds: Array.isArray(row.allowedUserIds) ? row.allowedUserIds.map(Number) : [],
+  }));
 }
 
 async function listExamMixQuotaRules(

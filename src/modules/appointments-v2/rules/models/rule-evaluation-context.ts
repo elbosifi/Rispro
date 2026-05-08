@@ -101,6 +101,9 @@ export interface RuleEvaluationContext {
 
   /** The role of the requesting user for role-aware evaluation outcomes. */
   requesterRole?: Role;
+
+  /** The requesting user ID, used for per-quota allow-list checks. */
+  requesterUserId?: number | null;
 }
 
 /**

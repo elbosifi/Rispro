@@ -36,6 +36,7 @@ function makeContext(
     specialQuotas: [],
     currentBookedCount: 0,
     currentSpecialQuotaBookedCount: 0,
+    requesterUserId: 1,
     ...overrides,
   };
 }
@@ -528,6 +529,7 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
       policyVersionId: 1,
       examTypeId,
       dailyExtraSlots,
+      allowedUserIds: [1],
       isActive: true,
     };
   }
@@ -551,6 +553,40 @@ describe("pureEvaluate — special quota (D008 step 5)", () => {
           currentBookedCount: 10,
           specialQuotas: [makeQuota(50, 3)],
           examTypeRuleItemExamTypeIds: [50],
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "available");
+    assert.equal(decision.consumedCapacityMode, "special");
+  });
+
+  it("blocks special quota for users outside the quota allow-list", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        capacityResolutionMode: "special_quota_extra",
+        useSpecialQuota: true,
+        context: makeContext({
+          requesterUserId: 2,
+          requesterRole: "supervisor",
+          specialQuotas: [makeQuota(50, 3)],
+        }),
+      })
+    );
+    assert.equal(decision.displayStatus, "blocked");
+    assert.ok(decision.reasons.some((r) => r.code === "special_quota_forbidden"));
+  });
+
+  it("allows super_admin to use special quota without allow-list membership", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        capacityResolutionMode: "special_quota_extra",
+        useSpecialQuota: true,
+        context: makeContext({
+          requesterUserId: 2,
+          requesterRole: "super_admin",
+          specialQuotas: [{ ...makeQuota(50, 3), allowedUserIds: [] }],
         }),
       })
     );
@@ -698,7 +734,7 @@ describe("pureEvaluate — exam mix quota", () => {
         useSpecialQuota: true,
         context: makeContext({
           specialQuotas: [
-            { id: 1, policyVersionId: 1, examTypeId: 50, dailyExtraSlots: 1, isActive: true },
+            { id: 1, policyVersionId: 1, examTypeId: 50, dailyExtraSlots: 1, allowedUserIds: [1], isActive: true },
           ],
           examMixQuotaRules: [
             {

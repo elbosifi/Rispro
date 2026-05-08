@@ -16,6 +16,11 @@ vi.mock("../api", () => ({
     isLoading: false,
     isError: false,
   }),
+  useV2PolicyUsers: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 describe("PolicyDraftEditor exam type helper text", () => {

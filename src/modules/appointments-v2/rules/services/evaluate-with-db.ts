@@ -40,6 +40,7 @@ import type { Role } from "../../../../types/domain.js";
 
 export interface EvaluateWithDbParams extends BookingDecisionInput {
   requesterRole?: Role;
+  requesterUserId?: number | null;
 }
 
 /**
@@ -205,6 +206,7 @@ export async function evaluateWithDb(
     currentExamMixConsumedByRuleId,
     closedWeekdays,
     requesterRole: params.requesterRole,
+    requesterUserId: params.requesterUserId ?? null,
   };
 
   // 6. Evaluate

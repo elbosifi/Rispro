@@ -33,10 +33,11 @@ function makeContext(overrides: Partial<RuleEvaluationContext> = {}): RuleEvalua
     currentBookedCountOncology: 0,
     currentBookedCountNonOncology: 0,
     specialQuotas: [
-      { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, isActive: true },
+      { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, allowedUserIds: [1], isActive: true },
     ],
     currentBookedCount: 0,
     currentSpecialQuotaBookedCount: 0,
+    requesterUserId: 1,
     ...overrides,
   };
 }
@@ -164,7 +165,7 @@ describe("Special quota consumption — pureEvaluate", () => {
         currentBookedCount: 2,
         currentSpecialQuotaBookedCount: 0,
         specialQuotas: [
-          { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, isActive: true }, // quota for exam type 10, not 99
+          { id: 1, policyVersionId: 1, examTypeId: 10, dailyExtraSlots: 3, allowedUserIds: [1], isActive: true }, // quota for exam type 10, not 99
         ],
       }),
     });

@@ -205,6 +205,11 @@ export function CreateAppointmentTab({
       item.date === form.appointmentDate &&
       (item.specialQuotaSummary?.remaining ?? 0) > 0
   );
+  const canUseSpecialQuotaMode = isSuperAdmin || hasSpecialQuotaAvailable || form.capacityResolutionMode === "special_quota_extra";
+  const canUseSelectedCapacityMode =
+    form.capacityResolutionMode === "special_quota_extra"
+      ? canUseSpecialQuotaMode
+      : canUseNonStandardCapacityModes;
   const filteredPriorityOptions = useMemo(
     () => priorityOptions.filter((p) => !isRoutinePriority(p)),
     [priorityOptions]
@@ -213,12 +218,12 @@ export function CreateAppointmentTab({
   useEffect(() => {
     if (
       form.capacityResolutionMode !== "standard" &&
-      (!canUseNonStandardCapacityModes ||
+      (!canUseSelectedCapacityMode ||
         (form.capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable))
     ) {
       actions.setCapacityResolutionMode("standard");
     }
-  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseNonStandardCapacityModes]);
+  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
 
   useEffect(() => {
     if (!form.patientId) {
@@ -314,15 +319,15 @@ export function CreateAppointmentTab({
       bookingTime: null,
       caseCategory: form.caseCategory,
       capacityResolutionMode:
-        canUseNonStandardCapacityModes ? form.capacityResolutionMode : "standard",
+        canUseSelectedCapacityMode ? form.capacityResolutionMode : "standard",
       useSpecialQuota:
-        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra",
+        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra",
       specialReasonCode:
-        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
+        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
           ? form.specialReasonCode || null
           : null,
       specialReasonNote:
-        canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
+        canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
           ? form.specialReasonNote.trim() || null
           : null,
       notes: form.notes.trim() || null,
@@ -397,11 +402,11 @@ export function CreateAppointmentTab({
         scheduledDate: form.appointmentDate,
         caseCategory: form.caseCategory,
         capacityResolutionMode:
-          canUseNonStandardCapacityModes ? form.capacityResolutionMode : "standard",
+          canUseSelectedCapacityMode ? form.capacityResolutionMode : "standard",
         useSpecialQuota:
-          canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra",
+          canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra",
         specialReasonCode:
-          canUseNonStandardCapacityModes && form.capacityResolutionMode === "special_quota_extra"
+          canUseSpecialQuotaMode && form.capacityResolutionMode === "special_quota_extra"
             ? form.specialReasonCode || null
             : null,
         includeOverrideEvaluation: true,
@@ -713,8 +718,9 @@ export function CreateAppointmentTab({
                     setOverrideError(null);
                   }}
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
-                  supervisorMode={canUseNonStandardCapacityModes}
+                  supervisorMode={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
                   superAdminMode={isSuperAdmin}
+                  allowCategoryOverride={canUseNonStandardCapacityModes}
                   specialReasonCode={form.specialReasonCode}
                   onChangeSpecialReasonCode={actions.setSpecialReasonCode}
                   specialReasonConfirmed={form.specialReasonConfirmed}

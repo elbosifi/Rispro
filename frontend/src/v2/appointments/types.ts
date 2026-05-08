@@ -362,7 +362,15 @@ export interface PolicyExamTypeSpecialQuotaDto {
   id: number;
   examTypeId: number;
   dailyExtraSlots: number;
+  allowedUserIds: number[];
   isActive: boolean;
+}
+
+export interface PolicyUserDto {
+  id: number;
+  username: string;
+  fullName: string;
+  role: import("@/types/api").Role;
 }
 
 export interface PolicyExamMixQuotaRuleDto {

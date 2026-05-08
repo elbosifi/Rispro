@@ -23,6 +23,16 @@ const MIGRATION_FILE = join(
   "migrations",
   "023_appointments_v2_schema.sql"
 );
+const SPECIAL_QUOTA_ALLOWLIST_MIGRATION_FILE = join(
+  __dirname,
+  "..",
+  "..",
+  "..",
+  "..",
+  "db",
+  "migrations",
+  "061_v2_special_quota_user_allowlist.sql"
+);
 
 describe("V2 DB migration file (023_appointments_v2_schema)", () => {
   let sql: string;
@@ -130,5 +140,16 @@ describe("V2 DB migration file (023_appointments_v2_schema)", () => {
       0,
       `Found legacy table references outside appointments_v2 schema: ${actualRefs?.join(", ")}`
     );
+  });
+});
+
+describe("V2 DB migration file (061_v2_special_quota_user_allowlist)", () => {
+  const sql = readFileSync(SPECIAL_QUOTA_ALLOWLIST_MIGRATION_FILE, "utf8");
+
+  it("should create special quota user allow-list table", () => {
+    assert.match(sql, /create\s+table\s+if\s+not\s+exists\s+appointments_v2\.exam_type_special_quota_users/i);
+    assert.match(sql, /quota_id\s+bigint\s+not\s+null\s+references\s+appointments_v2\.exam_type_special_quotas/i);
+    assert.match(sql, /user_id\s+bigint\s+not\s+null\s+references\s+users/i);
+    assert.match(sql, /primary\s+key\s*\(\s*quota_id\s*,\s*user_id\s*\)/i);
   });
 });

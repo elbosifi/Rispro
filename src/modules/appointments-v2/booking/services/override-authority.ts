@@ -47,6 +47,10 @@ export function validateDecisionAuthority(
 ): void {
   const reasonCodes = new Set(decision.reasons.map((reason) => reason.code));
 
+  if (reasonCodes.has("special_quota_forbidden")) {
+    throw new SchedulingError(403, "Special quota is forbidden for this user.", ["special_quota_forbidden"]);
+  }
+
   if (reasonCodes.has("closed_weekday_override_required")) {
     if (role !== "supervisor" && role !== "super_admin") {
       throw new SchedulingError(403, "Closed weekday override is forbidden for this role.", ["closed_weekday_override_forbidden"]);

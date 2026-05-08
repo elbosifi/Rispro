@@ -273,6 +273,7 @@ function checkCapacity(
 } {
   const ctx = input.context;
   const requesterRole = ctx.requesterRole;
+  const requesterUserId = ctx.requesterUserId == null ? null : Number(ctx.requesterUserId);
   const reasons: ReasonCode[] = [];
   const mode = input.capacityResolutionMode;
   const modalityDailyCapacity = ctx.modalityDailyCapacity;
@@ -343,6 +344,25 @@ function checkCapacity(
       (q) => Number(q.examTypeId) === examTypeIdNum && q.isActive
     );
     if (quota && quota.dailyExtraSlots > 0) {
+      const allowedUserIds = new Set((quota.allowedUserIds ?? []).map(Number));
+      const specialQuotaAllowed =
+        requesterRole === "super_admin" ||
+        (requesterUserId != null && allowedUserIds.has(requesterUserId));
+      if (!specialQuotaAllowed) {
+        reasons.push(
+          reason(
+            "special_quota_forbidden",
+            "error",
+            "This user is not allowed to use the special quota for this exam type."
+          )
+        );
+        return {
+          status: "blocked",
+          remainingStandardCapacity: Math.max(0, totalRemaining),
+          remainingSpecialQuota: 0,
+          reasons,
+        };
+      }
       remainingSpecialQuota = Math.max(
         0,
         quota.dailyExtraSlots - ctx.currentSpecialQuotaBookedCount

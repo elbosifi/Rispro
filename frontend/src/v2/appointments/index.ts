@@ -61,11 +61,13 @@ export {
   createV2PolicyDraft,
   saveV2PolicyDraft,
   fetchV2PolicyPreview,
+  fetchV2PolicyUsers,
   publishV2PolicyDraft,
   useV2PolicyStatus,
   useV2CreatePolicyDraft,
   useV2SavePolicyDraft,
   useV2PolicyPreview,
+  useV2PolicyUsers,
   useV2PublishPolicyDraft,
 } from "./api";
 

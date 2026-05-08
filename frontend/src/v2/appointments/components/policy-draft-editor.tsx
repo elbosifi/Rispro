@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button, Card, Input } from "@/components/shared";
 import { chooseLocalized } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
-import { useV2ExamTypeCatalog, useV2Lookups } from "../api";
+import { useV2ExamTypeCatalog, useV2Lookups, useV2PolicyUsers } from "../api";
 import type {
   PolicyCategoryDailyLimitDto,
   PolicyExamMixQuotaRuleDto,
@@ -125,6 +125,7 @@ export function PolicyDraftEditor({
 }) {
   const lookups = useV2Lookups();
   const examTypeCatalog = useV2ExamTypeCatalog();
+  const policyUsers = useV2PolicyUsers();
   const { language } = useLanguage();
   const [draft, setDraft] = useState<PolicySnapshotDto>(emptySnapshot());
   const [changeNote, setChangeNote] = useState("");
@@ -203,21 +204,39 @@ export function PolicyDraftEditor({
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [examTypeCatalog.data, language]);
 
+  const examTypeById = useMemo(() => {
+    const map = new Map<number, NonNullable<typeof examTypeCatalog.data>[number]>();
+    for (const examType of examTypeCatalog.data ?? []) {
+      map.set(Number(examType.id), examType);
+    }
+    return map;
+  }, [examTypeCatalog.data]);
+
+  const policyUserOptions = useMemo(() => {
+    return (policyUsers.data ?? [])
+      .map((user) => ({
+        value: Number(user.id),
+        label: `${user.fullName || user.username} (${user.role})`,
+      }))
+      .filter((user) => Number.isInteger(user.value) && user.value > 0)
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [policyUsers.data]);
+
   const lookupStatusMessage = useMemo(() => {
-    if (lookups.isLoading || examTypeCatalog.isLoading) {
+    if (lookups.isLoading || examTypeCatalog.isLoading || policyUsers.isLoading) {
       return { tone: "muted" as const, text: "Loading modality and exam type lookups..." };
     }
-    if (lookups.isError || examTypeCatalog.isError) {
+    if (lookups.isError || examTypeCatalog.isError || policyUsers.isError) {
       return { tone: "error" as const, text: "Failed to load modality or exam type lookups." };
     }
     if (modalityOptions.length === 0) {
       return { tone: "muted" as const, text: "No modalities available for policy editing." };
     }
     return null;
-  }, [examTypeCatalog.isError, examTypeCatalog.isLoading, lookups.isError, lookups.isLoading, modalityOptions.length]);
+  }, [examTypeCatalog.isError, examTypeCatalog.isLoading, lookups.isError, lookups.isLoading, modalityOptions.length, policyUsers.isError, policyUsers.isLoading]);
 
   const hasDraftSnapshot = snapshot != null;
-  const canSave = !lookups.isLoading && !examTypeCatalog.isLoading;
+  const canSave = !lookups.isLoading && !examTypeCatalog.isLoading && !policyUsers.isLoading;
 
   async function handleSave() {
     if (!hasDraftSnapshot) return;
@@ -1284,22 +1303,63 @@ export function PolicyDraftEditor({
         <details>
           <summary style={{ cursor: "pointer", fontWeight: 600, marginBottom: 8 }}>Special quotas</summary>
           <div style={{ display: "grid", gap: 8 }}>
-            {draft.examTypeSpecialQuotas.map((row, index) => (
-              <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-4">
+            {draft.examTypeSpecialQuotas.map((row, index) => {
+              const rowExamType = examTypeById.get(Number(row.examTypeId));
+              const rowModalityId = rowExamType?.modalityId == null ? 0 : Number(rowExamType.modalityId);
+              const filteredExamTypeOptions = rowModalityId > 0 ? examTypeOptionsByModality.get(rowModalityId) ?? [] : [];
+              return (
+              <div key={`${row.id}-${index}`} className="grid grid-cols-1 gap-2 md:grid-cols-6">
                 <select
                   className={inputBase}
-                  value={row.examTypeId}
-                  onChange={(event) =>
+                  value={rowModalityId}
+                  onChange={(event) => {
+                    const modalityId = Number(event.target.value);
+                    const firstExamTypeId = examTypeOptionsByModality.get(modalityId)?.[0]?.value ?? 0;
                     setDraft((prev) => ({
                       ...prev,
                       examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
-                        itemIndex === index ? { ...item, examTypeId: Number(event.target.value) } : item
+                        itemIndex === index ? { ...item, examTypeId: firstExamTypeId } : item
                       ),
-                    }))
-                  }
+                    }));
+                  }}
                 >
-                  <option value={0}>Select exam type...</option>
-                  {allExamTypeOptions.map((examType) => (
+                  <option value={0}>Select modality...</option>
+                  {modalityOptions.map((modality) => (
+                    <option key={modality.value} value={modality.value}>
+                      {modality.label}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className={inputBase}
+                  multiple
+                  value={row.examTypeId ? [String(row.examTypeId)] : []}
+                  onChange={(event) => {
+                    const selectedExamTypeIds = Array.from(event.currentTarget.selectedOptions)
+                      .map((option) => Number(option.value))
+                      .filter((examTypeId) => Number.isInteger(examTypeId) && examTypeId > 0);
+                    setDraft((prev) => {
+                      const replacement =
+                        selectedExamTypeIds.length === 0
+                          ? [{ ...row, examTypeId: 0 }]
+                          : selectedExamTypeIds.map((examTypeId, selectedIndex) => ({
+                              ...row,
+                              id: selectedIndex === 0 ? row.id : createNextId(prev.examTypeSpecialQuotas) + selectedIndex,
+                              examTypeId,
+                              allowedUserIds: row.allowedUserIds ?? [],
+                            }));
+                      return {
+                        ...prev,
+                        examTypeSpecialQuotas: [
+                          ...prev.examTypeSpecialQuotas.slice(0, index),
+                          ...replacement,
+                          ...prev.examTypeSpecialQuotas.slice(index + 1),
+                        ],
+                      };
+                    });
+                  }}
+                >
+                  {filteredExamTypeOptions.map((examType) => (
                     <option key={examType.value} value={examType.value}>
                       {examType.label}
                     </option>
@@ -1319,6 +1379,28 @@ export function PolicyDraftEditor({
                     }))
                   }
                 />
+                <select
+                  className={inputBase}
+                  multiple
+                  value={(row.allowedUserIds ?? []).map(String)}
+                  onChange={(event) => {
+                    const allowedUserIds = Array.from(event.currentTarget.selectedOptions)
+                      .map((option) => Number(option.value))
+                      .filter((userId) => Number.isInteger(userId) && userId > 0);
+                    setDraft((prev) => ({
+                      ...prev,
+                      examTypeSpecialQuotas: prev.examTypeSpecialQuotas.map((item, itemIndex) =>
+                        itemIndex === index ? { ...item, allowedUserIds } : item
+                      ),
+                    }));
+                  }}
+                >
+                  {policyUserOptions.map((user) => (
+                    <option key={user.value} value={user.value}>
+                      {user.label}
+                    </option>
+                  ))}
+                </select>
                 <label className="inline-flex items-center gap-2 text-xs text-stone-700 dark:text-stone-300">
                   <input
                     type="checkbox"
@@ -1347,7 +1429,8 @@ export function PolicyDraftEditor({
                   Remove
                 </button>
               </div>
-            ))}
+            );
+            })}
             <button
               type="button"
               className="w-fit rounded border border-stone-300 px-2 py-1 text-xs dark:border-stone-600"
@@ -1360,6 +1443,7 @@ export function PolicyDraftEditor({
                       id: createNextId(prev.examTypeSpecialQuotas),
                       examTypeId: allExamTypeOptions[0]?.value ?? 0,
                       dailyExtraSlots: 0,
+                      allowedUserIds: [],
                       isActive: true,
                     } satisfies PolicyExamTypeSpecialQuotaDto,
                   ],

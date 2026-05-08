@@ -23,6 +23,7 @@ import type {
   PolicyStatusDto,
   PolicySnapshotDto,
   PolicyPreviewDto,
+  PolicyUserDto,
   SpecialReasonCodeDto,
 } from "./types";
 
@@ -249,6 +250,11 @@ export async function fetchV2PolicyPreview(versionId: number): Promise<PolicyPre
   return api<PolicyPreviewDto>(`/v2/scheduling/admin/policy/draft/${versionId}/preview`);
 }
 
+export async function fetchV2PolicyUsers(): Promise<PolicyUserDto[]> {
+  const response = await api<{ items: PolicyUserDto[] }>("/v2/scheduling/admin/users");
+  return response.items;
+}
+
 export async function publishV2PolicyDraft(params: { versionId: number; changeNote?: string | null }) {
   return api<{ published: { id: number; versionNo: number; status: string }; ruleCount: number }>(
     `/v2/scheduling/admin/policy/draft/${params.versionId}/publish`,
@@ -409,6 +415,14 @@ export function useV2PolicyPreview(versionId: number | null) {
     queryFn: () => (versionId != null ? fetchV2PolicyPreview(versionId) : null),
     enabled: versionId != null,
     staleTime: 10_000,
+  });
+}
+
+export function useV2PolicyUsers() {
+  return useQuery({
+    queryKey: ["v2-policy-users"] as const,
+    queryFn: fetchV2PolicyUsers,
+    staleTime: 5 * 60_000,
   });
 }
 

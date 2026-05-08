@@ -135,12 +135,24 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
 
   async function setSpecialQuota(dailyExtraSlots: number): Promise<void> {
     const pool = await db();
-    await pool.query(
+    const result = await pool.query<{ id: number }>(
       `insert into appointments_v2.exam_type_special_quotas
         (policy_version_id, exam_type_id, daily_extra_slots, is_active)
       values ($1, $2, $3, true)
-      on conflict (policy_version_id, exam_type_id) do update set daily_extra_slots = $3, is_active = true`,
+      on conflict (policy_version_id, exam_type_id) do update set daily_extra_slots = $3, is_active = true
+      returning id`,
       [testData.policyVersionId, testData.examTypeId, dailyExtraSlots]
+    );
+    const quotaId = Number(result.rows[0]?.id);
+    await pool.query(
+      `delete from appointments_v2.exam_type_special_quota_users where quota_id = $1`,
+      [quotaId]
+    );
+    await pool.query(
+      `insert into appointments_v2.exam_type_special_quota_users (quota_id, user_id)
+       values ($1, $2)
+       on conflict do nothing`,
+      [quotaId, testData.userId]
     );
   }
 
@@ -349,14 +361,44 @@ describe("Special quota + capacity resolution modes — DB-backed integration", 
     assert.equal(result.status, 403);
   });
 
-  it("non-supervisor API request with special_quota_extra is rejected", async () => {
+  it("assigned receptionist API request with special_quota_extra is allowed", async () => {
     guard();
     const date = uniqueDate();
     await setModalityCapacity(1);
     await setCategoryLimits(null, null);
     await setSpecialQuota(2);
 
+    const base = await createBooking({
+      patientId: await createPatient(),
+      bookingDate: date,
+      caseCategory: "non_oncology",
+      capacityResolutionMode: "standard",
+    });
+    assert.equal(base.status, 201);
+
     const result = await fetchWithCookie(receptionistAuthCookie, "/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: await createPatient(),
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate: date,
+        caseCategory: "non_oncology",
+        capacityResolutionMode: "special_quota_extra",
+        specialReasonCode: "urgent_oncology",
+      },
+    });
+    assert.equal(result.status, 201);
+  });
+
+  it("unassigned receptionist API request with special_quota_extra is rejected", async () => {
+    guard();
+    const date = uniqueDate();
+    await setModalityCapacity(1);
+    await setCategoryLimits(null, null);
+    await setSpecialQuota(2);
+
+    const result = await fetchWithCookie(createTestAuthCookie(testData.userId + 999, "receptionist"), "/api/v2/appointments", {
       method: "POST",
       body: {
         patientId: await createPatient(),

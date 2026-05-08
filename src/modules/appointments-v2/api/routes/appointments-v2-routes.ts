@@ -32,8 +32,8 @@ interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUserContext;
 }
 
-function isNonStandardCapacityResolutionMode(mode: CapacityResolutionMode): boolean {
-  return mode === "category_override" || mode === "total_capacity_override" || mode === "special_quota_extra";
+function isRoleRestrictedCapacityResolutionMode(mode: CapacityResolutionMode): boolean {
+  return mode === "category_override" || mode === "total_capacity_override";
 }
 
 /**
@@ -126,7 +126,7 @@ router.post(
       body.capacityResolutionMode ??
       (body.useSpecialQuota === true ? "special_quota_extra" : "standard");
     if (
-      isNonStandardCapacityResolutionMode(capacityResolutionMode) &&
+      isRoleRestrictedCapacityResolutionMode(capacityResolutionMode) &&
       userRole !== "supervisor" &&
       userRole !== "super_admin"
     ) {
@@ -194,7 +194,7 @@ router.put(
       (body.useSpecialQuota === true ? "special_quota_extra" : undefined);
     if (
       capacityResolutionMode &&
-      isNonStandardCapacityResolutionMode(capacityResolutionMode) &&
+      isRoleRestrictedCapacityResolutionMode(capacityResolutionMode) &&
       userRole !== "supervisor" &&
       userRole !== "super_admin"
     ) {

@@ -21,6 +21,11 @@ vi.mock("../api", () => ({
     isLoading: false,
     isError: false,
   }),
+  useV2PolicyUsers: () => ({
+    data: [],
+    isLoading: false,
+    isError: false,
+  }),
 }));
 
 function renderEditor(snapshot: PolicySnapshotDto, onSave = vi.fn(async () => {})) {

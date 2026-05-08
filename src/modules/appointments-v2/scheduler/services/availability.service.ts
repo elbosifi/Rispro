@@ -82,6 +82,7 @@ export interface GetAvailabilityParams {
   specialReasonCode?: string | null;
   includeOverrideCandidates?: boolean;
   requesterRole?: Role;
+  requesterUserId?: number | null;
 }
 
 export interface AvailabilityQueryResult {
@@ -195,6 +196,7 @@ async function getAvailabilityInternal(
   const bucketMode: "partitioned" | "total_only" =
     activeOncology || activeNonOncology ? "partitioned" : "total_only";
   const closedWeekdays = await loadClosedWeekdays(client);
+  const requesterUserId = params.requesterUserId == null ? null : Number(params.requesterUserId);
 
   // 5. Generate dates
   const startDate = todayIso();
@@ -222,7 +224,11 @@ async function getAvailabilityInternal(
       const quota = specialQuotas.find(
         (q) => q.isActive && Number(q.examTypeId) === Number(params.examTypeId)
       );
-      if (quota) {
+      const specialQuotaAllowed =
+        quota != null &&
+        (params.requesterRole === "super_admin" ||
+          (requesterUserId != null && (quota.allowedUserIds ?? []).map(Number).includes(requesterUserId)));
+      if (quota && specialQuotaAllowed) {
         specialQuotaSummary = {
           examTypeId: Number(quota.examTypeId),
           configured: quota.dailyExtraSlots,
@@ -282,6 +288,7 @@ async function getAvailabilityInternal(
       currentExamMixConsumedByRuleId,
       closedWeekdays,
       requesterRole: params.requesterRole,
+      requesterUserId,
     };
 
     const pureInput: PureEvaluateInput = {

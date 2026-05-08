@@ -44,6 +44,7 @@ router.post(
       specialReasonCode: body.specialReasonCode ? String(body.specialReasonCode) : null,
       includeOverrideEvaluation: body.includeOverrideEvaluation === true,
       requesterRole: req.user?.role,
+      requesterUserId: Number(req.user?.sub ?? 0) || null,
     }, body.policySetKey as string | undefined);
     res.json(decision);
   })
@@ -80,6 +81,7 @@ router.get(
       specialReasonCode: req.query.specialReasonCode ? String(req.query.specialReasonCode) : null,
       includeOverrideCandidates: req.query.includeOverrideCandidates === "true",
       requesterRole: req.user?.role,
+      requesterUserId: Number(req.user?.sub ?? 0) || null,
     };
 
     const client = await pool.connect();

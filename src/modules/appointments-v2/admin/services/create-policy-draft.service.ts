@@ -209,6 +209,7 @@ async function copySnapshotIntoVersion(
     await insertExamTypeSpecialQuota(client, policyVersionId, {
       examTypeId: rule.examTypeId,
       dailyExtraSlots: rule.dailyExtraSlots,
+      allowedUserIds: rule.allowedUserIds,
       isActive: rule.isActive,
     });
   }

@@ -160,9 +160,14 @@ export default function RegistrationsPage() {
     modalityId: selectedAppointment?.modalityId ?? null,
     examTypeId: selectedAppointment?.examTypeId ?? null,
     caseCategory: selectedAppointment?.caseCategory ?? "non_oncology",
-    capacityResolutionMode: canUseNonStandardCapacityModes ? rescheduleCapacityResolutionMode : "standard",
+    capacityResolutionMode:
+      rescheduleCapacityResolutionMode === "special_quota_extra"
+        ? rescheduleCapacityResolutionMode
+        : canUseNonStandardCapacityModes
+        ? rescheduleCapacityResolutionMode
+        : "standard",
     specialReasonCode:
-      canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+      rescheduleCapacityResolutionMode === "special_quota_extra"
         ? rescheduleSpecialReasonCode || null
         : null,
     days: 14,
@@ -173,12 +178,18 @@ export default function RegistrationsPage() {
   );
   const rescheduleSpecialQuotaAvailable =
     (selectedRescheduleAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
+  const canUseRescheduleSpecialQuota =
+    isSuperAdmin || rescheduleSpecialQuotaAvailable || rescheduleCapacityResolutionMode === "special_quota_extra";
+  const canUseSelectedRescheduleCapacityMode =
+    rescheduleCapacityResolutionMode === "special_quota_extra"
+      ? canUseRescheduleSpecialQuota
+      : canUseNonStandardCapacityModes;
   const rescheduleCapacityModeNeedsOverrideAuth =
     canUseNonStandardCapacityModes &&
     (rescheduleCapacityResolutionMode === "category_override" ||
       rescheduleCapacityResolutionMode === "total_capacity_override");
   const rescheduleSpecialQuotaNeedsDetails =
-    canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra";
+    canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra";
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
@@ -629,15 +640,15 @@ export default function RegistrationsPage() {
     return {
       bookingDate: rescheduleDate,
       bookingTime: null,
-      capacityResolutionMode: canUseNonStandardCapacityModes ? rescheduleCapacityResolutionMode : "standard",
+      capacityResolutionMode: canUseSelectedRescheduleCapacityMode ? rescheduleCapacityResolutionMode : "standard",
       useSpecialQuota:
-        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra",
+        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra",
       specialReasonCode:
-        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra"
           ? rescheduleSpecialReasonCode || null
           : null,
       specialReasonNote:
-        canUseNonStandardCapacityModes && rescheduleCapacityResolutionMode === "special_quota_extra"
+        canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra"
           ? rescheduleSpecialReasonNote.trim() || null
           : null,
       rescheduleReason: rescheduleReason.trim() || null,
@@ -1386,7 +1397,7 @@ export default function RegistrationsPage() {
                           />
                         </div>
 
-                        {canUseNonStandardCapacityModes ? (
+                        {canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota ? (
                           <SpecialQuotaSection
                             capacityResolutionMode={rescheduleCapacityResolutionMode}
                             onChangeCapacityResolutionMode={(mode) => {
@@ -1397,8 +1408,9 @@ export default function RegistrationsPage() {
                               setPendingReschedulePayload(null);
                             }}
                             specialQuotaAvailable={rescheduleSpecialQuotaAvailable}
-                            supervisorMode={canUseNonStandardCapacityModes}
+                            supervisorMode={canUseNonStandardCapacityModes || canUseRescheduleSpecialQuota}
                             superAdminMode={isSuperAdmin}
+                            allowCategoryOverride={canUseNonStandardCapacityModes}
                             specialReasonCode={rescheduleSpecialReasonCode}
                             onChangeSpecialReasonCode={setRescheduleSpecialReasonCode}
                             specialReasonConfirmed={rescheduleSpecialReasonConfirmed}

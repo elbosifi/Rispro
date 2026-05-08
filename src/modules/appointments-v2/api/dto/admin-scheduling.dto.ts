@@ -59,6 +59,7 @@ export interface PolicyExamTypeSpecialQuotaDto {
   id: number;
   examTypeId: number;
   dailyExtraSlots: number;
+  allowedUserIds: number[];
   isActive: boolean;
 }
 

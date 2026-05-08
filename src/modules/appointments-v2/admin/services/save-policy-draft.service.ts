@@ -73,6 +73,7 @@ async function savePolicyDraftInternal(
   }
 
   await validateCategoryCapacityPolicy(client, policySnapshot);
+  await validateSpecialQuotaPolicy(client, policySnapshot);
   validateExamMixPolicy(policySnapshot);
 
   // 3. Delete all existing versioned rules for this version (authoritative replace)
@@ -128,6 +129,7 @@ async function savePolicyDraftInternal(
     await insertExamTypeSpecialQuota(client, versionId, {
       examTypeId: rule.examTypeId,
       dailyExtraSlots: rule.dailyExtraSlots,
+      allowedUserIds: rule.allowedUserIds,
       isActive: rule.isActive,
     });
   }
@@ -187,6 +189,91 @@ async function savePolicyDraftInternal(
     version: refreshed,
     configHash,
   };
+}
+
+async function validateSpecialQuotaPolicy(
+  client: PoolClient,
+  policySnapshot: PolicySnapshotDto
+): Promise<void> {
+  const fieldErrors: FieldValidationErrorDto[] = [];
+  const quotas = policySnapshot.examTypeSpecialQuotas;
+  const activeQuotas = quotas.filter((row) => row.isActive);
+  const examTypeIds = [...new Set(activeQuotas.map((row) => Number(row.examTypeId)).filter((id) => Number.isInteger(id) && id > 0))];
+  const allowedUserIds = [
+    ...new Set(
+      quotas.flatMap((row) => row.allowedUserIds ?? []).map(Number).filter((id) => Number.isInteger(id) && id > 0)
+    ),
+  ];
+
+  const existingExamTypeIds = new Set<number>();
+  if (examTypeIds.length > 0) {
+    const result = await client.query<{ id: number }>(
+      `select id from exam_types where id = any($1::bigint[])`,
+      [examTypeIds]
+    );
+    for (const row of result.rows) existingExamTypeIds.add(Number(row.id));
+  }
+
+  const activeUserIds = new Set<number>();
+  const superAdminUserIds = new Set<number>();
+  if (allowedUserIds.length > 0) {
+    const result = await client.query<{ id: number; role: string }>(
+      `select id, role from users where id = any($1::bigint[]) and is_active = true`,
+      [allowedUserIds]
+    );
+    for (const row of result.rows) {
+      activeUserIds.add(Number(row.id));
+      if (row.role === "super_admin") superAdminUserIds.add(Number(row.id));
+    }
+  }
+
+  const seenActiveExamTypes = new Set<number>();
+  for (const [index, row] of quotas.entries()) {
+    const examTypeId = Number(row.examTypeId);
+    if (row.isActive) {
+      if (!Number.isInteger(examTypeId) || examTypeId <= 0 || !existingExamTypeIds.has(examTypeId)) {
+        fieldErrors.push({
+          field: `policySnapshot.examTypeSpecialQuotas[${index}].examTypeId`,
+          code: "special_quota_exam_type_invalid",
+          message: "Active special quota must select an existing exam type.",
+        });
+      }
+      if (seenActiveExamTypes.has(examTypeId)) {
+        fieldErrors.push({
+          field: `policySnapshot.examTypeSpecialQuotas[${index}].examTypeId`,
+          code: "special_quota_duplicate_exam_type",
+          message: "Only one active special quota is allowed per exam type.",
+        });
+      }
+      seenActiveExamTypes.add(examTypeId);
+    }
+
+    for (const userId of row.allowedUserIds ?? []) {
+      if (!activeUserIds.has(Number(userId))) {
+        fieldErrors.push({
+          field: `policySnapshot.examTypeSpecialQuotas[${index}].allowedUserIds`,
+          code: "special_quota_user_invalid",
+          message: `Allowed user ${userId} does not exist or is inactive.`,
+        });
+      }
+      if (superAdminUserIds.has(Number(userId))) {
+        fieldErrors.push({
+          field: `policySnapshot.examTypeSpecialQuotas[${index}].allowedUserIds`,
+          code: "special_quota_super_admin_implicit",
+          message: "Super admins are allowed implicitly and should not be stored in special quota allow-lists.",
+        });
+      }
+    }
+  }
+
+  if (fieldErrors.length > 0) {
+    throw new SchedulingError(
+      400,
+      "Validation failed",
+      ["validation_failed"],
+      { fieldErrors }
+    );
+  }
 }
 
 function validateExamMixPolicy(policySnapshot: PolicySnapshotDto): void {
