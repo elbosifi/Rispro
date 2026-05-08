@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import path from "node:path";
 import type { PoolClient } from "pg";
 import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";

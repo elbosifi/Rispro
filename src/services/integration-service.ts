@@ -156,6 +156,10 @@ async function getAppointmentSummary(
   appointmentRefTypeInput: unknown = "auto"
 ): Promise<AppointmentSummaryRow> {
   const cleanAppointmentId = normalizePositiveInteger(appointmentId, "appointmentId");
+  if (cleanAppointmentId === null) {
+    throw new HttpError(400, "appointmentId is required.");
+  }
+
   const appointmentRefType = normalizeAppointmentRefType(appointmentRefTypeInput);
   let appointment: AppointmentSummaryRow | null = null;
 
