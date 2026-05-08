@@ -86,8 +86,8 @@ export interface AppointmentWithDetails extends Appointment {
   examNameEn: string | null;
   examSpecificInstructionAr: string | null;
   examSpecificInstructionEn: string | null;
-  specialReasonLabelAr: string | null;
-  specialReasonLabelEn: string | null;
+  specialReasonLabelAr?: string | null;
+  specialReasonLabelEn?: string | null;
   priorityNameAr: string | null;
   priorityNameEn: string | null;
   modalitySlotNumber: number | null;
