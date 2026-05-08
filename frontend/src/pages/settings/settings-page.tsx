@@ -2456,6 +2456,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
   const [backupBusy, setBackupBusy] = useState(false);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [restoreComplete, setRestoreComplete] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
   const [restorePreview, setRestorePreview] = useState<{
@@ -2470,6 +2471,19 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     env: Array<{ name: string; value: string; isSecret: boolean; requiresReview: boolean }>;
     warnings: string[];
   } | null>(null);
+
+  const restoreSteps = [
+    { label: "File", done: Boolean(restoreFile), active: !restoreFile },
+    { label: "Passphrase", done: restorePassphrase.length >= 8, active: Boolean(restoreFile) && restorePassphrase.length < 8 },
+    { label: "Validate", done: Boolean(restorePreview), active: previewBusy || (Boolean(restoreFile) && restorePassphrase.length >= 8 && !restorePreview) },
+    { label: "Confirm", done: restoreConfirmation === "RESTORE RISPRO", active: Boolean(restorePreview) && restoreConfirmation !== "RESTORE RISPRO" },
+    { label: "Restore", done: restoreComplete, active: restoreBusy },
+    { label: "Restart", done: false, active: restoreComplete }
+  ];
+  const restoreProgress = restoreComplete
+    ? 100
+    : Math.round((restoreSteps.filter((step) => step.done).length / restoreSteps.length) * 100);
+  const exportProgress = backupBusy ? 70 : backupPassphrase.length >= 8 ? 35 : 0;
 
   useImperativeHandle(ref, () => ({
     onReAuthSuccess: handleReAuthSuccess
@@ -2593,14 +2607,14 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     }
 
     const result = await response.json();
+    setRestoreComplete(true);
     setRestoreMessage({
       type: "success",
-      text: `Backup restored successfully. ${result.envVarsRestored || 0} env variables restored. Restart the RISpro service after the page reloads.`
+      text: `Restore completed successfully. ${result.envVarsRestored || 0} env variables were restored. Restart the RISpro service to apply restored runtime settings.`
     });
     setRestoreFile(null);
     setPendingPayload(null);
     setRestorePreview(null);
-    setTimeout(() => window.location.reload(), 2000);
   };
 
   const handleRestore = async () => {
@@ -2661,10 +2675,29 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
         </div>
       )}
 
+      {restoreComplete && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300">
+          <p className="font-semibold">Restore completed successfully.</p>
+          <p className="mt-1">Patients, appointments, documents, settings, and encrypted runtime variables were restored. Restart RISpro to apply restored environment variables.</p>
+        </div>
+      )}
+
       <div className="space-y-3">
         {/* Download backup */}
         <div>
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Export</h4>
+          <div className="mb-3">
+            <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-600 transition-all duration-300"
+                style={{ width: `${exportProgress}%` }}
+              />
+            </div>
+            <div className="mt-2 flex items-center justify-between text-xs text-stone-500 dark:text-stone-400">
+              <span>Passphrase</span>
+              <span>{backupBusy ? "Preparing backup" : "Download"}</span>
+            </div>
+          </div>
           <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="password"
@@ -2701,6 +2734,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
                 setRestoreFile(e.target.files?.[0] || null);
                 setRestorePreview(null);
                 setRestoreConfirmation("");
+                setRestoreComplete(false);
               }}
               className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300 file:hover:bg-stone-200 dark:file:hover:bg-stone-600 file:cursor-pointer file:transition-colors"
               disabled={restoreBusy || previewBusy}
@@ -2713,6 +2747,7 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
                   setRestorePassphrase(event.target.value);
                   setRestorePreview(null);
                   setRestoreConfirmation("");
+                  setRestoreComplete(false);
                 }}
                 placeholder="Backup passphrase"
                 className="input-premium text-sm flex-1"
@@ -2726,6 +2761,32 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
               >
                 {previewBusy ? "Validating..." : "Validate backup"}
               </button>
+            </div>
+
+            <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3">
+              <div className="h-2 rounded-full bg-stone-100 dark:bg-stone-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-emerald-600 transition-all duration-300"
+                  style={{ width: `${restoreProgress}%` }}
+                />
+              </div>
+              <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2">
+                {restoreSteps.map((step, index) => (
+                  <div
+                    key={step.label}
+                    className={`rounded-md border px-2 py-2 text-xs ${
+                      step.done
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300"
+                        : step.active
+                          ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                          : "border-stone-200 bg-white text-stone-500 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-400"
+                    }`}
+                  >
+                    <span className="font-semibold">{index + 1}. </span>
+                    {step.label}
+                  </div>
+                ))}
+              </div>
             </div>
 
             {restorePreview && (
