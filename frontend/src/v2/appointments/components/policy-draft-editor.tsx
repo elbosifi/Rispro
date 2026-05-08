@@ -216,7 +216,7 @@ export function PolicyDraftEditor({
     return (policyUsers.data ?? [])
       .map((user) => ({
         value: Number(user.id),
-        label: `${user.fullName || user.username} (${user.role})`,
+        label: `${user.fullName || user.username} (${user.username})`,
       }))
       .filter((user) => Number.isInteger(user.value) && user.value > 0)
       .sort((a, b) => a.label.localeCompare(b.label));
