@@ -4,7 +4,7 @@ import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { HttpError } from "../utils/http-error.js";
-import { buildBackupSnapshot, restoreBackupSnapshot } from "../services/admin-service.js";
+import { buildBackupSnapshot, previewBackupRestore, restoreBackupSnapshot } from "../services/admin-service.js";
 import {
   deleteDocumentsByScope,
   moveDocumentsToConfiguredStorage,
@@ -18,17 +18,29 @@ adminRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 adminRouter.get(
   "/backup",
   asyncRoute(async (req: Request, res: Response) => {
-    const result = await buildBackupSnapshot(req.user!.sub);
+    const passphrase = req.header("x-backup-passphrase") || req.query.passphrase;
+    const result = await buildBackupSnapshot(req.user!.sub, passphrase);
     res.setHeader("Content-Disposition", `attachment; filename="${result.backupName}"`);
     res.json(result.backup);
   })
 );
 
 adminRouter.post(
-  "/restore",
+  "/restore/preview",
+  express.json({ limit: "500mb" }),
   asyncRoute(async (req: Request, res: Response) => {
-    const payload = asUnknownRecord(req.body);
-    const result = await restoreBackupSnapshot(payload, req.user!.sub);
+    const body = asUnknownRecord(req.body);
+    const result = await previewBackupRestore(body.backup, body.passphrase);
+    res.json(result);
+  })
+);
+
+adminRouter.post(
+  "/restore",
+  express.json({ limit: "500mb" }),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await restoreBackupSnapshot(body.backup, req.user!.sub, body.passphrase, body.confirmation);
     res.json(result);
   })
 );

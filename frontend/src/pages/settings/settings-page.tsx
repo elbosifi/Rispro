@@ -2450,55 +2450,166 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
   function BackupRestoreSection({ onReAuthRequired }, ref) {
   const { t } = useLanguage();
   const [restoreFile, setRestoreFile] = useState<File | null>(null);
+  const [backupPassphrase, setBackupPassphrase] = useState("");
+  const [restorePassphrase, setRestorePassphrase] = useState("");
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [pendingPayload, setPendingPayload] = useState<unknown>(null);
+  const [restorePreview, setRestorePreview] = useState<{
+    manifest: {
+      createdAt: string;
+      schemas: string[];
+      tableCounts: Record<string, number>;
+      documents: { rows: number; filesIncluded: number; filesMissing: number };
+    };
+    tables: Array<{ name: string; rows: number }>;
+    documents: { rows: number; filesIncluded: number; filesMissing: number };
+    env: Array<{ name: string; value: string; isSecret: boolean; requiresReview: boolean }>;
+    warnings: string[];
+  } | null>(null);
 
   useImperativeHandle(ref, () => ({
     onReAuthSuccess: handleReAuthSuccess
   }));
 
+  const parseErrorMessage = async (response: Response) => {
+    const responseData = await response.json().catch(() => null);
+    return (
+      (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
+      responseData?.message ||
+      (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
+      `HTTP ${response.status}`
+    );
+  };
+
+  const downloadBackup = async () => {
+    if (backupPassphrase.length < 8) {
+      setRestoreMessage({ type: "error", text: "Backup passphrase must be at least 8 characters." });
+      return;
+    }
+
+    setBackupBusy(true);
+    setRestoreMessage(null);
+    try {
+      const response = await fetch("/api/admin/backup", {
+        method: "GET",
+        credentials: "include",
+        headers: { "x-backup-passphrase": backupPassphrase }
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "backup"]);
+          throw new Error("Recent supervisor re-authentication is required. Try download again after re-auth.");
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") || "";
+      const filenameMatch = disposition.match(/filename="([^"]+)"/);
+      const filename = filenameMatch?.[1] || `rispro-backup-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      setRestoreMessage({ type: "success", text: "Backup downloaded. Keep the file and passphrase together in a secure place." });
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Backup failed." });
+    } finally {
+      setBackupBusy(false);
+    }
+  };
+
+  const readRestorePayload = async () => {
+    if (!restoreFile) {
+      throw new Error("Select a backup file first.");
+    }
+    const content = await restoreFile.text();
+    return JSON.parse(content);
+  };
+
+  const handlePreview = async () => {
+    if (restorePassphrase.length < 8) {
+      setRestoreMessage({ type: "error", text: "Restore passphrase must be at least 8 characters." });
+      return;
+    }
+
+    setPreviewBusy(true);
+    setRestoreMessage(null);
+    setRestorePreview(null);
+    try {
+      const backup = await readRestorePayload();
+      const response = await fetch("/api/admin/restore/preview", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ backup, passphrase: restorePassphrase })
+      });
+
+      if (!response.ok) {
+        if (response.status === 403) {
+          onReAuthRequired(["admin", "restore", "preview"]);
+          throw new Error("Recent supervisor re-authentication is required. Validate again after re-auth.");
+        }
+        throw new Error(await parseErrorMessage(response));
+      }
+
+      setRestorePreview(await response.json());
+      setRestoreMessage({ type: "success", text: "Backup validated. Review the preview before restoring." });
+    } catch (err) {
+      setRestoreMessage({ type: "error", text: err instanceof Error ? err.message : "Restore preview failed." });
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
+
   const doRestore = async (payload: unknown) => {
     const response = await fetch("/api/admin/restore", {
       method: "POST",
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        backup: payload,
+        passphrase: restorePassphrase,
+        confirmation: restoreConfirmation
+      })
     });
 
-    const responseData = await response.json().catch(() => null);
-
     if (!response.ok) {
-      // Backend returns { error: { code: number, message: string } }
-      const errorMsg =
-        (responseData?.error && typeof responseData.error === "object" && responseData.error.message) ||
-        responseData?.message ||
-        (responseData?.error && typeof responseData.error === "string" ? responseData.error : null) ||
-        `HTTP ${response.status}`;
-
-      // 403 = re-auth required — trigger modal instead of showing error
       if (response.status === 403) {
         setPendingPayload(payload);
         onReAuthRequired(["admin", "restore"]);
         throw new Error("REAUTH_REQUIRED");
       }
-
-      console.error("[Restore] Server error:", response.status, responseData);
-      throw new Error(errorMsg);
+      throw new Error(await parseErrorMessage(response));
     }
 
-    console.log("[Restore] Success:", responseData);
-    setRestoreMessage({ type: "success", text: "Backup restored successfully! The page will reload..." });
+    const result = await response.json();
+    setRestoreMessage({
+      type: "success",
+      text: `Backup restored successfully. ${result.envVarsRestored || 0} env variables restored. Restart the RISpro service after the page reloads.`
+    });
     setRestoreFile(null);
     setPendingPayload(null);
+    setRestorePreview(null);
     setTimeout(() => window.location.reload(), 2000);
   };
 
   const handleRestore = async () => {
-    if (!restoreFile) return;
-
-    if (!confirm(
-      "⚠️ WARNING: This will DELETE ALL existing data and replace it with the backup.\n\nAre you sure you want to continue?"
-    )) {
+    if (!restorePreview) {
+      setRestoreMessage({ type: "error", text: "Validate the backup before restoring." });
+      return;
+    }
+    if (restoreConfirmation !== "RESTORE RISPRO") {
+      setRestoreMessage({ type: "error", text: "Type RESTORE RISPRO to confirm this destructive restore." });
       return;
     }
 
@@ -2506,15 +2617,13 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
     setRestoreMessage(null);
 
     try {
-      const content = await restoreFile.text();
-      const payload = JSON.parse(content);
+      const payload = await readRestorePayload();
       await doRestore(payload);
     } catch (err) {
       if (err instanceof Error && err.message === "REAUTH_REQUIRED") {
-        setRestoreMessage({ type: "error", text: "Re-authentication required. After re-authenticating, click Restore again." });
+        setRestoreMessage({ type: "error", text: "Re-authentication required. Restore will retry after re-authenticating." });
       } else {
         const message = err instanceof Error ? err.message : "Restore failed.";
-        console.error("[Restore] Failed:", err);
         setRestoreMessage({ type: "error", text: message });
       }
     } finally {
@@ -2556,9 +2665,27 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
         {/* Download backup */}
         <div>
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Export</h4>
-          <a href="/api/admin/backup" className="btn-primary text-sm inline-block">
-            {t("settings.downloadBackup")}
-          </a>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="password"
+              value={backupPassphrase}
+              onChange={(event) => setBackupPassphrase(event.target.value)}
+              placeholder="Backup encryption passphrase"
+              className="input-premium text-sm flex-1"
+              disabled={backupBusy}
+            />
+            <button
+              type="button"
+              onClick={downloadBackup}
+              disabled={backupBusy || backupPassphrase.length < 8}
+              className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {backupBusy ? "Preparing..." : t("settings.downloadBackup")}
+            </button>
+          </div>
+          <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
+            The backup includes database rows, document files, and encrypted runtime variables. The passphrase is required to restore it.
+          </p>
         </div>
 
         <hr className="border-stone-200 dark:border-stone-700" />
@@ -2566,24 +2693,105 @@ const BackupRestoreSection = forwardRef<{ onReAuthSuccess: () => void }, { onReA
         {/* Restore from backup */}
         <div>
           <h4 className="text-sm font-medium text-stone-900 dark:text-white mb-2">Restore</h4>
-          <div className="flex gap-3 items-start">
+          <div className="space-y-3">
             <input
               type="file"
               accept=".json"
-              onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+              onChange={(e) => {
+                setRestoreFile(e.target.files?.[0] || null);
+                setRestorePreview(null);
+                setRestoreConfirmation("");
+              }}
               className="text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded file:border-0 file:bg-stone-100 dark:file:bg-stone-700 file:text-stone-700 dark:file:text-stone-300 file:hover:bg-stone-200 dark:file:hover:bg-stone-600 file:cursor-pointer file:transition-colors"
-              disabled={restoreBusy}
+              disabled={restoreBusy || previewBusy}
             />
-            <button
-              onClick={handleRestore}
-              disabled={restoreBusy || !restoreFile}
-              className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {restoreBusy ? "Restoring..." : "Restore"}
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <input
+                type="password"
+                value={restorePassphrase}
+                onChange={(event) => {
+                  setRestorePassphrase(event.target.value);
+                  setRestorePreview(null);
+                  setRestoreConfirmation("");
+                }}
+                placeholder="Backup passphrase"
+                className="input-premium text-sm flex-1"
+                disabled={restoreBusy || previewBusy}
+              />
+              <button
+                type="button"
+                onClick={handlePreview}
+                disabled={previewBusy || restoreBusy || !restoreFile || restorePassphrase.length < 8}
+                className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {previewBusy ? "Validating..." : "Validate backup"}
+              </button>
+            </div>
+
+            {restorePreview && (
+              <div className="space-y-3 rounded-lg border border-stone-200 dark:border-stone-700 p-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <p className="text-xs text-stone-500 dark:text-stone-400">Created</p>
+                    <p className="font-medium text-stone-900 dark:text-white">{formatDateTimeLy(restorePreview.manifest.createdAt)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-stone-500 dark:text-stone-400">Tables</p>
+                    <p className="font-medium text-stone-900 dark:text-white">{restorePreview.tables.length}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-stone-500 dark:text-stone-400">Document files</p>
+                    <p className="font-medium text-stone-900 dark:text-white">
+                      {restorePreview.documents.filesIncluded} included, {restorePreview.documents.filesMissing} missing
+                    </p>
+                  </div>
+                </div>
+
+                {restorePreview.warnings.length > 0 && (
+                  <div className="rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-2 text-amber-700 dark:text-amber-300">
+                    {restorePreview.warnings.join(" ")}
+                  </div>
+                )}
+
+                <div>
+                  <p className="text-xs font-medium text-stone-600 dark:text-stone-300 mb-2">Runtime variables restored after review</p>
+                  <div className="max-h-44 overflow-auto rounded border border-stone-200 dark:border-stone-700">
+                    <table className="min-w-full text-xs">
+                      <tbody>
+                        {restorePreview.env.map((item) => (
+                          <tr key={item.name} className="border-b border-stone-100 dark:border-stone-800 last:border-0">
+                            <td className="px-2 py-1 font-mono text-stone-700 dark:text-stone-200">{item.name}</td>
+                            <td className="px-2 py-1 font-mono text-stone-500 dark:text-stone-400">{item.value}</td>
+                            <td className="px-2 py-1 text-stone-500 dark:text-stone-400">
+                              {item.requiresReview ? "Review" : item.isSecret ? "Secret" : ""}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <input
+                  value={restoreConfirmation}
+                  onChange={(event) => setRestoreConfirmation(event.target.value)}
+                  placeholder="Type RESTORE RISPRO"
+                  className="input-premium text-sm w-full"
+                  disabled={restoreBusy}
+                />
+                <button
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={restoreBusy || restoreConfirmation !== "RESTORE RISPRO"}
+                  className="btn-secondary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {restoreBusy ? "Restoring..." : "Restore full system"}
+                </button>
+              </div>
+            )}
           </div>
           <p className="text-xs text-stone-500 dark:text-stone-400 mt-2">
-            ⚠️ Restoring will delete all current data (patients, appointments, settings, etc.) and replace it with the backup.
+            Restoring deletes current data and replaces database rows, documents, and .env variables from the backup. Restart RISpro after restore.
           </p>
         </div>
       </div>
