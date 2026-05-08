@@ -451,7 +451,11 @@ async function getInsertOrder(client: PoolClient, tables: BackupTableRef[]): Pro
     });
 
     if (ready.length === 0) {
-      throw new HttpError(500, "Could not determine restore order for backup tables.");
+      for (const key of [...remaining].sort()) {
+        ordered.push(tableByKey.get(key)!);
+        remaining.delete(key);
+      }
+      break;
     }
 
     ready.sort();
@@ -462,6 +466,34 @@ async function getInsertOrder(client: PoolClient, tables: BackupTableRef[]): Pro
   }
 
   return ordered;
+}
+
+async function deferBackupForeignKeys(client: PoolClient): Promise<void> {
+  const { rows } = await client.query<{
+    table_schema: string;
+    table_name: string;
+    constraint_name: string;
+  }>(
+    `
+      select
+        child_schema.nspname as table_schema,
+        child.relname as table_name,
+        constraint_row.conname as constraint_name
+      from pg_constraint constraint_row
+      join pg_class child on child.oid = constraint_row.conrelid
+      join pg_namespace child_schema on child_schema.oid = child.relnamespace
+      where constraint_row.contype = 'f'
+        and child_schema.nspname = any($1::text[])
+    `,
+    [[...BACKUP_SCHEMAS]]
+  );
+
+  for (const row of rows) {
+    await client.query(
+      `alter table ${quoteIdent(row.table_schema)}.${quoteIdent(row.table_name)} alter constraint ${quoteIdent(row.constraint_name)} deferrable initially deferred`
+    );
+  }
+  await client.query("set constraints all deferred");
 }
 
 function normalizeRowsForInsert(
@@ -765,6 +797,7 @@ export async function restoreBackupSnapshot(
     const truncateSql = knownTables.map((table) => table.qualified).join(", ");
 
     await client.query("begin");
+    await deferBackupForeignKeys(client);
     await client.query(`truncate table ${truncateSql} restart identity cascade`);
 
     for (const table of insertOrder) {
