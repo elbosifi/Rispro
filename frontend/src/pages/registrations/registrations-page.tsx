@@ -544,13 +544,17 @@ export default function RegistrationsPage() {
   }, [selectedAppointment?.id, manageTab]);
 
   useEffect(() => {
-    if (rescheduleCapacityResolutionMode === "special_quota_extra" && !rescheduleSpecialQuotaAvailable) {
+    if (
+      rescheduleCapacityResolutionMode === "special_quota_extra" &&
+      !rescheduleAvailability.isLoading &&
+      !rescheduleSpecialQuotaAvailable
+    ) {
       setRescheduleCapacityResolutionMode("standard");
       setRescheduleSpecialReasonCode("");
       setRescheduleSpecialReasonConfirmed(false);
       setRescheduleSpecialReasonNote("");
     }
-  }, [rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable]);
+  }, [rescheduleAvailability.isLoading, rescheduleCapacityResolutionMode, rescheduleSpecialQuotaAvailable]);
 
   useEffect(() => {
     let cancelled = false;

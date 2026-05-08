@@ -219,11 +219,13 @@ export function CreateAppointmentTab({
     if (
       form.capacityResolutionMode !== "standard" &&
       (!canUseSelectedCapacityMode ||
-        (form.capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable))
+        (form.capacityResolutionMode === "special_quota_extra" &&
+          !availability.isLoading &&
+          !hasSpecialQuotaAvailable))
     ) {
       actions.setCapacityResolutionMode("standard");
     }
-  }, [actions, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
+  }, [actions, availability.isLoading, form.capacityResolutionMode, hasSpecialQuotaAvailable, canUseSelectedCapacityMode]);
 
   useEffect(() => {
     if (!form.patientId) {

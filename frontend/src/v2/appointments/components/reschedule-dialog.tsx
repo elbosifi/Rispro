@@ -157,13 +157,13 @@ export function RescheduleDialog({
   const specialQuotaNeedsDetails = effectiveCapacityResolutionMode === "special_quota_extra";
 
   useEffect(() => {
-    if (capacityResolutionMode === "special_quota_extra" && !hasSpecialQuotaAvailable) {
+    if (capacityResolutionMode === "special_quota_extra" && !evaluating && !hasSpecialQuotaAvailable) {
       setCapacityResolutionMode("standard");
       setSpecialReasonCode("");
       setSpecialReasonConfirmed(false);
       setSpecialReasonNote("");
     }
-  }, [capacityResolutionMode, hasSpecialQuotaAvailable]);
+  }, [capacityResolutionMode, evaluating, hasSpecialQuotaAvailable]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
