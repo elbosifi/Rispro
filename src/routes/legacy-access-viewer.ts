@@ -8,6 +8,7 @@
 
 import express, { Request, Response } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
@@ -23,6 +24,7 @@ export const legacyAccessViewerRouter = express.Router();
 
 // Normal authentication — same as every other route in the app.
 legacyAccessViewerRouter.use(requireAuth);
+legacyAccessViewerRouter.use(requirePageAccess("legacy"));
 
 /**
  * POST /api/legacy-access-viewer/upload

@@ -3,6 +3,7 @@ import { useState, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { AuthProvider, useAuth } from "@/providers/auth-provider";
+import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { LoginPage } from "@/pages/auth/login-page";
 import { DashboardPage } from "@/pages/dashboard/dashboard-page";
@@ -31,7 +32,8 @@ import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
   getDefaultLandingRouteForRole,
-  normalizePageVisibilityMatrix
+  normalizePageVisibilityMatrix,
+  type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
 
 const ROUTE_PATHS: Record<string, string> = {
@@ -59,6 +61,56 @@ const PATH_TO_ROUTE = Object.fromEntries(
   Object.entries(ROUTE_PATHS).map(([k, v]) => [v === "/" ? "/" : v.slice(1), k])
 );
 
+function getLandingPath(route: PageVisibilityRouteKey): string {
+  if (route === "dashboard") {
+    return "/dashboard";
+  }
+  return ROUTE_PATHS[route] || "/dashboard";
+}
+
+function LoadingScreen() {
+  return (
+    <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: "var(--background)" }}>
+      <div className="spinner-industrial h-12 w-12" />
+    </div>
+  );
+}
+
+function QueueCheckInAccessRoute() {
+  const { user, isLoading } = useAuth();
+  const { data: pageVisibilityMatrix, isLoading: isPageVisibilityLoading } = useQuery({
+    queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
+    queryFn: fetchPageVisibilityMatrix,
+    staleTime: 1000 * 60,
+    retry: false,
+  });
+  const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
+
+  if (isLoading || isPageVisibilityLoading) {
+    return <LoadingScreen />;
+  }
+
+  if (!user) {
+    return <ProtectedRoute><QueueCheckInPage /></ProtectedRoute>;
+  }
+
+  const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user.role);
+  const defaultLandingPath = getLandingPath(defaultLandingRoute);
+
+  return (
+    <ProtectedRoute>
+      <PageAccessRoute
+        routeKey="queue.checkin"
+        user={user}
+        matrix={normalizedMatrix}
+        defaultLandingPath={defaultLandingPath}
+      >
+        <QueueCheckInPage />
+      </PageAccessRoute>
+    </ProtectedRoute>
+  );
+}
+
 function AppContent() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -66,7 +118,7 @@ function AppContent() {
   const { language, toggleLanguage } = useLanguage();
   const isArabic = language === "ar";
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const { data: pageVisibilityMatrix } = useQuery({
+  const { data: pageVisibilityMatrix, isLoading: isPageVisibilityLoading } = useQuery({
     queryKey: ["settings", "users_and_roles", "page_visibility_by_role"],
     queryFn: fetchPageVisibilityMatrix,
     staleTime: 1000 * 60,
@@ -74,7 +126,7 @@ function AppContent() {
   });
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
   const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user?.role ?? "receptionist");
-  const defaultLandingPath = ROUTE_PATHS[defaultLandingRoute] || "/dashboard";
+  const defaultLandingPath = getLandingPath(defaultLandingRoute);
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -141,17 +193,24 @@ function AppContent() {
       }
     })();
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen" style={{ backgroundColor: "var(--background)" }}>
-        <div className="spinner-industrial h-12 w-12" />
-      </div>
-    );
+  if (isLoading || isPageVisibilityLoading) {
+    return <LoadingScreen />;
   }
 
   if (!user) {
     return null;
   }
+
+  const guardedPage = (routeKey: PageVisibilityRouteKey, element: React.ReactNode) => (
+    <PageAccessRoute
+      routeKey={routeKey}
+      user={user}
+      matrix={normalizedMatrix}
+      defaultLandingPath={defaultLandingPath}
+    >
+      {element}
+    </PageAccessRoute>
+  );
 
   return (
     <div className="flex flex-col min-h-screen" style={{ backgroundColor: "var(--background)" }} dir={isArabic ? "rtl" : "ltr"}>
@@ -195,29 +254,31 @@ function AppContent() {
         <main className="flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
           <Routes>
             <Route path="/" element={<Navigate to={defaultLandingPath} replace />} />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route path="/patients" element={<PatientsPage />} />
-            <Route path="/patients/new" element={<PatientsPage />} />
-            <Route path="/patients/:id/edit" element={<EditPatientPage />} />
-            <Route path="/appointments" element={<AppointmentsV3CreatePage />} />
+            <Route path="/dashboard" element={guardedPage("dashboard", <DashboardPage />)} />
+            <Route path="/patients" element={guardedPage("patients", <PatientsPage />)} />
+            <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
+            <Route path="/patients/:id/edit" element={guardedPage("patients", <EditPatientPage />)} />
+            <Route path="/appointments" element={guardedPage("appointments", <AppointmentsV3CreatePage />)} />
             <Route path="/appointments/legacy" element={<Navigate to="/appointments" replace />} />
-            <Route path="/calendar" element={<CalendarPage />} />
-            <Route path="/registrations" element={<RegistrationsPage />} />
-            <Route path="/queue" element={<QueuePage />} />
-            <Route path="/modality" element={<ModalityPage />} />
-            <Route path="/doctor" element={<DoctorPage />} />
-            <Route path="/print" element={<PrintPage />} />
-            <Route path="/statistics" element={<StatisticsPage />} />
+            <Route path="/calendar" element={guardedPage("calendar", <CalendarPage />)} />
+            <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />
+            <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
+            <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
+            <Route path="/doctor" element={guardedPage("doctor", <DoctorPage />)} />
+            <Route path="/print" element={guardedPage("print", <PrintPage />)} />
+            <Route path="/statistics" element={guardedPage("statistics", <StatisticsPage />)} />
             <Route path="/search" element={<SearchPage />} />
-            <Route path="/pacs" element={<PacsPage />} />
-            <Route path="/pacs/remap" element={<PacsRemapPage />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            <Route path="/legacy-access-viewer" element={<LegacyAccessViewerPage />} />
+            <Route path="/pacs" element={guardedPage("pacs", <PacsPage />)} />
+            <Route path="/pacs/remap" element={guardedPage("pacs.remap", <PacsRemapPage />)} />
+            <Route path="/settings" element={guardedPage("settings", <SettingsPage />)} />
+            <Route path="/legacy-access-viewer" element={guardedPage("legacy", <LegacyAccessViewerPage />)} />
             <Route path="/v2/appointments" element={<Navigate to="/appointments" replace />} />
             <Route
               path="/v2/appointments/admin"
-                  element={(user.role === "supervisor" || user.role === "super_admin") ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />}
-                />
+              element={(user.role === "supervisor" || user.role === "super_admin")
+                ? guardedPage("v2.appointments.admin", <SchedulingAdminV2Page />)
+                : <Navigate to="/appointments" replace />}
+            />
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
@@ -247,11 +308,7 @@ function RouterConfig() {
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
       <Route
         path="/queue/check-in"
-        element={
-          <ProtectedRoute>
-            <QueueCheckInPage />
-          </ProtectedRoute>
-        }
+        element={<QueueCheckInAccessRoute />}
       />
       <Route
         path="/*"

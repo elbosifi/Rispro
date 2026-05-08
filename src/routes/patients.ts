@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { pool } from "../db/pool.js";
@@ -28,6 +29,7 @@ type PatientsRequest = Request & {
 export const patientsRouter: Router = express.Router();
 
 patientsRouter.use(requireAuth);
+patientsRouter.use(requirePageAccess("patients"));
 
 patientsRouter.get(
   "/identifier-types",

@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from "express";
 import { requireAuth } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString, asUserId } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext } from "../types/http.js";
@@ -18,6 +19,7 @@ interface QueueRequest extends Request {
 export const queueRouter: Router = express.Router();
 
 queueRouter.use(requireAuth);
+queueRouter.use(requirePageAccess("queue"));
 
 queueRouter.get(
   "/",

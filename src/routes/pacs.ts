@@ -6,6 +6,7 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { requireAuth, requireSupervisor, requireRecentSupervisorReauth } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asUnknownRecord } from "../utils/records.js";
 import { asOptionalString } from "../utils/request-coercion.js";
@@ -62,6 +63,8 @@ const supervisorNoReauthMiddleware = [requireAuth, requireSupervisor];
 const authMiddleware = [requireAuth];
 
 export const pacsRouter = express.Router();
+
+pacsRouter.use("/remap", requireAuth, requirePageAccess("pacs.remap"));
 
 async function stageDicomRemapMultipartFiles(req: Request): Promise<{
   files: DicomRemapStagedUploadFile[];
@@ -397,6 +400,7 @@ pacsRouter.get(
 pacsRouter.get(
   "/orthanc-targets",
   ...authMiddleware,
+  requirePageAccess("pacs"),
   asyncRoute(async (_req: Request, res: Response) => {
     res.json(await listOrthancPacsTargets());
   })
@@ -517,6 +521,7 @@ pacsRouter.post(
 pacsRouter.post(
   "/search",
   ...authMiddleware,
+  requirePageAccess("pacs"),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as { body?: unknown; user: AuthenticatedUserContext };
     const body = asUnknownRecord(request.body ?? {});

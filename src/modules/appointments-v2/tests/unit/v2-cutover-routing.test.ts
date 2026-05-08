@@ -7,14 +7,16 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
-const appPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/App.tsx";
-const navPath = "/Users/serajalsaifi/Nextcloud/RISpro/frontend/src/components/layout/navigation.tsx";
+const appPath = path.join(process.cwd(), "frontend/src/App.tsx");
+const navPath = path.join(process.cwd(), "frontend/src/components/layout/navigation.tsx");
 
 describe("V3 controlled cutover — App routes", () => {
   it("/appointments maps to AppointmentsV3CreatePage", async () => {
     const source = await readFile(appPath, "utf-8");
-    assert.ok(source.includes('<Route path="/appointments" element={<AppointmentsV3CreatePage />} />'));
+    assert.ok(source.includes('path="/appointments"'));
+    assert.ok(source.includes('guardedPage("appointments", <AppointmentsV3CreatePage />)'));
   });
 
   it("/v2/appointments is retired from normal use and redirects to /appointments", async () => {
@@ -30,7 +32,8 @@ describe("V3 controlled cutover — App routes", () => {
   it("keeps /v2/appointments/admin as supervisor-only policy admin route", async () => {
     const source = await readFile(appPath, "utf-8");
     assert.ok(source.includes('path="/v2/appointments/admin"'));
-    assert.ok(source.includes('user.role === "supervisor" ? <SchedulingAdminV2Page /> : <Navigate to="/appointments" replace />'));
+    assert.ok(source.includes('user.role === "supervisor" || user.role === "super_admin"'));
+    assert.ok(source.includes('guardedPage("v2.appointments.admin", <SchedulingAdminV2Page />)'));
   });
 });
 
@@ -50,6 +53,6 @@ describe("V3 controlled cutover — navigation", () => {
   it("keeps supervisor V2 admin nav entry", async () => {
     const source = await readFile(navPath, "utf-8");
     assert.ok(source.includes('route: "v2.appointments.admin"'));
-    assert.ok(source.includes('roles: ["supervisor"]'));
+    assert.ok(source.includes('labelKey: "nav.appointmentsV2Admin"'));
   });
 });

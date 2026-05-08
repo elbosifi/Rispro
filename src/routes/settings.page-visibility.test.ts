@@ -100,6 +100,7 @@ test("settings page visibility route permissions", async () => {
   const superAdminReauthCookie = `${superAdminCookie}; ${createSupervisorReauthCookie(reauthCookieName, 102, "super_admin")}`;
 
   const server = await startTestServer(appModule.createApp);
+  let originalMatrix: Record<string, unknown> | null = null;
   try {
     const initial = await requestJson<{ matrix: Record<string, unknown> }>(
       server.baseUrl,
@@ -108,8 +109,27 @@ test("settings page visibility route permissions", async () => {
     );
 
     assert.equal(initial.status, 200);
-    const originalMatrix = initial.data.matrix;
+    originalMatrix = initial.data.matrix;
     assert.ok(Array.isArray(originalMatrix["pacs.remap"]));
+
+    const originalPatients = Array.isArray(originalMatrix.patients) ? originalMatrix.patients : [];
+    const originalStatistics = Array.isArray(originalMatrix.statistics) ? originalMatrix.statistics : [];
+    const deniedMatrix = {
+      ...originalMatrix,
+      patients: originalPatients.filter((role) => role !== "modality_staff"),
+      statistics: originalStatistics.filter((role) => role !== "modality_staff"),
+    };
+
+    const seededDeniedMatrix = await requestJson<{ matrix: Record<string, unknown> }>(
+      server.baseUrl,
+      "/api/settings/users-and-roles/page-visibility",
+      {
+        method: "PUT",
+        cookie: superAdminReauthCookie,
+        body: { matrix: deniedMatrix },
+      }
+    );
+    assert.equal(seededDeniedMatrix.status, 200);
 
     const anonymous = await requestJson<{ message?: string }>(server.baseUrl, "/api/settings/users-and-roles/page-visibility");
     assert.equal(anonymous.status, 401);
@@ -122,6 +142,20 @@ test("settings page visibility route permissions", async () => {
     assert.equal(modalityStaff.status, 200);
     assert.ok(Array.isArray(modalityStaff.data.matrix.patients));
 
+    const blockedPatientsApi = await requestJson<{ message?: string }>(
+      server.baseUrl,
+      "/api/patients/identifier-types",
+      { cookie: modalityStaffCookie }
+    );
+    assert.equal(blockedPatientsApi.status, 403);
+
+    const blockedStatisticsApi = await requestJson<{ message?: string }>(
+      server.baseUrl,
+      "/api/v2/read/statistics",
+      { cookie: modalityStaffCookie }
+    );
+    assert.equal(blockedStatisticsApi.status, 403);
+
     const denied = await requestJson<{ message?: string }>(
       server.baseUrl,
       "/api/settings/users-and-roles/page-visibility",
@@ -133,11 +167,10 @@ test("settings page visibility route permissions", async () => {
     );
     assert.equal(denied.status, 403);
 
-    const existingPatients = Array.isArray(originalMatrix.patients) ? originalMatrix.patients : [];
     const existingPacsRemap = Array.isArray(originalMatrix["pacs.remap"]) ? originalMatrix["pacs.remap"] : [];
     const updatedMatrix = {
       ...originalMatrix,
-      patients: ["modality_staff", ...existingPatients.filter((role) => role !== "modality_staff")],
+      patients: ["modality_staff", ...originalPatients.filter((role) => role !== "modality_staff")],
       "pacs.remap": ["doctor", ...existingPacsRemap.filter((role) => role !== "doctor")],
     };
 
@@ -157,6 +190,13 @@ test("settings page visibility route permissions", async () => {
     assert.equal(Array.isArray(allowed.data.matrix["pacs.remap"]), true);
     assert.equal((allowed.data.matrix["pacs.remap"] as unknown[]).includes("doctor"), true);
 
+    const allowedPatientsApi = await requestJson<{ items?: unknown[] }>(
+      server.baseUrl,
+      "/api/patients/identifier-types",
+      { cookie: modalityStaffCookie }
+    );
+    assert.equal(allowedPatientsApi.status, 200);
+
     const restored = await requestJson<{ matrix: Record<string, unknown> }>(
       server.baseUrl,
       "/api/settings/users-and-roles/page-visibility",
@@ -169,6 +209,17 @@ test("settings page visibility route permissions", async () => {
 
     assert.equal(restored.status, 200);
   } finally {
+    if (originalMatrix) {
+      await requestJson<{ matrix: Record<string, unknown> }>(
+        server.baseUrl,
+        "/api/settings/users-and-roles/page-visibility",
+        {
+          method: "PUT",
+          cookie: superAdminReauthCookie,
+          body: { matrix: originalMatrix },
+        }
+      ).catch(() => undefined);
+    }
     await server.close();
   }
 });

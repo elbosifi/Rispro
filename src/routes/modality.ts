@@ -1,5 +1,6 @@
 import express, { Request, Response, Router } from "express";
 import { requireAnyRole, requireAuth } from "../middleware/auth.js";
+import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext } from "../types/http.js";
@@ -7,7 +8,8 @@ import { listModalityWorklist, markAppointmentCompleted } from "../services/moda
 
 export const modalityRouter: Router = express.Router();
 
-modalityRouter.use(requireAuth, requireAnyRole(["modality_staff", "supervisor"]));
+modalityRouter.use(requireAuth, requireAnyRole(["modality_staff", "supervisor", "super_admin"]));
+modalityRouter.use(requirePageAccess("modality"));
 
 modalityRouter.get(
   "/worklist",

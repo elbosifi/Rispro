@@ -97,15 +97,7 @@ function canAccess(item: NavItemConfig, user: User | null, matrix: PageVisibilit
     return true;
   }
 
-  if (canRoleAccessRoute(matrix, item.route, user.role)) {
-    return true;
-  }
-  if (item.route === "pacs.remap" && canRoleAccessRoute(matrix, "pacs", user.role)) {
-    return true;
-  }
-
-  if (!item.roles) return false;
-  return item.roles.includes(user.role);
+  return canRoleAccessRoute(matrix, item.route, user.role);
 }
 
 const ICON_MAP: Record<NavIcon, typeof LayoutGrid> = {

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { pool } from "../../../../db/pool.js";
 import { requireAuth } from "../../../../middleware/auth.js";
+import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
@@ -289,6 +290,7 @@ router.get(
 
 router.get(
   "/statistics",
+  requirePageAccess("statistics"),
   asyncRoute(async (req: Request, res: Response) => {
     const query = req.query as Record<string, unknown>;
     const date = typeof query.date === "string" ? query.date : "";
@@ -450,6 +452,7 @@ router.get(
 
 router.get(
   "/queue",
+  requirePageAccess("queue"),
   asyncRoute(async (_req: Request, res: Response) => {
     const todayResult = await pool.query(`select current_date::text as today`);
     const today = String(todayResult.rows[0]?.today ?? "");
@@ -539,6 +542,7 @@ router.get(
 
 router.post(
   "/queue/scan",
+  requirePageAccess("queue"),
   asyncRoute(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const scanValue = String(body.scanValue ?? "").trim();
@@ -570,6 +574,7 @@ router.post(
 
 router.post(
   "/queue/walk-in",
+  requirePageAccess("queue"),
   asyncRoute(async (req: Request, res: Response) => {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const patientId = Number(body.patientId);
@@ -639,6 +644,7 @@ router.post(
 
 router.get(
   "/modality/worklist",
+  requirePageAccess("modality"),
   asyncRoute(async (req: Request, res: Response) => {
     const query = req.query as Record<string, unknown>;
     const scope = String(query.scope || "day");
@@ -712,6 +718,7 @@ router.get(
 
 router.post(
   "/appointments/:id/complete",
+  requirePageAccess("modality"),
   asyncRoute(async (req: Request, res: Response) => {
     const bookingId = Number(req.params.id);
     if (!Number.isInteger(bookingId) || bookingId <= 0) {

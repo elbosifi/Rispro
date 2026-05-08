@@ -107,6 +107,14 @@ export function sanitizePageVisibilityForNavigation(input: unknown): PageVisibil
   return safeResult;
 }
 
+export function canRoleAccessPage(routeKey: PageVisibilityRouteKey, role: Role, matrix: PageVisibilityMatrix): boolean {
+  if (routeKey === "settings" && role === "super_admin") {
+    return true;
+  }
+
+  return matrix[routeKey].includes(role);
+}
+
 export async function readPageVisibilityMatrix(): Promise<PageVisibilityMatrix> {
   const { rows } = await pool.query<{ setting_value: unknown }>(
     `
