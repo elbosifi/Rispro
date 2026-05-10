@@ -12,6 +12,20 @@ test("Sante outbox does not persist full HL7 payload text", () => {
 test("manual retry clears paths so retry creates a new unique file", () => {
   assert.match(source, /target_path = null/);
   assert.match(source, /tmp_path = null/);
-  assert.match(source, /manual_retry_new_file/);
+  assert.match(source, /manual_retry_new_file|createsNewDeliveryAttempt/);
 });
 
+test("file-drop writer still uses tmp write, rename, and pending import", () => {
+  assert.match(source, /writeSanteOutboxJobToFileDrop/);
+  assert.match(source, /fs\.writeFile\(tmpPath, built\.message, "utf8"\)/);
+  assert.match(source, /fs\.rename\(tmpPath, targetPath\)/);
+  assert.match(source, /status = 'pending_import'/);
+});
+
+test("MLLP delivery records acknowledged, nack, and retryable send failure paths", () => {
+  assert.match(source, /sendSanteOutboxJobViaMllp/);
+  assert.match(source, /status = 'acknowledged'/);
+  assert.match(source, /status = 'nack_received'/);
+  assert.match(source, /status = 'send_failed'/);
+  assert.match(source, /markSanteOutboxFailure\(job, message, job\.attemptCount < job\.maxAttempts\)/);
+});

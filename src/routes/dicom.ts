@@ -36,7 +36,7 @@ import {
   retrySanteOutbox,
   sendSyntheticSanteTestFile,
 } from "../services/sante-hl7-outbox-service.js";
-import { testSanteOutputFolderAccess } from "../services/sante-worklist-settings-resolver.js";
+import { resolveSanteWorklistSettings, testSanteOutputFolderAccess } from "../services/sante-worklist-settings-resolver.js";
 import {
   getAllServiceStatuses,
   getServiceStatus
@@ -219,6 +219,10 @@ dicomRouter.get(
 dicomRouter.post(
   "/sante-hl7/test-folder",
   asyncRoute(async (req: Request, res: Response) => {
+    const settings = await resolveSanteWorklistSettings();
+    if (settings.deliveryMethod !== "file_drop") {
+      throw new HttpError(400, "Sante HL7 test folder is only available for file_drop delivery.");
+    }
     const body = asUnknownRecord(req.body ?? {});
     const result = await testSanteOutputFolderAccess(String(body.outputFolderPath || "").trim());
     res.json(result);

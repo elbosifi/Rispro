@@ -27,7 +27,9 @@ async function runSanteTick(batchSize: number): Promise<void> {
     for (const job of jobs) {
       await writeSanteOutboxJob(job);
     }
-    await monitorSantePendingImports(batchSize);
+    if (settings.deliveryMethod === "file_drop") {
+      await monitorSantePendingImports(batchSize);
+    }
   } finally {
     isTickRunning = false;
   }
@@ -60,4 +62,3 @@ export async function startSanteWorklistWorker(options?: {
     },
   };
 }
-

@@ -11,10 +11,16 @@ type FormState = {
   enabled: string;
   mode: string;
   keep_internal_mwl_active: string;
+  delivery_method: string;
   output_folder_path: string;
   file_extension: string;
   success_behavior: string;
   error_extensions: string;
+  mllp_host: string;
+  mllp_port: string;
+  mllp_timeout_seconds: string;
+  mllp_expect_ack: string;
+  scheduled_station_ae_title_default: string;
   retry_max_attempts: string;
   retry_initial_delay_seconds: string;
   retry_max_delay_seconds: string;
@@ -45,10 +51,17 @@ type SummaryResponse = {
     settings: {
       enabled: boolean;
       mode: string;
+      deliveryMethod: string;
       outputFolderPath: string;
       allowedBasePaths: string[];
       hostOutboxHint: string;
       windowsShareSourceHint: string;
+      mllp: {
+        host: string;
+        port: number;
+        timeoutSeconds: number;
+        expectAck: boolean;
+      };
     };
   };
 };
@@ -57,10 +70,16 @@ const DEFAULT_FORM: FormState = {
   enabled: "false",
   mode: "disabled",
   keep_internal_mwl_active: "true",
+  delivery_method: "file_drop",
   output_folder_path: "",
   file_extension: ".hl7",
   success_behavior: "auto_detect",
   error_extensions: ".ERR,.err",
+  mllp_host: "",
+  mllp_port: "",
+  mllp_timeout_seconds: "10",
+  mllp_expect_ack: "true",
+  scheduled_station_ae_title_default: "",
   retry_max_attempts: "5",
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
@@ -161,7 +180,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
   const retryMutation = useMutation({
     mutationFn: (outboxId: number) => api(`/dicom/sante-hl7/retry/${outboxId}`, { method: "POST" }),
     onSuccess: async () => {
-      setMessage("Retry queued. A new unique file will be created.");
+      setMessage("Retry queued. A new delivery attempt will be created.");
       await queryClient.invalidateQueries({ queryKey: ["dicom", "sante-hl7", "summary"] });
     },
     onError: (error: Error) => setMessage(error.message || "Retry failed."),
@@ -181,6 +200,8 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
   }
 
   const summary = summaryQuery.data?.summary;
+  const isFileDrop = form.delivery_method !== "mllp";
+  const syntheticTestLabel = form.delivery_method === "mllp" ? "Send Synthetic Test HL7 via MLLP" : "Send Synthetic Test HL7";
 
   return (
     <div className="space-y-6">
@@ -190,26 +211,47 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
         </div>
       )}
 
-      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
-        The folder path must be visible to the RISpro backend/container, not this browser.
-      </div>
+      {isFileDrop && (
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+          The folder path must be visible to the RISpro backend/container, not this browser.
+        </div>
+      )}
 
       <section className="space-y-3">
-        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Sante Worklist Server HL7 File-Drop</h4>
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Sante Worklist Server HL7</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <Field label="Enabled" type="select" value={form.enabled} onChange={(value) => setValue("enabled", value)} options={[["false", "Disabled"], ["true", "Enabled"]]} />
           <Field label="Mode" type="select" value={form.mode} onChange={(value) => setValue("mode", value)} options={[["disabled", "Disabled"], ["shadow", "Shadow"], ["primary_with_internal_fallback", "Primary with internal fallback"], ["sante_only", "Sante only"]]} />
           <Field label="Keep internal MWL active" type="select" value={form.keep_internal_mwl_active} onChange={() => setValue("keep_internal_mwl_active", "true")} options={[["true", "Always true for rollout"]]} />
-          <Field label="Output folder path" value={form.output_folder_path} onChange={(value) => setValue("output_folder_path", value)} placeholder="storage/sante-hl7-output" />
-          <Field label="File extension" type="select" value={form.file_extension} onChange={(value) => setValue("file_extension", value)} options={[[".hl7", ".hl7"], [".txt", ".txt"]]} />
-          <Field label="Success behavior" type="select" value={form.success_behavior} onChange={(value) => setValue("success_behavior", value)} options={[["auto_detect", "Auto-detect"], ["deleted", "Deleted"], ["don", ".DON/.don"]]} />
-          <Field label="Error extensions" value={form.error_extensions} onChange={(value) => setValue("error_extensions", value)} />
+          <Field label="Delivery method" type="select" value={form.delivery_method} onChange={(value) => setValue("delivery_method", value)} options={[["file_drop", "File drop"], ["mllp", "MLLP"]]} />
           <Field label="Retry max attempts" type="number" value={form.retry_max_attempts} onChange={(value) => setValue("retry_max_attempts", value)} />
           <Field label="Initial retry delay seconds" type="number" value={form.retry_initial_delay_seconds} onChange={(value) => setValue("retry_initial_delay_seconds", value)} />
           <Field label="Max retry delay seconds" type="number" value={form.retry_max_delay_seconds} onChange={(value) => setValue("retry_max_delay_seconds", value)} />
-          <Field label="Pending import timeout seconds" type="number" value={form.pending_import_timeout_seconds} onChange={(value) => setValue("pending_import_timeout_seconds", value)} />
         </div>
       </section>
+
+      {isFileDrop ? (
+        <section className="space-y-3">
+          <h4 className="text-lg font-semibold text-stone-900 dark:text-white">File Drop Delivery</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="Output folder path" value={form.output_folder_path} onChange={(value) => setValue("output_folder_path", value)} placeholder="storage/sante-hl7-output" />
+            <Field label="File extension" type="select" value={form.file_extension} onChange={(value) => setValue("file_extension", value)} options={[[".hl7", ".hl7"], [".txt", ".txt"]]} />
+            <Field label="Success behavior" type="select" value={form.success_behavior} onChange={(value) => setValue("success_behavior", value)} options={[["auto_detect", "Auto-detect"], ["deleted", "Deleted"], ["don", ".DON/.don"]]} />
+            <Field label="Error extensions" value={form.error_extensions} onChange={(value) => setValue("error_extensions", value)} />
+            <Field label="Pending import timeout seconds" type="number" value={form.pending_import_timeout_seconds} onChange={(value) => setValue("pending_import_timeout_seconds", value)} />
+          </div>
+        </section>
+      ) : (
+        <section className="space-y-3">
+          <h4 className="text-lg font-semibold text-stone-900 dark:text-white">MLLP Delivery</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Field label="MLLP host" value={form.mllp_host} onChange={(value) => setValue("mllp_host", value)} placeholder="192.168.1.50" />
+            <Field label="MLLP port" type="number" value={form.mllp_port} onChange={(value) => setValue("mllp_port", value)} placeholder="2575" />
+            <Field label="Timeout seconds" type="number" value={form.mllp_timeout_seconds} onChange={(value) => setValue("mllp_timeout_seconds", value)} />
+            <Field label="Expect ACK" type="select" value={form.mllp_expect_ack} onChange={(value) => setValue("mllp_expect_ack", value)} options={[["true", "Yes"], ["false", "No"]]} />
+          </div>
+        </section>
+      )}
 
       <section className="space-y-3">
         <h4 className="text-lg font-semibold text-stone-900 dark:text-white">HL7 Identity And Mapping</h4>
@@ -222,6 +264,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <Field label="Charset" value={form.charset} onChange={(value) => setValue("charset", value)} />
           <Field label="Patient ID field" type="select" value={form.patient_id_field} onChange={(value) => setValue("patient_id_field", value)} options={[["identifier_value", "Primary identifier"], ["mrn", "MRN"], ["national_id", "National ID"], ["patient_id", "RISpro patient ID"]]} />
           <Field label="Patient name field" type="select" value={form.patient_name_field} onChange={(value) => setValue("patient_name_field", value)} options={[["english_full_name", "English name"], ["arabic_full_name", "Arabic name"]]} />
+          <Field label="Default scheduled station AE title" value={form.scheduled_station_ae_title_default} onChange={(value) => setValue("scheduled_station_ae_title_default", value)} placeholder="Optional" />
         </div>
       </section>
 
@@ -229,11 +272,13 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
         <button type="button" className="btn-primary text-sm disabled:opacity-50" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
           {saveMutation.isPending ? "Saving..." : "Save Sante Settings"}
         </button>
-        <button type="button" className="btn-secondary text-sm" onClick={() => folderTestMutation.mutate()} disabled={folderTestMutation.isPending}>
-          {folderTestMutation.isPending ? "Testing..." : "Test Folder Access"}
-        </button>
+        {isFileDrop && (
+          <button type="button" className="btn-secondary text-sm" onClick={() => folderTestMutation.mutate()} disabled={folderTestMutation.isPending}>
+            {folderTestMutation.isPending ? "Testing..." : "Test Folder Access"}
+          </button>
+        )}
         <button type="button" className="btn-secondary text-sm" onClick={() => testFileMutation.mutate()} disabled={testFileMutation.isPending}>
-          {testFileMutation.isPending ? "Queueing..." : "Send Synthetic Test HL7"}
+          {testFileMutation.isPending ? "Queueing..." : syntheticTestLabel}
         </button>
       </div>
 
@@ -243,10 +288,21 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <StatusList title="Outbox Status" items={summary?.outboxStatus || []} />
           <div className="p-3 rounded-lg border border-stone-200 dark:border-stone-700 text-xs space-y-1">
             <p>Resolved mode: {summary?.settings.mode || "unknown"}</p>
-            <p>Resolved folder: {summary?.settings.outputFolderPath || "(empty)"}</p>
-            <p>Windows folder to share: {summary?.settings.windowsShareSourceHint || "(not provided by deployment)"}</p>
-            <p>Host folder hint: {summary?.settings.hostOutboxHint || "(not provided by deployment)"}</p>
-            <p>Allowed bases: {(summary?.settings.allowedBasePaths || []).join(", ") || "(none)"}</p>
+            <p>Delivery method: {summary?.settings.deliveryMethod || "file_drop"}</p>
+            {summary?.settings.deliveryMethod === "mllp" ? (
+              <>
+                <p>MLLP target: {summary.settings.mllp.host || "(empty)"}:{summary.settings.mllp.port || "(empty)"}</p>
+                <p>MLLP timeout: {summary.settings.mllp.timeoutSeconds}s</p>
+                <p>Expect ACK: {summary.settings.mllp.expectAck ? "yes" : "no"}</p>
+              </>
+            ) : (
+              <>
+                <p>Resolved folder: {summary?.settings.outputFolderPath || "(empty)"}</p>
+                <p>Windows folder to share: {summary?.settings.windowsShareSourceHint || "(not provided by deployment)"}</p>
+                <p>Host folder hint: {summary?.settings.hostOutboxHint || "(not provided by deployment)"}</p>
+                <p>Allowed bases: {(summary?.settings.allowedBasePaths || []).join(", ") || "(none)"}</p>
+              </>
+            )}
           </div>
         </div>
       </section>
@@ -263,7 +319,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
                 <p>Status: {failure.status}; attempts: {failure.attemptCount}</p>
                 <p className="break-all">Error: {failure.lastError || "(empty)"}</p>
                 <button className="btn-secondary text-xs mt-2" onClick={() => retryMutation.mutate(failure.id)} disabled={retryMutation.isPending}>
-                  Retry with New File
+                  Retry Delivery
                 </button>
               </div>
             ))}

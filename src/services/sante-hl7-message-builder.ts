@@ -100,6 +100,7 @@ export function buildSanteOrmO01Message(input: {
   const procedureDescription = booking.exam_name_en || booking.exam_name_ar || booking.modality_name_en || booking.modality_name_ar || booking.modality_code;
   const scheduledDateTime = hl7DateTime(booking.booking_date, booking.booking_time);
   const timestamp = hl7Timestamp(input.now);
+  const acceptAckType = settings.deliveryMethod === "mllp" && settings.mllpExpectAck ? "AL" : "";
 
   const segments = [
     [
@@ -117,7 +118,7 @@ export function buildSanteOrmO01Message(input: {
       escapeHl7(settings.hl7Version),
       "",
       "",
-      "",
+      acceptAckType,
       "",
       escapeHl7(settings.charset),
     ].join("|"),
@@ -182,6 +183,13 @@ export function buildSanteOrmO01Message(input: {
     ].join("|"),
   ];
 
+  if (settings.scheduledStationAeTitleDefault) {
+    segments.push([
+      "ZSS",
+      escapeHl7(settings.scheduledStationAeTitleDefault),
+    ].join("|"));
+  }
+
   const message = `${segments.join("\r")}\r`;
   return {
     message,
@@ -212,4 +220,3 @@ export function buildSyntheticSanteTestProjection(): SanteHl7BookingProjection {
     status: "scheduled",
   };
 }
-

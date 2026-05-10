@@ -17,6 +17,11 @@ import {
   testSanteOutputFolderAccess,
   type ResolvedSanteWorklistSettings,
 } from "./sante-worklist-settings-resolver.js";
+import {
+  sendSanteMllpMessage,
+  SanteMllpRetryableError,
+  type SanteMllpSendResult,
+} from "./sante-mllp-client.js";
 import type { UserId } from "../types/http.js";
 
 export type SanteOutboxStatus =
@@ -30,7 +35,10 @@ export type SanteOutboxStatus =
   | "pending_timeout"
   | "retry_scheduled"
   | "dead_letter"
-  | "skipped";
+  | "skipped"
+  | "acknowledged"
+  | "nack_received"
+  | "send_failed";
 
 export interface SanteOutboxJob {
   id: number;
@@ -52,14 +60,21 @@ export interface SanteHl7Summary {
     lastError: string;
     updatedAt: string;
   }>;
-    settings: {
-      enabled: boolean;
-      mode: string;
-      outputFolderPath: string;
-      allowedBasePaths: string[];
-      hostOutboxHint: string;
-      windowsShareSourceHint: string;
+  settings: {
+    enabled: boolean;
+    mode: string;
+    deliveryMethod: string;
+    outputFolderPath: string;
+    allowedBasePaths: string[];
+    hostOutboxHint: string;
+    windowsShareSourceHint: string;
+    mllp: {
+      host: string;
+      port: number;
+      timeoutSeconds: number;
+      expectAck: boolean;
     };
+  };
 }
 
 const ACTIVE_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
@@ -308,7 +323,6 @@ async function projectionForJob(job: SanteOutboxJob, client: PoolClient): Promis
 
 export async function writeSanteOutboxJob(job: SanteOutboxJob): Promise<void> {
   const settings = await resolveSanteWorklistSettings();
-  await testSanteOutputFolderAccess(settings.outputFolderPath);
   const client = await pool.connect();
   try {
     const projection = await projectionForJob(job, client);
@@ -317,20 +331,40 @@ export async function writeSanteOutboxJob(job: SanteOutboxJob): Promise<void> {
       orderControl: job.orderControl,
       settings,
     });
-    const fileStem = safeFileStem({
-      bookingId: job.bookingId,
-      accessionNumber: built.accessionNumber,
-      eventType: job.eventType,
-      messageControlId: built.messageControlId,
-    });
-    const tmpPath = path.join(settings.outputFolderPath, `${fileStem}.tmp`);
-    const targetPath = path.join(settings.outputFolderPath, `${fileStem}${settings.fileExtension}`);
+    if (settings.deliveryMethod === "mllp") {
+      await sendSanteOutboxJobViaMllp(job, built, settings);
+      return;
+    }
 
-    await fs.writeFile(tmpPath, built.message, "utf8");
-    await fs.rename(tmpPath, targetPath);
+    await writeSanteOutboxJobToFileDrop(job, built, settings);
+  } catch (error) {
+    const retryable = job.attemptCount < job.maxAttempts;
+    await markSanteOutboxFailure(job, (error as Error).message || "sante_hl7_delivery_failed", retryable);
+  } finally {
+    client.release();
+  }
+}
 
-    await pool.query(
-      `
+async function writeSanteOutboxJobToFileDrop(
+  job: SanteOutboxJob,
+  built: ReturnType<typeof buildSanteOrmO01Message>,
+  settings: ResolvedSanteWorklistSettings
+): Promise<void> {
+  await testSanteOutputFolderAccess(settings.outputFolderPath);
+  const fileStem = safeFileStem({
+    bookingId: job.bookingId,
+    accessionNumber: built.accessionNumber,
+    eventType: job.eventType,
+    messageControlId: built.messageControlId,
+  });
+  const tmpPath = path.join(settings.outputFolderPath, `${fileStem}.tmp`);
+  const targetPath = path.join(settings.outputFolderPath, `${fileStem}${settings.fileExtension}`);
+
+  await fs.writeFile(tmpPath, built.message, "utf8");
+  await fs.rename(tmpPath, targetPath);
+
+  await pool.query(
+    `
         update sante_hl7_outbox
         set status = 'pending_import',
             locked_at = null,
@@ -346,12 +380,12 @@ export async function writeSanteOutboxJob(job: SanteOutboxJob): Promise<void> {
             updated_at = now()
         where id = $1
       `,
-      [job.id, built.payloadHash, built.messageControlId, fileStem, settings.fileExtension, tmpPath, targetPath]
-    );
+    [job.id, built.payloadHash, built.messageControlId, fileStem, settings.fileExtension, tmpPath, targetPath]
+  );
 
-    if (job.bookingId != null) {
-      await pool.query(
-        `
+  if (job.bookingId != null) {
+    await pool.query(
+      `
           update sante_worklist_sync
           set sync_status = 'written',
               payload_hash = $2,
@@ -361,14 +395,148 @@ export async function writeSanteOutboxJob(job: SanteOutboxJob): Promise<void> {
               updated_at = now()
           where booking_id = $1::bigint
         `,
-        [job.bookingId, built.payloadHash, job.id]
-      );
+      [job.bookingId, built.payloadHash, job.id]
+    );
+  }
+}
+
+async function markSanteOutboxAcknowledged(input: {
+  job: SanteOutboxJob;
+  built: ReturnType<typeof buildSanteOrmO01Message>;
+  ack: SanteMllpSendResult;
+}): Promise<void> {
+  await pool.query(
+    `
+      update sante_hl7_outbox
+      set status = 'acknowledged',
+          locked_at = null,
+          last_error = null,
+          payload_hash = $2,
+          message_control_id = $3,
+          accession_number = $4,
+          last_file_state = $5,
+          updated_at = now()
+      where id = $1
+    `,
+    [input.job.id, input.built.payloadHash, input.built.messageControlId, input.built.accessionNumber, input.ack.ackCode ? `mllp_ack_${input.ack.ackCode}` : "mllp_sent_no_ack_expected"]
+  );
+  if (input.job.bookingId != null) {
+    await pool.query(
+      `
+        update sante_worklist_sync
+        set sync_status = 'acknowledged',
+            payload_hash = $2,
+            last_outbox_id = $3,
+            last_attempt_at = now(),
+            last_success_at = now(),
+            last_error = null,
+            updated_at = now()
+        where booking_id = $1::bigint
+      `,
+      [input.job.bookingId, input.built.payloadHash, input.job.id]
+    );
+  }
+}
+
+async function markSanteOutboxNack(input: {
+  job: SanteOutboxJob;
+  built: ReturnType<typeof buildSanteOrmO01Message>;
+  ack: SanteMllpSendResult;
+}): Promise<void> {
+  const message = input.ack.error || `Sante MLLP negative ACK: ${input.ack.ackCode || "unknown"}`;
+  await pool.query(
+    `
+      update sante_hl7_outbox
+      set status = 'nack_received',
+          locked_at = null,
+          last_error = $2,
+          payload_hash = $3,
+          message_control_id = $4,
+          accession_number = $5,
+          last_file_state = $6,
+          updated_at = now()
+      where id = $1
+    `,
+    [input.job.id, message, input.built.payloadHash, input.built.messageControlId, input.built.accessionNumber, `mllp_nack_${input.ack.ackCode || "unknown"}`]
+  );
+  if (input.job.bookingId != null) {
+    await pool.query(
+      `
+        update sante_worklist_sync
+        set sync_status = 'nack_received',
+            payload_hash = $2,
+            last_outbox_id = $3,
+            last_attempt_at = now(),
+            last_error = $4,
+            updated_at = now()
+        where booking_id = $1::bigint
+      `,
+      [input.job.bookingId, input.built.payloadHash, input.job.id, message]
+    );
+  }
+}
+
+async function markSanteOutboxSendFailed(
+  job: SanteOutboxJob,
+  message: string,
+  built: ReturnType<typeof buildSanteOrmO01Message>
+): Promise<void> {
+  await pool.query(
+    `
+      update sante_hl7_outbox
+      set status = 'send_failed',
+          locked_at = null,
+          last_error = $2,
+          payload_hash = $3,
+          message_control_id = $4,
+          accession_number = $5,
+          last_file_state = 'mllp_send_failed',
+          updated_at = now()
+      where id = $1
+    `,
+    [job.id, message, built.payloadHash, built.messageControlId, built.accessionNumber]
+  );
+  if (job.bookingId != null) {
+    await pool.query(
+      `
+        update sante_worklist_sync
+        set sync_status = 'send_failed',
+            payload_hash = $2,
+            last_outbox_id = $3,
+            last_attempt_at = now(),
+            last_error = $4,
+            updated_at = now()
+        where booking_id = $1::bigint
+      `,
+      [job.bookingId, built.payloadHash, job.id, message]
+    );
+  }
+}
+
+async function sendSanteOutboxJobViaMllp(
+  job: SanteOutboxJob,
+  built: ReturnType<typeof buildSanteOrmO01Message>,
+  settings: ResolvedSanteWorklistSettings
+): Promise<void> {
+  try {
+    const ack = await sendSanteMllpMessage({
+      host: settings.mllpHost,
+      port: settings.mllpPort,
+      timeoutSeconds: settings.mllpTimeoutSeconds,
+      message: built.message,
+      expectAck: settings.mllpExpectAck,
+    });
+    if (ack.acknowledged) {
+      await markSanteOutboxAcknowledged({ job, built, ack });
+      return;
     }
+    await markSanteOutboxNack({ job, built, ack });
   } catch (error) {
-    const retryable = job.attemptCount < job.maxAttempts;
-    await markSanteOutboxFailure(job, (error as Error).message || "sante_hl7_write_failed", retryable);
-  } finally {
-    client.release();
+    const message = error instanceof SanteMllpRetryableError
+      ? error.message
+      : (error as Error).message || "sante_hl7_mllp_send_failed";
+    await markSanteOutboxSendFailed(job, message, built);
+    await markSanteOutboxFailure(job, message, job.attemptCount < job.maxAttempts);
   }
 }
 
@@ -407,6 +575,7 @@ export async function markSanteOutboxFailure(job: SanteOutboxJob, message: strin
 
 export async function monitorSantePendingImports(limit = 100): Promise<{ checked: number; updated: number }> {
   const settings = await resolveSanteWorklistSettings();
+  if (settings.deliveryMethod !== "file_drop") return { checked: 0, updated: 0 };
   const { rows } = await pool.query<{
     id: number;
     booking_id: number | null;
@@ -504,7 +673,9 @@ async function firstExisting(paths: string[]): Promise<string | null> {
 
 export async function sendSyntheticSanteTestFile(currentUserId: UserId): Promise<{ outboxId: number }> {
   const settings = await resolveSanteWorklistSettings();
-  if (!settings.outputFolderPath) throw new HttpError(400, "Sante output folder path is required.");
+  if (settings.deliveryMethod === "file_drop" && !settings.outputFolderPath) {
+    throw new HttpError(400, "Sante output folder path is required.");
+  }
   const client = await pool.connect();
   try {
     await client.query("begin");
@@ -521,7 +692,7 @@ export async function sendSyntheticSanteTestFile(currentUserId: UserId): Promise
     await logAuditEntry({
       entityType: "integration",
       entityId: inserted.id,
-      actionType: "sante_hl7_test_file_queued",
+      actionType: "sante_hl7_test_queued",
       oldValues: null,
       newValues: { outboxId: inserted.id, synthetic: true },
       changedByUserId: currentUserId,
@@ -568,7 +739,7 @@ export async function retrySanteOutbox(outboxId: number, currentUserId: UserId):
     entityId: id,
     actionType: "sante_hl7_retry_queued",
     oldValues: null,
-    newValues: { outboxId: id, createsNewFile: true },
+    newValues: { outboxId: id, createsNewDeliveryAttempt: true },
     changedByUserId: currentUserId,
   });
   return { ok: true, outboxId: id };
@@ -603,7 +774,9 @@ export async function reconcileSanteHl7Window(input: {
   );
 
   const missing = rows.filter((row) => !row.sync_status).map((row) => Number(row.id));
-  const failed = rows.filter((row) => row.sync_status === "import_failed" || row.sync_status === "dead_letter").map((row) => Number(row.id));
+  const failed = rows
+    .filter((row) => ["import_failed", "dead_letter", "nack_received", "send_failed"].includes(row.sync_status || ""))
+    .map((row) => Number(row.id));
   const pendingTimeout = rows.filter((row) => row.sync_status === "pending_timeout").map((row) => Number(row.id));
   const repairCandidates = Array.from(new Set([...missing, ...failed, ...pendingTimeout]));
   const repaired: number[] = [];
@@ -635,7 +808,7 @@ export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
       `
         select id, booking_id, accession_number, status, attempt_count, last_error, updated_at::text as updated_at
         from sante_hl7_outbox
-        where status in ('import_failed', 'pending_timeout', 'retry_scheduled', 'dead_letter')
+        where status in ('import_failed', 'pending_timeout', 'retry_scheduled', 'dead_letter', 'nack_received', 'send_failed')
         order by updated_at desc
         limit 10
       `
@@ -656,10 +829,17 @@ export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
     settings: {
       enabled: settings.enabled,
       mode: settings.mode,
+      deliveryMethod: settings.deliveryMethod,
       outputFolderPath: settings.outputFolderPath,
       allowedBasePaths: settings.allowedBasePaths,
       hostOutboxHint: settings.hostOutboxHint,
       windowsShareSourceHint: settings.windowsShareSourceHint,
+      mllp: {
+        host: settings.mllpHost,
+        port: settings.mllpPort,
+        timeoutSeconds: settings.mllpTimeoutSeconds,
+        expectAck: settings.mllpExpectAck,
+      },
     },
   };
 }

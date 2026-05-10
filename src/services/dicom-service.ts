@@ -971,7 +971,7 @@ export function scheduleBookingWorklistSync(bookingId: UserId): void {
     .then(() => enqueueSanteHl7ForBooking(Number(bookingId)))
     .catch((error) => {
       console.warn(
-        `[Sante HL7] Failed to enqueue file-drop job for booking ${bookingId}.`,
+        `[Sante HL7] Failed to enqueue delivery job for booking ${bookingId}.`,
         error
       );
     });

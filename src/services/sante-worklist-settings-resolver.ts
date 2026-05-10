@@ -15,15 +15,22 @@ export const SANTE_HL7_CATEGORY = "sante_worklist_hl7";
 
 export type SanteWorklistMode = "disabled" | "shadow" | "primary_with_internal_fallback" | "sante_only";
 export type SanteSuccessBehavior = "auto_detect" | "deleted" | "don";
+export type SanteDeliveryMethod = "file_drop" | "mllp";
 
 export interface ResolvedSanteWorklistSettings {
   enabled: boolean;
   mode: SanteWorklistMode;
   keepInternalMwlActive: boolean;
+  deliveryMethod: SanteDeliveryMethod;
   outputFolderPath: string;
   fileExtension: ".hl7" | ".txt";
   successBehavior: SanteSuccessBehavior;
   errorExtensions: string[];
+  mllpHost: string;
+  mllpPort: number;
+  mllpTimeoutSeconds: number;
+  mllpExpectAck: boolean;
+  scheduledStationAeTitleDefault: string;
   retryMaxAttempts: number;
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
@@ -48,10 +55,16 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   enabled: "false",
   mode: "disabled",
   keep_internal_mwl_active: "true",
+  delivery_method: "file_drop",
   output_folder_path: "",
   file_extension: ".hl7",
   success_behavior: "auto_detect",
   error_extensions: ".ERR,.err",
+  mllp_host: "",
+  mllp_port: "",
+  mllp_timeout_seconds: "10",
+  mllp_expect_ack: "true",
+  scheduled_station_ae_title_default: "",
   retry_max_attempts: "5",
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
@@ -137,6 +150,10 @@ function normalizeSuccessBehavior(raw: string): SanteSuccessBehavior {
   return "auto_detect";
 }
 
+function normalizeDeliveryMethod(raw: string): SanteDeliveryMethod {
+  return raw === "mllp" ? "mllp" : "file_drop";
+}
+
 export function getSanteAllowedBasePaths(): string[] {
   const configured = splitPaths(env.santeHl7AllowedBasePaths);
   return configured.length > 0 ? configured : [path.join(rootDir, "storage", "sante-hl7-output")];
@@ -157,7 +174,12 @@ export function validateSanteSettingsEntries(entries: Array<{ key: string; value
 
   const mode = normalizeMode(incoming.get("mode") || SANTE_HL7_DEFAULTS.mode);
   const enabled = parseBoolean(incoming.get("enabled"), false);
+  const deliveryMethod = normalizeDeliveryMethod(incoming.get("delivery_method") || SANTE_HL7_DEFAULTS.delivery_method);
   const outputFolderPath = incoming.get("output_folder_path") || "";
+
+  if (incoming.has("delivery_method") && !["file_drop", "mllp"].includes(incoming.get("delivery_method") || "")) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.delivery_method must be file_drop or mllp.`);
+  }
 
   if (incoming.has("file_extension")) {
     const ext = incoming.get("file_extension") || "";
@@ -173,14 +195,27 @@ export function validateSanteSettingsEntries(entries: Array<{ key: string; value
     }
   }
 
-  for (const key of ["retry_max_attempts", "retry_initial_delay_seconds", "retry_max_delay_seconds", "pending_import_timeout_seconds"]) {
+  for (const key of ["retry_max_attempts", "retry_initial_delay_seconds", "retry_max_delay_seconds", "pending_import_timeout_seconds", "mllp_timeout_seconds"]) {
     if (incoming.has(key) && parsePositiveInteger(incoming.get(key), 0) <= 0) {
       throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be a positive integer.`);
     }
   }
 
-  if ((enabled || mode !== "disabled") && !outputFolderPath.trim()) {
+  if (incoming.has("mllp_port") && parsePositiveInteger(incoming.get("mllp_port"), 0) <= 0) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.mllp_port must be a positive integer.`);
+  }
+
+  if ((enabled || mode !== "disabled") && deliveryMethod === "file_drop" && !outputFolderPath.trim()) {
     throw new HttpError(400, "Sante output folder path is required when Sante HL7 is enabled.");
+  }
+
+  if ((enabled || mode !== "disabled") && deliveryMethod === "mllp") {
+    if (!normalizeOptionalText(incoming.get("mllp_host"))) {
+      throw new HttpError(400, "Sante MLLP host is required when Sante HL7 MLLP is enabled.");
+    }
+    if (parsePositiveInteger(incoming.get("mllp_port"), 0) <= 0) {
+      throw new HttpError(400, "Sante MLLP port is required when Sante HL7 MLLP is enabled.");
+    }
   }
 
   if (outputFolderPath.trim()) {
@@ -232,15 +267,22 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
 
   const enabled = parseBoolean(db.enabled, env.santeHl7Enabled);
   const mode = enabled ? normalizeMode(db.mode || "shadow") : "disabled";
+  const deliveryMethod = normalizeDeliveryMethod(db.delivery_method || "file_drop");
 
   return {
     enabled: enabled && mode !== "disabled",
     mode,
     keepInternalMwlActive: true,
+    deliveryMethod,
     outputFolderPath,
     fileExtension: normalizeFileExtension(db.file_extension || ".hl7"),
     successBehavior: normalizeSuccessBehavior(db.success_behavior || "auto_detect"),
     errorExtensions: (db.error_extensions || ".ERR,.err").split(",").map((value) => value.trim()).filter(Boolean),
+    mllpHost: normalizeOptionalText(db.mllp_host),
+    mllpPort: parsePositiveInteger(db.mllp_port, 0),
+    mllpTimeoutSeconds: parsePositiveInteger(db.mllp_timeout_seconds, 10),
+    mllpExpectAck: parseBoolean(db.mllp_expect_ack, true),
+    scheduledStationAeTitleDefault: normalizeOptionalText(db.scheduled_station_ae_title_default),
     retryMaxAttempts: parsePositiveInteger(db.retry_max_attempts, 5),
     retryInitialDelaySeconds: parsePositiveInteger(db.retry_initial_delay_seconds, 30),
     retryMaxDelaySeconds: parsePositiveInteger(db.retry_max_delay_seconds, 300),
