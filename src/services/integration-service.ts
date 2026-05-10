@@ -217,7 +217,7 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       scannerBridgeMode,
       scannerProfileName: documentSettings.scanner_profile_name || "default_twain_profile",
       scannerSource: documentSettings.scanner_source || "feeder",
-      scanDpi: documentSettings.scan_dpi || "300",
+      scanDpi: documentSettings.scan_dpi || "200",
       scanColorMode: documentSettings.scan_color_mode || "grayscale",
       scanFileFormat: documentSettings.scan_file_format || "pdf",
       bridgeReady: String(scannerBridgeMode || "") === "naps2_webscan",

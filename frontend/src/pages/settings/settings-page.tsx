@@ -3877,6 +3877,11 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
   const [authPassword, setAuthPassword] = useState("");
   const [authDomain, setAuthDomain] = useState("");
   const [fallbackEnabled, setFallbackEnabled] = useState(true);
+  const [naps2WebScanEnabled, setNaps2WebScanEnabled] = useState(false);
+  const [naps2WebScanEndpoint, setNaps2WebScanEndpoint] = useState("");
+  const [scanDpi, setScanDpi] = useState("200");
+  const [scanColorMode, setScanColorMode] = useState("grayscale");
+  const [scannerSource, setScannerSource] = useState("feeder");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [resultMessage, setResultMessage] = useState<string>("");
@@ -3894,6 +3899,11 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
     setAuthPassword(settings.storage_auth_password || "");
     setAuthDomain(settings.storage_auth_domain || "");
     setFallbackEnabled(String(settings.storage_fallback_enabled || "true").toLowerCase() === "true");
+    setNaps2WebScanEnabled(String(settings.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled");
+    setNaps2WebScanEndpoint(settings.naps2_webscan_endpoint || "");
+    setScanDpi(settings.scan_dpi || "200");
+    setScanColorMode(settings.scan_color_mode || "grayscale");
+    setScannerSource(settings.scanner_source || "feeder");
   }, [settings]);
 
   const saveMutation = useMutation({
@@ -3905,11 +3915,19 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           { key: "storage_auth_password", value: { value: authPassword } },
           { key: "storage_auth_domain", value: { value: authDomain } },
           { key: "storage_fallback_enabled", value: { value: String(fallbackEnabled) } },
+          { key: "naps2_webscan_enabled", value: { value: naps2WebScanEnabled ? "enabled" : "disabled" } },
+          { key: "naps2_webscan_endpoint", value: { value: naps2WebScanEndpoint } },
+          { key: "scanner_bridge_mode", value: { value: naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
+          { key: "scan_dpi", value: { value: scanDpi } },
+          { key: "scan_color_mode", value: { value: scanColorMode } },
+          { key: "scanner_source", value: { value: scannerSource } },
+          { key: "scan_file_format", value: { value: "pdf" } },
         ],
       }),
     onSuccess: () => {
       setResultMessage(t("settings.documents.saved"));
       queryClient.invalidateQueries({ queryKey: ["settings", "documents_and_uploads"] });
+      queryClient.invalidateQueries({ queryKey: ["integration-status", "documents"] });
     },
     onError: (err: unknown) => {
       setResultMessage(err instanceof Error ? err.message : t("settings.documents.saveFailed"));
@@ -3988,6 +4006,54 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
 
   return (
     <div className="space-y-4">
+      <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
+        <h4 className="font-medium text-sm">{t("settings.documents.naps2Title")}</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={naps2WebScanEnabled}
+                onChange={(e) => setNaps2WebScanEnabled(e.target.checked)}
+              />
+              {t("settings.documents.naps2Enabled")}
+            </label>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.naps2Endpoint")}</label>
+            <input
+              value={naps2WebScanEndpoint}
+              onChange={(e) => setNaps2WebScanEndpoint(e.target.value)}
+              placeholder="http://127.0.0.1:9880"
+              className="input-premium w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.scanDpi")}</label>
+            <select value={scanDpi} onChange={(e) => setScanDpi(e.target.value)} className="input-premium w-full">
+              <option value="150">150</option>
+              <option value="200">200</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.scanColorMode")}</label>
+            <select value={scanColorMode} onChange={(e) => setScanColorMode(e.target.value)} className="input-premium w-full">
+              <option value="grayscale">{t("settings.documents.grayscale")}</option>
+              <option value="color">{t("settings.documents.color")}</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerSource")}</label>
+            <select value={scannerSource} onChange={(e) => setScannerSource(e.target.value)} className="input-premium w-full">
+              <option value="feeder">{t("settings.documents.feeder")}</option>
+              <option value="flatbed">{t("settings.documents.flatbed")}</option>
+              <option value="duplex">{t("settings.documents.duplex")}</option>
+            </select>
+          </div>
+        </div>
+        <p className="text-xs description-center">{t("settings.documents.naps2Help")}</p>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="block text-sm font-medium mb-1">{t("settings.documents.storagePath")}</label>

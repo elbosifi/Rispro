@@ -82,6 +82,14 @@ export function RequestDocumentsPanel({
     canScanOrUpload &&
     hasAppointmentContext &&
     Boolean(integrationStatus?.scanner?.naps2WebScanEnabled || integrationStatus?.scanner?.scannerBridgeMode === "naps2_webscan");
+  const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
+  const scanColorMode = integrationStatus?.scanner?.scanColorMode === "color" ? "color" : "grayscale";
+  const scanSource =
+    integrationStatus?.scanner?.scannerSource === "flatbed"
+      ? "flatbed"
+      : integrationStatus?.scanner?.scannerSource === "duplex"
+        ? "duplex"
+        : "feeder";
 
   const uploadMutation = useMutation({
     mutationFn: async () => {
@@ -180,9 +188,9 @@ export function RequestDocumentsPanel({
       const failures: Array<{ file: File; error: string; documentType: string }> = [];
       const scanResult = await scanAppointmentRequest({
         endpoint: integrationStatus?.scanner?.naps2WebScanEndpoint,
-        dpi: 200,
-        colorMode: "grayscale",
-        source: "feeder",
+        dpi: Number.isFinite(scanDpi) && scanDpi > 0 ? scanDpi : 200,
+        colorMode: scanColorMode,
+        source: scanSource,
         fileName: suggestedFileName || `appointment-${appointmentId}-request.pdf`,
       });
       try {

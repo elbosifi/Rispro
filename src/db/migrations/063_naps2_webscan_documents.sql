@@ -19,3 +19,9 @@ values
   ('documents_and_uploads', 'naps2_webscan_enabled', '{"value":"disabled"}'::jsonb),
   ('documents_and_uploads', 'naps2_webscan_endpoint', '{"value":""}'::jsonb)
 on conflict (category, setting_key) do nothing;
+
+update system_settings
+set setting_value = '{"value":"200"}'::jsonb
+where category = 'documents_and_uploads'
+  and setting_key = 'scan_dpi'
+  and setting_value = '{"value":"300"}'::jsonb;
