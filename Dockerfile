@@ -70,16 +70,11 @@ RUN set -eux; \
 # ---------------------------------------------------------------------------
 FROM node:22-bookworm-slim AS runtime-base
 
-# Install runtime dependencies for the app and DCMTK shared libraries.
-# Native npm modules may fall back to source builds when prebuild downloads time out.
+# Install runtime dependencies for the app and DCMTK shared libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     wget \
     bash \
-    git \
-    build-essential \
-    cmake \
-    python3 \
     libssl3 \
     libxml2 \
     zlib1g \

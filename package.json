@@ -27,7 +27,6 @@
     "busboy": "^1.6.0",
     "cookie-parser": "^1.4.7",
     "dcmjs": "^0.50.1",
-    "dicom-dimse-native": "^2.6.1",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
