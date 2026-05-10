@@ -15,6 +15,7 @@ import {
 import { fetchDoctorMe } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
+import { DoctorRosterPage } from "./doctor-roster-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -31,7 +32,7 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
-  { path: "/doctor/roster", label: "Roster Management", icon: CalendarDays, management: true },
+  { path: "/doctor/admin/roster", label: "Roster Management", icon: CalendarDays, management: true },
   { path: "/doctor/team-workload", label: "Team Workload", icon: Activity, management: true },
   { path: "/doctor/admin/doctors", label: "Doctors/Admin", icon: Users, management: true },
 ];
@@ -103,12 +104,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
       <Route
         path="roster"
-        element={
-          <PlaceholderPanel
-            title={canManage ? "Roster Management" : "My Roster"}
-            body="Weekly roster management is intentionally deferred to Phase 2. This page is a bounded placeholder and does not change schedules or appointments."
-          />
-        }
+        element={<DoctorRosterPage me={me} management={false} />}
       />
       <Route
         path="cases"
@@ -136,6 +132,16 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
               title="Team Workload"
               body="Team workload summaries are deferred to Phase 5. No workload units, ranking, salary, or productivity scoring are implemented here."
             />
+          ) : (
+            <Navigate to="/doctor/dashboard" replace />
+          )
+        }
+      />
+      <Route
+        path="admin/roster"
+        element={
+          canManage ? (
+            <DoctorRosterPage me={me} management />
           ) : (
             <Navigate to="/doctor/dashboard" replace />
           )

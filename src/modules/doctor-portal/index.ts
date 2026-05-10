@@ -8,10 +8,12 @@ import type { AuthenticatedUserContext } from "../../types/http.js";
 import { createProfileForAdmin, getDoctorMe, listProfilesForAdmin } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
 import { requireDoctorCapability } from "./middleware.js";
+import { doctorRosterRouter } from "./roster-routes.js";
 
 const router = Router();
 
 router.use(requireAuth);
+router.use("/roster", doctorRosterRouter);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;

@@ -28,7 +28,13 @@ import type {
   PatientIdentifierTypeOption,
   PatientDirectoryResponse,
   PatientDirectorySummary,
-  DoctorMe
+  DoctorMe,
+  DoctorProfile,
+  DoctorRosterResponse,
+  DoctorRosterAssignment,
+  DoctorRosterMember,
+  RosterDutyType,
+  RosterTeamRole
 } from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
@@ -149,6 +155,69 @@ export async function deleteAppointmentDocument(documentId: number): Promise<{ d
 
 export async function fetchDoctorMe(): Promise<DoctorMe> {
   return api<DoctorMe>("/doctor/me");
+}
+
+export async function fetchDoctorRosterWeek(weekStart: string): Promise<DoctorRosterResponse> {
+  const params = new URLSearchParams({ weekStart });
+  return api<DoctorRosterResponse>(`/doctor/roster/weeks?${params.toString()}`);
+}
+
+export async function fetchMyDoctorRoster(weekStart: string): Promise<DoctorRosterResponse> {
+  const params = new URLSearchParams({ weekStart });
+  return api<DoctorRosterResponse>(`/doctor/roster/my?${params.toString()}`);
+}
+
+export async function fetchRosterDoctors(): Promise<DoctorProfile[]> {
+  const raw = await api<{ profiles: DoctorProfile[] }>("/doctor/roster/doctors");
+  return raw.profiles;
+}
+
+export async function createDoctorRosterWeek(payload: { weekStartDate: string; weekEndDate: string }) {
+  return api<{ week: DoctorRosterResponse["week"] }>("/doctor/roster/weeks", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function copyPreviousDoctorRosterWeek(weekId: number): Promise<DoctorRosterResponse> {
+  return api<DoctorRosterResponse>(`/doctor/roster/weeks/${weekId}/copy-previous`, { method: "POST" });
+}
+
+export async function publishDoctorRosterWeek(weekId: number) {
+  return api<{ week: DoctorRosterResponse["week"] }>(`/doctor/roster/weeks/${weekId}/publish`, { method: "POST" });
+}
+
+export async function createDoctorRosterAssignment(payload: {
+  rosterWeekId: number;
+  date: string;
+  modalityId: number | null;
+  dutyType: RosterDutyType;
+  sessionName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  teamName: string;
+}): Promise<DoctorRosterAssignment> {
+  const raw = await api<{ assignment: DoctorRosterAssignment }>("/doctor/roster/assignments", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.assignment;
+}
+
+export async function deleteDoctorRosterAssignment(assignmentId: number): Promise<void> {
+  await api(`/doctor/roster/assignments/${assignmentId}`, { method: "DELETE" });
+}
+
+export async function addDoctorRosterMember(assignmentId: number, payload: { doctorId: number; teamRole: RosterTeamRole }): Promise<DoctorRosterMember> {
+  const raw = await api<{ member: DoctorRosterMember }>(`/doctor/roster/assignments/${assignmentId}/members`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.member;
+}
+
+export async function deleteDoctorRosterMember(assignmentId: number, memberId: number): Promise<void> {
+  await api(`/doctor/roster/assignments/${assignmentId}/members/${memberId}`, { method: "DELETE" });
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {

@@ -81,6 +81,65 @@ export interface DoctorMe {
   canAccessCoreWorkspace: boolean;
 }
 
+export type RosterWeekStatus = "draft" | "published" | "archived";
+export type RosterDutyType =
+  | "ct_protocol_day"
+  | "ct_reporting_day"
+  | "mri_supervision_reporting"
+  | "ultrasound_term_1"
+  | "ultrasound_term_2"
+  | "ultrasound_term_3"
+  | "mammography_session"
+  | "general_reporting"
+  | "on_call"
+  | "leave"
+  | "admin"
+  | "teaching";
+export type RosterTeamRole = "lead" | "specialist" | "sho" | "supervisor" | "observer";
+
+export interface DoctorRosterWeek {
+  id: number;
+  weekStartDate: string;
+  weekEndDate: string;
+  status: RosterWeekStatus;
+  createdBy: number | null;
+  publishedBy: number | null;
+  publishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DoctorRosterMember {
+  id: number;
+  rosterAssignmentId: number;
+  doctorId: number;
+  displayName: string;
+  doctorRole: string;
+  teamRole: RosterTeamRole;
+}
+
+export interface DoctorRosterAssignment {
+  id: number;
+  rosterWeekId: number;
+  date: string;
+  modalityId: number | null;
+  modalityCode: string | null;
+  modalityNameEn: string | null;
+  modalityNameAr: string | null;
+  dutyType: RosterDutyType;
+  sessionName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  teamName: string;
+  status: "active" | "cancelled";
+  members: DoctorRosterMember[];
+}
+
+export interface DoctorRosterResponse {
+  week: DoctorRosterWeek | null;
+  assignments: DoctorRosterAssignment[];
+}
+
 export type IdentifierType = string;
 
 export interface PatientIdentifier {

@@ -7,9 +7,24 @@ import { LanguageProvider } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
 
 const fetchDoctorMeMock = vi.fn();
+const fetchMyDoctorRosterMock = vi.fn();
+const fetchDoctorRosterWeekMock = vi.fn();
+const fetchAppointmentLookupsMock = vi.fn();
+const fetchRosterDoctorsMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
+  fetchMyDoctorRoster: (...args: unknown[]) => fetchMyDoctorRosterMock(...args),
+  fetchDoctorRosterWeek: (...args: unknown[]) => fetchDoctorRosterWeekMock(...args),
+  fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
+  fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
+  createDoctorRosterWeek: vi.fn(),
+  copyPreviousDoctorRosterWeek: vi.fn(),
+  publishDoctorRosterWeek: vi.fn(),
+  createDoctorRosterAssignment: vi.fn(),
+  deleteDoctorRosterAssignment: vi.fn(),
+  addDoctorRosterMember: vi.fn(),
+  deleteDoctorRosterMember: vi.fn(),
 }));
 
 function CorePlaceholder() {
@@ -62,6 +77,14 @@ describe("Doctor Portal shell", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
     fetchDoctorMeMock.mockReset();
+    fetchMyDoctorRosterMock.mockReset();
+    fetchDoctorRosterWeekMock.mockReset();
+    fetchAppointmentLookupsMock.mockReset();
+    fetchRosterDoctorsMock.mockReset();
+    fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
+    fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
+    fetchRosterDoctorsMock.mockResolvedValue([]);
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -120,5 +143,52 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByTestId("appointment-editor")).toBeNull();
     expect(screen.queryByRole("button", { name: /Print/i })).toBeNull();
     expect(screen.queryByText(/reschedule/i)).toBeNull();
+  });
+
+  it("normal doctor sees My Roster empty state without management controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/roster");
+
+    expect(await screen.findByText("My Roster")).toBeTruthy();
+    expect(screen.getByText("No roster assignments for this week.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Create draft week/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Publish week/i })).toBeNull();
+  });
+
+  it("doctor supervisor sees roster management controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    expect(await screen.findByText("Roster Management")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Create draft week/i })).toBeTruthy();
+  });
+
+  it("publish action is visible only for supervisor draft roster", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    expect(await screen.findByRole("button", { name: /Publish week/i })).toBeTruthy();
   });
 });

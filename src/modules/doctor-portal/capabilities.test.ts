@@ -66,4 +66,37 @@ describe("Doctor Portal wiring", () => {
     assert.match(migration, /doctor_portal\.doctor_module_audit_events/i);
     assert.doesNotMatch(migration, /doctor_roster|case_team_assignments|appointment_protocols|workload_unit/i);
   });
+
+  it("creates Phase 2 roster tables without case assignment, protocol, or workload tables", () => {
+    const migration = readFileSync(join(rootDir, "src", "db", "migrations", "065_doctor_portal_roster.sql"), "utf8");
+    assert.match(migration, /doctor_portal\.doctor_roster_weeks/i);
+    assert.match(migration, /doctor_portal\.doctor_roster_assignments/i);
+    assert.match(migration, /doctor_portal\.doctor_roster_members/i);
+    assert.match(migration, /ct_protocol_day/i);
+    assert.match(migration, /mri_supervision_reporting/i);
+    assert.match(migration, /mammography_session/i);
+    assert.doesNotMatch(migration, /case_team_assignments|appointment_protocols|workload_unit|salary|rvu/i);
+  });
+
+  it("mounts roster endpoints under /api/doctor/roster only", () => {
+    const source = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "index.ts"), "utf8");
+    const routes = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "roster-routes.ts"), "utf8");
+    assert.match(source, /router\.use\("\/roster", doctorRosterRouter\)/);
+    assert.match(routes, /"\/weeks"/);
+    assert.match(routes, /"\/my"/);
+    assert.match(routes, /"\/assignments"/);
+    assert.match(routes, /"\/weeks\/:id\/publish"/);
+    assert.match(routes, /"\/weeks\/:id\/copy-previous"/);
+    assert.doesNotMatch(routes, /createBooking|rescheduleBooking|case_team|protocol|workload|rvu|salary/i);
+  });
+
+  it("enforces supervisor or admin capability before roster mutations", () => {
+    const service = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "roster-service.ts"), "utf8");
+    assert.match(service, /requireRosterDoctor/);
+    assert.match(service, /requireRosterManager/);
+    assert.match(service, /doctor_supervisor/);
+    assert.match(service, /doctor_admin/);
+    assert.match(service, /Only draft roster weeks can be edited in Phase 2/);
+    assert.match(service, /Past roster edits are blocked in Phase 2/);
+  });
 });
