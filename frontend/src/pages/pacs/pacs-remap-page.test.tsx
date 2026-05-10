@@ -7,6 +7,7 @@ const apiMock = vi.fn();
 const previewMock = vi.fn();
 const scanMock = vi.fn();
 const buildPlanMock = vi.fn();
+const buildSkipPreviewMock = vi.fn();
 
 vi.mock("@/lib/api-client", () => {
   class ApiError extends Error {
@@ -37,6 +38,7 @@ vi.mock("@/lib/dicom-study-scan", () => ({
   previewDicomStudiesFromFiles: (...args: unknown[]) => previewMock(...args),
   scanDicomStudiesFromFiles: (...args: unknown[]) => scanMock(...args),
   buildDicomUploadSelectionPlan: (...args: unknown[]) => buildPlanMock(...args),
+  buildSkipPreviewScanResult: (...args: unknown[]) => buildSkipPreviewMock(...args),
 }));
 
 class FakeXHR {
@@ -88,7 +90,17 @@ describe("PacsRemapPage wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     FakeXHR.instances.length = 0;
-    previewMock.mockRejectedValue(new Error("preview unavailable"));
+    previewMock.mockImplementation((...args: unknown[]) => scanMock(...args));
+    buildSkipPreviewMock.mockImplementation((inputFiles: File[]) => ({
+      studies: [],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      totalFileCount: inputFiles.length,
+      dicomLikeFileCount: inputFiles.length,
+      parsedDicomFileCount: 0,
+      fallbackUploadFiles: inputFiles,
+      unparsedFiles: [],
+    }));
     vi.stubGlobal("XMLHttpRequest", FakeXHR as unknown as typeof XMLHttpRequest);
     apiMock.mockImplementation((path: string) => {
       if (path === "/pacs/remap/destinations") return Promise.resolve({ destinations: [{ key: "1", name: "Main PACS", isDefault: true }] });
@@ -273,8 +285,6 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
     const comboBoxes = screen.getAllByRole("combobox");
     fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
-    expect(await screen.findByText(/Verifying selected study files/i)).toBeTruthy();
-    await waitFor(() => expect(scanMock).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/CD study contents/i)).toBeTruthy();
     expect(await screen.findByText(/full1\.dcm/i)).toBeTruthy();
     expect(await screen.findByText(/full2\.dcm/i)).toBeTruthy();
@@ -283,9 +293,32 @@ describe("PacsRemapPage wizard", () => {
     fireEvent.click(uploadButton);
 
     await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
-    expect(scanMock).toHaveBeenCalledTimes(1);
+    expect(scanMock).not.toHaveBeenCalled();
     expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/process-multipart");
     expect(FakeXHR.instances[0]?.sentBody?.getAll("files")).toHaveLength(2);
+  });
+
+  it("skip preview uploads all selected DICOM-like files without scan or selectedStudyInstanceUID", async () => {
+    const selectedFiles = [new File(["1"], "a1.dcm"), new File(["2"], "a2.dcm")];
+    buildPlanMock.mockReturnValue({ files: selectedFiles, selectedStudyInstanceUid: null, usesFallback: true });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: selectedFiles } });
+    const skipButton = screen.getByRole("button", { name: "Skip preview" }) as HTMLButtonElement;
+    await waitFor(() => expect(skipButton.disabled).toBe(false));
+    fireEvent.click(skipButton);
+    expect(previewMock).not.toHaveBeenCalled();
+    expect(scanMock).not.toHaveBeenCalled();
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
+    const comboBoxes = screen.getAllByRole("combobox");
+    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(await screen.findByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+
+    await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
+    const sent = FakeXHR.instances[0]?.sentBody;
+    expect(sent?.getAll("files")).toHaveLength(2);
+    expect(sent?.get("selectedStudyInstanceUID")).toBeNull();
+    expect(sent?.get("uploadMode")).toBe("fallback_all_candidates");
   });
 
   it("preselects the default PACS destination", async () => {

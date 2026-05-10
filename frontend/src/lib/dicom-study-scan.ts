@@ -1,10 +1,10 @@
 import * as dicomParser from "dicom-parser";
 
-const INITIAL_SCAN_BYTES = 512 * 1024;
+const INITIAL_SCAN_BYTES = 128 * 1024;
 const RETRY_SCAN_BYTES = 2 * 1024 * 1024;
 const DEFAULT_BATCH_SIZE = 20;
 export const DICOM_PREVIEW_HEADER_BYTES = INITIAL_SCAN_BYTES;
-const MAX_PREVIEW_SAMPLE_FILES = 96;
+const MAX_PREVIEW_SAMPLE_FILES = 16;
 
 const SKIPPABLE_FILE_NAMES = new Set([
   "DICOMDIR",
@@ -215,6 +215,23 @@ export async function previewDicomStudiesFromFiles(files: File[]): Promise<Dicom
   }
 
   return rehydratePreviewResult(result, sampledFiles);
+}
+
+export function buildSkipPreviewScanResult(files: File[]): DicomStudyScanResult {
+  const allFiles = Array.isArray(files) ? files : [];
+  const fallbackUploadFiles = allFiles.filter(isLikelyDicomCandidate);
+  const skippedSidecarCount = allFiles.filter((file) => isSkippableDicomSidecarFile(file.name)).length;
+
+  return {
+    studies: [],
+    skippedSidecarCount,
+    unparsedCount: 0,
+    totalFileCount: allFiles.length,
+    dicomLikeFileCount: fallbackUploadFiles.length,
+    parsedDicomFileCount: 0,
+    fallbackUploadFiles,
+    unparsedFiles: [],
+  };
 }
 
 async function parseDicomHeader(file: File): Promise<DicomScanFileEntry | null> {
