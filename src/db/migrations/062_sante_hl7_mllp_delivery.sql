@@ -4,8 +4,7 @@ values
   ('sante_worklist_hl7', 'mllp_host', '{"value":""}'::jsonb),
   ('sante_worklist_hl7', 'mllp_port', '{"value":""}'::jsonb),
   ('sante_worklist_hl7', 'mllp_timeout_seconds', '{"value":"10"}'::jsonb),
-  ('sante_worklist_hl7', 'mllp_expect_ack', '{"value":"true"}'::jsonb),
-  ('sante_worklist_hl7', 'scheduled_station_ae_title_default', '{"value":""}'::jsonb)
+  ('sante_worklist_hl7', 'mllp_expect_ack', '{"value":"true"}'::jsonb)
 on conflict (category, setting_key) do nothing;
 
 alter table sante_hl7_outbox

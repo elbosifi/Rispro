@@ -20,7 +20,6 @@ type FormState = {
   mllp_port: string;
   mllp_timeout_seconds: string;
   mllp_expect_ack: string;
-  scheduled_station_ae_title_default: string;
   retry_max_attempts: string;
   retry_initial_delay_seconds: string;
   retry_max_delay_seconds: string;
@@ -79,7 +78,6 @@ const DEFAULT_FORM: FormState = {
   mllp_port: "",
   mllp_timeout_seconds: "10",
   mllp_expect_ack: "true",
-  scheduled_station_ae_title_default: "",
   retry_max_attempts: "5",
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
@@ -264,7 +262,6 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <Field label="Charset" value={form.charset} onChange={(value) => setValue("charset", value)} />
           <Field label="Patient ID field" type="select" value={form.patient_id_field} onChange={(value) => setValue("patient_id_field", value)} options={[["identifier_value", "Primary identifier"], ["mrn", "MRN"], ["national_id", "National ID"], ["patient_id", "RISpro patient ID"]]} />
           <Field label="Patient name field" type="select" value={form.patient_name_field} onChange={(value) => setValue("patient_name_field", value)} options={[["english_full_name", "English name"], ["arabic_full_name", "Arabic name"]]} />
-          <Field label="Default scheduled station AE title" value={form.scheduled_station_ae_title_default} onChange={(value) => setValue("scheduled_station_ae_title_default", value)} placeholder="Optional" />
         </div>
       </section>
 

@@ -30,7 +30,6 @@ export interface ResolvedSanteWorklistSettings {
   mllpPort: number;
   mllpTimeoutSeconds: number;
   mllpExpectAck: boolean;
-  scheduledStationAeTitleDefault: string;
   retryMaxAttempts: number;
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
@@ -64,7 +63,6 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   mllp_port: "",
   mllp_timeout_seconds: "10",
   mllp_expect_ack: "true",
-  scheduled_station_ae_title_default: "",
   retry_max_attempts: "5",
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
@@ -282,7 +280,6 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
     mllpPort: parsePositiveInteger(db.mllp_port, 0),
     mllpTimeoutSeconds: parsePositiveInteger(db.mllp_timeout_seconds, 10),
     mllpExpectAck: parseBoolean(db.mllp_expect_ack, true),
-    scheduledStationAeTitleDefault: normalizeOptionalText(db.scheduled_station_ae_title_default),
     retryMaxAttempts: parsePositiveInteger(db.retry_max_attempts, 5),
     retryInitialDelaySeconds: parsePositiveInteger(db.retry_initial_delay_seconds, 30),
     retryMaxDelaySeconds: parsePositiveInteger(db.retry_max_delay_seconds, 300),

@@ -63,7 +63,7 @@ function patientName(row: SanteHl7BookingProjection, settings: ResolvedSanteWork
   const clean = String(selected || fallback).trim();
   const parts = clean.split(/\s+/).filter(Boolean);
   if (parts.length <= 1) return escapeHl7(clean.replace(/\s+/g, "^"));
-  return `${escapeHl7(parts.slice(1).join(" "))}^${escapeHl7(parts[0])}`;
+  return parts.map(escapeHl7).join("^");
 }
 
 function patientId(row: SanteHl7BookingProjection, settings: ResolvedSanteWorklistSettings): string {
@@ -101,6 +101,15 @@ export function buildSanteOrmO01Message(input: {
   const scheduledDateTime = hl7DateTime(booking.booking_date, booking.booking_time);
   const timestamp = hl7Timestamp(input.now);
   const acceptAckType = settings.deliveryMethod === "mllp" && settings.mllpExpectAck ? "AL" : "";
+  const obr = Array<string>(25).fill("");
+  obr[0] = "OBR";
+  obr[1] = "1";
+  obr[2] = escapeHl7(accessionNumber);
+  obr[4] = `^${escapeHl7(procedureDescription)}`;
+  obr[6] = scheduledDateTime;
+  obr[7] = scheduledDateTime;
+  obr[18] = escapeHl7(accessionNumber);
+  obr[24] = escapeHl7(booking.modality_code);
 
   const segments = [
     [
@@ -149,46 +158,8 @@ export function buildSanteOrmO01Message(input: {
       "",
       timestamp,
     ].join("|"),
-    [
-      "OBR",
-      "1",
-      escapeHl7(accessionNumber),
-      "",
-      `^${escapeHl7(procedureDescription)}`,
-      "",
-      scheduledDateTime,
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      escapeHl7(accessionNumber),
-      "",
-      "",
-      "",
-      "",
-      "",
-      "",
-      escapeHl7(settings.receivingApplication),
-      "",
-      "",
-      "",
-      "",
-      escapeHl7(booking.modality_code),
-    ].join("|"),
+    obr.join("|"),
   ];
-
-  if (settings.scheduledStationAeTitleDefault) {
-    segments.push([
-      "ZSS",
-      escapeHl7(settings.scheduledStationAeTitleDefault),
-    ].join("|"));
-  }
 
   const message = `${segments.join("\r")}\r`;
   return {

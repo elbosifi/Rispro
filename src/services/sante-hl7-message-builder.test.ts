@@ -20,7 +20,6 @@ function settings(): ResolvedSanteWorklistSettings {
     mllpPort: 0,
     mllpTimeoutSeconds: 10,
     mllpExpectAck: true,
-    scheduledStationAeTitleDefault: "",
     retryMaxAttempts: 5,
     retryInitialDelaySeconds: 30,
     retryMaxDelaySeconds: 300,
@@ -44,7 +43,7 @@ function settings(): ResolvedSanteWorklistSettings {
 
 test("buildSanteOrmO01Message emits ORM O01 with configured identity and NW order", () => {
   const message = buildSanteOrmO01Message({
-    booking: buildSyntheticSanteTestProjection(),
+    booking: { ...buildSyntheticSanteTestProjection(), booking_date: "2026-05-10", booking_time: "08:00:00" },
     orderControl: "NW",
     settings: settings(),
     messageControlId: "RISPRO-TEST-1",
@@ -57,6 +56,11 @@ test("buildSanteOrmO01Message emits ORM O01 with configured identity and NW orde
   assert.match(message.message, /\rOBR\|1\|V2-000000/);
   assert.equal(message.accessionNumber, "V2-000000");
   assert.equal(message.payloadHash.length, 64);
+
+  const obr = message.message.split("\r").find((segment) => segment.startsWith("OBR|"))?.split("|") || [];
+  assert.equal(obr[6], "20260510080000");
+  assert.equal(obr[7], "20260510080000");
+  assert.equal(obr[24], "CT");
 });
 
 test("buildSanteOrmO01Message escapes HL7 separators", () => {
@@ -73,6 +77,16 @@ test("buildSanteOrmO01Message escapes HL7 separators", () => {
 
   assert.match(message.message, /Pipe\\F\\Caret\\S\\Amp\\T\\Back\\E\\Name/);
   assert.match(message.message, /\rORC\|XO\|/);
+});
+
+test("buildSanteOrmO01Message keeps patient name components in entered order", () => {
+  const message = buildSanteOrmO01Message({
+    booking: { ...buildSyntheticSanteTestProjection(), english_full_name: "First Second Third Fourth" },
+    orderControl: "NW",
+    settings: settings(),
+  });
+
+  assert.match(message.message, /\rPID\|1\|\|TEST-SANTE-001\|\|First\^Second\^Third\^Fourth\|/);
 });
 
 test("buildSanteOrmO01Message leaves MSH-15 blank for file-drop delivery", () => {
@@ -99,18 +113,12 @@ test("buildSanteOrmO01Message requests accept ACK for MLLP when configured", () 
   assert.equal(msh[14], "AL");
 });
 
-test("buildSanteOrmO01Message includes configured scheduled station AE title only when set", () => {
-  const base = buildSanteOrmO01Message({
+test("buildSanteOrmO01Message does not invent scheduled station when booking has none", () => {
+  const message = buildSanteOrmO01Message({
     booking: buildSyntheticSanteTestProjection(),
     orderControl: "NW",
     settings: settings(),
   });
-  const withAe = buildSanteOrmO01Message({
-    booking: buildSyntheticSanteTestProjection(),
-    orderControl: "NW",
-    settings: { ...settings(), scheduledStationAeTitleDefault: "CT_ROOM_1" },
-  });
 
-  assert.doesNotMatch(base.message, /\rZSS\|/);
-  assert.match(withAe.message, /\rZSS\|CT_ROOM_1\r/);
+  assert.doesNotMatch(message.message, /\rZSS\|/);
 });
