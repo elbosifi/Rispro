@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { env } from "../config/env.js";
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { requireRow } from "../utils/records.js";
@@ -54,6 +55,8 @@ interface IntegrationStatus {
     scanColorMode: string;
     scanFileFormat: string;
     bridgeReady: boolean;
+    naps2WebScanEnabled: boolean;
+    naps2WebScanEndpoint: string;
   };
   dicomGateway: {
     enabled: boolean;
@@ -186,7 +189,13 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
   const rawScannerMode = documentSettings.scanner_bridge_mode || "";
-  const scannerBridgeMode = rawScannerMode === "future_local_bridge" ? "manual_browser_upload" : rawScannerMode || "manual_browser_upload";
+  const naps2WebScanEnabled =
+    env.naps2WebscanEnabled || String(documentSettings.naps2_webscan_enabled || "").trim().toLowerCase() === "enabled";
+  const scannerBridgeMode = naps2WebScanEnabled
+    ? "naps2_webscan"
+    : rawScannerMode === "future_local_bridge"
+      ? "manual_browser_upload"
+      : rawScannerMode || "manual_browser_upload";
   const dicomGateway = await getDicomGatewayOverview();
 
   return {
@@ -211,7 +220,9 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       scanDpi: documentSettings.scan_dpi || "300",
       scanColorMode: documentSettings.scan_color_mode || "grayscale",
       scanFileFormat: documentSettings.scan_file_format || "pdf",
-      bridgeReady: String(scannerBridgeMode || "") === "local_bridge_ready"
+      bridgeReady: String(scannerBridgeMode || "") === "naps2_webscan",
+      naps2WebScanEnabled,
+      naps2WebScanEndpoint: env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim()
     },
     dicomGateway: {
       enabled: Boolean(dicomGateway.settings.enabled),
@@ -265,7 +276,7 @@ export async function preparePrintJob(payload: PrintPreparePayload, currentUserI
 }
 
 export async function prepareScanSession(payload: ScanPreparePayload, currentUserId: OptionalUserId): Promise<ScanPreparation> {
-  const documentType = String(payload.documentType || "referral_request").trim() || "referral_request";
+  const documentType = String(payload.documentType || "appointment_request").trim() || "appointment_request";
   const appointment = payload.appointmentId
     ? await getAppointmentSummary(payload.appointmentId, payload.appointmentRefType)
     : null;
@@ -281,7 +292,7 @@ export async function prepareScanSession(payload: ScanPreparePayload, currentUse
   const suggestedFileName = appointment
     ? `${appointment.accession_number}-${documentType}.${status.scanner.scanFileFormat}`
     : `${sessionCode}-${documentType}.${status.scanner.scanFileFormat}`;
-  const mode = status.scanner.bridgeReady ? "local_bridge_ready" : "manual_browser_upload";
+  const mode = status.scanner.naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload";
 
   const preparation: ScanPreparation = {
     sessionCode,
@@ -298,8 +309,8 @@ export async function prepareScanSession(payload: ScanPreparePayload, currentUse
     allowedFileTypes: status.scanner.allowedFileTypes,
     suggestedFileName,
     guidance:
-      mode === "local_bridge_ready"
-        ? "Scanner bridge is ready for this workstation session."
+      mode === "naps2_webscan"
+        ? "NAPS2.WebScan is ready for this workstation session."
         : "Upload the scanned file in this session to attach it immediately."
   };
 

@@ -100,6 +100,8 @@ export interface EnvConfig {
   requestBodyLimit: string;
   trustProxy: boolean | number | string;
   uploadsDir: string;
+  naps2WebscanEnabled: boolean;
+  naps2WebscanEndpoint: string;
   seedSupervisorUsername: string;
   seedSupervisorPassword: string;
   seedSupervisorFullName: string;
@@ -169,9 +171,11 @@ export const env: EnvConfig = {
   cookieSameSite: readSameSite("COOKIE_SAME_SITE", "lax"),
   sessionHours: readPositiveInteger("SESSION_HOURS", 8),
   supervisorReauthMinutes: readPositiveInteger("SUPERVISOR_REAUTH_MINUTES", 10),
-  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "8mb",
+  requestBodyLimit: process.env.REQUEST_BODY_LIMIT || "75mb",
   trustProxy: readTrustProxy(),
   uploadsDir: process.env.UPLOADS_DIR || "storage/uploads",
+  naps2WebscanEnabled: readBoolean("NAPS2_WEBSCAN_ENABLED", false),
+  naps2WebscanEndpoint: String(process.env.NAPS2_WEBSCAN_ENDPOINT || "").trim(),
   seedSupervisorUsername: process.env.SEED_SUPERVISOR_USERNAME || "admin",
   seedSupervisorPassword: process.env.SEED_SUPERVISOR_PASSWORD || "ChangeMe123!",
   seedSupervisorFullName: process.env.SEED_SUPERVISOR_FULL_NAME || "Supervisor",

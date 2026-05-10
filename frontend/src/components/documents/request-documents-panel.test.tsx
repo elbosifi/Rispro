@@ -26,16 +26,41 @@ const mockDeleteAppointmentDocument = vi.fn<(documentId: number) => Promise<{ de
 );
 const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
   preparation: {
-    documentType: "referral_request",
-    suggestedFileName: "V2-42-referral_request.pdf",
+    documentType: "appointment_request",
+    suggestedFileName: "V2-42-appointment_request.pdf",
     scanFileFormat: "pdf",
     sessionCode: "SCAN-TEST",
     guidance: "Ready to scan",
   },
 }));
-const mockScanPages = vi.fn<(customOptions?: unknown) => Promise<Blob[]>>(
-  async () => [new Blob(["page-1"], { type: "application/pdf" })]
+const mockScanAppointmentRequest = vi.fn<(customOptions?: unknown) => Promise<{ file: File; pageCount: number; source: "naps2_webscan" }>>(
+  async () => ({
+    file: new File([new Blob(["page-1"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
+    pageCount: 1,
+    source: "naps2_webscan",
+  })
 );
+const mockFetchCurrentSession = vi.fn(async () => ({
+  id: 1,
+  role: "receptionist",
+  username: "front",
+  fullName: "Front Desk",
+}));
+const mockFetchIntegrationStatus = vi.fn(async () => ({
+  scanner: {
+    referralUploadEnabled: true,
+    allowedFileTypes: ["pdf", "jpg", "png"],
+    documentLinkScope: "patient_and_appointment",
+    scannerBridgeMode: "naps2_webscan",
+    scannerProfileName: "default",
+    scannerSource: "feeder",
+    scanDpi: "200",
+    scanColorMode: "grayscale",
+    scanFileFormat: "pdf",
+    bridgeReady: true,
+    naps2WebScanEnabled: true,
+  },
+}));
 
 vi.mock("@/lib/api-hooks", () => ({
   listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
@@ -43,17 +68,16 @@ vi.mock("@/lib/api-hooks", () => ({
   uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
   deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
   prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
+  fetchCurrentSession: () => mockFetchCurrentSession(),
+  fetchIntegrationStatus: () => mockFetchIntegrationStatus(),
 }));
 
 vi.mock("@/lib/toast", () => ({
   pushToast: vi.fn(),
 }));
 
-vi.mock("./use-scanapp-for-web", () => ({
-  useScanAppForWeb: () => ({
-    isSupported: true,
-    scanPages: (customOptions?: unknown) => mockScanPages(customOptions),
-  }),
+vi.mock("@/lib/naps2-webscan", () => ({
+  scanAppointmentRequest: (customOptions?: unknown) => mockScanAppointmentRequest(customOptions),
 }));
 
 function renderPanel() {
@@ -114,19 +138,25 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockUploadAppointmentDocument.mockReset();
     mockDeleteAppointmentDocument.mockReset();
     mockPrepareScanSession.mockReset();
-    mockScanPages.mockReset();
+    mockScanAppointmentRequest.mockReset();
+    mockFetchCurrentSession.mockClear();
+    mockFetchIntegrationStatus.mockClear();
 
     mockListAppointmentDocuments.mockResolvedValue([]);
     mockPrepareScanSession.mockResolvedValue({
       preparation: {
-        documentType: "referral_request",
-        suggestedFileName: "V2-42-referral_request.pdf",
+        documentType: "appointment_request",
+        suggestedFileName: "V2-42-appointment_request.pdf",
         scanFileFormat: "pdf",
         sessionCode: "SCAN-TEST",
         guidance: "Ready to scan",
       },
     });
-    mockScanPages.mockResolvedValue([new Blob(["page-1"], { type: "application/pdf" })]);
+    mockScanAppointmentRequest.mockResolvedValue({
+      file: new File([new Blob(["page-1"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
+      pageCount: 1,
+      source: "naps2_webscan",
+    });
     mockUploadAppointmentDocument.mockResolvedValue({
       id: 1,
       patientId: 9,
@@ -142,70 +172,110 @@ describe("RequestDocumentsPanel local scan flow", () => {
       lastMoveError: null,
       createdAt: "2026-01-01T00:00:00.000Z",
     });
+    mockFetchCurrentSession.mockResolvedValue({
+      id: 1,
+      role: "receptionist",
+      username: "front",
+      fullName: "Front Desk",
+    });
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true,
+        allowedFileTypes: ["pdf", "jpg", "png"],
+        documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "naps2_webscan",
+        scannerProfileName: "default",
+        scannerSource: "feeder",
+        scanDpi: "200",
+        scanColorMode: "grayscale",
+        scanFileFormat: "pdf",
+        bridgeReady: true,
+        naps2WebScanEnabled: true,
+      },
+    });
   });
 
-  it("prepares scan and uploads scanned pages through existing document upload API", async () => {
-    mockScanPages.mockResolvedValue([
-      new Blob(["page-1"], { type: "application/pdf" }),
-      new Blob(["page-2"], { type: "application/pdf" }),
-    ]);
-
+  it("prepares scan and uploads a NAPS2 scanned appointment request through existing document upload API", async () => {
     renderPanel();
 
-    await userEvent.click(screen.getByRole("button", { name: "Scan & Attach" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
 
     await waitFor(() => {
       expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(2);
+      expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(1);
     });
 
     expect(mockPrepareScanSession).toHaveBeenCalledWith({
       appointmentId: 42,
       patientId: 9,
-      documentType: "referral_request",
+      documentType: "appointment_request",
       appointmentRefType: "v2_booking",
     });
+    expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        dpi: 200,
+        colorMode: "grayscale",
+        source: "feeder",
+      })
+    );
     expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(
       expect.objectContaining({
         patientId: 9,
         appointmentId: 42,
         appointmentRefType: "v2_booking",
-        documentType: "referral_request",
+        documentType: "appointment_request",
         mimeType: "application/pdf",
+        source: "naps2_webscan",
       })
     );
   });
 
-  it("Prepare Scan triggers a real scanner request when local scan is enabled", async () => {
+  it("shows the NAPS2 scan button when the feature is enabled and user has access", async () => {
     renderPanel();
 
-    await userEvent.click(screen.getByRole("button", { name: "Prepare Scan" }));
+    expect(await screen.findByRole("button", { name: "Scan Appointment Request" })).toBeTruthy();
+  });
+
+  it("does not show the NAPS2 scan action when local scan is disabled", async () => {
+    renderPanelWithoutLocalScan();
 
     await waitFor(() => {
-      expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
-    });
-    await waitFor(() => {
-      expect(mockScanPages).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
     });
   });
 
-  it("Prepare Scan triggers scanner request even when local-scan button is hidden", async () => {
-    renderPanelWithoutLocalScan();
-
-    await userEvent.click(screen.getByRole("button", { name: "Prepare Scan" }));
-
-    await waitFor(() => {
-      expect(mockPrepareScanSession).toHaveBeenCalledTimes(1);
+  it("shows manual upload fallback when NAPS2 is unavailable", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true,
+        allowedFileTypes: ["pdf", "jpg", "png"],
+        documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "manual_browser_upload",
+        scannerProfileName: "default",
+        scannerSource: "feeder",
+        scanDpi: "200",
+        scanColorMode: "grayscale",
+        scanFileFormat: "pdf",
+        bridgeReady: false,
+        naps2WebScanEnabled: false,
+      },
     });
-    await waitFor(() => {
-      expect(mockScanPages).toHaveBeenCalledTimes(1);
-    });
+
+    renderPanel();
+
+    expect(await screen.findByText("NAPS2.WebScan is not available on this workstation. Upload PDF/image instead.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
   });
 
   it("keeps failed scanned uploads retryable through the same upload API", async () => {
-    mockScanPages.mockResolvedValue([new Blob(["retry-me"], { type: "application/pdf" })]);
+    mockScanAppointmentRequest.mockResolvedValue({
+      file: new File([new Blob(["retry-me"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
+      pageCount: 1,
+      source: "naps2_webscan",
+    });
     mockUploadAppointmentDocument
       .mockRejectedValueOnce(new Error("Temporary upload failure"))
       .mockResolvedValueOnce({
@@ -226,7 +296,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     renderPanel();
 
-    await userEvent.click(screen.getByRole("button", { name: "Scan & Attach" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
 
     await waitFor(() => {
       expect(mockUploadAppointmentDocument).toHaveBeenCalledTimes(1);

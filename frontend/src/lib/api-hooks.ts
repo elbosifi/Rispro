@@ -51,9 +51,27 @@ export interface RequestDocument {
   mimeType: string;
   fileSize: number;
   storageLocationType: "network" | "local_fallback";
+  source: "manual_upload" | "naps2_webscan";
   lastMoveAttemptAt: string | null;
   lastMoveError: string | null;
   createdAt: string;
+}
+
+export interface IntegrationStatus {
+  scanner: {
+    referralUploadEnabled: boolean;
+    allowedFileTypes: string[];
+    documentLinkScope: string;
+    scannerBridgeMode: string;
+    scannerProfileName: string;
+    scannerSource: string;
+    scanDpi: string;
+    scanColorMode: string;
+    scanFileFormat: string;
+    bridgeReady: boolean;
+    naps2WebScanEnabled?: boolean;
+    naps2WebScanEndpoint?: string;
+  };
 }
 
 function mapRequestDocument(raw: RawRecord): RequestDocument {
@@ -73,6 +91,7 @@ function mapRequestDocument(raw: RawRecord): RequestDocument {
       String(raw.storage_location_type ?? raw.storageLocationType ?? "local_fallback") === "network"
         ? "network"
         : "local_fallback",
+    source: String(raw.source ?? "manual_upload") === "naps2_webscan" ? "naps2_webscan" : "manual_upload",
     lastMoveAttemptAt: (raw.last_move_attempt_at ?? raw.lastMoveAttemptAt ?? null) as string | null,
     lastMoveError: (raw.last_move_error ?? raw.lastMoveError ?? null) as string | null,
     createdAt: String(raw.created_at ?? raw.createdAt ?? ""),
@@ -109,6 +128,7 @@ export async function uploadAppointmentDocument(payload: {
   originalFilename: string;
   mimeType: string;
   fileContentBase64: string;
+  source?: "manual_upload" | "naps2_webscan";
 }): Promise<RequestDocument> {
   const raw = await api<{ document: RawRecord }>("/documents", {
     method: "POST",
@@ -124,6 +144,11 @@ export async function deleteAppointmentDocument(documentId: number): Promise<{ d
   return api<{ deleted: boolean; documentId: number }>(`/documents/${documentId}`, {
     method: "DELETE",
   });
+}
+
+export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {
+  const raw = await api<{ status: IntegrationStatus }>("/integrations/status");
+  return raw.status;
 }
 
 export async function prepareScanSession(payload: {

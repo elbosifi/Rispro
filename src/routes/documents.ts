@@ -1,5 +1,5 @@
 import express, { Request, Response } from "express";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString, asOptionalUserId } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
@@ -10,10 +10,18 @@ import {
   listDocuments,
   uploadDocument,
 } from "../services/document-service.js";
+import type { DocumentRow } from "../services/document-service.js";
 
 export const documentsRouter = express.Router();
 
 documentsRouter.use(requireAuth);
+
+function toDocumentResponse(document: DocumentRow): Omit<DocumentRow, "stored_path"> & { stored_path: string } {
+  return {
+    ...document,
+    stored_path: "",
+  };
+}
 
 documentsRouter.get(
   "/",
@@ -24,7 +32,7 @@ documentsRouter.get(
       appointmentId: asOptionalUserId(query.appointmentId),
       appointmentRefType: asOptionalString(query.appointmentRefType),
     });
-    res.json({ documents });
+    res.json({ documents: documents.map(toDocumentResponse) });
   })
 );
 
@@ -52,15 +60,17 @@ documentsRouter.post(
         patientId: asOptionalUserId(body.patientId),
         appointmentId: asOptionalUserId(body.appointmentId),
         appointmentRefType: asOptionalString(body.appointmentRefType),
+        source: asOptionalString(body.source),
       },
       req.user!.sub
     );
-    res.status(201).json({ document });
+    res.status(201).json({ document: toDocumentResponse(document) });
   })
 );
 
 documentsRouter.delete(
   "/:documentId",
+  requireAnyRole(["supervisor", "super_admin"]),
   asyncRoute(async (req: Request, res: Response) => {
     const result = await deleteDocumentById(String(req.params.documentId || ""), req.user!.sub);
     res.json(result);

@@ -24,6 +24,7 @@ export interface DocumentUploadPayload {
   originalFilename?: string;
   mimeType?: string;
   fileContentBase64?: string;
+  source?: string;
 }
 
 export interface DocumentRow {
@@ -37,6 +38,7 @@ export interface DocumentRow {
   mime_type: string;
   file_size: number;
   storage_location_type: "network" | "local_fallback";
+  source: "manual_upload" | "naps2_webscan";
   last_move_attempt_at: string | null;
   last_move_error: string | null;
   created_at: string;
@@ -75,6 +77,9 @@ interface StorageConfig {
   fallbackEnabled: boolean;
 }
 
+const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
 function sanitizeFileName(fileName: unknown): string {
   const cleaned = String(fileName || "document")
     .replace(/[^a-zA-Z0-9._-]/g, "_")
@@ -103,6 +108,30 @@ async function ensureRelatedRecords(patientId: number | null, appointmentId: num
     const { rowCount } = await pool.query("select 1 from patients where id = $1 limit 1", [patientId]);
     if (Number(rowCount || 0) === 0) {
       throw new HttpError(404, "Patient not found.");
+    }
+  }
+}
+
+async function ensureAppointmentBelongsToPatient(reference: AppointmentReference, patientId: number | null): Promise<void> {
+  if (!patientId) return;
+
+  if (reference.legacyAppointmentId) {
+    const { rowCount } = await pool.query(
+      "select 1 from appointments where id = $1 and patient_id = $2 limit 1",
+      [reference.legacyAppointmentId, patientId]
+    );
+    if (Number(rowCount || 0) === 0) {
+      throw new HttpError(400, "Appointment does not belong to patient.");
+    }
+  }
+
+  if (reference.v2BookingId) {
+    const { rowCount } = await pool.query(
+      "select 1 from appointments_v2.bookings where id = $1 and patient_id = $2 limit 1",
+      [reference.v2BookingId, patientId]
+    );
+    if (Number(rowCount || 0) === 0) {
+      throw new HttpError(400, "Appointment does not belong to patient.");
     }
   }
 }
@@ -167,6 +196,10 @@ async function resolveAppointmentReference(
 
 function isTruthyFlag(raw: string): boolean {
   return ["true", "1", "yes", "enabled", "on"].includes(String(raw || "").trim().toLowerCase());
+}
+
+function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" {
+  return String(source || "").trim() === "naps2_webscan" ? "naps2_webscan" : "manual_upload";
 }
 
 async function loadDocumentStorageConfig(): Promise<StorageConfig> {
@@ -250,6 +283,7 @@ export async function listDocuments(
         mime_type,
         file_size,
         storage_location_type,
+        source,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -279,6 +313,7 @@ export async function getDocumentById(documentId: UserId): Promise<DocumentRow> 
         mime_type,
         file_size,
         storage_location_type,
+        source,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -343,6 +378,7 @@ async function selectDocumentsForScope(scope: DocumentsDeleteScope): Promise<Doc
         d.mime_type,
         d.file_size,
         d.storage_location_type,
+        d.source,
         d.last_move_attempt_at,
         d.last_move_error,
         d.created_at
@@ -377,17 +413,25 @@ export async function uploadDocument(
   const patientId = normalizePositiveInteger(payload.patientId, "patientId", { required: false });
   const appointmentId = normalizePositiveInteger(payload.appointmentId, "appointmentId", { required: false });
   const appointmentRefType = normalizeAppointmentRefType(payload.appointmentRefType);
-  const documentType = String(payload.documentType || "referral_request").trim();
+  const documentType = String(payload.documentType || "appointment_request").trim();
   const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
-  const mimeType = String(payload.mimeType || "application/octet-stream").trim();
+  const mimeType = String(payload.mimeType || "application/octet-stream").trim().toLowerCase();
+  const source = normalizeDocumentSource(payload.source);
   const fileBuffer = decodeBase64File(payload.fileContentBase64);
 
   if (fileBuffer.length === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
   }
+  if (fileBuffer.length > MAX_DOCUMENT_BYTES) {
+    throw new HttpError(413, "Uploaded document exceeds the 50 MB limit.");
+  }
+  if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+    throw new HttpError(400, "Document type must be PDF, JPEG, or PNG.");
+  }
 
   await ensureRelatedRecords(patientId, appointmentId);
   const appointmentReference = await resolveAppointmentReference(appointmentId, appointmentRefType);
+  await ensureAppointmentBelongsToPatient(appointmentReference, patientId);
 
   const storageConfig = await loadDocumentStorageConfig();
   let storedPath = "";
@@ -429,9 +473,10 @@ export async function uploadDocument(
         file_size,
         storage_location_type,
         last_move_error,
-        uploaded_by_user_id
+        uploaded_by_user_id,
+        source
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       returning
         id,
         patient_id,
@@ -443,6 +488,7 @@ export async function uploadDocument(
         mime_type,
         file_size,
         storage_location_type,
+        source,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -459,6 +505,7 @@ export async function uploadDocument(
       storageLocationType,
       fallbackReason,
       currentUserId,
+      source,
     ]
   )) as DbQueryResult<DocumentRow>;
   const savedDocument = rows[0];
