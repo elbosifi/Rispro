@@ -28,7 +28,7 @@ import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
 import { LanguageProvider, useLanguage } from "@/providers/language-provider";
-import { fetchPageVisibilityMatrix } from "@/lib/api-hooks";
+import { fetchDoctorMe, fetchPageVisibilityMatrix } from "@/lib/api-hooks";
 import {
   DEFAULT_PAGE_VISIBILITY_MATRIX,
   getDefaultLandingRouteForRole,
@@ -124,9 +124,17 @@ function AppContent() {
     staleTime: 1000 * 60,
     retry: false,
   });
+  const { data: doctorMe, isLoading: isDoctorMeLoading } = useQuery({
+    queryKey: ["doctor", "me"],
+    queryFn: fetchDoctorMe,
+    enabled: Boolean(user),
+    staleTime: 1000 * 60,
+    retry: false,
+  });
   const normalizedMatrix = normalizePageVisibilityMatrix(pageVisibilityMatrix ?? DEFAULT_PAGE_VISIBILITY_MATRIX);
   const defaultLandingRoute = getDefaultLandingRouteForRole(normalizedMatrix, user?.role ?? "receptionist");
   const defaultLandingPath = getLandingPath(defaultLandingRoute);
+  const effectiveDefaultLandingPath = doctorMe?.hasActiveDoctorProfile ? "/doctor/dashboard" : defaultLandingPath;
 
   const handleNavigate = useCallback(
     (route: string) => {
@@ -193,7 +201,7 @@ function AppContent() {
       }
     })();
 
-  if (isLoading || isPageVisibilityLoading) {
+  if (isLoading || isPageVisibilityLoading || (location.pathname === "/" && isDoctorMeLoading)) {
     return <LoadingScreen />;
   }
 
@@ -206,7 +214,7 @@ function AppContent() {
       routeKey={routeKey}
       user={user}
       matrix={normalizedMatrix}
-      defaultLandingPath={defaultLandingPath}
+      defaultLandingPath={effectiveDefaultLandingPath}
     >
       {element}
     </PageAccessRoute>
@@ -253,7 +261,7 @@ function AppContent() {
 
         <main className="flex-1 overflow-y-auto p-4 lg:p-6" dir={isArabic ? "rtl" : "ltr"}>
           <Routes>
-            <Route path="/" element={<Navigate to={defaultLandingPath} replace />} />
+            <Route path="/" element={<Navigate to={effectiveDefaultLandingPath} replace />} />
             <Route path="/dashboard" element={guardedPage("dashboard", <DashboardPage />)} />
             <Route path="/patients" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
@@ -264,7 +272,6 @@ function AppContent() {
             <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />
             <Route path="/queue" element={guardedPage("queue", <QueuePage />)} />
             <Route path="/modality" element={guardedPage("modality", <ModalityPage />)} />
-            <Route path="/doctor" element={guardedPage("doctor", <DoctorPage />)} />
             <Route path="/print" element={guardedPage("print", <PrintPage />)} />
             <Route path="/statistics" element={guardedPage("statistics", <StatisticsPage />)} />
             <Route path="/search" element={<SearchPage />} />
@@ -309,6 +316,14 @@ function RouterConfig() {
       <Route
         path="/queue/check-in"
         element={<QueueCheckInAccessRoute />}
+      />
+      <Route
+        path="/doctor/*"
+        element={
+          <ProtectedRoute>
+            <DoctorPage />
+          </ProtectedRoute>
+        }
       />
       <Route
         path="/*"

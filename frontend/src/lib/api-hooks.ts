@@ -27,7 +27,8 @@ import type {
   PatientImportStagingRow,
   PatientIdentifierTypeOption,
   PatientDirectoryResponse,
-  PatientDirectorySummary
+  PatientDirectorySummary,
+  DoctorMe
 } from "@/types/api";
 import type { DictionaryEntry } from "@/lib/name-generation";
 
@@ -144,6 +145,10 @@ export async function deleteAppointmentDocument(documentId: number): Promise<{ d
   return api<{ deleted: boolean; documentId: number }>(`/documents/${documentId}`, {
     method: "DELETE",
   });
+}
+
+export async function fetchDoctorMe(): Promise<DoctorMe> {
+  return api<DoctorMe>("/doctor/me");
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {

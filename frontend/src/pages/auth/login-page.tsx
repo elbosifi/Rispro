@@ -3,6 +3,7 @@ import { useAuth } from "@/providers/auth-provider";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
+import { fetchDoctorMe } from "@/lib/api-hooks";
 import { Lock, User, Power } from "lucide-react";
 
 export function LoginPage() {
@@ -22,6 +23,11 @@ export function LoginPage() {
     setError("");
     try {
       await login(username, password);
+      const doctorMe = await fetchDoctorMe().catch(() => null);
+      if (doctorMe?.hasActiveDoctorProfile) {
+        navigate("/doctor/dashboard", { replace: true });
+        return;
+      }
       navigate(from, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : t(language, "login.failed"));

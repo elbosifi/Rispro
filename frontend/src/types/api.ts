@@ -39,6 +39,48 @@ export interface AuthSession {
   recentSupervisorReauth?: boolean;
 }
 
+export type DoctorProfileRole = "consultant" | "specialist" | "senior_house_officer" | "resident";
+export type DoctorModuleCapability = "doctor" | "doctor_supervisor" | "doctor_admin";
+
+export interface DoctorProfile {
+  id: number;
+  userId: number;
+  username?: string | null;
+  displayName: string;
+  doctorRole: DoctorProfileRole;
+  active: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DoctorModalityPermission {
+  id: number;
+  doctorId: number;
+  modalityId: number;
+  modalityCode: string | null;
+  modalityNameEn: string | null;
+  modalityNameAr: string | null;
+  canProtocol: boolean;
+  canReport: boolean;
+  canSupervise: boolean;
+  active: boolean;
+}
+
+export interface DoctorMe {
+  hasActiveDoctorProfile: boolean;
+  profile: DoctorProfile | null;
+  doctorRole: DoctorProfileRole | null;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+  allowedModalities: DoctorModalityPermission[];
+  moduleCapabilities: DoctorModuleCapability[];
+  canAccessCoreWorkspace: boolean;
+}
+
 export type IdentifierType = string;
 
 export interface PatientIdentifier {

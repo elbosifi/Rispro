@@ -1,174 +1,250 @@
-import { useState } from "react";
+import { useMemo } from "react";
+import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
-import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
-import { DateInput } from "@/components/common/date-input";
-import { Select } from "@/components/common/select";
-import { AppointmentEditor } from "@/components/appointments/appointment-editor";
-import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
-import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import {
+  Activity,
+  BriefcaseMedical,
+  CalendarDays,
+  ClipboardList,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  Stethoscope,
+  Users,
+} from "lucide-react";
+import { fetchDoctorMe } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
-import { t } from "@/lib/i18n";
-import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import type { AppointmentWithDetails } from "@/lib/mappers";
+import type { DoctorMe } from "@/types/api";
 
-export default function DoctorPage() {
-  const { language } = useLanguage();
-  const [date, setDate] = useState(todayIsoDateLy());
-  const [modalityId, setModalityId] = useState("");
-  const [selectedAppointment, setSelectedAppointment] = useState<AppointmentWithDetails | null>(null);
+type DoctorPortalNavItem = {
+  path: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  management?: boolean;
+};
 
-  const { data: lookups } = useQuery({
-    queryKey: ["lookups"],
-    queryFn: fetchAppointmentLookups,
-    staleTime: 1000 * 60 * 5
-  });
+const DOCTOR_NAV: DoctorPortalNavItem[] = [
+  { path: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { path: "/doctor/roster", label: "My Roster", icon: CalendarDays },
+  { path: "/doctor/cases", label: "My Cases", icon: BriefcaseMedical },
+  { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
+];
 
-  const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["doctor-requests", date, modalityId],
-    queryFn: () => fetchAppointments({ date, ...(modalityId && { modalityId }) }),
-    staleTime: 1000 * 30
-  });
-  const typedAppointments = appointments as AppointmentWithDetails[];
+const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
+  { path: "/doctor/roster", label: "Roster Management", icon: CalendarDays, management: true },
+  { path: "/doctor/team-workload", label: "Team Workload", icon: Activity, management: true },
+  { path: "/doctor/admin/doctors", label: "Doctors/Admin", icon: Users, management: true },
+];
 
+function isSupervisorOrAdmin(me: DoctorMe): boolean {
+  return me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+}
+
+function LoadingShell() {
   return (
-    <div className="max-w-7xl mx-auto space-y-5">
-      <h2 className="text-xl sm:text-2xl font-bold text-stone-900 dark:text-white lg:hidden">
-        {t(language, "doctor.title")}
-      </h2>
-
-      {/* Filters */}
-      <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <DateInput label={t(language, "doctor.date")} value={date} onChange={setDate} />
-          <Select
-            label={t(language, "doctor.modality")}
-            value={modalityId}
-            onChange={setModalityId}
-            options={[
-              { value: "", label: t(language, "doctor.all") },
-              ...(lookups?.modalities ?? []).map((m) => ({
-                value: m.id.toString(),
-                label: m.nameEn
-              }))
-            ]}
-          />
-        </div>
-      </div>
-
-      {/* List */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-stone-200 dark:border-stone-700">
-            <h3 className="font-semibold text-stone-900 dark:text-white">
-              {t(language, "doctor.requests", { count: isLoading ? 0 : typedAppointments.length })}
-            </h3>
-          </div>
-          {isLoading ? (
-            <div className="p-8 text-center text-stone-500">{t(language, "common.loading")}</div>
-          ) : typedAppointments.length === 0 ? (
-            <div className="p-8 text-center text-stone-500">{t(language, "doctor.empty")}</div>
-          ) : (
-            <ul className="divide-y divide-stone-200 dark:divide-stone-700 max-h-[600px] overflow-y-auto">
-              {typedAppointments.map((apt) => (
-                <li key={apt.id}>
-                  <button
-                    onClick={() => setSelectedAppointment(apt)}
-                    className={`w-full text-right p-4 transition-colors hover:bg-stone-50 dark:hover:bg-stone-700/50 ${
-                      selectedAppointment?.id === apt.id ? "bg-teal-50 dark:bg-teal-900/20" : ""
-                    }`}
-                  >
-                    <div className="flex flex-wrap items-center justify-end gap-1.5">
-                      <p className="font-medium text-stone-900 dark:text-white">
-                        {apt.accessionNumber}
-                      </p>
-                      <PatientCategoryBadge category={apt.caseCategory} showWhenUnset={false} size="sm" />
-                    </div>
-                    <p className="text-sm text-stone-500 dark:text-stone-400 mt-1">
-                      {apt.arabicFullName} {"\u2022"} {apt.modalityNameEn}
-                    </p>
-                    <p className="text-xs text-stone-400 dark:text-stone-500 mt-0.5">
-                      {formatDateLy(apt.appointmentDate)} {"\u2022"} {apt.status}
-                    </p>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {/* Details */}
-        <div>
-          {selectedAppointment ? (
-            <div className="bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 shadow-sm p-4 sm:p-5">
-              <div className="flex items-start justify-between gap-3 mb-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="text-base sm:text-lg font-semibold text-stone-900 dark:text-white">
-                    {t(language, "doctor.details")}
-                  </h3>
-                  {selectedAppointment.updatedAt && selectedAppointment.createdAt && selectedAppointment.updatedAt !== selectedAppointment.createdAt && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-                      {t(language, "appointmentEditor.edited")}
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
-                  className="px-3 py-1.5 bg-teal-600 hover:bg-teal-700 text-white text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap"
-                >
-                  {t(language, "common.print")}
-                </button>
-              </div>
-              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 px-3 py-2">
-                <span className="font-medium text-stone-900 dark:text-white">
-                  {selectedAppointment.arabicFullName}
-                </span>
-                <PatientCategoryBadge category={selectedAppointment.caseCategory} showWhenUnset={false} size="sm" />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-sm">
-                <Field label={t(language, "doctor.fieldAccession")} value={selectedAppointment.accessionNumber} />
-                <Field label={t(language, "doctor.fieldPatient")} value={selectedAppointment.arabicFullName} />
-                <Field label={t(language, "doctor.fieldModality")} value={selectedAppointment.modalityNameEn} />
-                <Field label={t(language, "doctor.fieldExam")} value={selectedAppointment.examNameEn} />
-                <Field label={t(language, "doctor.fieldDate")} value={formatDateLy(selectedAppointment.appointmentDate)} />
-                <Field label={t(language, "doctor.fieldStatus")} value={selectedAppointment.status} />
-                <Field label={t(language, "doctor.fieldNotes")} value={selectedAppointment.notes} />
-              </div>
-              <div className="mt-6">
-                <RequestDocumentsPanel
-                  appointmentId={selectedAppointment.id}
-                  patientId={selectedAppointment.patientId}
-                  appointmentRefType="v2_booking"
-                  title={t(language, "documents.title")}
-                  enablePreviewModal
-                />
-              </div>
-              <div className="mt-6">
-                <AppointmentEditor
-                  appointment={selectedAppointment}
-                  lookups={lookups}
-                  onUpdated={(updated) => setSelectedAppointment(updated)}
-                  onDeleted={() => setSelectedAppointment(null)}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="h-full flex items-center justify-center bg-white dark:bg-stone-800 rounded-xl border border-stone-200 dark:border-stone-700 p-8">
-              <p className="text-stone-500 dark:text-stone-400">{t(language, "doctor.selectPrompt")}</p>
-            </div>
-          )}
-        </div>
-      </div>
+    <div className="flex min-h-screen items-center justify-center" style={{ backgroundColor: "var(--background)" }}>
+      <div className="spinner-industrial h-10 w-10" />
     </div>
   );
 }
 
-
-function Field({ label, value }: { label: string; value: string | undefined | null }) {
+function DoctorPortalHome({ me }: { me: DoctorMe }) {
   return (
-    <div className="rounded-lg border border-stone-200 dark:border-stone-700 bg-stone-50 dark:bg-stone-800/60 p-2.5">
-      <p className="text-[10px] uppercase tracking-[0.12em] text-stone-500 dark:text-stone-400">{label}</p>
-      <p className="mt-0.5 text-stone-900 dark:text-white font-medium leading-snug">{value ?? "—"}</p>
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
+          Doctor Portal
+        </p>
+        <h2 className="mt-1 text-2xl font-semibold text-foreground">
+          {me.profile?.displayName ?? "Doctor workspace"}
+        </h2>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <SummaryTile label="Role" value={me.doctorRole?.replaceAll("_", " ") ?? "doctor"} />
+        <SummaryTile label="Protocol permission" value={me.canAssignProtocols ? "Allowed" : "Not enabled"} />
+        <SummaryTile label="Reporting permission" value={me.canFinalizeReports ? "Can finalize" : "Not enabled"} />
+      </div>
+      <PlaceholderPanel
+        title="Clinical coordination workspace"
+        body="Phase 1 enables identity, access control, and navigation only. Roster, case basket, protocol assignment, and workload dashboards will arrive in later phases."
+      />
+    </div>
+  );
+}
+
+function SummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <p className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--text-muted)" }}>
+        {label}
+      </p>
+      <p className="mt-2 text-base font-semibold capitalize text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function PlaceholderPanel({ title, body }: { title: string; body: string }) {
+  return (
+    <section className="rounded-lg border p-5" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+      <p className="mt-2 max-w-3xl text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+        {body}
+      </p>
+    </section>
+  );
+}
+
+function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
+  const canManage = isSupervisorOrAdmin(me);
+
+  return (
+    <Routes>
+      <Route index element={<Navigate to="/doctor/dashboard" replace />} />
+      <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
+      <Route
+        path="roster"
+        element={
+          <PlaceholderPanel
+            title={canManage ? "Roster Management" : "My Roster"}
+            body="Weekly roster management is intentionally deferred to Phase 2. This page is a bounded placeholder and does not change schedules or appointments."
+          />
+        }
+      />
+      <Route
+        path="cases"
+        element={
+          <PlaceholderPanel
+            title="My Cases"
+            body="Case baskets and team assignment are deferred to Phase 3. No cases are assigned or modified in Phase 1."
+          />
+        }
+      />
+      <Route
+        path="protocols"
+        element={
+          <PlaceholderPanel
+            title="Protocols"
+            body="Protocol assignment is deferred to Phase 4. This page does not create or update appointment protocols."
+          />
+        }
+      />
+      <Route
+        path="team-workload"
+        element={
+          canManage ? (
+            <PlaceholderPanel
+              title="Team Workload"
+              body="Team workload summaries are deferred to Phase 5. No workload units, ranking, salary, or productivity scoring are implemented here."
+            />
+          ) : (
+            <Navigate to="/doctor/dashboard" replace />
+          )
+        }
+      />
+      <Route
+        path="admin/doctors"
+        element={
+          canManage ? (
+            <PlaceholderPanel
+              title="Doctors/Admin"
+              body="Doctor profile administration is available through the backend identity module. A full management UI is deferred beyond this shell."
+            />
+          ) : (
+            <Navigate to="/doctor/dashboard" replace />
+          )
+        }
+      />
+      <Route path="*" element={<Navigate to="/doctor/dashboard" replace />} />
+    </Routes>
+  );
+}
+
+export default function DoctorPage() {
+  const { language } = useLanguage();
+  const isRtl = language === "ar";
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { data: me, isLoading } = useQuery({
+    queryKey: ["doctor", "me"],
+    queryFn: fetchDoctorMe,
+    retry: false,
+    staleTime: 1000 * 60,
+  });
+
+  const navItems = useMemo(() => {
+    if (!me || !isSupervisorOrAdmin(me)) return DOCTOR_NAV;
+    const byPath = new Map<string, DoctorPortalNavItem>();
+    [...DOCTOR_NAV, ...SUPERVISOR_NAV].forEach((item) => byPath.set(item.path, item));
+    return [...byPath.values()];
+  }, [me]);
+
+  if (isLoading) return <LoadingShell />;
+
+  if (!me?.hasActiveDoctorProfile) {
+    return <Navigate to="/" replace />;
+  }
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "var(--background)" }} dir={isRtl ? "rtl" : "ltr"}>
+      <header className="border-b" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <div className="flex h-14 items-center justify-between gap-3 px-4 lg:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg text-white" style={{ backgroundColor: "var(--accent)" }}>
+              <Stethoscope size={18} />
+            </div>
+            <div className="min-w-0">
+              <h1 className="truncate text-base font-semibold text-foreground">Doctor Portal</h1>
+              <p className="truncate text-xs" style={{ color: "var(--text-muted)" }}>
+                Team-based clinical workflow
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {me.canAccessCoreWorkspace && (
+              <button
+                type="button"
+                onClick={() => navigate("/dashboard")}
+                className="inline-flex h-9 items-center gap-2 rounded-lg border px-3 text-xs font-semibold"
+                style={{ borderColor: "var(--border)", backgroundColor: "var(--background)" }}
+              >
+                <LogOut size={14} />
+                RISpro Core
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
+
+      <div className="grid min-h-[calc(100vh-3.5rem)] grid-cols-1 lg:grid-cols-[240px_1fr]">
+        <aside className="border-b p-3 lg:border-b-0 lg:border-r" style={{ borderColor: "var(--border)" }}>
+          <nav className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              const active = location.pathname === item.path;
+              return (
+                <button
+                  key={`${item.path}-${item.label}`}
+                  type="button"
+                  onClick={() => navigate(item.path)}
+                  className="inline-flex h-10 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium lg:w-full"
+                  style={{
+                    borderColor: active ? "var(--accent)" : "transparent",
+                    backgroundColor: active ? "color-mix(in srgb, var(--accent) 12%, transparent)" : "transparent",
+                    color: active ? "var(--accent)" : "var(--foreground)",
+                  }}
+                >
+                  <Icon size={16} />
+                  <span>{item.label}</span>
+                  {item.management && <Settings size={13} className="ml-auto opacity-60" />}
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+        <main className="p-4 lg:p-6">
+          <DoctorPortalRoutes me={me} />
+        </main>
+      </div>
     </div>
   );
 }

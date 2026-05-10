@@ -19,6 +19,7 @@ import { dicomRouter } from "./routes/dicom.js";
 import { pacsRouter } from "./routes/pacs.js";
 import { legacyAccessViewerRouter } from "./routes/legacy-access-viewer.js";
 import { createAppointmentsV2Router } from "./modules/appointments-v2/index.js";
+import { createDoctorPortalRouter } from "./modules/doctor-portal/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
@@ -123,6 +124,7 @@ export function createApp(): Application {
   app.use("/api/dicom", dicomRouter);
   app.use("/api/pacs", pacsRouter);
   app.use("/api/legacy-access-viewer", legacyAccessViewerRouter);
+  app.use("/api/doctor", createDoctorPortalRouter());
 
   // ---- Appointments V2 (parallel module) ----
   const v2Router = createAppointmentsV2Router();
