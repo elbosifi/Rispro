@@ -32,6 +32,7 @@ type FormState = {
   charset: string;
   patient_id_field: string;
   patient_name_field: string;
+  scheduled_station_ae_title_default: string;
 };
 
 type SummaryResponse = {
@@ -90,6 +91,7 @@ const DEFAULT_FORM: FormState = {
   charset: "UNICODE UTF-8",
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
+  scheduled_station_ae_title_default: "RISPRO_MWL",
 };
 
 function toForm(settings: Record<string, string> | null | undefined): FormState {
@@ -262,6 +264,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <Field label="Charset" value={form.charset} onChange={(value) => setValue("charset", value)} />
           <Field label="Patient ID field" type="select" value={form.patient_id_field} onChange={(value) => setValue("patient_id_field", value)} options={[["identifier_value", "Primary identifier"], ["mrn", "MRN"], ["national_id", "National ID"], ["patient_id", "RISpro patient ID"]]} />
           <Field label="Patient name field" type="select" value={form.patient_name_field} onChange={(value) => setValue("patient_name_field", value)} options={[["english_full_name", "English name"], ["arabic_full_name", "Arabic name"]]} />
+          <Field label="Scheduled Station AE Title default" value={form.scheduled_station_ae_title_default} onChange={(value) => setValue("scheduled_station_ae_title_default", value)} placeholder="RISPRO_MWL" />
         </div>
       </section>
 

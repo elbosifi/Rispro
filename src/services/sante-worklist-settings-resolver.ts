@@ -45,6 +45,7 @@ export interface ResolvedSanteWorklistSettings {
   charset: string;
   patientIdField: "identifier_value" | "mrn" | "national_id" | "patient_id";
   patientNameField: "english_full_name" | "arabic_full_name";
+  scheduledStationAeTitleDefault: string;
   allowedBasePaths: string[];
   hostOutboxHint: string;
   windowsShareSourceHint: string;
@@ -78,6 +79,7 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   charset: "UNICODE UTF-8",
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
+  scheduled_station_ae_title_default: "RISPRO_MWL",
 };
 
 const ALLOWED_KEYS = new Set(Object.keys(SANTE_HL7_DEFAULTS));
@@ -297,6 +299,7 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
       ? db.patient_id_field as ResolvedSanteWorklistSettings["patientIdField"]
       : "identifier_value",
     patientNameField: db.patient_name_field === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
+    scheduledStationAeTitleDefault: normalizeOptionalText(db.scheduled_station_ae_title_default) || "RISPRO_MWL",
     allowedBasePaths,
     hostOutboxHint: normalizeOptionalText(env.santeHl7HostOutboxHint),
     windowsShareSourceHint: normalizeOptionalText(env.santeHl7WindowsShareSourceHint || env.santeHl7HostOutboxHint),

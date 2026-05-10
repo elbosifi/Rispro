@@ -12,6 +12,7 @@ const baseEntries = [
   { key: "delivery_method", value: { value: "file_drop" } },
   { key: "output_folder_path", value: { value: "storage/sante-hl7-output" } },
   { key: "file_extension", value: { value: ".hl7" } },
+  { key: "scheduled_station_ae_title_default", value: { value: "RISPRO_MWL" } },
 ];
 
 test("validateSanteSettingsEntries accepts configured file-drop settings", () => {

@@ -109,6 +109,7 @@ export function buildSanteOrmO01Message(input: {
   obr[6] = scheduledDateTime;
   obr[7] = scheduledDateTime;
   obr[18] = escapeHl7(accessionNumber);
+  obr[21] = escapeHl7(settings.scheduledStationAeTitleDefault);
   obr[24] = escapeHl7(booking.modality_code);
 
   const segments = [

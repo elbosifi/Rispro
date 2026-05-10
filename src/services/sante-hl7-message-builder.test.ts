@@ -35,6 +35,7 @@ function settings(): ResolvedSanteWorklistSettings {
     charset: "UNICODE UTF-8",
     patientIdField: "identifier_value",
     patientNameField: "english_full_name",
+    scheduledStationAeTitleDefault: "RISPRO_MWL",
     allowedBasePaths: ["storage/sante-hl7-output"],
     hostOutboxHint: "storage/sante-hl7-output",
     windowsShareSourceHint: "storage/sante-hl7-output",
@@ -60,6 +61,7 @@ test("buildSanteOrmO01Message emits ORM O01 with configured identity and NW orde
   const obr = message.message.split("\r").find((segment) => segment.startsWith("OBR|"))?.split("|") || [];
   assert.equal(obr[6], "20260510080000");
   assert.equal(obr[7], "20260510080000");
+  assert.equal(obr[21], "RISPRO_MWL");
   assert.equal(obr[24], "CT");
 });
 
