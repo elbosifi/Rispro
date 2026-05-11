@@ -361,6 +361,16 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     })).status, 201);
     assert.equal((await api(supervisor.cookie, `/api/doctor/roster/weeks/${weekId}/publish`, { method: "POST" })).status, 200);
 
+    const notify = await api(supervisor.cookie, `/api/doctor/roster/weeks/${weekId}/notify`, { method: "POST" });
+    assert.equal(notify.status, 201);
+    assert.equal((notify.data as { createdCount: number }).createdCount, 1);
+    const htmlExport = await fetch(`${app.baseUrl}/api/doctor/roster/weeks/${weekId}/export?format=html&scope=full`, { headers: { Cookie: supervisor.cookie } });
+    assert.equal(htmlExport.status, 200);
+    assert.match(await htmlExport.text(), /CT Team|Doctor roster/);
+    const csvExport = await fetch(`${app.baseUrl}/api/doctor/roster/weeks/${weekId}/export?format=csv&scope=my`, { headers: { Cookie: normal.cookie } });
+    assert.equal(csvExport.status, 200);
+    assert.match(await csvExport.text(), /CT Team/);
+
     const assignRun = await api(supervisor.cookie, "/api/doctor/cases/assign", {
       method: "POST",
       body: { dateFrom: today, dateTo: today, modalityId: testData.modalityId },
@@ -436,6 +446,83 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       [appointmentId]
     );
     assert.equal(Number(activeRows.rows[0].count), 1);
+  });
+
+  it("runs availability, leave, conflict-blocked publish, templates, and draft generation", async () => {
+    guard();
+    const availabilityDate = addDays(today, 21);
+    const availability = await api(normal.cookie, "/api/doctor/availability/my", {
+      method: "POST",
+      body: { date: availabilityDate, availabilityStatus: "unavailable", startTime: null, endTime: null, note: "integration unavailable" },
+    });
+    assert.equal(availability.status, 201);
+
+    const leave = await api(normal.cookie, "/api/doctor/leave/my", {
+      method: "POST",
+      body: { startDate: addDays(today, 22), endDate: addDays(today, 22), leaveType: "annual_leave", reason: "integration leave" },
+    });
+    assert.equal(leave.status, 201);
+    const leaveId = Number((leave.data as { leave: { id: number } }).leave.id);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/leave/${leaveId}/status`, { method: "PATCH", body: { status: "approved" } })).status, 200);
+
+    const conflictWeekStart = addDays(mondayOf(today), 21);
+    const conflictWeek = await api(supervisor.cookie, "/api/doctor/roster/weeks", {
+      method: "POST",
+      body: { weekStartDate: conflictWeekStart, weekEndDate: addDays(conflictWeekStart, 6) },
+    });
+    assert.equal(conflictWeek.status, 201);
+    const conflictWeekId = Number((conflictWeek.data as { week: { id: number } }).week.id);
+    const conflictAssignment = await api(supervisor.cookie, "/api/doctor/roster/assignments", {
+      method: "POST",
+      body: {
+        rosterWeekId: conflictWeekId,
+        date: availabilityDate,
+        modalityId: testData.modalityId,
+        dutyType: "ct_protocol_day",
+        sessionName: "day",
+        startTime: "08:00",
+        endTime: "14:00",
+        teamName: `${TEST_PREFIX}Conflict Team`,
+      },
+    });
+    assert.equal(conflictAssignment.status, 201);
+    const conflictAssignmentId = Number((conflictAssignment.data as { assignment: { id: number } }).assignment.id);
+    assert.equal((await api(supervisor.cookie, `/api/doctor/roster/assignments/${conflictAssignmentId}/members`, {
+      method: "POST",
+      body: { doctorId: normal.doctorId, teamRole: "lead" },
+    })).status, 201);
+    const blockedPublish = await api(supervisor.cookie, `/api/doctor/roster/weeks/${conflictWeekId}/publish`, { method: "POST" });
+    assert.equal(blockedPublish.status, 409);
+
+    const template = await api(admin.cookie, "/api/doctor/roster/templates", {
+      method: "POST",
+      body: {
+        name: `${TEST_PREFIX}Template`,
+        templateType: "ct_weekly",
+        modalityId: testData.modalityId,
+        assignments: [{
+          dayOfWeek: 1,
+          modalityId: testData.modalityId,
+          dutyType: "ct_protocol_day",
+          sessionName: "day",
+          startTime: "08:00",
+          endTime: "14:00",
+          teamName: `${TEST_PREFIX}Template Team`,
+          sortOrder: 0,
+          members: [],
+        }],
+      },
+    });
+    assert.equal(template.status, 201);
+    const templateId = Number((template.data as { template: { id: number } }).template.id);
+    const generatedWeekStart = addDays(mondayOf(today), 35);
+    const generated = await api(supervisor.cookie, "/api/doctor/roster/generate-draft", {
+      method: "POST",
+      body: { weekStartDate: generatedWeekStart, templateId, modalityId: null, includeDoctors: false, balanceStrategy: "simple" },
+    });
+    assert.equal(generated.status, 201);
+    assert.equal((generated.data as { week: { status: string }; assignmentsCreated: number }).week.status, "draft");
+    assert.equal((generated.data as { assignmentsCreated: number }).assignmentsCreated, 1);
   });
 
   it("enforces permissions for non-doctor, normal doctor, supervisor, and admin", async () => {
