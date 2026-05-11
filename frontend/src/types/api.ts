@@ -140,6 +140,54 @@ export interface DoctorRosterResponse {
   assignments: DoctorRosterAssignment[];
 }
 
+export type CaseAssignmentStatus = "active" | "superseded" | "corrected" | "cancelled";
+export type CaseAssignmentType = "imaging" | "protocol" | "reporting" | "ultrasound_operator" | "mammography_episode";
+
+export interface DoctorCase {
+  appointmentId: number;
+  appointmentDate: string;
+  appointmentTime: string | null;
+  patientId: number;
+  patientMrn: string | null;
+  patientNationalId: string | null;
+  patientArabicName: string | null;
+  patientEnglishName: string | null;
+  modalityId: number;
+  modalityCode: string | null;
+  modalityName: string | null;
+  examTypeId: number | null;
+  examTypeName: string | null;
+  caseCategory: string | null;
+  requiresReport: boolean;
+  appointmentStatus: string;
+  rosterAssignmentId: number | null;
+  teamName: string | null;
+  dutyType: RosterDutyType | null;
+  expectedReportingDate: string | null;
+  assignmentType: CaseAssignmentType | null;
+  assignmentStatus: CaseAssignmentStatus | null;
+  protocolStatus: null;
+  reportStatus: null;
+}
+
+export interface DoctorCaseFilters {
+  dateFrom: string;
+  dateTo: string;
+  modalityId?: number | null;
+  status?: string | null;
+  requiresReport?: boolean | null;
+  caseCategory?: string | null;
+  rosterAssignmentId?: number | null;
+}
+
+export interface DoctorCaseAssignmentSummary {
+  assignedCount: number;
+  alreadyAssignedCount: number;
+  unassignedNoRosterCount: number;
+  skippedCancelledCount: number;
+  errors: Array<{ appointmentId: number; reason: string }>;
+}
+
 export type IdentifierType = string;
 
 export interface PatientIdentifier {

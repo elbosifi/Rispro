@@ -87,7 +87,7 @@ describe("Doctor Portal wiring", () => {
     assert.match(routes, /"\/assignments"/);
     assert.match(routes, /"\/weeks\/:id\/publish"/);
     assert.match(routes, /"\/weeks\/:id\/copy-previous"/);
-    assert.doesNotMatch(routes, /createBooking|rescheduleBooking|case_team|protocol|workload|rvu|salary/i);
+    assert.doesNotMatch(routes, /createBooking|rescheduleBooking|case_team|appointment_protocols|workload|rvu|salary/i);
   });
 
   it("enforces supervisor or admin capability before roster mutations", () => {

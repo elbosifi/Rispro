@@ -15,6 +15,7 @@ import {
 import { fetchDoctorMe } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
+import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
 
 type DoctorPortalNavItem = {
@@ -101,6 +102,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
   return (
     <Routes>
       <Route index element={<Navigate to="/doctor/dashboard" replace />} />
+      <Route path="" element={<Navigate to="/doctor/dashboard" replace />} />
       <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
       <Route
         path="roster"
@@ -108,12 +110,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route
         path="cases"
-        element={
-          <PlaceholderPanel
-            title="My Cases"
-            body="Case baskets and team assignment are deferred to Phase 3. No cases are assigned or modified in Phase 1."
-          />
-        }
+        element={<DoctorCasesPage me={me} />}
       />
       <Route
         path="protocols"
@@ -188,6 +185,10 @@ export default function DoctorPage() {
 
   if (!me?.hasActiveDoctorProfile) {
     return <Navigate to="/" replace />;
+  }
+
+  if (location.pathname === "/doctor") {
+    return <Navigate to="/doctor/dashboard" replace />;
   }
 
   return (

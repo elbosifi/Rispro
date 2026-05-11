@@ -1,6 +1,6 @@
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPage from "./doctor-page";
 import { LanguageProvider } from "@/providers/language-provider";
@@ -11,6 +11,10 @@ const fetchMyDoctorRosterMock = vi.fn();
 const fetchDoctorRosterWeekMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchRosterDoctorsMock = vi.fn();
+const fetchMyDoctorCasesMock = vi.fn();
+const fetchTeamDoctorCasesMock = vi.fn();
+const fetchUnassignedDoctorCasesMock = vi.fn();
+const runDoctorCaseAssignmentMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -18,6 +22,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorRosterWeek: (...args: unknown[]) => fetchDoctorRosterWeekMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchRosterDoctors: (...args: unknown[]) => fetchRosterDoctorsMock(...args),
+  fetchMyDoctorCases: (...args: unknown[]) => fetchMyDoctorCasesMock(...args),
+  fetchTeamDoctorCases: (...args: unknown[]) => fetchTeamDoctorCasesMock(...args),
+  fetchUnassignedDoctorCases: (...args: unknown[]) => fetchUnassignedDoctorCasesMock(...args),
+  runDoctorCaseAssignment: (...args: unknown[]) => runDoctorCaseAssignmentMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -81,18 +89,32 @@ describe("Doctor Portal shell", () => {
     fetchDoctorRosterWeekMock.mockReset();
     fetchAppointmentLookupsMock.mockReset();
     fetchRosterDoctorsMock.mockReset();
+    fetchMyDoctorCasesMock.mockReset();
+    fetchTeamDoctorCasesMock.mockReset();
+    fetchUnassignedDoctorCasesMock.mockReset();
+    runDoctorCaseAssignmentMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
     fetchRosterDoctorsMock.mockResolvedValue([]);
+    fetchMyDoctorCasesMock.mockResolvedValue([]);
+    fetchTeamDoctorCasesMock.mockResolvedValue([]);
+    fetchUnassignedDoctorCasesMock.mockResolvedValue([]);
+    runDoctorCaseAssignmentMock.mockResolvedValue({
+      assignedCount: 0,
+      alreadyAssignedCount: 0,
+      unassignedNoRosterCount: 0,
+      skippedCancelledCount: 0,
+      errors: [],
+    });
   });
 
   it("allows an active doctor to access /doctor", async () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal();
 
-    expect(await screen.findByText("Doctor Portal")).toBeTruthy();
-    expect(screen.getByText("Dr Normal")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Doctor Portal" })).toBeTruthy();
+    expect(await screen.findByText("Dr Normal")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Dashboard/i })).toBeTruthy();
   });
 
@@ -149,8 +171,8 @@ describe("Doctor Portal shell", () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/roster");
 
-    expect(await screen.findByText("My Roster")).toBeTruthy();
-    expect(screen.getByText("No roster assignments for this week.")).toBeTruthy();
+    expect((await screen.findAllByText("My Roster")).length).toBeGreaterThan(0);
+    expect(await screen.findByText("No roster assignments for this week.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Create draft week/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /Publish week/i })).toBeNull();
   });
@@ -163,7 +185,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/admin/roster");
 
-    expect(await screen.findByText("Roster Management")).toBeTruthy();
+    expect((await screen.findAllByText("Roster Management")).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Create draft week/i })).toBeTruthy();
   });
 
@@ -190,5 +212,50 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/admin/roster");
 
     expect(await screen.findByRole("button", { name: /Publish week/i })).toBeTruthy();
+  });
+
+  it("normal doctor My Cases page renders empty state without assignment controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/cases");
+
+    expect(await screen.findByText("No cases found for this filter.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Run assignment/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Unassigned cases/i })).toBeNull();
+  });
+
+  it("doctor supervisor sees case assignment controls and unassigned view", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/cases");
+
+    expect(await screen.findByRole("button", { name: /Run assignment/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Team cases/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Unassigned cases/i })).toBeTruthy();
+  });
+
+  it("renders case assignment result summary", async () => {
+    runDoctorCaseAssignmentMock.mockResolvedValue({
+      assignedCount: 2,
+      alreadyAssignedCount: 1,
+      unassignedNoRosterCount: 3,
+      skippedCancelledCount: 4,
+      errors: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/cases");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Run assignment/i }));
+
+    expect(await screen.findByText("Assigned")).toBeTruthy();
+    expect(screen.getByText("Already assigned")).toBeTruthy();
+    expect(screen.getByText("No roster match")).toBeTruthy();
+    expect(screen.getByText("Skipped cancelled")).toBeTruthy();
   });
 });

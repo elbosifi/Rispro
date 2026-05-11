@@ -33,6 +33,9 @@ import type {
   DoctorRosterResponse,
   DoctorRosterAssignment,
   DoctorRosterMember,
+  DoctorCase,
+  DoctorCaseAssignmentSummary,
+  DoctorCaseFilters,
   RosterDutyType,
   RosterTeamRole
 } from "@/types/api";
@@ -218,6 +221,41 @@ export async function addDoctorRosterMember(assignmentId: number, payload: { doc
 
 export async function deleteDoctorRosterMember(assignmentId: number, memberId: number): Promise<void> {
   await api(`/doctor/roster/assignments/${assignmentId}/members/${memberId}`, { method: "DELETE" });
+}
+
+function doctorCaseParams(filters: DoctorCaseFilters): URLSearchParams {
+  const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
+  if (filters.modalityId) params.set("modalityId", String(filters.modalityId));
+  if (filters.status) params.set("status", filters.status);
+  if (filters.requiresReport !== null && filters.requiresReport !== undefined) {
+    params.set("requiresReport", String(filters.requiresReport));
+  }
+  if (filters.caseCategory) params.set("caseCategory", filters.caseCategory);
+  if (filters.rosterAssignmentId) params.set("rosterAssignmentId", String(filters.rosterAssignmentId));
+  return params;
+}
+
+export async function fetchMyDoctorCases(filters: DoctorCaseFilters): Promise<DoctorCase[]> {
+  const raw = await api<{ cases: DoctorCase[] }>(`/doctor/cases/my?${doctorCaseParams(filters).toString()}`);
+  return raw.cases;
+}
+
+export async function fetchTeamDoctorCases(filters: DoctorCaseFilters): Promise<DoctorCase[]> {
+  const raw = await api<{ cases: DoctorCase[] }>(`/doctor/cases/team?${doctorCaseParams(filters).toString()}`);
+  return raw.cases;
+}
+
+export async function fetchUnassignedDoctorCases(filters: DoctorCaseFilters): Promise<DoctorCase[]> {
+  const raw = await api<{ cases: DoctorCase[] }>(`/doctor/cases/unassigned?${doctorCaseParams(filters).toString()}`);
+  return raw.cases;
+}
+
+export async function runDoctorCaseAssignment(payload: { dateFrom: string; dateTo: string; modalityId?: number | null }): Promise<DoctorCaseAssignmentSummary> {
+  const raw = await api<{ summary: DoctorCaseAssignmentSummary }>("/doctor/cases/assign", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.summary;
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {
