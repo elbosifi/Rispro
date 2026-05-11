@@ -118,6 +118,60 @@ export interface DoctorRosterMember {
   teamRole: RosterTeamRole;
 }
 
+export type AvailabilityStatus =
+  | "available"
+  | "unavailable"
+  | "preferred"
+  | "not_preferred"
+  | "leave"
+  | "conference"
+  | "admin"
+  | "teaching"
+  | "on_call";
+
+export type LeaveType =
+  | "annual_leave"
+  | "sick_leave"
+  | "conference"
+  | "study_leave"
+  | "admin_leave"
+  | "emergency_absence";
+
+export type LeaveStatus = "pending" | "approved" | "rejected" | "cancelled";
+
+export interface DoctorAvailability {
+  id: number;
+  doctorId: number;
+  doctorName: string | null;
+  date: string;
+  startTime: string | null;
+  endTime: string | null;
+  availabilityStatus: AvailabilityStatus;
+  note: string | null;
+}
+
+export interface DoctorLeaveRequest {
+  id: number;
+  doctorId: number;
+  doctorName: string | null;
+  startDate: string;
+  endDate: string;
+  leaveType: LeaveType;
+  status: LeaveStatus;
+  reason: string | null;
+}
+
+export type RosterConflictSeverity = "error" | "warning" | "info";
+
+export interface RosterConflict {
+  assignmentId: number | null;
+  memberId: number | null;
+  doctorId: number | null;
+  severity: RosterConflictSeverity;
+  code: string;
+  message: string;
+}
+
 export interface DoctorRosterAssignment {
   id: number;
   rosterWeekId: number;

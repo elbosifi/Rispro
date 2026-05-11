@@ -11,9 +11,10 @@ import {
   fetchDoctorRosterWeek,
   fetchMyDoctorRoster,
   fetchRosterDoctors,
+  fetchRosterWeekConflicts,
   publishDoctorRosterWeek,
 } from "@/lib/api-hooks";
-import type { DoctorMe, DoctorRosterAssignment, RosterDutyType, RosterTeamRole } from "@/types/api";
+import type { DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole } from "@/types/api";
 
 const DUTY_TYPES: Array<{ value: RosterDutyType; label: string }> = [
   { value: "ct_protocol_day", label: "CT protocol day" },
@@ -65,11 +66,13 @@ function AssignmentList({
   canManage,
   onDeleteAssignment,
   onRemoveMember,
+  conflicts,
 }: {
   assignments: DoctorRosterAssignment[];
   canManage: boolean;
   onDeleteAssignment?: (assignmentId: number) => void;
   onRemoveMember?: (assignmentId: number, memberId: number) => void;
+  conflicts?: RosterConflict[];
 }) {
   if (assignments.length === 0) {
     return (
@@ -83,6 +86,11 @@ function AssignmentList({
     <div className="space-y-3">
       {assignments.map((assignment) => (
         <article key={assignment.id} className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          {(conflicts ?? []).filter((conflict) => conflict.assignmentId === assignment.id).map((conflict, index) => (
+            <p key={`${conflict.code}-${index}`} className="mb-2 rounded-lg border px-3 py-2 text-xs font-medium" style={{ borderColor: "var(--border)", color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>
+              {conflict.severity.toUpperCase()}: {conflict.message}
+            </p>
+          ))}
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-foreground">{assignment.teamName}</p>
@@ -199,6 +207,19 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
+  const conflictsQuery = useQuery({
+    queryKey: ["doctor", "roster", "conflicts", roster?.week?.id],
+    queryFn: () => fetchRosterWeekConflicts(roster!.week!.id),
+    enabled: Boolean(canManage && roster?.week),
+  });
+  const conflicts = conflictsQuery.data ?? [];
+  const selectedAssignmentId = memberForm.assignmentId ? Number(memberForm.assignmentId) : null;
+  const conflictedDoctorIds = new Set(
+    conflicts
+      .filter((conflict) => !selectedAssignmentId || conflict.assignmentId === selectedAssignmentId)
+      .map((conflict) => conflict.doctorId)
+      .filter((doctorId): doctorId is number => typeof doctorId === "number")
+  );
 
   return (
     <div className="space-y-4">
@@ -249,6 +270,24 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                 )}
               </>
             )}
+          </div>
+          {publishMutation.isError && (
+            <p className="mt-3 text-sm font-medium" style={{ color: "#dc2626" }}>
+              Publish blocked: roster has publish-blocking conflicts.
+            </p>
+          )}
+        </section>
+      )}
+
+      {canManage && conflicts.length > 0 && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <h3 className="font-semibold">Roster conflicts</h3>
+          <div className="mt-3 space-y-2 text-sm">
+            {conflicts.map((conflict, index) => (
+              <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>
+                {conflict.severity.toUpperCase()}: {conflict.message}
+              </p>
+            ))}
           </div>
         </section>
       )}
@@ -317,7 +356,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
               <select value={memberForm.doctorId} onChange={(e) => setMemberForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">Doctor</option>
                 {(doctorsQuery.data ?? []).map((doctor) => (
-                  <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>
+                  <option key={doctor.id} value={doctor.id}>{doctor.displayName}{conflictedDoctorIds.has(doctor.id) ? " · conflict" : ""}</option>
                 ))}
               </select>
               <select value={memberForm.teamRole} onChange={(e) => setMemberForm((c) => ({ ...c, teamRole: e.target.value as RosterTeamRole }))} className="rounded-lg border px-3 py-2 text-sm">
@@ -337,6 +376,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
           canManage={Boolean(editable)}
           onDeleteAssignment={(assignmentId) => deleteAssignmentMutation.mutate(assignmentId)}
           onRemoveMember={(assignmentId, memberId) => removeMemberMutation.mutate({ assignmentId, memberId })}
+          conflicts={conflicts}
         />
       )}
     </div>

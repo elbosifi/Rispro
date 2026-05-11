@@ -13,6 +13,7 @@ import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
 import { doctorWorkloadRouter } from "./workload-routes.js";
+import { doctorAvailabilityRouter, doctorLeaveRouter } from "./availability-routes.js";
 
 const router = Router();
 
@@ -28,6 +29,8 @@ router.use("/roster", doctorRosterRouter);
 router.use("/cases", doctorCasesRouter);
 router.use("/protocols", doctorProtocolsRouter);
 router.use("/workload", doctorWorkloadRouter);
+router.use("/availability", doctorAvailabilityRouter);
+router.use("/leave", doctorLeaveRouter);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;

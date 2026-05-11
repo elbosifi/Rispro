@@ -21,6 +21,8 @@ import {
 } from "./roster-repository.js";
 import type { RosterTeamRole } from "./roster-types.js";
 import { pool } from "../../db/pool.js";
+import { insertDoctorAuditEvent } from "./profile-repository.js";
+import { validateRosterAssignmentConflicts, validateRosterWeekConflicts } from "./roster-conflicts.js";
 
 interface Actor {
   userId: UserId;
@@ -149,9 +151,33 @@ export async function removeRosterMember(actor: Actor, assignmentId: number, mem
 export async function publishRosterWeek(actor: Actor, weekId: number) {
   const me = await requireRosterManager(actor);
   await assertDraftFutureRosterWeek(weekId);
+  const conflicts = await validateRosterWeekConflicts(weekId);
+  const errors = conflicts.filter((conflict) => conflict.severity === "error");
+  if (errors.length > 0) {
+    await insertDoctorAuditEvent(pool, {
+      actorUserId: actor.userId,
+      actorDoctorId: me.profile!.id,
+      eventType: "roster_publish_blocked",
+      targetType: "doctor_roster_week",
+      targetId: weekId,
+      metadata: { errorCount: errors.length, conflicts: errors },
+      reason: null,
+    });
+    throw new HttpError(409, "Roster has publish-blocking conflicts.", { conflicts: errors });
+  }
   const week = await publishWeek(weekId, { userId: actor.userId, doctorId: me.profile!.id });
   if (!week) throw new HttpError(409, "Roster week could not be published.");
   return week;
+}
+
+export async function getRosterWeekConflicts(actor: Actor, weekId: number) {
+  await requireRosterManager(actor);
+  return validateRosterWeekConflicts(weekId);
+}
+
+export async function validateRosterAssignment(actor: Actor, assignmentId: number) {
+  await requireRosterManager(actor);
+  return validateRosterAssignmentConflicts(assignmentId);
 }
 
 export async function archiveRosterWeek(actor: Actor, weekId: number) {

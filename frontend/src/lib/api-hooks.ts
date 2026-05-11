@@ -33,6 +33,9 @@ import type {
   DoctorRosterResponse,
   DoctorRosterAssignment,
   DoctorRosterMember,
+  DoctorAvailability,
+  DoctorLeaveRequest,
+  RosterConflict,
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
@@ -45,6 +48,8 @@ import type {
   WorkloadCalculationSummary,
   WorkloadCatalogRule,
   WorkloadFilters,
+  AvailabilityStatus,
+  LeaveType,
   RosterDutyType,
   RosterTeamRole
 } from "@/types/api";
@@ -230,6 +235,67 @@ export async function addDoctorRosterMember(assignmentId: number, payload: { doc
 
 export async function deleteDoctorRosterMember(assignmentId: number, memberId: number): Promise<void> {
   await api(`/doctor/roster/assignments/${assignmentId}/members/${memberId}`, { method: "DELETE" });
+}
+
+export async function fetchRosterWeekConflicts(weekId: number): Promise<RosterConflict[]> {
+  const raw = await api<{ conflicts: RosterConflict[] }>(`/doctor/roster/weeks/${weekId}/conflicts`);
+  return raw.conflicts;
+}
+
+export async function validateDoctorRosterAssignment(assignmentId: number): Promise<RosterConflict[]> {
+  const raw = await api<{ conflicts: RosterConflict[] }>(`/doctor/roster/assignments/${assignmentId}/validate`, { method: "POST" });
+  return raw.conflicts;
+}
+
+export async function fetchMyDoctorAvailability(dateFrom: string, dateTo: string): Promise<DoctorAvailability[]> {
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  const raw = await api<{ availability: DoctorAvailability[] }>(`/doctor/availability/my?${params.toString()}`);
+  return raw.availability;
+}
+
+export async function fetchTeamDoctorAvailability(dateFrom: string, dateTo: string): Promise<DoctorAvailability[]> {
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  const raw = await api<{ availability: DoctorAvailability[] }>(`/doctor/availability/team?${params.toString()}`);
+  return raw.availability;
+}
+
+export async function createMyDoctorAvailability(payload: {
+  date: string;
+  startTime: string | null;
+  endTime: string | null;
+  availabilityStatus: AvailabilityStatus;
+  note: string | null;
+}): Promise<DoctorAvailability> {
+  const raw = await api<{ availability: DoctorAvailability }>("/doctor/availability/my", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.availability;
+}
+
+export async function fetchMyDoctorLeave(dateFrom: string, dateTo: string): Promise<DoctorLeaveRequest[]> {
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  const raw = await api<{ leave: DoctorLeaveRequest[] }>(`/doctor/leave/my?${params.toString()}`);
+  return raw.leave;
+}
+
+export async function fetchTeamDoctorLeave(dateFrom: string, dateTo: string): Promise<DoctorLeaveRequest[]> {
+  const params = new URLSearchParams({ dateFrom, dateTo });
+  const raw = await api<{ leave: DoctorLeaveRequest[] }>(`/doctor/leave/team?${params.toString()}`);
+  return raw.leave;
+}
+
+export async function createMyDoctorLeave(payload: {
+  startDate: string;
+  endDate: string;
+  leaveType: LeaveType;
+  reason: string | null;
+}): Promise<DoctorLeaveRequest> {
+  const raw = await api<{ leave: DoctorLeaveRequest }>("/doctor/leave/my", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.leave;
 }
 
 function doctorCaseParams(filters: DoctorCaseFilters): URLSearchParams {

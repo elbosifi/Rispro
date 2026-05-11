@@ -12,6 +12,7 @@ import {
   copyPreviousRosterWeek,
   createDraftRosterWeek,
   getMyRosterForDoctor,
+  getRosterWeekConflicts,
   getRosterWeekForManager,
   listRosterDoctors,
   patchRosterAssignment,
@@ -19,6 +20,7 @@ import {
   removeRosterAssignment,
   removeRosterMember,
   updateDraftRosterWeek,
+  validateRosterAssignment,
 } from "./roster-service.js";
 
 const router = Router();
@@ -134,6 +136,14 @@ router.post(
   })
 );
 
+router.get(
+  "/weeks/:id/conflicts",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const conflicts = await getRosterWeekConflicts(actor(req), asPositiveInteger(req.params.id, "weekId"));
+    res.json({ conflicts });
+  })
+);
+
 router.post(
   "/weeks/:id/archive",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
@@ -215,6 +225,14 @@ router.post(
       parseTeamRole(body.teamRole)
     );
     res.status(201).json({ member });
+  })
+);
+
+router.post(
+  "/assignments/:id/validate",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const conflicts = await validateRosterAssignment(actor(req), asPositiveInteger(req.params.id, "assignmentId"));
+    res.json({ conflicts });
   })
 );
 

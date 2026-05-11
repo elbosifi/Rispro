@@ -62,3 +62,13 @@ export interface RosterWeekDetails {
   assignments: RosterAssignmentRow[];
 }
 
+export type RosterConflictSeverity = "error" | "warning" | "info";
+
+export interface RosterConflict {
+  assignmentId: number | null;
+  memberId: number | null;
+  doctorId: number | null;
+  severity: RosterConflictSeverity;
+  code: string;
+  message: string;
+}

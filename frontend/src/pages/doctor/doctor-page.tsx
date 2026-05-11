@@ -19,6 +19,7 @@ import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
 import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
+import { DoctorAvailabilityPage } from "./doctor-availability-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -30,6 +31,7 @@ type DoctorPortalNavItem = {
 const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { path: "/doctor/roster", label: "My Roster", icon: CalendarDays },
+  { path: "/doctor/availability", label: "Availability", icon: CalendarDays },
   { path: "/doctor/cases", label: "My Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
   { path: "/doctor/team-workload", label: "Team Workload", icon: Activity },
@@ -109,6 +111,10 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route
         path="roster"
         element={<DoctorRosterPage me={me} management={false} />}
+      />
+      <Route
+        path="availability"
+        element={<DoctorAvailabilityPage me={me} />}
       />
       <Route
         path="cases"

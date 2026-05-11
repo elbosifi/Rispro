@@ -24,6 +24,13 @@ const cancelProtocolMock = vi.fn();
 const fetchTeamWorkloadSummaryMock = vi.fn();
 const runWorkloadCalculationMock = vi.fn();
 const fetchWorkloadCatalogMock = vi.fn();
+const fetchRosterWeekConflictsMock = vi.fn();
+const fetchMyDoctorAvailabilityMock = vi.fn();
+const fetchTeamDoctorAvailabilityMock = vi.fn();
+const createMyDoctorAvailabilityMock = vi.fn();
+const fetchMyDoctorLeaveMock = vi.fn();
+const fetchTeamDoctorLeaveMock = vi.fn();
+const createMyDoctorLeaveMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -44,6 +51,13 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchTeamWorkloadSummary: (...args: unknown[]) => fetchTeamWorkloadSummaryMock(...args),
   runWorkloadCalculation: (...args: unknown[]) => runWorkloadCalculationMock(...args),
   fetchWorkloadCatalog: (...args: unknown[]) => fetchWorkloadCatalogMock(...args),
+  fetchRosterWeekConflicts: (...args: unknown[]) => fetchRosterWeekConflictsMock(...args),
+  fetchMyDoctorAvailability: (...args: unknown[]) => fetchMyDoctorAvailabilityMock(...args),
+  fetchTeamDoctorAvailability: (...args: unknown[]) => fetchTeamDoctorAvailabilityMock(...args),
+  createMyDoctorAvailability: (...args: unknown[]) => createMyDoctorAvailabilityMock(...args),
+  fetchMyDoctorLeave: (...args: unknown[]) => fetchMyDoctorLeaveMock(...args),
+  fetchTeamDoctorLeave: (...args: unknown[]) => fetchTeamDoctorLeaveMock(...args),
+  createMyDoctorLeave: (...args: unknown[]) => createMyDoctorLeaveMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -120,6 +134,13 @@ describe("Doctor Portal shell", () => {
     fetchTeamWorkloadSummaryMock.mockReset();
     runWorkloadCalculationMock.mockReset();
     fetchWorkloadCatalogMock.mockReset();
+    fetchRosterWeekConflictsMock.mockReset();
+    fetchMyDoctorAvailabilityMock.mockReset();
+    fetchTeamDoctorAvailabilityMock.mockReset();
+    createMyDoctorAvailabilityMock.mockReset();
+    fetchMyDoctorLeaveMock.mockReset();
+    fetchTeamDoctorLeaveMock.mockReset();
+    createMyDoctorLeaveMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
@@ -177,6 +198,13 @@ describe("Doctor Portal shell", () => {
       errors: [],
     });
     fetchWorkloadCatalogMock.mockResolvedValue([]);
+    fetchRosterWeekConflictsMock.mockResolvedValue([]);
+    fetchMyDoctorAvailabilityMock.mockResolvedValue([]);
+    fetchTeamDoctorAvailabilityMock.mockResolvedValue([]);
+    createMyDoctorAvailabilityMock.mockResolvedValue({});
+    fetchMyDoctorLeaveMock.mockResolvedValue([]);
+    fetchTeamDoctorLeaveMock.mockResolvedValue([]);
+    createMyDoctorLeaveMock.mockResolvedValue({});
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -282,6 +310,81 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/admin/roster");
 
     expect(await screen.findByRole("button", { name: /Publish week/i })).toBeTruthy();
+  });
+
+  it("availability page renders and doctor can add unavailable day", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/availability");
+
+    expect(await screen.findByRole("heading", { name: /Doctor availability and leave/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Add unavailable day/i }));
+
+    await waitFor(() => {
+      expect(createMyDoctorAvailabilityMock).toHaveBeenCalled();
+    });
+  });
+
+  it("supervisor sees team availability", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    fetchTeamDoctorAvailabilityMock.mockResolvedValue([
+      { id: 1, doctorId: 2, doctorName: "Dr Team", date: "2027-01-04", startTime: null, endTime: null, availabilityStatus: "unavailable", note: null },
+    ]);
+    renderDoctorPortal("/doctor/availability");
+
+    expect(await screen.findByText("Team availability")).toBeTruthy();
+    expect(await screen.findByText(/Dr Team/)).toBeTruthy();
+  });
+
+  it("roster page shows conflict warnings and labels conflicted doctors", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [
+        {
+          id: 44,
+          rosterWeekId: 99,
+          date: "2027-01-04",
+          modalityId: 1,
+          modalityCode: "CT",
+          modalityNameEn: "CT",
+          modalityNameAr: "CT",
+          dutyType: "ct_protocol_day",
+          sessionName: "day",
+          startTime: "08:00",
+          endTime: "14:00",
+          teamName: "CT Team",
+          status: "active",
+          members: [],
+        },
+      ],
+    });
+    fetchRosterDoctorsMock.mockResolvedValue([{ ...normalDoctor.profile!, id: 7, displayName: "Dr Conflict" }]);
+    fetchRosterWeekConflictsMock.mockResolvedValue([
+      { assignmentId: 44, memberId: null, doctorId: 7, severity: "error", code: "doctor_unavailable", message: "Dr Conflict is unavailable." },
+    ]);
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    expect(await screen.findByText("Roster conflicts")).toBeTruthy();
+    expect((await screen.findAllByText(/Dr Conflict is unavailable/)).length).toBeGreaterThan(0);
+    expect(await screen.findByRole("option", { name: /Dr Conflict · conflict/i })).toBeTruthy();
   });
 
   it("normal doctor My Cases page renders empty state without assignment controls", async () => {
