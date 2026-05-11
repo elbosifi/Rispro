@@ -165,7 +165,7 @@ export async function createProtocol(
         updated_by_doctor_id,
         version
       )
-      values ($1, $2, $3, $4, $5, $6, $7, case when $7 = 'assigned' then $8 else null end, case when $7 = 'assigned' then now() else null end, $8, 1)
+      values ($1, $2, $3, $4, $5, $6, $7::text, case when $7::text = 'assigned' then $8::bigint else null::bigint end, case when $7::text = 'assigned' then now() else null end, $8::bigint, 1)
       returning
         id, appointment_id as "appointmentId", protocol_text as "protocolText", contrast_required as "contrastRequired",
         contrast_phase_or_protocol as "contrastPhaseOrProtocol", special_preparation as "specialPreparation",
@@ -221,10 +221,10 @@ export async function updateProtocol(
           contrast_phase_or_protocol = $4,
           special_preparation = $5,
           technologist_notes = $6,
-          protocol_status = $7,
-          assigned_by_doctor_id = case when $7 = 'assigned' and assigned_by_doctor_id is null then $8 else assigned_by_doctor_id end,
-          assigned_at = case when $7 = 'assigned' and assigned_at is null then now() else assigned_at end,
-          updated_by_doctor_id = $8,
+          protocol_status = $7::text,
+          assigned_by_doctor_id = case when $7::text = 'assigned' and assigned_by_doctor_id is null then $8::bigint else assigned_by_doctor_id end,
+          assigned_at = case when $7::text = 'assigned' and assigned_at is null then now() else assigned_at end,
+          updated_by_doctor_id = $8::bigint,
           updated_at = now(),
           version = version + 1
       where appointment_id = $1
