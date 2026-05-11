@@ -1,8 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   addDoctorRosterMember,
+  applyRosterTemplate,
   copyPreviousDoctorRosterWeek,
+  createRosterTemplate,
   createDoctorRosterAssignment,
   createDoctorRosterWeek,
   deleteDoctorRosterAssignment,
@@ -11,10 +13,11 @@ import {
   fetchDoctorRosterWeek,
   fetchMyDoctorRoster,
   fetchRosterDoctors,
+  fetchRosterTemplates,
   fetchRosterWeekConflicts,
   publishDoctorRosterWeek,
 } from "@/lib/api-hooks";
-import type { DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole } from "@/types/api";
+import type { ApplyRosterTemplateResult, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
 
 const DUTY_TYPES: Array<{ value: RosterDutyType; label: string }> = [
   { value: "ct_protocol_day", label: "CT protocol day" },
@@ -39,6 +42,15 @@ const TEAM_ROLES: Array<{ value: RosterTeamRole; label: string }> = [
   { value: "observer", label: "Observer" },
 ];
 
+const TEMPLATE_TYPES: Array<{ value: RosterTemplateType; label: string }> = [
+  { value: "ct_weekly", label: "CT weekly" },
+  { value: "mri_weekly", label: "MRI weekly" },
+  { value: "ultrasound_weekly", label: "Ultrasound weekly" },
+  { value: "mammography_weekly", label: "Mammography weekly" },
+  { value: "mixed_weekly", label: "Mixed weekly" },
+  { value: "custom", label: "Custom" },
+];
+
 function weekStartIso(date = new Date()): string {
   const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const day = d.getUTCDay();
@@ -55,6 +67,10 @@ function addDays(isoDate: string, days: number): string {
 
 function isManager(me: DoctorMe): boolean {
   return me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+}
+
+function isAdmin(me: DoctorMe): boolean {
+  return me.moduleCapabilities.includes("doctor_admin");
 }
 
 function dutyLabel(value: string): string {
@@ -137,6 +153,7 @@ function AssignmentList({
 export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; management?: boolean }) {
   const queryClient = useQueryClient();
   const canManage = management && isManager(me);
+  const canManageTemplates = canManage && isAdmin(me);
   const [weekStart, setWeekStart] = useState(weekStartIso());
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const rosterQueryKey = canManage ? ["doctor", "roster", "week", weekStart] : ["doctor", "roster", "my", weekStart];
@@ -156,6 +173,11 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
   const doctorsQuery = useQuery({
     queryKey: ["doctor", "roster", "doctors"],
     queryFn: fetchRosterDoctors,
+    enabled: canManage,
+  });
+  const templatesQuery = useQuery({
+    queryKey: ["doctor", "roster", "templates"],
+    queryFn: fetchRosterTemplates,
     enabled: canManage,
   });
 
@@ -193,6 +215,21 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
       deleteDoctorRosterMember(payload.assignmentId, payload.memberId),
     onSuccess: invalidateRoster,
   });
+  const createTemplateMutation = useMutation({
+    mutationFn: createRosterTemplate,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "roster", "templates"] });
+    },
+  });
+  const [templateApplyResult, setTemplateApplyResult] = useState<ApplyRosterTemplateResult | null>(null);
+  const applyTemplateMutation = useMutation({
+    mutationFn: (payload: { templateId: number; targetWeekStartDate: string; copyMode: RosterTemplateCopyMode; overwriteExisting: boolean; modalityId: number | null }) =>
+      applyRosterTemplate(payload.templateId, payload),
+    onSuccess: async (result) => {
+      setTemplateApplyResult(result);
+      await invalidateRoster();
+    },
+  });
 
   const [assignmentForm, setAssignmentForm] = useState({
     date: weekStart,
@@ -204,6 +241,26 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     teamName: "",
   });
   const [memberForm, setMemberForm] = useState({ assignmentId: "", doctorId: "", teamRole: "specialist" as RosterTeamRole });
+  const [templateForm, setTemplateForm] = useState({
+    name: "",
+    templateType: "ct_weekly" as RosterTemplateType,
+    dayOfWeek: "1",
+    dutyType: "ct_protocol_day" as RosterDutyType,
+    teamName: "Template team",
+    placeholderLabel: "Lead specialist",
+    requiredRole: "specialist",
+  });
+  const [templateApplyForm, setTemplateApplyForm] = useState({
+    templateId: "",
+    copyMode: "structure_only" as RosterTemplateCopyMode,
+    overwriteExisting: false,
+  });
+  useEffect(() => {
+    const firstTemplate = templatesQuery.data?.[0];
+    if (firstTemplate && !templateApplyForm.templateId) {
+      setTemplateApplyForm((current) => ({ ...current, templateId: String(firstTemplate.id) }));
+    }
+  }, [templatesQuery.data, templateApplyForm.templateId]);
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
@@ -365,6 +422,111 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
             </div>
             <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Add member</button>
           </form>
+        </section>
+      )}
+
+      {canManage && (
+        <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="space-y-3">
+            <h3 className="font-semibold">Roster templates</h3>
+            {(templatesQuery.data ?? []).length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No roster templates yet.</p>
+            ) : (
+              <div className="space-y-2 text-sm">
+                {(templatesQuery.data ?? []).map((template) => (
+                  <p key={template.id}>{template.name} · {template.templateType.replaceAll("_", " ")} · {template.assignments.length} duties</p>
+                ))}
+              </div>
+            )}
+            <form
+              className="grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!templateApplyForm.templateId) return;
+                applyTemplateMutation.mutate({
+                  templateId: Number(templateApplyForm.templateId),
+                  targetWeekStartDate: weekStart,
+                  copyMode: templateApplyForm.copyMode,
+                  overwriteExisting: templateApplyForm.overwriteExisting,
+                  modalityId: null,
+                });
+              }}
+            >
+              <select value={templateApplyForm.templateId} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="">Select template</option>
+                {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
+              <select value={templateApplyForm.copyMode} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, copyMode: e.target.value as RosterTemplateCopyMode }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="structure_only">Structure only</option>
+                <option value="structure_with_named_doctors">Structure with named doctors</option>
+              </select>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={templateApplyForm.overwriteExisting} onChange={(e) => setTemplateApplyForm((c) => ({ ...c, overwriteExisting: e.target.checked }))} />
+                Overwrite existing draft duties
+              </label>
+              <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Apply template</button>
+            </form>
+            {templateApplyResult && (
+              <div className="rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)" }}>
+                Template applied: {templateApplyResult.createdAssignmentCount} duties, {templateApplyResult.copiedMemberCount} doctors, {templateApplyResult.skippedCount} skipped.
+                {templateApplyResult.conflicts.length > 0 && (
+                  <div className="mt-2 space-y-1">
+                    {templateApplyResult.conflicts.map((conflict, index) => (
+                      <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>{conflict.severity.toUpperCase()}: {conflict.message}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {canManageTemplates && (
+            <form
+              className="space-y-3"
+              onSubmit={(event) => {
+                event.preventDefault();
+                createTemplateMutation.mutate({
+                  name: templateForm.name || "New roster template",
+                  description: null,
+                  modalityId: null,
+                  templateType: templateForm.templateType,
+                  assignments: [{
+                    dayOfWeek: Number(templateForm.dayOfWeek),
+                    modalityId: null,
+                    dutyType: templateForm.dutyType,
+                    sessionName: null,
+                    startTime: "08:00",
+                    endTime: "14:00",
+                    teamName: templateForm.teamName || "Template team",
+                    sortOrder: 0,
+                    members: [{
+                      doctorId: null,
+                      teamRole: "lead",
+                      placeholderLabel: templateForm.placeholderLabel || "Lead specialist",
+                      requiredRole: templateForm.requiredRole || "specialist",
+                    }],
+                  }],
+                });
+              }}
+            >
+              <h3 className="font-semibold">Create template</h3>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input placeholder="Template name" value={templateForm.name} onChange={(e) => setTemplateForm((c) => ({ ...c, name: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <select value={templateForm.templateType} onChange={(e) => setTemplateForm((c) => ({ ...c, templateType: e.target.value as RosterTemplateType }))} className="rounded-lg border px-3 py-2 text-sm">
+                  {TEMPLATE_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                </select>
+                <select value={templateForm.dayOfWeek} onChange={(e) => setTemplateForm((c) => ({ ...c, dayOfWeek: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                  {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>Day {day}</option>)}
+                </select>
+                <select value={templateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
+                  {DUTY_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                </select>
+                <input placeholder="Team name" value={templateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+                <input placeholder="Placeholder" value={templateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              </div>
+              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Create template</button>
+            </form>
+          )}
         </section>
       )}
 

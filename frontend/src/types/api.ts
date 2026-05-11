@@ -172,6 +172,57 @@ export interface RosterConflict {
   message: string;
 }
 
+export type RosterTemplateType = "ct_weekly" | "mri_weekly" | "ultrasound_weekly" | "mammography_weekly" | "mixed_weekly" | "custom";
+export type RosterTemplateCopyMode = "structure_only" | "structure_with_named_doctors";
+
+export interface RosterTemplateMember {
+  id: number;
+  templateAssignmentId: number;
+  doctorId: number | null;
+  doctorName: string | null;
+  teamRole: RosterTeamRole;
+  placeholderLabel: string | null;
+  requiredRole: string | null;
+}
+
+export interface RosterTemplateAssignment {
+  id: number;
+  templateId: number;
+  dayOfWeek: number;
+  modalityId: number | null;
+  modalityCode: string | null;
+  modalityNameEn: string | null;
+  modalityNameAr: string | null;
+  dutyType: RosterDutyType;
+  sessionName: string | null;
+  startTime: string | null;
+  endTime: string | null;
+  teamName: string;
+  sortOrder: number;
+  members: RosterTemplateMember[];
+}
+
+export interface RosterTemplate {
+  id: number;
+  name: string;
+  description: string | null;
+  modalityId: number | null;
+  modalityCode: string | null;
+  modalityNameEn: string | null;
+  modalityNameAr: string | null;
+  templateType: RosterTemplateType;
+  active: boolean;
+  assignments: RosterTemplateAssignment[];
+}
+
+export interface ApplyRosterTemplateResult {
+  week: DoctorRosterWeek;
+  createdAssignmentCount: number;
+  copiedMemberCount: number;
+  skippedCount: number;
+  conflicts: RosterConflict[];
+}
+
 export interface DoctorRosterAssignment {
   id: number;
   rosterWeekId: number;

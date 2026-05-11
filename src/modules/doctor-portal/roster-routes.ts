@@ -5,6 +5,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import type { RosterDutyType, RosterTeamRole } from "./roster-types.js";
+import { doctorRosterTemplateRouter } from "./roster-template-routes.js";
 import {
   addRosterAssignment,
   addRosterMember,
@@ -24,6 +25,7 @@ import {
 } from "./roster-service.js";
 
 const router = Router();
+router.use("/templates", doctorRosterTemplateRouter);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;

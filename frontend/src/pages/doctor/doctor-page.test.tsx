@@ -31,6 +31,9 @@ const createMyDoctorAvailabilityMock = vi.fn();
 const fetchMyDoctorLeaveMock = vi.fn();
 const fetchTeamDoctorLeaveMock = vi.fn();
 const createMyDoctorLeaveMock = vi.fn();
+const fetchRosterTemplatesMock = vi.fn();
+const createRosterTemplateMock = vi.fn();
+const applyRosterTemplateMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -58,6 +61,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchMyDoctorLeave: (...args: unknown[]) => fetchMyDoctorLeaveMock(...args),
   fetchTeamDoctorLeave: (...args: unknown[]) => fetchTeamDoctorLeaveMock(...args),
   createMyDoctorLeave: (...args: unknown[]) => createMyDoctorLeaveMock(...args),
+  fetchRosterTemplates: (...args: unknown[]) => fetchRosterTemplatesMock(...args),
+  createRosterTemplate: (...args: unknown[]) => createRosterTemplateMock(...args),
+  applyRosterTemplate: (...args: unknown[]) => applyRosterTemplateMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -141,6 +147,9 @@ describe("Doctor Portal shell", () => {
     fetchMyDoctorLeaveMock.mockReset();
     fetchTeamDoctorLeaveMock.mockReset();
     createMyDoctorLeaveMock.mockReset();
+    fetchRosterTemplatesMock.mockReset();
+    createRosterTemplateMock.mockReset();
+    applyRosterTemplateMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
@@ -205,6 +214,25 @@ describe("Doctor Portal shell", () => {
     fetchMyDoctorLeaveMock.mockResolvedValue([]);
     fetchTeamDoctorLeaveMock.mockResolvedValue([]);
     createMyDoctorLeaveMock.mockResolvedValue({});
+    fetchRosterTemplatesMock.mockResolvedValue([]);
+    createRosterTemplateMock.mockResolvedValue({});
+    applyRosterTemplateMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      createdAssignmentCount: 1,
+      copiedMemberCount: 0,
+      skippedCount: 0,
+      conflicts: [],
+    });
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -385,6 +413,69 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByText("Roster conflicts")).toBeTruthy();
     expect((await screen.findAllByText(/Dr Conflict is unavailable/)).length).toBeGreaterThan(0);
     expect(await screen.findByRole("option", { name: /Dr Conflict · conflict/i })).toBeTruthy();
+  });
+
+  it("normal doctor does not see template management", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/roster");
+
+    expect(await screen.findByText("No roster assignments for this week.")).toBeTruthy();
+    expect(screen.queryByText("Roster templates")).toBeNull();
+  });
+
+  it("supervisor sees template controls and empty state", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    expect(await screen.findByText("Roster templates")).toBeTruthy();
+    expect(await screen.findByText("No roster templates yet.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Apply template/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Create template/i })).toBeNull();
+  });
+
+  it("admin can create and apply a template with conflict result", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor", "doctor_admin"],
+    });
+    fetchRosterTemplatesMock.mockImplementation(() => Promise.resolve([
+      { id: 7, name: "CT Weekly", description: null, modalityId: null, modalityCode: null, modalityNameEn: null, modalityNameAr: null, templateType: "ct_weekly", active: true, assignments: [] },
+    ]));
+    applyRosterTemplateMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      createdAssignmentCount: 2,
+      copiedMemberCount: 1,
+      skippedCount: 0,
+      conflicts: [{ assignmentId: 44, memberId: null, doctorId: null, severity: "error", code: "required_team_empty", message: "Published roster has an empty required team slot." }],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    expect(await screen.findByRole("button", { name: /Create template/i })).toBeTruthy();
+    await waitFor(() => {
+      expect(fetchRosterTemplatesMock).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Apply template/i }));
+
+    await waitFor(() => {
+      expect(applyRosterTemplateMock).toHaveBeenCalled();
+    });
+    expect(await screen.findByText(/Template applied: 2 duties, 1 doctors, 0 skipped/)).toBeTruthy();
+    expect(await screen.findByText(/Published roster has an empty required team slot/)).toBeTruthy();
   });
 
   it("normal doctor My Cases page renders empty state without assignment controls", async () => {

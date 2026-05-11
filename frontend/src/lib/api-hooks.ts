@@ -36,6 +36,10 @@ import type {
   DoctorAvailability,
   DoctorLeaveRequest,
   RosterConflict,
+  RosterTemplate,
+  ApplyRosterTemplateResult,
+  RosterTemplateCopyMode,
+  RosterTemplateType,
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
@@ -245,6 +249,47 @@ export async function fetchRosterWeekConflicts(weekId: number): Promise<RosterCo
 export async function validateDoctorRosterAssignment(assignmentId: number): Promise<RosterConflict[]> {
   const raw = await api<{ conflicts: RosterConflict[] }>(`/doctor/roster/assignments/${assignmentId}/validate`, { method: "POST" });
   return raw.conflicts;
+}
+
+export async function fetchRosterTemplates(): Promise<RosterTemplate[]> {
+  const raw = await api<{ templates: RosterTemplate[] }>("/doctor/roster/templates");
+  return raw.templates;
+}
+
+export async function createRosterTemplate(payload: {
+  name: string;
+  description: string | null;
+  modalityId: number | null;
+  templateType: RosterTemplateType;
+  assignments: Array<{
+    dayOfWeek: number;
+    modalityId: number | null;
+    dutyType: RosterDutyType;
+    sessionName: string | null;
+    startTime: string | null;
+    endTime: string | null;
+    teamName: string;
+    sortOrder: number;
+    members: Array<{ doctorId: number | null; teamRole: RosterTeamRole; placeholderLabel: string | null; requiredRole: string | null }>;
+  }>;
+}): Promise<RosterTemplate> {
+  const raw = await api<{ template: RosterTemplate }>("/doctor/roster/templates", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.template;
+}
+
+export async function applyRosterTemplate(templateId: number, payload: {
+  targetWeekStartDate: string;
+  copyMode: RosterTemplateCopyMode;
+  overwriteExisting: boolean;
+  modalityId: number | null;
+}): Promise<ApplyRosterTemplateResult> {
+  return api<ApplyRosterTemplateResult>(`/doctor/roster/templates/${templateId}/apply`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function fetchMyDoctorAvailability(dateFrom: string, dateTo: string): Promise<DoctorAvailability[]> {
