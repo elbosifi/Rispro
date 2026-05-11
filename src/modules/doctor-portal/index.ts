@@ -4,6 +4,7 @@ import { asyncRoute } from "../../utils/async-route.js";
 import { asOptionalBoolean, asString } from "../../utils/request-coercion.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
+import { env } from "../../config/env.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import { createProfileForAdmin, getDoctorMe, listProfilesForAdmin } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
@@ -16,6 +17,13 @@ import { doctorWorkloadRouter } from "./workload-routes.js";
 const router = Router();
 
 router.use(requireAuth);
+router.use((_req, _res, next) => {
+  if (!env.doctorPortalEnabled) {
+    next(new HttpError(404, "Doctor Portal is disabled."));
+    return;
+  }
+  next();
+});
 router.use("/roster", doctorRosterRouter);
 router.use("/cases", doctorCasesRouter);
 router.use("/protocols", doctorProtocolsRouter);

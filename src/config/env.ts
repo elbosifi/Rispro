@@ -137,6 +137,7 @@ export interface EnvConfig {
   webPushReportReadyScanIntervalSeconds: number;
   webPushReportReadyLookbackDays: number;
   webPushReportReadyMaxChecksPerRun: number;
+  doctorPortalEnabled: boolean;
 }
 
 function readDeploymentEnum<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
@@ -211,6 +212,7 @@ export const env: EnvConfig = {
   webPushReportReadyScanIntervalSeconds: readPositiveInteger("WEB_PUSH_REPORT_READY_SCAN_INTERVAL_SECONDS", 300),
   webPushReportReadyLookbackDays: readPositiveInteger("WEB_PUSH_REPORT_READY_LOOKBACK_DAYS", 14),
   webPushReportReadyMaxChecksPerRun: readPositiveInteger("WEB_PUSH_REPORT_READY_MAX_CHECKS_PER_RUN", 25),
+  doctorPortalEnabled: readBoolean("DOCTOR_PORTAL_ENABLED", true),
 };
 
 if (env.cookieSameSite === "none" && !env.cookieSecure) {
