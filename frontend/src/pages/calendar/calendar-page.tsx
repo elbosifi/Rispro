@@ -5,6 +5,7 @@ import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
@@ -313,8 +314,12 @@ export default function CalendarPage() {
               </div>
 
               <div className="mt-4 space-y-2 max-h-[55vh] overflow-y-auto">
-                {selectedModalitySummary.appointments.map((appointment) => (
-                  <div key={appointment.id} className="rounded-xl border border-border p-3">
+                {selectedModalitySummary.appointments.map((appointment, index) => (
+                  <div
+                    key={appointment.id}
+                    className={`rounded-xl border border-border p-3 ${patientCategoryRowClass(appointment.caseCategory, index)}`}
+                    data-category={appointment.caseCategory || "unknown"}
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">

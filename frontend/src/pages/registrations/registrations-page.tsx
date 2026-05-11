@@ -18,6 +18,7 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { Card, Button, SearchInput } from "@/components/shared";
@@ -981,14 +982,7 @@ export default function RegistrationsPage() {
                       : apt.caseCategory === "non_oncology"
                         ? t("appointments.create.nonOncology")
                         : t("registrations.categoryUnknown");
-                  const categoryRowClass =
-                    apt.caseCategory === "oncology"
-                      ? "border-l-4 border-l-rose-300 bg-rose-50/55 hover:bg-rose-50/80"
-                      : apt.caseCategory === "non_oncology"
-                        ? "border-l-4 border-l-sky-200 bg-sky-50/25 hover:bg-sky-50/45"
-                        : `border-l-4 border-l-transparent ${
-                            index % 2 === 0 ? "bg-background hover:bg-muted/40" : "bg-muted/20 hover:bg-muted/40"
-                          }`;
+                  const categoryRowClass = patientCategoryRowClass(apt.caseCategory, index, isSelected);
                   const statusToneClass =
                     apt.status === "arrived"
                       ? "bg-emerald-100 text-emerald-700"
@@ -1021,9 +1015,7 @@ export default function RegistrationsPage() {
                           openSlipPreview(apt);
                         }
                       }}
-                      className={`grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(190px,0.62fr)] items-center gap-2 px-3 py-2.5 transition-colors outline-none cursor-pointer ${categoryRowClass} ${
-                        isSelected ? "ring-1 ring-accent/30" : ""
-                      }`}
+                      className={`grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(190px,0.62fr)] items-center gap-2 px-3 py-2.5 transition-colors outline-none cursor-pointer ${categoryRowClass}`}
                       >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">

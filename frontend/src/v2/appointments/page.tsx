@@ -12,6 +12,7 @@ import { pushToast } from "@/lib/toast";
 import { useAuth } from "@/providers/auth-provider";
 import { Button, Card, LoadingState } from "@/components/shared";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
+import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2Lookups, useV2ExamTypes, useV2Availability, useV2ListBookings, useV2CancelBooking, useV2RescheduleBooking, useV2Suggestions, useV2SpecialReasonCodes } from "./api";
 import type { CaseCategory, DecisionStatus, AvailabilityDayDto, BookingWithPatientInfo, ExamTypeDto, ModalityDto, CapacityResolutionMode, SpecialReasonCodeDto } from "./types";
@@ -631,7 +632,7 @@ function BookingsList({
               </tr>
             </thead>
             <tbody>
-              {bookingsList.map((booking) => {
+              {bookingsList.map((booking, index) => {
                 // Keep pending disable state scoped to the affected booking row only.
                 const cancelPendingForRow = cancelPendingBookingId === booking.id;
                 const reschedulePendingForRow = reschedulePendingBookingId === booking.id;
@@ -639,9 +640,10 @@ function BookingsList({
                 return (
                   <tr
                     key={booking.id}
-                    className="border-b transition-colors hover:bg-[var(--muted)]"
+                    className={`border-b transition-colors ${patientCategoryRowClass(booking.caseCategory, index)}`}
+                    data-category={booking.caseCategory || "unknown"}
                     style={{
-                      borderColor: "var(--border)",
+                      borderBottomColor: "var(--border)",
                       opacity: booking.status === "cancelled" || booking.status === "discontinued" || booking.status === "voided" ? 0.6 : 1,
                     }}
                   >

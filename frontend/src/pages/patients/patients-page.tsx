@@ -7,6 +7,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { UserPlus, Search, Pencil, CalendarPlus, Printer, X, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User, IdCard } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
 import type { PatientDirectoryRow, PatientDirectoryResponse, PatientDirectorySummary } from "@/types/api";
@@ -436,20 +437,24 @@ export default function PatientsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {patients.map((patient: PatientDirectoryRow) => (
-                  <tr
-                      key={patient.id}
-                      className="transition-colors duration-150 hover:bg-muted/50 cursor-pointer"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => setSelectedPatientId(patient.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setSelectedPatientId(patient.id);
-                        }
-                      }}
-                    >
+                  {patients.map((patient: PatientDirectoryRow, index: number) => {
+                    const categoryRowClass = patientCategoryRowClass(patient.category, index);
+
+                    return (
+                      <tr
+                        key={patient.id}
+                        className={`transition-colors duration-150 cursor-pointer ${categoryRowClass}`}
+                        data-category={patient.category || "unknown"}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setSelectedPatientId(patient.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setSelectedPatientId(patient.id);
+                          }
+                        }}
+                      >
                       <td className="p-3 font-mono text-xs">{patient.mrn || "—"}</td>
                       <td className="p-3 font-medium">
                         <div className="flex items-center gap-2">
@@ -540,8 +545,9 @@ export default function PatientsPage() {
                           )}
                         </div>
                       </td>
-                    </tr>
-                  ))}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -14,6 +14,7 @@ import {
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import {
   Badge,
   Button,
@@ -459,7 +460,7 @@ export default function ModalityPage() {
                   </div>
                 ) : (
                   <ul className="space-y-3">
-                    {activeAppointments.map((appointment) => {
+                    {activeAppointments.map((appointment, index) => {
                       const selected = appointment.id === selectedAppointmentId;
                       const edited = Boolean(appointment.createdAt && appointment.updatedAt && appointment.createdAt !== appointment.updatedAt);
                       return (
@@ -468,11 +469,11 @@ export default function ModalityPage() {
                             ref={selected ? selectedRef : undefined}
                             type="button"
                             onClick={() => setSelectedAppointmentId(appointment.id)}
-                            className={`w-full rounded-2xl border p-4 text-right transition-all duration-150 ${
+                            className={`w-full rounded-2xl border border-slate-200 p-4 text-right transition-all duration-150 ${
                               selected
-                                ? "border-[color:var(--accent)] bg-[linear-gradient(135deg,rgba(37,99,235,0.10),rgba(14,165,233,0.08))] shadow-[0_12px_30px_rgba(37,99,235,0.12)]"
-                                : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                            }`}
+                                ? "shadow-[0_12px_30px_rgba(37,99,235,0.12)]"
+                                : "hover:border-slate-300"
+                            } ${patientCategoryRowClass(appointment.caseCategory, index, selected)}`}
                           >
                             <div className={`flex items-start justify-between gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
                               <div className="min-w-0 flex-1">
@@ -538,16 +539,16 @@ export default function ModalityPage() {
                     </div>
                   ) : (
                     <ul className="space-y-2">
-                      {historyAppointments.slice(0, 12).map((appointment) => (
+                      {historyAppointments.slice(0, 12).map((appointment, index) => (
                         <li key={appointment.id}>
                           <button
                             type="button"
                             onClick={() => setSelectedAppointmentId(appointment.id)}
-                            className={`w-full rounded-2xl border px-4 py-3 text-right transition-colors ${
+                            className={`w-full rounded-2xl border border-slate-200 px-4 py-3 text-right transition-colors ${
                               appointment.id === selectedAppointmentId
-                                ? "border-[color:var(--accent)] bg-[linear-gradient(135deg,rgba(37,99,235,0.08),rgba(14,165,233,0.06))]"
-                                : "border-slate-200 bg-white hover:bg-slate-50"
-                            }`}
+                                ? ""
+                                : "hover:border-slate-300"
+                            } ${patientCategoryRowClass(appointment.caseCategory, index, appointment.id === selectedAppointmentId)}`}
                           >
                             <div className={`flex items-center justify-between gap-3 ${isArabic ? "flex-row-reverse" : ""}`}>
                               <div className="min-w-0 flex-1">
