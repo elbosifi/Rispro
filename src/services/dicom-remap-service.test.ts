@@ -198,6 +198,7 @@ test("dicom helper: DICOM file checks are strict but predictable", () => {
   assert.equal(__dicomRemapTestables.isLikelyDicomFile("notes.txt", "text/plain"), false);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("DICOMDIR"), true);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("MEDIAVIE.PRO"), true);
+  assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("CDVIEWER.JAR"), true);
   assert.equal(__dicomRemapTestables.isSkippableDicomRemapFolderEntry("image.dcm"), false);
 });
 

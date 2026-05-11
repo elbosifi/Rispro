@@ -153,6 +153,7 @@ describe("dicom study scan", () => {
     expect(isSkippableDicomSidecarFile("DICOMDIR")).toBe(true);
     expect(isSkippableDicomSidecarFile("MEDIAVIE.PRO")).toBe(true);
     expect(isSkippableDicomSidecarFile("viewer.exe")).toBe(true);
+    expect(isSkippableDicomSidecarFile("CDVIEWER.JAR")).toBe(true);
     expect(isSkippableDicomSidecarFile("scan1.dcm")).toBe(false);
   });
 

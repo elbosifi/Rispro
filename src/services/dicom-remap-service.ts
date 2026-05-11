@@ -217,6 +217,11 @@ function isSkippableDicomRemapFolderEntry(fileName: string): boolean {
     ".dll",
     ".bat",
     ".cmd",
+    ".jar",
+    ".jnlp",
+    ".class",
+    ".cab",
+    ".zip",
     ".ini",
     ".html",
     ".htm",
@@ -821,6 +826,12 @@ async function rewriteDicomFileForRemap(
     body: Buffer.from(datasetToBuffer(dataset)),
     originalSummary,
   };
+}
+
+function isDicomRewriteParseError(error: unknown): boolean {
+  return error instanceof HttpError &&
+    error.statusCode === 400 &&
+    error.message.startsWith("RISPro could not rewrite ");
 }
 
 function readOrthancStudySeriesCount(payload: unknown): number | null {
@@ -2507,7 +2518,16 @@ export async function processDicomRemapMultipartJob({
     }
 
     for (const entry of acceptedFiles) {
-      const rewritten = await rewriteDicomFileForRemap(entry.file, replacement, uidPlan);
+      const rewritten = await rewriteDicomFileForRemap(entry.file, replacement, uidPlan).catch((error: unknown) => {
+        if (isDicomRewriteParseError(error)) {
+          skippedFilesCount += 1;
+          return null;
+        }
+        throw error;
+      });
+      if (!rewritten) {
+        continue;
+      }
       if (!originalSummary) {
         originalSummary = rewritten.originalSummary;
       }
