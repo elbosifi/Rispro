@@ -48,7 +48,7 @@ import {
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { chooseLocalized, type TranslationKey } from "@/lib/i18n";
-import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
+import { scanAppointmentRequest } from "@/lib/naps2-webscan";
 import { useLanguage } from "@/providers/language-provider";
 import { Button } from "@/components/shared/Button";
 import { Card } from "@/components/shared/Card";
@@ -4201,11 +4201,15 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
   });
 
   const testNaps2Mutation = useMutation({
-    mutationFn: () => getNaps2WebScanStatus(naps2WebScanEndpoint),
-    onSuccess: (status) => {
-      setResultMessage(status.available && status.endpoint
-        ? t("settings.documents.naps2TestOk", { endpoint: `${status.endpoint}/eSCL/ScannerCapabilities` })
-        : t("settings.documents.naps2TestFailed", { message: status.message || "NAPS2.WebScan is not reachable." }));
+    mutationFn: () => scanAppointmentRequest({
+      endpoint: naps2WebScanEndpoint,
+      dpi: Number(scanDpi) || 200,
+      colorMode: scanColorMode === "color" ? "color" : "grayscale",
+      source: scannerSource === "flatbed" ? "flatbed" : scannerSource === "duplex" ? "duplex" : "feeder",
+      fileName: "naps2-test-scan.pdf",
+    }),
+    onSuccess: (result) => {
+      setResultMessage(t("settings.documents.naps2TestOk", { pageCount: result.pageCount, fileName: result.file.name }));
     },
     onError: (err: unknown) => {
       setResultMessage(err instanceof Error ? err.message : t("settings.documents.naps2TestFailed", { message: "NAPS2.WebScan is not reachable." }));
