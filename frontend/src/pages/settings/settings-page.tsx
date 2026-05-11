@@ -245,9 +245,10 @@ const SECTION_KEYS: SettingsSection[] = [
   "backup_restore"
 ];
 
+type SettingsMenuSection = Exclude<SettingsSection, "menu">;
 type SettingsGroup = "all" | "clinical" | "scheduling" | "integrations" | "admin" | "system";
 
-const SECTION_GROUPS: Record<Exclude<SettingsSection, "menu">, Exclude<SettingsGroup, "all">> = {
+const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">> = {
   patient_registration: "clinical",
   patient_import: "clinical",
   exam_types: "clinical",
@@ -273,6 +274,7 @@ const SECTION_GROUPS: Record<Exclude<SettingsSection, "menu">, Exclude<SettingsG
 };
 
 const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
+const SETTINGS_MENU_SECTIONS = SECTION_KEYS as SettingsMenuSection[];
 
 function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
   if (section === "patient_import") {
@@ -326,7 +328,7 @@ export default function SettingsPage() {
     setShowReAuthModal(true);
   };
 
-  const visibleSections = SECTION_KEYS.filter((key) => {
+  const visibleSections = SETTINGS_MENU_SECTIONS.filter((key) => {
     const label = sectionLabel(t, key);
     const query = settingsQuery.trim().toLowerCase();
     const matchesGroup = settingsGroup === "all" || SECTION_GROUPS[key] === settingsGroup;
@@ -388,7 +390,7 @@ export default function SettingsPage() {
               <div key={group} className="rounded-xl border border-border bg-muted/30 p-3">
                 <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">{groupLabel(t, group)}</p>
                 <p className="mt-1 text-lg font-semibold text-foreground">
-                  {SECTION_KEYS.filter((key) => SECTION_GROUPS[key] === group).length}
+                  {SETTINGS_MENU_SECTIONS.filter((key) => SECTION_GROUPS[key] === group).length}
                 </p>
               </div>
             ))}
