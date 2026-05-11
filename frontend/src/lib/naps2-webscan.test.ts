@@ -78,7 +78,8 @@ describe("naps2 webscan adapter", () => {
     expect(scanJobBody).toContain("<scan:ColorMode>Grayscale8</scan:ColorMode>");
     expect(scanJobBody).toContain("<scan:XResolution>200</scan:XResolution>");
     expect(scanJobBody).toContain("<scan:YResolution>200</scan:YResolution>");
-    expect(scanJobBody).toContain("<scan:DocumentFormat>application/pdf</scan:DocumentFormat>");
+    expect(scanJobBody).toContain("<pwg:DocumentFormat>application/pdf</pwg:DocumentFormat>");
+    expect(scanJobBody).toContain("<scan:DocumentFormatExt>application/pdf</scan:DocumentFormatExt>");
   });
 
   it("reports endpoint and HTTP status when capabilities work but scan job creation fails", async () => {
@@ -89,6 +90,33 @@ describe("naps2 webscan adapter", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(scanAppointmentRequest({ endpoint: "http://localhost:9801" }))
-      .rejects.toThrow("NAPS2.WebScan capabilities were reachable at http://localhost:9801, but scan job creation failed with HTTP 500.");
+      .rejects.toThrow("NAPS2.WebScan capabilities were reachable at http://localhost:9801, but scan job creation failed with HTTP 500 for application/pdf. JPEG fallback also failed: NAPS2.WebScan capabilities were reachable at http://localhost:9801, but scan job creation failed with HTTP 500 for image/jpeg.");
+  });
+
+  it("falls back to JPEG scan job creation when PDF is rejected", async () => {
+    const scanJobBodies: string[] = [];
+    let nextDocumentCount = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "http://localhost:9801/eSCL/ScannerCapabilities") return response();
+      if (url === "http://localhost:9801/eSCL/ScanJobs") {
+        scanJobBodies.push(String(init?.body || ""));
+        if (scanJobBodies.length === 1) return response({ ok: false, status: 400 });
+        return response({ status: 201, headers: { Location: "http://localhost:9801/eSCL/ScanJobs/job-jpeg" } });
+      }
+      if (url === "http://localhost:9801/eSCL/ScanJobs/job-jpeg/NextDocument") {
+        nextDocumentCount += 1;
+        return nextDocumentCount === 1
+          ? response({ blob: new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" }) })
+          : response({ ok: false, status: 404 });
+      }
+      return response({ ok: false, status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await scanAppointmentRequest({ endpoint: "http://localhost:9801" });
+
+    expect(scanJobBodies[0]).toContain("<pwg:DocumentFormat>application/pdf</pwg:DocumentFormat>");
+    expect(scanJobBodies[1]).toContain("<pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>");
+    expect(scanJobBodies[1]).toContain("<scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>");
   });
 });

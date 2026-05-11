@@ -18,6 +18,8 @@ export interface Naps2ScanResult {
   source: "naps2_webscan";
 }
 
+type EsclDocumentFormat = "application/pdf" | "image/jpeg";
+
 const DEFAULT_ENDPOINTS = [
   "http://127.0.0.1:9801",
   "http://localhost:9801",
@@ -94,13 +96,17 @@ function toEsclColorMode(colorMode: Naps2ScanOptions["colorMode"]): string {
   return colorMode === "color" ? "RGB24" : "Grayscale8";
 }
 
-function buildScanSettings(options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>): string {
+function buildScanSettings(
+  options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>,
+  documentFormat: EsclDocumentFormat
+): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm" xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
   <pwg:Version>2.6</pwg:Version>
   <scan:Intent>Document</scan:Intent>
   <scan:InputSource>${toEsclInputSource(options.source)}</scan:InputSource>
-  <scan:DocumentFormat>application/pdf</scan:DocumentFormat>
+  <pwg:DocumentFormat>${documentFormat}</pwg:DocumentFormat>
+  <scan:DocumentFormatExt>${documentFormat}</scan:DocumentFormatExt>
   <scan:XResolution>${options.dpi}</scan:XResolution>
   <scan:YResolution>${options.dpi}</scan:YResolution>
   <scan:ColorMode>${toEsclColorMode(options.colorMode)}</scan:ColorMode>
@@ -114,16 +120,20 @@ function resolveJobId(location: string): string {
   return jobId;
 }
 
-async function createScanJob(endpoint: string, options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>): Promise<string> {
+async function createScanJob(
+  endpoint: string,
+  options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>,
+  documentFormat: EsclDocumentFormat
+): Promise<string> {
   const response = await fetch(`${endpoint}/eSCL/ScanJobs`, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8" },
-    body: buildScanSettings(options),
+    body: buildScanSettings(options, documentFormat),
     signal: withTimeout(8000),
   });
 
   if (!response.ok) {
-    throw new Error(`NAPS2.WebScan capabilities were reachable at ${endpoint}, but scan job creation failed with HTTP ${response.status}.`);
+    throw new Error(`NAPS2.WebScan capabilities were reachable at ${endpoint}, but scan job creation failed with HTTP ${response.status} for ${documentFormat}.`);
   }
 
   const location = response.headers.get("Location") || response.headers.get("location") || "";
@@ -260,7 +270,18 @@ export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Pr
       colorMode: options.colorMode || "grayscale",
       source: options.source || "feeder",
     } as const;
-    const jobId = await createScanJob(status.endpoint, scanOptions);
+    let jobId: string;
+    try {
+      jobId = await createScanJob(status.endpoint, scanOptions, "application/pdf");
+    } catch (pdfError) {
+      try {
+        jobId = await createScanJob(status.endpoint, scanOptions, "image/jpeg");
+      } catch (jpegError) {
+        const pdfMessage = pdfError instanceof Error ? pdfError.message : "PDF scan job creation failed.";
+        const jpegMessage = jpegError instanceof Error ? jpegError.message : "JPEG scan job creation failed.";
+        throw new Error(`${pdfMessage} JPEG fallback also failed: ${jpegMessage}`);
+      }
+    }
     const pages = await readScannedPages(status.endpoint, jobId);
     if (pages.length === 0) throw new Error("No scanned pages were returned by NAPS2.WebScan.");
 
