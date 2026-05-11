@@ -9,13 +9,21 @@ if (!process.env.DATABASE_URL && process.env.TEST_DATABASE_URL) {
 const skipEnv = !(process.env.TEST_DATABASE_URL || process.env.DATABASE_URL) ? "DATABASE_URL not set" : undefined;
 const TEST_PREFIX = "DPHARD_";
 type Pool = typeof import("../../db/pool.js").pool;
-type TestData = Awaited<ReturnType<typeof import("../appointments-v2/tests/integration/helpers.js").seedTestData>>;
+interface TestData {
+  userId: number;
+  modalityId: number;
+  examTypeId: number;
+  patientId: number;
+  policySetId: number;
+  policySetKey: string;
+  policyVersionId: number;
+  schemaName: string;
+}
 
 let pool: Pool;
 let canReachDatabase: typeof import("../appointments-v2/tests/integration/helpers.js").canReachDatabase;
 let createTestAuthCookie: typeof import("../appointments-v2/tests/integration/helpers.js").createTestAuthCookie;
 let fetchJson: typeof import("../appointments-v2/tests/integration/helpers.js").fetchJson;
-let seedTestData: typeof import("../appointments-v2/tests/integration/helpers.js").seedTestData;
 let setupTestDatabase: typeof import("../appointments-v2/tests/integration/helpers.js").setupTestDatabase;
 
 interface TestUser {
@@ -88,12 +96,80 @@ async function createPatient(name: string): Promise<number> {
         arabic_full_name, english_full_name, national_id, normalized_arabic_name, sex, age_years,
         identifier_type, identifier_value
       )
-      values ($1, $2, $3, $4, 'F', 40, 'national_id', $3)
+      values ($1, $2, $3::varchar, $4, 'F', 40, 'national_id', $3::text)
       returning id::text as id
     `,
     [`${TEST_PREFIX}${name} Arabic`, `${TEST_PREFIX}${name}`, nationalId, `${TEST_PREFIX}${name}`]
   );
   return Number(result.rows[0].id);
+}
+
+async function seedDoctorPortalTestData(): Promise<TestData> {
+  const suffix = randomUUID().replace(/-/g, "").slice(0, 8);
+  const keyBase = `${TEST_PREFIX.toLowerCase()}${suffix}`;
+  const userResult = await pool.query<{ id: string }>(
+    `
+      insert into users (username, password_hash, full_name, role, is_active)
+      values ($1, '$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS', $2, 'supervisor', true)
+      returning id::text as id
+    `,
+    [`${keyBase}supervisor`, `${TEST_PREFIX}${suffix} Supervisor`]
+  );
+  const userId = Number(userResult.rows[0].id);
+
+  const modalityResult = await pool.query<{ id: string }>(
+    `
+      insert into modalities (name_ar, name_en, code, daily_capacity, is_active)
+      values ($1, $2, $3, 10, true)
+      returning id::text as id
+    `,
+    [`${TEST_PREFIX}${suffix} CT AR`, `${TEST_PREFIX}${suffix} CT`, `${TEST_PREFIX}${suffix}CT`]
+  );
+  const modalityId = Number(modalityResult.rows[0].id);
+
+  const examTypeResult = await pool.query<{ id: string }>(
+    `
+      insert into exam_types (modality_id, name_ar, name_en, code, duration_minutes, is_active)
+      values ($1, $2, $3, $4, 20, true)
+      returning id::text as id
+    `,
+    [modalityId, `${TEST_PREFIX}${suffix} CT Head AR`, `${TEST_PREFIX}${suffix} CT Head`, `${TEST_PREFIX}${suffix}CTHEAD`]
+  );
+  const examTypeId = Number(examTypeResult.rows[0].id);
+
+  const patientId = await createPatient(`${suffix} Patient`);
+  const policyKey = `${keyBase}_policy`;
+  const policySetResult = await pool.query<{ id: string }>(
+    `
+      insert into appointments_v2.policy_sets (key, name, created_by_user_id)
+      values ($1, $2, $3)
+      returning id::text as id
+    `,
+    [policyKey, `${TEST_PREFIX}${suffix} Policy`, userId]
+  );
+  const policySetId = Number(policySetResult.rows[0].id);
+  const policyVersionResult = await pool.query<{ id: string }>(
+    `
+      insert into appointments_v2.policy_versions (
+        policy_set_id, version_no, status, config_hash, created_by_user_id, published_at, published_by_user_id
+      )
+      values ($1, 1, 'published', $2, $3, now(), $3)
+      returning id::text as id
+    `,
+    [policySetId, `${keyBase}_hash`, userId]
+  );
+  const policyVersionId = Number(policyVersionResult.rows[0].id);
+  await pool.query(
+    `
+      insert into appointments_v2.category_daily_limits (
+        policy_version_id, modality_id, case_category, daily_limit, is_active
+      )
+      values ($1, $2, 'oncology', 10, true)
+    `,
+    [policyVersionId, modalityId]
+  );
+
+  return { userId, modalityId, examTypeId, patientId, policySetId, policySetKey: policyKey, policyVersionId, schemaName: "appointments_v2" };
 }
 
 async function createDoctorPortalTestApp() {
@@ -127,11 +203,21 @@ async function cleanupDoctorPortalTestData() {
   const doctorIds = doctorRows.rows.map((row) => Number(row.id));
   const patientRows = await pool.query<{ id: string }>(`select id::text as id from patients where english_full_name like $1`, [`${TEST_PREFIX}%`]);
   const patientIds = patientRows.rows.map((row) => Number(row.id));
+  const bookingRows = await pool.query<{ id: string }>(`select id::text as id from appointments_v2.bookings where patient_id = any($1::bigint[])`, [patientIds]);
+  const bookingIds = bookingRows.rows.map((row) => Number(row.id));
   const weekRows = await pool.query<{ id: string }>(`select id::text as id from doctor_portal.doctor_roster_weeks where created_by = any($1::bigint[])`, [userIds]);
   const weekIds = weekRows.rows.map((row) => Number(row.id));
+  const assignmentRows = await pool.query<{ id: string }>(`select id::text as id from doctor_portal.doctor_roster_assignments where roster_week_id = any($1::bigint[])`, [weekIds]);
+  const assignmentIds = assignmentRows.rows.map((row) => Number(row.id));
 
   await pool.query(`delete from doctor_portal.doctor_module_audit_events where actor_user_id = any($1::bigint[]) or actor_doctor_id = any($2::bigint[])`, [userIds, doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.appointment_protocol_audit_events where appointment_id = any($1::bigint[]) or changed_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.appointment_protocols where appointment_id = any($1::bigint[]) or assigned_by_doctor_id = any($2::bigint[]) or updated_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.case_workload_units where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.doctor_roster_members where doctor_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [doctorIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_weeks where id = any($1::bigint[])`, [weekIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.workload_unit_catalog where created_by = any($1::bigint[])`, [userIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_profiles where id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from users where id = any($1::bigint[])`, [userIds]).catch(() => undefined);
@@ -158,14 +244,13 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     canReachDatabase = helpers.canReachDatabase;
     createTestAuthCookie = helpers.createTestAuthCookie;
     fetchJson = helpers.fetchJson;
-    seedTestData = helpers.seedTestData;
     setupTestDatabase = helpers.setupTestDatabase;
     if (!await canReachDatabase()) {
       console.warn("WARNING: Database not reachable. Skipping Doctor Portal integration tests.");
       return;
     }
     testDb = await setupTestDatabase(TEST_PREFIX);
-    testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
+    testData = await seedDoctorPortalTestData();
     app = await createDoctorPortalTestApp();
     today = String((await pool.query<{ today: string }>(`select current_date::text as today`)).rows[0].today);
     normal = await createDoctorUser("normal", "doctor", { canAssignProtocols: true, canSupervise: false });
@@ -293,7 +378,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         technologistNotes: "check renal function",
       },
     });
-    assert.equal(draft.status, 201);
+    assert.equal(draft.status, 201, JSON.stringify(draft.data));
     assert.equal((draft.data as { protocol: { version: number; protocolStatus: string } }).protocol.version, 1);
     assert.equal((draft.data as { protocol: { protocolStatus: string } }).protocol.protocolStatus, "draft");
 
