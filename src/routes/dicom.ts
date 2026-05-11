@@ -32,6 +32,7 @@ import {
 } from "../services/orthanc-mwl-reconcile-service.js";
 import {
   getSanteHl7Summary,
+  forceResyncSanteHl7Window,
   reconcileSanteHl7Window,
   retrySanteOutbox,
   sendSyntheticSanteTestFile,
@@ -264,6 +265,27 @@ dicomRouter.post(
       modalityCode,
       apply,
       limit: Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000,
+    });
+    res.json({ ok: true, result });
+  })
+);
+
+dicomRouter.post(
+  "/sante-hl7/force-resync",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as Request & { user: AuthenticatedUserContext };
+    const body = asUnknownRecord(req.body ?? {});
+    const dateFrom = String(body.dateFrom || "").trim();
+    const dateTo = String(body.dateTo || "").trim();
+    const modalityCode = String(body.modalityCode || "").trim() || undefined;
+    const limitRaw = Number(body.limit);
+    if (!dateFrom || !dateTo) throw new HttpError(400, "dateFrom and dateTo are required.");
+    const result = await forceResyncSanteHl7Window({
+      dateFrom,
+      dateTo,
+      modalityCode,
+      limit: Number.isInteger(limitRaw) && limitRaw > 0 ? limitRaw : 5000,
+      currentUserId: request.user.sub as UserId,
     });
     res.json({ ok: true, result });
   })

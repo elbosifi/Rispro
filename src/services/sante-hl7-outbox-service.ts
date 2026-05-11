@@ -790,6 +790,114 @@ export async function reconcileSanteHl7Window(input: {
   return { missing, failed, pendingTimeout, repaired };
 }
 
+export async function forceResyncSanteHl7Window(input: {
+  dateFrom: string;
+  dateTo: string;
+  modalityCode?: string;
+  limit?: number;
+  currentUserId: UserId;
+}): Promise<{
+  deletedOutboxCount: number;
+  deletedSyncCount: number;
+  selectedBookingIds: number[];
+  enqueuedBookingIds: number[];
+  skippedBookingIds: number[];
+}> {
+  const limit = Number.isInteger(input.limit) && (input.limit as number) > 0 ? Number(input.limit) : 5000;
+  const client = await pool.connect();
+  let selectedBookingIds: number[] = [];
+  let deletedOutboxCount = 0;
+  let deletedSyncCount = 0;
+
+  try {
+    await client.query("begin");
+    const { rows } = await client.query<{ id: number }>(
+      `
+        select b.id
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        where b.booking_date between $1::date and $2::date
+          and b.status in ('scheduled', 'arrived', 'waiting')
+          and ($3::text is null or m.code = $3)
+        order by b.booking_date asc, b.id asc
+        limit $4
+      `,
+      [input.dateFrom, input.dateTo, input.modalityCode || null, limit]
+    );
+    selectedBookingIds = rows.map((row) => Number(row.id));
+
+    if (selectedBookingIds.length > 0) {
+      const deletedSync = await client.query(
+        `delete from sante_worklist_sync where booking_id = any($1::bigint[])`,
+        [selectedBookingIds]
+      );
+      const deletedOutbox = await client.query(
+        `delete from sante_hl7_outbox where booking_id = any($1::bigint[])`,
+        [selectedBookingIds]
+      );
+      deletedSyncCount = deletedSync.rowCount ?? 0;
+      deletedOutboxCount = deletedOutbox.rowCount ?? 0;
+    }
+
+    await logAuditEntry({
+      entityType: "integration",
+      entityId: null,
+      actionType: "sante_hl7_force_resync_cleared",
+      oldValues: null,
+      newValues: {
+        dateFrom: input.dateFrom,
+        dateTo: input.dateTo,
+        modalityCode: input.modalityCode || null,
+        selectedBookingCount: selectedBookingIds.length,
+        deletedOutboxCount,
+        deletedSyncCount,
+      },
+      changedByUserId: input.currentUserId,
+    }, client);
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const enqueuedBookingIds: number[] = [];
+  const skippedBookingIds: number[] = [];
+  for (const bookingId of selectedBookingIds) {
+    const result = await enqueueSanteHl7ForBooking(bookingId);
+    if (result.enqueued) {
+      enqueuedBookingIds.push(bookingId);
+    } else {
+      skippedBookingIds.push(bookingId);
+    }
+  }
+
+  await logAuditEntry({
+    entityType: "integration",
+    entityId: null,
+    actionType: "sante_hl7_force_resync_queued",
+    oldValues: null,
+    newValues: {
+      dateFrom: input.dateFrom,
+      dateTo: input.dateTo,
+      modalityCode: input.modalityCode || null,
+      selectedBookingCount: selectedBookingIds.length,
+      enqueuedCount: enqueuedBookingIds.length,
+      skippedCount: skippedBookingIds.length,
+    },
+    changedByUserId: input.currentUserId,
+  });
+
+  return {
+    deletedOutboxCount,
+    deletedSyncCount,
+    selectedBookingIds,
+    enqueuedBookingIds,
+    skippedBookingIds,
+  };
+}
+
 export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
   const settings = await resolveSanteWorklistSettings();
   const [statusResult, failuresResult] = await Promise.all([

@@ -177,6 +177,30 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
     onError: (error: Error) => setMessage(error.message || "Sante reconciliation failed."),
   });
 
+  const forceResyncMutation = useMutation({
+    mutationFn: () =>
+      api<{
+        ok: boolean;
+        result: {
+          deletedOutboxCount: number;
+          deletedSyncCount: number;
+          selectedBookingIds: number[];
+          enqueuedBookingIds: number[];
+          skippedBookingIds: number[];
+        };
+      }>("/dicom/sante-hl7/force-resync", {
+        method: "POST",
+        body: JSON.stringify({ dateFrom, dateTo }),
+      }),
+    onSuccess: async (response) => {
+      setMessage(
+        `Sante force resync complete. Cleared ${response.result.deletedOutboxCount} outbox rows and ${response.result.deletedSyncCount} sync rows. Requeued ${response.result.enqueuedBookingIds.length} of ${response.result.selectedBookingIds.length} active bookings.`
+      );
+      await queryClient.invalidateQueries({ queryKey: ["dicom", "sante-hl7", "summary"] });
+    },
+    onError: (error: Error) => setMessage(error.message || "Sante force resync failed."),
+  });
+
   const retryMutation = useMutation({
     mutationFn: (outboxId: number) => api(`/dicom/sante-hl7/retry/${outboxId}`, { method: "POST" }),
     onSuccess: async () => {
@@ -339,6 +363,16 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           </button>
           <button className="btn-primary text-sm" onClick={() => reconcileMutation.mutate(true)} disabled={!dateFrom || !dateTo || reconcileMutation.isPending}>
             Reconcile + Requeue
+          </button>
+          <button
+            className="btn-secondary text-sm border-red-300 text-red-700 hover:bg-red-50 disabled:opacity-50"
+            onClick={() => {
+              const ok = window.confirm("Delete Sante HL7 tracking for active bookings in this date range and force a fresh resync?");
+              if (ok) forceResyncMutation.mutate();
+            }}
+            disabled={!dateFrom || !dateTo || forceResyncMutation.isPending}
+          >
+            {forceResyncMutation.isPending ? "Force Resyncing..." : "Delete All + Force Resync"}
           </button>
         </div>
       </section>
