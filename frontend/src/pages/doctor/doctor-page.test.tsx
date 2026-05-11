@@ -28,12 +28,16 @@ const fetchRosterWeekConflictsMock = vi.fn();
 const fetchMyDoctorAvailabilityMock = vi.fn();
 const fetchTeamDoctorAvailabilityMock = vi.fn();
 const createMyDoctorAvailabilityMock = vi.fn();
+const createTeamDoctorAvailabilityMock = vi.fn();
 const fetchMyDoctorLeaveMock = vi.fn();
 const fetchTeamDoctorLeaveMock = vi.fn();
 const createMyDoctorLeaveMock = vi.fn();
+const updateDoctorLeaveStatusMock = vi.fn();
 const fetchRosterTemplatesMock = vi.fn();
 const createRosterTemplateMock = vi.fn();
 const applyRosterTemplateMock = vi.fn();
+const generateDoctorRosterDraftMock = vi.fn();
+const notifyDoctorRosterWeekMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -58,12 +62,16 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchMyDoctorAvailability: (...args: unknown[]) => fetchMyDoctorAvailabilityMock(...args),
   fetchTeamDoctorAvailability: (...args: unknown[]) => fetchTeamDoctorAvailabilityMock(...args),
   createMyDoctorAvailability: (...args: unknown[]) => createMyDoctorAvailabilityMock(...args),
+  createTeamDoctorAvailability: (...args: unknown[]) => createTeamDoctorAvailabilityMock(...args),
   fetchMyDoctorLeave: (...args: unknown[]) => fetchMyDoctorLeaveMock(...args),
   fetchTeamDoctorLeave: (...args: unknown[]) => fetchTeamDoctorLeaveMock(...args),
   createMyDoctorLeave: (...args: unknown[]) => createMyDoctorLeaveMock(...args),
+  updateDoctorLeaveStatus: (...args: unknown[]) => updateDoctorLeaveStatusMock(...args),
   fetchRosterTemplates: (...args: unknown[]) => fetchRosterTemplatesMock(...args),
   createRosterTemplate: (...args: unknown[]) => createRosterTemplateMock(...args),
   applyRosterTemplate: (...args: unknown[]) => applyRosterTemplateMock(...args),
+  generateDoctorRosterDraft: (...args: unknown[]) => generateDoctorRosterDraftMock(...args),
+  notifyDoctorRosterWeek: (...args: unknown[]) => notifyDoctorRosterWeekMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -144,12 +152,16 @@ describe("Doctor Portal shell", () => {
     fetchMyDoctorAvailabilityMock.mockReset();
     fetchTeamDoctorAvailabilityMock.mockReset();
     createMyDoctorAvailabilityMock.mockReset();
+    createTeamDoctorAvailabilityMock.mockReset();
     fetchMyDoctorLeaveMock.mockReset();
     fetchTeamDoctorLeaveMock.mockReset();
     createMyDoctorLeaveMock.mockReset();
+    updateDoctorLeaveStatusMock.mockReset();
     fetchRosterTemplatesMock.mockReset();
     createRosterTemplateMock.mockReset();
     applyRosterTemplateMock.mockReset();
+    generateDoctorRosterDraftMock.mockReset();
+    notifyDoctorRosterWeekMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
@@ -211,9 +223,11 @@ describe("Doctor Portal shell", () => {
     fetchMyDoctorAvailabilityMock.mockResolvedValue([]);
     fetchTeamDoctorAvailabilityMock.mockResolvedValue([]);
     createMyDoctorAvailabilityMock.mockResolvedValue({});
+    createTeamDoctorAvailabilityMock.mockResolvedValue({});
     fetchMyDoctorLeaveMock.mockResolvedValue([]);
     fetchTeamDoctorLeaveMock.mockResolvedValue([]);
     createMyDoctorLeaveMock.mockResolvedValue({});
+    updateDoctorLeaveStatusMock.mockResolvedValue({});
     fetchRosterTemplatesMock.mockResolvedValue([]);
     createRosterTemplateMock.mockResolvedValue({});
     applyRosterTemplateMock.mockResolvedValue({
@@ -233,6 +247,25 @@ describe("Doctor Portal shell", () => {
       skippedCount: 0,
       conflicts: [],
     });
+    generateDoctorRosterDraftMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignmentsCreated: 1,
+      membersAssigned: 0,
+      conflicts: [],
+      unfilledRequirements: [],
+      warnings: [],
+    });
+    notifyDoctorRosterWeekMock.mockResolvedValue({ createdCount: 1, alreadyExistingCount: 0, notifications: [] });
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -476,6 +509,53 @@ describe("Doctor Portal shell", () => {
     });
     expect(await screen.findByText(/Template applied: 2 duties, 1 doctors, 0 skipped/)).toBeTruthy();
     expect(await screen.findByText(/Published roster has an empty required team slot/)).toBeTruthy();
+  });
+
+  it("supervisor can generate draft roster and export roster", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Generate draft roster/i }));
+
+    await waitFor(() => {
+      expect(generateDoctorRosterDraftMock).toHaveBeenCalled();
+    });
+    expect(await screen.findByText(/Generated: 1 duties, 0 doctors assigned/)).toBeTruthy();
+  });
+
+  it("published roster shows notify and export controls", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "published",
+        createdBy: 1,
+        publishedBy: 1,
+        publishedAt: "2027-01-01",
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/admin/roster");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Notify assigned doctors/i }));
+
+    await waitFor(() => {
+      expect(notifyDoctorRosterWeekMock.mock.calls[0]?.[0]).toBe(99);
+    });
+    expect(screen.getByText("Export HTML")).toBeTruthy();
+    expect(screen.getByText("Export CSV")).toBeTruthy();
   });
 
   it("normal doctor My Cases page renders empty state without assignment controls", async () => {

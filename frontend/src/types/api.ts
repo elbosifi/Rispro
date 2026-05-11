@@ -223,6 +223,35 @@ export interface ApplyRosterTemplateResult {
   conflicts: RosterConflict[];
 }
 
+export type RosterBalanceStrategy = "simple" | "preserve_previous" | "least_assigned";
+
+export interface GenerateDraftRosterResult {
+  week: DoctorRosterWeek;
+  assignmentsCreated: number;
+  membersAssigned: number;
+  conflicts: RosterConflict[];
+  unfilledRequirements: string[];
+  warnings: string[];
+}
+
+export interface RosterNotification {
+  id: number;
+  rosterWeekId: number;
+  doctorId: number;
+  doctorName: string;
+  notificationType: "roster_published";
+  status: "created" | "sent" | "failed";
+  sentAt: string | null;
+  error: string | null;
+  createdAt: string;
+}
+
+export interface RosterNotificationSummary {
+  createdCount: number;
+  alreadyExistingCount: number;
+  notifications: RosterNotification[];
+}
+
 export interface DoctorRosterAssignment {
   id: number;
   rosterWeekId: number;

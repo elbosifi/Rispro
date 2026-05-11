@@ -211,12 +211,16 @@ async function cleanupDoctorPortalTestData() {
   const assignmentIds = assignmentRows.rows.map((row) => Number(row.id));
 
   await pool.query(`delete from doctor_portal.doctor_module_audit_events where actor_user_id = any($1::bigint[]) or actor_doctor_id = any($2::bigint[])`, [userIds, doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.doctor_roster_notifications where roster_week_id = any($1::bigint[]) or doctor_id = any($2::bigint[])`, [weekIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.appointment_protocol_audit_events where appointment_id = any($1::bigint[]) or changed_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.appointment_protocols where appointment_id = any($1::bigint[]) or assigned_by_doctor_id = any($2::bigint[]) or updated_by_doctor_id = any($2::bigint[])`, [bookingIds, doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_workload_units where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.case_team_assignments where appointment_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [bookingIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_members where doctor_id = any($1::bigint[]) or roster_assignment_id = any($2::bigint[])`, [doctorIds, assignmentIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_roster_weeks where id = any($1::bigint[])`, [weekIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.doctor_availability where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.doctor_leave_requests where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
+  await pool.query(`delete from doctor_portal.roster_templates where created_by = any($1::bigint[])`, [userIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.workload_unit_catalog where created_by = any($1::bigint[])`, [userIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_modality_permissions where doctor_id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
   await pool.query(`delete from doctor_portal.doctor_profiles where id = any($1::bigint[])`, [doctorIds]).catch(() => undefined);
@@ -282,7 +286,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
   const api = (cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
     fetchJson(app.baseUrl, path, { cookie, ...options });
 
-  it("verifies Doctor Portal migrations 064-068 are applied with core constraints/indexes", async () => {
+  it("verifies Doctor Portal migrations 064-071 are applied with core constraints/indexes", async () => {
     guard();
     const tables = await pool.query<{ table_name: string }>(
       `
@@ -302,9 +306,15 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         "appointment_protocol_audit_events",
         "workload_unit_catalog",
         "case_workload_units",
+        "doctor_availability",
+        "doctor_leave_requests",
+        "roster_templates",
+        "roster_template_assignments",
+        "roster_template_members",
+        "doctor_roster_notifications",
       ]]
     );
-    assert.equal(tables.rowCount, 10);
+    assert.equal(tables.rowCount, 16);
     const indexes = await pool.query<{ indexname: string }>(
       `
         select indexname
@@ -312,9 +322,9 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
         where schemaname = 'doctor_portal'
           and indexname = any($1::text[])
       `,
-      [["case_team_assignments_active_unique", "case_workload_units_active_unique", "appointment_protocols_appointment_idx"]]
+      [["case_team_assignments_active_unique", "case_workload_units_active_unique", "appointment_protocols_appointment_idx", "doctor_availability_doctor_date_idx", "doctor_leave_requests_status_idx", "doctor_roster_notifications_week_idx"]]
     );
-    assert.equal(indexes.rowCount, 3);
+    assert.equal(indexes.rowCount, 6);
   });
 
   it("runs roster, case assignment, protocol, read-only exposure, workload, and idempotency flow", async () => {

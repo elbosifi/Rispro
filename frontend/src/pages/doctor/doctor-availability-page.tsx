@@ -3,10 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createMyDoctorAvailability,
   createMyDoctorLeave,
+  createTeamDoctorAvailability,
   fetchMyDoctorAvailability,
   fetchMyDoctorLeave,
+  fetchRosterDoctors,
   fetchTeamDoctorAvailability,
   fetchTeamDoctorLeave,
+  updateDoctorLeaveStatus,
 } from "@/lib/api-hooks";
 import type { AvailabilityStatus, DoctorMe, LeaveType } from "@/types/api";
 
@@ -63,6 +66,12 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
     leaveType: "annual_leave" as LeaveType,
     reason: "",
   });
+  const [teamAvailabilityForm, setTeamAvailabilityForm] = useState({
+    doctorId: "",
+    date: dateFrom,
+    availabilityStatus: "unavailable" as AvailabilityStatus,
+    note: "",
+  });
 
   const myAvailabilityQuery = useQuery({
     queryKey: ["doctor", "availability", "my", dateFrom, dateTo],
@@ -82,6 +91,11 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
     queryFn: () => fetchTeamDoctorLeave(dateFrom, dateTo),
     enabled: manager,
   });
+  const doctorsQuery = useQuery({
+    queryKey: ["doctor", "roster", "doctors"],
+    queryFn: fetchRosterDoctors,
+    enabled: manager,
+  });
 
   const invalidateAvailability = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "availability"] });
@@ -94,6 +108,14 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
   });
   const leaveMutation = useMutation({
     mutationFn: createMyDoctorLeave,
+    onSuccess: invalidateAvailability,
+  });
+  const teamAvailabilityMutation = useMutation({
+    mutationFn: createTeamDoctorAvailability,
+    onSuccess: invalidateAvailability,
+  });
+  const leaveStatusMutation = useMutation({
+    mutationFn: (payload: { leaveId: number; status: "approved" | "rejected" | "cancelled" }) => updateDoctorLeaveStatus(payload.leaveId, payload.status),
     onSuccess: invalidateAvailability,
   });
 
@@ -119,6 +141,7 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
             onChange={(event) => {
               setDateFrom(event.target.value);
               setAvailabilityForm((current) => ({ ...current, date: event.target.value }));
+              setTeamAvailabilityForm((current) => ({ ...current, date: event.target.value }));
               setLeaveForm((current) => ({ ...current, startDate: event.target.value, endDate: event.target.value }));
             }}
             className="mt-1 block rounded-lg border px-3 py-2 text-sm"
@@ -202,6 +225,32 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
         <section className="grid gap-4 lg:grid-cols-2">
           <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="font-semibold">Team availability</h3>
+            <form
+              className="mt-3 grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!teamAvailabilityForm.doctorId) return;
+                teamAvailabilityMutation.mutate({
+                  doctorId: Number(teamAvailabilityForm.doctorId),
+                  date: teamAvailabilityForm.date,
+                  startTime: null,
+                  endTime: null,
+                  availabilityStatus: teamAvailabilityForm.availabilityStatus,
+                  note: teamAvailabilityForm.note || null,
+                });
+              }}
+            >
+              <select value={teamAvailabilityForm.doctorId} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, doctorId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="">Doctor</option>
+                {(doctorsQuery.data ?? []).map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+              </select>
+              <input type="date" value={teamAvailabilityForm.date} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <select value={teamAvailabilityForm.availabilityStatus} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, availabilityStatus: e.target.value as AvailabilityStatus }))} className="rounded-lg border px-3 py-2 text-sm">
+                {AVAILABILITY_STATUSES.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}
+              </select>
+              <input placeholder="Note" value={teamAvailabilityForm.note} onChange={(e) => setTeamAvailabilityForm((c) => ({ ...c, note: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Add team availability</button>
+            </form>
             <div className="mt-3 space-y-2 text-sm">
               {teamAvailability.length === 0 ? <p style={{ color: "var(--text-muted)" }}>No team availability entries.</p> : teamAvailability.map((row) => (
                 <p key={row.id}>{row.doctorName ?? "Doctor"} · {row.date} · {row.availabilityStatus.replaceAll("_", " ")}</p>
@@ -210,6 +259,15 @@ export function DoctorAvailabilityPage({ me }: { me: DoctorMe }) {
           </div>
           <div className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
             <h3 className="font-semibold">Team leave</h3>
+            <div className="mt-3 space-y-2">
+              {teamLeave.filter((row) => row.status === "pending").map((row) => (
+                <div key={`actions-${row.id}`} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span>{row.doctorName ?? "Doctor"} leave action</span>
+                  <button type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "approved" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Approve</button>
+                  <button type="button" onClick={() => leaveStatusMutation.mutate({ leaveId: row.id, status: "rejected" })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Reject</button>
+                </div>
+              ))}
+            </div>
             <div className="mt-3 space-y-2 text-sm">
               {teamLeave.length === 0 ? <p style={{ color: "var(--text-muted)" }}>No team leave requests.</p> : teamLeave.map((row) => (
                 <p key={row.id}>{row.doctorName ?? "Doctor"} · {row.startDate} to {row.endDate} · {row.status}</p>

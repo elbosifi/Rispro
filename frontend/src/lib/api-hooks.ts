@@ -39,6 +39,10 @@ import type {
   RosterConflict,
   RosterTemplate,
   ApplyRosterTemplateResult,
+  GenerateDraftRosterResult,
+  RosterBalanceStrategy,
+  RosterNotification,
+  RosterNotificationSummary,
   RosterTemplateCopyMode,
   RosterTemplateType,
   DoctorCase,
@@ -332,6 +336,30 @@ export async function applyRosterTemplate(templateId: number, payload: {
   });
 }
 
+export async function generateDoctorRosterDraft(payload: {
+  weekStartDate: string;
+  templateId: number | null;
+  modalityId: number | null;
+  includeDoctors: boolean;
+  balanceStrategy: RosterBalanceStrategy;
+}): Promise<GenerateDraftRosterResult> {
+  return api<GenerateDraftRosterResult>("/doctor/roster/generate-draft", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function notifyDoctorRosterWeek(weekId: number): Promise<RosterNotificationSummary> {
+  return api<RosterNotificationSummary>(`/doctor/roster/weeks/${weekId}/notify`, {
+    method: "POST",
+  });
+}
+
+export async function fetchDoctorRosterNotifications(weekId: number): Promise<RosterNotification[]> {
+  const raw = await api<{ notifications: RosterNotification[] }>(`/doctor/roster/weeks/${weekId}/notifications`);
+  return raw.notifications;
+}
+
 export async function fetchMyDoctorAvailability(dateFrom: string, dateTo: string): Promise<DoctorAvailability[]> {
   const params = new URLSearchParams({ dateFrom, dateTo });
   const raw = await api<{ availability: DoctorAvailability[] }>(`/doctor/availability/my?${params.toString()}`);
@@ -352,6 +380,21 @@ export async function createMyDoctorAvailability(payload: {
   note: string | null;
 }): Promise<DoctorAvailability> {
   const raw = await api<{ availability: DoctorAvailability }>("/doctor/availability/my", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.availability;
+}
+
+export async function createTeamDoctorAvailability(payload: {
+  doctorId: number;
+  date: string;
+  startTime: string | null;
+  endTime: string | null;
+  availabilityStatus: AvailabilityStatus;
+  note: string | null;
+}): Promise<DoctorAvailability> {
+  const raw = await api<{ availability: DoctorAvailability }>("/doctor/availability", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -379,6 +422,14 @@ export async function createMyDoctorLeave(payload: {
   const raw = await api<{ leave: DoctorLeaveRequest }>("/doctor/leave/my", {
     method: "POST",
     body: JSON.stringify(payload),
+  });
+  return raw.leave;
+}
+
+export async function updateDoctorLeaveStatus(leaveId: number, status: "approved" | "rejected" | "cancelled"): Promise<DoctorLeaveRequest> {
+  const raw = await api<{ leave: DoctorLeaveRequest }>(`/doctor/leave/${leaveId}/status`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
   return raw.leave;
 }

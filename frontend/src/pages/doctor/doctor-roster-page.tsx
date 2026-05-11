@@ -15,9 +15,11 @@ import {
   fetchRosterDoctors,
   fetchRosterTemplates,
   fetchRosterWeekConflicts,
+  generateDoctorRosterDraft,
+  notifyDoctorRosterWeek,
   publishDoctorRosterWeek,
 } from "@/lib/api-hooks";
-import type { ApplyRosterTemplateResult, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
+import type { ApplyRosterTemplateResult, GenerateDraftRosterResult, RosterBalanceStrategy, RosterNotificationSummary, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
 
 const DUTY_TYPES: Array<{ value: RosterDutyType; label: string }> = [
   { value: "ct_protocol_day", label: "CT protocol day" },
@@ -222,6 +224,8 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     },
   });
   const [templateApplyResult, setTemplateApplyResult] = useState<ApplyRosterTemplateResult | null>(null);
+  const [generateResult, setGenerateResult] = useState<GenerateDraftRosterResult | null>(null);
+  const [notifyResult, setNotifyResult] = useState<RosterNotificationSummary | null>(null);
   const applyTemplateMutation = useMutation({
     mutationFn: (payload: { templateId: number; targetWeekStartDate: string; copyMode: RosterTemplateCopyMode; overwriteExisting: boolean; modalityId: number | null }) =>
       applyRosterTemplate(payload.templateId, payload),
@@ -229,6 +233,18 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
       setTemplateApplyResult(result);
       await invalidateRoster();
     },
+  });
+  const generateMutation = useMutation({
+    mutationFn: (payload: { weekStartDate: string; templateId: number | null; modalityId: number | null; includeDoctors: boolean; balanceStrategy: RosterBalanceStrategy }) =>
+      generateDoctorRosterDraft(payload),
+    onSuccess: async (result) => {
+      setGenerateResult(result);
+      await invalidateRoster();
+    },
+  });
+  const notifyMutation = useMutation({
+    mutationFn: notifyDoctorRosterWeek,
+    onSuccess: (result) => setNotifyResult(result),
   });
 
   const [assignmentForm, setAssignmentForm] = useState({
@@ -254,6 +270,11 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     templateId: "",
     copyMode: "structure_only" as RosterTemplateCopyMode,
     overwriteExisting: false,
+  });
+  const [generateForm, setGenerateForm] = useState({
+    templateId: "",
+    includeDoctors: false,
+    balanceStrategy: "simple" as RosterBalanceStrategy,
   });
   useEffect(() => {
     const firstTemplate = templatesQuery.data?.[0];
@@ -325,12 +346,28 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                     </button>
                   </>
                 )}
+                {roster.week.status === "published" && (
+                  <button type="button" onClick={() => notifyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                    Notify assigned doctors
+                  </button>
+                )}
+                <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=html&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                  Export HTML
+                </a>
+                <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=csv&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                  Export CSV
+                </a>
               </>
             )}
           </div>
           {publishMutation.isError && (
             <p className="mt-3 text-sm font-medium" style={{ color: "#dc2626" }}>
               Publish blocked: roster has publish-blocking conflicts.
+            </p>
+          )}
+          {notifyResult && (
+            <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
+              Notification records: {notifyResult.createdCount} created, {notifyResult.alreadyExistingCount} already existed.
             </p>
           )}
         </section>
@@ -475,6 +512,43 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                       <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>{conflict.severity.toUpperCase()}: {conflict.message}</p>
                     ))}
                   </div>
+                )}
+              </div>
+            )}
+            <form
+              className="mt-4 grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                generateMutation.mutate({
+                  weekStartDate: weekStart,
+                  templateId: generateForm.templateId ? Number(generateForm.templateId) : null,
+                  modalityId: null,
+                  includeDoctors: generateForm.includeDoctors,
+                  balanceStrategy: generateForm.balanceStrategy,
+                });
+              }}
+            >
+              <h3 className="sm:col-span-2 font-semibold">Generate draft roster</h3>
+              <select value={generateForm.templateId} onChange={(e) => setGenerateForm((c) => ({ ...c, templateId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="">No template</option>
+                {(templatesQuery.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+              </select>
+              <select value={generateForm.balanceStrategy} onChange={(e) => setGenerateForm((c) => ({ ...c, balanceStrategy: e.target.value as RosterBalanceStrategy }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="simple">Simple</option>
+                <option value="preserve_previous">Preserve previous</option>
+                <option value="least_assigned">Least assigned</option>
+              </select>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={generateForm.includeDoctors} onChange={(e) => setGenerateForm((c) => ({ ...c, includeDoctors: e.target.checked }))} />
+                Auto-fill doctors
+              </label>
+              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Generate draft roster</button>
+            </form>
+            {generateResult && (
+              <div className="mt-3 rounded-lg border p-3 text-sm" style={{ borderColor: "var(--border)" }}>
+                Generated: {generateResult.assignmentsCreated} duties, {generateResult.membersAssigned} doctors assigned.
+                {generateResult.unfilledRequirements.length > 0 && (
+                  <p className="mt-1" style={{ color: "#dc2626" }}>Unfilled: {generateResult.unfilledRequirements.join("; ")}</p>
                 )}
               </div>
             )}

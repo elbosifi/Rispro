@@ -23,6 +23,13 @@ import {
   updateDraftRosterWeek,
   validateRosterAssignment,
 } from "./roster-service.js";
+import {
+  exportRosterWeek,
+  generateRosterDraftForManager,
+  getRosterWeekNotificationsForManager,
+  notifyRosterWeekForManager,
+} from "./roster-planning-service.js";
+import type { RosterBalanceStrategy, RosterExportFormat } from "./roster-planning-types.js";
 
 const router = Router();
 router.use("/templates", doctorRosterTemplateRouter);
@@ -47,6 +54,8 @@ const DUTY_TYPES = new Set<RosterDutyType>([
 ]);
 
 const TEAM_ROLES = new Set<RosterTeamRole>(["lead", "specialist", "sho", "supervisor", "observer"]);
+const BALANCE_STRATEGIES = new Set<RosterBalanceStrategy>(["simple", "preserve_previous", "least_assigned"]);
+const EXPORT_FORMATS = new Set<RosterExportFormat>(["html", "csv"]);
 
 function actor(req: DoctorRequest) {
   if (!req.user) throw new HttpError(401, "Authentication required.");
@@ -86,6 +95,23 @@ function optionalNumberPatch(value: unknown): number | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === "") return null;
   return asPositiveInteger(value, "modalityId");
+}
+
+function optionalNumberByField(value: unknown, field: string): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  return asPositiveInteger(value, field);
+}
+
+function parseBalanceStrategy(value: unknown): RosterBalanceStrategy {
+  const parsed = String(value ?? "simple").trim();
+  if (!BALANCE_STRATEGIES.has(parsed as RosterBalanceStrategy)) throw new HttpError(400, "Unsupported balanceStrategy.");
+  return parsed as RosterBalanceStrategy;
+}
+
+function parseExportFormat(value: unknown): RosterExportFormat {
+  const parsed = String(value ?? "html").trim();
+  if (!EXPORT_FORMATS.has(parsed as RosterExportFormat)) throw new HttpError(400, "Unsupported export format.");
+  return parsed as RosterExportFormat;
 }
 
 router.get(
@@ -146,6 +172,35 @@ router.get(
   })
 );
 
+router.get(
+  "/weeks/:id/export",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const payload = await exportRosterWeek(
+      actor(req),
+      asPositiveInteger(req.params.id, "weekId"),
+      parseExportFormat(req.query.format),
+      req.query.scope === "full" ? "full" : "my"
+    );
+    res.setHeader("Content-Type", payload.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.send(payload.body);
+  })
+);
+
+router.post(
+  "/weeks/:id/notify",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.status(201).json(await notifyRosterWeekForManager(actor(req), asPositiveInteger(req.params.id, "weekId")));
+  })
+);
+
+router.get(
+  "/weeks/:id/notifications",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    res.json({ notifications: await getRosterWeekNotificationsForManager(actor(req), asPositiveInteger(req.params.id, "weekId")) });
+  })
+);
+
 router.post(
   "/weeks/:id/archive",
   asyncRoute(async (req: DoctorRequest, res: Response) => {
@@ -168,6 +223,21 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const profiles = await listRosterDoctors(actor(req));
     res.json({ profiles });
+  })
+);
+
+router.post(
+  "/generate-draft",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await generateRosterDraftForManager(actor(req), {
+      weekStartDate: asString(body.weekStartDate),
+      templateId: optionalNumberByField(body.templateId, "templateId"),
+      modalityId: optionalNumberByField(body.modalityId, "modalityId"),
+      includeDoctors: body.includeDoctors === true,
+      balanceStrategy: parseBalanceStrategy(body.balanceStrategy),
+    });
+    res.status(201).json(result);
   })
 );
 
