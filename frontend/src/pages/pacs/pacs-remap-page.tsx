@@ -181,14 +181,28 @@ async function uploadMultipartWithProgress(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     const timer = window.setTimeout(() => xhr.abort(), timeoutMs);
-    xhr.open("POST", `/api${path}`, true);
-    xhr.withCredentials = true;
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) onProgress(event.loaded, event.total);
-    };
-    xhr.upload.onload = () => {
+    let uploadComplete = false;
+    const markUploadComplete = () => {
+      if (uploadComplete) return;
+      uploadComplete = true;
       onUploadComplete?.();
     };
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      onProgress(event.loaded, event.total);
+      if (event.total > 0 && event.loaded >= event.total) {
+        markUploadComplete();
+      }
+    };
+    xhr.upload.onload = () => {
+      markUploadComplete();
+    };
+    xhr.upload.onloadend = () => {
+      markUploadComplete();
+    };
+    xhr.open("POST", `/api${path}`, true);
+    xhr.withCredentials = true;
     xhr.onreadystatechange = () => {
       if (xhr.readyState !== XMLHttpRequest.DONE) return;
       window.clearTimeout(timer);
@@ -412,6 +426,7 @@ export default function PacsRemapPage() {
         setUploadLoaded(loaded);
         setUploadTotal(total || uploadTotal);
       }, () => {
+        setUploadLoaded((current) => Math.max(current, uploadTotal));
         setProcessingStage("orthanc_processing");
       });
       setJobId(uploadResult.job.id);

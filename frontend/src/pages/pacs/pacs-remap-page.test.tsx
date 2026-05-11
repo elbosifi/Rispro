@@ -43,6 +43,9 @@ vi.mock("@/lib/dicom-study-scan", () => ({
 
 class FakeXHR {
   static instances: FakeXHR[] = [];
+  static fireUploadLoad = true;
+  static fireUploadLoadEnd = false;
+  static respondInSend = true;
   withCredentials = false;
   readyState = 0;
   status = 0;
@@ -50,6 +53,7 @@ class FakeXHR {
   upload = {
     onprogress: null as ((event: ProgressEvent<EventTarget>) => void) | null,
     onload: null as (() => void) | null,
+    onloadend: null as (() => void) | null,
   };
   onreadystatechange: (() => void) | null = null;
   onerror: (() => void) | null = null;
@@ -66,7 +70,9 @@ class FakeXHR {
   }
   send(body?: Document | XMLHttpRequestBodyInit | null) {
     this.sentBody = body as FormData;
-    this.upload.onload?.();
+    if (FakeXHR.fireUploadLoad) this.upload.onload?.();
+    if (FakeXHR.fireUploadLoadEnd) this.upload.onloadend?.();
+    if (!FakeXHR.respondInSend) return;
     this.status = 201;
     this.responseText = JSON.stringify({ job: { id: 88, status: "sent" }, skippedFilesCount: 0 });
     this.readyState = 4;
@@ -90,6 +96,9 @@ describe("PacsRemapPage wizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     FakeXHR.instances.length = 0;
+    FakeXHR.fireUploadLoad = true;
+    FakeXHR.fireUploadLoadEnd = false;
+    FakeXHR.respondInSend = true;
     previewMock.mockImplementation((...args: unknown[]) => scanMock(...args));
     buildSkipPreviewMock.mockImplementation((inputFiles: File[]) => ({
       studies: [],
@@ -296,6 +305,40 @@ describe("PacsRemapPage wizard", () => {
     expect(scanMock).not.toHaveBeenCalled();
     expect(FakeXHR.instances[0]?.url).toBe("/api/pacs/remap/jobs/process-multipart");
     expect(FakeXHR.instances[0]?.sentBody?.getAll("files")).toHaveLength(2);
+  });
+
+  it("moves to Orthanc processing when upload loadend fires without upload load", async () => {
+    FakeXHR.fireUploadLoad = false;
+    FakeXHR.fireUploadLoadEnd = true;
+    FakeXHR.respondInSend = false;
+    const fullFiles = [new File(["full-1"], "full1.dcm")];
+    previewMock.mockResolvedValue({
+      studies: [
+        { studyInstanceUid: "1.2.3", studyDescription: "Preview", studyDate: "20260101", modality: "CT", patientId: "P1", patientName: "One", seriesCount: 1, fileCount: 1, totalBytes: 10, files: [fullFiles[0]] },
+      ],
+      skippedSidecarCount: 0,
+      unparsedCount: 0,
+      totalFileCount: 1,
+      dicomLikeFileCount: 1,
+      parsedDicomFileCount: 1,
+      fallbackUploadFiles: fullFiles,
+      unparsedFiles: [],
+      previewOnly: true,
+    });
+    buildPlanMock.mockReturnValue({ files: [fullFiles[0]], selectedStudyInstanceUid: "1.2.3", usesFallback: false });
+    renderPage();
+    fireEvent.change(screen.getByLabelText("Select DICOM files"), { target: { files: fullFiles } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan selected folder/files" }));
+    await screen.findByText(/Detected 1 studies/i);
+    fireEvent.click(screen.getByRole("button", { name: /Preview/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /John Doe/i }));
+    const comboBoxes = screen.getAllByRole("combobox");
+    fireEvent.change(comboBoxes[2] as HTMLSelectElement, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "I confirm this is the correct study and correct RISPro patient." }));
+    fireEvent.click(await screen.findByRole("button", { name: "Upload selected study, remap, and send to PACS" }));
+
+    await waitFor(() => expect(FakeXHR.instances.length).toBe(1));
+    await screen.findByText("Waiting for Orthanc study stability and remapping demographics");
   });
 
   it("skip preview uploads all selected DICOM-like files without scan or selectedStudyInstanceUID", async () => {
