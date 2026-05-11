@@ -19,6 +19,10 @@ export interface Naps2ScanResult {
 }
 
 const DEFAULT_ENDPOINTS = [
+  "http://127.0.0.1:9801",
+  "http://localhost:9801",
+  "http://127.0.0.1:9802",
+  "http://localhost:9802",
   "http://127.0.0.1:9880",
   "http://localhost:9880",
   "https://127.0.0.1:9880",
@@ -93,10 +97,10 @@ function toEsclColorMode(colorMode: Naps2ScanOptions["colorMode"]): string {
 function buildScanSettings(options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <scan:ScanSettings xmlns:pwg="http://www.pwg.org/schemas/2010/12/sm" xmlns:scan="http://schemas.hp.com/imaging/escl/2011/05/03">
-  <pwg:Version>2.0</pwg:Version>
+  <pwg:Version>2.6</pwg:Version>
   <scan:Intent>Document</scan:Intent>
-  <pwg:InputSource>${toEsclInputSource(options.source)}</pwg:InputSource>
-  <scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>
+  <scan:InputSource>${toEsclInputSource(options.source)}</scan:InputSource>
+  <scan:DocumentFormat>application/pdf</scan:DocumentFormat>
   <scan:XResolution>${options.dpi}</scan:XResolution>
   <scan:YResolution>${options.dpi}</scan:YResolution>
   <scan:ColorMode>${toEsclColorMode(options.colorMode)}</scan:ColorMode>
@@ -119,7 +123,7 @@ async function createScanJob(endpoint: string, options: Required<Pick<Naps2ScanO
   });
 
   if (!response.ok) {
-    throw new Error("NAPS2.WebScan could not start a scan job.");
+    throw new Error(`NAPS2.WebScan capabilities were reachable at ${endpoint}, but scan job creation failed with HTTP ${response.status}.`);
   }
 
   const location = response.headers.get("Location") || response.headers.get("location") || "";
@@ -260,7 +264,7 @@ export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Pr
     const pages = await readScannedPages(status.endpoint, jobId);
     if (pages.length === 0) throw new Error("No scanned pages were returned by NAPS2.WebScan.");
 
-    const pdf = pages.length === 1 && pages[0].type === "application/pdf" ? pages[0] : await buildPdfFromJpegPages(pages);
+    const pdf = pages.length === 1 && pages[0].type.toLowerCase().includes("pdf") ? pages[0] : await buildPdfFromJpegPages(pages);
     const fileName = options.fileName?.trim() || "appointment-request.pdf";
     const normalizedFileName = fileName.toLowerCase().endsWith(".pdf") ? fileName : `${fileName.replace(/\.[a-z0-9]+$/i, "")}.pdf`;
     return {

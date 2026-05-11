@@ -48,6 +48,7 @@ import {
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { formatDateTimeLy } from "@/lib/date-format";
 import { chooseLocalized, type TranslationKey } from "@/lib/i18n";
+import { getNaps2WebScanStatus } from "@/lib/naps2-webscan";
 import { useLanguage } from "@/providers/language-provider";
 import { Button } from "@/components/shared/Button";
 import { Card } from "@/components/shared/Card";
@@ -4199,6 +4200,18 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
     },
   });
 
+  const testNaps2Mutation = useMutation({
+    mutationFn: () => getNaps2WebScanStatus(naps2WebScanEndpoint),
+    onSuccess: (status) => {
+      setResultMessage(status.available && status.endpoint
+        ? t("settings.documents.naps2TestOk", { endpoint: `${status.endpoint}/eSCL/ScannerCapabilities` })
+        : t("settings.documents.naps2TestFailed", { message: status.message || "NAPS2.WebScan is not reachable." }));
+    },
+    onError: (err: unknown) => {
+      setResultMessage(err instanceof Error ? err.message : t("settings.documents.naps2TestFailed", { message: "NAPS2.WebScan is not reachable." }));
+    },
+  });
+
   const deleteAllMutation = useMutation({
     mutationFn: () => adminBulkDeleteDocuments({ mode: "all" }),
     onSuccess: (result) => {
@@ -4279,7 +4292,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             <input
               value={naps2WebScanEndpoint}
               onChange={(e) => setNaps2WebScanEndpoint(e.target.value)}
-              placeholder="http://127.0.0.1:9880"
+              placeholder="http://127.0.0.1:9801"
               className="input-premium w-full"
             />
           </div>
@@ -4305,6 +4318,16 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
               <option value="duplex">{t("settings.documents.duplex")}</option>
             </select>
           </div>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            onClick={() => testNaps2Mutation.mutate()}
+            disabled={testNaps2Mutation.isPending}
+          >
+            {testNaps2Mutation.isPending ? t("settings.documents.naps2Testing") : t("settings.documents.naps2Test")}
+          </button>
         </div>
         <p className="text-xs description-center">{t("settings.documents.naps2Help")}</p>
       </div>

@@ -59,6 +59,7 @@ const mockFetchIntegrationStatus = vi.fn(async () => ({
     scanFileFormat: "pdf",
     bridgeReady: true,
     naps2WebScanEnabled: true,
+    naps2WebScanEndpoint: "",
   },
 }));
 
@@ -191,6 +192,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanFileFormat: "pdf",
         bridgeReady: true,
         naps2WebScanEnabled: true,
+        naps2WebScanEndpoint: "",
       },
     });
   });
@@ -218,6 +220,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         dpi: 200,
         colorMode: "grayscale",
         source: "feeder",
+        endpoint: "",
       })
     );
     expect(mockUploadAppointmentDocument).toHaveBeenCalledWith(
@@ -260,6 +263,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanFileFormat: "pdf",
         bridgeReady: false,
         naps2WebScanEnabled: false,
+        naps2WebScanEndpoint: "",
       },
     });
 
@@ -268,6 +272,35 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(await screen.findByText("NAPS2.WebScan is not available on this workstation. Upload PDF/image instead.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
     expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
+  });
+
+  it("passes configured NAPS2 endpoint from integration status to scanner adapter", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true,
+        allowedFileTypes: ["pdf", "jpg", "png"],
+        documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "naps2_webscan",
+        scannerProfileName: "default",
+        scannerSource: "feeder",
+        scanDpi: "200",
+        scanColorMode: "grayscale",
+        scanFileFormat: "pdf",
+        bridgeReady: true,
+        naps2WebScanEnabled: true,
+        naps2WebScanEndpoint: "http://localhost:9801",
+      },
+    });
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Appointment Request" }));
+
+    await waitFor(() => {
+      expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ endpoint: "http://localhost:9801" })
+      );
+    });
   });
 
   it("keeps failed scanned uploads retryable through the same upload API", async () => {
