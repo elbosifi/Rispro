@@ -58,6 +58,34 @@ const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shad
 const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+function RegistrationStat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "rose" | "sky" | "amber" | "emerald";
+}) {
+  const toneClass =
+    tone === "rose"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : tone === "sky"
+        ? "border-sky-200 bg-sky-50 text-sky-700"
+        : tone === "amber"
+          ? "border-amber-200 bg-amber-50 text-amber-700"
+          : tone === "emerald"
+            ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+            : "border-border bg-muted/30 text-foreground";
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-75">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -302,6 +330,16 @@ export default function RegistrationsPage() {
   const tomorrowValue = isoDateDaysFromNow(1);
   const isTodayShortcutActive = filters.dateMode === "single" && filters.date === todayValue;
   const isTomorrowShortcutActive = filters.dateMode === "single" && filters.date === tomorrowValue;
+  const visibleSummary = appointments.reduce(
+    (summary, appointment) => {
+      if (appointment.caseCategory === "oncology") summary.oncology += 1;
+      if (appointment.caseCategory === "non_oncology") summary.nonOncology += 1;
+      if (appointment.status === "arrived" || appointment.status === "waiting") summary.inDepartment += 1;
+      if (appointment.patientWebPushSubscribed) summary.notifiable += 1;
+      return summary;
+    },
+    { oncology: 0, nonOncology: 0, inDepartment: 0, notifiable: 0 }
+  );
   const notificationTemplates = [
     { value: "appointment_reminder_24h", label: t("registrations.webPushTemplateReminder") },
     { value: "appointment_rescheduled", label: t("registrations.webPushTemplateRescheduled") },
@@ -947,8 +985,82 @@ export default function RegistrationsPage() {
           </Button>
         </div>
 
+        <div className="grid grid-cols-2 gap-2 border-b border-border p-3 lg:grid-cols-4">
+          <RegistrationStat label={t("appointments.create.oncology")} value={visibleSummary.oncology} tone="rose" />
+          <RegistrationStat label={t("appointments.create.nonOncology")} value={visibleSummary.nonOncology} tone="sky" />
+          <RegistrationStat label={t("registrations.inDepartment")} value={visibleSummary.inDepartment} tone="amber" />
+          <RegistrationStat label={t("registrations.notifiable")} value={visibleSummary.notifiable} tone="emerald" />
+        </div>
+
         <div className="overflow-x-auto">
-          <div className="min-w-[1140px]">
+          <div className="space-y-3 p-3 lg:hidden">
+            {isLoading ? (
+              <div className="p-8 text-center text-muted-foreground">
+                {t("common.loading")}
+              </div>
+            ) : appointments.length === 0 ? (
+              <div className="p-8 text-center text-muted-foreground">
+                {t("queue.empty")}
+              </div>
+            ) : (
+              appointments.map((apt: AppointmentWithDetails, index: number) => {
+                const patientName = chooseLocalized(language, apt.arabicFullName, apt.englishFullName);
+                const modalityName = chooseLocalized(language, apt.modalityNameAr, apt.modalityNameEn);
+                const examName = chooseLocalized(language, apt.examNameAr, apt.examNameEn);
+                const categoryLabel =
+                  apt.caseCategory === "oncology"
+                    ? t("appointments.create.oncology")
+                    : apt.caseCategory === "non_oncology"
+                      ? t("appointments.create.nonOncology")
+                      : t("registrations.categoryUnknown");
+
+                return (
+                  <div
+                    key={apt.id}
+                    role="button"
+                    tabIndex={0}
+                    className={`rounded-xl border border-border p-3 ${patientCategoryRowClass(apt.caseCategory, index, selectedAppointment?.id === apt.id)}`}
+                    onClick={() => openSlipPreview(apt)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        openSlipPreview(apt);
+                      }
+                    }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{patientName}</p>
+                        <p className="mt-1 font-mono text-xs text-muted-foreground">{apt.accessionNumber}</p>
+                      </div>
+                      <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
+                        {statusLabel(language, apt.status)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {[categoryLabel, modalityName, examName, formatDateLy(apt.appointmentDate)].filter(Boolean).join(" • ")}
+                    </p>
+                    <div className="mt-3 grid grid-cols-4 gap-1" onClick={(event) => event.stopPropagation()}>
+                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
+                        <Printer size={15} />
+                      </Button>
+                      <Button type="button" size="sm" variant="ghost" className="h-9 px-0" onClick={() => void handleViewAppointmentLink(apt)}>
+                        <ExternalLink size={15} />
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" disabled={!apt.phone1} onClick={() => openWhatsappDialog(apt)}>
+                        WA
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" className="h-9 px-0" disabled={!apt.patientWebPushSubscribed} onClick={() => openPatientNotificationDialog(apt)}>
+                        <Bell size={15} />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="hidden min-w-[1140px] lg:block">
             <div className="grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(190px,0.62fr)] gap-2 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
               <div>{t("registrations.accession")}</div>

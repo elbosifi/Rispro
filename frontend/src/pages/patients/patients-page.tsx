@@ -25,6 +25,32 @@ function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
   );
 }
 
+function DirectoryStat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "rose" | "sky" | "amber";
+}) {
+  const toneClass =
+    tone === "rose"
+      ? "border-rose-200 bg-rose-50 text-rose-700"
+      : tone === "sky"
+        ? "border-sky-200 bg-sky-50 text-sky-700"
+        : tone === "amber"
+          ? "border-amber-200 bg-amber-50 text-amber-700"
+          : "border-border bg-muted/30 text-foreground";
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-75">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
+  );
+}
+
 function PatientDrawer({
   patientId,
   onClose
@@ -275,6 +301,35 @@ export default function PatientsPage() {
   const patients = data?.patients || [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages || 1;
+  const hasActiveFilters = Boolean(searchQuery || categoryFilter || appointmentFilter || sexFilter || ageMin !== "" || ageMax !== "" || sortBy !== "name");
+  const visibleSummary = patients.reduce(
+    (summary, patient) => {
+      if (patient.category === "oncology") summary.oncology += 1;
+      if (patient.category === "non_oncology") summary.nonOncology += 1;
+      if (patient.nextAppointment) summary.withNextAppointment += 1;
+      if (
+        patient.warnings.missingPhone ||
+        patient.warnings.missingDob ||
+        patient.warnings.missingSex ||
+        patient.warnings.missingName ||
+        patient.warnings.possibleDuplicate
+      ) {
+        summary.needsReview += 1;
+      }
+      return summary;
+    },
+    { oncology: 0, nonOncology: 0, withNextAppointment: 0, needsReview: 0 }
+  );
+  const clearFilters = () => {
+    setSearchQuery("");
+    setCategoryFilter("");
+    setAppointmentFilter("");
+    setSexFilter("");
+    setAgeMin("");
+    setAgeMax("");
+    setSortBy("name");
+    setPage(1);
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -304,8 +359,8 @@ export default function PatientsPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-4 mt-4 pt-4 border-t border-border">
-          <div className="flex items-center gap-2">
+        <div className="mt-4 grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-6">
+          <label className="space-y-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.directory.filter.category")}:</span>
             <select
               value={categoryFilter}
@@ -313,14 +368,14 @@ export default function PatientsPage() {
                 setCategoryFilter(e.target.value as CategoryFilter);
                 setPage(1);
               }}
-              className="input-premium h-9 text-sm"
+              className="input-premium h-10 w-full text-sm"
             >
               <option value="">{t(language, "patients.directory.filter.all")}</option>
               <option value="oncology">{t(language, "patients.directory.filter.oncology")}</option>
               <option value="non_oncology">{t(language, "patients.directory.filter.nonOncology")}</option>
             </select>
-          </div>
-          <div className="flex items-center gap-2">
+          </label>
+          <label className="space-y-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.directory.filter.appointments")}:</span>
             <select
               value={appointmentFilter}
@@ -328,15 +383,15 @@ export default function PatientsPage() {
                 setAppointmentFilter(e.target.value as AppointmentFilter);
                 setPage(1);
               }}
-              className="input-premium h-9 text-sm"
+              className="input-premium h-10 w-full text-sm"
             >
               <option value="">{t(language, "patients.directory.filter.all")}</option>
               <option value="has_future">{t(language, "patients.directory.filter.hasFuture")}</option>
               <option value="today">{t(language, "patients.directory.filter.today")}</option>
               <option value="no_future">{t(language, "patients.directory.filter.noFuture")}</option>
             </select>
-          </div>
-          <div className="flex items-center gap-2">
+          </label>
+          <label className="space-y-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.sex")}:</span>
             <select
               value={sexFilter}
@@ -344,54 +399,68 @@ export default function PatientsPage() {
                 setSexFilter(e.target.value as "male" | "female" | "");
                 setPage(1);
               }}
-              className="input-premium h-9 text-sm"
+              className="input-premium h-10 w-full text-sm"
             >
               <option value="">{t(language, "patients.directory.filter.all")}</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
             </select>
-          </div>
-          <div className="flex items-center gap-2">
+          </label>
+          <label className="space-y-1">
             <span className="text-sm text-muted-foreground">{t(language, "patients.age")}:</span>
-            <input
-              type="number"
-              value={ageMin}
-              onChange={(e) => {
-                setAgeMin(e.target.value === "" ? "" : Number(e.target.value));
-                setPage(1);
-              }}
-              placeholder="Min"
-              className="input-premium h-9 w-16 text-sm"
-              min="0"
-            />
-            <span className="text-muted-foreground">-</span>
-            <input
-              type="number"
-              value={ageMax}
-              onChange={(e) => {
-                setAgeMax(e.target.value === "" ? "" : Number(e.target.value));
-                setPage(1);
-              }}
-              placeholder="Max"
-              className="input-premium h-9 w-16 text-sm"
-              min="0"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-muted-foreground">Sort:</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={ageMin}
+                onChange={(e) => {
+                  setAgeMin(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+                placeholder={t(language, "patients.directory.filter.minAge")}
+                className="input-premium h-10 min-w-0 flex-1 text-sm"
+                min="0"
+              />
+              <span className="text-muted-foreground">-</span>
+              <input
+                type="number"
+                value={ageMax}
+                onChange={(e) => {
+                  setAgeMax(e.target.value === "" ? "" : Number(e.target.value));
+                  setPage(1);
+                }}
+                placeholder={t(language, "patients.directory.filter.maxAge")}
+                className="input-premium h-10 min-w-0 flex-1 text-sm"
+                min="0"
+              />
+            </div>
+          </label>
+          <label className="space-y-1">
+            <span className="text-sm text-muted-foreground">{t(language, "patients.directory.filter.sort")}:</span>
             <select
               value={sortBy}
               onChange={(e) => {
                 setSortBy(e.target.value as "name" | "recent" | "mrn");
                 setPage(1);
               }}
-              className="input-premium h-9 text-sm"
+              className="input-premium h-10 w-full text-sm"
             >
-              <option value="name">Name</option>
-              <option value="recent">Most Recent</option>
+              <option value="name">{t(language, "patients.directory.filter.sortName")}</option>
+              <option value="recent">{t(language, "patients.directory.filter.sortRecent")}</option>
               <option value="mrn">MRN</option>
             </select>
+          </label>
+          <div className="flex items-end">
+            <Button type="button" variant="ghost" size="sm" className="h-10 w-full" onClick={clearFilters} disabled={!hasActiveFilters}>
+              {t(language, "patients.directory.filter.clear")}
+            </Button>
           </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-4 lg:grid-cols-4">
+          <DirectoryStat label={t(language, "patients.directory.filter.oncology")} value={visibleSummary.oncology} tone="rose" />
+          <DirectoryStat label={t(language, "patients.directory.filter.nonOncology")} value={visibleSummary.nonOncology} tone="sky" />
+          <DirectoryStat label={t(language, "patients.directory.summary.withNext")} value={visibleSummary.withNextAppointment} />
+          <DirectoryStat label={t(language, "patients.directory.summary.needsReview")} value={visibleSummary.needsReview} tone="amber" />
         </div>
       </Card>
 
@@ -421,7 +490,7 @@ export default function PatientsPage() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border">
@@ -550,6 +619,48 @@ export default function PatientsPage() {
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="space-y-3 p-3 md:hidden">
+              {patients.map((patient: PatientDirectoryRow, index: number) => (
+                <button
+                  key={patient.id}
+                  type="button"
+                  className={`w-full rounded-xl border border-border p-3 text-start transition-colors ${patientCategoryRowClass(patient.category, index)}`}
+                  onClick={() => setSelectedPatientId(patient.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate font-semibold">{patient.arabicFullName}</p>
+                        <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
+                      </div>
+                      <p className="mt-1 font-mono text-xs text-muted-foreground">{patient.mrn || "—"}</p>
+                    </div>
+                    <Badge variant={patient.nextAppointment ? "info" : "neutral"} size="sm">
+                      {patient.nextAppointment ? t(language, "patients.directory.filter.hasFuture") : t(language, "patients.directory.filter.noFuture")}
+                    </Badge>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                    <div>
+                      <p className="font-mono uppercase tracking-[0.12em]">{t(language, "patients.sex")}</p>
+                      <p className="mt-0.5 text-foreground">{patient.sex || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono uppercase tracking-[0.12em]">{t(language, "patients.age")}</p>
+                      <p className="mt-0.5 text-foreground">{patient.ageYears}{patient.demographicsEstimated ? " (E)" : ""}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono uppercase tracking-[0.12em]">{t(language, "patients.directory.nextAppointment")}</p>
+                      <p className="mt-0.5 text-foreground">{patient.nextAppointment?.date || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="font-mono uppercase tracking-[0.12em]">{t(language, "patients.phone")}</p>
+                      <p className="mt-0.5 text-foreground">{patient.phone1 || "—"}</p>
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
 
             {totalPages > 1 && (

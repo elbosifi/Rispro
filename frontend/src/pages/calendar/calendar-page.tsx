@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight, ListFilter, Search } from "lucide-react";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -18,6 +19,8 @@ interface CalendarDay {
   isCurrentMonth: boolean;
   isToday: boolean;
   count: number;
+  oncology: number;
+  nonOncology: number;
   summary: { modality: string; count: number }[];
   isSelected: boolean;
 }
@@ -37,7 +40,11 @@ export default function CalendarPage() {
   const today = new Date();
   const [displayDate, setDisplayDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
   const [selectedDate, setSelectedDate] = useState(todayIsoDateLy());
+  const [userSelectedDate, setUserSelectedDate] = useState(false);
   const [modalityFilter, setModalityFilter] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedModalitySummaryKey, setSelectedModalitySummaryKey] = useState<string | null>(null);
   const [isModalityModalOpen, setIsModalityModalOpen] = useState(false);
   const navigate = useNavigate();
@@ -53,6 +60,28 @@ export default function CalendarPage() {
     placeholderData: (previousData) => previousData
   });
   const visibleAppointments = useMemo(() => filterVisibleAppointments(appointments), [appointments]);
+  const filteredAppointments = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return visibleAppointments.filter((appointment) => {
+      if (categoryFilter && appointment.caseCategory !== categoryFilter) return false;
+      if (statusFilter && appointment.status !== statusFilter) return false;
+      if (!query) return true;
+
+      return [
+        appointment.accessionNumber,
+        appointment.arabicFullName,
+        appointment.englishFullName,
+        appointment.mrn,
+        appointment.nationalId,
+        appointment.modalityNameAr,
+        appointment.modalityNameEn,
+        appointment.examNameAr,
+        appointment.examNameEn,
+      ]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query));
+    });
+  }, [categoryFilter, searchQuery, statusFilter, visibleAppointments]);
 
   // Load lookups for modality filter
   const { data: lookups } = useQuery({
@@ -62,13 +91,30 @@ export default function CalendarPage() {
   });
 
   // Group appointments by date
-  const groupedByDate = useMemo(() => visibleAppointments.reduce((acc, apt) => {
+  const groupedByDate = useMemo(() => filteredAppointments.reduce((acc, apt) => {
     const date = String(apt.appointmentDate || "").slice(0, 10);
     if (!date) return acc;
     if (!acc[date]) acc[date] = [];
     acc[date].push(apt);
     return acc;
-  }, {} as Record<string, any[]>), [visibleAppointments]);
+  }, {} as Record<string, AppointmentWithDetails[]>), [filteredAppointments]);
+
+  const monthStats = useMemo(() => buildMonthStats(filteredAppointments, language), [filteredAppointments, language]);
+
+  useEffect(() => {
+    if (userSelectedDate || isLoading || groupedByDate[selectedDate] || filteredAppointments.length === 0) return;
+
+    const firstAppointmentDate = filteredAppointments
+      .map((appointment) => String(appointment.appointmentDate || "").slice(0, 10))
+      .filter(Boolean)
+      .sort()[0];
+
+    if (firstAppointmentDate) {
+      setSelectedDate(firstAppointmentDate);
+      setSelectedModalitySummaryKey(null);
+      setIsModalityModalOpen(false);
+    }
+  }, [filteredAppointments, groupedByDate, isLoading, selectedDate, userSelectedDate]);
 
   // Build grid
   const gridDays = useMemo(
@@ -85,21 +131,33 @@ export default function CalendarPage() {
   );
 
   const prevMonth = () => {
-    setDisplayDate((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
+    setDisplayDate((d) => {
+      const nextDate = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+      setSelectedDate(formatDate(nextDate));
+      return nextDate;
+    });
+    setUserSelectedDate(false);
   };
 
   const nextMonth = () => {
-    setDisplayDate((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
+    setDisplayDate((d) => {
+      const nextDate = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+      setSelectedDate(formatDate(nextDate));
+      return nextDate;
+    });
+    setUserSelectedDate(false);
   };
 
   const goToday = () => {
     const now = new Date();
     setDisplayDate(new Date(now.getFullYear(), now.getMonth(), 1));
     setSelectedDate(formatDate(now));
+    setUserSelectedDate(true);
   };
 
   const selectDay = (date: string) => {
     setSelectedDate(date);
+    setUserSelectedDate(true);
     setSelectedModalitySummaryKey(null);
     setIsModalityModalOpen(false);
   };
@@ -118,6 +176,10 @@ export default function CalendarPage() {
     navigate(`/registrations?${params.toString()}`);
   };
 
+  const openRegistrationsForSelectedDay = () => {
+    navigate(`/registrations?date=${selectedDate}`);
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       {/* Header */}
@@ -129,56 +191,133 @@ export default function CalendarPage() {
           <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
             <span className="gradient-text">{t(language, "calendar.title")}</span>
           </h1>
-          <div className="flex items-center gap-3">
-            <select
-              value={modalityFilter}
-              onChange={(e) => setModalityFilter(e.target.value)}
-              className="input-premium h-12 w-auto min-w-[200px]"
-            >
-              <option value="">{t(language, "calendar.allModalities")}</option>
-              {(lookups?.modalities ?? []).map((m: any) => (
-                <option key={m.id} value={m.id.toString()}>
-                  {m.nameEn}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
+
+      <Card className="p-3 sm:p-4">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:flex-1">
+            <label className="space-y-1">
+              <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                <Search size={12} />
+                {t(language, "calendar.search")}
+              </span>
+              <input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                className="input-premium h-11 w-full"
+                placeholder={t(language, "calendar.searchPlaceholder")}
+                aria-label={t(language, "calendar.search")}
+              />
+            </label>
+            <label className="space-y-1">
+              <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                <ListFilter size={12} />
+                {t(language, "calendar.modalityFilter")}
+              </span>
+              <select
+                value={modalityFilter}
+                onChange={(event) => setModalityFilter(event.target.value)}
+                className="input-premium h-11 w-full"
+                aria-label={t(language, "calendar.modalityFilter")}
+              >
+                <option value="">{t(language, "calendar.allModalities")}</option>
+                {(lookups?.modalities ?? []).map((m: any) => (
+                  <option key={m.id} value={m.id.toString()}>
+                    {chooseLocalized(language, m.nameAr, m.nameEn)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                {t(language, "calendar.categoryFilter")}
+              </span>
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className="input-premium h-11 w-full"
+                aria-label={t(language, "calendar.categoryFilter")}
+              >
+                <option value="">{t(language, "calendar.allCategories")}</option>
+                <option value="oncology">{t(language, "calendar.oncologyLabel")}</option>
+                <option value="non_oncology">{t(language, "calendar.nonOncologyLabel")}</option>
+              </select>
+            </label>
+            <label className="space-y-1">
+              <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                {t(language, "calendar.statusFilter")}
+              </span>
+              <select
+                value={statusFilter}
+                onChange={(event) => setStatusFilter(event.target.value)}
+                className="input-premium h-11 w-full"
+                aria-label={t(language, "calendar.statusFilter")}
+              >
+                <option value="">{t(language, "calendar.allStatuses")}</option>
+                {["scheduled", "arrived", "waiting", "completed", "cancelled", "voided", "discontinued"].map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(language, status)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-10 self-start xl:self-end"
+            onClick={() => {
+              setSearchQuery("");
+              setCategoryFilter("");
+              setStatusFilter("");
+              setModalityFilter("");
+            }}
+          >
+            {t(language, "calendar.clearFilters")}
+          </Button>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Calendar Grid */}
         <Card className="lg:col-span-2 overflow-hidden p-0">
           {/* Header */}
-          <div className="p-4 border-b border-border flex items-center justify-between">
-            <button onClick={prevMonth} className="p-2 rounded-lg hover:bg-muted transition-colors">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <h3 className="text-xl font-semibold">
-              {displayDate.toLocaleString("default", { month: "long", year: "numeric" })}
-            </h3>
-            <div className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={goToday}
-              >
-                {t(language, "calendar.today")}
-              </Button>
-              <button onClick={nextMonth} className="p-2 rounded-lg hover:bg-muted transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                </svg>
+          <div className="border-b border-border p-3 sm:p-4">
+            <div className="flex items-center justify-between gap-2">
+              <button onClick={prevMonth} className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors" aria-label={t(language, "calendar.previousMonth")}>
+                <ChevronLeft size={20} />
               </button>
+              <div className="min-w-0 text-center">
+                <h3 className="truncate text-base font-semibold sm:text-xl">
+                  {displayDate.toLocaleString(language === "ar" ? "ar-LY" : "en", { month: "long", year: "numeric" })}
+                </h3>
+                <p className="mt-1 text-xs text-muted-foreground">{t(language, "calendar.monthTotal", { count: monthStats.total })}</p>
+              </div>
+              <div className="flex gap-1.5">
+                <Button variant="secondary" size="sm" onClick={goToday} className="h-10 px-3">
+                  {t(language, "calendar.today")}
+                </Button>
+                <button onClick={nextMonth} className="inline-flex h-10 w-10 items-center justify-center rounded-lg hover:bg-muted transition-colors" aria-label={t(language, "calendar.nextMonth")}>
+                  <ChevronRight size={20} />
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <SummaryStat label={t(language, "calendar.totalLabel")} value={monthStats.total} />
+              <SummaryStat label={t(language, "calendar.oncologyLabel")} value={monthStats.oncology} />
+              <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={monthStats.nonOncology} />
+              <SummaryStat label={t(language, "calendar.busiestDay")} value={monthStats.busiestCount} detail={monthStats.busiestLabel} />
             </div>
           </div>
 
           {/* Weekday Headers */}
           <div className="grid grid-cols-7 bg-muted/50 border-b border-border">
             {[t(language, "calendar.sun"), t(language, "calendar.mon"), t(language, "calendar.tue"), t(language, "calendar.wed"), t(language, "calendar.thu"), t(language, "calendar.fri"), t(language, "calendar.sat")].map((day) => (
-              <div key={day} className="p-3 text-center text-sm font-medium text-muted-foreground">
+              <div key={day} className="p-2 text-center text-[11px] font-medium text-muted-foreground sm:p-3 sm:text-sm">
                 {day}
               </div>
             ))}
@@ -193,14 +332,14 @@ export default function CalendarPage() {
                 <button
                   key={day.date}
                   onClick={() => selectDay(day.date)}
-                  className={`min-h-[100px] p-3 border-b border-e border-border text-right transition-all duration-200 hover:bg-muted/50 relative ${
+                  className={`relative min-h-[76px] border-b border-e border-border p-1.5 text-right transition-all duration-200 hover:bg-muted/50 sm:min-h-[112px] sm:p-3 ${
                     !day.isCurrentMonth ? "bg-muted/30" : ""
                   } ${day.isSelected ? "bg-accent/10 ring-2 ring-inset ring-accent" : ""}`}
                 >
                   <span
-                    className={`text-sm font-medium ${
+                    className={`text-xs font-medium sm:text-sm ${
                       day.isToday
-                        ? "bg-accent text-white w-7 h-7 rounded-full flex items-center justify-center ml-auto mb-2"
+                        ? "bg-accent text-white w-6 h-6 rounded-full flex items-center justify-center ml-auto mb-1 sm:h-7 sm:w-7 sm:mb-2"
                         : day.isCurrentMonth
                           ? ""
                           : "text-muted-foreground opacity-50"
@@ -209,7 +348,23 @@ export default function CalendarPage() {
                     {day.dayNumber}
                   </span>
                   {day.count > 0 && (
-                    <div className="space-y-1 mt-1">
+                    <div className="mt-1 space-y-1">
+                      <div className="flex flex-wrap justify-end gap-1">
+                        <span className="rounded-full bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold text-accent sm:text-[11px]">
+                          {day.count}
+                        </span>
+                        {day.oncology > 0 && (
+                          <span className="rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 sm:text-[11px]">
+                            {day.oncology}
+                          </span>
+                        )}
+                        {day.nonOncology > 0 && (
+                          <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700 sm:text-[11px]">
+                            {day.nonOncology}
+                          </span>
+                        )}
+                      </div>
+                      <div className="hidden space-y-1 sm:block">
                       {day.summary.slice(0, 2).map((s, i) => (
                         <div key={i} className="text-xs text-muted-foreground truncate text-right">
                           {s.modality} ({s.count})
@@ -218,6 +373,7 @@ export default function CalendarPage() {
                       {day.summary.length > 2 && (
                         <div className="text-xs text-muted-foreground text-right">{t(language, "calendar.more", { count: day.summary.length - 2 })}</div>
                       )}
+                      </div>
                     </div>
                   )}
                 </button>
@@ -250,6 +406,14 @@ export default function CalendarPage() {
                   onClick={() => navigate(`/print?date=${selectedDate}`)}
                 >
                   {t(language, "calendar.openPrintTab")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={openRegistrationsForSelectedDay}
+                  disabled={selectedAppointments.length === 0}
+                >
+                  {t(language, "calendar.openDayRegistrations")}
                 </Button>
               </div>
             </div>
@@ -398,10 +562,40 @@ function buildSelectedDaySummaries(
   });
 }
 
+function buildMonthStats(appointments: AppointmentWithDetails[], language: "ar" | "en") {
+  const countsByDate = new Map<string, number>();
+  let oncology = 0;
+  let nonOncology = 0;
+
+  appointments.forEach((appointment) => {
+    const date = String(appointment.appointmentDate || "").slice(0, 10);
+    if (date) countsByDate.set(date, (countsByDate.get(date) || 0) + 1);
+    if (appointment.caseCategory === "oncology") oncology += 1;
+    if (appointment.caseCategory === "non_oncology") nonOncology += 1;
+  });
+
+  let busiestDate = "";
+  let busiestCount = 0;
+  countsByDate.forEach((count, date) => {
+    if (count > busiestCount) {
+      busiestDate = date;
+      busiestCount = count;
+    }
+  });
+
+  return {
+    total: appointments.length,
+    oncology,
+    nonOncology,
+    busiestCount,
+    busiestLabel: busiestDate ? formatDateLy(busiestDate) : t(language, "calendar.none"),
+  };
+}
+
 function buildCalendarGrid(
   displayDate: Date,
   selectedDate: string,
-  groupedByDate: Record<string, any[]>,
+  groupedByDate: Record<string, AppointmentWithDetails[]>,
   language: "ar" | "en"
 ): CalendarDay[] {
   const todayStr = formatDate(new Date());
@@ -429,6 +623,8 @@ function buildCalendarGrid(
       isCurrentMonth: date.getMonth() === displayDate.getMonth(),
       isToday: dateStr === todayStr,
       count: dayAppointments.length,
+      oncology: dayAppointments.filter((appointment) => appointment.caseCategory === "oncology").length,
+      nonOncology: dayAppointments.filter((appointment) => appointment.caseCategory === "non_oncology").length,
       summary: Object.entries(summary)
         .map(([modality, count]) => ({ modality, count: count as number }))
         .sort((a, b) => b.count - a.count),
@@ -466,11 +662,12 @@ function StatusBadge({ language, status }: { language: "ar" | "en"; status: stri
   );
 }
 
-function SummaryStat({ label, value }: { label: string; value: number }) {
+function SummaryStat({ label, value, detail }: { label: string; value: number; detail?: string }) {
   return (
     <div className="rounded-xl border border-border bg-muted/30 p-2.5">
       <p className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground mb-0.5">{label}</p>
       <p className="text-sm font-medium leading-snug break-words">{value}</p>
+      {detail ? <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{detail}</p> : null}
     </div>
   );
 }

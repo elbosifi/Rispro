@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useImperativeHandle, forwardRef, useMemo, type ChangeEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Search, ShieldCheck } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import {
   fetchUsers,
@@ -244,6 +245,35 @@ const SECTION_KEYS: SettingsSection[] = [
   "backup_restore"
 ];
 
+type SettingsGroup = "all" | "clinical" | "scheduling" | "integrations" | "admin" | "system";
+
+const SECTION_GROUPS: Record<Exclude<SettingsSection, "menu">, Exclude<SettingsGroup, "all">> = {
+  patient_registration: "clinical",
+  patient_import: "clinical",
+  exam_types: "clinical",
+  modalities: "clinical",
+  name_dictionary: "clinical",
+  appointment_slip: "clinical",
+  patient_qr_self_service: "clinical",
+  scheduling_and_capacity: "scheduling",
+  queue_and_arrival: "scheduling",
+  scheduling_engine_config: "scheduling",
+  pacs_connection: "integrations",
+  dicom_gateway_config: "integrations",
+  dicom_gateway_devices: "integrations",
+  dicom_gateway_monitoring: "integrations",
+  orthanc_mwl_sync: "integrations",
+  sante_worklist_hl7: "integrations",
+  sonicdicom_reports: "integrations",
+  users: "admin",
+  role_page_access: "admin",
+  audit_log: "admin",
+  documents_and_uploads: "system",
+  backup_restore: "system",
+};
+
+const SETTINGS_GROUPS: SettingsGroup[] = ["all", "clinical", "scheduling", "integrations", "admin", "system"];
+
 function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
   if (section === "patient_import") {
     return "Patient Import";
@@ -263,9 +293,15 @@ function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string |
   return _t(`settings.section.${section}` as TranslationKey);
 }
 
+function groupLabel(t: (key: TranslationKey, params?: Record<string, string | number>) => string, group: SettingsGroup): string {
+  return t(`settings.group.${group}` as TranslationKey);
+}
+
 export default function SettingsPage() {
   const { t } = useLanguage();
   const [section, setSection] = useState<SettingsSection>("menu");
+  const [settingsQuery, setSettingsQuery] = useState("");
+  const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("all");
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[]>([]);
   const [reauthVersion, setReauthVersion] = useState(0);
@@ -290,6 +326,14 @@ export default function SettingsPage() {
     setShowReAuthModal(true);
   };
 
+  const visibleSections = SECTION_KEYS.filter((key) => {
+    const label = sectionLabel(t, key);
+    const query = settingsQuery.trim().toLowerCase();
+    const matchesGroup = settingsGroup === "all" || SECTION_GROUPS[key] === settingsGroup;
+    const matchesQuery = !query || label.toLowerCase().includes(query) || SECTION_GROUPS[key].toLowerCase().includes(query);
+    return matchesGroup && matchesQuery;
+  });
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 mb-4 lg:hidden">
@@ -301,21 +345,86 @@ export default function SettingsPage() {
       </div>
 
       {section === "menu" ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {SECTION_KEYS.map((key) => {
-            const label = sectionLabel(t, key);
-            return (
-              <Button
-                key={key}
-                variant="secondary"
-                onClick={() => setSection(key)}
-                className="p-6 h-auto hover:border-teal-500 dark:hover:border-teal-500 transition-colors text-start"
-              >
-                <h3 className="text-lg font-semibold text-stone-900 dark:text-white">{label}</h3>
-                <p className="text-sm description-center mt-1">{t("settings.configureSection", { section: label })}</p>
-              </Button>
-            );
-          })}
+        <div className="space-y-4">
+          <Card className="p-4 sm:p-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="space-y-1">
+                <h2 className="text-xl font-semibold text-stone-900 dark:text-white">{t("settings.optionsTitle")}</h2>
+                <p className="text-sm description-center">{t("settings.optionsDescription")}</p>
+              </div>
+              <div className="relative w-full lg:max-w-sm">
+                <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={settingsQuery}
+                  onChange={(event) => setSettingsQuery(event.target.value)}
+                  placeholder={t("settings.searchOptions")}
+                  className="input-premium h-11 w-full pl-10"
+                  aria-label={t("settings.searchOptions")}
+                />
+              </div>
+            </div>
+
+            <div className="mt-4 flex gap-2 overflow-x-auto pb-1">
+              {SETTINGS_GROUPS.map((group) => (
+                <button
+                  key={group}
+                  type="button"
+                  onClick={() => setSettingsGroup(group)}
+                  aria-pressed={settingsGroup === group}
+                  className={`shrink-0 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    settingsGroup === group
+                      ? "border-accent/25 bg-accent/10 text-accent ring-1 ring-accent/15"
+                      : "border-border bg-background text-muted-foreground hover:bg-muted/60"
+                  }`}
+                >
+                  {groupLabel(t, group)}
+                </button>
+              ))}
+            </div>
+          </Card>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            {SETTINGS_GROUPS.filter((group) => group !== "all").map((group) => (
+              <div key={group} className="rounded-xl border border-border bg-muted/30 p-3">
+                <p className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">{groupLabel(t, group)}</p>
+                <p className="mt-1 text-lg font-semibold text-foreground">
+                  {SECTION_KEYS.filter((key) => SECTION_GROUPS[key] === group).length}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {visibleSections.length === 0 ? (
+            <Card className="p-8 text-center text-muted-foreground">{t("settings.noOptionsMatch")}</Card>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleSections.map((key) => {
+                const label = sectionLabel(t, key);
+                const group = SECTION_GROUPS[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setSection(key)}
+                    className="rounded-xl border border-border bg-background p-4 text-start transition-colors hover:border-accent/40 hover:bg-muted/40 focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-base font-semibold text-stone-900 dark:text-white">{label}</p>
+                        <p className="mt-1 line-clamp-2 text-sm description-center">{t("settings.configureSection", { section: label })}</p>
+                      </div>
+                      {group === "admin" || group === "system" ? (
+                        <ShieldCheck size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                      ) : null}
+                    </div>
+                    <span className="mt-3 inline-flex rounded-full border border-border bg-muted/30 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                      {groupLabel(t, group)}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-4">

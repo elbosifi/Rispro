@@ -179,7 +179,7 @@ describe("CalendarPage registration drilldown", () => {
     renderPage();
     await screen.findByText("2 total registrations");
 
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "2" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value: "2" } });
 
     await waitFor(() => {
       expect(
