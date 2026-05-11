@@ -303,6 +303,29 @@ describe("RequestDocumentsPanel local scan flow", () => {
     });
   });
 
+  it("shows scan action when a NAPS2 endpoint is configured even if enabled flag is stale", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true,
+        allowedFileTypes: ["pdf", "jpg", "png"],
+        documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "manual_browser_upload",
+        scannerProfileName: "default",
+        scannerSource: "feeder",
+        scanDpi: "200",
+        scanColorMode: "grayscale",
+        scanFileFormat: "pdf",
+        bridgeReady: false,
+        naps2WebScanEnabled: false,
+        naps2WebScanEndpoint: "http://localhost:9801",
+      },
+    });
+
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: "Scan Appointment Request" })).toBeTruthy();
+  });
+
   it("keeps failed scanned uploads retryable through the same upload API", async () => {
     mockScanAppointmentRequest.mockResolvedValue({
       file: new File([new Blob(["retry-me"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
