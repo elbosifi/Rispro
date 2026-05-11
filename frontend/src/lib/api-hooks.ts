@@ -41,6 +41,10 @@ import type {
   ProtocolFilters,
   ProtocolPayload,
   ProtocolTask,
+  TeamWorkloadSummaryRow,
+  WorkloadCalculationSummary,
+  WorkloadCatalogRule,
+  WorkloadFilters,
   RosterDutyType,
   RosterTeamRole
 } from "@/types/api";
@@ -312,6 +316,34 @@ export async function cancelProtocol(appointmentId: number, payload: ProtocolPay
     body: JSON.stringify(payload),
   });
   return raw.protocol;
+}
+
+function workloadParams(filters: WorkloadFilters): URLSearchParams {
+  const params = new URLSearchParams({ startDate: filters.startDate, endDate: filters.endDate });
+  if (filters.modalityId) params.set("modalityId", String(filters.modalityId));
+  if (filters.rosterAssignmentId) params.set("rosterAssignmentId", String(filters.rosterAssignmentId));
+  if (filters.teamName) params.set("teamName", filters.teamName);
+  if (filters.caseCategory) params.set("caseCategory", filters.caseCategory);
+  if (filters.requiresReport !== null && filters.requiresReport !== undefined) params.set("requiresReport", String(filters.requiresReport));
+  return params;
+}
+
+export async function fetchTeamWorkloadSummary(filters: WorkloadFilters): Promise<TeamWorkloadSummaryRow[]> {
+  const raw = await api<{ summary: TeamWorkloadSummaryRow[] }>(`/doctor/workload/summary?${workloadParams(filters).toString()}`);
+  return raw.summary;
+}
+
+export async function runWorkloadCalculation(payload: { startDate: string; endDate: string; modalityId?: number | null }): Promise<WorkloadCalculationSummary> {
+  const raw = await api<{ summary: WorkloadCalculationSummary }>("/doctor/workload/calculate", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.summary;
+}
+
+export async function fetchWorkloadCatalog(): Promise<WorkloadCatalogRule[]> {
+  const raw = await api<{ catalog: WorkloadCatalogRule[] }>("/doctor/workload/catalog");
+  return raw.catalog;
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {

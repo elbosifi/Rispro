@@ -18,6 +18,7 @@ import type { DoctorMe } from "@/types/api";
 import { DoctorCasesPage } from "./doctor-cases-page";
 import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
+import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -31,11 +32,11 @@ const DOCTOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/roster", label: "My Roster", icon: CalendarDays },
   { path: "/doctor/cases", label: "My Cases", icon: BriefcaseMedical },
   { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
+  { path: "/doctor/team-workload", label: "Team Workload", icon: Activity },
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/admin/roster", label: "Roster Management", icon: CalendarDays, management: true },
-  { path: "/doctor/team-workload", label: "Team Workload", icon: Activity, management: true },
   { path: "/doctor/admin/doctors", label: "Doctors/Admin", icon: Users, management: true },
 ];
 
@@ -119,16 +120,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route
         path="team-workload"
-        element={
-          canManage ? (
-            <PlaceholderPanel
-              title="Team Workload"
-              body="Team workload summaries are deferred to Phase 5. No workload units, ranking, salary, or productivity scoring are implemented here."
-            />
-          ) : (
-            <Navigate to="/doctor/dashboard" replace />
-          )
-        }
+        element={<DoctorTeamWorkloadPage me={me} />}
       />
       <Route
         path="admin/roster"

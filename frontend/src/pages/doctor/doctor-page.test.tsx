@@ -21,6 +21,9 @@ const saveProtocolDraftMock = vi.fn();
 const assignProtocolMock = vi.fn();
 const requestProtocolClarificationMock = vi.fn();
 const cancelProtocolMock = vi.fn();
+const fetchTeamWorkloadSummaryMock = vi.fn();
+const runWorkloadCalculationMock = vi.fn();
+const fetchWorkloadCatalogMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -38,6 +41,9 @@ vi.mock("@/lib/api-hooks", () => ({
   assignProtocol: (...args: unknown[]) => assignProtocolMock(...args),
   requestProtocolClarification: (...args: unknown[]) => requestProtocolClarificationMock(...args),
   cancelProtocol: (...args: unknown[]) => cancelProtocolMock(...args),
+  fetchTeamWorkloadSummary: (...args: unknown[]) => fetchTeamWorkloadSummaryMock(...args),
+  runWorkloadCalculation: (...args: unknown[]) => runWorkloadCalculationMock(...args),
+  fetchWorkloadCatalog: (...args: unknown[]) => fetchWorkloadCatalogMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -111,6 +117,9 @@ describe("Doctor Portal shell", () => {
     assignProtocolMock.mockReset();
     requestProtocolClarificationMock.mockReset();
     cancelProtocolMock.mockReset();
+    fetchTeamWorkloadSummaryMock.mockReset();
+    runWorkloadCalculationMock.mockReset();
+    fetchWorkloadCatalogMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
@@ -159,6 +168,15 @@ describe("Doctor Portal shell", () => {
     assignProtocolMock.mockResolvedValue({});
     requestProtocolClarificationMock.mockResolvedValue({});
     cancelProtocolMock.mockResolvedValue({});
+    fetchTeamWorkloadSummaryMock.mockResolvedValue([]);
+    runWorkloadCalculationMock.mockResolvedValue({
+      calculatedCount: 0,
+      alreadyCurrentCount: 0,
+      defaultedNoCatalogRuleCount: 0,
+      skippedCount: 0,
+      errors: [],
+    });
+    fetchWorkloadCatalogMock.mockResolvedValue([]);
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -205,7 +223,7 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/dashboard");
 
     expect(await screen.findByRole("button", { name: /My Roster/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Team Workload/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Team Workload/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Doctors\/Admin/i })).toBeNull();
   });
 
@@ -369,5 +387,67 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/protocols");
 
     expect(await screen.findByText("Supervisor/admin team and unassigned protocol tasks are visible here.")).toBeTruthy();
+  });
+
+  it("normal doctor sees team workload empty state without calculation controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/team-workload");
+
+    expect(await screen.findByText("My team workload")).toBeTruthy();
+    expect(screen.getByText("No workload summary for this filter.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Calculate workload/i })).toBeNull();
+    expect(screen.queryByText(/ranking|salary|payment/i)).toBeNull();
+  });
+
+  it("supervisor sees workload calculation controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/team-workload");
+
+    expect(await screen.findByText("Department team workload")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Calculate workload/i })).toBeTruthy();
+  });
+
+  it("renders workload summary rows and calculation summary", async () => {
+    fetchTeamWorkloadSummaryMock.mockResolvedValue([
+      {
+        rosterAssignmentId: 44,
+        teamName: "CT Team",
+        dutyType: "ct_protocol_day",
+        date: "2027-01-04",
+        modalityId: 1,
+        modalityName: "CT",
+        caseCategory: "oncology",
+        caseCount: 3,
+        totalWorkloadUnits: 5,
+        reportRequiredCount: 2,
+        noReportCount: 1,
+        pendingCount: 1,
+        finalizedCount: 1,
+        overdueCount: 0,
+      },
+    ]);
+    runWorkloadCalculationMock.mockResolvedValue({
+      calculatedCount: 2,
+      alreadyCurrentCount: 1,
+      defaultedNoCatalogRuleCount: 1,
+      skippedCount: 0,
+      errors: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/team-workload");
+
+    expect(await screen.findByText("CT Team")).toBeTruthy();
+    expect(screen.getByText("5")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Calculate workload/i }));
+    expect(await screen.findByText("Calculated")).toBeTruthy();
+    expect(screen.getByText("Defaulted")).toBeTruthy();
   });
 });
