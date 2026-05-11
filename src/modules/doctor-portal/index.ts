@@ -10,12 +10,14 @@ import type { DoctorRole } from "./profile-repository.js";
 import { requireDoctorCapability } from "./middleware.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
+import { doctorProtocolsRouter } from "./protocol-routes.js";
 
 const router = Router();
 
 router.use(requireAuth);
 router.use("/roster", doctorRosterRouter);
 router.use("/cases", doctorCasesRouter);
+router.use("/protocols", doctorProtocolsRouter);
 
 interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;

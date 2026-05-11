@@ -16,6 +16,7 @@ import { fetchDoctorMe } from "@/lib/api-hooks";
 import { useLanguage } from "@/providers/language-provider";
 import type { DoctorMe } from "@/types/api";
 import { DoctorCasesPage } from "./doctor-cases-page";
+import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
 
 type DoctorPortalNavItem = {
@@ -114,12 +115,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       />
       <Route
         path="protocols"
-        element={
-          <PlaceholderPanel
-            title="Protocols"
-            body="Protocol assignment is deferred to Phase 4. This page does not create or update appointment protocols."
-          />
-        }
+        element={<DoctorProtocolsPage me={me} />}
       />
       <Route
         path="team-workload"

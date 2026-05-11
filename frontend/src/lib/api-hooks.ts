@@ -36,6 +36,11 @@ import type {
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
+  AppointmentProtocol,
+  ProtocolDetails,
+  ProtocolFilters,
+  ProtocolPayload,
+  ProtocolTask,
   RosterDutyType,
   RosterTeamRole
 } from "@/types/api";
@@ -256,6 +261,57 @@ export async function runDoctorCaseAssignment(payload: { dateFrom: string; dateT
     body: JSON.stringify(payload),
   });
   return raw.summary;
+}
+
+function protocolParams(filters: ProtocolFilters): URLSearchParams {
+  const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
+  if (filters.modalityId) params.set("modalityId", String(filters.modalityId));
+  if (filters.protocolStatus) params.set("protocolStatus", filters.protocolStatus);
+  if (filters.unprotocolledOnly) params.set("unprotocolledOnly", "true");
+  if (filters.requiresReport !== null && filters.requiresReport !== undefined) params.set("requiresReport", String(filters.requiresReport));
+  if (filters.caseCategory) params.set("caseCategory", filters.caseCategory);
+  return params;
+}
+
+export async function fetchProtocolTasks(filters: ProtocolFilters): Promise<ProtocolTask[]> {
+  const raw = await api<{ tasks: ProtocolTask[] }>(`/doctor/protocols/tasks?${protocolParams(filters).toString()}`);
+  return raw.tasks;
+}
+
+export async function fetchProtocolDetails(appointmentId: number): Promise<ProtocolDetails> {
+  return api<ProtocolDetails>(`/doctor/protocols/${appointmentId}`);
+}
+
+export async function saveProtocolDraft(appointmentId: number, payload: ProtocolPayload): Promise<AppointmentProtocol> {
+  const raw = await api<{ protocol: AppointmentProtocol }>(`/doctor/protocols/${appointmentId}`, {
+    method: "POST",
+    body: JSON.stringify({ ...payload, protocolStatus: payload.protocolStatus ?? "draft" }),
+  });
+  return raw.protocol;
+}
+
+export async function assignProtocol(appointmentId: number, payload: ProtocolPayload): Promise<AppointmentProtocol> {
+  const raw = await api<{ protocol: AppointmentProtocol }>(`/doctor/protocols/${appointmentId}/assign`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.protocol;
+}
+
+export async function requestProtocolClarification(appointmentId: number, payload: ProtocolPayload): Promise<AppointmentProtocol> {
+  const raw = await api<{ protocol: AppointmentProtocol }>(`/doctor/protocols/${appointmentId}/clarification`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.protocol;
+}
+
+export async function cancelProtocol(appointmentId: number, payload: ProtocolPayload): Promise<AppointmentProtocol> {
+  const raw = await api<{ protocol: AppointmentProtocol }>(`/doctor/protocols/${appointmentId}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.protocol;
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {

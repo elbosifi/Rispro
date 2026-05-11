@@ -188,6 +188,79 @@ export interface DoctorCaseAssignmentSummary {
   errors: Array<{ appointmentId: number; reason: string }>;
 }
 
+export type ProtocolStatus = "draft" | "assigned" | "clarification_needed" | "cancelled";
+
+export interface ProtocolTask {
+  appointmentId: number;
+  patientId: number;
+  patientMrn: string | null;
+  patientNationalId: string | null;
+  patientArabicName: string | null;
+  patientEnglishName: string | null;
+  ageYears: number | null;
+  sex: string | null;
+  appointmentDate: string;
+  appointmentTime: string | null;
+  modalityId: number;
+  modalityCode: string | null;
+  modalityName: string | null;
+  examTypeId: number | null;
+  examTypeName: string | null;
+  caseCategory: string | null;
+  requiresReport: boolean;
+  clinicalIndication: string | null;
+  appointmentStatus: string;
+  rosterAssignmentId: number | null;
+  teamName: string | null;
+  protocolStatus: ProtocolStatus | null;
+  assignedByDoctorName: string | null;
+  updatedAt: string | null;
+}
+
+export interface AppointmentProtocol {
+  id: number;
+  appointmentId: number;
+  protocolText: string | null;
+  contrastRequired: boolean | null;
+  contrastPhaseOrProtocol: string | null;
+  specialPreparation: string | null;
+  technologistNotes: string | null;
+  protocolStatus: ProtocolStatus;
+  assignedByDoctorId: number | null;
+  assignedByDoctorName: string | null;
+  assignedAt: string | null;
+  updatedByDoctorId: number | null;
+  updatedByDoctorName: string | null;
+  updatedAt: string;
+  version: number;
+  createdAt: string;
+}
+
+export interface ProtocolDetails {
+  appointment: ProtocolTask;
+  protocol: AppointmentProtocol | null;
+}
+
+export interface ProtocolFilters {
+  dateFrom: string;
+  dateTo: string;
+  modalityId?: number | null;
+  protocolStatus?: string | null;
+  unprotocolledOnly?: boolean;
+  requiresReport?: boolean | null;
+  caseCategory?: string | null;
+}
+
+export interface ProtocolPayload {
+  protocolText: string | null;
+  contrastRequired: boolean | null;
+  contrastPhaseOrProtocol: string | null;
+  specialPreparation: string | null;
+  technologistNotes: string | null;
+  protocolStatus?: ProtocolStatus;
+  reason?: string | null;
+}
+
 export type IdentifierType = string;
 
 export interface PatientIdentifier {

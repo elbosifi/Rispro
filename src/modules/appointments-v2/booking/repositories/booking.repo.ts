@@ -389,13 +389,23 @@ const FIND_BOOKING_PRINT_DETAILS_SQL = `
     src.label_ar as special_reason_label_ar,
     src.label_en as special_reason_label_en,
     rp.name_ar as priority_name_ar,
-    rp.name_en as priority_name_en
+    rp.name_en as priority_name_en,
+    ap.protocol_status,
+    ap.protocol_text,
+    ap.contrast_required,
+    ap.contrast_phase_or_protocol,
+    ap.special_preparation,
+    ap.technologist_notes,
+    dp.display_name as protocol_assigned_by_doctor_name,
+    ap.assigned_at as protocol_assigned_at
   from booking_base bb
   join patients p on p.id = bb.patient_id
   join modalities m on m.id = bb.modality_id
   left join exam_types et on et.id = bb.exam_type_id
   left join appointments_v2.special_reason_codes src on src.code = bb.special_reason_code
   left join reporting_priorities rp on rp.id = bb.reporting_priority_id
+  left join doctor_portal.appointment_protocols ap on ap.appointment_id = bb.id and ap.protocol_status = 'assigned'
+  left join doctor_portal.doctor_profiles dp on dp.id = ap.assigned_by_doctor_id
 `;
 
 export interface BookingPrintDetailsRow {
@@ -440,6 +450,14 @@ export interface BookingPrintDetailsRow {
   special_reason_label_en: string | null;
   priority_name_ar: string | null;
   priority_name_en: string | null;
+  protocol_status: string | null;
+  protocol_text: string | null;
+  contrast_required: boolean | null;
+  contrast_phase_or_protocol: string | null;
+  special_preparation: string | null;
+  technologist_notes: string | null;
+  protocol_assigned_by_doctor_name: string | null;
+  protocol_assigned_at: string | null;
 }
 
 export async function findBookingPrintDetailsById(

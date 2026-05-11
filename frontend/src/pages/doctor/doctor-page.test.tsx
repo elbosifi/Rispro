@@ -15,6 +15,12 @@ const fetchMyDoctorCasesMock = vi.fn();
 const fetchTeamDoctorCasesMock = vi.fn();
 const fetchUnassignedDoctorCasesMock = vi.fn();
 const runDoctorCaseAssignmentMock = vi.fn();
+const fetchProtocolTasksMock = vi.fn();
+const fetchProtocolDetailsMock = vi.fn();
+const saveProtocolDraftMock = vi.fn();
+const assignProtocolMock = vi.fn();
+const requestProtocolClarificationMock = vi.fn();
+const cancelProtocolMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -26,6 +32,12 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchTeamDoctorCases: (...args: unknown[]) => fetchTeamDoctorCasesMock(...args),
   fetchUnassignedDoctorCases: (...args: unknown[]) => fetchUnassignedDoctorCasesMock(...args),
   runDoctorCaseAssignment: (...args: unknown[]) => runDoctorCaseAssignmentMock(...args),
+  fetchProtocolTasks: (...args: unknown[]) => fetchProtocolTasksMock(...args),
+  fetchProtocolDetails: (...args: unknown[]) => fetchProtocolDetailsMock(...args),
+  saveProtocolDraft: (...args: unknown[]) => saveProtocolDraftMock(...args),
+  assignProtocol: (...args: unknown[]) => assignProtocolMock(...args),
+  requestProtocolClarification: (...args: unknown[]) => requestProtocolClarificationMock(...args),
+  cancelProtocol: (...args: unknown[]) => cancelProtocolMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -93,6 +105,12 @@ describe("Doctor Portal shell", () => {
     fetchTeamDoctorCasesMock.mockReset();
     fetchUnassignedDoctorCasesMock.mockReset();
     runDoctorCaseAssignmentMock.mockReset();
+    fetchProtocolTasksMock.mockReset();
+    fetchProtocolDetailsMock.mockReset();
+    saveProtocolDraftMock.mockReset();
+    assignProtocolMock.mockReset();
+    requestProtocolClarificationMock.mockReset();
+    cancelProtocolMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
@@ -107,6 +125,40 @@ describe("Doctor Portal shell", () => {
       skippedCancelledCount: 0,
       errors: [],
     });
+    fetchProtocolTasksMock.mockResolvedValue([]);
+    fetchProtocolDetailsMock.mockResolvedValue({
+      appointment: {
+        appointmentId: 77,
+        patientId: 5,
+        patientMrn: "MRN-5",
+        patientNationalId: "NID-5",
+        patientArabicName: "Arabic Name",
+        patientEnglishName: "Protocol Patient",
+        ageYears: 42,
+        sex: "F",
+        appointmentDate: "2027-01-04",
+        appointmentTime: "09:00",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Brain",
+        caseCategory: "oncology",
+        requiresReport: true,
+        clinicalIndication: "Headache",
+        appointmentStatus: "scheduled",
+        rosterAssignmentId: 9,
+        teamName: "CT Team",
+        protocolStatus: null,
+        assignedByDoctorName: null,
+        updatedAt: null,
+      },
+      protocol: null,
+    });
+    saveProtocolDraftMock.mockResolvedValue({});
+    assignProtocolMock.mockResolvedValue({});
+    requestProtocolClarificationMock.mockResolvedValue({});
+    cancelProtocolMock.mockResolvedValue({});
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -257,5 +309,65 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByText("Already assigned")).toBeTruthy();
     expect(screen.getByText("No roster match")).toBeTruthy();
     expect(screen.getByText("Skipped cancelled")).toBeTruthy();
+  });
+
+  it("normal doctor sees Protocols page empty state", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByText("No protocol tasks found.")).toBeTruthy();
+    expect(screen.queryByText(/reschedule/i)).toBeNull();
+  });
+
+  it("protocol form renders appointment summary and actions", async () => {
+    fetchProtocolTasksMock.mockResolvedValue([
+      {
+        appointmentId: 77,
+        patientId: 5,
+        patientMrn: "MRN-5",
+        patientNationalId: "NID-5",
+        patientArabicName: "Arabic Name",
+        patientEnglishName: "Protocol Patient",
+        ageYears: 42,
+        sex: "F",
+        appointmentDate: "2027-01-04",
+        appointmentTime: "09:00",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Brain",
+        caseCategory: "oncology",
+        requiresReport: true,
+        clinicalIndication: "Headache",
+        appointmentStatus: "scheduled",
+        rosterAssignmentId: 9,
+        teamName: "CT Team",
+        protocolStatus: null,
+        assignedByDoctorName: null,
+        updatedAt: null,
+      },
+    ]);
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/protocols");
+
+    fireEvent.click(await screen.findByText("Protocol Patient"));
+
+    expect(await screen.findByText(/Clinical indication:/)).toBeTruthy();
+    expect(screen.getByText("Save draft")).toBeTruthy();
+    expect(screen.getByText("Assign protocol")).toBeTruthy();
+    expect(screen.getByText("Clarification requires a note.")).toBeTruthy();
+    expect(screen.queryByText(/reschedule/i)).toBeNull();
+  });
+
+  it("supervisor sees team protocol task controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/protocols");
+
+    expect(await screen.findByText("Supervisor/admin team and unassigned protocol tasks are visible here.")).toBeTruthy();
   });
 });

@@ -481,11 +481,21 @@ router.get(
             m.name_ar as modality_name_ar,
             m.name_en as modality_name_en,
             et.name_ar as exam_name_ar,
-            et.name_en as exam_name_en
+            et.name_en as exam_name_en,
+            ap.protocol_status,
+            ap.protocol_text,
+            ap.contrast_required,
+            ap.contrast_phase_or_protocol,
+            ap.special_preparation,
+            ap.technologist_notes,
+            dp.display_name as protocol_assigned_by_doctor_name,
+            ap.assigned_at as protocol_assigned_at
           from appointments_v2.bookings b
           join patients p on p.id = b.patient_id
           join modalities m on m.id = b.modality_id
           left join exam_types et on et.id = b.exam_type_id
+          left join doctor_portal.appointment_protocols ap on ap.appointment_id = b.id and ap.protocol_status = 'assigned'
+          left join doctor_portal.doctor_profiles dp on dp.id = ap.assigned_by_doctor_id
           where b.booking_date = $1::date
             and b.status in ('scheduled', 'arrived', 'waiting')
           order by b.created_at asc, b.id asc
