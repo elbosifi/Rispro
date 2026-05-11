@@ -8,10 +8,12 @@ import {
   findActiveDoctorProfileByUserId,
   listDoctorModalityPermissions,
   listDoctorProfiles,
+  updateDoctorProfile,
   type CreateDoctorProfileInput,
   type DoctorModalityPermissionRow,
   type DoctorProfileRow,
   type DoctorRole,
+  type UpdateDoctorProfileInput,
 } from "./profile-repository.js";
 
 export interface DoctorMeResponse {
@@ -69,15 +71,11 @@ export async function getDoctorMe(userId: UserId, appRole: Role): Promise<Doctor
   };
 }
 
-export async function requireDoctorAdmin(userId: UserId, appRole: Role): Promise<DoctorProfileRow> {
-  const profile = await findActiveDoctorProfileByUserId(userId);
-  if (!profile) {
-    throw new HttpError(403, "Active doctor profile is required.");
-  }
+export async function requireDoctorAdmin(userId: UserId, appRole: Role): Promise<DoctorProfileRow | null> {
   if (appRole !== "super_admin") {
     throw new HttpError(403, "Doctor admin access is required.");
   }
-  return profile;
+  return findActiveDoctorProfileByUserId(userId);
 }
 
 export async function listProfilesForAdmin(userId: UserId, appRole: Role): Promise<DoctorProfileRow[]> {
@@ -92,4 +90,18 @@ export async function createProfileForAdmin(
 ): Promise<DoctorProfileRow> {
   await requireDoctorAdmin(actorUserId, appRole);
   return createDoctorProfile(input, actorUserId);
+}
+
+export async function updateProfileForAdmin(
+  actorUserId: UserId,
+  appRole: Role,
+  profileId: number,
+  input: UpdateDoctorProfileInput
+): Promise<DoctorProfileRow> {
+  await requireDoctorAdmin(actorUserId, appRole);
+  const profile = await updateDoctorProfile(profileId, input, actorUserId);
+  if (!profile) {
+    throw new HttpError(404, "Doctor profile not found.");
+  }
+  return profile;
 }

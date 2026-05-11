@@ -51,11 +51,12 @@ describe("Doctor Portal wiring", () => {
     assert.doesNotMatch(source, /createBooking|rescheduleBooking|\/appointments|\/v2\/appointments/);
   });
 
-  it("exposes /me and keeps profile admin endpoints permission guarded", () => {
+  it("exposes /me and keeps profile admin endpoints service guarded", () => {
     const source = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "index.ts"), "utf8");
     assert.match(source, /router\.get\(\s*"\/me"/);
-    assert.match(source, /router\.get\(\s*"\/profiles",\s*requireDoctorCapability\("doctor_admin"\)/);
-    assert.match(source, /router\.post\(\s*"\/profiles",\s*requireDoctorCapability\("doctor_admin"\)/);
+    assert.match(source, /listProfilesForAdmin\(user\.sub, user\.role\)/);
+    assert.match(source, /createProfileForAdmin\(user\.sub, user\.role/);
+    assert.match(source, /updateProfileForAdmin\(user\.sub, user\.role/);
   });
 
   it("creates only Phase 1 Doctor Portal identity tables", () => {

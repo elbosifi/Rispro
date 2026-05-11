@@ -41,6 +41,15 @@ export interface CreateDoctorProfileInput {
   canSupervise: boolean;
 }
 
+export interface UpdateDoctorProfileInput {
+  displayName?: string;
+  doctorRole?: DoctorRole;
+  active?: boolean;
+  canFinalizeReports?: boolean;
+  canAssignProtocols?: boolean;
+  canSupervise?: boolean;
+}
+
 type Db = Pick<PoolClient, "query"> | typeof pool;
 
 const PROFILE_SELECT = `
@@ -131,6 +140,63 @@ export async function createDoctorProfile(
     metadata: { userId: profile.userId, doctorRole: profile.doctorRole, active: profile.active },
     reason: null,
   });
+  return profile;
+}
+
+export async function updateDoctorProfile(
+  profileId: number,
+  input: UpdateDoctorProfileInput,
+  actorUserId: UserId
+): Promise<DoctorProfileRow | null> {
+  const result = await pool.query<DoctorProfileRow>(
+    `
+      update doctor_portal.doctor_profiles
+      set
+        display_name = coalesce($2, display_name),
+        doctor_role = coalesce($3, doctor_role),
+        active = coalesce($4, active),
+        can_finalize_reports = coalesce($5, can_finalize_reports),
+        can_assign_protocols = coalesce($6, can_assign_protocols),
+        can_supervise = coalesce($7, can_supervise),
+        updated_at = now()
+      where id = $1
+      returning
+        id,
+        user_id as "userId",
+        null::text as username,
+        display_name as "displayName",
+        doctor_role as "doctorRole",
+        active,
+        can_finalize_reports as "canFinalizeReports",
+        can_assign_protocols as "canAssignProtocols",
+        can_supervise as "canSupervise",
+        created_at as "createdAt",
+        updated_at as "updatedAt"
+    `,
+    [
+      profileId,
+      input.displayName ?? null,
+      input.doctorRole ?? null,
+      input.active ?? null,
+      input.canFinalizeReports ?? null,
+      input.canAssignProtocols ?? null,
+      input.canSupervise ?? null,
+    ]
+  );
+
+  const profile = result.rows[0] ?? null;
+  if (!profile) return null;
+
+  await insertDoctorAuditEvent(pool, {
+    actorUserId,
+    actorDoctorId: null,
+    eventType: "doctor_profile_updated",
+    targetType: "doctor_profile",
+    targetId: profile.id,
+    metadata: { userId: profile.userId, doctorRole: profile.doctorRole, active: profile.active },
+    reason: null,
+  });
+
   return profile;
 }
 

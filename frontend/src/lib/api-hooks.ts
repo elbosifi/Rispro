@@ -30,6 +30,7 @@ import type {
   PatientDirectorySummary,
   DoctorMe,
   DoctorProfile,
+  DoctorProfileRole,
   DoctorRosterResponse,
   DoctorRosterAssignment,
   DoctorRosterMember,
@@ -176,6 +177,45 @@ export async function deleteAppointmentDocument(documentId: number): Promise<{ d
 
 export async function fetchDoctorMe(): Promise<DoctorMe> {
   return api<DoctorMe>("/doctor/me");
+}
+
+export async function fetchDoctorProfilesForAdmin(): Promise<DoctorProfile[]> {
+  const raw = await api<{ profiles: DoctorProfile[] }>("/doctor/profiles");
+  return raw.profiles;
+}
+
+export async function createDoctorProfileForAdmin(payload: {
+  userId: number;
+  displayName: string;
+  doctorRole: DoctorProfileRole;
+  active: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+}): Promise<DoctorProfile> {
+  const raw = await api<{ profile: DoctorProfile }>("/doctor/profiles", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.profile;
+}
+
+export async function updateDoctorProfileForAdmin(
+  profileId: number,
+  payload: {
+    displayName?: string;
+    doctorRole?: DoctorProfileRole;
+    active?: boolean;
+    canFinalizeReports?: boolean;
+    canAssignProtocols?: boolean;
+    canSupervise?: boolean;
+  }
+): Promise<DoctorProfile> {
+  const raw = await api<{ profile: DoctorProfile }>(`/doctor/profiles/${profileId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.profile;
 }
 
 export async function fetchDoctorRosterWeek(weekStart: string): Promise<DoctorRosterResponse> {

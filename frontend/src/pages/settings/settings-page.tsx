@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api-client";
 import {
   fetchUsers,
+  fetchDoctorProfilesForAdmin,
   fetchAuditEntries,
   fetchExamTypes,
   fetchModalitiesSettings,
@@ -11,6 +12,8 @@ import {
   fetchPageVisibilityMatrix,
   deleteUser,
   createUser,
+  createDoctorProfileForAdmin,
+  updateDoctorProfileForAdmin,
   updateUserPassword,
   exportAuditCSV,
   deleteNameDictionaryEntry,
@@ -58,6 +61,8 @@ import PatientQrSettingsSection from "./patient-qr-settings-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import type {
   User,
+  DoctorProfile,
+  DoctorProfileRole,
   SchedulingEngineConfig,
   PatientImportBatch,
   PatientImportStagingRow
@@ -70,6 +75,21 @@ import {
   type PageVisibilityMatrix,
   type PageVisibilityRouteKey
 } from "@/lib/page-visibility";
+
+type DoctorProfileDraft = {
+  doctorRole: DoctorProfileRole;
+  active: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+};
+
+const DOCTOR_PROFILE_ROLE_OPTIONS: Array<{ value: DoctorProfileRole; label: string }> = [
+  { value: "consultant", label: "Consultant" },
+  { value: "specialist", label: "Specialist" },
+  { value: "senior_house_officer", label: "SHO" },
+  { value: "resident", label: "Resident" },
+];
 
 // ---------------------------------------------------------------------------
 // Friendly label maps for scheduling config enums
@@ -344,12 +364,45 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery<{ users: User[] }>({ queryKey: ["users"], queryFn: fetchUsers });
+  const doctorProfilesQuery = useQuery<DoctorProfile[]>({
+    queryKey: ["doctor", "profiles"],
+    queryFn: fetchDoctorProfilesForAdmin,
+    retry: false
+  });
 
   const [showCreate, setShowCreate] = useState(false);
   const [createForm, setCreateForm] = useState({ username: "", fullName: "", password: "", role: "receptionist" });
   const [editingPasswordUserId, setEditingPasswordUserId] = useState<number | null>(null);
   const [passwordDraft, setPasswordDraft] = useState("");
+  const [doctorProfileDrafts, setDoctorProfileDrafts] = useState<Record<number, DoctorProfileDraft>>({});
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const doctorProfilesByUserId = useMemo(() => {
+    const map = new Map<number, DoctorProfile>();
+    for (const profile of doctorProfilesQuery.data ?? []) {
+      map.set(profile.userId, profile);
+    }
+    return map;
+  }, [doctorProfilesQuery.data]);
+
+  const defaultDoctorProfileDraft = (user: User, profile?: DoctorProfile): DoctorProfileDraft => ({
+    doctorRole: profile?.doctorRole ?? "consultant",
+    active: profile?.active ?? true,
+    canFinalizeReports: profile?.canFinalizeReports ?? true,
+    canAssignProtocols: profile?.canAssignProtocols ?? true,
+    canSupervise: profile?.canSupervise ?? (user.role === "super_admin" || user.role === "supervisor"),
+  });
+
+  const getDoctorProfileDraft = (user: User, profile?: DoctorProfile): DoctorProfileDraft => (
+    doctorProfileDrafts[user.id] ?? defaultDoctorProfileDraft(user, profile)
+  );
+
+  const updateDoctorProfileDraft = (user: User, profile: DoctorProfile | undefined, patch: Partial<DoctorProfileDraft>) => {
+    setDoctorProfileDrafts((current) => ({
+      ...current,
+      [user.id]: { ...getDoctorProfileDraft(user, profile), ...patch },
+    }));
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (userId: number) => deleteUser(userId),
@@ -370,6 +423,31 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       setMutationError(null);
     },
     onError: (err: Error) => { setMutationError(err?.message || "Password update failed"); }
+  });
+  const createDoctorProfileMutation = useMutation({
+    mutationFn: (payload: { user: User; draft: DoctorProfileDraft }) => createDoctorProfileForAdmin({
+      userId: payload.user.id,
+      displayName: payload.user.fullName,
+      ...payload.draft,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["doctor", "me"] });
+      setMutationError(null);
+    },
+    onError: (err: Error) => { setMutationError(err?.message || "Doctor profile update failed"); }
+  });
+  const updateDoctorProfileMutation = useMutation({
+    mutationFn: (payload: { profileId: number; draft: DoctorProfileDraft; displayName: string }) => updateDoctorProfileForAdmin(payload.profileId, {
+      displayName: payload.displayName,
+      ...payload.draft,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] });
+      queryClient.invalidateQueries({ queryKey: ["doctor", "me"] });
+      setMutationError(null);
+    },
+    onError: (err: Error) => { setMutationError(err?.message || "Doctor profile update failed"); }
   });
 
   if (error) {
@@ -410,8 +488,19 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
         </div>
       )}
 
+      {doctorProfilesQuery.error && (
+        <p className="text-xs text-amber-700 dark:text-amber-300">
+          Doctor Portal profile settings are available to super admins when Doctor Portal is enabled.
+        </p>
+      )}
+
       <ul className="divide-y divide-stone-200 dark:divide-stone-700">
-        {data?.users?.map((u) => (
+        {data?.users?.map((u) => {
+          const doctorProfile = doctorProfilesByUserId.get(u.id);
+          const doctorDraft = getDoctorProfileDraft(u, doctorProfile);
+          const doctorProfilePending = createDoctorProfileMutation.isPending || updateDoctorProfileMutation.isPending;
+
+          return (
           <li key={u.id} className="py-3">
             <div className="flex items-center justify-between">
               <div className="text-start">
@@ -440,6 +529,60 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
                 </button>
               </div>
             </div>
+            {!doctorProfilesQuery.error && (
+              <div className="mt-3 rounded border border-stone-200 dark:border-stone-700 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-medium text-stone-900 dark:text-white">Doctor Portal</p>
+                    <p className="text-xs description-center">
+                      {doctorProfile ? `Profile #${doctorProfile.id}` : "No doctor profile enabled"}
+                    </p>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${doctorDraft.active ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
+                    {doctorDraft.active ? "Doctor enabled" : "Doctor disabled"}
+                  </span>
+                </div>
+                <div className="mt-3 grid gap-2 md:grid-cols-5">
+                  <select
+                    value={doctorDraft.doctorRole}
+                    onChange={(event) => updateDoctorProfileDraft(u, doctorProfile, { doctorRole: event.target.value as DoctorProfileRole })}
+                    className="px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
+                  >
+                    {DOCTOR_PROFILE_ROLE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  {[
+                    ["active", "Active"],
+                    ["canAssignProtocols", "Protocols"],
+                    ["canFinalizeReports", "Reports"],
+                    ["canSupervise", "Supervisor"],
+                  ].map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 text-xs text-stone-700 dark:text-stone-200">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(doctorDraft[key as keyof DoctorProfileDraft])}
+                        onChange={(event) => updateDoctorProfileDraft(u, doctorProfile, { [key]: event.target.checked } as Partial<DoctorProfileDraft>)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  onClick={() => {
+                    if (doctorProfile) {
+                      updateDoctorProfileMutation.mutate({ profileId: doctorProfile.id, draft: doctorDraft, displayName: u.fullName });
+                    } else {
+                      createDoctorProfileMutation.mutate({ user: u, draft: doctorDraft });
+                    }
+                  }}
+                  disabled={doctorProfilePending}
+                  className="mt-3 px-2 py-1 text-xs bg-teal-600 hover:bg-teal-700 disabled:bg-teal-400 text-white rounded transition-colors"
+                >
+                  {doctorProfile ? "Save Doctor Portal" : "Enable Doctor Portal"}
+                </button>
+              </div>
+            )}
             {editingPasswordUserId === u.id && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <input
@@ -468,7 +611,8 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
               </div>
             )}
           </li>
-        ))}
+          );
+        })}
       </ul>
     </div>
   );

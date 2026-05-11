@@ -6,9 +6,8 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { env } from "../../config/env.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
-import { createProfileForAdmin, getDoctorMe, listProfilesForAdmin } from "./profile-service.js";
+import { createProfileForAdmin, getDoctorMe, listProfilesForAdmin, updateProfileForAdmin } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
-import { requireDoctorCapability } from "./middleware.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
@@ -69,7 +68,6 @@ router.get(
 
 router.get(
   "/profiles",
-  requireDoctorCapability("doctor_admin"),
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const user = currentUser(req);
     const profiles = await listProfilesForAdmin(user.sub, user.role);
@@ -79,7 +77,6 @@ router.get(
 
 router.post(
   "/profiles",
-  requireDoctorCapability("doctor_admin"),
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const user = currentUser(req);
     const body = asUnknownRecord(req.body);
@@ -99,6 +96,29 @@ router.post(
     });
 
     res.status(201).json({ profile });
+  })
+);
+
+router.patch(
+  "/profiles/:id",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const profileId = Number(req.params.id);
+    if (!Number.isInteger(profileId) || profileId <= 0) {
+      throw new HttpError(400, "profile id must be a positive integer.");
+    }
+
+    const body = asUnknownRecord(req.body);
+    const profile = await updateProfileForAdmin(user.sub, user.role, profileId, {
+      displayName: body.displayName === undefined ? undefined : asString(body.displayName),
+      doctorRole: body.doctorRole === undefined ? undefined : parseDoctorRole(body.doctorRole),
+      active: asOptionalBoolean(body.active),
+      canFinalizeReports: asOptionalBoolean(body.canFinalizeReports),
+      canAssignProtocols: asOptionalBoolean(body.canAssignProtocols),
+      canSupervise: asOptionalBoolean(body.canSupervise),
+    });
+
+    res.json({ profile });
   })
 );
 
