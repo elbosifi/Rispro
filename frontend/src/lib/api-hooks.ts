@@ -2048,6 +2048,34 @@ export async function recordReportOutput(payload: {
   });
 }
 
+export async function exportReportXlsx(payload: {
+  reportTemplate: string;
+  filters: Record<string, unknown>;
+  rows: Array<Record<string, unknown>>;
+  includePhoneNumbers: boolean;
+  includePatientIdentifiers: boolean;
+}): Promise<void> {
+  const response = await fetch("/api/v2/read/reports/export-xlsx", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error("Excel export failed");
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `rispro-${payload.reportTemplate}-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+    anchor.remove();
+  }, 1000);
+}
+
 // -- Statistics --
 export async function fetchStatistics(date: string, modalityId: string): Promise<AppointmentStatistics> {
   const params = new URLSearchParams();

@@ -9,8 +9,10 @@ const fetchAppointmentLookupsMock = vi.fn();
 const fetchPatientDirectoryMock = vi.fn();
 const fetchAuditEntriesMock = vi.fn();
 const recordReportOutputMock = vi.fn();
+const exportReportXlsxMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
+  exportReportXlsx: (...args: unknown[]) => exportReportXlsxMock(...args),
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchAuditEntries: (...args: unknown[]) => fetchAuditEntriesMock(...args),
@@ -48,6 +50,7 @@ describe("ReportCenter", () => {
     vi.clearAllMocks();
     localStorage.clear();
     recordReportOutputMock.mockResolvedValue(undefined);
+    exportReportXlsxMock.mockResolvedValue(undefined);
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }] });
     fetchPatientDirectoryMock.mockResolvedValue({ patients: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } });
     fetchAuditEntriesMock.mockResolvedValue({ entries: [], meta: {} });
@@ -95,6 +98,20 @@ describe("ReportCenter", () => {
       rowCount: 1,
       includePhoneNumbers: false,
       includePatientIdentifiers: true,
+    }));
+  });
+
+  it("exports Excel through the backend workbook endpoint", async () => {
+    renderCenter();
+
+    expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Excel" }));
+
+    expect(exportReportXlsxMock).toHaveBeenCalledWith(expect.objectContaining({
+      reportTemplate: "daily-appointments",
+      includePhoneNumbers: false,
+      includePatientIdentifiers: true,
+      rows: [expect.objectContaining({ Accession: "V2-000001" })],
     }));
   });
 });

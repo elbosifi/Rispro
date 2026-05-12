@@ -6,6 +6,7 @@ import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
 import { logAuditEntry } from "../../../../services/audit-service.js";
+import { buildWorkbookBuffer } from "../../../../services/workbook-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
@@ -58,6 +59,32 @@ function normalizeReportOutputType(value: unknown): "print" | "pdf" | "csv" | "c
   return "print";
 }
 
+function sanitizeWorkbookRows(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 5000).map((row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return {};
+    const output: Record<string, unknown> = {};
+    for (const [key, rawValue] of Object.entries(row as Record<string, unknown>).slice(0, 80)) {
+      const cleanKey = String(key || "").trim().slice(0, 80);
+      if (!cleanKey) continue;
+      if (rawValue == null || typeof rawValue === "string" || typeof rawValue === "number" || typeof rawValue === "boolean") {
+        output[cleanKey] = rawValue ?? "";
+      } else {
+        output[cleanKey] = JSON.stringify(rawValue).slice(0, 500);
+      }
+    }
+    return output;
+  });
+}
+
+function safeWorkbookName(value: unknown): string {
+  return String(value || "report")
+    .trim()
+    .replace(/[^a-z0-9_-]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "report";
+}
+
 router.post(
   "/reports/output-audit",
   asyncRoute(async (req: AuthedRequest, res: Response) => {
@@ -80,6 +107,40 @@ router.post(
     });
 
     res.json({ ok: true });
+  })
+);
+
+router.post(
+  "/reports/export-xlsx",
+  asyncRoute(async (req: AuthedRequest, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const rows = sanitizeWorkbookRows(body.rows);
+    const reportTemplate = safeWorkbookName(body.reportTemplate);
+
+    await logAuditEntry({
+      entityType: "report_output",
+      actionType: "xlsx",
+      changedByUserId: req.user?.sub ?? null,
+      newValues: {
+        reportTemplate,
+        outputType: "xlsx",
+        rowCount: rows.length,
+        filters: body.filters ?? {},
+        includePhoneNumbers: Boolean(body.includePhoneNumbers),
+        includePatientIdentifiers: Boolean(body.includePatientIdentifiers),
+      },
+    });
+
+    const workbook = await buildWorkbookBuffer([
+      {
+        name: "Report",
+        rows: rows.length ? rows : [{ Message: "No rows matched the selected filters." }],
+      },
+    ]);
+
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="rispro-${reportTemplate}-${new Date().toISOString().slice(0, 10)}.xlsx"`);
+    res.send(workbook);
   })
 );
 

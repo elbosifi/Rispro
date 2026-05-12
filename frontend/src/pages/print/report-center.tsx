@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
 import { Button, Card, Badge } from "@/components/shared";
-import { fetchAppointments, fetchAppointmentLookups, fetchAuditEntries, fetchPatientDirectory, recordReportOutput, type PatientDirectoryParams } from "@/lib/api-hooks";
+import { exportReportXlsx, fetchAppointments, fetchAppointmentLookups, fetchAuditEntries, fetchPatientDirectory, recordReportOutput, type PatientDirectoryParams } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import type { AuditEntry, Role } from "@/types/api";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
@@ -222,6 +222,24 @@ export function ReportCenter() {
     window.print();
   }
 
+  async function exportExcel() {
+    try {
+      await exportReportXlsx({
+        reportTemplate: selectedTemplate.id,
+        filters: selectedTemplate.source === "patients" ? patientParams : appointmentParams,
+        rows: exportRows,
+        includePhoneNumbers: effectiveIncludePhones,
+        includePatientIdentifiers: effectiveIncludeIdentifiers,
+      });
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "Excel export failed",
+        message: error instanceof Error ? error.message : "Could not generate the workbook.",
+      });
+    }
+  }
+
   function savePreset() {
     const name = presetName.trim();
     if (!name) return;
@@ -341,7 +359,7 @@ export function ReportCenter() {
                 <Button type="button" size="sm" variant="secondary" onClick={() => void printPdf()} disabled={activeRows.length === 0}>
                   <FileText size={15} /> PDF
                 </Button>
-                <Button type="button" size="sm" variant="secondary" disabled title="XLSX export needs a frontend workbook utility or backend export endpoint.">
+                <Button type="button" size="sm" variant="secondary" onClick={() => void exportExcel()} disabled={activeRows.length === 0}>
                   <FileSpreadsheet size={15} /> Excel
                 </Button>
                 <Button type="button" size="sm" variant="secondary" onClick={() => void exportCsv()} disabled={activeRows.length === 0}>
