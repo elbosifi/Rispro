@@ -179,7 +179,7 @@ export function ReportCenter() {
       await recordReportOutput({
         reportTemplate: selectedTemplate.id,
         outputType,
-        filters: selectedTemplate.source === "patients" ? patientParams : appointmentParams,
+        filters: selectedTemplate.source === "patients" ? { ...patientParams } : appointmentParams,
         rowCount: activeRows.length,
         includePhoneNumbers: effectiveIncludePhones,
         includePatientIdentifiers: effectiveIncludeIdentifiers,
@@ -204,7 +204,7 @@ export function ReportCenter() {
     if (!(await auditOutput("copy"))) return;
     const text = toCsv(exportRows);
     if (navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(text).then(() => pushToast({ type: "success", title: "Table copied" }));
+      void navigator.clipboard.writeText(text).then(() => pushToast({ type: "success", title: "Table copied", message: "Report rows were copied to the clipboard." }));
     }
   }
 
@@ -245,7 +245,7 @@ export function ReportCenter() {
     const next = [nextPreset, ...presets.filter((preset) => preset.name !== name)].slice(0, 12);
     setPresets(next);
     localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
-    pushToast({ type: "success", title: "Preset saved" });
+    pushToast({ type: "success", title: "Preset saved", message: `${name} is ready to reuse.` });
   }
 
   function loadPreset(name: string) {
