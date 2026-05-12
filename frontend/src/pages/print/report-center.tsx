@@ -226,7 +226,7 @@ export function ReportCenter() {
     try {
       await exportReportXlsx({
         reportTemplate: selectedTemplate.id,
-        filters: selectedTemplate.source === "patients" ? patientParams : appointmentParams,
+        filters: asRecord(selectedTemplate.source === "patients" ? patientParams : appointmentParams),
         rows: exportRows,
         includePhoneNumbers: effectiveIncludePhones,
         includePatientIdentifiers: effectiveIncludeIdentifiers,

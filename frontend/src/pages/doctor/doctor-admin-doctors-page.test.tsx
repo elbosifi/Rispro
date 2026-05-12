@@ -49,8 +49,6 @@ const users: User[] = [
     role: "doctor",
     isActive: true,
     mustChangePassword: false,
-    createdAt: null,
-    updatedAt: null,
   },
   {
     id: 11,
@@ -59,8 +57,6 @@ const users: User[] = [
     role: "doctor",
     isActive: true,
     mustChangePassword: false,
-    createdAt: null,
-    updatedAt: null,
   },
 ];
 
