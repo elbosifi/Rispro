@@ -16,7 +16,7 @@ import {
   updateProfileModalitiesForAdmin,
 } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
-import { resetUserTemporaryPassword, setUserMustChangePassword } from "../../services/user-service.js";
+import { resetUserTemporaryPassword, setUserMustChangePassword, updateUserActiveState } from "../../services/user-service.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
@@ -186,6 +186,34 @@ router.post(
       throw new HttpError(404, "Linked doctor user not found.");
     }
     const updatedUser = await setUserMustChangePassword(targetUserId, user.sub);
+    res.json({ user: updatedUser });
+  })
+);
+
+router.post(
+  "/admin/doctors/:userId/activate",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const targetUserId = asPositiveInteger(req.params.userId, "user id");
+    const profiles = await listProfilesForAdmin(user.sub, user.role);
+    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+      throw new HttpError(404, "Linked doctor user not found.");
+    }
+    const updatedUser = await updateUserActiveState(targetUserId, true, { userId: user.sub, role: user.role });
+    res.json({ user: updatedUser });
+  })
+);
+
+router.post(
+  "/admin/doctors/:userId/deactivate",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const targetUserId = asPositiveInteger(req.params.userId, "user id");
+    const profiles = await listProfilesForAdmin(user.sub, user.role);
+    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+      throw new HttpError(404, "Linked doctor user not found.");
+    }
+    const updatedUser = await updateUserActiveState(targetUserId, false, { userId: user.sub, role: user.role });
     res.json({ user: updatedUser });
   })
 );

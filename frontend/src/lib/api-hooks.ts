@@ -288,6 +288,14 @@ export async function forceDoctorUserPasswordChange(userId: number): Promise<Use
   return mapUser(raw.user);
 }
 
+export async function setDoctorUserActive(userId: number, active: boolean): Promise<User> {
+  const action = active ? "activate" : "deactivate";
+  const raw = await api<{ user: RawRecord }>(`/doctor/admin/doctors/${userId}/${action}`, {
+    method: "POST",
+  });
+  return mapUser(raw.user);
+}
+
 export interface DoctorImportPreview {
   rows: Array<{ rowNumber: number; values: Record<string, string>; action: "create" | "update" | "invalid"; errors: string[] }>;
   canConfirm: boolean;

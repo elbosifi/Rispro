@@ -708,6 +708,13 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal(supervisorCreate.status, 201, JSON.stringify(supervisorCreate.data));
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).user.must_change_password, true);
     assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).profile.active, true);
+    const supervisorCreatedUserId = (supervisorCreate.data as { user: { id: number } }).user.id;
+    const deactivated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/deactivate`, { method: "POST" });
+    assert.equal(deactivated.status, 200, JSON.stringify(deactivated.data));
+    assert.equal((deactivated.data as { user: { is_active: boolean } }).user.is_active, false);
+    const activated = await api(admin.cookie, `/api/doctor/admin/doctors/${supervisorCreatedUserId}/activate`, { method: "POST" });
+    assert.equal(activated.status, 200, JSON.stringify(activated.data));
+    assert.equal((activated.data as { user: { is_active: boolean } }).user.is_active, true);
 
     const failingUsername = `${TEST_PREFIX.toLowerCase()}rollback_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
     const failed = await api(admin.cookie, "/api/doctor/admin/doctors", {

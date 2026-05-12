@@ -14,6 +14,7 @@ const updateDoctorProfileForAdminMock = vi.fn();
 const updateDoctorProfileModalitiesMock = vi.fn();
 const resetDoctorUserTemporaryPasswordMock = vi.fn();
 const forceDoctorUserPasswordChangeMock = vi.fn();
+const setDoctorUserActiveMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorProfilesForAdmin: () => fetchDoctorProfilesForAdminMock(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/api-hooks", () => ({
   updateDoctorProfileModalities: (...args: unknown[]) => updateDoctorProfileModalitiesMock(...args),
   resetDoctorUserTemporaryPassword: (...args: unknown[]) => resetDoctorUserTemporaryPasswordMock(...args),
   forceDoctorUserPasswordChange: (...args: unknown[]) => forceDoctorUserPasswordChangeMock(...args),
+  setDoctorUserActive: (...args: unknown[]) => setDoctorUserActiveMock(...args),
   inspectDoctorImport: vi.fn(),
   previewDoctorImport: vi.fn(),
   confirmDoctorImport: vi.fn(),
@@ -100,6 +102,7 @@ describe("DoctorAdminDoctorsPage", () => {
     updateDoctorProfileModalitiesMock.mockResolvedValue([]);
     resetDoctorUserTemporaryPasswordMock.mockResolvedValue(users[0]);
     forceDoctorUserPasswordChangeMock.mockResolvedValue(users[0]);
+    setDoctorUserActiveMock.mockResolvedValue(users[0]);
     vi.clearAllMocks();
   });
 
@@ -173,6 +176,9 @@ describe("DoctorAdminDoctorsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Require password change" }));
     await waitFor(() => expect(forceDoctorUserPasswordChangeMock).toHaveBeenCalledWith(10));
+
+    fireEvent.click(screen.getByRole("button", { name: "Deactivate linked user" }));
+    await waitFor(() => expect(setDoctorUserActiveMock).toHaveBeenCalledWith(10, false));
   });
 
   it("does not render admin create or edit controls for normal doctors", () => {

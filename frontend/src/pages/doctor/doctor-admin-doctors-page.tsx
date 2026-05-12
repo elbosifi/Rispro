@@ -12,6 +12,7 @@ import {
   inspectDoctorImport,
   previewDoctorImport,
   resetDoctorUserTemporaryPassword,
+  setDoctorUserActive,
   updateDoctorProfileForAdmin,
   updateDoctorProfileModalities,
   type DoctorImportPreview,
@@ -120,6 +121,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
   const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
+  const editingLinkedUserActive = editingProfile ? (editingProfile.userActive ?? usersById.get(editingProfile.userId)?.isActive ?? false) : false;
 
   const invalidateProfiles = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] });
@@ -191,6 +193,17 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
     mutationFn: () => {
       if (!editingProfile) throw new Error("Select a doctor profile to edit.");
       return forceDoctorUserPasswordChange(editingProfile.userId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await invalidateProfiles();
+    },
+  });
+
+  const userActiveMutation = useMutation({
+    mutationFn: (active: boolean) => {
+      if (!editingProfile) throw new Error("Select a doctor profile to edit.");
+      return setDoctorUserActive(editingProfile.userId, active);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -272,7 +285,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
     setResetPassword("");
   };
 
-  const formError = createDoctorMutation.error || createMutation.error || editMutation.error || resetPasswordMutation.error || forcePasswordMutation.error;
+  const formError = createDoctorMutation.error || createMutation.error || editMutation.error || resetPasswordMutation.error || forcePasswordMutation.error || userActiveMutation.error;
 
   if (!me.canManageDoctorProfiles) {
     return <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)" }}>Doctor profile management is not available for this user.</div>;
@@ -468,7 +481,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
           <div className="mt-4 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
             <p className="text-sm font-semibold">Linked user account</p>
             <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
-              @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - {editingProfile.userActive ?? usersById.get(editingProfile.userId)?.isActive ? "Active" : "Inactive"}
+              @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - {editingLinkedUserActive ? "Active" : "Inactive"}
               {usersById.get(editingProfile.userId)?.mustChangePassword ? " - must change password" : ""}
             </p>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -478,6 +491,9 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
               </button>
               <button type="button" disabled={forcePasswordMutation.isPending} onClick={() => forcePasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
                 Require password change
+              </button>
+              <button type="button" disabled={userActiveMutation.isPending} onClick={() => userActiveMutation.mutate(!editingLinkedUserActive)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
+                {editingLinkedUserActive ? "Deactivate linked user" : "Activate linked user"}
               </button>
             </div>
           </div>

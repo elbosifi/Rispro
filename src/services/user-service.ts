@@ -400,6 +400,96 @@ export async function setUserMustChangePassword(
   return updatedUser;
 }
 
+export async function updateUserActiveState(
+  userId: UserId,
+  isActive: boolean,
+  actor: UserActorContext = { userId: null, role: "supervisor" }
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+  if (actor.userId && Number(actor.userId) === cleanUserId && !isActive) {
+    throw new HttpError(400, "You cannot deactivate your own account.");
+  }
+
+  const currentResult = await pool.query<UserRow>(
+    `
+      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+  const previousUser = currentResult.rows[0];
+  if (!previousUser) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  if (previousUser.role === "super_admin" && actor.role !== "super_admin") {
+    await auditSuperAdminAttempt({
+      actionType: "update_super_admin_active_denied",
+      actorUserId: actor.userId,
+      targetUserId: previousUser.id,
+      details: {
+        reason: "only_super_admin_can_update_super_admin",
+        targetUsername: previousUser.username,
+        attemptedIsActive: isActive
+      }
+    });
+    throw new HttpError(403, "Only super_admin can update a super_admin user.");
+  }
+
+  if (previousUser.role === "super_admin" && previousUser.is_active && !isActive) {
+    const countResult = await pool.query<{ count: string }>(
+      `
+        select count(*)::text as count
+        from users
+        where role = 'super_admin'
+          and is_active = true
+      `
+    );
+    if (Number(countResult.rows[0]?.count ?? "0") <= 1) {
+      await auditSuperAdminAttempt({
+        actionType: "update_super_admin_active_denied",
+        actorUserId: actor.userId,
+        targetUserId: previousUser.id,
+        details: {
+          reason: "cannot_deactivate_last_super_admin",
+          targetUsername: previousUser.username
+        }
+      });
+      throw new HttpError(409, "Cannot deactivate the last active super_admin user.");
+    }
+  }
+
+  const updatedResult = await pool.query<UserRow>(
+    `
+      update users
+      set is_active = $2, updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+    `,
+    [cleanUserId, isActive]
+  );
+  const updatedUser = updatedResult.rows[0];
+  if (!updatedUser) {
+    throw new HttpError(500, "Failed to update user active state.");
+  }
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updatedUser.id,
+    actionType: isActive ? "activate" : "deactivate",
+    oldValues: { is_active: previousUser.is_active },
+    newValues: { is_active: updatedUser.is_active },
+    changedByUserId: actor.userId
+  });
+
+  return updatedUser;
+}
+
 export async function updateOwnPassword(
   userId: UserId,
   currentPassword: string,
