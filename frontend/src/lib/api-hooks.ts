@@ -206,6 +206,33 @@ export async function createDoctorProfileForAdmin(payload: {
   return raw.profile;
 }
 
+export async function createDoctorWithUserForAdmin(payload: {
+  username: string;
+  fullName: string;
+  temporaryPassword: string;
+  coreRole: "doctor" | "supervisor";
+  userActive: boolean;
+  doctorDisplayName: string;
+  doctorRole: DoctorProfileRole;
+  doctorProfileActive: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+  modalityPermissions: Array<{
+    modalityId: number;
+    canProtocol: boolean;
+    canReport: boolean;
+    canSupervise: boolean;
+    active: boolean;
+  }>;
+}): Promise<{ user: User; profile: DoctorProfile; modalities: DoctorModalityPermission[] }> {
+  const raw = await api<{ user: RawRecord; profile: DoctorProfile; modalities: DoctorModalityPermission[] }>("/doctor/admin/doctors", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return { user: mapUser(raw.user), profile: raw.profile, modalities: raw.modalities };
+}
+
 export async function updateDoctorProfileForAdmin(
   profileId: number,
   payload: {
@@ -244,6 +271,21 @@ export async function updateDoctorProfileModalities(
     body: JSON.stringify({ permissions })
   });
   return raw.modalities;
+}
+
+export async function resetDoctorUserTemporaryPassword(userId: number, temporaryPassword: string): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/doctor/admin/doctors/${userId}/reset-password`, {
+    method: "POST",
+    body: JSON.stringify({ temporaryPassword }),
+  });
+  return mapUser(raw.user);
+}
+
+export async function forceDoctorUserPasswordChange(userId: number): Promise<User> {
+  const raw = await api<{ user: RawRecord }>(`/doctor/admin/doctors/${userId}/force-password-change`, {
+    method: "POST",
+  });
+  return mapUser(raw.user);
 }
 
 export interface DoctorImportPreview {

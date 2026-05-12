@@ -1,14 +1,17 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  createDoctorWithUserForAdmin,
   createDoctorProfileForAdmin,
   confirmDoctorImport,
   fetchAppointmentLookups,
   fetchDoctorProfileModalities,
   fetchDoctorProfilesForAdmin,
   fetchUsers,
+  forceDoctorUserPasswordChange,
   inspectDoctorImport,
   previewDoctorImport,
+  resetDoctorUserTemporaryPassword,
   updateDoctorProfileForAdmin,
   updateDoctorProfileModalities,
   type DoctorImportPreview,
@@ -16,12 +19,58 @@ import {
 } from "@/lib/api-hooks";
 import type { DoctorMe, DoctorModalityPermission, DoctorProfile, DoctorProfileRole, User } from "@/types/api";
 
+type CreateDoctorDraft = {
+  username: string;
+  fullName: string;
+  temporaryPassword: string;
+  coreRole: "doctor" | "supervisor";
+  userActive: boolean;
+  doctorDisplayName: string;
+  doctorRole: DoctorProfileRole;
+  doctorProfileActive: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+};
+
+type DoctorProfileDraft = {
+  displayName: string;
+  doctorRole: DoctorProfileRole;
+  active: boolean;
+  canFinalizeReports: boolean;
+  canAssignProtocols: boolean;
+  canSupervise: boolean;
+};
+
 const DOCTOR_ROLES: Array<{ value: DoctorProfileRole; label: string }> = [
   { value: "consultant", label: "Consultant" },
   { value: "specialist", label: "Specialist" },
   { value: "senior_house_officer", label: "Senior house officer" },
   { value: "resident", label: "Resident" },
 ];
+
+const DEFAULT_PROFILE_DRAFT: DoctorProfileDraft = {
+  displayName: "",
+  doctorRole: "consultant",
+  active: true,
+  canFinalizeReports: true,
+  canAssignProtocols: true,
+  canSupervise: false,
+};
+
+const DEFAULT_CREATE_DOCTOR_DRAFT: CreateDoctorDraft = {
+  username: "",
+  fullName: "",
+  temporaryPassword: "",
+  coreRole: "doctor",
+  userActive: true,
+  doctorDisplayName: "",
+  doctorRole: "consultant",
+  doctorProfileActive: true,
+  canFinalizeReports: true,
+  canAssignProtocols: true,
+  canSupervise: false,
+};
 
 function statusLabel(profile?: DoctorProfile): string {
   if (!profile) return "No doctor profile";
@@ -37,6 +86,16 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
   const [importInspect, setImportInspect] = useState<{ format: "csv" | "xlsx"; columns: string[]; rowCount: number; missingColumns: string[] } | null>(null);
   const [importPreview, setImportPreview] = useState<DoctorImportPreview | null>(null);
   const [importResult, setImportResult] = useState<DoctorImportResult | null>(null);
+  const [createDoctorDraft, setCreateDoctorDraft] = useState<CreateDoctorDraft>(DEFAULT_CREATE_DOCTOR_DRAFT);
+  const [createDoctorModalities, setCreateDoctorModalities] = useState<Record<number, {
+    canProtocol: boolean;
+    canReport: boolean;
+    canSupervise: boolean;
+    active: boolean;
+  }>>({});
+  const [editingProfileId, setEditingProfileId] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState<DoctorProfileDraft>(DEFAULT_PROFILE_DRAFT);
+  const [resetPassword, setResetPassword] = useState("");
   const [draft, setDraft] = useState({
     userId: "",
     displayName: "",
@@ -60,6 +119,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
   const usersById = useMemo(() => new Map((usersQuery.data?.users ?? []).map((user) => [user.id, user])), [usersQuery.data?.users]);
   const profilesByUserId = useMemo(() => new Map(profiles.map((profile) => [profile.userId, profile])), [profiles]);
   const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? null;
+  const editingProfile = profiles.find((profile) => profile.id === editingProfileId) ?? null;
 
   const invalidateProfiles = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "profiles"] });
@@ -82,9 +142,60 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
     },
   });
 
+  const createDoctorMutation = useMutation({
+    mutationFn: () => createDoctorWithUserForAdmin({
+      ...createDoctorDraft,
+      modalityPermissions: Object.entries(createDoctorModalities)
+        .map(([modalityId, permission]) => ({ modalityId: Number(modalityId), ...permission }))
+        .filter((permission) => permission.active || permission.canProtocol || permission.canReport || permission.canSupervise),
+    }),
+    onSuccess: async (result) => {
+      setSelectedProfileId(result.profile.id);
+      setCreateDoctorDraft(DEFAULT_CREATE_DOCTOR_DRAFT);
+      setCreateDoctorModalities({});
+      await invalidateProfiles();
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+  });
+
   const updateMutation = useMutation({
     mutationFn: (payload: { profileId: number; patch: Partial<typeof draft> }) => updateDoctorProfileForAdmin(payload.profileId, payload.patch),
     onSuccess: invalidateProfiles,
+  });
+
+  const editMutation = useMutation({
+    mutationFn: () => {
+      if (!editingProfile) throw new Error("Select a doctor profile to edit.");
+      return updateDoctorProfileForAdmin(editingProfile.id, editDraft);
+    },
+    onSuccess: async () => {
+      setEditingProfileId(null);
+      setResetPassword("");
+      await invalidateProfiles();
+    },
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: () => {
+      if (!editingProfile) throw new Error("Select a doctor profile to edit.");
+      return resetDoctorUserTemporaryPassword(editingProfile.userId, resetPassword);
+    },
+    onSuccess: async () => {
+      setResetPassword("");
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await invalidateProfiles();
+    },
+  });
+
+  const forcePasswordMutation = useMutation({
+    mutationFn: () => {
+      if (!editingProfile) throw new Error("Select a doctor profile to edit.");
+      return forceDoctorUserPasswordChange(editingProfile.userId);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+      await invalidateProfiles();
+    },
   });
 
   const modalityMutation = useMutation({
@@ -148,6 +259,21 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
     modalityMutation.mutate(rows.map(({ label: _label, ...row }) => row));
   };
 
+  const startEditing = (profile: DoctorProfile) => {
+    setEditingProfileId(profile.id);
+    setEditDraft({
+      displayName: profile.displayName,
+      doctorRole: profile.doctorRole,
+      active: profile.active,
+      canFinalizeReports: profile.canFinalizeReports,
+      canAssignProtocols: profile.canAssignProtocols,
+      canSupervise: profile.canSupervise,
+    });
+    setResetPassword("");
+  };
+
+  const formError = createDoctorMutation.error || createMutation.error || editMutation.error || resetPasswordMutation.error || forcePasswordMutation.error;
+
   if (!me.canManageDoctorProfiles) {
     return <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)" }}>Doctor profile management is not available for this user.</div>;
   }
@@ -158,6 +284,74 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
         <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>Doctor Portal Admin</p>
         <h2 className="mt-1 text-2xl font-semibold text-foreground">Doctors</h2>
       </div>
+
+      {formError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {formError instanceof Error ? formError.message : "Doctor admin action failed."}
+        </div>
+      )}
+
+      <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+        <h3 className="font-semibold">Create Doctor</h3>
+        <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+          Creates the RISpro login account and Doctor Portal profile together.
+        </p>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <input value={createDoctorDraft.username} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, username: event.target.value }))} placeholder="Username" className="rounded-lg border px-3 py-2 text-sm" />
+          <input value={createDoctorDraft.fullName} onChange={(event) => setCreateDoctorDraft((current) => ({
+            ...current,
+            fullName: event.target.value,
+            doctorDisplayName: current.doctorDisplayName || event.target.value,
+          }))} placeholder="Full name" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="password" value={createDoctorDraft.temporaryPassword} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} placeholder="Temporary password" className="rounded-lg border px-3 py-2 text-sm" />
+          <select value={createDoctorDraft.coreRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, coreRole: event.target.value as "doctor" | "supervisor" }))} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="doctor">Doctor login</option>
+            <option value="supervisor">Supervisor login</option>
+          </select>
+          <input value={createDoctorDraft.doctorDisplayName} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorDisplayName: event.target.value }))} placeholder="Doctor display name" className="rounded-lg border px-3 py-2 text-sm" />
+          <select value={createDoctorDraft.doctorRole} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
+            {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+          </select>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-4 text-sm">
+          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.userActive} disabled /> User active</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.doctorProfileActive} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, doctorProfileActive: event.target.checked }))} /> Profile active</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.canFinalizeReports} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> Can finalize reports</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.canAssignProtocols} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> Can assign protocols</label>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={createDoctorDraft.canSupervise} onChange={(event) => setCreateDoctorDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> Can supervise</label>
+        </div>
+        {(lookupsQuery.data?.modalities ?? []).length > 0 && (
+          <div className="mt-4 overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+            <table className="min-w-full text-sm">
+              <thead><tr>{["Initial modality", "Active", "Protocol", "Report", "Supervise"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+              <tbody>
+                {(lookupsQuery.data?.modalities ?? []).map((modality) => {
+                  const permission = createDoctorModalities[modality.id] ?? { active: false, canProtocol: false, canReport: false, canSupervise: false };
+                  const label = modality.nameEn || modality.nameAr || modality.code || String(modality.id);
+                  return (
+                    <tr key={modality.id}>
+                      <td className="px-3 py-2 font-medium">{label}</td>
+                      {(["active", "canProtocol", "canReport", "canSupervise"] as const).map((key) => (
+                        <td key={key} className="px-3 py-2">
+                          <input type="checkbox" checked={permission[key]} onChange={(event) => setCreateDoctorModalities((current) => ({
+                            ...current,
+                            [modality.id]: { ...permission, [key]: event.target.checked },
+                          }))} />
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="mt-4">
+          <button type="button" disabled={!createDoctorDraft.username || !createDoctorDraft.fullName || !createDoctorDraft.temporaryPassword || !createDoctorDraft.doctorDisplayName || createDoctorMutation.isPending} onClick={() => createDoctorMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+            Create doctor
+          </button>
+        </div>
+      </section>
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="mb-4 flex flex-wrap gap-2">
@@ -234,6 +428,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => startEditing(profile)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
                     <button type="button" onClick={() => setSelectedProfileId(profile.id)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Modalities</button>
                     <button type="button" onClick={() => updateMutation.mutate({ profileId: profile.id, patch: { active: !profile.active } })} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
                       {profile.active ? "Disable" : "Reactivate"}
@@ -248,6 +443,46 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
           </tbody>
         </table>
       </section>
+
+      {editingProfile && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="font-semibold">Edit doctor profile: {editingProfile.displayName}</h3>
+            <button type="button" onClick={() => setEditingProfileId(null)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Close</button>
+          </div>
+          <div className="mt-3 grid gap-2 md:grid-cols-3">
+            <input value={editDraft.displayName} onChange={(event) => setEditDraft((current) => ({ ...current, displayName: event.target.value }))} placeholder="Display name" className="rounded-lg border px-3 py-2 text-sm" />
+            <select value={editDraft.doctorRole} onChange={(event) => setEditDraft((current) => ({ ...current, doctorRole: event.target.value as DoctorProfileRole }))} className="rounded-lg border px-3 py-2 text-sm">
+              {DOCTOR_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+            </select>
+            <button type="button" disabled={!editDraft.displayName || editMutation.isPending} onClick={() => editMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+              Save profile
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-4 text-sm">
+            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.active} onChange={(event) => setEditDraft((current) => ({ ...current, active: event.target.checked }))} /> Profile active</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canFinalizeReports} onChange={(event) => setEditDraft((current) => ({ ...current, canFinalizeReports: event.target.checked }))} /> Can finalize reports</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canAssignProtocols} onChange={(event) => setEditDraft((current) => ({ ...current, canAssignProtocols: event.target.checked }))} /> Can assign protocols</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={editDraft.canSupervise} onChange={(event) => setEditDraft((current) => ({ ...current, canSupervise: event.target.checked }))} /> Can supervise</label>
+          </div>
+          <div className="mt-4 rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+            <p className="text-sm font-semibold">Linked user account</p>
+            <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+              @{editingProfile.username ?? usersById.get(editingProfile.userId)?.username ?? editingProfile.userId} - {editingProfile.userActive ?? usersById.get(editingProfile.userId)?.isActive ? "Active" : "Inactive"}
+              {usersById.get(editingProfile.userId)?.mustChangePassword ? " - must change password" : ""}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <input type="password" value={resetPassword} onChange={(event) => setResetPassword(event.target.value)} placeholder="New temporary password" className="rounded-lg border px-3 py-2 text-sm" />
+              <button type="button" disabled={!resetPassword || resetPasswordMutation.isPending} onClick={() => resetPasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
+                Reset temporary password
+              </button>
+              <button type="button" disabled={forcePasswordMutation.isPending} onClick={() => forcePasswordMutation.mutate()} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>
+                Require password change
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {selectedProfile && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>

@@ -628,6 +628,110 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((await api(cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 403);
   });
 
+  it("creates a doctor login, profile, and modality permissions atomically from Doctor Admin", async () => {
+    guard();
+    const username = `${TEST_PREFIX.toLowerCase()}created_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const body = {
+      username,
+      fullName: `${TEST_PREFIX} Created Doctor`,
+      temporaryPassword: "TempPass123",
+      coreRole: "doctor",
+      userActive: true,
+      doctorDisplayName: `${TEST_PREFIX} Created Display`,
+      doctorRole: "consultant",
+      doctorProfileActive: true,
+      canFinalizeReports: true,
+      canAssignProtocols: false,
+      canSupervise: true,
+      modalityPermissions: [{ modalityId: testData.modalityId, active: true, canProtocol: true, canReport: true, canSupervise: false }],
+    };
+
+    const created = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body });
+    assert.equal(created.status, 201, JSON.stringify(created.data));
+    const createdData = created.data as {
+      user: { id: number; must_change_password: boolean; is_active: boolean };
+      profile: { id: number; active: boolean; canSupervise: boolean };
+      modalities: Array<{ modalityId: number; canProtocol: boolean; canReport: boolean; active: boolean }>;
+    };
+    assert.equal(createdData.user.must_change_password, true);
+    assert.equal(createdData.user.is_active, true);
+    assert.equal(createdData.profile.active, true);
+    assert.equal(createdData.profile.canSupervise, true);
+    assert.equal(createdData.modalities.some((permission) => permission.modalityId === testData.modalityId && permission.active && permission.canProtocol && permission.canReport), true);
+
+    const userCookie = createTestAuthCookie(createdData.user.id, "doctor");
+    assert.equal((await api(userCookie, "/api/doctor/me")).status, 200);
+    const updated = await api(admin.cookie, `/api/doctor/profiles/${createdData.profile.id}`, {
+      method: "PATCH",
+      body: { displayName: `${TEST_PREFIX} Updated Display`, doctorRole: "resident", active: false, canFinalizeReports: false, canAssignProtocols: true, canSupervise: false },
+    });
+    assert.equal(updated.status, 200, JSON.stringify(updated.data));
+    assert.equal((updated.data as { profile: { displayName: string; doctorRole: string; active: boolean; canAssignProtocols: boolean } }).profile.displayName, `${TEST_PREFIX} Updated Display`);
+    assert.equal((updated.data as { profile: { doctorRole: string } }).profile.doctorRole, "resident");
+    assert.equal((updated.data as { profile: { canAssignProtocols: boolean } }).profile.canAssignProtocols, true);
+
+    const inactiveMe = await api(userCookie, "/api/doctor/me");
+    assert.equal(inactiveMe.status, 200);
+    assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).hasActiveDoctorProfile, false);
+    assert.equal((inactiveMe.data as { hasActiveDoctorProfile: boolean; canAccessClinicalDoctorPortal: boolean }).canAccessClinicalDoctorPortal, false);
+
+    const duplicate = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, doctorDisplayName: `${TEST_PREFIX} Duplicate` } });
+    assert.equal(duplicate.status, 409);
+
+    const missingPassword = await api(admin.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_missing`, temporaryPassword: "" } });
+    assert.equal(missingPassword.status, 400);
+
+    const normalDenied = await api(normal.cookie, "/api/doctor/admin/doctors", { method: "POST", body: { ...body, username: `${username}_denied` } });
+    assert.equal(normalDenied.status, 403);
+  });
+
+  it("allows supervisors to create doctors and rolls back user creation when profile setup fails", async () => {
+    guard();
+    const supervisorUsername = `${TEST_PREFIX.toLowerCase()}supercreated_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const supervisorCreate = await api(supervisor.cookie, "/api/doctor/admin/doctors", {
+      method: "POST",
+      body: {
+        username: supervisorUsername,
+        fullName: `${TEST_PREFIX} Supervisor Created Doctor`,
+        temporaryPassword: "TempPass123",
+        coreRole: "supervisor",
+        userActive: true,
+        doctorDisplayName: `${TEST_PREFIX} Supervisor Created Doctor`,
+        doctorRole: "specialist",
+        doctorProfileActive: true,
+        canFinalizeReports: true,
+        canAssignProtocols: true,
+        canSupervise: true,
+        modalityPermissions: [],
+      },
+    });
+    assert.equal(supervisorCreate.status, 201, JSON.stringify(supervisorCreate.data));
+    assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).user.must_change_password, true);
+    assert.equal((supervisorCreate.data as { user: { must_change_password: boolean }; profile: { active: boolean } }).profile.active, true);
+
+    const failingUsername = `${TEST_PREFIX.toLowerCase()}rollback_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const failed = await api(admin.cookie, "/api/doctor/admin/doctors", {
+      method: "POST",
+      body: {
+        username: failingUsername,
+        fullName: `${TEST_PREFIX} Rollback Doctor`,
+        temporaryPassword: "TempPass123",
+        coreRole: "doctor",
+        userActive: true,
+        doctorDisplayName: `${TEST_PREFIX} Rollback Doctor`,
+        doctorRole: "consultant",
+        doctorProfileActive: true,
+        canFinalizeReports: true,
+        canAssignProtocols: true,
+        canSupervise: false,
+        modalityPermissions: [{ modalityId: 2147483000, active: true, canProtocol: true, canReport: false, canSupervise: false }],
+      },
+    });
+    assert.notEqual(failed.status, 201);
+    const leakedUser = await pool.query<{ count: string }>(`select count(*)::text as count from users where username = $1`, [failingUsername]);
+    assert.equal(Number(leakedUser.rows[0].count), 0);
+  });
+
   it("imports doctors through CSV preview/confirm and forces password change", async () => {
     guard();
     const username = `${TEST_PREFIX.toLowerCase()}import_${randomUUID().replace(/-/g, "").slice(0, 8)}`;

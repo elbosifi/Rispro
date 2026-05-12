@@ -307,6 +307,99 @@ export async function updateUserPassword(
   return updatedUser;
 }
 
+export async function resetUserTemporaryPassword(
+  userId: UserId,
+  password: string,
+  changedByUserId: NullableUserId = null
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  const cleanPassword = String(password ?? "").trim();
+
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+  if (!cleanPassword) {
+    throw new HttpError(400, "temporaryPassword is required.");
+  }
+
+  const currentResult = await pool.query(
+    `
+      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+  const previousUser = currentResult.rows[0] as UserRow | undefined;
+  if (!previousUser) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  const passwordHash = await bcrypt.hash(cleanPassword, 10);
+  const updatedResult = await pool.query(
+    `
+      update users
+      set password_hash = $2, must_change_password = true, updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+    `,
+    [cleanUserId, passwordHash]
+  );
+
+  const updatedUser = updatedResult.rows[0] as UserRow | undefined;
+  if (!updatedUser) {
+    throw new HttpError(500, "Failed to reset user password.");
+  }
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updatedUser.id,
+    actionType: "reset_temporary_password",
+    oldValues: { must_change_password: previousUser.must_change_password },
+    newValues: { must_change_password: updatedUser.must_change_password },
+    changedByUserId
+  });
+
+  return updatedUser;
+}
+
+export async function setUserMustChangePassword(
+  userId: UserId,
+  changedByUserId: NullableUserId = null
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+
+  const updatedResult = await pool.query(
+    `
+      update users
+      set must_change_password = true, updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+    `,
+    [cleanUserId]
+  );
+
+  const updatedUser = updatedResult.rows[0] as UserRow | undefined;
+  if (!updatedUser) {
+    throw new HttpError(404, "User not found.");
+  }
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updatedUser.id,
+    actionType: "force_password_change",
+    oldValues: null,
+    newValues: { must_change_password: true },
+    changedByUserId
+  });
+
+  return updatedUser;
+}
+
 export async function updateOwnPassword(
   userId: UserId,
   currentPassword: string,

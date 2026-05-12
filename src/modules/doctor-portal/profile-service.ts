@@ -1,5 +1,8 @@
 import { HttpError } from "../../utils/http-error.js";
+import bcrypt from "bcryptjs";
+import { pool } from "../../db/pool.js";
 import { env } from "../../config/env.js";
+import { isRole } from "../../constants/roles.js";
 import { canRoleAccessPage, readPageVisibilityMatrix } from "../../services/page-visibility-settings-service.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
@@ -11,6 +14,7 @@ import {
   listDoctorModalityPermissions,
   listDoctorProfiles,
   replaceDoctorModalityPermissions,
+  insertDoctorAuditEvent,
   updateDoctorProfile,
   type CreateDoctorProfileInput,
   type DoctorModalityPermissionRow,
@@ -109,6 +113,189 @@ export async function createProfileForAdmin(
 ): Promise<DoctorProfileRow> {
   await requireDoctorAdmin(actorUserId, appRole);
   return createDoctorProfile(input, actorUserId);
+}
+
+export async function createDoctorWithUserForAdmin(
+  actorUserId: UserId,
+  appRole: Role,
+  input: {
+    username: string;
+    fullName: string;
+    temporaryPassword: string;
+    coreRole: Role | string;
+    userActive: boolean;
+    doctorDisplayName: string;
+    doctorRole: DoctorRole;
+    doctorProfileActive: boolean;
+    canFinalizeReports: boolean;
+    canAssignProtocols: boolean;
+    canSupervise: boolean;
+    modalityPermissions: Array<{
+      modalityId: number;
+      canProtocol: boolean;
+      canReport: boolean;
+      canSupervise: boolean;
+      active: boolean;
+    }>;
+  }
+) {
+  await requireDoctorAdmin(actorUserId, appRole);
+  const username = input.username.trim();
+  const fullName = input.fullName.trim();
+  const temporaryPassword = input.temporaryPassword.trim();
+  const doctorDisplayName = input.doctorDisplayName.trim() || fullName;
+
+  if (!username || !fullName || !temporaryPassword || !doctorDisplayName) {
+    throw new HttpError(400, "username, fullName, temporaryPassword, and doctorDisplayName are required.");
+  }
+  if (input.coreRole !== "doctor" && input.coreRole !== "supervisor") {
+    throw new HttpError(400, "coreRole must be doctor or supervisor.");
+  }
+  if (!isRole(input.coreRole)) {
+    throw new HttpError(400, "coreRole is invalid.");
+  }
+  if (!input.userActive) {
+    throw new HttpError(400, "New doctor users must be active.");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10);
+    const userResult = await client.query<{
+      id: number;
+      username: string;
+      full_name: string;
+      role: Role;
+      is_active: boolean;
+      must_change_password: boolean;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `
+        insert into users (username, full_name, password_hash, role, is_active, must_change_password)
+        values ($1, $2, $3, $4, $5, true)
+        returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      `,
+      [username, fullName, passwordHash, input.coreRole, input.userActive]
+    );
+    const user = userResult.rows[0];
+
+    const profileResult = await client.query<DoctorProfileRow>(
+      `
+        insert into doctor_portal.doctor_profiles (
+          user_id,
+          display_name,
+          doctor_role,
+          active,
+          can_finalize_reports,
+          can_assign_protocols,
+          can_supervise
+        )
+        values ($1, $2, $3, $4, $5, $6, $7)
+        returning
+          id,
+          user_id as "userId",
+          $8::text as username,
+          $9::text as "fullName",
+          $10::text as "coreRole",
+          $11::boolean as "userActive",
+          display_name as "displayName",
+          doctor_role as "doctorRole",
+          active,
+          can_finalize_reports as "canFinalizeReports",
+          can_assign_protocols as "canAssignProtocols",
+          can_supervise as "canSupervise",
+          created_at as "createdAt",
+          updated_at as "updatedAt"
+      `,
+      [
+        user.id,
+        doctorDisplayName,
+        input.doctorRole,
+        input.doctorProfileActive,
+        input.canFinalizeReports,
+        input.canAssignProtocols,
+        input.canSupervise,
+        user.username,
+        user.full_name,
+        user.role,
+        user.is_active,
+      ]
+    );
+    const profile = profileResult.rows[0];
+
+    for (const permission of input.modalityPermissions) {
+      await client.query(
+        `
+          insert into doctor_portal.doctor_modality_permissions (
+            doctor_id, modality_id, can_protocol, can_report, can_supervise, active
+          )
+          values ($1, $2, $3, $4, $5, $6)
+          on conflict (doctor_id, modality_id)
+          do update set
+            can_protocol = excluded.can_protocol,
+            can_report = excluded.can_report,
+            can_supervise = excluded.can_supervise,
+            active = excluded.active,
+            updated_at = now()
+        `,
+        [
+          profile.id,
+          permission.modalityId,
+          permission.canProtocol,
+          permission.canReport,
+          permission.canSupervise,
+          permission.active,
+        ]
+      );
+    }
+
+    await insertDoctorAuditEvent(client, {
+      actorUserId,
+      actorDoctorId: null,
+      eventType: "doctor_created_with_user",
+      targetType: "doctor_profile",
+      targetId: profile.id,
+      metadata: {
+        userId: user.id,
+        username: user.username,
+        coreRole: user.role,
+        doctorRole: profile.doctorRole,
+        modalityIds: input.modalityPermissions.map((permission) => permission.modalityId),
+      },
+      reason: null,
+    });
+    await client.query("commit");
+
+    return {
+      user: {
+        id: user.id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        is_active: user.is_active,
+        must_change_password: user.must_change_password,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      },
+      profile,
+      modalities: await listDoctorModalityPermissions(profile.id, true),
+    };
+  } catch (error) {
+    await client.query("rollback");
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      String((error as Record<string, unknown>).code) === "23505"
+    ) {
+      throw new HttpError(409, "A user with that username already exists.");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateProfileForAdmin(

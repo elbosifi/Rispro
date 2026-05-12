@@ -7,6 +7,7 @@ import { HttpError } from "../../utils/http-error.js";
 import { env } from "../../config/env.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import {
+  createDoctorWithUserForAdmin,
   createProfileForAdmin,
   getDoctorMe,
   listProfileModalitiesForAdmin,
@@ -15,6 +16,7 @@ import {
   updateProfileModalitiesForAdmin,
 } from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
+import { resetUserTemporaryPassword, setUserMustChangePassword } from "../../services/user-service.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
@@ -120,6 +122,71 @@ router.post(
     });
 
     res.status(201).json({ profile });
+  })
+);
+
+router.post(
+  "/admin/doctors",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const body = asUnknownRecord(req.body);
+    const rawPermissions = Array.isArray(body.modalityPermissions) ? body.modalityPermissions : [];
+    const modalityPermissions = rawPermissions.map((item) => {
+      const record = asUnknownRecord(item);
+      return {
+        modalityId: asPositiveInteger(record.modalityId, "modalityId"),
+        canProtocol: asOptionalBoolean(record.canProtocol) ?? false,
+        canReport: asOptionalBoolean(record.canReport) ?? false,
+        canSupervise: asOptionalBoolean(record.canSupervise) ?? false,
+        active: asOptionalBoolean(record.active) ?? true,
+      };
+    });
+
+    const result = await createDoctorWithUserForAdmin(user.sub, user.role, {
+      username: asString(body.username),
+      fullName: asString(body.fullName),
+      temporaryPassword: asString(body.temporaryPassword),
+      coreRole: asString(body.coreRole),
+      userActive: asOptionalBoolean(body.userActive) ?? true,
+      doctorDisplayName: asString(body.doctorDisplayName),
+      doctorRole: parseDoctorRole(body.doctorRole),
+      doctorProfileActive: asOptionalBoolean(body.doctorProfileActive) ?? true,
+      canFinalizeReports: asOptionalBoolean(body.canFinalizeReports) ?? false,
+      canAssignProtocols: asOptionalBoolean(body.canAssignProtocols) ?? false,
+      canSupervise: asOptionalBoolean(body.canSupervise) ?? false,
+      modalityPermissions,
+    });
+
+    res.status(201).json(result);
+  })
+);
+
+router.post(
+  "/admin/doctors/:userId/reset-password",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const targetUserId = asPositiveInteger(req.params.userId, "user id");
+    const profiles = await listProfilesForAdmin(user.sub, user.role);
+    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+      throw new HttpError(404, "Linked doctor user not found.");
+    }
+    const body = asUnknownRecord(req.body);
+    const updatedUser = await resetUserTemporaryPassword(targetUserId, asString(body.temporaryPassword), user.sub);
+    res.json({ user: updatedUser });
+  })
+);
+
+router.post(
+  "/admin/doctors/:userId/force-password-change",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const targetUserId = asPositiveInteger(req.params.userId, "user id");
+    const profiles = await listProfilesForAdmin(user.sub, user.role);
+    if (!profiles.some((profile) => profile.userId === targetUserId)) {
+      throw new HttpError(404, "Linked doctor user not found.");
+    }
+    const updatedUser = await setUserMustChangePassword(targetUserId, user.sub);
+    res.json({ user: updatedUser });
   })
 );
 
