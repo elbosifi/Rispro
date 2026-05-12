@@ -386,6 +386,18 @@ export interface ProtocolDetails {
   protocol: AppointmentProtocol | null;
 }
 
+export interface ProtocolAuditTimelineEvent {
+  eventType: "protocol_created" | "protocol_updated" | "protocol_assigned" | "clarification_requested" | "protocol_cancelled" | "protocol_corrected";
+  changedByDoctorId: number | null;
+  changedByDoctorName: string | null;
+  createdAt: string;
+  reason: string | null;
+  oldSummary: string | null;
+  newSummary: string | null;
+  version: number | null;
+  protocolStatus: ProtocolStatus | null;
+}
+
 export interface ProtocolFilters {
   dateFrom: string;
   dateTo: string;

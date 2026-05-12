@@ -20,18 +20,19 @@
 3. Set doctor role, active state, report/protocol/supervisor permissions, and modality permissions.
 4. Disable access by setting the doctor profile inactive. Do not delete historical rows.
 5. Reactivate access by setting the doctor profile active.
-6. Use CSV import/export for bulk doctor setup. Export never includes passwords.
+6. Use CSV or XLSX import/export for bulk doctor setup. Export never includes passwords.
 7. Imported new users are active immediately and must change temporary password on first login.
 
 ## Import / Export Workflow
 
 1. Download the doctor import template.
 2. Fill `username`, `full_name`, `temporary_password`, `core_role`, `doctor_role`, profile flags, and modality code lists.
-3. Upload CSV.
+3. Upload CSV or XLSX.
 4. Inspect columns and row count.
 5. Preview row actions and validation errors.
 6. Confirm only when preview has no row-level errors.
 7. Confirm writes users, profiles, modality permissions, and audit events transactionally.
+8. New imports require first-login password change; existing user passwords change only when `reset_password=true`.
 
 ## Roster Planning
 
@@ -47,10 +48,26 @@
 
 - Use Doctor Portal > Cases in supervisor/admin mode.
 - Filter by date range, modality, assignment status, report requirement, and case category.
-- Assign or reassign a case to a published roster slot.
+- Drag a case to a published roster target, then enter a correction reason.
+- Use Assign/Reassign as the fallback when drag/drop is not convenient.
 - A correction reason is required.
 - Reassignment supersedes the previous active assignment and writes an audit event.
 - Normal doctors cannot run assignment or reassignment.
+
+## Workload Catalog
+
+- Use Doctor Portal > Team Workload to review team workload totals.
+- Doctor Admin can create, edit, and deactivate workload catalog rules.
+- Rules configure team workload units by modality, optional exam, optional case category, and assignment type.
+- Supervisors may view the catalog according to Doctor Portal permissions, but normal doctors cannot manage it.
+- No individual productivity, salary, payment, revenue, or ranking views should appear.
+
+## Protocol History
+
+- Open a protocol task and review Protocol history.
+- The timeline should show created, updated, assigned, clarification, cancelled, and corrected events when present.
+- Confirm date/time, actor, reason, status, and version render without exposing raw internal JSON.
+- Unrelated normal doctors must not be able to view protocol history.
 
 ## Forced Password Change
 
@@ -75,8 +92,8 @@ Also run focused Doctor Portal backend tests, frontend Doctor Portal tests, Sett
 
 1. Set `DOCTOR_PORTAL_ENABLED=true`.
 2. Set `DOCTOR_PORTAL_AUTO_REDIRECT=true`.
-3. Apply migrations through `072_users_must_change_password.sql`.
-4. Create or import test doctors.
+3. Apply migrations through the current release migration set.
+4. Create or import test doctors using CSV and XLSX.
 5. Confirm forced password change.
 6. Set modality permissions.
 7. Create a roster.
@@ -84,33 +101,40 @@ Also run focused Doctor Portal backend tests, frontend Doctor Portal tests, Sett
 9. Resolve conflicts and publish roster.
 10. Create or select scheduled appointments.
 11. Run assignment.
-12. Manually reassign one case with a reason.
-13. Save protocol draft and confirm draft is hidden from operational reads.
-14. Assign protocol and confirm read-only visibility.
-15. Run workload calculation and confirm team-based workload only.
-16. Confirm normal doctor sees only own/team-allowed data.
-17. Confirm supervisor/admin management works.
-18. Confirm reception workflow is unchanged.
-19. Monitor selected doctors, supervisors, and technologists for 1-2 weeks.
+12. Drag/drop reassign one case with a reason.
+13. Reassign one case using the Assign/Reassign fallback with a reason.
+14. Save protocol draft and confirm draft is hidden from operational reads.
+15. Assign protocol and confirm read-only visibility.
+16. Review protocol history timeline.
+17. Create/edit/deactivate workload catalog rules and rerun workload calculation.
+18. Confirm workload remains team-based only.
+19. Confirm normal doctor sees only own/team-allowed data.
+20. Confirm supervisor/admin management works.
+21. Confirm reception workflow is unchanged.
+22. Monitor selected doctors, supervisors, and technologists for 1-2 weeks.
 
 ## Go / No-Go
 
 GO for controlled staging pilot only if:
 
-- DB-backed integration test runs and passes without skip.
+- DB-backed integration test runs and passes without skip after these code changes.
 - Migrations apply cleanly.
 - Forced password change works.
-- Import inspect/preview/confirm works.
+- CSV and XLSX import inspect/preview/confirm work.
 - Modality permission UI works.
 - Auto-redirect works.
 - Drag/drop roster works with fallback controls.
-- Manual case reassignment works with audit.
+- Drag/drop and fallback case reassignment work with audit.
+- Workload catalog management works without individual productivity views.
+- Protocol history timeline works with permission checks.
 - Protocol drafts remain hidden from appointment/queue reads.
 - Assigned protocols appear read-only.
 - No duplicate active assignment/workload rows exist.
 - Normal doctors cannot access unrelated data.
 - Appointment routing/cutover tests pass.
 - Typechecks pass.
+
+These code changes require re-validation before production. Do not mark production complete until DB-backed validation has been rerun and the staging pilot has completed.
 
 NO-GO if:
 

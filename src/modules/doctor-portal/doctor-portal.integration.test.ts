@@ -196,6 +196,13 @@ async function createDoctorPortalTestApp() {
   });
 }
 
+async function workbookBase64(rows: Array<Record<string, unknown>>): Promise<string> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(rows), "Doctor import");
+  return (XLSX.write(workbook, { type: "buffer", bookType: "xlsx" }) as Buffer).toString("base64");
+}
+
 async function cleanupDoctorPortalTestData() {
   const userRows = await pool.query<{ id: string }>(`select id::text as id from users where username like $1`, [`${TEST_PREFIX.toLowerCase()}%`]);
   const userIds = userRows.rows.map((row) => Number(row.id));
@@ -438,6 +445,12 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     assert.equal((assigned.data as { protocol: { protocolStatus: string; version: number } }).protocol.protocolStatus, "assigned");
     assert.equal((assigned.data as { protocol: { version: number } }).protocol.version, 2);
 
+    const audit = await api(normal.cookie, `/api/doctor/protocols/${appointmentId}/audit`);
+    assert.equal(audit.status, 200);
+    const auditEvents = (audit.data as { audit: Array<{ eventType: string; newSummary: string | null; protocolStatus: string | null }> }).audit;
+    assert.equal(auditEvents.some((event) => event.eventType === "protocol_assigned" && event.protocolStatus === "assigned"), true);
+    assert.equal(auditEvents.some((event) => /protocol text/i.test(event.newSummary ?? "")), true);
+
     const assignedDetails = await api(supervisor.cookie, `/api/v2/appointments/${appointmentId}/details`);
     assert.equal((assignedDetails.data as { appointment: { protocol_status: string | null } }).appointment.protocol_status, "assigned");
     assert.equal((assignedDetails.data as { appointment: { protocol_text: string | null } }).appointment.protocol_text, "Assigned CT protocol");
@@ -558,6 +571,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       body: { protocolText: "not allowed" },
     });
     assert.equal(unrelatedProtocol.status, 403);
+    assert.equal((await api(otherDoctor.cookie, `/api/doctor/protocols/${unrelatedAppointmentId}/audit`)).status, 403);
 
     const catalog = await api(admin.cookie, "/api/doctor/workload/catalog", {
       method: "POST",
@@ -571,6 +585,17 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       },
     });
     assert.equal(catalog.status, 201);
+    const catalogId = Number((catalog.data as { rule: { id: number } }).rule.id);
+    const updatedCatalog = await api(admin.cookie, `/api/doctor/workload/catalog/${catalogId}`, {
+      method: "PATCH",
+      body: { baseUnits: 2, noReportUnits: 0.5 },
+    });
+    assert.equal(updatedCatalog.status, 200);
+    assert.equal((updatedCatalog.data as { rule: { baseUnits: number } }).rule.baseUnits, 2);
+    assert.equal((await api(normal.cookie, `/api/doctor/workload/catalog/${catalogId}`, { method: "PATCH", body: { baseUnits: 3 } })).status, 403);
+    const deactivatedCatalog = await api(admin.cookie, `/api/doctor/workload/catalog/${catalogId}/deactivate`, { method: "POST" });
+    assert.equal(deactivatedCatalog.status, 200);
+    assert.equal((deactivatedCatalog.data as { rule: { active: boolean } }).rule.active, false);
     assert.equal((await api(supervisor.cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 200);
   });
 
@@ -633,6 +658,79 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       [username]
     );
     assert.equal(imported.rows[0]?.must_change_password, true);
+  });
+
+  it("supports XLSX doctor import/export with row errors and password reset guardrails", async () => {
+    guard();
+    const modality = await pool.query<{ code: string }>(`select code from modalities where id = $1`, [testData.modalityId]);
+    const modalityCode = modality.rows[0].code;
+    const username = `${TEST_PREFIX.toLowerCase()}xlsx_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const rows = [{
+      username,
+      full_name: `${TEST_PREFIX} XLSX Doctor`,
+      temporary_password: "TempPass123",
+      core_role: "doctor",
+      user_active: "true",
+      doctor_role: "consultant",
+      doctor_profile_active: "true",
+      can_finalize_reports: "true",
+      can_assign_protocols: "true",
+      can_supervise: "false",
+      modalities_protocol: modalityCode,
+      modalities_report: "",
+      modalities_supervise: "",
+      reset_password: "false",
+    }];
+    const fileContentBase64 = await workbookBase64(rows);
+
+    const exportResponse = await fetch(`${app.baseUrl}/api/doctor/admin/doctors/export?format=xlsx`, { headers: { Cookie: admin.cookie } });
+    assert.equal(exportResponse.status, 200);
+    assert.equal(exportResponse.headers.get("content-type")?.includes("spreadsheetml"), true);
+    const XLSX = await import("xlsx");
+    const exported = XLSX.read(Buffer.from(await exportResponse.arrayBuffer()), { type: "buffer" });
+    const exportedHeaders = XLSX.utils.sheet_to_json<unknown[]>(exported.Sheets[exported.SheetNames[0]], { header: 1 })[0]?.map(String) ?? [];
+    assert.equal(exportedHeaders.some((header) => /password/i.test(header)), false);
+
+    const template = await fetch(`${app.baseUrl}/api/doctor/admin/doctors/import/template?format=xlsx`, { headers: { Cookie: admin.cookie } });
+    assert.equal(template.status, 200);
+    assert.equal(template.headers.get("content-type")?.includes("spreadsheetml"), true);
+
+    const preview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", { method: "POST", body: { fileContentBase64, format: "xlsx" } });
+    assert.equal(preview.status, 200, JSON.stringify(preview.data));
+    assert.equal((preview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, true);
+
+    const confirm = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", { method: "POST", body: { fileContentBase64, format: "xlsx" } });
+    assert.equal(confirm.status, 200, JSON.stringify(confirm.data));
+    assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
+    assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
+    const imported = await pool.query<{ id: string; password_hash: string; must_change_password: boolean }>(
+      `select id::text, password_hash, must_change_password from users where username = $1 limit 1`,
+      [username]
+    );
+    assert.equal(imported.rows[0]?.must_change_password, true);
+    const originalHash = imported.rows[0].password_hash;
+
+    const duplicatePreview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST",
+      body: { fileContentBase64: await workbookBase64([rows[0], rows[0]]), format: "xlsx" },
+    });
+    assert.equal((duplicatePreview.data as { preview: { canConfirm: boolean; rows: Array<{ errors: string[] }> } }).preview.canConfirm, false);
+    assert.match((duplicatePreview.data as { preview: { rows: Array<{ errors: string[] }> } }).preview.rows[1].errors.join(";"), /duplicate username/i);
+
+    const invalidPreview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", {
+      method: "POST",
+      body: { fileContentBase64: await workbookBase64([{ ...rows[0], username: `${username}_invalid`, modalities_protocol: "NO_SUCH_MODALITY" }]), format: "xlsx" },
+    });
+    assert.equal((invalidPreview.data as { preview: { canConfirm: boolean; rows: Array<{ errors: string[] }> } }).preview.canConfirm, false);
+    assert.match((invalidPreview.data as { preview: { rows: Array<{ errors: string[] }> } }).preview.rows[0].errors.join(";"), /invalid modality/i);
+
+    const noReset = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", {
+      method: "POST",
+      body: { fileContentBase64: await workbookBase64([{ ...rows[0], temporary_password: "DifferentPass123", reset_password: "false" }]), format: "xlsx" },
+    });
+    assert.equal(noReset.status, 200, JSON.stringify(noReset.data));
+    const unchanged = await pool.query<{ password_hash: string }>(`select password_hash from users where username = $1`, [username]);
+    assert.equal(unchanged.rows[0].password_hash, originalHash);
   });
 
   it("supersedes changed workload values without duplicate active rows", async () => {

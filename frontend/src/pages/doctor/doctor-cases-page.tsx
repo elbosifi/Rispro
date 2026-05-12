@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
@@ -37,6 +39,49 @@ function weekStartIso(isoDate: string): string {
   return date.toISOString().slice(0, 10);
 }
 
+function RosterDropTarget({ assignment }: { assignment: { id: number; label: string } }) {
+  const droppable = useDroppable({ id: `case-roster-${assignment.id}`, data: { rosterAssignmentId: assignment.id } });
+  return (
+    <div
+      ref={droppable.setNodeRef}
+      className="rounded-lg border p-3 text-sm"
+      style={{
+        borderColor: droppable.isOver ? "var(--accent)" : "var(--border)",
+        backgroundColor: droppable.isOver ? "var(--accent-soft)" : "var(--card)",
+      }}
+    >
+      <p className="font-semibold text-foreground">Roster target #{assignment.id}</p>
+      <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>{assignment.label}</p>
+    </div>
+  );
+}
+
+function DraggableCaseRow({
+  row,
+  canManage,
+  children,
+}: {
+  row: DoctorCase;
+  canManage: boolean;
+  children: ReactNode;
+}) {
+  const draggable = useDraggable({
+    id: `case-${row.appointmentId}`,
+    disabled: !canManage,
+    data: { appointmentId: row.appointmentId },
+  });
+  return (
+    <tr
+      ref={draggable.setNodeRef}
+      style={{ opacity: draggable.isDragging ? 0.55 : 1 }}
+      {...(canManage ? draggable.listeners : {})}
+      {...(canManage ? draggable.attributes : {})}
+    >
+      {children}
+    </tr>
+  );
+}
+
 function CaseTable({
   cases,
   canManage,
@@ -73,7 +118,7 @@ function CaseTable({
         </thead>
         <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
           {cases.map((row) => (
-            <tr key={`${row.appointmentId}-${row.assignmentType ?? "unassigned"}`}>
+            <DraggableCaseRow key={`${row.appointmentId}-${row.assignmentType ?? "unassigned"}`} row={row} canManage={canManage}>
               <td className="px-3 py-2 font-medium text-foreground">{patientName(row)}</td>
               <td className="px-3 py-2">{row.appointmentDate} {row.appointmentTime ?? ""}</td>
               <td className="px-3 py-2">{row.modalityName ?? row.modalityCode ?? row.modalityId}</td>
@@ -114,7 +159,7 @@ function CaseTable({
                   )
                 )}
               </td>
-            </tr>
+            </DraggableCaseRow>
           ))}
         </tbody>
       </table>
@@ -154,6 +199,9 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const [caseCategory, setCaseCategory] = useState("");
   const [view, setView] = useState<"my" | "team" | "unassigned">("my");
   const [summary, setSummary] = useState<DoctorCaseAssignmentSummary | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ appointmentId: number; rosterAssignmentId: number } | null>(null);
+  const [dropReason, setDropReason] = useState("");
+  const [dropError, setDropError] = useState("");
   const rosterWeekStart = useMemo(() => weekStartIso(dateFrom), [dateFrom]);
 
   const filters = useMemo(() => ({
@@ -196,8 +244,12 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
     mutationFn: (payload: { appointmentId: number; rosterAssignmentId: number; reason: string }) =>
       reassignDoctorCase(payload.appointmentId, { rosterAssignmentId: payload.rosterAssignmentId, reason: payload.reason }),
     onSuccess: async () => {
+      setDropTarget(null);
+      setDropReason("");
+      setDropError("");
       await queryClient.invalidateQueries({ queryKey: ["doctor", "cases"] });
     },
+    onError: (error) => setDropError(error instanceof Error ? error.message : "Reassignment failed."),
   });
 
   const cases = casesQuery.data ?? [];
@@ -206,8 +258,18 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
     label: `${assignment.date} · ${assignment.teamName} · ${assignment.modalityNameEn ?? "No modality"} · ${assignment.dutyType.replaceAll("_", " ")}`,
   }));
 
+  const handleDragEnd = (event: DragEndEvent) => {
+    const appointmentId = Number(event.active.data.current?.appointmentId);
+    const rosterAssignmentId = Number(event.over?.data.current?.rosterAssignmentId);
+    if (!appointmentId || !rosterAssignmentId) return;
+    setDropTarget({ appointmentId, rosterAssignmentId });
+    setDropReason("");
+    setDropError("");
+  };
+
   return (
-    <div className="space-y-4">
+    <DndContext onDragEnd={handleDragEnd}>
+      <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
@@ -276,6 +338,41 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
 
       <AssignmentSummary summary={summary} />
 
+      {canManage && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <h3 className="font-semibold">Roster assignment targets</h3>
+          <div className="mt-3 grid gap-2 lg:grid-cols-3">
+            {rosterAssignments.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--text-muted)" }}>No published roster assignments for the selected week.</p>
+            ) : (
+              rosterAssignments.map((assignment) => <RosterDropTarget key={assignment.id} assignment={assignment} />)
+            )}
+          </div>
+        </section>
+      )}
+
+      {dropTarget && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <h3 className="font-semibold">Reassignment reason</h3>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            Case {dropTarget.appointmentId} will be assigned to roster target {dropTarget.rosterAssignmentId}.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input value={dropReason} onChange={(event) => setDropReason(event.target.value)} placeholder="Correction reason" className="min-w-80 rounded-lg border px-3 py-2 text-sm" />
+            <button
+              type="button"
+              disabled={!dropReason.trim() || reassignMutation.isPending}
+              onClick={() => reassignMutation.mutate({ ...dropTarget, reason: dropReason })}
+              className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400"
+            >
+              Submit reassignment
+            </button>
+            <button type="button" onClick={() => setDropTarget(null)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel</button>
+          </div>
+          {dropError && <p className="mt-2 text-sm text-red-600">{dropError}</p>}
+        </section>
+      )}
+
       {casesQuery.isLoading ? (
         <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
           Loading cases...
@@ -289,6 +386,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
             reassignMutation.mutate({ appointmentId, rosterAssignmentId: targetRosterAssignmentId, reason: correctionReason })}
         />
       )}
-    </div>
+      </div>
+    </DndContext>
   );
 }

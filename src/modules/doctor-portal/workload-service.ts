@@ -2,7 +2,7 @@ import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { getDoctorMe } from "./profile-service.js";
-import { calculateWorkloadUnits, createCatalogRule, listCatalogRules, listWorkloadSummary } from "./workload-repository.js";
+import { calculateWorkloadUnits, createCatalogRule, deactivateCatalogRule, listCatalogRules, listWorkloadSummary, updateCatalogRule } from "./workload-repository.js";
 import type { CaseAssignmentType } from "./case-assignment-rules.js";
 
 interface Actor {
@@ -78,4 +78,29 @@ export async function addWorkloadCatalogRule(actor: Actor, input: {
 }) {
   await requireWorkloadAdmin(actor);
   return createCatalogRule({ ...input, actorUserId: actor.userId });
+}
+
+export async function editWorkloadCatalogRule(actor: Actor, id: number, input: {
+  modalityId?: number;
+  examTypeId?: number | null;
+  caseCategory?: string | null;
+  assignmentType?: CaseAssignmentType;
+  baseUnits?: number;
+  reportRequiredMultiplier?: number;
+  noReportUnits?: number;
+  active?: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+}) {
+  await requireWorkloadAdmin(actor);
+  const rule = await updateCatalogRule({ id, ...input, actorUserId: actor.userId });
+  if (!rule) throw new HttpError(404, "Workload catalog rule not found.");
+  return rule;
+}
+
+export async function removeWorkloadCatalogRule(actor: Actor, id: number) {
+  await requireWorkloadAdmin(actor);
+  const rule = await deactivateCatalogRule(id, actor.userId);
+  if (!rule) throw new HttpError(404, "Workload catalog rule not found.");
+  return rule;
 }

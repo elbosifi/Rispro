@@ -1,6 +1,6 @@
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DoctorPage from "./doctor-page";
 import { LanguageProvider } from "@/providers/language-provider";
@@ -15,8 +15,10 @@ const fetchMyDoctorCasesMock = vi.fn();
 const fetchTeamDoctorCasesMock = vi.fn();
 const fetchUnassignedDoctorCasesMock = vi.fn();
 const runDoctorCaseAssignmentMock = vi.fn();
+const reassignDoctorCaseMock = vi.fn();
 const fetchProtocolTasksMock = vi.fn();
 const fetchProtocolDetailsMock = vi.fn();
+const fetchProtocolAuditMock = vi.fn();
 const saveProtocolDraftMock = vi.fn();
 const assignProtocolMock = vi.fn();
 const requestProtocolClarificationMock = vi.fn();
@@ -24,6 +26,9 @@ const cancelProtocolMock = vi.fn();
 const fetchTeamWorkloadSummaryMock = vi.fn();
 const runWorkloadCalculationMock = vi.fn();
 const fetchWorkloadCatalogMock = vi.fn();
+const createWorkloadCatalogRuleMock = vi.fn();
+const updateWorkloadCatalogRuleMock = vi.fn();
+const deactivateWorkloadCatalogRuleMock = vi.fn();
 const fetchRosterWeekConflictsMock = vi.fn();
 const fetchMyDoctorAvailabilityMock = vi.fn();
 const fetchTeamDoctorAvailabilityMock = vi.fn();
@@ -49,8 +54,10 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchTeamDoctorCases: (...args: unknown[]) => fetchTeamDoctorCasesMock(...args),
   fetchUnassignedDoctorCases: (...args: unknown[]) => fetchUnassignedDoctorCasesMock(...args),
   runDoctorCaseAssignment: (...args: unknown[]) => runDoctorCaseAssignmentMock(...args),
+  reassignDoctorCase: (...args: unknown[]) => reassignDoctorCaseMock(...args),
   fetchProtocolTasks: (...args: unknown[]) => fetchProtocolTasksMock(...args),
   fetchProtocolDetails: (...args: unknown[]) => fetchProtocolDetailsMock(...args),
+  fetchProtocolAudit: (...args: unknown[]) => fetchProtocolAuditMock(...args),
   saveProtocolDraft: (...args: unknown[]) => saveProtocolDraftMock(...args),
   assignProtocol: (...args: unknown[]) => assignProtocolMock(...args),
   requestProtocolClarification: (...args: unknown[]) => requestProtocolClarificationMock(...args),
@@ -58,6 +65,9 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchTeamWorkloadSummary: (...args: unknown[]) => fetchTeamWorkloadSummaryMock(...args),
   runWorkloadCalculation: (...args: unknown[]) => runWorkloadCalculationMock(...args),
   fetchWorkloadCatalog: (...args: unknown[]) => fetchWorkloadCatalogMock(...args),
+  createWorkloadCatalogRule: (...args: unknown[]) => createWorkloadCatalogRuleMock(...args),
+  updateWorkloadCatalogRule: (...args: unknown[]) => updateWorkloadCatalogRuleMock(...args),
+  deactivateWorkloadCatalogRule: (...args: unknown[]) => deactivateWorkloadCatalogRuleMock(...args),
   fetchRosterWeekConflicts: (...args: unknown[]) => fetchRosterWeekConflictsMock(...args),
   fetchMyDoctorAvailability: (...args: unknown[]) => fetchMyDoctorAvailabilityMock(...args),
   fetchTeamDoctorAvailability: (...args: unknown[]) => fetchTeamDoctorAvailabilityMock(...args),
@@ -140,8 +150,10 @@ describe("Doctor Portal shell", () => {
     fetchTeamDoctorCasesMock.mockReset();
     fetchUnassignedDoctorCasesMock.mockReset();
     runDoctorCaseAssignmentMock.mockReset();
+    reassignDoctorCaseMock.mockReset();
     fetchProtocolTasksMock.mockReset();
     fetchProtocolDetailsMock.mockReset();
+    fetchProtocolAuditMock.mockReset();
     saveProtocolDraftMock.mockReset();
     assignProtocolMock.mockReset();
     requestProtocolClarificationMock.mockReset();
@@ -149,6 +161,9 @@ describe("Doctor Portal shell", () => {
     fetchTeamWorkloadSummaryMock.mockReset();
     runWorkloadCalculationMock.mockReset();
     fetchWorkloadCatalogMock.mockReset();
+    createWorkloadCatalogRuleMock.mockReset();
+    updateWorkloadCatalogRuleMock.mockReset();
+    deactivateWorkloadCatalogRuleMock.mockReset();
     fetchRosterWeekConflictsMock.mockReset();
     fetchMyDoctorAvailabilityMock.mockReset();
     fetchTeamDoctorAvailabilityMock.mockReset();
@@ -165,7 +180,7 @@ describe("Doctor Portal shell", () => {
     notifyDoctorRosterWeekMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
-    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [] });
+    fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
     fetchRosterDoctorsMock.mockResolvedValue([]);
     fetchMyDoctorCasesMock.mockResolvedValue([]);
     fetchTeamDoctorCasesMock.mockResolvedValue([]);
@@ -177,7 +192,9 @@ describe("Doctor Portal shell", () => {
       skippedCancelledCount: 0,
       errors: [],
     });
+    reassignDoctorCaseMock.mockResolvedValue({ assignmentId: 99 });
     fetchProtocolTasksMock.mockResolvedValue([]);
+    fetchProtocolAuditMock.mockResolvedValue([]);
     fetchProtocolDetailsMock.mockResolvedValue({
       appointment: {
         appointmentId: 77,
@@ -220,6 +237,9 @@ describe("Doctor Portal shell", () => {
       errors: [],
     });
     fetchWorkloadCatalogMock.mockResolvedValue([]);
+    createWorkloadCatalogRuleMock.mockResolvedValue({});
+    updateWorkloadCatalogRuleMock.mockResolvedValue({});
+    deactivateWorkloadCatalogRuleMock.mockResolvedValue({});
     fetchRosterWeekConflictsMock.mockResolvedValue([]);
     fetchMyDoctorAvailabilityMock.mockResolvedValue([]);
     fetchTeamDoctorAvailabilityMock.mockResolvedValue([]);
@@ -630,6 +650,83 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("button", { name: /Unassigned cases/i })).toBeTruthy();
   });
 
+  it("supervisor sees drag/drop targets and fallback reassignment works", async () => {
+    fetchMyDoctorCasesMock.mockResolvedValue([
+      {
+        appointmentId: 77,
+        appointmentDate: "2027-01-04",
+        appointmentTime: "09:00",
+        patientId: 5,
+        patientMrn: "MRN-5",
+        patientNationalId: "NID-5",
+        patientArabicName: "Arabic Name",
+        patientEnglishName: "Case Patient",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Brain",
+        caseCategory: "oncology",
+        requiresReport: true,
+        appointmentStatus: "scheduled",
+        rosterAssignmentId: null,
+        teamName: null,
+        dutyType: null,
+        expectedReportingDate: null,
+        assignmentType: null,
+        assignmentStatus: null,
+        protocolStatus: null,
+        reportStatus: null,
+      },
+    ]);
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: null,
+      assignments: [{
+        id: 9,
+        rosterWeekId: 1,
+        date: "2027-01-04",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityNameEn: "CT",
+        modalityNameAr: "CT",
+        dutyType: "ct_protocol_day",
+        sessionName: "day",
+        startTime: "08:00",
+        endTime: "14:00",
+        teamName: "CT Team",
+        status: "active",
+        members: [],
+      }],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/cases");
+
+    expect(await screen.findByText("Roster assignment targets")).toBeTruthy();
+    expect(await screen.findByText(/Roster target #9/)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    const rosterSelect = screen.getAllByRole("combobox").at(-1);
+    expect(rosterSelect).toBeTruthy();
+    fireEvent.change(rosterSelect!, { target: { value: "9" } });
+    fireEvent.change(screen.getByPlaceholderText("Correction reason"), { target: { value: "manual correction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(reassignDoctorCaseMock).toHaveBeenCalledWith(77, { rosterAssignmentId: 9, reason: "manual correction" });
+    });
+  });
+
+  it("normal doctor does not see drag/drop assignment controls", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/cases");
+
+    expect(await screen.findByText("No cases found for this filter.")).toBeTruthy();
+    expect(screen.queryByText("Roster assignment targets")).toBeNull();
+  });
+
   it("renders case assignment result summary", async () => {
     runDoctorCaseAssignmentMock.mockResolvedValue({
       assignedCount: 2,
@@ -691,6 +788,19 @@ describe("Doctor Portal shell", () => {
       },
     ]);
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    fetchProtocolAuditMock.mockResolvedValue([
+      {
+        eventType: "protocol_assigned",
+        changedByDoctorId: 1,
+        changedByDoctorName: "Dr Normal",
+        createdAt: "2027-01-04T10:00:00.000Z",
+        reason: "corrected request",
+        oldSummary: "status draft, version 1",
+        newSummary: "status assigned, version 2, protocol text present",
+        version: 2,
+        protocolStatus: "assigned",
+      },
+    ]);
     renderDoctorPortal("/doctor/protocols");
 
     fireEvent.click(await screen.findByText("Protocol Patient"));
@@ -699,6 +809,8 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByText("Save draft")).toBeTruthy();
     expect(screen.getByText("Assign protocol")).toBeTruthy();
     expect(screen.getByText("Clarification requires a note.")).toBeTruthy();
+    expect(await screen.findByText("Protocol history")).toBeTruthy();
+    expect(screen.getByText(/corrected request/)).toBeTruthy();
     expect(screen.queryByText(/reschedule/i)).toBeNull();
   });
 
@@ -733,6 +845,54 @@ describe("Doctor Portal shell", () => {
 
     expect(await screen.findByText("Department team workload")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Calculate workload/i })).toBeTruthy();
+  });
+
+  it("admin can manage workload catalog and normal doctor cannot", async () => {
+    fetchAppointmentLookupsMock.mockResolvedValue({
+      modalities: [{ id: 1, code: "CT", nameEn: "CT", nameAr: "CT" }],
+      examTypes: [{ id: 2, modalityId: 1, nameEn: "CT Brain", nameAr: "CT Brain" }],
+    });
+    fetchWorkloadCatalogMock.mockResolvedValue([
+      { id: 8, modalityId: 1, examTypeId: null, caseCategory: null, assignmentType: "reporting", baseUnits: 1, reportRequiredMultiplier: 1, noReportUnits: 0, active: true, effectiveFrom: "2027-01-01", effectiveTo: null },
+    ]);
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor", "doctor_admin"],
+    });
+    renderDoctorPortal("/doctor/team-workload");
+
+    expect(await screen.findByText("Workload catalog")).toBeTruthy();
+    const catalogSection = screen.getByText("Workload catalog").closest("section");
+    expect(catalogSection).toBeTruthy();
+    await waitFor(() => expect(within(catalogSection as HTMLElement).getByRole("option", { name: "CT" })).toBeTruthy());
+    fireEvent.change(within(catalogSection as HTMLElement).getAllByRole("combobox")[0], { target: { value: "1" } });
+    const createRuleButton = within(catalogSection as HTMLElement).getByRole("button", { name: /Create rule/i }) as HTMLButtonElement;
+    await waitFor(() => expect(createRuleButton.disabled).toBe(false));
+    fireEvent.click(createRuleButton);
+    await waitFor(() => expect(createWorkloadCatalogRuleMock).toHaveBeenCalled());
+    fireEvent.click(within(catalogSection as HTMLElement).getByRole("button", { name: /Edit/i }));
+    fireEvent.click(within(catalogSection as HTMLElement).getByRole("button", { name: /Save rule/i }));
+    await waitFor(() => expect(updateWorkloadCatalogRuleMock).toHaveBeenCalled());
+    fireEvent.click(within(catalogSection as HTMLElement).getByRole("button", { name: /Deactivate/i }));
+    await waitFor(() => expect(deactivateWorkloadCatalogRuleMock.mock.calls[0]?.[0]).toBe(8));
+    expect(screen.queryByText(/salary|payment|ranking/i)).toBeNull();
+  });
+
+  it("supervisor can view workload catalog without edit controls", async () => {
+    fetchWorkloadCatalogMock.mockResolvedValue([
+      { id: 8, modalityId: 1, examTypeId: null, caseCategory: null, assignmentType: "reporting", baseUnits: 1, reportRequiredMultiplier: 1, noReportUnits: 0, active: true, effectiveFrom: "2027-01-01", effectiveTo: null },
+    ]);
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/team-workload");
+
+    expect(await screen.findByText("Workload catalog")).toBeTruthy();
+    expect(screen.getByText("Read-only for this Doctor Portal role.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Create rule/i })).toBeNull();
   });
 
   it("renders workload summary rows and calculation summary", async () => {

@@ -3,12 +3,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   assignProtocol,
   fetchAppointmentLookups,
+  fetchProtocolAudit,
   fetchProtocolDetails,
   fetchProtocolTasks,
   requestProtocolClarification,
   saveProtocolDraft,
 } from "@/lib/api-hooks";
-import type { DoctorMe, ProtocolDetails, ProtocolPayload, ProtocolTask } from "@/types/api";
+import type { DoctorMe, ProtocolAuditTimelineEvent, ProtocolDetails, ProtocolPayload, ProtocolTask } from "@/types/api";
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -30,11 +31,13 @@ function patientName(task: ProtocolTask): string {
 
 function ProtocolForm({
   details,
+  audit,
   onSubmit,
   onAssign,
   onClarification,
 }: {
   details: ProtocolDetails;
+  audit: ProtocolAuditTimelineEvent[];
   onSubmit: (payload: ProtocolPayload) => void;
   onAssign: (payload: ProtocolPayload) => void;
   onClarification: (payload: ProtocolPayload) => void;
@@ -119,6 +122,32 @@ function ProtocolForm({
           Clarification requires a note.
         </p>
       )}
+      <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
+        <h3 className="font-semibold">Protocol history</h3>
+        {audit.length === 0 ? (
+          <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>No protocol history yet.</p>
+        ) : (
+          <ol className="mt-3 space-y-3">
+            {audit.map((event, index) => (
+              <li key={`${event.createdAt}-${index}`} className="border-l-2 pl-3" style={{ borderColor: "var(--accent)" }}>
+                <div className="flex flex-wrap justify-between gap-2">
+                  <span className="text-sm font-semibold">{event.eventType.replaceAll("_", " ")}</span>
+                  <span className="text-xs" style={{ color: "var(--text-muted)" }}>{new Date(event.createdAt).toLocaleString()}</span>
+                </div>
+                <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+                  {event.changedByDoctorName ?? "Unknown doctor"} · {event.protocolStatus ?? "status unknown"}{event.version ? ` · v${event.version}` : ""}
+                </p>
+                {event.reason && <p className="mt-1 text-sm">Reason: {event.reason}</p>}
+                {(event.oldSummary || event.newSummary) && (
+                  <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+                    {event.oldSummary ? `From ${event.oldSummary}. ` : ""}{event.newSummary ? `To ${event.newSummary}.` : ""}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
     </section>
   );
 }
@@ -152,6 +181,11 @@ export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
   const detailsQuery = useQuery({
     queryKey: ["doctor", "protocols", selectedAppointmentId],
     queryFn: () => fetchProtocolDetails(selectedAppointmentId!),
+    enabled: selectedAppointmentId !== null,
+  });
+  const auditQuery = useQuery({
+    queryKey: ["doctor", "protocols", selectedAppointmentId, "audit"],
+    queryFn: () => fetchProtocolAudit(selectedAppointmentId!),
     enabled: selectedAppointmentId !== null,
   });
   const lookupsQuery = useQuery({ queryKey: ["lookups"], queryFn: fetchAppointmentLookups, staleTime: 1000 * 60 * 5 });
@@ -219,6 +253,7 @@ export function DoctorProtocolsPage({ me }: { me: DoctorMe }) {
       {detailsQuery.data && (
         <ProtocolForm
           details={detailsQuery.data}
+          audit={auditQuery.data ?? []}
           onSubmit={(payload) => saveMutation.mutate(payload)}
           onAssign={(payload) => assignMutation.mutate(payload)}
           onClarification={(payload) => clarificationMutation.mutate(payload)}

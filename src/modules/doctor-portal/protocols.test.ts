@@ -32,6 +32,7 @@ describe("Doctor Portal protocol backend", () => {
     assert.match(routes, /"\/:appointmentId\/assign"/);
     assert.match(routes, /"\/:appointmentId\/clarification"/);
     assert.match(routes, /"\/:appointmentId\/cancel"/);
+    assert.match(routes, /"\/:appointmentId\/audit"/);
     assert.doesNotMatch(routes, /createBooking|rescheduleBooking|updateBookingForReschedule|capacity/i);
   });
 
@@ -53,6 +54,7 @@ describe("Doctor Portal protocol backend", () => {
     assert.match(repo, /protocol_assigned/);
     assert.match(repo, /clarification_requested/);
     assert.match(repo, /protocol_cancelled/);
+    assert.match(repo, /listProtocolAuditEvents/);
   });
 
   it("requires reason for clarification and cancellation", () => {

@@ -6,6 +6,7 @@ import {
   appointmentHasDoctorRosterMembership,
   createProtocol,
   getProtocolDetails,
+  listProtocolAuditEvents,
   listProtocolTasks,
   updateProtocol,
 } from "./protocol-repository.js";
@@ -75,6 +76,11 @@ export async function getProtocolTasks(actor: Actor, filters: ProtocolFilters) {
 export async function getProtocolForAppointment(actor: Actor, appointmentId: number) {
   const { details } = await requireProtocolEligibility(actor, appointmentId);
   return details;
+}
+
+export async function getProtocolAuditForAppointment(actor: Actor, appointmentId: number) {
+  await requireProtocolEligibility(actor, appointmentId);
+  return listProtocolAuditEvents(appointmentId);
 }
 
 export async function saveProtocolForAppointment(

@@ -73,17 +73,18 @@ describe("Doctor Portal wiring", () => {
     assert.doesNotMatch(source, /createDoctorProfileForAdmin|updateDoctorProfileForAdmin|updateDoctorProfileModalities/);
   });
 
-  it("keeps Doctor Admin import/export CSV-only and password-free", () => {
+  it("keeps Doctor Admin CSV/XLSX import/export password-free", () => {
     const service = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "doctor-import-export-service.ts"), "utf8");
     const page = readFileSync(join(rootDir, "frontend", "src", "pages", "doctor", "doctor-admin-doctors-page.tsx"), "utf8");
     assert.match(service, /exportDoctorProfilesCsv/);
-    assert.match(service, /confirmDoctorImportCsv/);
+    assert.match(service, /exportDoctorProfilesXlsx/);
+    assert.match(service, /confirmDoctorImport/);
     assert.match(service, /must_change_password\)/);
     assert.doesNotMatch(service.match(/const EXPORT_COLUMNS = \[[\s\S]*?\];/)?.[0] ?? "", /password/i);
-    assert.match(page, /Import CSV/);
+    assert.match(page, /Import CSV\/XLSX/);
     assert.match(page, /Export CSV/);
-    assert.match(page, /accept="\.csv,text\/csv"/);
-    assert.doesNotMatch(`${service}\n${page}`, /xlsx/i);
+    assert.match(page, /Export XLSX/);
+    assert.match(page, /accept="\.csv,text\/csv,\.xlsx/);
   });
 
   it("creates only Phase 1 Doctor Portal identity tables", () => {

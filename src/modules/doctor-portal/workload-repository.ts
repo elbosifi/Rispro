@@ -312,3 +312,80 @@ export async function createCatalogRule(input: {
   );
   return result.rows[0];
 }
+
+export async function updateCatalogRule(input: {
+  id: number;
+  modalityId?: number;
+  examTypeId?: number | null;
+  caseCategory?: string | null;
+  assignmentType?: string;
+  baseUnits?: number;
+  reportRequiredMultiplier?: number;
+  noReportUnits?: number;
+  active?: boolean;
+  effectiveFrom?: string;
+  effectiveTo?: string | null;
+  actorUserId: UserId;
+}): Promise<WorkloadCatalogRule | null> {
+  const result = await pool.query<WorkloadCatalogRule>(
+    `
+      update doctor_portal.workload_unit_catalog
+      set modality_id = case when $2::boolean then $3::bigint else modality_id end,
+        exam_type_id = case when $4::boolean then $5::bigint else exam_type_id end,
+        case_category = case when $6::boolean then $7::text else case_category end,
+        assignment_type = case when $8::boolean then $9::text else assignment_type end,
+        base_units = case when $10::boolean then $11::numeric else base_units end,
+        report_required_multiplier = case when $12::boolean then $13::numeric else report_required_multiplier end,
+        no_report_units = case when $14::boolean then $15::numeric else no_report_units end,
+        active = case when $16::boolean then $17::boolean else active end,
+        effective_from = case when $18::boolean then $19::date else effective_from end,
+        effective_to = case when $20::boolean then $21::date else effective_to end,
+        updated_at = now()
+      where id = $1
+      returning id, modality_id as "modalityId", exam_type_id as "examTypeId", case_category as "caseCategory",
+        assignment_type as "assignmentType", base_units::float as "baseUnits",
+        report_required_multiplier::float as "reportRequiredMultiplier", no_report_units::float as "noReportUnits",
+        active, effective_from::text as "effectiveFrom", effective_to::text as "effectiveTo"
+    `,
+    [
+      input.id,
+      input.modalityId !== undefined,
+      input.modalityId ?? null,
+      input.examTypeId !== undefined,
+      input.examTypeId ?? null,
+      input.caseCategory !== undefined,
+      input.caseCategory ?? null,
+      input.assignmentType !== undefined,
+      input.assignmentType ?? null,
+      input.baseUnits !== undefined,
+      input.baseUnits ?? null,
+      input.reportRequiredMultiplier !== undefined,
+      input.reportRequiredMultiplier ?? null,
+      input.noReportUnits !== undefined,
+      input.noReportUnits ?? null,
+      input.active !== undefined,
+      input.active ?? null,
+      input.effectiveFrom !== undefined,
+      input.effectiveFrom ?? null,
+      input.effectiveTo !== undefined,
+      input.effectiveTo ?? null,
+    ]
+  );
+  const rule = result.rows[0] ?? null;
+  if (rule) {
+    await insertDoctorAuditEvent(pool, {
+      actorUserId: input.actorUserId,
+      actorDoctorId: null,
+      eventType: "workload_catalog_rule_updated",
+      targetType: "workload_unit_catalog",
+      targetId: rule.id,
+      metadata: { active: rule.active, assignmentType: rule.assignmentType, modalityId: rule.modalityId },
+      reason: null,
+    });
+  }
+  return rule;
+}
+
+export async function deactivateCatalogRule(id: number, actorUserId: UserId): Promise<WorkloadCatalogRule | null> {
+  return updateCatalogRule({ id, active: false, actorUserId });
+}

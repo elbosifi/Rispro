@@ -4,6 +4,7 @@ import { isRole } from "../../constants/roles.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
+import { buildWorkbookBuffer, parseWorksheet, readWorkbookFromBase64 } from "../../services/workbook-service.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
 import type { DoctorRole } from "./profile-repository.js";
 
@@ -41,6 +42,7 @@ const IMPORT_COLUMNS = [
 ];
 
 const DOCTOR_ROLES = new Set<DoctorRole>(["consultant", "specialist", "senior_house_officer", "resident"]);
+type DoctorImportFormat = "csv" | "xlsx";
 
 interface ImportRow {
   rowNumber: number;
@@ -98,6 +100,35 @@ function decodeBase64Csv(fileContentBase64: string): string {
   return Buffer.from(fileContentBase64, "base64").toString("utf8");
 }
 
+function normalizeFormat(format?: string | null, fileName?: string | null, fileContentBase64?: string): DoctorImportFormat {
+  const clean = String(format ?? "").trim().toLowerCase();
+  if (clean === "csv" || clean === "xlsx") return clean;
+  const name = String(fileName ?? "").trim().toLowerCase();
+  if (name.endsWith(".xlsx")) return "xlsx";
+  if (name.endsWith(".csv")) return "csv";
+  return String(fileContentBase64 ?? "").startsWith("UEs") ? "xlsx" : "csv";
+}
+
+function workbookValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value).trim();
+}
+
+async function parseImportFile(input: { fileContentBase64: string; format?: string | null; fileName?: string | null }) {
+  const format = normalizeFormat(input.format, input.fileName, input.fileContentBase64);
+  if (format === "csv") return { format, ...parseCsv(decodeBase64Csv(input.fileContentBase64)) };
+  const { XLSX, workbook, sheetNames } = await readWorkbookFromBase64(input.fileContentBase64);
+  const parsed = parseWorksheet(XLSX, workbook.Sheets[sheetNames[0]], sheetNames[0]);
+  return {
+    format,
+    headers: parsed.headers,
+    rows: parsed.rows.map((row) => ({
+      rowNumber: row.rowNumber,
+      values: Object.fromEntries(Object.entries(row.values).map(([key, value]) => [key.trim(), workbookValue(value)])),
+    })),
+  };
+}
+
 function boolValue(value: string, fallback: boolean): boolean {
   const clean = String(value ?? "").trim().toLowerCase();
   if (!clean) return fallback;
@@ -149,9 +180,24 @@ export async function exportDoctorProfilesCsv(): Promise<{ csv: string; filename
   return { csv, filename: "rispro-doctors.csv" };
 }
 
-export function inspectDoctorImportCsv(fileContentBase64: string) {
-  const { headers, rows } = parseCsv(decodeBase64Csv(fileContentBase64));
+export async function exportDoctorProfilesXlsx(): Promise<{ buffer: Buffer; filename: string }> {
+  const csvPayload = await exportDoctorProfilesCsv();
+  const [headerLine, ...lines] = csvPayload.csv.split("\n");
+  const headers = parseCsvLine(headerLine);
+  const rows = lines.filter(Boolean).map((line) => {
+    const cells = parseCsvLine(line);
+    return Object.fromEntries(headers.map((header, index) => [header, cells[index] ?? ""]));
+  });
   return {
+    buffer: await buildWorkbookBuffer([{ name: "Doctors", headers: EXPORT_COLUMNS, rows }]),
+    filename: "rispro-doctors.xlsx",
+  };
+}
+
+export async function inspectDoctorImport(input: { fileContentBase64: string; format?: string | null; fileName?: string | null }) {
+  const { format, headers, rows } = await parseImportFile(input);
+  return {
+    format,
     columns: headers,
     requiredColumns: IMPORT_COLUMNS,
     rowCount: rows.length,
@@ -159,8 +205,8 @@ export function inspectDoctorImportCsv(fileContentBase64: string) {
   };
 }
 
-export async function previewDoctorImportCsv(fileContentBase64: string): Promise<{ rows: PreviewRow[]; canConfirm: boolean }> {
-  const parsed = parseCsv(decodeBase64Csv(fileContentBase64));
+export async function previewDoctorImport(input: { fileContentBase64: string; format?: string | null; fileName?: string | null }): Promise<{ rows: PreviewRow[]; canConfirm: boolean }> {
+  const parsed = await parseImportFile(input);
   const modalityMap = await modalityCodeMap();
   const seen = new Set<string>();
   const usernames = parsed.rows.map((row) => row.values.username?.trim()).filter(Boolean);
@@ -173,7 +219,7 @@ export async function previewDoctorImportCsv(fileContentBase64: string): Promise
     const coreRole = row.values.core_role?.trim();
     const doctorRole = row.values.doctor_role?.trim();
     if (!username) errors.push("username is required");
-    if (username && seen.has(username.toLowerCase())) errors.push("duplicate username in CSV");
+    if (username && seen.has(username.toLowerCase())) errors.push(`duplicate username in ${parsed.format.toUpperCase()}`);
     if (username) seen.add(username.toLowerCase());
     if (!row.values.full_name?.trim()) errors.push("full_name is required");
     if (!coreRole || !isRole(coreRole)) errors.push("invalid core_role");
@@ -198,7 +244,11 @@ export async function previewDoctorImportCsv(fileContentBase64: string): Promise
 }
 
 export async function confirmDoctorImportCsv(fileContentBase64: string, actorUserId: UserId) {
-  const preview = await previewDoctorImportCsv(fileContentBase64);
+  return confirmDoctorImport({ fileContentBase64, format: "csv" }, actorUserId);
+}
+
+export async function confirmDoctorImport(input: { fileContentBase64: string; format?: string | null; fileName?: string | null }, actorUserId: UserId) {
+  const preview = await previewDoctorImport(input);
   if (!preview.canConfirm) throw new HttpError(400, "Doctor import has validation errors.", { rows: preview.rows });
   const modalityMap = await modalityCodeMap();
   const summary = {
@@ -343,4 +393,11 @@ export async function confirmDoctorImportCsv(fileContentBase64: string, actorUse
 
 export function doctorImportTemplateCsv(): string {
   return IMPORT_COLUMNS.join(",") + "\n";
+}
+
+export async function doctorImportTemplateXlsx(): Promise<{ buffer: Buffer; filename: string }> {
+  return {
+    buffer: await buildWorkbookBuffer([{ name: "Doctor import", headers: IMPORT_COLUMNS, rows: [] }]),
+    filename: "rispro-doctor-import-template.xlsx",
+  };
 }

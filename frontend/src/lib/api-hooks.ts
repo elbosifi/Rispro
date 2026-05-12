@@ -50,6 +50,7 @@ import type {
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
   AppointmentProtocol,
+  ProtocolAuditTimelineEvent,
   ProtocolDetails,
   ProtocolFilters,
   ProtocolPayload,
@@ -250,6 +251,12 @@ export interface DoctorImportPreview {
   canConfirm: boolean;
 }
 
+export interface DoctorImportPayload {
+  fileContentBase64: string;
+  format?: "csv" | "xlsx";
+  fileName?: string;
+}
+
 export interface DoctorImportResult {
   createdUsers: number;
   updatedUsers: number;
@@ -261,25 +268,25 @@ export interface DoctorImportResult {
   failedRows: Array<{ rowNumber: number; reason: string }>;
 }
 
-export async function inspectDoctorImport(fileContentBase64: string) {
-  return api<{ workbook: { columns: string[]; requiredColumns: string[]; rowCount: number; missingColumns: string[] } }>("/doctor/admin/doctors/import/inspect", {
+export async function inspectDoctorImport(payload: DoctorImportPayload) {
+  return api<{ workbook: { format: "csv" | "xlsx"; columns: string[]; requiredColumns: string[]; rowCount: number; missingColumns: string[] } }>("/doctor/admin/doctors/import/inspect", {
     method: "POST",
-    body: JSON.stringify({ fileContentBase64 })
+    body: JSON.stringify(payload)
   });
 }
 
-export async function previewDoctorImport(fileContentBase64: string): Promise<DoctorImportPreview> {
+export async function previewDoctorImport(payload: DoctorImportPayload): Promise<DoctorImportPreview> {
   const raw = await api<{ preview: DoctorImportPreview }>("/doctor/admin/doctors/import/preview", {
     method: "POST",
-    body: JSON.stringify({ fileContentBase64 })
+    body: JSON.stringify(payload)
   });
   return raw.preview;
 }
 
-export async function confirmDoctorImport(fileContentBase64: string): Promise<DoctorImportResult> {
+export async function confirmDoctorImport(payload: DoctorImportPayload): Promise<DoctorImportResult> {
   const raw = await api<{ result: DoctorImportResult }>("/doctor/admin/doctors/import/confirm", {
     method: "POST",
-    body: JSON.stringify({ fileContentBase64 })
+    body: JSON.stringify(payload)
   });
   return raw.result;
 }
@@ -589,6 +596,11 @@ export async function cancelProtocol(appointmentId: number, payload: ProtocolPay
   return raw.protocol;
 }
 
+export async function fetchProtocolAudit(appointmentId: number): Promise<ProtocolAuditTimelineEvent[]> {
+  const raw = await api<{ audit: ProtocolAuditTimelineEvent[] }>(`/doctor/protocols/${appointmentId}/audit`);
+  return raw.audit;
+}
+
 function workloadParams(filters: WorkloadFilters): URLSearchParams {
   const params = new URLSearchParams({ startDate: filters.startDate, endDate: filters.endDate });
   if (filters.modalityId) params.set("modalityId", String(filters.modalityId));
@@ -615,6 +627,27 @@ export async function runWorkloadCalculation(payload: { startDate: string; endDa
 export async function fetchWorkloadCatalog(): Promise<WorkloadCatalogRule[]> {
   const raw = await api<{ catalog: WorkloadCatalogRule[] }>("/doctor/workload/catalog");
   return raw.catalog;
+}
+
+export async function createWorkloadCatalogRule(payload: Omit<WorkloadCatalogRule, "id" | "active"> & { active?: boolean }): Promise<WorkloadCatalogRule> {
+  const raw = await api<{ rule: WorkloadCatalogRule }>("/doctor/workload/catalog", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.rule;
+}
+
+export async function updateWorkloadCatalogRule(id: number, payload: Partial<Omit<WorkloadCatalogRule, "id">>): Promise<WorkloadCatalogRule> {
+  const raw = await api<{ rule: WorkloadCatalogRule }>(`/doctor/workload/catalog/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  return raw.rule;
+}
+
+export async function deactivateWorkloadCatalogRule(id: number): Promise<WorkloadCatalogRule> {
+  const raw = await api<{ rule: WorkloadCatalogRule }>(`/doctor/workload/catalog/${id}/deactivate`, { method: "POST" });
+  return raw.rule;
 }
 
 export async function fetchIntegrationStatus(): Promise<IntegrationStatus> {

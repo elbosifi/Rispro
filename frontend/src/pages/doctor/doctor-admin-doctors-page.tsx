@@ -32,7 +32,9 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [importFileBase64, setImportFileBase64] = useState("");
-  const [importInspect, setImportInspect] = useState<{ columns: string[]; rowCount: number; missingColumns: string[] } | null>(null);
+  const [importFileName, setImportFileName] = useState("");
+  const [importFormat, setImportFormat] = useState<"csv" | "xlsx">("csv");
+  const [importInspect, setImportInspect] = useState<{ format: "csv" | "xlsx"; columns: string[]; rowCount: number; missingColumns: string[] } | null>(null);
   const [importPreview, setImportPreview] = useState<DoctorImportPreview | null>(null);
   const [importResult, setImportResult] = useState<DoctorImportResult | null>(null);
   const [draft, setDraft] = useState({
@@ -109,6 +111,8 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
     },
   });
 
+  const importPayload = () => ({ fileContentBase64: importFileBase64, format: importFormat, fileName: importFileName });
+
   const readImportFile = async (file: File) => {
     const dataUrl = await new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
@@ -117,11 +121,14 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
       reader.readAsDataURL(file);
     });
     const base64 = dataUrl.split(",")[1] ?? "";
+    const format = file.name.toLowerCase().endsWith(".xlsx") ? "xlsx" : "csv";
     setImportFileBase64(base64);
+    setImportFileName(file.name);
+    setImportFormat(format);
     setImportInspect(null);
     setImportPreview(null);
     setImportResult(null);
-    inspectMutation.mutate(base64);
+    inspectMutation.mutate({ fileContentBase64: base64, format, fileName: file.name });
   };
 
   const modalityRows = (lookupsQuery.data?.modalities ?? []).map((modality) => {
@@ -154,21 +161,23 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="mb-4 flex flex-wrap gap-2">
-          <a href="/api/doctor/admin/doctors/import/template" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download CSV template</a>
+          <a href="/api/doctor/admin/doctors/import/template?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download CSV template</a>
+          <a href="/api/doctor/admin/doctors/import/template?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download XLSX template</a>
           <a href="/api/doctor/admin/doctors/export?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export CSV</a>
+          <a href="/api/doctor/admin/doctors/export?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export XLSX</a>
           <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-            Import CSV
-            <input type="file" accept=".csv,text/csv" className="sr-only" onChange={(event) => {
+            Import CSV/XLSX
+            <input type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" onChange={(event) => {
               const file = event.target.files?.[0];
               if (file) void readImportFile(file);
             }} />
           </label>
-          <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importFileBase64)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview CSV</button>
-          <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importFileBase64)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm CSV import</button>
+          <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importPayload())} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview import</button>
+          <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importPayload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
         </div>
         {importInspect && (
           <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
-            CSV file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
+            {importInspect.format.toUpperCase()} file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
           </p>
         )}
         {importPreview && (

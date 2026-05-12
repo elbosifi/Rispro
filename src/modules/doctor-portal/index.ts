@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { requireAuth } from "../../middleware/auth.js";
 import { asyncRoute } from "../../utils/async-route.js";
-import { asOptionalBoolean, asString } from "../../utils/request-coercion.js";
+import { asOptionalBoolean, asOptionalString, asString } from "../../utils/request-coercion.js";
 import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { env } from "../../config/env.js";
@@ -21,11 +21,13 @@ import { doctorProtocolsRouter } from "./protocol-routes.js";
 import { doctorWorkloadRouter } from "./workload-routes.js";
 import { doctorAvailabilityRouter, doctorLeaveRouter } from "./availability-routes.js";
 import {
-  confirmDoctorImportCsv,
+  confirmDoctorImport,
   doctorImportTemplateCsv,
+  doctorImportTemplateXlsx,
+  exportDoctorProfilesXlsx,
   exportDoctorProfilesCsv,
-  inspectDoctorImportCsv,
-  previewDoctorImportCsv,
+  inspectDoctorImport,
+  previewDoctorImport,
 } from "./doctor-import-export-service.js";
 
 const router = Router();
@@ -189,11 +191,11 @@ router.get(
     const user = currentUser(req);
     await listProfilesForAdmin(user.sub, user.role);
     const format = String(req.query.format ?? "csv").toLowerCase();
-    if (format !== "csv") throw new HttpError(400, "Only CSV doctor export is currently supported.");
-    const payload = await exportDoctorProfilesCsv();
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    if (format !== "csv" && format !== "xlsx") throw new HttpError(400, "format must be csv or xlsx.");
+    const payload = format === "xlsx" ? await exportDoctorProfilesXlsx() : await exportDoctorProfilesCsv();
+    res.setHeader("Content-Type", format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
-    res.send(payload.csv);
+    res.send("buffer" in payload ? payload.buffer : payload.csv);
   })
 );
 
@@ -202,6 +204,15 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const user = currentUser(req);
     await listProfilesForAdmin(user.sub, user.role);
+    const format = String(req.query.format ?? "csv").toLowerCase();
+    if (format !== "csv" && format !== "xlsx") throw new HttpError(400, "format must be csv or xlsx.");
+    if (format === "xlsx") {
+      const payload = await doctorImportTemplateXlsx();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+      res.send(payload.buffer);
+      return;
+    }
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="rispro-doctor-import-template.csv"`);
     res.send(doctorImportTemplateCsv());
@@ -214,7 +225,7 @@ router.post(
     const user = currentUser(req);
     await listProfilesForAdmin(user.sub, user.role);
     const body = asUnknownRecord(req.body);
-    res.json({ workbook: inspectDoctorImportCsv(asString(body.fileContentBase64)) });
+    res.json({ workbook: await inspectDoctorImport({ fileContentBase64: asString(body.fileContentBase64), format: asOptionalString(body.format), fileName: asOptionalString(body.fileName) }) });
   })
 );
 
@@ -224,7 +235,7 @@ router.post(
     const user = currentUser(req);
     await listProfilesForAdmin(user.sub, user.role);
     const body = asUnknownRecord(req.body);
-    res.json({ preview: await previewDoctorImportCsv(asString(body.fileContentBase64)) });
+    res.json({ preview: await previewDoctorImport({ fileContentBase64: asString(body.fileContentBase64), format: asOptionalString(body.format), fileName: asOptionalString(body.fileName) }) });
   })
 );
 
@@ -234,7 +245,7 @@ router.post(
     const user = currentUser(req);
     await listProfilesForAdmin(user.sub, user.role);
     const body = asUnknownRecord(req.body);
-    res.json({ result: await confirmDoctorImportCsv(asString(body.fileContentBase64), user.sub) });
+    res.json({ result: await confirmDoctorImport({ fileContentBase64: asString(body.fileContentBase64), format: asOptionalString(body.format), fileName: asOptionalString(body.fileName) }, user.sub) });
   })
 );
 

@@ -45,6 +45,8 @@ describe("Doctor Portal workload schema and wiring", () => {
     assert.match(routes, /"\/summary"/);
     assert.match(routes, /"\/calculate"/);
     assert.match(routes, /"\/catalog"/);
+    assert.match(routes, /"\/catalog\/:id"/);
+    assert.match(routes, /"\/catalog\/:id\/deactivate"/);
     assert.doesNotMatch(routes, /createBooking|rescheduleBooking|capacity|salary|payment|revenue/i);
   });
 
@@ -55,6 +57,8 @@ describe("Doctor Portal workload schema and wiring", () => {
     assert.match(service, /requireWorkloadDoctor/);
     assert.match(service, /requireWorkloadManager/);
     assert.match(service, /requireWorkloadAdmin/);
+    assert.match(service, /editWorkloadCatalogRule/);
+    assert.match(service, /removeWorkloadCatalogRule/);
     assert.match(repo, /doctor_roster_members/);
     assert.match(repo, /status = 'superseded'/);
     assert.match(repo, /defaultedNoCatalogRuleCount/);

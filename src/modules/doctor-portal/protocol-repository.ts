@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import type {
   AppointmentProtocolRow,
   ProtocolAuditEventType,
+  ProtocolAuditTimelineEvent,
   ProtocolDetails,
   ProtocolInput,
   ProtocolStatus,
@@ -295,4 +296,60 @@ export async function insertProtocolAudit(
       input.reason,
     ]
   );
+}
+
+function protocolSummary(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Partial<AppointmentProtocolRow>;
+  const parts = [
+    record.protocolStatus ? `status ${record.protocolStatus}` : null,
+    typeof record.version === "number" ? `version ${record.version}` : null,
+    record.contrastRequired === true ? "contrast required" : record.contrastRequired === false ? "no contrast" : null,
+    record.protocolText ? "protocol text present" : null,
+    record.technologistNotes ? "technologist notes present" : null,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : null;
+}
+
+export async function listProtocolAuditEvents(appointmentId: number): Promise<ProtocolAuditTimelineEvent[]> {
+  const result = await pool.query<{
+    eventType: ProtocolAuditEventType;
+    changedByDoctorId: number | null;
+    changedByDoctorName: string | null;
+    createdAt: string;
+    reason: string | null;
+    oldValueJson: unknown;
+    newValueJson: unknown;
+    version: number | null;
+    protocolStatus: ProtocolStatus | null;
+  }>(
+    `
+      select
+        pae.event_type as "eventType",
+        pae.changed_by_doctor_id as "changedByDoctorId",
+        dp.display_name as "changedByDoctorName",
+        pae.created_at as "createdAt",
+        pae.reason,
+        pae.old_value_json as "oldValueJson",
+        pae.new_value_json as "newValueJson",
+        nullif(pae.new_value_json->>'version', '')::int as "version",
+        pae.new_value_json->>'protocolStatus' as "protocolStatus"
+      from doctor_portal.appointment_protocol_audit_events pae
+      left join doctor_portal.doctor_profiles dp on dp.id = pae.changed_by_doctor_id
+      where pae.appointment_id = $1
+      order by pae.created_at asc, pae.id asc
+    `,
+    [appointmentId]
+  );
+  return result.rows.map((row) => ({
+    eventType: row.eventType,
+    changedByDoctorId: row.changedByDoctorId,
+    changedByDoctorName: row.changedByDoctorName,
+    createdAt: row.createdAt,
+    reason: row.reason,
+    oldSummary: protocolSummary(row.oldValueJson),
+    newSummary: protocolSummary(row.newValueJson),
+    version: row.version,
+    protocolStatus: row.protocolStatus,
+  }));
 }

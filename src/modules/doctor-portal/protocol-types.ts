@@ -66,3 +66,15 @@ export interface ProtocolDetails {
   appointment: ProtocolTaskRow;
   protocol: AppointmentProtocolRow | null;
 }
+
+export interface ProtocolAuditTimelineEvent {
+  eventType: ProtocolAuditEventType;
+  changedByDoctorId: number | null;
+  changedByDoctorName: string | null;
+  createdAt: string;
+  reason: string | null;
+  oldSummary: string | null;
+  newSummary: string | null;
+  version: number | null;
+  protocolStatus: ProtocolStatus | null;
+}

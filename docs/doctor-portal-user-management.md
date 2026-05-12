@@ -13,15 +13,22 @@ Doctor Portal uses normal RISpro user accounts for authentication. A user become
 
 ## Bulk Import
 
-Doctor import is CSV only:
+Doctor import supports CSV and XLSX:
 
 1. Download the template from Doctor Portal > Admin > Doctors.
-2. Upload the completed CSV.
-3. Inspect the CSV columns.
+2. Choose either the CSV template or the XLSX template.
+3. Upload the completed CSV or XLSX file.
+4. Inspect the columns.
 4. Preview row-level actions and errors.
 5. Confirm valid imports.
 
-New imported users are active immediately, receive the provided temporary password, and must change password on first login. Existing passwords are changed only when `reset_password=true`. Passwords are never included in doctor export CSV files.
+CSV remains supported as the simple fallback. New imported users are active immediately, receive the provided temporary password, and must change password on first login. Existing passwords are changed only when `reset_password=true`. Passwords and password hashes are never included in CSV or XLSX doctor exports.
+
+## Related Admin Workflows
+
+- Cases: supervisors/admins can drag a case to a published roster target or use the Assign/Reassign fallback. Both paths require a correction reason before the backend saves reassignment and audit.
+- Workload catalog: Doctor Admin can configure team workload units by modality, exam, category, and assignment type. This is team workload only; salary, payment, revenue, and individual productivity ranking are not part of Doctor Portal.
+- Protocols: eligible doctors and supervisors/admins can view the read-only Protocol history timeline for a case.
 
 ## Modality Permissions
 

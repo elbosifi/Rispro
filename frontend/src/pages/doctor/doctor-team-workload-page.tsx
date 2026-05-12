@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { fetchAppointmentLookups, fetchTeamWorkloadSummary, runWorkloadCalculation } from "@/lib/api-hooks";
-import type { DoctorMe, TeamWorkloadSummaryRow, WorkloadCalculationSummary } from "@/types/api";
+import {
+  createWorkloadCatalogRule,
+  deactivateWorkloadCatalogRule,
+  fetchAppointmentLookups,
+  fetchTeamWorkloadSummary,
+  fetchWorkloadCatalog,
+  runWorkloadCalculation,
+  updateWorkloadCatalogRule,
+} from "@/lib/api-hooks";
+import type { CaseAssignmentType, DoctorMe, TeamWorkloadSummaryRow, WorkloadCalculationSummary, WorkloadCatalogRule } from "@/types/api";
+
+const ASSIGNMENT_TYPES: CaseAssignmentType[] = ["imaging", "protocol", "reporting", "ultrasound_operator", "mammography_episode"];
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -78,6 +88,140 @@ function Tile({ label, value }: { label: string; value: number }) {
   );
 }
 
+function CatalogManagement({
+  rules,
+  canEdit,
+  modalities,
+  examTypes,
+  onCreate,
+  onUpdate,
+  onDeactivate,
+}: {
+  rules: WorkloadCatalogRule[];
+  canEdit: boolean;
+  modalities: Array<{ id: number; nameEn: string; code?: string }>;
+  examTypes: Array<{ id: number; modalityId?: number | null; nameEn: string }>;
+  onCreate: (payload: Omit<WorkloadCatalogRule, "id" | "active">) => void;
+  onUpdate: (id: number, payload: Partial<Omit<WorkloadCatalogRule, "id">>) => void;
+  onDeactivate: (id: number) => void;
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [draft, setDraft] = useState({
+    modalityId: "",
+    examTypeId: "",
+    caseCategory: "",
+    assignmentType: "reporting" as CaseAssignmentType,
+    baseUnits: "1",
+    reportRequiredMultiplier: "1",
+    noReportUnits: "0",
+    effectiveFrom: todayIso(),
+    effectiveTo: "",
+  });
+  const activeCount = rules.filter((rule) => rule.active).length;
+  const selected = editingId ? rules.find((rule) => rule.id === editingId) : null;
+
+  const loadRule = (rule: WorkloadCatalogRule) => {
+    setEditingId(rule.id);
+    setDraft({
+      modalityId: String(rule.modalityId),
+      examTypeId: rule.examTypeId ? String(rule.examTypeId) : "",
+      caseCategory: rule.caseCategory ?? "",
+      assignmentType: rule.assignmentType,
+      baseUnits: String(rule.baseUnits),
+      reportRequiredMultiplier: String(rule.reportRequiredMultiplier),
+      noReportUnits: String(rule.noReportUnits),
+      effectiveFrom: rule.effectiveFrom,
+      effectiveTo: rule.effectiveTo ?? "",
+    });
+  };
+  const reset = () => {
+    setEditingId(null);
+    setDraft({ modalityId: "", examTypeId: "", caseCategory: "", assignmentType: "reporting", baseUnits: "1", reportRequiredMultiplier: "1", noReportUnits: "0", effectiveFrom: todayIso(), effectiveTo: "" });
+  };
+  const payload = () => ({
+    modalityId: Number(draft.modalityId),
+    examTypeId: draft.examTypeId ? Number(draft.examTypeId) : null,
+    caseCategory: draft.caseCategory || null,
+    assignmentType: draft.assignmentType,
+    baseUnits: Number(draft.baseUnits),
+    reportRequiredMultiplier: Number(draft.reportRequiredMultiplier),
+    noReportUnits: Number(draft.noReportUnits),
+    effectiveFrom: draft.effectiveFrom,
+    effectiveTo: draft.effectiveTo || null,
+  });
+
+  return (
+    <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="font-semibold">Workload catalog</h3>
+          {activeCount === 0 && <p className="mt-1 text-sm text-amber-700">No active catalog rule exists; workload calculation will use conservative defaults.</p>}
+        </div>
+        {!canEdit && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Read-only for this Doctor Portal role.</p>}
+      </div>
+
+      {canEdit && (
+        <div className="grid gap-2 md:grid-cols-4">
+          <select value={draft.modalityId} onChange={(event) => setDraft((current) => ({ ...current, modalityId: event.target.value, examTypeId: "" }))} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="">Modality</option>
+            {modalities.map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn || modality.code || modality.id}</option>)}
+          </select>
+          <select value={draft.examTypeId} onChange={(event) => setDraft((current) => ({ ...current, examTypeId: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="">Any exam</option>
+            {examTypes.filter((exam) => !draft.modalityId || exam.modalityId === Number(draft.modalityId)).map((exam) => <option key={exam.id} value={exam.id}>{exam.nameEn}</option>)}
+          </select>
+          <select value={draft.assignmentType} onChange={(event) => setDraft((current) => ({ ...current, assignmentType: event.target.value as CaseAssignmentType }))} className="rounded-lg border px-3 py-2 text-sm">
+            {ASSIGNMENT_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
+          </select>
+          <input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder="Category or blank" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder="Base units" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder="Report multiplier" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="number" min="0" step="0.25" value={draft.noReportUnits} onChange={(event) => setDraft((current) => ({ ...current, noReportUnits: event.target.value }))} placeholder="No-report units" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          <div className="flex gap-2 md:col-span-3">
+            <button type="button" disabled={!draft.modalityId || !draft.effectiveFrom} onClick={() => {
+              if (selected) onUpdate(selected.id, payload());
+              else onCreate(payload());
+              reset();
+            }} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">
+              {selected ? "Save rule" : "Create rule"}
+            </button>
+            {selected && <button type="button" onClick={reset} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Cancel edit</button>}
+          </div>
+        </div>
+      )}
+
+      <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
+        <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
+          <thead><tr>{["Status", "Modality", "Exam", "Category", "Type", "Units", "Effective", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+          <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
+            {rules.map((rule) => (
+              <tr key={rule.id}>
+                <td className="px-3 py-2">{rule.active ? "Active" : "Inactive"}</td>
+                <td className="px-3 py-2">{modalities.find((modality) => modality.id === rule.modalityId)?.nameEn ?? rule.modalityId}</td>
+                <td className="px-3 py-2">{rule.examTypeId ? examTypes.find((exam) => exam.id === rule.examTypeId)?.nameEn ?? rule.examTypeId : "Any"}</td>
+                <td className="px-3 py-2">{rule.caseCategory ?? "Any"}</td>
+                <td className="px-3 py-2">{rule.assignmentType.replaceAll("_", " ")}</td>
+                <td className="px-3 py-2">{rule.baseUnits} x {rule.reportRequiredMultiplier}; no-report {rule.noReportUnits}</td>
+                <td className="px-3 py-2">{rule.effectiveFrom} to {rule.effectiveTo ?? "open"}</td>
+                <td className="px-3 py-2">
+                  {canEdit && (
+                    <div className="flex gap-2">
+                      <button type="button" onClick={() => loadRule(rule)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Edit</button>
+                      {rule.active && <button type="button" onClick={() => onDeactivate(rule.id)} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>Deactivate</button>}
+                    </div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
   const canManage = isManager(me);
   const queryClient = useQueryClient();
@@ -87,6 +231,7 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
   const [requiresReport, setRequiresReport] = useState("");
   const [caseCategory, setCaseCategory] = useState("");
   const [summary, setSummary] = useState<WorkloadCalculationSummary | null>(null);
+  const canEditCatalog = me.moduleCapabilities.includes("doctor_admin");
 
   const filters = useMemo(() => ({
     startDate,
@@ -101,12 +246,25 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
     queryFn: () => fetchTeamWorkloadSummary(filters),
   });
   const lookupsQuery = useQuery({ queryKey: ["lookups"], queryFn: fetchAppointmentLookups, staleTime: 1000 * 60 * 5 });
+  const catalogQuery = useQuery({ queryKey: ["doctor", "workload", "catalog"], queryFn: fetchWorkloadCatalog, enabled: canManage });
   const calculateMutation = useMutation({
     mutationFn: () => runWorkloadCalculation({ startDate, endDate, modalityId: modalityId ? Number(modalityId) : null }),
     onSuccess: async (result) => {
       setSummary(result);
       await queryClient.invalidateQueries({ queryKey: ["doctor", "workload"] });
     },
+  });
+  const createCatalogMutation = useMutation({
+    mutationFn: createWorkloadCatalogRule,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "workload", "catalog"] }),
+  });
+  const updateCatalogMutation = useMutation({
+    mutationFn: (input: { id: number; payload: Partial<Omit<WorkloadCatalogRule, "id">> }) => updateWorkloadCatalogRule(input.id, input.payload),
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "workload", "catalog"] }),
+  });
+  const deactivateCatalogMutation = useMutation({
+    mutationFn: deactivateWorkloadCatalogRule,
+    onSuccess: async () => queryClient.invalidateQueries({ queryKey: ["doctor", "workload", "catalog"] }),
   });
 
   return (
@@ -135,6 +293,17 @@ export function DoctorTeamWorkloadPage({ me }: { me: DoctorMe }) {
 
       <CalculationSummary summary={summary} />
       <SummaryTable rows={workloadQuery.data ?? []} />
+      {canManage && (
+        <CatalogManagement
+          rules={catalogQuery.data ?? []}
+          canEdit={canEditCatalog}
+          modalities={lookupsQuery.data?.modalities ?? []}
+          examTypes={lookupsQuery.data?.examTypes ?? []}
+          onCreate={(payload) => createCatalogMutation.mutate(payload)}
+          onUpdate={(id, payload) => updateCatalogMutation.mutate({ id, payload })}
+          onDeactivate={(id) => deactivateCatalogMutation.mutate(id)}
+        />
+      )}
     </div>
   );
 }

@@ -7,6 +7,7 @@ import type { AuthenticatedUserContext } from "../../types/http.js";
 import {
   assignProtocolForAppointment,
   cancelProtocolForAppointment,
+  getProtocolAuditForAppointment,
   getProtocolForAppointment,
   getProtocolTasks,
   requestProtocolClarification,
@@ -82,6 +83,14 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const tasks = await getProtocolTasks(actor(req), filters(req));
     res.json({ tasks });
+  })
+);
+
+router.get(
+  "/:appointmentId/audit",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const audit = await getProtocolAuditForAppointment(actor(req), requiredPositiveInteger(req.params.appointmentId, "appointmentId"));
+    res.json({ audit });
   })
 );
 
