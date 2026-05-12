@@ -3,6 +3,7 @@ import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
 import { requireRosterDoctor, requireRosterManager } from "./roster-service.js";
 import {
+  assignCaseToDoctor,
   assignCases,
   listMyCases,
   listTeamCases,
@@ -71,6 +72,36 @@ export async function correctDoctorCaseAssignment(
     }
     if (error instanceof Error && error.message === "active_assignment_conflict") {
       throw new HttpError(409, "Case assignment changed while reassignment was being saved. Refresh and try again.");
+    }
+    throw error;
+  }
+}
+
+export async function assignDoctorCase(
+  actor: Actor,
+  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null }
+) {
+  const me = await requireRosterManager(actor);
+  try {
+    return await assignCaseToDoctor(input, { userId: actor.userId, doctorId: me.profile!.id });
+  } catch (error) {
+    if (error instanceof Error && error.message === "appointment_not_found") {
+      throw new HttpError(404, "Appointment not found.");
+    }
+    if (error instanceof Error && error.message === "doctor_not_found") {
+      throw new HttpError(404, "Active doctor profile not found.");
+    }
+    if (error instanceof Error && error.message === "roster_assignment_not_found") {
+      throw new HttpError(404, "Roster assignment not found.");
+    }
+    if (error instanceof Error && error.message === "no_report_case_not_assignable") {
+      throw new HttpError(400, "No-report cases cannot be assigned for reporting.");
+    }
+    if (error instanceof Error && error.message === "case_not_assignable") {
+      throw new HttpError(400, "Cancelled or deleted cases cannot be assigned.");
+    }
+    if (error instanceof Error && error.message === "reassignment_reason_required") {
+      throw new HttpError(400, "Reassignment reason is required.");
     }
     throw error;
   }

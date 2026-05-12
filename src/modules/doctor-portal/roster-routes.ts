@@ -29,6 +29,17 @@ import {
   getRosterWeekNotificationsForManager,
   notifyRosterWeekForManager,
 } from "./roster-planning-service.js";
+import {
+  getRosterDutyTypesForManager,
+  getRosterShiftImportMappingsForManager,
+  saveRosterDutyTypeForManager,
+  saveRosterShiftImportMappingForManager,
+} from "./roster-config-service.js";
+import {
+  confirmRosterXmlImportForManager,
+  previewRosterXmlImportForManager,
+} from "./roster-xml-import-service.js";
+import type { DoctorRole } from "./profile-repository.js";
 import type { RosterBalanceStrategy, RosterExportFormat } from "./roster-planning-types.js";
 
 const router = Router();
@@ -38,24 +49,10 @@ interface DoctorRequest extends Request {
   user?: AuthenticatedUserContext;
 }
 
-const DUTY_TYPES = new Set<RosterDutyType>([
-  "ct_protocol_day",
-  "ct_reporting_day",
-  "mri_supervision_reporting",
-  "ultrasound_term_1",
-  "ultrasound_term_2",
-  "ultrasound_term_3",
-  "mammography_session",
-  "general_reporting",
-  "on_call",
-  "leave",
-  "admin",
-  "teaching",
-]);
-
 const TEAM_ROLES = new Set<RosterTeamRole>(["lead", "specialist", "sho", "supervisor", "observer"]);
 const BALANCE_STRATEGIES = new Set<RosterBalanceStrategy>(["simple", "preserve_previous", "least_assigned"]);
 const EXPORT_FORMATS = new Set<RosterExportFormat>(["html", "csv"]);
+const DOCTOR_ROLES = new Set<DoctorRole>(["consultant", "specialist", "senior_house_officer", "resident"]);
 
 function actor(req: DoctorRequest) {
   if (!req.user) throw new HttpError(401, "Authentication required.");
@@ -72,10 +69,14 @@ function asPositiveInteger(value: unknown, field: string): number {
 
 function parseDutyType(value: unknown): RosterDutyType {
   const dutyType = String(value ?? "").trim();
-  if (!DUTY_TYPES.has(dutyType as RosterDutyType)) {
-    throw new HttpError(400, "Unsupported dutyType.");
-  }
+  if (!dutyType) throw new HttpError(400, "dutyType is required.");
   return dutyType as RosterDutyType;
+}
+
+function parseDoctorRole(value: unknown): DoctorRole {
+  const role = String(value ?? "").trim();
+  if (!DOCTOR_ROLES.has(role as DoctorRole)) throw new HttpError(400, "defaultDoctorRole is invalid.");
+  return role as DoctorRole;
 }
 
 function parseTeamRole(value: unknown): RosterTeamRole {
@@ -169,6 +170,83 @@ router.get(
   asyncRoute(async (req: DoctorRequest, res: Response) => {
     const conflicts = await getRosterWeekConflicts(actor(req), asPositiveInteger(req.params.id, "weekId"));
     res.json({ conflicts });
+  })
+);
+
+router.get(
+  "/duty-types",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const dutyTypes = await getRosterDutyTypesForManager(actor(req), req.query.includeInactive === "true");
+    res.json({ dutyTypes });
+  })
+);
+
+router.post(
+  "/duty-types",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const dutyType = await saveRosterDutyTypeForManager(actor(req), {
+      code: asString(body.code),
+      label: asString(body.label),
+      active: body.active !== false,
+      requiresSpecialist: body.requiresSpecialist === true,
+      sortOrder: body.sortOrder,
+    });
+    res.status(201).json({ dutyType });
+  })
+);
+
+router.get(
+  "/shift-import-mappings",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const mappings = await getRosterShiftImportMappingsForManager(actor(req), req.query.includeInactive === "true");
+    res.json({ mappings });
+  })
+);
+
+router.post(
+  "/shift-import-mappings",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const mapping = await saveRosterShiftImportMappingForManager(actor(req), {
+      id: optionalNumberByField(body.id, "id"),
+      sourceSystem: asOptionalString(body.sourceSystem) ?? "abc",
+      sourceShiftName: asOptionalString(body.sourceShiftName) ?? null,
+      sourceShiftType: asOptionalString(body.sourceShiftType) ?? null,
+      sourceShiftAbbreviation: asOptionalString(body.sourceShiftAbbreviation) ?? null,
+      dutyTypeCode: asString(body.dutyTypeCode),
+      modalityId: optionalNumberByField(body.modalityId, "modalityId"),
+      teamName: asOptionalString(body.teamName) ?? null,
+      active: body.active !== false,
+    });
+    res.status(201).json({ mapping });
+  })
+);
+
+router.post(
+  "/import/abc/preview",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const preview = await previewRosterXmlImportForManager(actor(req), {
+      fileContentBase64: asString(body.fileContentBase64),
+    });
+    res.json({ preview });
+  })
+);
+
+router.post(
+  "/import/abc/confirm",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await confirmRosterXmlImportForManager(actor(req), {
+      fileContentBase64: asString(body.fileContentBase64),
+      createMissingDoctors: body.createMissingDoctors === true,
+      temporaryPassword: asString(body.temporaryPassword),
+      defaultDoctorRole: parseDoctorRole(body.defaultDoctorRole),
+      defaultCoreRole: body.defaultCoreRole === "supervisor" ? "supervisor" : "doctor",
+      defaultTeamRole: parseTeamRole(body.defaultTeamRole),
+    });
+    res.json({ result });
   })
 );
 

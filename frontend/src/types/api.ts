@@ -93,19 +93,7 @@ export interface DoctorMe {
 }
 
 export type RosterWeekStatus = "draft" | "published" | "archived";
-export type RosterDutyType =
-  | "ct_protocol_day"
-  | "ct_reporting_day"
-  | "mri_supervision_reporting"
-  | "ultrasound_term_1"
-  | "ultrasound_term_2"
-  | "ultrasound_term_3"
-  | "mammography_session"
-  | "general_reporting"
-  | "on_call"
-  | "leave"
-  | "admin"
-  | "teaching";
+export type RosterDutyType = string;
 export type RosterTeamRole = "lead" | "specialist" | "sho" | "supervisor" | "observer";
 
 export interface DoctorRosterWeek {
@@ -288,6 +276,51 @@ export interface DoctorRosterResponse {
 export type CaseAssignmentStatus = "active" | "superseded" | "corrected" | "cancelled";
 export type CaseAssignmentType = "imaging" | "protocol" | "reporting" | "ultrasound_operator" | "mammography_episode";
 
+export interface RosterDutyTypeConfig {
+  code: string;
+  label: string;
+  active: boolean;
+  requiresSpecialist: boolean;
+  sortOrder: number;
+}
+
+export interface RosterShiftImportMapping {
+  id: number;
+  sourceSystem: string;
+  sourceShiftName: string | null;
+  sourceShiftType: string | null;
+  sourceShiftAbbreviation: string | null;
+  dutyTypeCode: string;
+  modalityId: number | null;
+  modalityName: string | null;
+  teamName: string | null;
+  active: boolean;
+}
+
+export interface RosterXmlImportPreview {
+  doctorsMatched: string[];
+  doctorsToCreate: string[];
+  dutySlotsToCreate: Array<{
+    doctorName: string | null;
+    date: string | null;
+    shiftName: string | null;
+    shiftType: string | null;
+    abbreviation: string | null;
+    dutyTypeCode: string | null;
+    modalityId: number | null;
+    teamName: string | null;
+  }>;
+  unmappedShiftTypes: string[];
+  warnings: string[];
+  canConfirm: boolean;
+}
+
+export interface RosterXmlImportResult {
+  createdDoctors: string[];
+  importedDutySlotCount: number;
+  message: string;
+}
+
 export interface DoctorCase {
   appointmentId: number;
   appointmentDate: string;
@@ -306,11 +339,15 @@ export interface DoctorCase {
   requiresReport: boolean;
   appointmentStatus: string;
   rosterAssignmentId: number | null;
+  assignedDoctorId: number | null;
+  assignedDoctorName: string | null;
   teamName: string | null;
   dutyType: RosterDutyType | null;
   expectedReportingDate: string | null;
   assignmentType: CaseAssignmentType | null;
   assignmentStatus: CaseAssignmentStatus | null;
+  workloadPoints: number | null;
+  workloadDefaulted: boolean;
   protocolStatus: null;
   reportStatus: null;
 }

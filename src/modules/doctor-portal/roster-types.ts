@@ -1,18 +1,6 @@
 export type RosterWeekStatus = "draft" | "published" | "archived";
 export type RosterAssignmentStatus = "active" | "cancelled";
-export type RosterDutyType =
-  | "ct_protocol_day"
-  | "ct_reporting_day"
-  | "mri_supervision_reporting"
-  | "ultrasound_term_1"
-  | "ultrasound_term_2"
-  | "ultrasound_term_3"
-  | "mammography_session"
-  | "general_reporting"
-  | "on_call"
-  | "leave"
-  | "admin"
-  | "teaching";
+export type RosterDutyType = string;
 export type RosterTeamRole = "lead" | "specialist" | "sho" | "supervisor" | "observer";
 
 export interface RosterWeekRow {
@@ -47,6 +35,7 @@ export interface RosterAssignmentRow {
   modalityNameEn: string | null;
   modalityNameAr: string | null;
   dutyType: RosterDutyType;
+  requiresSpecialist?: boolean;
   sessionName: string | null;
   startTime: string | null;
   endTime: string | null;

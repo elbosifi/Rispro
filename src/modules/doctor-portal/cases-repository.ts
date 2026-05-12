@@ -17,6 +17,7 @@ interface AssignCasesInput {
 
 interface BookingRow extends CaseBookingSignal {
   status: string;
+  requiresReport: boolean;
 }
 
 const CASE_SELECT = `
@@ -38,11 +39,15 @@ const CASE_SELECT = `
     b.requires_report as "requiresReport",
     b.status as "appointmentStatus",
     cta.roster_assignment_id as "rosterAssignmentId",
+    cta.assigned_doctor_id as "assignedDoctorId",
+    assigned_doctor.display_name as "assignedDoctorName",
     dra.team_name as "teamName",
     dra.duty_type as "dutyType",
     cta.expected_reporting_date::text as "expectedReportingDate",
     cta.assignment_type as "assignmentType",
     cta.status as "assignmentStatus",
+    coalesce(cwu.workload_units, catalog.workload_units)::float as "workloadPoints",
+    (cwu.id is null and catalog.workload_units is null) as "workloadDefaulted",
     null::text as "protocolStatus",
     null::text as "reportStatus"
   from appointments_v2.bookings b
@@ -51,11 +56,30 @@ const CASE_SELECT = `
   left join exam_types et on et.id = b.exam_type_id
   left join doctor_portal.case_team_assignments cta on cta.appointment_id = b.id and cta.status = 'active'
   left join doctor_portal.doctor_roster_assignments dra on dra.id = cta.roster_assignment_id
+  left join doctor_portal.doctor_profiles assigned_doctor on assigned_doctor.id = cta.assigned_doctor_id
+  left join doctor_portal.case_workload_units cwu on cwu.case_team_assignment_id = cta.id and cwu.status = 'active'
+  left join lateral (
+    select (wuc.base_units * wuc.report_required_multiplier) as workload_units
+    from doctor_portal.workload_unit_catalog wuc
+    where wuc.active = true
+      and wuc.assignment_type = 'reporting'
+      and wuc.modality_id = b.modality_id
+      and (wuc.exam_type_id is null or wuc.exam_type_id = b.exam_type_id)
+      and (wuc.case_category is null or wuc.case_category = b.case_category)
+      and (wuc.effective_from is null or wuc.effective_from <= b.booking_date)
+      and (wuc.effective_to is null or wuc.effective_to >= b.booking_date)
+    order by
+      case when wuc.exam_type_id = b.exam_type_id then 0 else 1 end,
+      case when wuc.case_category = b.case_category then 0 else 1 end,
+      wuc.effective_from desc nulls last,
+      wuc.id desc
+    limit 1
+  ) catalog on b.requires_report = true
 `;
 
 function filters(params: { dateFrom: string; dateTo: string; modalityId?: number | null; status?: string | null; requiresReport?: boolean | null; caseCategory?: string | null }) {
   const values: unknown[] = [params.dateFrom, params.dateTo];
-  const where = ["b.booking_date >= $1::date", "b.booking_date <= $2::date"];
+  const where = ["b.booking_date >= $1::date", "b.booking_date <= $2::date", "b.requires_report = true"];
   if (params.modalityId) {
     values.push(params.modalityId);
     where.push(`b.modality_id = $${values.length}`);
@@ -63,10 +87,6 @@ function filters(params: { dateFrom: string; dateTo: string; modalityId?: number
   if (params.status) {
     values.push(params.status);
     where.push(`coalesce(cta.status, 'unassigned') = $${values.length}`);
-  }
-  if (params.requiresReport !== null && params.requiresReport !== undefined) {
-    values.push(params.requiresReport);
-    where.push(`b.requires_report = $${values.length}`);
   }
   if (params.caseCategory) {
     values.push(params.caseCategory);
@@ -79,12 +99,12 @@ export async function listMyCases(doctorId: number, params: { dateFrom: string; 
   const scoped = filters(params);
   scoped.values.push(doctorId);
   scoped.where.push(`
-    exists (
+    (cta.assigned_doctor_id = $${scoped.values.length} or exists (
       select 1
       from doctor_portal.doctor_roster_members drm
       where drm.roster_assignment_id = cta.roster_assignment_id
         and drm.doctor_id = $${scoped.values.length}
-    )
+    ))
   `);
   const result = await pool.query<DoctorCaseRow>(
     `${CASE_SELECT} where ${scoped.where.join(" and ")} order by b.booking_date asc, b.booking_time asc nulls first, b.id asc limit 500`,
@@ -129,12 +149,15 @@ async function listAssignableBookings(input: AssignCasesInput): Promise<BookingR
         m.name_en as "modalityName",
         et.name_en as "examTypeName",
         null::text as "sessionName",
-        b.status
+        b.status,
+        b.requires_report as "requiresReport"
       from appointments_v2.bookings b
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       where b.booking_date >= $1::date
         and b.booking_date <= $2::date
+        and b.requires_report = true
+        and b.status not in ('cancelled', 'discontinued', 'voided')
         ${modalityFilter}
       order by b.booking_date asc, b.booking_time asc nulls first, b.id asc
     `,
@@ -282,7 +305,8 @@ export async function reassignCase(input: { appointmentId: number; rosterAssignm
           m.name_en as "modalityName",
           et.name_en as "examTypeName",
           null::text as "sessionName",
-          b.status
+          b.status,
+          b.requires_report as "requiresReport"
         from appointments_v2.bookings b
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
@@ -293,6 +317,8 @@ export async function reassignCase(input: { appointmentId: number; rosterAssignm
     );
     const booking = bookingResult.rows[0];
     if (!booking) throw new Error("appointment_not_found");
+    if (!booking.requiresReport) throw new Error("no_report_case_not_assignable");
+    if (["cancelled", "discontinued", "voided"].includes(booking.status)) throw new Error("case_not_assignable");
     const rule = classifyCaseRule(booking);
 
     const rosterResult = await client.query<RosterAssignmentSignal>(
@@ -352,6 +378,118 @@ export async function reassignCase(input: { appointmentId: number; rosterAssignm
         assignmentType: rule.assignmentType,
       },
       reason: input.reason,
+    });
+    await client.query("commit");
+    return { assignmentId };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function assignCaseToDoctor(
+  input: { appointmentId: number; doctorId: number; rosterAssignmentId?: number | null; reason?: string | null },
+  actor: AssignmentActor
+) {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const bookingResult = await client.query<BookingRow>(
+      `
+        select
+          b.id as "appointmentId",
+          b.booking_date::text as "bookingDate",
+          b.modality_id as "modalityId",
+          m.code as "modalityCode",
+          m.name_en as "modalityName",
+          et.name_en as "examTypeName",
+          null::text as "sessionName",
+          b.status,
+          b.requires_report as "requiresReport"
+        from appointments_v2.bookings b
+        join modalities m on m.id = b.modality_id
+        left join exam_types et on et.id = b.exam_type_id
+        where b.id = $1
+        limit 1
+      `,
+      [input.appointmentId]
+    );
+    const booking = bookingResult.rows[0];
+    if (!booking) throw new Error("appointment_not_found");
+    if (!booking.requiresReport) throw new Error("no_report_case_not_assignable");
+    if (["cancelled", "discontinued", "voided"].includes(booking.status)) throw new Error("case_not_assignable");
+
+    const doctorResult = await client.query<{ id: number }>(
+      `select id from doctor_portal.doctor_profiles where id = $1 and active = true limit 1`,
+      [input.doctorId]
+    );
+    if (!doctorResult.rows[0]) throw new Error("doctor_not_found");
+
+    if (input.rosterAssignmentId) {
+      const rosterResult = await client.query<{ id: number }>(
+        `
+          select a.id
+          from doctor_portal.doctor_roster_assignments a
+          join doctor_portal.doctor_roster_weeks w on w.id = a.roster_week_id
+          where a.id = $1
+            and a.status = 'active'
+            and w.status in ('draft', 'published')
+          limit 1
+        `,
+        [input.rosterAssignmentId]
+      );
+      if (!rosterResult.rows[0]) throw new Error("roster_assignment_not_found");
+    }
+
+    const existing = await client.query<{ id: number; assigned_doctor_id: number | null; roster_assignment_id: number | null }>(
+      `
+        select id, assigned_doctor_id, roster_assignment_id
+        from doctor_portal.case_team_assignments
+        where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+        limit 1
+      `,
+      [booking.appointmentId]
+    );
+    if (existing.rows[0] && (!input.reason || !input.reason.trim())) {
+      throw new Error("reassignment_reason_required");
+    }
+
+    await client.query(
+      `
+        update doctor_portal.case_team_assignments
+        set status = 'corrected', updated_at = now()
+        where appointment_id = $1 and assignment_type = 'reporting' and status = 'active'
+      `,
+      [booking.appointmentId]
+    );
+
+    const inserted = await client.query<{ id: number }>(
+      `
+        insert into doctor_portal.case_team_assignments (
+          appointment_id, roster_assignment_id, assigned_doctor_id, modality_id, assignment_type, expected_reporting_date, status
+        )
+        values ($1, $2, $3, $4, 'reporting', $5::date, 'active')
+        returning id
+      `,
+      [booking.appointmentId, input.rosterAssignmentId ?? null, input.doctorId, booking.modalityId, booking.bookingDate]
+    );
+    const assignmentId = inserted.rows[0]?.id;
+    if (!assignmentId) throw new Error("assignment_failed");
+
+    await insertDoctorAuditEvent(client, {
+      actorUserId: actor.userId,
+      actorDoctorId: actor.doctorId,
+      eventType: existing.rows[0] ? "case_doctor_reassigned" : "case_doctor_assigned",
+      targetType: "case_team_assignment",
+      targetId: assignmentId,
+      metadata: {
+        appointmentId: booking.appointmentId,
+        doctorId: input.doctorId,
+        rosterAssignmentId: input.rosterAssignmentId ?? null,
+      },
+      reason: input.reason ?? null,
     });
     await client.query("commit");
     return { assignmentId };

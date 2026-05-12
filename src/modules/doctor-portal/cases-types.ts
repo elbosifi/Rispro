@@ -19,11 +19,15 @@ export interface DoctorCaseRow {
   requiresReport: boolean;
   appointmentStatus: string;
   rosterAssignmentId: number | null;
+  assignedDoctorId: number | null;
+  assignedDoctorName: string | null;
   teamName: string | null;
   dutyType: RosterDutyType | null;
   expectedReportingDate: string | null;
   assignmentType: CaseAssignmentType | null;
   assignmentStatus: CaseAssignmentStatus | null;
+  workloadPoints: number | null;
+  workloadDefaulted: boolean;
   protocolStatus: null;
   reportStatus: null;
 }

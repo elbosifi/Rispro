@@ -49,6 +49,7 @@ const ASSIGNMENT_SELECT = `
     m.name_en as "modalityNameEn",
     m.name_ar as "modalityNameAr",
     a.duty_type as "dutyType",
+    coalesce(rdt.requires_specialist, false) as "requiresSpecialist",
     a.session_name as "sessionName",
     a.start_time::text as "startTime",
     a.end_time::text as "endTime",
@@ -58,6 +59,7 @@ const ASSIGNMENT_SELECT = `
     a.updated_at as "updatedAt"
   from doctor_portal.doctor_roster_assignments a
   left join modalities m on m.id = a.modality_id
+  left join doctor_portal.roster_duty_types rdt on rdt.code = a.duty_type
 `;
 
 export async function findRosterWeekByStart(weekStart: string): Promise<RosterWeekRow | null> {

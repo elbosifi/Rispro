@@ -5,6 +5,7 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
 import {
+  assignDoctorCase,
   correctDoctorCaseAssignment,
   getMyDoctorCases,
   getTeamDoctorCases,
@@ -90,6 +91,20 @@ router.post(
       modalityId: optionalPositiveInteger(body.modalityId, "modalityId"),
     });
     res.json({ summary });
+  })
+);
+
+router.post(
+  "/:appointmentId/assign-doctor",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const result = await assignDoctorCase(actor(req), {
+      appointmentId: requiredPositiveInteger(req.params.appointmentId, "appointmentId"),
+      doctorId: requiredPositiveInteger(body.doctorId, "doctorId"),
+      rosterAssignmentId: optionalPositiveInteger(body.rosterAssignmentId, "rosterAssignmentId"),
+      reason: asOptionalString(body.reason) ?? null,
+    });
+    res.json(result);
   })
 );
 

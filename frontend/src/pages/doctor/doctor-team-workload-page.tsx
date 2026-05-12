@@ -111,7 +111,7 @@ function CatalogManagement({
     examTypeId: "",
     caseCategory: "",
     assignmentType: "reporting" as CaseAssignmentType,
-    baseUnits: "1",
+    baseUnits: "",
     reportRequiredMultiplier: "1",
     noReportUnits: "0",
     effectiveFrom: todayIso(),
@@ -136,7 +136,7 @@ function CatalogManagement({
   };
   const reset = () => {
     setEditingId(null);
-    setDraft({ modalityId: "", examTypeId: "", caseCategory: "", assignmentType: "reporting", baseUnits: "1", reportRequiredMultiplier: "1", noReportUnits: "0", effectiveFrom: todayIso(), effectiveTo: "" });
+    setDraft({ modalityId: "", examTypeId: "", caseCategory: "", assignmentType: "reporting", baseUnits: "", reportRequiredMultiplier: "1", noReportUnits: "0", effectiveFrom: todayIso(), effectiveTo: "" });
   };
   const payload = () => ({
     modalityId: Number(draft.modalityId),
@@ -154,8 +154,8 @@ function CatalogManagement({
     <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h3 className="font-semibold">Workload catalog</h3>
-          {activeCount === 0 && <p className="mt-1 text-sm text-amber-700">No active catalog rule exists; workload calculation will use conservative defaults.</p>}
+          <h3 className="font-semibold">Workload scoring rules</h3>
+          {activeCount === 0 && <p className="mt-1 text-sm text-amber-700">No active scoring rule exists; report workload points will remain uncalculated until rules are configured.</p>}
         </div>
         {!canEdit && <p className="text-sm" style={{ color: "var(--text-muted)" }}>Read-only for this Doctor Portal role.</p>}
       </div>
@@ -174,13 +174,12 @@ function CatalogManagement({
             {ASSIGNMENT_TYPES.map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
           </select>
           <input value={draft.caseCategory} onChange={(event) => setDraft((current) => ({ ...current, caseCategory: event.target.value }))} placeholder="Category or blank" className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder="Base units" className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder="Report multiplier" className="rounded-lg border px-3 py-2 text-sm" />
-          <input type="number" min="0" step="0.25" value={draft.noReportUnits} onChange={(event) => setDraft((current) => ({ ...current, noReportUnits: event.target.value }))} placeholder="No-report units" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="number" min="0" step="0.25" value={draft.baseUnits} onChange={(event) => setDraft((current) => ({ ...current, baseUnits: event.target.value }))} placeholder="Points" className="rounded-lg border px-3 py-2 text-sm" />
+          <input type="number" min="0" step="0.1" value={draft.reportRequiredMultiplier} onChange={(event) => setDraft((current) => ({ ...current, reportRequiredMultiplier: event.target.value }))} placeholder="Report-required multiplier" className="rounded-lg border px-3 py-2 text-sm" />
           <input type="date" value={draft.effectiveFrom} onChange={(event) => setDraft((current) => ({ ...current, effectiveFrom: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
           <input type="date" value={draft.effectiveTo} onChange={(event) => setDraft((current) => ({ ...current, effectiveTo: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
           <div className="flex gap-2 md:col-span-3">
-            <button type="button" disabled={!draft.modalityId || !draft.effectiveFrom} onClick={() => {
+            <button type="button" disabled={!draft.modalityId || !draft.baseUnits || !draft.effectiveFrom} onClick={() => {
               if (selected) onUpdate(selected.id, payload());
               else onCreate(payload());
               reset();
@@ -194,7 +193,7 @@ function CatalogManagement({
 
       <div className="overflow-x-auto rounded-lg border" style={{ borderColor: "var(--border)" }}>
         <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
-          <thead><tr>{["Status", "Modality", "Exam", "Category", "Type", "Units", "Effective", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
+          <thead><tr>{["Status", "Modality", "Exam", "Category", "Work type", "Points", "Rule preview", "Effective", "Actions"].map((header) => <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>{header}</th>)}</tr></thead>
           <tbody className="divide-y" style={{ borderColor: "var(--border)" }}>
             {rules.map((rule) => (
               <tr key={rule.id}>
@@ -203,7 +202,8 @@ function CatalogManagement({
                 <td className="px-3 py-2">{rule.examTypeId ? examTypes.find((exam) => exam.id === rule.examTypeId)?.nameEn ?? rule.examTypeId : "Any"}</td>
                 <td className="px-3 py-2">{rule.caseCategory ?? "Any"}</td>
                 <td className="px-3 py-2">{rule.assignmentType.replaceAll("_", " ")}</td>
-                <td className="px-3 py-2">{rule.baseUnits} x {rule.reportRequiredMultiplier}; no-report {rule.noReportUnits}</td>
+                <td className="px-3 py-2">{rule.baseUnits * rule.reportRequiredMultiplier}</td>
+                <td className="px-3 py-2">{modalities.find((modality) => modality.id === rule.modalityId)?.nameEn ?? "Selected modality"} {rule.examTypeId ? examTypes.find((exam) => exam.id === rule.examTypeId)?.nameEn ?? "selected exam" : "report"} cases count as {rule.baseUnits * rule.reportRequiredMultiplier} points.</td>
                 <td className="px-3 py-2">{rule.effectiveFrom} to {rule.effectiveTo ?? "open"}</td>
                 <td className="px-3 py-2">
                   {canEdit && (

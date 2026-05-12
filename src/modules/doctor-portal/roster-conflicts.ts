@@ -1,6 +1,6 @@
 import { pool } from "../../db/pool.js";
 import { findRosterWeekById, listAssignmentsForWeek } from "./roster-repository.js";
-import type { RosterAssignmentRow, RosterConflict, RosterDutyType, RosterMemberRow } from "./roster-types.js";
+import type { RosterAssignmentRow, RosterConflict, RosterMemberRow } from "./roster-types.js";
 
 export interface DoctorRosterFacts {
   doctorId: number;
@@ -24,23 +24,6 @@ function overlaps(a: RosterAssignmentRow, b: RosterAssignmentRow): boolean {
   return timeValue(a.startTime, "00:00") < timeValue(b.endTime, "23:59:59") && timeValue(b.startTime, "00:00") < timeValue(a.endTime, "23:59:59");
 }
 
-function requiresSpecialist(dutyType: RosterDutyType): boolean {
-  return dutyType === "ct_protocol_day" ||
-    dutyType === "mri_supervision_reporting" ||
-    dutyType === "ultrasound_term_1" ||
-    dutyType === "ultrasound_term_2" ||
-    dutyType === "ultrasound_term_3" ||
-    dutyType === "mammography_session";
-}
-
-function requiredSpecialistMessage(dutyType: RosterDutyType): string {
-  if (dutyType === "ct_protocol_day") return "CT protocol day requires a specialist.";
-  if (dutyType === "mri_supervision_reporting") return "MRI supervision/reporting requires a specialist.";
-  if (dutyType.startsWith("ultrasound_term")) return "Ultrasound term requires a supervising specialist.";
-  if (dutyType === "mammography_session") return "Mammography session requires a breast-capable specialist.";
-  return "Team requires a specialist.";
-}
-
 export function evaluateRosterConflicts(
   assignments: RosterAssignmentRow[],
   doctors: Map<number, DoctorRosterFacts>
@@ -49,7 +32,7 @@ export function evaluateRosterConflicts(
   const memberAssignments = new Map<number, RosterAssignmentRow[]>();
 
   for (const assignment of assignments.filter((row) => row.status === "active")) {
-    if (assignment.members.length === 0 && requiresSpecialist(assignment.dutyType)) {
+    if (assignment.members.length === 0 && assignment.requiresSpecialist) {
       conflicts.push({
         assignmentId: assignment.id,
         memberId: null,
@@ -86,14 +69,14 @@ export function evaluateRosterConflicts(
         message: "Team has no specialist.",
       });
     }
-    if (requiresSpecialist(assignment.dutyType) && !hasSpecialist) {
+    if (assignment.requiresSpecialist && !hasSpecialist) {
       conflicts.push({
         assignmentId: assignment.id,
         memberId: null,
         doctorId: null,
         severity: "error",
         code: "duty_missing_specialist",
-        message: requiredSpecialistMessage(assignment.dutyType),
+        message: "Duty type requires a specialist.",
       });
     }
 

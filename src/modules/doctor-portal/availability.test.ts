@@ -89,7 +89,7 @@ describe("Doctor Portal availability and roster conflict wiring", () => {
     const conflicts = evaluateRosterConflicts([
       assignment({ id: 1, members: [{ id: 1, rosterAssignmentId: 1, doctorId: 7, displayName: "Dr Test", doctorRole: "specialist", teamRole: "lead", createdAt: "", updatedAt: "" }] }),
       assignment({ id: 2, startTime: "10:00:00", endTime: "16:00:00", members: [{ id: 2, rosterAssignmentId: 2, doctorId: 7, displayName: "Dr Test", doctorRole: "specialist", teamRole: "specialist", createdAt: "", updatedAt: "" }] }),
-      assignment({ id: 3, dutyType: "mri_supervision_reporting", modalityId: 11, members: [] }),
+      assignment({ id: 3, dutyType: "configured_required_duty", requiresSpecialist: true, modalityId: 11, members: [] }),
     ], doctors);
     assert.ok(conflicts.some((conflict) => conflict.code === "overlapping_assignment"));
     assert.ok(conflicts.some((conflict) => conflict.code === "required_team_empty" && conflict.severity === "error"));

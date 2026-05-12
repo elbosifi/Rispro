@@ -105,12 +105,13 @@ describe("Doctor Portal wiring", () => {
 
   it("creates Phase 2 roster tables without case assignment, protocol, or workload tables", () => {
     const migration = readFileSync(join(rootDir, "src", "db", "migrations", "065_doctor_portal_roster.sql"), "utf8");
+    const configurableRosterMigration = readFileSync(join(rootDir, "src", "db", "migrations", "073_doctor_portal_configurable_roster_reporting.sql"), "utf8");
     assert.match(migration, /doctor_portal\.doctor_roster_weeks/i);
     assert.match(migration, /doctor_portal\.doctor_roster_assignments/i);
     assert.match(migration, /doctor_portal\.doctor_roster_members/i);
-    assert.match(migration, /ct_protocol_day/i);
-    assert.match(migration, /mri_supervision_reporting/i);
-    assert.match(migration, /mammography_session/i);
+    assert.match(configurableRosterMigration, /doctor_portal\.roster_duty_types/i);
+    assert.match(configurableRosterMigration, /select distinct duty_type/i);
+    assert.match(configurableRosterMigration, /drop constraint/i);
     assert.doesNotMatch(migration, /case_team_assignments|appointment_protocols|workload_unit|salary|rvu/i);
   });
 

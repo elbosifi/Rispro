@@ -21,20 +21,6 @@ interface DoctorRequest extends Request {
 
 const TEMPLATE_TYPES = new Set<RosterTemplateType>(["ct_weekly", "mri_weekly", "ultrasound_weekly", "mammography_weekly", "mixed_weekly", "custom"]);
 const COPY_MODES = new Set<RosterTemplateCopyMode>(["structure_only", "structure_with_named_doctors"]);
-const DUTY_TYPES = new Set<RosterDutyType>([
-  "ct_protocol_day",
-  "ct_reporting_day",
-  "mri_supervision_reporting",
-  "ultrasound_term_1",
-  "ultrasound_term_2",
-  "ultrasound_term_3",
-  "mammography_session",
-  "general_reporting",
-  "on_call",
-  "leave",
-  "admin",
-  "teaching",
-]);
 const TEAM_ROLES = new Set<RosterTeamRole>(["lead", "specialist", "sho", "supervisor", "observer"]);
 
 function actor(req: DoctorRequest) {
@@ -67,7 +53,7 @@ function parseCopyMode(value: unknown): RosterTemplateCopyMode {
 
 function parseDutyType(value: unknown): RosterDutyType {
   const dutyType = String(value ?? "").trim();
-  if (!DUTY_TYPES.has(dutyType as RosterDutyType)) throw new HttpError(400, "Unsupported dutyType.");
+  if (!dutyType) throw new HttpError(400, "dutyType is required.");
   return dutyType as RosterDutyType;
 }
 

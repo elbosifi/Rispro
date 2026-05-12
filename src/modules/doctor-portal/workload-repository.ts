@@ -1,13 +1,13 @@
 import { pool } from "../../db/pool.js";
 import type { UserId } from "../../types/http.js";
 import { insertDoctorAuditEvent } from "./profile-repository.js";
-import { defaultWorkloadUnits } from "./workload-rules.js";
 import type { TeamWorkloadSummaryRow, WorkloadCalculationSummary, WorkloadCatalogRule } from "./workload-types.js";
 
 interface WorkloadCaseRow {
   caseTeamAssignmentId: number;
   appointmentId: number;
-  rosterAssignmentId: number;
+  rosterAssignmentId: number | null;
+  assignedDoctorId: number | null;
   modalityId: number;
   modalityCode: string | null;
   modalityName: string | null;
@@ -34,6 +34,7 @@ async function listWorkloadCases(input: { startDate: string; endDate: string; mo
         cta.id as "caseTeamAssignmentId",
         cta.appointment_id as "appointmentId",
         cta.roster_assignment_id as "rosterAssignmentId",
+        cta.assigned_doctor_id as "assignedDoctorId",
         b.modality_id as "modalityId",
         m.code as "modalityCode",
         m.name_en as "modalityName",
@@ -48,6 +49,9 @@ async function listWorkloadCases(input: { startDate: string; endDate: string; mo
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
       where cta.status = 'active'
+        and cta.assignment_type = 'reporting'
+        and b.requires_report = true
+        and b.status not in ('cancelled', 'discontinued', 'voided')
         and b.booking_date >= $1::date
         and b.booking_date <= $2::date
         ${modalityFilter}
@@ -133,12 +137,12 @@ export async function calculateWorkloadUnits(input: { startDate: string; endDate
     }
     try {
       const rule = await findCatalogRule(row);
-      const units = rule
-        ? row.requiresReport
-          ? rule.baseUnits * rule.reportRequiredMultiplier
-          : rule.noReportUnits
-        : defaultWorkloadUnits(row);
-      if (!rule) summary.defaultedNoCatalogRuleCount += 1;
+      if (!rule) {
+        summary.defaultedNoCatalogRuleCount += 1;
+        summary.skippedCount += 1;
+        continue;
+      }
+      const units = rule.baseUnits * rule.reportRequiredMultiplier;
       if (await activeWorkloadCurrent(row, units)) {
         summary.alreadyCurrentCount += 1;
         continue;
@@ -156,9 +160,9 @@ export async function calculateWorkloadUnits(input: { startDate: string; endDate
           insert into doctor_portal.case_workload_units (
             appointment_id, case_team_assignment_id, roster_assignment_id, modality_id, exam_type_id,
             case_category, assignment_type, requires_report, workload_units, source, status,
-            catalog_rule_id, defaulted
+            catalog_rule_id, defaulted, assigned_doctor_id
           )
-          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'auto', 'active', $10, $11)
+          values ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'auto', 'active', $10, false, $11)
         `,
         [
           row.appointmentId,
@@ -170,8 +174,8 @@ export async function calculateWorkloadUnits(input: { startDate: string; endDate
           row.assignmentType,
           row.requiresReport,
           units,
-          rule?.id ?? null,
-          !rule,
+          rule.id,
+          row.assignedDoctorId,
         ]
       );
       summary.calculatedCount += 1;
@@ -203,7 +207,7 @@ export async function listWorkloadSummary(
   filters: { startDate: string; endDate: string; modalityId?: number | null; rosterAssignmentId?: number | null; teamName?: string | null; caseCategory?: string | null; requiresReport?: boolean | null }
 ): Promise<TeamWorkloadSummaryRow[]> {
   const values: unknown[] = [filters.startDate, filters.endDate];
-  const where = ["b.booking_date >= $1::date", "b.booking_date <= $2::date", "cwu.status = 'active'"];
+  const where = ["b.booking_date >= $1::date", "b.booking_date <= $2::date", "cwu.status = 'active'", "cwu.assignment_type = 'reporting'", "cwu.requires_report = true"];
   if (filters.modalityId) {
     values.push(filters.modalityId);
     where.push(`cwu.modality_id = $${values.length}`);
@@ -220,13 +224,9 @@ export async function listWorkloadSummary(
     values.push(filters.caseCategory);
     where.push(`cwu.case_category = $${values.length}`);
   }
-  if (filters.requiresReport !== null && filters.requiresReport !== undefined) {
-    values.push(filters.requiresReport);
-    where.push(`cwu.requires_report = $${values.length}`);
-  }
   if (!isManager) {
     values.push(doctorId);
-    where.push(`exists (select 1 from doctor_portal.doctor_roster_members drm where drm.roster_assignment_id = cwu.roster_assignment_id and drm.doctor_id = $${values.length})`);
+    where.push(`(cwu.assigned_doctor_id = $${values.length} or exists (select 1 from doctor_portal.doctor_roster_members drm where drm.roster_assignment_id = cwu.roster_assignment_id and drm.doctor_id = $${values.length}))`);
   }
   const result = await pool.query<TeamWorkloadSummaryRow>(
     `
@@ -248,11 +248,11 @@ export async function listWorkloadSummary(
       from doctor_portal.case_workload_units cwu
       join appointments_v2.bookings b on b.id = cwu.appointment_id
       join doctor_portal.case_team_assignments cta on cta.id = cwu.case_team_assignment_id
-      join doctor_portal.doctor_roster_assignments dra on dra.id = cwu.roster_assignment_id
+      left join doctor_portal.doctor_roster_assignments dra on dra.id = cwu.roster_assignment_id
       join modalities m on m.id = cwu.modality_id
       where ${where.join(" and ")}
       group by cwu.roster_assignment_id, dra.team_name, dra.duty_type, dra.date, cwu.modality_id, m.name_en, cwu.case_category
-      order by dra.date asc, dra.team_name asc, m.name_en asc
+      order by dra.date asc nulls last, dra.team_name asc nulls last, m.name_en asc
     `,
     values
   );

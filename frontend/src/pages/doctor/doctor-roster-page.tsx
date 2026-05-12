@@ -4,6 +4,7 @@ import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-
 import {
   addDoctorRosterMember,
   applyRosterTemplate,
+  confirmRosterXmlImport,
   copyPreviousDoctorRosterWeek,
   createRosterTemplate,
   createDoctorRosterAssignment,
@@ -14,28 +15,18 @@ import {
   fetchDoctorRosterWeek,
   fetchMyDoctorRoster,
   fetchRosterDoctors,
+  fetchRosterDutyTypes,
+  fetchRosterShiftImportMappings,
   fetchRosterTemplates,
   fetchRosterWeekConflicts,
   generateDoctorRosterDraft,
   notifyDoctorRosterWeek,
+  previewRosterXmlImport,
   publishDoctorRosterWeek,
+  saveRosterDutyType,
+  saveRosterShiftImportMapping,
 } from "@/lib/api-hooks";
-import type { ApplyRosterTemplateResult, GenerateDraftRosterResult, RosterBalanceStrategy, RosterNotificationSummary, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
-
-const DUTY_TYPES: Array<{ value: RosterDutyType; label: string }> = [
-  { value: "ct_protocol_day", label: "CT protocol day" },
-  { value: "ct_reporting_day", label: "CT reporting day" },
-  { value: "mri_supervision_reporting", label: "MRI supervision/reporting" },
-  { value: "ultrasound_term_1", label: "US term 1" },
-  { value: "ultrasound_term_2", label: "US term 2" },
-  { value: "ultrasound_term_3", label: "US term 3" },
-  { value: "mammography_session", label: "Mammography session" },
-  { value: "general_reporting", label: "General reporting" },
-  { value: "on_call", label: "On call" },
-  { value: "leave", label: "Leave" },
-  { value: "admin", label: "Admin" },
-  { value: "teaching", label: "Teaching" },
-];
+import type { ApplyRosterTemplateResult, GenerateDraftRosterResult, RosterBalanceStrategy, RosterNotificationSummary, RosterXmlImportPreview, RosterXmlImportResult, DoctorMe, DoctorRosterAssignment, RosterConflict, RosterDutyType, RosterTeamRole, RosterTemplateCopyMode, RosterTemplateType } from "@/types/api";
 
 const TEAM_ROLES: Array<{ value: RosterTeamRole; label: string }> = [
   { value: "lead", label: "Lead" },
@@ -76,8 +67,8 @@ function isAdmin(me: DoctorMe): boolean {
   return me.moduleCapabilities.includes("doctor_admin");
 }
 
-function dutyLabel(value: string): string {
-  return DUTY_TYPES.find((item) => item.value === value)?.label ?? value;
+function dutyLabel(value: string, dutyTypeLabels = new Map<string, string>()): string {
+  return dutyTypeLabels.get(value) ?? value.replaceAll("_", " ");
 }
 
 function DraggableDoctor({
@@ -114,7 +105,7 @@ function DraggableDoctor({
   );
 }
 
-function DroppableRosterSlot({ assignment, conflicts }: { assignment: DoctorRosterAssignment; conflicts: RosterConflict[] }) {
+function DroppableRosterSlot({ assignment, conflicts, dutyTypeLabels }: { assignment: DoctorRosterAssignment; conflicts: RosterConflict[]; dutyTypeLabels: Map<string, string> }) {
   const droppable = useDroppable({ id: `assignment-${assignment.id}`, data: { assignmentId: assignment.id } });
   const assignmentConflicts = conflicts.filter((conflict) => conflict.assignmentId === assignment.id);
   return (
@@ -122,7 +113,7 @@ function DroppableRosterSlot({ assignment, conflicts }: { assignment: DoctorRost
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">{assignment.teamName}</p>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType)}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType, dutyTypeLabels)}</p>
           <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.startTime || "--"}-{assignment.endTime || "--"}</p>
         </div>
         {assignmentConflicts.length > 0 && <span className="rounded-full border px-2 py-0.5 text-xs text-red-600" style={{ borderColor: "var(--border)" }}>{assignmentConflicts.length} conflicts</span>}
@@ -143,12 +134,14 @@ function AssignmentList({
   onDeleteAssignment,
   onRemoveMember,
   conflicts,
+  dutyTypeLabels,
 }: {
   assignments: DoctorRosterAssignment[];
   canManage: boolean;
   onDeleteAssignment?: (assignmentId: number) => void;
   onRemoveMember?: (assignmentId: number, memberId: number) => void;
   conflicts?: RosterConflict[];
+  dutyTypeLabels: Map<string, string>;
 }) {
   if (assignments.length === 0) {
     return (
@@ -171,7 +164,7 @@ function AssignmentList({
             <div>
               <p className="text-sm font-semibold text-foreground">{assignment.teamName}</p>
               <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
-                {assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType)}
+                {assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType, dutyTypeLabels)}
               </p>
               <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
                 {assignment.sessionName || "No session"} · {assignment.startTime || "--"}-{assignment.endTime || "--"}
@@ -240,6 +233,24 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     queryFn: fetchRosterTemplates,
     enabled: canManage,
   });
+  const dutyTypesQuery = useQuery({
+    queryKey: ["doctor", "roster", "duty-types"],
+    queryFn: () => fetchRosterDutyTypes(true),
+    enabled: canManage,
+  });
+  const shiftMappingsQuery = useQuery({
+    queryKey: ["doctor", "roster", "shift-import-mappings"],
+    queryFn: () => fetchRosterShiftImportMappings(true),
+    enabled: canManage,
+  });
+  const activeDutyTypes = useMemo(
+    () => (dutyTypesQuery.data ?? []).filter((dutyType) => dutyType.active),
+    [dutyTypesQuery.data]
+  );
+  const dutyTypeLabels = useMemo(
+    () => new Map((dutyTypesQuery.data ?? []).map((dutyType) => [dutyType.code, dutyType.label])),
+    [dutyTypesQuery.data]
+  );
 
   const invalidateRoster = async () => {
     await queryClient.invalidateQueries({ queryKey: ["doctor", "roster"] });
@@ -284,6 +295,8 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
   const [templateApplyResult, setTemplateApplyResult] = useState<ApplyRosterTemplateResult | null>(null);
   const [generateResult, setGenerateResult] = useState<GenerateDraftRosterResult | null>(null);
   const [notifyResult, setNotifyResult] = useState<RosterNotificationSummary | null>(null);
+  const [xmlImportPreview, setXmlImportPreview] = useState<RosterXmlImportPreview | null>(null);
+  const [xmlImportResult, setXmlImportResult] = useState<RosterXmlImportResult | null>(null);
   const applyTemplateMutation = useMutation({
     mutationFn: (payload: { templateId: number; targetWeekStartDate: string; copyMode: RosterTemplateCopyMode; overwriteExisting: boolean; modalityId: number | null }) =>
       applyRosterTemplate(payload.templateId, payload),
@@ -304,11 +317,37 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     mutationFn: notifyDoctorRosterWeek,
     onSuccess: (result) => setNotifyResult(result),
   });
+  const saveDutyTypeMutation = useMutation({
+    mutationFn: saveRosterDutyType,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "roster", "duty-types"] });
+    },
+  });
+  const saveShiftMappingMutation = useMutation({
+    mutationFn: saveRosterShiftImportMapping,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "roster", "shift-import-mappings"] });
+    },
+  });
+  const previewXmlImportMutation = useMutation({
+    mutationFn: previewRosterXmlImport,
+    onSuccess: (preview) => {
+      setXmlImportPreview(preview);
+      setXmlImportResult(null);
+    },
+  });
+  const confirmXmlImportMutation = useMutation({
+    mutationFn: confirmRosterXmlImport,
+    onSuccess: async (result) => {
+      setXmlImportResult(result);
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "roster"] });
+    },
+  });
 
   const [assignmentForm, setAssignmentForm] = useState({
     date: weekStart,
     modalityId: "",
-    dutyType: "ct_protocol_day" as RosterDutyType,
+    dutyType: "" as RosterDutyType,
     sessionName: "",
     startTime: "08:00",
     endTime: "14:00",
@@ -319,7 +358,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     name: "",
     templateType: "ct_weekly" as RosterTemplateType,
     dayOfWeek: "1",
-    dutyType: "ct_protocol_day" as RosterDutyType,
+    dutyType: "" as RosterDutyType,
     teamName: "Template team",
     placeholderLabel: "Lead specialist",
     requiredRole: "specialist",
@@ -334,12 +373,44 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
     includeDoctors: false,
     balanceStrategy: "simple" as RosterBalanceStrategy,
   });
+  const [dutyTypeDraft, setDutyTypeDraft] = useState({
+    code: "",
+    label: "",
+    active: true,
+    requiresSpecialist: false,
+    sortOrder: 0,
+  });
+  const [shiftMappingDraft, setShiftMappingDraft] = useState({
+    sourceSystem: "abc",
+    sourceShiftName: "",
+    sourceShiftType: "",
+    sourceShiftAbbreviation: "",
+    dutyTypeCode: "",
+    modalityId: "",
+    teamName: "",
+    active: true,
+  });
+  const [xmlImportDraft, setXmlImportDraft] = useState({
+    fileContentBase64: "",
+    temporaryPassword: "",
+    defaultDoctorRole: "consultant",
+    defaultCoreRole: "doctor" as "doctor" | "supervisor",
+    defaultTeamRole: "specialist",
+    createMissingDoctors: true,
+  });
   useEffect(() => {
     const firstTemplate = templatesQuery.data?.[0];
     if (firstTemplate && !templateApplyForm.templateId) {
       setTemplateApplyForm((current) => ({ ...current, templateId: String(firstTemplate.id) }));
     }
   }, [templatesQuery.data, templateApplyForm.templateId]);
+  useEffect(() => {
+    const firstDutyType = activeDutyTypes[0]?.code ?? "";
+    if (!firstDutyType) return;
+    setAssignmentForm((current) => (current.dutyType ? current : { ...current, dutyType: firstDutyType }));
+    setTemplateForm((current) => (current.dutyType ? current : { ...current, dutyType: firstDutyType }));
+    setShiftMappingDraft((current) => (current.dutyTypeCode ? current : { ...current, dutyTypeCode: firstDutyType }));
+  }, [activeDutyTypes]);
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
@@ -455,6 +526,149 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
         </section>
       )}
 
+      {canManageTemplates && (
+        <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="space-y-3">
+            <h3 className="font-semibold">Roster duty types</h3>
+            <form
+              className="grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!dutyTypeDraft.code.trim() || !dutyTypeDraft.label.trim()) return;
+                saveDutyTypeMutation.mutate({
+                  code: dutyTypeDraft.code,
+                  label: dutyTypeDraft.label,
+                  active: dutyTypeDraft.active,
+                  requiresSpecialist: dutyTypeDraft.requiresSpecialist,
+                  sortOrder: Number(dutyTypeDraft.sortOrder) || 0,
+                });
+              }}
+            >
+              <input placeholder="Code" value={dutyTypeDraft.code} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, code: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Label" value={dutyTypeDraft.label} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, label: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input type="number" placeholder="Sort order" value={dutyTypeDraft.sortOrder} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, sortOrder: Number(e.target.value) }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={dutyTypeDraft.active} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={dutyTypeDraft.requiresSpecialist} onChange={(e) => setDutyTypeDraft((c) => ({ ...c, requiresSpecialist: e.target.checked }))} /> Requires specialist</label>
+              <button type="submit" disabled={!dutyTypeDraft.code.trim() || !dutyTypeDraft.label.trim() || saveDutyTypeMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save duty type</button>
+            </form>
+            <div className="space-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
+              {(dutyTypesQuery.data ?? []).map((dutyType) => (
+                <button
+                  key={dutyType.code}
+                  type="button"
+                  className="block text-left"
+                  onClick={() => setDutyTypeDraft({
+                    code: dutyType.code,
+                    label: dutyType.label,
+                    active: dutyType.active,
+                    requiresSpecialist: dutyType.requiresSpecialist,
+                    sortOrder: dutyType.sortOrder,
+                  })}
+                >
+                  {dutyType.label} ({dutyType.code}){dutyType.active ? "" : " inactive"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="font-semibold">ABC shift mappings</h3>
+            <form
+              className="grid gap-2 sm:grid-cols-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                if (!shiftMappingDraft.dutyTypeCode) return;
+                saveShiftMappingMutation.mutate({
+                  sourceSystem: shiftMappingDraft.sourceSystem || "abc",
+                  sourceShiftName: shiftMappingDraft.sourceShiftName || null,
+                  sourceShiftType: shiftMappingDraft.sourceShiftType || null,
+                  sourceShiftAbbreviation: shiftMappingDraft.sourceShiftAbbreviation || null,
+                  dutyTypeCode: shiftMappingDraft.dutyTypeCode,
+                  modalityId: shiftMappingDraft.modalityId ? Number(shiftMappingDraft.modalityId) : null,
+                  teamName: shiftMappingDraft.teamName || null,
+                  active: shiftMappingDraft.active,
+                });
+              }}
+            >
+              <input placeholder="Shift name" value={shiftMappingDraft.sourceShiftName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Shift type" value={shiftMappingDraft.sourceShiftType} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftType: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <input placeholder="Abbreviation" value={shiftMappingDraft.sourceShiftAbbreviation} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, sourceShiftAbbreviation: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <select value={shiftMappingDraft.dutyTypeCode} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, dutyTypeCode: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="">Duty type</option>
+                {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
+              </select>
+              <select value={shiftMappingDraft.modalityId} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+                <option value="">No modality</option>
+                {(lookupsQuery.data?.modalities ?? []).map((modality) => <option key={modality.id} value={modality.id}>{modality.nameEn}</option>)}
+              </select>
+              <input placeholder="Team name" value={shiftMappingDraft.teamName} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={shiftMappingDraft.active} onChange={(e) => setShiftMappingDraft((c) => ({ ...c, active: e.target.checked }))} /> Active</label>
+              <button type="submit" disabled={!shiftMappingDraft.dutyTypeCode || saveShiftMappingMutation.isPending} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Save mapping</button>
+            </form>
+            <div className="space-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
+              {(shiftMappingsQuery.data ?? []).map((mapping) => (
+                <p key={mapping.id}>{mapping.sourceShiftName || mapping.sourceShiftType || mapping.sourceShiftAbbreviation || "Unnamed shift"} {">"} {dutyLabel(mapping.dutyTypeCode, dutyTypeLabels)}</p>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {canManageTemplates && (
+        <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <h3 className="font-semibold">Import roster from ABC export</h3>
+          <div className="grid gap-2 md:grid-cols-6">
+            <input
+              type="file"
+              accept=".xml,text/xml,application/xml"
+              className="rounded-lg border px-3 py-2 text-sm md:col-span-2"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = () => {
+                  const content = String(reader.result ?? "");
+                  setXmlImportDraft((current) => ({ ...current, fileContentBase64: content.split(",")[1] ?? "" }));
+                };
+                reader.readAsDataURL(file);
+              }}
+            />
+            <select value={xmlImportDraft.defaultDoctorRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultDoctorRole: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              <option value="consultant">Consultant</option>
+              <option value="specialist">Specialist</option>
+              <option value="senior_house_officer">Senior house officer</option>
+              <option value="resident">Resident</option>
+            </select>
+            <select value={xmlImportDraft.defaultCoreRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultCoreRole: event.target.value as "doctor" | "supervisor" }))} className="rounded-lg border px-3 py-2 text-sm">
+              <option value="doctor">RISpro doctor user</option>
+              <option value="supervisor">RISpro supervisor user</option>
+            </select>
+            <select value={xmlImportDraft.defaultTeamRole} onChange={(event) => setXmlImportDraft((current) => ({ ...current, defaultTeamRole: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
+              {TEAM_ROLES.map((role) => <option key={role.value} value={role.value}>{role.label}</option>)}
+            </select>
+            <input type="password" placeholder="Temporary password" value={xmlImportDraft.temporaryPassword} onChange={(event) => setXmlImportDraft((current) => ({ ...current, temporaryPassword: event.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+          </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={xmlImportDraft.createMissingDoctors} onChange={(event) => setXmlImportDraft((current) => ({ ...current, createMissingDoctors: event.target.checked }))} />
+            Create RISpro users and doctor profiles for unmatched doctors
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={!xmlImportDraft.fileContentBase64 || previewXmlImportMutation.isPending} onClick={() => previewXmlImportMutation.mutate({ fileContentBase64: xmlImportDraft.fileContentBase64 })} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview XML</button>
+            <button type="button" disabled={!xmlImportPreview?.canConfirm || !xmlImportDraft.temporaryPassword || confirmXmlImportMutation.isPending} onClick={() => confirmXmlImportMutation.mutate(xmlImportDraft)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
+          </div>
+          {xmlImportPreview && (
+            <div className="grid gap-3 text-sm md:grid-cols-4">
+              <p>Matched doctors: {xmlImportPreview.doctorsMatched.length}</p>
+              <p>Doctors to create: {xmlImportPreview.doctorsToCreate.length}</p>
+              <p>Duty slots: {xmlImportPreview.dutySlotsToCreate.length}</p>
+              <p>Unmapped shifts: {xmlImportPreview.unmappedShiftTypes.length}</p>
+              {xmlImportPreview.warnings.map((warning) => <p key={warning} className="md:col-span-4 text-amber-700">{warning}</p>)}
+            </div>
+          )}
+          {xmlImportResult && <p className="text-sm" style={{ color: "var(--text-muted)" }}>{xmlImportResult.message} Created doctors: {xmlImportResult.createdDoctors.length}.</p>}
+        </section>
+      )}
+
       {canManage && conflicts.length > 0 && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Roster conflicts</h3>
@@ -489,7 +703,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
               <h3 className="font-semibold">Roster slots</h3>
               <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
                 {(roster?.assignments ?? []).map((assignment) => (
-                  <DroppableRosterSlot key={assignment.id} assignment={assignment} conflicts={conflicts} />
+                  <DroppableRosterSlot key={assignment.id} assignment={assignment} conflicts={conflicts} dutyTypeLabels={dutyTypeLabels} />
                 ))}
               </div>
             </div>
@@ -503,7 +717,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
             className="space-y-3"
             onSubmit={(event) => {
               event.preventDefault();
-              if (!roster?.week) return;
+              if (!roster?.week || !assignmentForm.dutyType) return;
               assignmentMutation.mutate({
                 rosterWeekId: roster.week.id,
                 date: assignmentForm.date,
@@ -526,7 +740,8 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                 ))}
               </select>
               <select value={assignmentForm.dutyType} onChange={(e) => setAssignmentForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
-                {DUTY_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                <option value="">Duty type</option>
+                {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
               </select>
               <input placeholder="Team name" value={assignmentForm.teamName} onChange={(e) => setAssignmentForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               <input placeholder="Session" value={assignmentForm.sessionName} onChange={(e) => setAssignmentForm((c) => ({ ...c, sessionName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
@@ -535,7 +750,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                 <input type="time" value={assignmentForm.endTime} onChange={(e) => setAssignmentForm((c) => ({ ...c, endTime: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               </div>
             </div>
-            <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Add assignment</button>
+            <button type="submit" disabled={!assignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Add assignment</button>
           </form>
 
           <form
@@ -670,6 +885,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
               className="space-y-3"
               onSubmit={(event) => {
                 event.preventDefault();
+                if (!templateForm.dutyType) return;
                 createTemplateMutation.mutate({
                   name: templateForm.name || "New roster template",
                   description: null,
@@ -704,12 +920,13 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                   {[1, 2, 3, 4, 5, 6, 7].map((day) => <option key={day} value={day}>Day {day}</option>)}
                 </select>
                 <select value={templateForm.dutyType} onChange={(e) => setTemplateForm((c) => ({ ...c, dutyType: e.target.value as RosterDutyType }))} className="rounded-lg border px-3 py-2 text-sm">
-                  {DUTY_TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                  <option value="">Duty type</option>
+                  {activeDutyTypes.map((type) => <option key={type.code} value={type.code}>{type.label}</option>)}
                 </select>
                 <input placeholder="Team name" value={templateForm.teamName} onChange={(e) => setTemplateForm((c) => ({ ...c, teamName: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
                 <input placeholder="Placeholder" value={templateForm.placeholderLabel} onChange={(e) => setTemplateForm((c) => ({ ...c, placeholderLabel: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
               </div>
-              <button type="submit" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Create template</button>
+              <button type="submit" disabled={!templateForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Create template</button>
             </form>
           )}
         </section>
@@ -724,6 +941,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
           onDeleteAssignment={(assignmentId) => deleteAssignmentMutation.mutate(assignmentId)}
           onRemoveMember={(assignmentId, memberId) => removeMemberMutation.mutate({ assignmentId, memberId })}
           conflicts={conflicts}
+          dutyTypeLabels={dutyTypeLabels}
         />
       )}
     </div>

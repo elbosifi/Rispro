@@ -49,6 +49,10 @@ import type {
   DoctorCase,
   DoctorCaseAssignmentSummary,
   DoctorCaseFilters,
+  RosterDutyTypeConfig,
+  RosterShiftImportMapping,
+  RosterXmlImportPreview,
+  RosterXmlImportResult,
   AppointmentProtocol,
   ProtocolAuditTimelineEvent,
   ProtocolDetails,
@@ -474,6 +478,75 @@ export async function notifyDoctorRosterWeek(weekId: number): Promise<RosterNoti
   });
 }
 
+export async function fetchRosterDutyTypes(includeInactive = false): Promise<RosterDutyTypeConfig[]> {
+  const params = new URLSearchParams();
+  if (includeInactive) params.set("includeInactive", "true");
+  const raw = await api<{ dutyTypes: RosterDutyTypeConfig[] }>(`/doctor/roster/duty-types?${params.toString()}`);
+  return raw.dutyTypes;
+}
+
+export async function saveRosterDutyType(payload: {
+  code: string;
+  label: string;
+  active: boolean;
+  requiresSpecialist: boolean;
+  sortOrder: number;
+}): Promise<RosterDutyTypeConfig> {
+  const raw = await api<{ dutyType: RosterDutyTypeConfig }>("/doctor/roster/duty-types", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.dutyType;
+}
+
+export async function fetchRosterShiftImportMappings(includeInactive = false): Promise<RosterShiftImportMapping[]> {
+  const params = new URLSearchParams();
+  if (includeInactive) params.set("includeInactive", "true");
+  const raw = await api<{ mappings: RosterShiftImportMapping[] }>(`/doctor/roster/shift-import-mappings?${params.toString()}`);
+  return raw.mappings;
+}
+
+export async function saveRosterShiftImportMapping(payload: {
+  id?: number | null;
+  sourceSystem: string;
+  sourceShiftName: string | null;
+  sourceShiftType: string | null;
+  sourceShiftAbbreviation: string | null;
+  dutyTypeCode: string;
+  modalityId: number | null;
+  teamName: string | null;
+  active: boolean;
+}): Promise<RosterShiftImportMapping> {
+  const raw = await api<{ mapping: RosterShiftImportMapping }>("/doctor/roster/shift-import-mappings", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.mapping;
+}
+
+export async function previewRosterXmlImport(payload: { fileContentBase64: string }): Promise<RosterXmlImportPreview> {
+  const raw = await api<{ preview: RosterXmlImportPreview }>("/doctor/roster/import/abc/preview", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.preview;
+}
+
+export async function confirmRosterXmlImport(payload: {
+  fileContentBase64: string;
+  createMissingDoctors: boolean;
+  temporaryPassword: string;
+  defaultDoctorRole: string;
+  defaultCoreRole: "doctor" | "supervisor";
+  defaultTeamRole: string;
+}): Promise<RosterXmlImportResult> {
+  const raw = await api<{ result: RosterXmlImportResult }>("/doctor/roster/import/abc/confirm", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return raw.result;
+}
+
 export async function fetchDoctorRosterNotifications(weekId: number): Promise<RosterNotification[]> {
   const raw = await api<{ notifications: RosterNotification[] }>(`/doctor/roster/weeks/${weekId}/notifications`);
   return raw.notifications;
@@ -590,6 +663,16 @@ export async function runDoctorCaseAssignment(payload: { dateFrom: string; dateT
 
 export async function reassignDoctorCase(appointmentId: number, payload: { rosterAssignmentId: number; reason: string }): Promise<{ assignmentId: number }> {
   return api<{ assignmentId: number }>(`/doctor/cases/${appointmentId}/reassign`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function assignDoctorCase(
+  appointmentId: number,
+  payload: { doctorId: number; rosterAssignmentId?: number | null; reason?: string | null }
+): Promise<{ assignmentId: number }> {
+  return api<{ assignmentId: number }>(`/doctor/cases/${appointmentId}/assign-doctor`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
