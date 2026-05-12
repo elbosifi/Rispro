@@ -16,6 +16,7 @@ import { HttpError } from "../utils/http-error.js";
 import { asString } from "../utils/request-coercion.js";
 import { UnknownRecord, AuthenticatedUserContext, UserId } from "../types/http.js";
 import type { Role } from "../types/domain.js";
+import { updateOwnPassword } from "../services/user-service.js";
 
 interface AuthSessionRequest extends Request {
   body: Record<string, unknown>;
@@ -26,6 +27,7 @@ interface AuthenticatedUser {
   sub: UserId;
   role: Role;
   username: string;
+  mustChangePassword?: boolean;
 }
 
 export const authRouter: Router = express.Router();
@@ -43,7 +45,8 @@ function requireCurrentUser(request: AuthSessionRequest): AuthenticatedUser {
   return {
     sub: request.user.sub,
     role: request.user.role,
-    username: request.user.username as string
+    username: request.user.username as string,
+    mustChangePassword: request.user.mustChangePassword
   };
 }
 
@@ -73,7 +76,8 @@ authRouter.post(
         id: user.id,
         username: user.username,
         fullName: user.full_name,
-        role: user.role
+        role: user.role,
+        mustChangePassword: user.must_change_password
       }
     });
   })
@@ -91,10 +95,38 @@ authRouter.get("/me", requireAuth, (req: Request, res: Response) => {
   res.json({
     user: {
       ...currentUser,
-      recentSupervisorReauth: hasRecentSupervisorReauth(request)
+      recentSupervisorReauth: hasRecentSupervisorReauth(request),
+      mustChangePassword: Boolean(currentUser.mustChangePassword)
     }
   });
 });
+
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as AuthSessionRequest;
+    const currentUser = requireCurrentUser(request);
+    const body = request.body as UnknownRecord;
+    const user = await updateOwnPassword(
+      currentUser.sub,
+      asString(body.currentPassword),
+      asString(body.newPassword)
+    );
+    const token = buildSessionToken(user);
+    writeSessionCookie(res, token);
+
+    res.json({
+      user: {
+        id: user.id,
+        username: user.username,
+        fullName: user.full_name,
+        role: user.role,
+        mustChangePassword: user.must_change_password
+      }
+    });
+  })
+);
 
 authRouter.post(
   "/re-auth",
@@ -124,6 +156,7 @@ authRouter.post(
         username: user.username,
         fullName: user.full_name,
         role: user.role,
+        mustChangePassword: user.must_change_password,
         recentSupervisorReauth: true
       }
     });

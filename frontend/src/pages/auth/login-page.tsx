@@ -22,9 +22,13 @@ export function LoginPage() {
     e.preventDefault();
     setError("");
     try {
-      await login(username, password);
+      const user = await login(username, password);
+      if (user.mustChangePassword) {
+        navigate(from, { replace: true });
+        return;
+      }
       const doctorMe = await fetchDoctorMe().catch(() => null);
-      if (doctorMe?.hasActiveDoctorProfile) {
+      if (doctorMe?.doctorPortalAutoRedirect !== false && doctorMe?.hasActiveDoctorProfile) {
         navigate("/doctor/dashboard", { replace: true });
         return;
       }

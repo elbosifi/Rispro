@@ -47,7 +47,8 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
       role: parseRole(payload.role),
       purpose: payload.purpose ? String(payload.purpose) : undefined,
       username: payload.username ? String(payload.username) : undefined,
-      fullName: payload.fullName ? String(payload.fullName) : undefined
+      fullName: payload.fullName ? String(payload.fullName) : undefined,
+      mustChangePassword: payload.mustChangePassword === true
     };
     next();
   } catch (error) {

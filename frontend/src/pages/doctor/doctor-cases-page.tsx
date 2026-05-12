@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAppointmentLookups,
   fetchMyDoctorCases,
+  fetchDoctorRosterWeek,
   fetchTeamDoctorCases,
   fetchUnassignedDoctorCases,
+  reassignDoctorCase,
   runDoctorCaseAssignment,
 } from "@/lib/api-hooks";
 import type { DoctorCase, DoctorCaseAssignmentSummary, DoctorMe } from "@/types/api";
@@ -27,7 +29,28 @@ function patientName(row: DoctorCase): string {
   return row.patientEnglishName || row.patientArabicName || row.patientMrn || `Patient ${row.patientId}`;
 }
 
-function CaseTable({ cases }: { cases: DoctorCase[] }) {
+function weekStartIso(isoDate: string): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  const day = date.getUTCDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setUTCDate(date.getUTCDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function CaseTable({
+  cases,
+  canManage,
+  rosterAssignments,
+  onReassign,
+}: {
+  cases: DoctorCase[];
+  canManage: boolean;
+  rosterAssignments: Array<{ id: number; label: string }>;
+  onReassign: (appointmentId: number, rosterAssignmentId: number, reason: string) => void;
+}) {
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [rosterAssignmentId, setRosterAssignmentId] = useState("");
+  const [reason, setReason] = useState("");
   if (cases.length === 0) {
     return (
       <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
@@ -41,7 +64,7 @@ function CaseTable({ cases }: { cases: DoctorCase[] }) {
       <table className="min-w-full divide-y text-sm" style={{ borderColor: "var(--border)" }}>
         <thead style={{ backgroundColor: "var(--card)" }}>
           <tr>
-            {["Patient", "Appointment", "Modality", "Exam", "Category", "Report", "Team", "Expected report", "Status"].map((header) => (
+            {["Patient", "Appointment", "Modality", "Exam", "Category", "Report", "Team", "Roster assignment", "Expected report", "Protocol", "Status", "Actions"].map((header) => (
               <th key={header} className="px-3 py-2 text-left text-xs font-semibold uppercase" style={{ color: "var(--text-muted)" }}>
                 {header}
               </th>
@@ -58,8 +81,39 @@ function CaseTable({ cases }: { cases: DoctorCase[] }) {
               <td className="px-3 py-2">{row.caseCategory ?? "-"}</td>
               <td className="px-3 py-2">{row.requiresReport ? "Required" : "No report"}</td>
               <td className="px-3 py-2">{row.teamName ?? "Unassigned"}</td>
+              <td className="px-3 py-2">{row.rosterAssignmentId ?? "-"}</td>
               <td className="px-3 py-2">{row.expectedReportingDate ?? "-"}</td>
+              <td className="px-3 py-2">{row.protocolStatus ?? "-"}</td>
               <td className="px-3 py-2">{row.appointmentStatus}</td>
+              <td className="px-3 py-2">
+                {canManage && (
+                  editingId === row.appointmentId ? (
+                    <div className="flex min-w-72 flex-col gap-2">
+                      <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="rounded-lg border px-2 py-1 text-xs">
+                        <option value="">Roster slot</option>
+                        {rosterAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.label}</option>)}
+                      </select>
+                      <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Correction reason" className="rounded-lg border px-2 py-1 text-xs" />
+                      <div className="flex gap-2">
+                        <button type="button" disabled={!rosterAssignmentId || !reason.trim()} onClick={() => {
+                          onReassign(row.appointmentId, Number(rosterAssignmentId), reason);
+                          setEditingId(null);
+                          setRosterAssignmentId("");
+                          setReason("");
+                        }} className="rounded bg-teal-600 px-2 py-1 text-xs font-semibold text-white disabled:bg-teal-400">Save</button>
+                        <button type="button" onClick={() => setEditingId(null)} className="rounded border px-2 py-1 text-xs">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => {
+                      setEditingId(row.appointmentId);
+                      setRosterAssignmentId(row.rosterAssignmentId ? String(row.rosterAssignmentId) : "");
+                    }} className="rounded-lg border px-2 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
+                      {row.rosterAssignmentId ? "Reassign" : "Assign"}
+                    </button>
+                  )
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -100,6 +154,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const [caseCategory, setCaseCategory] = useState("");
   const [view, setView] = useState<"my" | "team" | "unassigned">("my");
   const [summary, setSummary] = useState<DoctorCaseAssignmentSummary | null>(null);
+  const rosterWeekStart = useMemo(() => weekStartIso(dateFrom), [dateFrom]);
 
   const filters = useMemo(() => ({
     dateFrom,
@@ -124,6 +179,11 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
     queryFn: fetchAppointmentLookups,
     staleTime: 1000 * 60 * 5,
   });
+  const rosterQuery = useQuery({
+    queryKey: ["doctor", "roster", "week", rosterWeekStart],
+    queryFn: () => fetchDoctorRosterWeek(rosterWeekStart),
+    enabled: canManage,
+  });
 
   const assignmentMutation = useMutation({
     mutationFn: () => runDoctorCaseAssignment({ dateFrom, dateTo, modalityId: modalityId ? Number(modalityId) : null }),
@@ -132,8 +192,19 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
       await queryClient.invalidateQueries({ queryKey: ["doctor", "cases"] });
     },
   });
+  const reassignMutation = useMutation({
+    mutationFn: (payload: { appointmentId: number; rosterAssignmentId: number; reason: string }) =>
+      reassignDoctorCase(payload.appointmentId, { rosterAssignmentId: payload.rosterAssignmentId, reason: payload.reason }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["doctor", "cases"] });
+    },
+  });
 
   const cases = casesQuery.data ?? [];
+  const rosterAssignments = (rosterQuery.data?.assignments ?? []).map((assignment) => ({
+    id: assignment.id,
+    label: `${assignment.date} · ${assignment.teamName} · ${assignment.modalityNameEn ?? "No modality"} · ${assignment.dutyType.replaceAll("_", " ")}`,
+  }));
 
   return (
     <div className="space-y-4">
@@ -210,7 +281,13 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
           Loading cases...
         </div>
       ) : (
-        <CaseTable cases={cases} />
+        <CaseTable
+          cases={cases}
+          canManage={canManage}
+          rosterAssignments={rosterAssignments}
+          onReassign={(appointmentId, targetRosterAssignmentId, correctionReason) =>
+            reassignMutation.mutate({ appointmentId, rosterAssignmentId: targetRosterAssignmentId, reason: correctionReason })}
+        />
       )}
     </div>
   );

@@ -20,6 +20,7 @@ import { DoctorProtocolsPage } from "./doctor-protocols-page";
 import { DoctorRosterPage } from "./doctor-roster-page";
 import { DoctorTeamWorkloadPage } from "./doctor-team-workload-page";
 import { DoctorAvailabilityPage } from "./doctor-availability-page";
+import { DoctorAdminDoctorsPage } from "./doctor-admin-doctors-page";
 
 type DoctorPortalNavItem = {
   path: string;
@@ -43,7 +44,7 @@ const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
 ];
 
 function isSupervisorOrAdmin(me: DoctorMe): boolean {
-  return me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+  return Boolean(me.canAccessDoctorAdmin) || me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
 }
 
 function LoadingShell() {
@@ -62,18 +63,19 @@ function DoctorPortalHome({ me }: { me: DoctorMe }) {
           Doctor Portal
         </p>
         <h2 className="mt-1 text-2xl font-semibold text-foreground">
-          {me.profile?.displayName ?? "Doctor workspace"}
+          {me.profile?.displayName ?? "Doctor Portal admin"}
         </h2>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
-        <SummaryTile label="Role" value={me.doctorRole?.replaceAll("_", " ") ?? "doctor"} />
+        <SummaryTile label="Role" value={me.doctorRole?.replaceAll("_", " ") ?? (me.isSuperAdmin ? "super admin" : "admin")} />
         <SummaryTile label="Protocol permission" value={me.canAssignProtocols ? "Allowed" : "Not enabled"} />
         <SummaryTile label="Reporting permission" value={me.canFinalizeReports ? "Can finalize" : "Not enabled"} />
       </div>
-      <PlaceholderPanel
-        title="Clinical coordination workspace"
-        body="Phase 1 enables identity, access control, and navigation only. Roster, case basket, protocol assignment, and workload dashboards will arrive in later phases."
-      />
+      {!me.hasActiveDoctorProfile && me.canAccessDoctorAdmin ? (
+        <PlaceholderPanel title="Doctor Portal administration" body="Use Doctors/Admin to manage doctor profiles and modality permissions." />
+      ) : (
+        <PlaceholderPanel title="Clinical coordination workspace" body="Roster, case basket, protocol assignment, and workload dashboards are available from the navigation." />
+      )}
     </div>
   );
 }
@@ -110,23 +112,23 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
       <Route
         path="roster"
-        element={<DoctorRosterPage me={me} management={false} />}
+        element={me.hasActiveDoctorProfile ? <DoctorRosterPage me={me} management={false} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="availability"
-        element={<DoctorAvailabilityPage me={me} />}
+        element={me.hasActiveDoctorProfile ? <DoctorAvailabilityPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="cases"
-        element={<DoctorCasesPage me={me} />}
+        element={me.hasActiveDoctorProfile ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="protocols"
-        element={<DoctorProtocolsPage me={me} />}
+        element={me.hasActiveDoctorProfile ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="team-workload"
-        element={<DoctorTeamWorkloadPage me={me} />}
+        element={me.hasActiveDoctorProfile ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="admin/roster"
@@ -142,10 +144,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
         path="admin/doctors"
         element={
           canManage ? (
-            <PlaceholderPanel
-              title="Doctors/Admin"
-              body="Doctor profile administration is available through the backend identity module. A full management UI is deferred beyond this shell."
-            />
+            <DoctorAdminDoctorsPage me={me} />
           ) : (
             <Navigate to="/doctor/dashboard" replace />
           )
@@ -169,15 +168,17 @@ export default function DoctorPage() {
   });
 
   const navItems = useMemo(() => {
-    if (!me || !isSupervisorOrAdmin(me)) return DOCTOR_NAV;
+    if (!me) return DOCTOR_NAV;
+    const baseNav = me.hasActiveDoctorProfile ? DOCTOR_NAV : [];
+    if (!isSupervisorOrAdmin(me)) return baseNav;
     const byPath = new Map<string, DoctorPortalNavItem>();
-    [...DOCTOR_NAV, ...SUPERVISOR_NAV].forEach((item) => byPath.set(item.path, item));
+    [...baseNav, ...SUPERVISOR_NAV].forEach((item) => byPath.set(item.path, item));
     return [...byPath.values()];
   }, [me]);
 
   if (isLoading) return <LoadingShell />;
 
-  if (!me?.hasActiveDoctorProfile) {
+  if (!(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.moduleCapabilities.includes("doctor_admin"))) {
     return <Navigate to="/" replace />;
   }
 

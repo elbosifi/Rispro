@@ -29,6 +29,7 @@ import type {
   PatientDirectoryResponse,
   PatientDirectorySummary,
   DoctorMe,
+  DoctorModalityPermission,
   DoctorProfile,
   DoctorProfileRole,
   DoctorRosterResponse,
@@ -220,6 +221,67 @@ export async function updateDoctorProfileForAdmin(
     body: JSON.stringify(payload),
   });
   return raw.profile;
+}
+
+export async function fetchDoctorProfileModalities(profileId: number): Promise<DoctorModalityPermission[]> {
+  const raw = await api<{ modalities: DoctorModalityPermission[] }>(`/doctor/profiles/${profileId}/modalities`);
+  return raw.modalities;
+}
+
+export async function updateDoctorProfileModalities(
+  profileId: number,
+  permissions: Array<{
+    modalityId: number;
+    canProtocol: boolean;
+    canReport: boolean;
+    canSupervise: boolean;
+    active: boolean;
+  }>
+): Promise<DoctorModalityPermission[]> {
+  const raw = await api<{ modalities: DoctorModalityPermission[] }>(`/doctor/profiles/${profileId}/modalities`, {
+    method: "PUT",
+    body: JSON.stringify({ permissions })
+  });
+  return raw.modalities;
+}
+
+export interface DoctorImportPreview {
+  rows: Array<{ rowNumber: number; values: Record<string, string>; action: "create" | "update" | "invalid"; errors: string[] }>;
+  canConfirm: boolean;
+}
+
+export interface DoctorImportResult {
+  createdUsers: number;
+  updatedUsers: number;
+  createdProfiles: number;
+  updatedProfiles: number;
+  disabledProfiles: number;
+  modalityPermissionsUpdated: number;
+  skippedRows: number;
+  failedRows: Array<{ rowNumber: number; reason: string }>;
+}
+
+export async function inspectDoctorImport(fileContentBase64: string) {
+  return api<{ workbook: { columns: string[]; requiredColumns: string[]; rowCount: number; missingColumns: string[] } }>("/doctor/admin/doctors/import/inspect", {
+    method: "POST",
+    body: JSON.stringify({ fileContentBase64 })
+  });
+}
+
+export async function previewDoctorImport(fileContentBase64: string): Promise<DoctorImportPreview> {
+  const raw = await api<{ preview: DoctorImportPreview }>("/doctor/admin/doctors/import/preview", {
+    method: "POST",
+    body: JSON.stringify({ fileContentBase64 })
+  });
+  return raw.preview;
+}
+
+export async function confirmDoctorImport(fileContentBase64: string): Promise<DoctorImportResult> {
+  const raw = await api<{ result: DoctorImportResult }>("/doctor/admin/doctors/import/confirm", {
+    method: "POST",
+    body: JSON.stringify({ fileContentBase64 })
+  });
+  return raw.result;
 }
 
 export async function fetchDoctorRosterWeek(weekStart: string): Promise<DoctorRosterResponse> {
@@ -469,6 +531,13 @@ export async function runDoctorCaseAssignment(payload: { dateFrom: string; dateT
   return raw.summary;
 }
 
+export async function reassignDoctorCase(appointmentId: number, payload: { rosterAssignmentId: number; reason: string }): Promise<{ assignmentId: number }> {
+  return api<{ assignmentId: number }>(`/doctor/cases/${appointmentId}/reassign`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 function protocolParams(filters: ProtocolFilters): URLSearchParams {
   const params = new URLSearchParams({ dateFrom: filters.dateFrom, dateTo: filters.dateTo });
   if (filters.modalityId) params.set("modalityId", String(filters.modalityId));
@@ -606,6 +675,14 @@ export async function login(username: string, password: string): Promise<User> {
   const res = await api<{ user: RawRecord }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ username, password })
+  });
+  return mapUser(res.user);
+}
+
+export async function changeOwnPassword(currentPassword: string, newPassword: string): Promise<User> {
+  const res = await api<{ user: RawRecord }>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword })
   });
   return mapUser(res.user);
 }

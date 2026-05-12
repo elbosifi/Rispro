@@ -6,13 +6,27 @@ import { asUnknownRecord } from "../../utils/records.js";
 import { HttpError } from "../../utils/http-error.js";
 import { env } from "../../config/env.js";
 import type { AuthenticatedUserContext } from "../../types/http.js";
-import { createProfileForAdmin, getDoctorMe, listProfilesForAdmin, updateProfileForAdmin } from "./profile-service.js";
+import {
+  createProfileForAdmin,
+  getDoctorMe,
+  listProfileModalitiesForAdmin,
+  listProfilesForAdmin,
+  updateProfileForAdmin,
+  updateProfileModalitiesForAdmin,
+} from "./profile-service.js";
 import type { DoctorRole } from "./profile-repository.js";
 import { doctorRosterRouter } from "./roster-routes.js";
 import { doctorCasesRouter } from "./cases-routes.js";
 import { doctorProtocolsRouter } from "./protocol-routes.js";
 import { doctorWorkloadRouter } from "./workload-routes.js";
 import { doctorAvailabilityRouter, doctorLeaveRouter } from "./availability-routes.js";
+import {
+  confirmDoctorImportCsv,
+  doctorImportTemplateCsv,
+  exportDoctorProfilesCsv,
+  inspectDoctorImportCsv,
+  previewDoctorImportCsv,
+} from "./doctor-import-export-service.js";
 
 const router = Router();
 
@@ -55,6 +69,14 @@ function parseDoctorRole(value: unknown): DoctorRole {
     throw new HttpError(400, "doctorRole must be consultant, specialist, senior_house_officer, or resident.");
   }
   return role as DoctorRole;
+}
+
+function asPositiveInteger(value: unknown, field: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new HttpError(400, `${field} must be a positive integer.`);
+  }
+  return parsed;
 }
 
 router.get(
@@ -119,6 +141,100 @@ router.patch(
     });
 
     res.json({ profile });
+  })
+);
+
+router.get(
+  "/profiles/:id/modalities",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const modalities = await listProfileModalitiesForAdmin(
+      user.sub,
+      user.role,
+      asPositiveInteger(req.params.id, "profile id")
+    );
+    res.json({ modalities });
+  })
+);
+
+router.put(
+  "/profiles/:id/modalities",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    const body = asUnknownRecord(req.body);
+    const rawPermissions = Array.isArray(body.permissions) ? body.permissions : [];
+    const permissions = rawPermissions.map((item) => {
+      const record = asUnknownRecord(item);
+      return {
+        modalityId: asPositiveInteger(record.modalityId, "modalityId"),
+        canProtocol: asOptionalBoolean(record.canProtocol) ?? false,
+        canReport: asOptionalBoolean(record.canReport) ?? false,
+        canSupervise: asOptionalBoolean(record.canSupervise) ?? false,
+        active: asOptionalBoolean(record.active) ?? true,
+      };
+    });
+    const modalities = await updateProfileModalitiesForAdmin(
+      user.sub,
+      user.role,
+      asPositiveInteger(req.params.id, "profile id"),
+      permissions
+    );
+    res.json({ modalities });
+  })
+);
+
+router.get(
+  "/admin/doctors/export",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    await listProfilesForAdmin(user.sub, user.role);
+    const format = String(req.query.format ?? "csv").toLowerCase();
+    if (format !== "csv") throw new HttpError(400, "Only CSV doctor export is currently supported.");
+    const payload = await exportDoctorProfilesCsv();
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.send(payload.csv);
+  })
+);
+
+router.get(
+  "/admin/doctors/import/template",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    await listProfilesForAdmin(user.sub, user.role);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="rispro-doctor-import-template.csv"`);
+    res.send(doctorImportTemplateCsv());
+  })
+);
+
+router.post(
+  "/admin/doctors/import/inspect",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    await listProfilesForAdmin(user.sub, user.role);
+    const body = asUnknownRecord(req.body);
+    res.json({ workbook: inspectDoctorImportCsv(asString(body.fileContentBase64)) });
+  })
+);
+
+router.post(
+  "/admin/doctors/import/preview",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    await listProfilesForAdmin(user.sub, user.role);
+    const body = asUnknownRecord(req.body);
+    res.json({ preview: await previewDoctorImportCsv(asString(body.fileContentBase64)) });
+  })
+);
+
+router.post(
+  "/admin/doctors/import/confirm",
+  asyncRoute(async (req: DoctorRequest, res: Response) => {
+    const user = currentUser(req);
+    await listProfilesForAdmin(user.sub, user.role);
+    const body = asUnknownRecord(req.body);
+    res.json({ result: await confirmDoctorImportCsv(asString(body.fileContentBase64), user.sub) });
   })
 );
 

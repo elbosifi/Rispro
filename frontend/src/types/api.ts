@@ -29,6 +29,7 @@ export interface User {
   createdAt?: string;
   updatedAt?: string;
   recentSupervisorReauth?: boolean;
+  mustChangePassword?: boolean;
 }
 
 export interface AuthSession {
@@ -37,6 +38,7 @@ export interface AuthSession {
   fullName: string;
   role: Role;
   recentSupervisorReauth?: boolean;
+  mustChangePassword?: boolean;
 }
 
 export type DoctorProfileRole = "consultant" | "specialist" | "senior_house_officer" | "resident";
@@ -46,6 +48,9 @@ export interface DoctorProfile {
   id: number;
   userId: number;
   username?: string | null;
+  fullName?: string | null;
+  coreRole?: Role | string | null;
+  userActive?: boolean | null;
   displayName: string;
   doctorRole: DoctorProfileRole;
   active: boolean;
@@ -72,6 +77,11 @@ export interface DoctorModalityPermission {
 export interface DoctorMe {
   hasActiveDoctorProfile: boolean;
   profile: DoctorProfile | null;
+  isSuperAdmin?: boolean;
+  canAccessDoctorPortal?: boolean;
+  canAccessDoctorAdmin?: boolean;
+  canManageDoctorProfiles?: boolean;
+  doctorPortalAutoRedirect?: boolean;
   doctorRole: DoctorProfileRole | null;
   canFinalizeReports: boolean;
   canAssignProtocols: boolean;

@@ -85,7 +85,7 @@ export async function getMyRosterForDoctor(actor: Actor, weekStart: string | nul
 
 export async function listRosterDoctors(actor: Actor): Promise<DoctorProfileRow[]> {
   await requireRosterManager(actor);
-  return listDoctorProfiles();
+  return (await listDoctorProfiles()).filter((profile) => profile.active);
 }
 
 export async function createDraftRosterWeek(actor: Actor, input: { weekStartDate: string; weekEndDate: string }) {

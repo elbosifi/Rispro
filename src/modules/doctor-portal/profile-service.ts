@@ -1,4 +1,5 @@
 import { HttpError } from "../../utils/http-error.js";
+import { env } from "../../config/env.js";
 import { canRoleAccessPage, readPageVisibilityMatrix } from "../../services/page-visibility-settings-service.js";
 import type { Role } from "../../types/domain.js";
 import type { UserId } from "../../types/http.js";
@@ -6,8 +7,10 @@ import { deriveDoctorCapabilities } from "./capabilities.js";
 import {
   createDoctorProfile,
   findActiveDoctorProfileByUserId,
+  findDoctorProfileByUserId,
   listDoctorModalityPermissions,
   listDoctorProfiles,
+  replaceDoctorModalityPermissions,
   updateDoctorProfile,
   type CreateDoctorProfileInput,
   type DoctorModalityPermissionRow,
@@ -19,6 +22,11 @@ import {
 export interface DoctorMeResponse {
   hasActiveDoctorProfile: boolean;
   profile: DoctorProfileRow | null;
+  isSuperAdmin: boolean;
+  canAccessDoctorPortal: boolean;
+  canAccessDoctorAdmin: boolean;
+  canManageDoctorProfiles: boolean;
+  doctorPortalAutoRedirect: boolean;
   doctorRole: DoctorRole | null;
   canFinalizeReports: boolean;
   canAssignProtocols: boolean;
@@ -47,24 +55,32 @@ const CORE_ROUTE_KEYS = [
 ] as const;
 
 export async function getDoctorMe(userId: UserId, appRole: Role): Promise<DoctorMeResponse> {
-  const profile = await findActiveDoctorProfileByUserId(userId);
-  const allowedModalities = profile ? await listDoctorModalityPermissions(profile.id) : [];
+  const profile = await findDoctorProfileByUserId(userId);
+  const hasActiveDoctorProfile = Boolean(profile?.active);
+  const isSuperAdmin = appRole === "super_admin";
+  const canManageDoctorProfiles = isSuperAdmin || appRole === "supervisor";
+  const allowedModalities = hasActiveDoctorProfile && profile ? await listDoctorModalityPermissions(profile.id) : [];
   const moduleCapabilities = deriveDoctorCapabilities({
     appRole,
-    hasActiveProfile: Boolean(profile),
-    canSupervise: Boolean(profile?.canSupervise),
+    hasActiveProfile: hasActiveDoctorProfile,
+    canSupervise: canManageDoctorProfiles || Boolean(profile?.canSupervise),
   });
 
   const pageMatrix = await readPageVisibilityMatrix();
   const canAccessCoreWorkspace = CORE_ROUTE_KEYS.some((routeKey) => canRoleAccessPage(routeKey, appRole, pageMatrix));
 
   return {
-    hasActiveDoctorProfile: Boolean(profile),
+    hasActiveDoctorProfile,
     profile,
+    isSuperAdmin,
+    canAccessDoctorPortal: hasActiveDoctorProfile || isSuperAdmin,
+    canAccessDoctorAdmin: canManageDoctorProfiles,
+    canManageDoctorProfiles,
+    doctorPortalAutoRedirect: env.doctorPortalAutoRedirect,
     doctorRole: profile?.doctorRole ?? null,
-    canFinalizeReports: Boolean(profile?.canFinalizeReports),
-    canAssignProtocols: Boolean(profile?.canAssignProtocols),
-    canSupervise: Boolean(profile?.canSupervise),
+    canFinalizeReports: hasActiveDoctorProfile && Boolean(profile?.canFinalizeReports),
+    canAssignProtocols: hasActiveDoctorProfile && Boolean(profile?.canAssignProtocols),
+    canSupervise: canManageDoctorProfiles || (hasActiveDoctorProfile && Boolean(profile?.canSupervise)),
     allowedModalities,
     moduleCapabilities,
     canAccessCoreWorkspace,
@@ -72,7 +88,7 @@ export async function getDoctorMe(userId: UserId, appRole: Role): Promise<Doctor
 }
 
 export async function requireDoctorAdmin(userId: UserId, appRole: Role): Promise<DoctorProfileRow | null> {
-  if (appRole !== "super_admin") {
+  if (appRole !== "super_admin" && appRole !== "supervisor") {
     throw new HttpError(403, "Doctor admin access is required.");
   }
   return findActiveDoctorProfileByUserId(userId);
@@ -104,4 +120,25 @@ export async function updateProfileForAdmin(
     throw new HttpError(404, "Doctor profile not found.");
   }
   return profile;
+}
+
+export async function listProfileModalitiesForAdmin(userId: UserId, appRole: Role, profileId: number) {
+  await requireDoctorAdmin(userId, appRole);
+  return listDoctorModalityPermissions(profileId, true);
+}
+
+export async function updateProfileModalitiesForAdmin(
+  actorUserId: UserId,
+  appRole: Role,
+  profileId: number,
+  permissions: Array<{
+    modalityId: number;
+    canProtocol: boolean;
+    canReport: boolean;
+    canSupervise: boolean;
+    active: boolean;
+  }>
+) {
+  await requireDoctorAdmin(actorUserId, appRole);
+  return replaceDoctorModalityPermissions(profileId, permissions, actorUserId);
 }

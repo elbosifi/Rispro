@@ -1,88 +1,130 @@
 # Doctor Portal Staging Validation
 
-## Purpose
+## Access Policy
 
-Validate Doctor Portal rollout without changing RISpro Core scheduling, capacity, registration, print, QR, or booking workflows.
+- RISpro uses one login page. There is no separate Doctor Portal login.
+- `DOCTOR_PORTAL_ENABLED=true` enables the module. `DOCTOR_PORTAL_AUTO_REDIRECT=true` is the default.
+- After normal login, active Doctor Portal doctors auto-redirect to `/doctor/dashboard`.
+- Users without an active doctor profile remain in RISpro Core.
+- Core role `doctor` alone does not grant Doctor Portal clinical access.
+- Inactive doctor profiles block clinical Doctor Portal access.
+- `super_admin` can access Doctor Portal Admin without a doctor profile, but is not rosterable unless a doctor profile exists.
+- Core `supervisor` can manage doctor profiles in Doctor Portal Admin without having a doctor profile.
+- RISpro Settings > Users manages core accounts only and shows read-only Doctor Portal status.
 
-## Prerequisites
+## User Management
 
-- Run migrations through `071_doctor_portal_roster_notifications.sql`.
-- Confirm `doctor_portal` schema exists.
-- Set `DOCTOR_PORTAL_ENABLED=true` for staging validation. Leave unset to use the default enabled behavior.
-- Keep RISpro Core appointment workflows enabled and unchanged.
-- Use staging users only.
+1. Open Doctor Portal > Admin > Doctors.
+2. Create doctor profiles for existing RISpro users.
+3. Set doctor role, active state, report/protocol/supervisor permissions, and modality permissions.
+4. Disable access by setting the doctor profile inactive. Do not delete historical rows.
+5. Reactivate access by setting the doctor profile active.
+6. Use CSV import/export for bulk doctor setup. Export never includes passwords.
+7. Imported new users are active immediately and must change temporary password on first login.
 
-## Test Setup
+## Import / Export Workflow
 
-1. Create one normal doctor user, one doctor supervisor, and one doctor admin.
-2. Create active doctor profiles for each user.
-3. Add modality permissions with `can_protocol=true` for the target modality.
-4. Select or create a scheduled V2 appointment in staging.
-5. Publish a roster week containing a matching roster assignment/team for the appointment date.
-6. Add the normal doctor as a roster member.
-7. Add one availability entry and one leave request for staging validation.
+1. Download the doctor import template.
+2. Fill `username`, `full_name`, `temporary_password`, `core_role`, `doctor_role`, profile flags, and modality code lists.
+3. Upload CSV.
+4. Inspect columns and row count.
+5. Preview row actions and validation errors.
+6. Confirm only when preview has no row-level errors.
+7. Confirm writes users, profiles, modality permissions, and audit events transactionally.
 
-## Workflow Smoke Test
+## Roster Planning
 
-1. Log in as supervisor and publish the roster week.
-2. Confirm availability entries and leave requests appear under Doctor Portal Availability.
-3. Approve or reject a staging leave request as supervisor.
-4. Add an unavailable doctor to a draft roster and confirm conflict warnings appear.
-5. Confirm publish is blocked when error-level conflicts remain.
-6. Resolve the conflict and publish successfully.
-7. Apply a roster template to a draft week and confirm it does not publish automatically.
-8. Generate a draft roster and confirm it remains draft.
-9. Export the roster as HTML and CSV, confirming roster content only and no patient data.
-10. Trigger roster notification records after publish and confirm only assigned doctors are included.
-11. Run case assignment for the appointment date from Doctor Portal.
-12. Confirm the appointment is assigned to the roster assignment/team, not to an individual doctor.
-13. Log in as normal doctor and confirm the case appears in My Cases.
-14. Open Protocols, save a draft, and confirm draft protocol is not visible in V2 appointment details or queue.
-15. Assign the protocol.
-16. Confirm assigned protocol fields are visible read-only in appointment details and queue reads.
-17. Run workload calculation for the date range.
-18. Confirm workload summary shows team, modality, case count, workload units, report-required count, no-report count, pending/finalized/overdue where available.
+- Use Doctor Portal > Admin > Roster for supervisor/admin roster planning.
+- Drag doctors into roster slots to add members.
+- Dragging an existing member to another slot asks whether to move or copy.
+- Backend APIs remain authoritative; failed drops show API errors/conflicts through existing query invalidation.
+- The Add Member dropdown remains available as the non-drag fallback.
+- Conflict warnings must be reviewed before publishing.
+- Publishing is blocked when error-level conflicts exist.
 
-## Permission Checks
+## Manual Case Assignment
 
-- Non-doctor cannot access Doctor Portal APIs.
-- Normal doctor cannot mutate roster.
-- Normal doctor cannot create team availability or approve leave.
-- Normal doctor cannot run global case assignment.
-- Normal doctor cannot run workload calculation.
-- Normal doctor cannot generate draft rosters, notify teams, or export unrelated full rosters.
-- Normal doctor cannot protocol unrelated cases.
-- Supervisor can manage roster, run case assignment, protocol team cases, and calculate workload.
-- Doctor admin can create catalog rules/profile records where enabled.
+- Use Doctor Portal > Cases in supervisor/admin mode.
+- Filter by date range, modality, assignment status, report requirement, and case category.
+- Assign or reassign a case to a published roster slot.
+- A correction reason is required.
+- Reassignment supersedes the previous active assignment and writes an audit event.
+- Normal doctors cannot run assignment or reassignment.
 
-## Migration Verification
+## Forced Password Change
 
-- Confirm migrations `064` through `071` applied in order.
-- Confirm partial unique indexes:
-  - `case_team_assignments_active_unique`
-  - `case_workload_units_active_unique`
-- Confirm availability/leave/template/notification tables:
-  - `doctor_availability`
-  - `doctor_leave_requests`
-  - `roster_templates`
-  - `roster_template_assignments`
-  - `roster_template_members`
-  - `doctor_roster_notifications`
-- Confirm foreign keys to `appointments_v2.bookings`, `modalities`, `exam_types`, roster assignments, and doctor profiles.
+- New imported users get `must_change_password=true`.
+- Users with the flag must change password before RISpro Core or Doctor Portal access.
+- Successful password change clears the flag and refreshes the session.
+- Existing users are not forced unless explicitly flagged.
 
-## Rollback / Disable Procedure
+## DB-Backed Validation Commands
 
-1. Hide Doctor Portal navigation or disable access by removing active doctor profiles.
-2. Set `DOCTOR_PORTAL_ENABLED=false` and restart the app to disable Doctor Portal API access.
-3. Leave API permission checks in place.
-4. Do not delete historical protocol, assignment, roster, or workload rows unless staging reset is intended.
-5. If a migration rollback is required, remove dependent tables in reverse order: notifications, roster templates, availability/leave, workload, protocols, case assignments, roster, identity.
+Run with a real staging-like database:
 
-## Known Limitations
+```bash
+TEST_DATABASE_URL=postgres://... node --import tsx --test src/modules/doctor-portal/doctor-portal.integration.test.ts
+npm run typecheck
+cd frontend && npx tsc --noEmit -p tsconfig.app.json
+```
 
-- Workload pending/finalized status uses existing booking status; no report finalization workflow is implemented.
-- Workload catalog management is backend-only and minimal.
-- Protocol audit history exists in the database but does not yet have a full timeline UI.
-- Ultrasound session matching falls back safely when appointment data does not expose an explicit session signal.
-- Roster notifications currently create internal records only; email delivery is deferred unless existing email infrastructure is explicitly wired later.
-- Draft generation is conservative and review-only; it never publishes automatically.
+Also run focused Doctor Portal backend tests, frontend Doctor Portal tests, Settings Users tests, auth/login tests, and appointment routing/cutover tests.
+
+## Staging Pilot Checklist
+
+1. Set `DOCTOR_PORTAL_ENABLED=true`.
+2. Set `DOCTOR_PORTAL_AUTO_REDIRECT=true`.
+3. Create or import test doctors.
+4. Confirm forced password change.
+5. Set modality permissions.
+6. Create a roster.
+7. Test drag/drop roster planning and Add Member fallback.
+8. Resolve conflicts and publish roster.
+9. Create or select scheduled appointments.
+10. Run assignment.
+11. Manually reassign one case with a reason.
+12. Save protocol draft and confirm draft is hidden from operational reads.
+13. Assign protocol and confirm read-only visibility.
+14. Run workload calculation and confirm team-based workload only.
+15. Confirm normal doctor sees only own/team-allowed data.
+16. Confirm supervisor/admin management works.
+17. Confirm reception workflow is unchanged.
+18. Monitor selected doctors, supervisors, and technologists for 1-2 weeks.
+
+## Go / No-Go
+
+GO for controlled staging pilot only if:
+
+- DB-backed integration test runs and passes without skip.
+- Migrations apply cleanly.
+- Forced password change works.
+- Import inspect/preview/confirm works.
+- Modality permission UI works.
+- Auto-redirect works.
+- Drag/drop roster works with fallback controls.
+- Manual case reassignment works with audit.
+- Protocol drafts remain hidden from appointment/queue reads.
+- Assigned protocols appear read-only.
+- No duplicate active assignment/workload rows exist.
+- Normal doctors cannot access unrelated data.
+- Appointment routing/cutover tests pass.
+- Typechecks pass.
+
+NO-GO if:
+
+- DB-backed test skips.
+- Migrations fail.
+- Doctor without profile can enter clinical Doctor Portal pages.
+- Inactive doctor can enter clinical Doctor Portal pages.
+- Imported users can bypass forced password change.
+- Protocol drafts appear in queue/appointment reads.
+- Manual reassignment lacks audit.
+- Normal doctor can reassign cases.
+- Doctor Portal changes RISpro appointment scheduling/capacity behavior.
+
+## Rollback / Disable
+
+1. Set `DOCTOR_PORTAL_ENABLED=false` and restart the app.
+2. Leave existing profiles, roster, protocols, assignments, and workload rows intact.
+3. To block individual access, set the doctor profile inactive.
+4. Keep RISpro Core scheduling, registration, booking, print, QR, and receptionist workflows unchanged.

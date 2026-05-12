@@ -9,10 +9,9 @@ export interface DoctorCapabilityInput {
 }
 
 export function deriveDoctorCapabilities(input: DoctorCapabilityInput): DoctorModuleCapability[] {
-  if (!input.hasActiveProfile) return [];
-
-  const capabilities: DoctorModuleCapability[] = ["doctor"];
-  if (input.canSupervise) capabilities.push("doctor_supervisor");
+  const capabilities: DoctorModuleCapability[] = [];
+  if (input.hasActiveProfile) capabilities.push("doctor");
+  if (input.hasActiveProfile && input.canSupervise) capabilities.push("doctor_supervisor");
   if (input.appRole === "super_admin") capabilities.push("doctor_admin");
   return capabilities;
 }

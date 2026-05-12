@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import {
   addDoctorRosterMember,
   applyRosterTemplate,
@@ -77,6 +78,63 @@ function isAdmin(me: DoctorMe): boolean {
 
 function dutyLabel(value: string): string {
   return DUTY_TYPES.find((item) => item.value === value)?.label ?? value;
+}
+
+function DraggableDoctor({
+  id,
+  label,
+  dimmed,
+  reason,
+  source,
+}: {
+  id: number;
+  label: string;
+  dimmed?: boolean;
+  reason?: string;
+  source?: { assignmentId: number; memberId: number };
+}) {
+  const draggable = useDraggable({ id: source ? `member-${source.memberId}` : `doctor-${id}`, data: { doctorId: id, source } });
+  return (
+    <button
+      ref={draggable.setNodeRef}
+      type="button"
+      {...draggable.listeners}
+      {...draggable.attributes}
+      className="rounded-lg border px-3 py-2 text-left text-xs"
+      style={{
+        borderColor: "var(--border)",
+        opacity: dimmed ? 0.55 : 1,
+        transform: draggable.transform ? `translate3d(${draggable.transform.x}px, ${draggable.transform.y}px, 0)` : undefined,
+      }}
+      title={reason}
+    >
+      <span className="font-semibold">{label}</span>
+      {reason && <span className="block" style={{ color: "var(--text-muted)" }}>{reason}</span>}
+    </button>
+  );
+}
+
+function DroppableRosterSlot({ assignment, conflicts }: { assignment: DoctorRosterAssignment; conflicts: RosterConflict[] }) {
+  const droppable = useDroppable({ id: `assignment-${assignment.id}`, data: { assignmentId: assignment.id } });
+  const assignmentConflicts = conflicts.filter((conflict) => conflict.assignmentId === assignment.id);
+  return (
+    <div ref={droppable.setNodeRef} className="min-h-36 rounded-lg border p-3" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)", backgroundColor: "var(--card)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-sm font-semibold">{assignment.teamName}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType)}</p>
+          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.startTime || "--"}-{assignment.endTime || "--"}</p>
+        </div>
+        {assignmentConflicts.length > 0 && <span className="rounded-full border px-2 py-0.5 text-xs text-red-600" style={{ borderColor: "var(--border)" }}>{assignmentConflicts.length} conflicts</span>}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {assignment.members.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>Drop doctor here</span>}
+        {assignment.members.map((member) => (
+          <DraggableDoctor key={member.id} id={member.doctorId} label={`${member.displayName} · ${member.teamRole}`} source={{ assignmentId: assignment.id, memberId: member.id }} />
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function AssignmentList({
@@ -298,6 +356,30 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
       .map((conflict) => conflict.doctorId)
       .filter((doctorId): doctorId is number => typeof doctorId === "number")
   );
+  const conflictReasonByDoctorId = new Map<number, string>();
+  for (const conflict of conflicts) {
+    if (typeof conflict.doctorId === "number" && !conflictReasonByDoctorId.has(conflict.doctorId)) {
+      conflictReasonByDoctorId.set(conflict.doctorId, conflict.message);
+    }
+  }
+  const handleDragEnd = (event: DragEndEvent) => {
+    const assignmentId = Number(event.over?.data.current?.assignmentId);
+    const doctorId = Number(event.active.data.current?.doctorId);
+    const source = event.active.data.current?.source as { assignmentId: number; memberId: number } | undefined;
+    if (!assignmentId || !doctorId || !editable) return;
+    if (source?.assignmentId === assignmentId) return;
+    const shouldMove = source ? window.confirm("Move this doctor to the target slot? Choose Cancel to copy instead.") : false;
+    addMemberMutation.mutate(
+      { assignmentId, doctorId, teamRole: "specialist" },
+      {
+        onSuccess: () => {
+          if (shouldMove && source) {
+            removeMemberMutation.mutate({ assignmentId: source.assignmentId, memberId: source.memberId });
+          }
+        },
+      }
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -384,6 +466,35 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
             ))}
           </div>
         </section>
+      )}
+
+      {canManage && editable && (
+        <DndContext onDragEnd={handleDragEnd}>
+          <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-[260px_1fr]" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            <div>
+              <h3 className="font-semibold">Doctors</h3>
+              <div className="mt-3 grid gap-2">
+                {(doctorsQuery.data ?? []).map((doctor) => (
+                  <DraggableDoctor
+                    key={doctor.id}
+                    id={doctor.id}
+                    label={doctor.displayName}
+                    dimmed={conflictedDoctorIds.has(doctor.id)}
+                    reason={conflictReasonByDoctorId.get(doctor.id)}
+                  />
+                ))}
+              </div>
+            </div>
+            <div>
+              <h3 className="font-semibold">Roster slots</h3>
+              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {(roster?.assignments ?? []).map((assignment) => (
+                  <DroppableRosterSlot key={assignment.id} assignment={assignment} conflicts={conflicts} />
+                ))}
+              </div>
+            </div>
+          </section>
+        </DndContext>
       )}
 
       {canManage && editable && (

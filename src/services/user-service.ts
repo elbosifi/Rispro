@@ -12,6 +12,7 @@ export interface UserRow {
   full_name: string;
   role: Role;
   is_active: boolean;
+  must_change_password: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -22,6 +23,7 @@ export interface UserCreatePayload {
   password?: string;
   role?: Role | string;
   isActive?: boolean;
+  mustChangePassword?: boolean;
 }
 
 interface UserActorContext {
@@ -47,7 +49,7 @@ async function auditSuperAdminAttempt(input: {
 
 export async function listUsers(): Promise<UserRow[]> {
   const { rows } = await pool.query(`
-    select id, username, full_name, role, is_active, created_at, updated_at
+    select id, username, full_name, role, is_active, coalesce(must_change_password, false) as must_change_password, created_at, updated_at
     from users
     order by created_at asc
   `);
@@ -56,7 +58,7 @@ export async function listUsers(): Promise<UserRow[]> {
 }
 
 export async function createUser(
-  { username, fullName, password, role, isActive = true }: UserCreatePayload,
+  { username, fullName, password, role, isActive = true, mustChangePassword = false }: UserCreatePayload,
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   if (!username || !fullName || !password || !role) {
@@ -88,11 +90,11 @@ export async function createUser(
   try {
     const { rows } = await pool.query(
       `
-        insert into users (username, full_name, password_hash, role, is_active)
-        values ($1, $2, $3, $4, $5)
-        returning id, username, full_name, role, is_active, created_at, updated_at
+        insert into users (username, full_name, password_hash, role, is_active, must_change_password)
+        values ($1, $2, $3, $4, $5, $6)
+        returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
       `,
-      [username, fullName, passwordHash, role, isActive]
+      [username, fullName, passwordHash, role, isActive, mustChangePassword]
     );
 
     const createdUser = rows[0] as UserRow | undefined;
@@ -212,7 +214,7 @@ export async function deleteUser(
     `
       delete from users
       where id = $1
-      returning id, username, full_name, role, is_active, created_at, updated_at
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
     `,
     [cleanUserId]
   );
@@ -264,7 +266,7 @@ export async function updateUserPassword(
 
   const currentResult = await pool.query(
     `
-      select id, username, full_name, role, is_active, created_at, updated_at
+      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
       from users
       where id = $1
       limit 1
@@ -281,9 +283,9 @@ export async function updateUserPassword(
   const updatedResult = await pool.query(
     `
       update users
-      set password_hash = $2, updated_at = now()
+      set password_hash = $2, must_change_password = false, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, created_at, updated_at
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
     `,
     [cleanUserId, passwordHash]
   );
@@ -303,4 +305,60 @@ export async function updateUserPassword(
   });
 
   return updatedUser;
+}
+
+export async function updateOwnPassword(
+  userId: UserId,
+  currentPassword: string,
+  newPassword: string
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  const cleanCurrentPassword = String(currentPassword ?? "");
+  const cleanNewPassword = String(newPassword ?? "").trim();
+
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "userId must be a positive whole number.");
+  }
+  if (!cleanCurrentPassword || !cleanNewPassword) {
+    throw new HttpError(400, "currentPassword and newPassword are required.");
+  }
+
+  const currentResult = await pool.query<UserRow & { password_hash: string }>(
+    `
+      select id, username, full_name, role, password_hash, is_active, must_change_password, created_at, updated_at
+      from users
+      where id = $1
+      limit 1
+    `,
+    [cleanUserId]
+  );
+  const current = currentResult.rows[0];
+  if (!current || !current.is_active) throw new HttpError(401, "Invalid username or password.");
+
+  const valid = await bcrypt.compare(cleanCurrentPassword, current.password_hash);
+  if (!valid) throw new HttpError(401, "Invalid username or password.");
+
+  const passwordHash = await bcrypt.hash(cleanNewPassword, 10);
+  const updatedResult = await pool.query<UserRow>(
+    `
+      update users
+      set password_hash = $2, must_change_password = false, updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+    `,
+    [cleanUserId, passwordHash]
+  );
+  const updated = updatedResult.rows[0];
+  if (!updated) throw new HttpError(500, "Failed to update user password.");
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updated.id,
+    actionType: "change_own_password",
+    oldValues: { must_change_password: current.must_change_password },
+    newValues: { must_change_password: updated.must_change_password },
+    changedByUserId: updated.id
+  });
+
+  return updated;
 }

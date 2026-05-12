@@ -15,6 +15,7 @@ interface AuthUserRow {
   role: Role;
   password_hash: string;
   is_active: boolean;
+  must_change_password: boolean;
 }
 
 interface CookieResponse {
@@ -30,7 +31,7 @@ export async function authenticateUser(
   password: string
 ): Promise<AuthUserRow> {
   const query = `
-    select id, username, full_name, role, password_hash, is_active
+    select id, username, full_name, role, password_hash, is_active, coalesce(must_change_password, false) as must_change_password
     from users
     where username = $1
     limit 1
@@ -52,13 +53,14 @@ export async function authenticateUser(
   return authenticatedUser;
 }
 
-export function buildSessionToken(user: AuthUserRow): string {
+export function buildSessionToken(user: Pick<AuthUserRow, "id" | "username" | "full_name" | "role" | "must_change_password">): string {
   return jwt.sign(
     {
       sub: user.id,
       username: user.username,
       fullName: user.full_name,
-      role: user.role
+      role: user.role,
+      mustChangePassword: user.must_change_password
     },
     env.jwtSecret,
     { expiresIn: `${env.sessionHours}h` }

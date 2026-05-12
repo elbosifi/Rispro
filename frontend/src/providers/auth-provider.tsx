@@ -1,14 +1,15 @@
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchCurrentSession, login as loginApi, logout as logoutApi, reAuthSupervisor } from "@/lib/api-hooks";
+import { changeOwnPassword, fetchCurrentSession, login as loginApi, logout as logoutApi, reAuthSupervisor } from "@/lib/api-hooks";
 import type { User } from "@/types/api";
 
 interface AuthContextValue {
   user: User | null;
   isLoading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<User>;
   logout: () => Promise<void>;
   reAuth: (password: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -60,9 +61,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   });
 
-  const login = async (username: string, password: string) => {
+  const changePasswordMutation = useMutation({
+    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
+      changeOwnPassword(currentPassword, newPassword),
+    meta: {
+      suppressGlobalToast: true
+    },
+    onSuccess: (userData) => {
+      queryClient.setQueryData(["auth-session"], userData);
+    }
+  });
+
+  const login = async (username: string, password: string): Promise<User> => {
     setIsTransitioning(true);
-    await loginMutation.mutateAsync({ username, password });
+    return loginMutation.mutateAsync({ username, password });
   };
 
   const logout = async () => {
@@ -73,14 +85,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await reAuthMutation.mutateAsync(password);
   };
 
+  const changePassword = async (currentPassword: string, newPassword: string) => {
+    await changePasswordMutation.mutateAsync({ currentPassword, newPassword });
+  };
+
   return (
     <AuthContext.Provider
       value={{
         user: user ?? null,
-        isLoading: isLoading || isTransitioning,
+        isLoading: isLoading || isTransitioning || changePasswordMutation.isPending,
         login,
         logout,
-        reAuth
+        reAuth,
+        changePassword
       }}
     >
       {children}
