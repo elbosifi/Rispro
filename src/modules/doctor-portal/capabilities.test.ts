@@ -17,6 +17,13 @@ describe("Doctor Portal capabilities", () => {
     );
   });
 
+  it("does not grant clinical module capabilities to profileless super admins", () => {
+    assert.deepEqual(
+      deriveDoctorCapabilities({ appRole: "super_admin", hasActiveProfile: false, canSupervise: true }),
+      []
+    );
+  });
+
   it("maps an active profile to normal doctor capability", () => {
     assert.deepEqual(
       deriveDoctorCapabilities({ appRole: "doctor", hasActiveProfile: true, canSupervise: false }),
@@ -59,6 +66,26 @@ describe("Doctor Portal wiring", () => {
     assert.match(source, /updateProfileForAdmin\(user\.sub, user\.role/);
   });
 
+  it("keeps Settings Users doctor status read-only", () => {
+    const source = readFileSync(join(rootDir, "frontend", "src", "pages", "settings", "settings-page.tsx"), "utf8");
+    assert.match(source, /Doctor profiles and modality permissions are managed in Doctor Portal/);
+    assert.doesNotMatch(source, /Enable Doctor/);
+    assert.doesNotMatch(source, /createDoctorProfileForAdmin|updateDoctorProfileForAdmin|updateDoctorProfileModalities/);
+  });
+
+  it("keeps Doctor Admin import/export CSV-only and password-free", () => {
+    const service = readFileSync(join(rootDir, "src", "modules", "doctor-portal", "doctor-import-export-service.ts"), "utf8");
+    const page = readFileSync(join(rootDir, "frontend", "src", "pages", "doctor", "doctor-admin-doctors-page.tsx"), "utf8");
+    assert.match(service, /exportDoctorProfilesCsv/);
+    assert.match(service, /confirmDoctorImportCsv/);
+    assert.match(service, /must_change_password\)/);
+    assert.doesNotMatch(service.match(/const EXPORT_COLUMNS = \[[\s\S]*?\];/)?.[0] ?? "", /password/i);
+    assert.match(page, /Import CSV/);
+    assert.match(page, /Export CSV/);
+    assert.match(page, /accept="\.csv,text\/csv"/);
+    assert.doesNotMatch(`${service}\n${page}`, /xlsx/i);
+  });
+
   it("creates only Phase 1 Doctor Portal identity tables", () => {
     const migration = readFileSync(join(rootDir, "src", "db", "migrations", "064_doctor_portal_identity.sql"), "utf8");
     assert.match(migration, /create\s+schema\s+if\s+not\s+exists\s+doctor_portal/i);
@@ -66,6 +93,13 @@ describe("Doctor Portal wiring", () => {
     assert.match(migration, /doctor_portal\.doctor_modality_permissions/i);
     assert.match(migration, /doctor_portal\.doctor_module_audit_events/i);
     assert.doesNotMatch(migration, /doctor_roster|case_team_assignments|appointment_protocols|workload_unit/i);
+  });
+
+  it("creates the forced password-change migration", () => {
+    const migration = readFileSync(join(rootDir, "src", "db", "migrations", "072_users_must_change_password.sql"), "utf8");
+    assert.match(migration, /alter\s+table\s+users/i);
+    assert.match(migration, /must_change_password\s+boolean\s+not\s+null\s+default\s+false/i);
+    assert.match(migration, /users_must_change_password_idx/i);
   });
 
   it("creates Phase 2 roster tables without case assignment, protocol, or workload tables", () => {

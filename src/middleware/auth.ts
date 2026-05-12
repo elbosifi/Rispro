@@ -63,6 +63,25 @@ export function requireAuth(req: AuthRequest, _res: Response, next: NextFunction
   }
 }
 
+export function blockForcedPasswordChange(req: AuthRequest, _res: Response, next: NextFunction): void {
+  try {
+    const token = readToken(req);
+    if (!token) {
+      return next();
+    }
+
+    const decoded = jwt.verify(token, env.jwtSecret);
+    const payload = decoded && typeof decoded === "object" ? asUnknownRecord(decoded) : null;
+    if (payload?.mustChangePassword === true) {
+      return next(new HttpError(403, "Password change is required before accessing this area."));
+    }
+
+    return next();
+  } catch {
+    return next();
+  }
+}
+
 export function requireSupervisor(req: AuthRequest, _res: Response, next: NextFunction): void {
   if (!req.user) {
     return next(new HttpError(401, "Authentication required."));

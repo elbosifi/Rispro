@@ -43,8 +43,12 @@ const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
   { path: "/doctor/admin/doctors", label: "Doctors/Admin", icon: Users, management: true },
 ];
 
-function isSupervisorOrAdmin(me: DoctorMe): boolean {
-  return Boolean(me.canAccessDoctorAdmin) || me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin");
+function canAccessDoctorAdmin(me: DoctorMe): boolean {
+  return Boolean(me.canAccessDoctorAdmin) || me.moduleCapabilities.includes("doctor_admin");
+}
+
+function canManageClinicalRoster(me: DoctorMe): boolean {
+  return Boolean(me.canAccessClinicalDoctorPortal) && (me.moduleCapabilities.includes("doctor_supervisor") || me.moduleCapabilities.includes("doctor_admin"));
 }
 
 function LoadingShell() {
@@ -103,7 +107,9 @@ function PlaceholderPanel({ title, body }: { title: string; body: string }) {
 }
 
 function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
-  const canManage = isSupervisorOrAdmin(me);
+  const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
+  const canManageRoster = canManageClinicalRoster(me);
+  const canManageDoctors = canAccessDoctorAdmin(me);
 
   return (
     <Routes>
@@ -112,28 +118,28 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
       <Route
         path="roster"
-        element={me.hasActiveDoctorProfile ? <DoctorRosterPage me={me} management={false} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorRosterPage me={me} management={false} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="availability"
-        element={me.hasActiveDoctorProfile ? <DoctorAvailabilityPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorAvailabilityPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="cases"
-        element={me.hasActiveDoctorProfile ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="protocols"
-        element={me.hasActiveDoctorProfile ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="team-workload"
-        element={me.hasActiveDoctorProfile ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
       />
       <Route
         path="admin/roster"
         element={
-          canManage ? (
+          canManageRoster ? (
             <DoctorRosterPage me={me} management />
           ) : (
             <Navigate to="/doctor/dashboard" replace />
@@ -143,7 +149,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route
         path="admin/doctors"
         element={
-          canManage ? (
+          canManageDoctors ? (
             <DoctorAdminDoctorsPage me={me} />
           ) : (
             <Navigate to="/doctor/dashboard" replace />
@@ -169,16 +175,17 @@ export default function DoctorPage() {
 
   const navItems = useMemo(() => {
     if (!me) return DOCTOR_NAV;
-    const baseNav = me.hasActiveDoctorProfile ? DOCTOR_NAV : [];
-    if (!isSupervisorOrAdmin(me)) return baseNav;
+    const baseNav = (me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile) ? DOCTOR_NAV : [];
     const byPath = new Map<string, DoctorPortalNavItem>();
-    [...baseNav, ...SUPERVISOR_NAV].forEach((item) => byPath.set(item.path, item));
+    baseNav.forEach((item) => byPath.set(item.path, item));
+    if (canManageClinicalRoster(me)) byPath.set(SUPERVISOR_NAV[0].path, SUPERVISOR_NAV[0]);
+    if (canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[1].path, SUPERVISOR_NAV[1]);
     return [...byPath.values()];
   }, [me]);
 
   if (isLoading) return <LoadingShell />;
 
-  if (!(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.moduleCapabilities.includes("doctor_admin"))) {
+  if (!(me?.canAccessDoctorPortal ?? me?.hasActiveDoctorProfile ?? me?.canAccessDoctorAdmin)) {
     return <Navigate to="/" replace />;
   }
 

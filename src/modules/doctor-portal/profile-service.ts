@@ -24,6 +24,7 @@ export interface DoctorMeResponse {
   profile: DoctorProfileRow | null;
   isSuperAdmin: boolean;
   canAccessDoctorPortal: boolean;
+  canAccessClinicalDoctorPortal: boolean;
   canAccessDoctorAdmin: boolean;
   canManageDoctorProfiles: boolean;
   doctorPortalAutoRedirect: boolean;
@@ -59,6 +60,7 @@ export async function getDoctorMe(userId: UserId, appRole: Role): Promise<Doctor
   const hasActiveDoctorProfile = Boolean(profile?.active);
   const isSuperAdmin = appRole === "super_admin";
   const canManageDoctorProfiles = isSuperAdmin || appRole === "supervisor";
+  const canAccessClinicalDoctorPortal = hasActiveDoctorProfile;
   const allowedModalities = hasActiveDoctorProfile && profile ? await listDoctorModalityPermissions(profile.id) : [];
   const moduleCapabilities = deriveDoctorCapabilities({
     appRole,
@@ -73,14 +75,15 @@ export async function getDoctorMe(userId: UserId, appRole: Role): Promise<Doctor
     hasActiveDoctorProfile,
     profile,
     isSuperAdmin,
-    canAccessDoctorPortal: hasActiveDoctorProfile || isSuperAdmin,
+    canAccessDoctorPortal: canAccessClinicalDoctorPortal || canManageDoctorProfiles,
+    canAccessClinicalDoctorPortal,
     canAccessDoctorAdmin: canManageDoctorProfiles,
     canManageDoctorProfiles,
     doctorPortalAutoRedirect: env.doctorPortalAutoRedirect,
     doctorRole: profile?.doctorRole ?? null,
     canFinalizeReports: hasActiveDoctorProfile && Boolean(profile?.canFinalizeReports),
     canAssignProtocols: hasActiveDoctorProfile && Boolean(profile?.canAssignProtocols),
-    canSupervise: canManageDoctorProfiles || (hasActiveDoctorProfile && Boolean(profile?.canSupervise)),
+    canSupervise: hasActiveDoctorProfile && (canManageDoctorProfiles || Boolean(profile?.canSupervise)),
     allowedModalities,
     moduleCapabilities,
     canAccessCoreWorkspace,

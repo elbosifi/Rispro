@@ -23,6 +23,7 @@ import { createDoctorPortalRouter } from "./modules/doctor-portal/index.js";
 import { publicAppointmentsCancelRouter } from "./modules/appointments-v2/api/routes/public-appointments-cancel-routes.js";
 import { errorHandler, notFoundHandler } from "./middleware/error-handler.js";
 import { securityHeaders } from "./middleware/security.js";
+import { blockForcedPasswordChange } from "./middleware/auth.js";
 import { cleanupStaleDicomRemapUploadTempDirs } from "./services/dicom-remap-service.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -111,6 +112,7 @@ export function createApp(): Application {
   });
 
   app.use("/api/auth", authRouter);
+  app.use("/api", blockForcedPasswordChange);
   app.use("/api/users", usersRouter);
   app.use("/api/patients", patientsRouter);
   app.use("/api/queue", queueRouter);

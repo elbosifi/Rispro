@@ -332,11 +332,14 @@ export async function reassignCase(input: { appointmentId: number; rosterAssignm
           appointment_id, roster_assignment_id, modality_id, assignment_type, expected_reporting_date, status
         )
         values ($1, $2, $3, $4, $5::date, 'active')
+        on conflict (appointment_id, assignment_type) where status = 'active'
+        do nothing
         returning id
       `,
       [booking.appointmentId, roster.id, booking.modalityId, rule.assignmentType, rule.expectedReportingDate]
     );
-    const assignmentId = inserted.rows[0].id;
+    const assignmentId = inserted.rows[0]?.id;
+    if (!assignmentId) throw new Error("active_assignment_conflict");
     await insertDoctorAuditEvent(client, {
       actorUserId: actor.userId,
       actorDoctorId: actor.doctorId,

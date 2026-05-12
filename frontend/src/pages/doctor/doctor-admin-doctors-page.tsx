@@ -154,7 +154,7 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
 
       <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <div className="mb-4 flex flex-wrap gap-2">
-          <a href="/api/doctor/admin/doctors/import/template" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download template</a>
+          <a href="/api/doctor/admin/doctors/import/template" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download CSV template</a>
           <a href="/api/doctor/admin/doctors/export?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export CSV</a>
           <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Import CSV
@@ -163,12 +163,12 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
               if (file) void readImportFile(file);
             }} />
           </label>
-          <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importFileBase64)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview import</button>
-          <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importFileBase64)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
+          <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importFileBase64)} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview CSV</button>
+          <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importFileBase64)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm CSV import</button>
         </div>
         {importInspect && (
           <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
-            Import file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
+            CSV file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
           </p>
         )}
         {importPreview && (

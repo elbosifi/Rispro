@@ -79,6 +79,7 @@ export interface DoctorMe {
   profile: DoctorProfile | null;
   isSuperAdmin?: boolean;
   canAccessDoctorPortal?: boolean;
+  canAccessClinicalDoctorPortal?: boolean;
   canAccessDoctorAdmin?: boolean;
   canManageDoctorProfiles?: boolean;
   doctorPortalAutoRedirect?: boolean;

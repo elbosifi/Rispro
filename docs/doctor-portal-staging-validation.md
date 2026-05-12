@@ -8,6 +8,7 @@
 - Users without an active doctor profile remain in RISpro Core.
 - Core role `doctor` alone does not grant Doctor Portal clinical access.
 - Inactive doctor profiles block clinical Doctor Portal access.
+- `/api/doctor/me` reports Doctor Admin access separately from clinical Doctor Portal access.
 - `super_admin` can access Doctor Portal Admin without a doctor profile, but is not rosterable unless a doctor profile exists.
 - Core `supervisor` can manage doctor profiles in Doctor Portal Admin without having a doctor profile.
 - RISpro Settings > Users manages core accounts only and shows read-only Doctor Portal status.
@@ -74,22 +75,23 @@ Also run focused Doctor Portal backend tests, frontend Doctor Portal tests, Sett
 
 1. Set `DOCTOR_PORTAL_ENABLED=true`.
 2. Set `DOCTOR_PORTAL_AUTO_REDIRECT=true`.
-3. Create or import test doctors.
-4. Confirm forced password change.
-5. Set modality permissions.
-6. Create a roster.
-7. Test drag/drop roster planning and Add Member fallback.
-8. Resolve conflicts and publish roster.
-9. Create or select scheduled appointments.
-10. Run assignment.
-11. Manually reassign one case with a reason.
-12. Save protocol draft and confirm draft is hidden from operational reads.
-13. Assign protocol and confirm read-only visibility.
-14. Run workload calculation and confirm team-based workload only.
-15. Confirm normal doctor sees only own/team-allowed data.
-16. Confirm supervisor/admin management works.
-17. Confirm reception workflow is unchanged.
-18. Monitor selected doctors, supervisors, and technologists for 1-2 weeks.
+3. Apply migrations through `072_users_must_change_password.sql`.
+4. Create or import test doctors.
+5. Confirm forced password change.
+6. Set modality permissions.
+7. Create a roster.
+8. Test drag/drop roster planning and Add Member fallback.
+9. Resolve conflicts and publish roster.
+10. Create or select scheduled appointments.
+11. Run assignment.
+12. Manually reassign one case with a reason.
+13. Save protocol draft and confirm draft is hidden from operational reads.
+14. Assign protocol and confirm read-only visibility.
+15. Run workload calculation and confirm team-based workload only.
+16. Confirm normal doctor sees only own/team-allowed data.
+17. Confirm supervisor/admin management works.
+18. Confirm reception workflow is unchanged.
+19. Monitor selected doctors, supervisors, and technologists for 1-2 weeks.
 
 ## Go / No-Go
 

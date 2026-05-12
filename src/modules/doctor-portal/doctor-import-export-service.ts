@@ -173,7 +173,7 @@ export async function previewDoctorImportCsv(fileContentBase64: string): Promise
     const coreRole = row.values.core_role?.trim();
     const doctorRole = row.values.doctor_role?.trim();
     if (!username) errors.push("username is required");
-    if (username && seen.has(username.toLowerCase())) errors.push("duplicate username in workbook");
+    if (username && seen.has(username.toLowerCase())) errors.push("duplicate username in CSV");
     if (username) seen.add(username.toLowerCase());
     if (!row.values.full_name?.trim()) errors.push("full_name is required");
     if (!coreRole || !isRole(coreRole)) errors.push("invalid core_role");

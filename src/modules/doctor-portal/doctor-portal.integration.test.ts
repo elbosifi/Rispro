@@ -286,7 +286,7 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
   const api = (cookie: string, path: string, options: { method?: string; body?: unknown } = {}) =>
     fetchJson(app.baseUrl, path, { cookie, ...options });
 
-  it("verifies Doctor Portal migrations 064-071 are applied with core constraints/indexes", async () => {
+  it("verifies Doctor Portal migrations 064-072 are applied with core constraints/indexes", async () => {
     guard();
     const tables = await pool.query<{ table_name: string }>(
       `
@@ -325,6 +325,25 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
       [["case_team_assignments_active_unique", "case_workload_units_active_unique", "appointment_protocols_appointment_idx", "doctor_availability_doctor_date_idx", "doctor_leave_requests_status_idx", "doctor_roster_notifications_week_idx"]]
     );
     assert.equal(indexes.rowCount, 6);
+    const mustChangeColumn = await pool.query<{ column_name: string }>(
+      `
+        select column_name
+        from information_schema.columns
+        where table_name = 'users'
+          and column_name = 'must_change_password'
+      `
+    );
+    assert.equal(mustChangeColumn.rowCount, 1);
+    const mustChangeIndex = await pool.query<{ indexname: string }>(
+      `
+        select indexname
+        from pg_indexes
+        where schemaname = 'public'
+          and tablename = 'users'
+          and indexname = 'users_must_change_password_idx'
+      `
+    );
+    assert.equal(mustChangeIndex.rowCount, 1);
   });
 
   it("runs roster, case assignment, protocol, read-only exposure, workload, and idempotency flow", async () => {
@@ -553,6 +572,67 @@ describe("Doctor Portal full workflow DB-backed integration", { skip: skipEnv },
     });
     assert.equal(catalog.status, 201);
     assert.equal((await api(supervisor.cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 200);
+  });
+
+  it("allows profileless admins to manage profiles but blocks clinical workflows", async () => {
+    guard();
+    const profileless = await pool.query<{ id: string }>(
+      `
+        insert into users (username, password_hash, full_name, role, is_active)
+        values ($1, '$2a$10$ztv9Kx3klEC1wiHttYuwUeCN9KMI3yHuGjvRVEGFFVnbRu7YSfTyS', $2, 'super_admin', true)
+        returning id::text as id
+      `,
+      [`${TEST_PREFIX.toLowerCase()}profileless_${randomUUID().replace(/-/g, "").slice(0, 8)}`, `${TEST_PREFIX}Profileless Admin`]
+    );
+    const cookie = createTestAuthCookie(Number(profileless.rows[0].id), "super_admin");
+
+    const me = await api(cookie, "/api/doctor/me");
+    assert.equal(me.status, 200);
+    assert.equal((me.data as { hasActiveDoctorProfile: boolean }).hasActiveDoctorProfile, false);
+    assert.equal((me.data as { canAccessDoctorAdmin: boolean }).canAccessDoctorAdmin, true);
+    assert.equal((me.data as { canAccessClinicalDoctorPortal: boolean }).canAccessClinicalDoctorPortal, false);
+
+    assert.equal((await api(cookie, "/api/doctor/profiles")).status, 200);
+    const template = await fetch(`${app.baseUrl}/api/doctor/admin/doctors/import/template`, { headers: { Cookie: cookie } });
+    assert.equal(template.status, 200);
+    assert.equal(template.headers.get("content-type")?.includes("text/csv"), true);
+
+    assert.equal((await api(cookie, `/api/doctor/roster/my?weekStart=${mondayOf(today)}`)).status, 403);
+    assert.equal((await api(cookie, "/api/doctor/cases/assign", { method: "POST", body: { dateFrom: today, dateTo: today } })).status, 403);
+    assert.equal((await api(cookie, `/api/doctor/protocols/${appointmentId}`)).status, 403);
+    assert.equal((await api(cookie, "/api/doctor/workload/calculate", { method: "POST", body: { startDate: today, endDate: today } })).status, 403);
+  });
+
+  it("imports doctors through CSV preview/confirm and forces password change", async () => {
+    guard();
+    const username = `${TEST_PREFIX.toLowerCase()}import_${randomUUID().replace(/-/g, "").slice(0, 8)}`;
+    const modality = await pool.query<{ code: string }>(`select code from modalities where id = $1`, [testData.modalityId]);
+    const modalityCode = modality.rows[0].code;
+    const csv = [
+      "username,full_name,temporary_password,core_role,user_active,doctor_role,doctor_profile_active,can_finalize_reports,can_assign_protocols,can_supervise,modalities_protocol,modalities_report,modalities_supervise,reset_password",
+      `${username},${TEST_PREFIX} Imported Doctor,TempPass123,doctor,true,consultant,true,true,true,false,${modalityCode},,,false`,
+    ].join("\n");
+    const fileContentBase64 = Buffer.from(csv, "utf8").toString("base64");
+
+    const inspect = await api(admin.cookie, "/api/doctor/admin/doctors/import/inspect", { method: "POST", body: { fileContentBase64 } });
+    assert.equal(inspect.status, 200);
+    assert.equal((inspect.data as { workbook: { rowCount: number; missingColumns: string[] } }).workbook.rowCount, 1);
+    assert.deepEqual((inspect.data as { workbook: { missingColumns: string[] } }).workbook.missingColumns, []);
+
+    const preview = await api(admin.cookie, "/api/doctor/admin/doctors/import/preview", { method: "POST", body: { fileContentBase64 } });
+    assert.equal(preview.status, 200, JSON.stringify(preview.data));
+    assert.equal((preview.data as { preview: { canConfirm: boolean } }).preview.canConfirm, true);
+
+    const confirm = await api(admin.cookie, "/api/doctor/admin/doctors/import/confirm", { method: "POST", body: { fileContentBase64 } });
+    assert.equal(confirm.status, 200, JSON.stringify(confirm.data));
+    assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdUsers, 1);
+    assert.equal((confirm.data as { result: { createdUsers: number; createdProfiles: number } }).result.createdProfiles, 1);
+
+    const imported = await pool.query<{ must_change_password: boolean }>(
+      `select must_change_password from users where username = $1 limit 1`,
+      [username]
+    );
+    assert.equal(imported.rows[0]?.must_change_password, true);
   });
 
   it("supersedes changed workload values without duplicate active rows", async () => {

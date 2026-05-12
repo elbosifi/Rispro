@@ -69,6 +69,9 @@ export async function correctDoctorCaseAssignment(
     if (error instanceof Error && error.message === "published_roster_assignment_not_found") {
       throw new HttpError(404, "Published roster assignment not found.");
     }
+    if (error instanceof Error && error.message === "active_assignment_conflict") {
+      throw new HttpError(409, "Case assignment changed while reassignment was being saved. Refresh and try again.");
+    }
     throw error;
   }
 }

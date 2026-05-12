@@ -12,7 +12,7 @@ export function deriveDoctorCapabilities(input: DoctorCapabilityInput): DoctorMo
   const capabilities: DoctorModuleCapability[] = [];
   if (input.hasActiveProfile) capabilities.push("doctor");
   if (input.hasActiveProfile && input.canSupervise) capabilities.push("doctor_supervisor");
-  if (input.appRole === "super_admin") capabilities.push("doctor_admin");
+  if (input.hasActiveProfile && input.appRole === "super_admin") capabilities.push("doctor_admin");
   return capabilities;
 }
 

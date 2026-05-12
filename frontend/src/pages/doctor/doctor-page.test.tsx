@@ -88,6 +88,7 @@ function CorePlaceholder() {
 
 const normalDoctor: DoctorMe = {
   hasActiveDoctorProfile: true,
+  canAccessClinicalDoctorPortal: true,
   profile: {
     id: 1,
     userId: 10,
@@ -297,6 +298,8 @@ describe("Doctor Portal shell", () => {
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,
       canSupervise: true,
+      canAccessDoctorAdmin: true,
+      canManageDoctorProfiles: true,
       moduleCapabilities: ["doctor", "doctor_supervisor"],
     });
 
@@ -314,6 +317,53 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByRole("button", { name: /My Roster/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Team Workload/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Doctors\/Admin/i })).toBeNull();
+  });
+
+  it("lets profileless admins manage doctors without clinical navigation", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      hasActiveDoctorProfile: false,
+      canAccessClinicalDoctorPortal: false,
+      canAccessDoctorPortal: true,
+      canAccessDoctorAdmin: true,
+      canManageDoctorProfiles: true,
+      profile: null,
+      doctorRole: null,
+      canFinalizeReports: false,
+      canAssignProtocols: false,
+      canSupervise: false,
+      allowedModalities: [],
+      moduleCapabilities: [],
+    });
+    renderDoctorPortal("/doctor/dashboard");
+
+    expect(await screen.findByText("Doctor Portal admin")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Doctors\/Admin/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /My Roster/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Roster Management/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /My Cases/i })).toBeNull();
+  });
+
+  it("redirects profileless admins away from clinical routes", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      hasActiveDoctorProfile: false,
+      canAccessClinicalDoctorPortal: false,
+      canAccessDoctorPortal: true,
+      canAccessDoctorAdmin: true,
+      canManageDoctorProfiles: true,
+      profile: null,
+      doctorRole: null,
+      canFinalizeReports: false,
+      canAssignProtocols: false,
+      canSupervise: false,
+      allowedModalities: [],
+      moduleCapabilities: [],
+    });
+    renderDoctorPortal("/doctor/roster");
+
+    expect(await screen.findByText("Doctor Portal admin")).toBeTruthy();
+    expect(screen.queryByText("No roster assignments for this week.")).toBeNull();
   });
 
   it("does not render appointment editing or rescheduling controls", async () => {

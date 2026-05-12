@@ -146,6 +146,8 @@ describe("Doctor Portal case assignment wiring", () => {
     assert.match(caseRoutes, /"\/assign"/);
     assert.match(caseRoutes, /"\/:appointmentId\/reassign"/);
     assert.match(caseRepo, /on conflict \(appointment_id, assignment_type\) where status = 'active'/i);
+    assert.match(caseRepo, /eventType:\s*"case_reassigned"/);
+    assert.match(caseRepo, /reason:\s*input\.reason/);
     assert.doesNotMatch(`${caseRoutes}\n${caseRepo}`, /createBooking|updateBookingForReschedule|capacity|protocol_text|workload_unit/i);
   });
 
@@ -156,5 +158,6 @@ describe("Doctor Portal case assignment wiring", () => {
     assert.match(service, /requireRosterManager\(actor\)/);
     assert.match(service, /runDoctorCaseAssignment/);
     assert.match(service, /correctDoctorCaseAssignment/);
+    assert.match(service, /Correction reason is required/);
   });
 });
