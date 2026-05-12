@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchAppointments } from "@/lib/api-hooks";
+import { fetchAppointments, recordReportOutput } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
@@ -44,21 +44,32 @@ export default function DayListPrintPage() {
   useEffect(() => {
     if (!autoprint || printed || isLoading || error || !date) return;
     const timeout = window.setTimeout(() => {
-      try {
-        if (navigator.userAgent.includes("jsdom")) {
+      void (async () => {
+        try {
+          await recordReportOutput({
+            reportTemplate: "daily-appointments",
+            outputType: "print",
+            filters: queryParams,
+            rowCount: appointments.length,
+            includePhoneNumbers: false,
+            includePatientIdentifiers: true,
+          });
+          try {
+            if (!navigator.userAgent.includes("jsdom")) {
+              window.focus();
+            }
+          } catch {
+            // Some test/preview environments do not implement focus.
+          }
           window.print();
           setPrinted(true);
-          return;
+        } catch {
+          setPrinted(true);
         }
-        window.focus();
-      } catch {
-        // Some test/preview environments do not implement focus.
-      }
-      window.print();
-      setPrinted(true);
+      })();
     }, 250);
     return () => window.clearTimeout(timeout);
-  }, [autoprint, date, error, isLoading, printed]);
+  }, [appointments.length, autoprint, date, error, isLoading, printed, queryParams]);
 
   return (
     <div className="print-route-page">

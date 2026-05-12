@@ -3,9 +3,9 @@ import { useQuery } from "@tanstack/react-query";
 import { Copy, Download, FileSpreadsheet, FileText, Printer } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
 import { Button, Card, Badge } from "@/components/shared";
-import { fetchAppointments, fetchAppointmentLookups, fetchPatientDirectory, type PatientDirectoryParams } from "@/lib/api-hooks";
+import { fetchAppointments, fetchAppointmentLookups, fetchAuditEntries, fetchPatientDirectory, recordReportOutput, type PatientDirectoryParams } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import type { Role } from "@/types/api";
+import type { AuditEntry, Role } from "@/types/api";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
@@ -13,7 +13,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentList } from "@/lib/print-utils";
 
-type ReportSource = "appointments" | "patients" | "disabled";
+type ReportSource = "appointments" | "patients" | "audit" | "disabled";
 
 interface ReportTemplate {
   id: string;
@@ -50,10 +50,29 @@ const REPORT_TEMPLATES: ReportTemplate[] = [
   { id: "supervisor-override", title: "Supervisor override report", description: "Override and capacity exception bookings.", source: "appointments", roles: ["supervisor", "super_admin"], supervisorOverride: "true" },
   { id: "referring-physician-volume", title: "Referring physician volume report", description: "Referring physician is not exposed on V2 bookings.", source: "disabled", roles: ["supervisor", "super_admin"], disabledReason: "No referring physician field is available in the list API." },
   { id: "exam-type-volume", title: "Exam type volume report", description: "Grouped appointment counts by exam.", source: "appointments", roles: ["supervisor", "super_admin"] },
-  { id: "printed-documents-audit", title: "User activity / printed documents report", description: "Audit log exists, but print/export events are not fully wired for all legacy outputs.", source: "disabled", roles: ["super_admin"], disabledReason: "Audit infrastructure exists; a dedicated print/export audit API remains a small backend follow-up." },
+  { id: "printed-documents-audit", title: "User activity / printed documents report", description: "Recent report print/export/copy activity.", source: "audit", roles: ["super_admin"] },
 ];
 
 const APPOINTMENT_COLUMNS = ["time", "patient", "accession", "modality", "exam", "category", "priority", "status", "phone", "identifier"];
+const PRESETS_KEY = "rispro-print-report-presets";
+
+interface ReportPreset {
+  name: string;
+  templateId: string;
+  date: string;
+  dateTo: string;
+  modalityId: string;
+  status: string;
+  caseCategory: string;
+  query: string;
+  groupBy: string;
+  orientation: "portrait" | "landscape";
+  paperSize: string;
+  includeCharts: boolean;
+  includePhones: boolean;
+  includeIdentifiers: boolean;
+  columns: string[];
+}
 
 export function ReportCenter() {
   const { user } = useAuth();
@@ -72,6 +91,8 @@ export function ReportCenter() {
   const [includePhones, setIncludePhones] = useState(false);
   const [includeIdentifiers, setIncludeIdentifiers] = useState(user?.role === "supervisor" || user?.role === "super_admin");
   const [columns, setColumns] = useState<string[]>(APPOINTMENT_COLUMNS.slice(0, 8));
+  const [presetName, setPresetName] = useState("");
+  const [presets, setPresets] = useState<ReportPreset[]>(() => loadPresets());
 
   const templates = useMemo(
     () => REPORT_TEMPLATES.filter((template) => user && template.roles.includes(user.role)),
@@ -121,38 +142,74 @@ export function ReportCenter() {
     enabled: selectedTemplate.source === "patients",
     staleTime: 1000 * 30,
   });
+  const auditQuery = useQuery({
+    queryKey: ["report-center-audit", selectedTemplate.id],
+    queryFn: () => fetchAuditEntries(200),
+    enabled: selectedTemplate.source === "audit",
+    staleTime: 1000 * 30,
+  });
 
   const appointmentRows = appointmentsQuery.data ?? [];
   const patientRows = patientsQuery.data?.patients ?? [];
-  const activeRows = selectedTemplate.source === "patients" ? patientRows : appointmentRows;
-  const isLoading = selectedTemplate.source === "patients" ? patientsQuery.isLoading : appointmentsQuery.isLoading;
-  const isError = selectedTemplate.source === "patients" ? patientsQuery.isError : appointmentsQuery.isError;
+  const auditRows = (auditQuery.data?.entries ?? []).filter((entry) => entry.entityType === "report_output");
+  const activeRows = selectedTemplate.source === "patients" ? patientRows : selectedTemplate.source === "audit" ? auditRows : appointmentRows;
+  const isLoading = selectedTemplate.source === "patients" ? patientsQuery.isLoading : selectedTemplate.source === "audit" ? auditQuery.isLoading : appointmentsQuery.isLoading;
+  const isError = selectedTemplate.source === "patients" ? patientsQuery.isError : selectedTemplate.source === "audit" ? auditQuery.isError : appointmentsQuery.isError;
   const grouping = groupBy || selectedTemplate.grouping || "";
   const groupedCounts = selectedTemplate.source === "appointments" ? buildGroupedCounts(appointmentRows, grouping, language) : [];
+  const sensitiveOutputAllowed = user?.role === "supervisor" || user?.role === "super_admin";
+  const effectiveIncludePhones = sensitiveOutputAllowed && includePhones;
+  const effectiveIncludeIdentifiers = sensitiveOutputAllowed && includeIdentifiers;
 
-  const exportRows = selectedTemplate.source === "patients"
+  const exportRows = selectedTemplate.source === "audit"
+    ? auditRows.map((entry) => auditExportRow(entry))
+    : selectedTemplate.source === "patients"
     ? patientRows.map((patient) => ({
       Patient: patient.englishFullName || patient.arabicFullName,
-      MRN: includeIdentifiers ? patient.mrn || "" : "",
+      MRN: effectiveIncludeIdentifiers ? patient.mrn || "" : "",
       Sex: patient.sex || "",
       Age: patient.ageYears,
-      Phone: includePhones ? patient.phone1 || "" : "",
+      Phone: effectiveIncludePhones ? patient.phone1 || "" : "",
       Category: patient.category || "",
     }))
-    : appointmentRows.map((appointment) => appointmentExportRow(appointment, language, includePhones, includeIdentifiers));
+    : appointmentRows.map((appointment) => appointmentExportRow(appointment, language, effectiveIncludePhones, effectiveIncludeIdentifiers));
 
-  function exportCsv(extension = "csv") {
-    downloadText(`${selectedTemplate.id}-${date}.${extension}`, toCsv(exportRows));
+  async function auditOutput(outputType: "print" | "pdf" | "csv" | "copy" | "xlsx") {
+    try {
+      await recordReportOutput({
+        reportTemplate: selectedTemplate.id,
+        outputType,
+        filters: selectedTemplate.source === "patients" ? patientParams : appointmentParams,
+        rowCount: activeRows.length,
+        includePhoneNumbers: effectiveIncludePhones,
+        includePatientIdentifiers: effectiveIncludeIdentifiers,
+      });
+      return true;
+    } catch (error) {
+      pushToast({
+        type: "error",
+        title: "Output blocked",
+        message: error instanceof Error ? error.message : "Could not write the required audit log.",
+      });
+      return false;
+    }
   }
 
-  function copyTable() {
+  async function exportCsv() {
+    if (!(await auditOutput("csv"))) return;
+    downloadText(`${selectedTemplate.id}-${date}.csv`, toCsv(exportRows));
+  }
+
+  async function copyTable() {
+    if (!(await auditOutput("copy"))) return;
     const text = toCsv(exportRows);
     if (navigator.clipboard?.writeText) {
       void navigator.clipboard.writeText(text).then(() => pushToast({ type: "success", title: "Table copied" }));
     }
   }
 
-  function printReport() {
+  async function printReport() {
+    if (!(await auditOutput("print"))) return;
     if (selectedTemplate.source === "appointments") {
       printAppointmentList(appointmentRows, dateTo ? `${date} to ${dateTo}` : date);
       return;
@@ -160,7 +217,55 @@ export function ReportCenter() {
     window.print();
   }
 
-  const sensitiveOutputAllowed = user?.role === "supervisor" || user?.role === "super_admin";
+  async function printPdf() {
+    if (!(await auditOutput("pdf"))) return;
+    window.print();
+  }
+
+  function savePreset() {
+    const name = presetName.trim();
+    if (!name) return;
+    const nextPreset: ReportPreset = {
+      name,
+      templateId: selectedTemplate.id,
+      date,
+      dateTo,
+      modalityId,
+      status,
+      caseCategory,
+      query,
+      groupBy,
+      orientation,
+      paperSize,
+      includeCharts,
+      includePhones,
+      includeIdentifiers,
+      columns,
+    };
+    const next = [nextPreset, ...presets.filter((preset) => preset.name !== name)].slice(0, 12);
+    setPresets(next);
+    localStorage.setItem(PRESETS_KEY, JSON.stringify(next));
+    pushToast({ type: "success", title: "Preset saved" });
+  }
+
+  function loadPreset(name: string) {
+    const preset = presets.find((item) => item.name === name);
+    if (!preset) return;
+    setTemplateId(preset.templateId);
+    setDate(preset.date);
+    setDateTo(preset.dateTo);
+    setModalityId(preset.modalityId);
+    setStatus(preset.status);
+    setCaseCategory(preset.caseCategory);
+    setQuery(preset.query);
+    setGroupBy(preset.groupBy);
+    setOrientation(preset.orientation);
+    setPaperSize(preset.paperSize);
+    setIncludeCharts(preset.includeCharts);
+    setIncludePhones(preset.includePhones);
+    setIncludeIdentifiers(preset.includeIdentifiers);
+    setColumns(preset.columns);
+  }
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -180,6 +285,19 @@ export function ReportCenter() {
             </select>
             <p className="mt-2 text-sm text-muted-foreground">{selectedTemplate.description}</p>
             {selectedTemplate.disabledReason ? <p className="mt-2 text-xs text-amber-700">{selectedTemplate.disabledReason}</p> : null}
+          </div>
+
+          <div className="grid gap-2">
+            <Input label="Preset name" value={presetName} onChange={setPresetName} />
+            <div className="flex gap-2">
+              <Button type="button" size="sm" variant="secondary" onClick={savePreset} disabled={!presetName.trim()}>
+                Save preset
+              </Button>
+              <select className="input-premium h-10 flex-1" aria-label="Load preset" defaultValue="" onChange={(event) => loadPreset(event.target.value)}>
+                <option value="">Load preset</option>
+                {presets.map((preset) => <option key={preset.name} value={preset.name}>{preset.name}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="grid gap-3">
@@ -217,19 +335,19 @@ export function ReportCenter() {
                 </div>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="sm" onClick={printReport} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
+                <Button type="button" size="sm" onClick={() => void printReport()} disabled={activeRows.length === 0 || selectedTemplate.source === "disabled"}>
                   <Printer size={15} /> Print
                 </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => window.print()} disabled={activeRows.length === 0}>
+                <Button type="button" size="sm" variant="secondary" onClick={() => void printPdf()} disabled={activeRows.length === 0}>
                   <FileText size={15} /> PDF
                 </Button>
                 <Button type="button" size="sm" variant="secondary" disabled title="XLSX export needs a frontend workbook utility or backend export endpoint.">
                   <FileSpreadsheet size={15} /> Excel
                 </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={() => exportCsv()} disabled={activeRows.length === 0}>
+                <Button type="button" size="sm" variant="secondary" onClick={() => void exportCsv()} disabled={activeRows.length === 0}>
                   <Download size={15} /> CSV
                 </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={copyTable} disabled={activeRows.length === 0}>
+                <Button type="button" size="sm" variant="secondary" onClick={() => void copyTable()} disabled={activeRows.length === 0}>
                   <Copy size={15} /> Copy
                 </Button>
               </div>
@@ -239,7 +357,7 @@ export function ReportCenter() {
               <Select label="Paper" value={paperSize} onChange={setPaperSize} options={[{ value: "A4", label: "A4" }, { value: "A5", label: "A5" }, { value: "Letter", label: "Letter" }]} />
               <Select label="Orientation" value={orientation} onChange={(value) => setOrientation(value as "portrait" | "landscape")} options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />
               <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includeCharts} onChange={(event) => setIncludeCharts(event.target.checked)} /> Charts</label>
-              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includePhones} onChange={(event) => setIncludePhones(event.target.checked)} /> Patient phones</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={includePhones} disabled={!sensitiveOutputAllowed} onChange={(event) => setIncludePhones(event.target.checked)} /> Patient phones</label>
               <label className="flex items-center gap-2 text-sm">
                 <input type="checkbox" checked={includeIdentifiers} disabled={!sensitiveOutputAllowed} onChange={(event) => setIncludeIdentifiers(event.target.checked)} />
                 Patient identifiers
@@ -280,10 +398,12 @@ export function ReportCenter() {
               <div className="p-8 text-center text-rose-700">Could not load report preview.</div>
             ) : activeRows.length === 0 ? (
               <div className="p-8 text-center text-muted-foreground">No rows match these filters.</div>
+            ) : selectedTemplate.source === "audit" ? (
+              <AuditPreview rows={auditRows} />
             ) : selectedTemplate.source === "patients" ? (
-              <PatientPreview rows={patientRows} includePhones={includePhones} includeIdentifiers={includeIdentifiers} />
+              <PatientPreview rows={patientRows} includePhones={effectiveIncludePhones} includeIdentifiers={effectiveIncludeIdentifiers} />
             ) : (
-              <AppointmentPreview rows={appointmentRows} columns={columns} language={language} includePhones={includePhones} includeIdentifiers={includeIdentifiers} />
+              <AppointmentPreview rows={appointmentRows} columns={columns} language={language} includePhones={effectiveIncludePhones} includeIdentifiers={effectiveIncludeIdentifiers} />
             )}
           </Card>
         </div>
@@ -354,6 +474,36 @@ function PatientPreview({ rows, includePhones, includeIdentifiers }: { rows: Awa
   );
 }
 
+function AuditPreview({ rows }: { rows: AuditEntry[] }) {
+  return (
+    <div className="overflow-auto">
+      <table className="w-full min-w-[780px] text-sm">
+        <thead className="bg-muted/50 text-xs uppercase tracking-[0.12em] text-muted-foreground">
+          <tr><th className="px-3 py-2 text-left">Time</th><th className="px-3 py-2 text-left">Output</th><th className="px-3 py-2 text-left">Template</th><th className="px-3 py-2 text-left">Rows</th><th className="px-3 py-2 text-left">Sensitive fields</th></tr>
+        </thead>
+        <tbody className="divide-y divide-border">
+          {rows.map((row) => {
+            const values = asRecord(row.newValues);
+            return (
+              <tr key={row.id}>
+                <td className="px-3 py-2">{row.createdAt || "-"}</td>
+                <td className="px-3 py-2">{String(values.outputType || row.actionType || "-")}</td>
+                <td className="px-3 py-2">{String(values.reportTemplate || "-")}</td>
+                <td className="px-3 py-2">{String(values.rowCount ?? "-")}</td>
+                <td className="px-3 py-2">
+                  {Boolean(values.includePhoneNumbers) ? "phones " : ""}
+                  {Boolean(values.includePatientIdentifiers) ? "identifiers" : ""}
+                  {!values.includePhoneNumbers && !values.includePatientIdentifiers ? "none" : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function MiniChart({ rows }: { rows: Array<{ label: string; count: number }> }) {
   const max = Math.max(...rows.map((row) => row.count), 1);
   return (
@@ -404,6 +554,23 @@ function appointmentExportRow(row: AppointmentWithDetails, language: "ar" | "en"
   };
 }
 
+function auditExportRow(row: AuditEntry) {
+  const values = asRecord(row.newValues);
+  return {
+    Time: row.createdAt || "",
+    Output: values.outputType || row.actionType,
+    Template: values.reportTemplate || "",
+    Rows: values.rowCount ?? "",
+    IncludePhones: Boolean(values.includePhoneNumbers),
+    IncludeIdentifiers: Boolean(values.includePatientIdentifiers),
+    UserId: row.changedByUserId ?? "",
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
 function buildGroupedCounts(rows: AppointmentWithDetails[], grouping: string, language: "ar" | "en") {
   if (!grouping) return [];
   const counts = new Map<string, number>();
@@ -437,4 +604,13 @@ function downloadText(fileName: string, text: string) {
     URL.revokeObjectURL(anchor.href);
     anchor.remove();
   }, 1000);
+}
+
+function loadPresets(): ReportPreset[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PRESETS_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed.slice(0, 12) : [];
+  } catch {
+    return [];
+  }
 }

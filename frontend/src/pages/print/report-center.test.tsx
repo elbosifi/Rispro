@@ -7,11 +7,15 @@ import { ReportCenter } from "./report-center";
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchPatientDirectoryMock = vi.fn();
+const fetchAuditEntriesMock = vi.fn();
+const recordReportOutputMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
+  fetchAuditEntries: (...args: unknown[]) => fetchAuditEntriesMock(...args),
   fetchPatientDirectory: (...args: unknown[]) => fetchPatientDirectoryMock(...args),
+  recordReportOutput: (...args: unknown[]) => recordReportOutputMock(...args),
 }));
 
 vi.mock("@/providers/auth-provider", () => ({
@@ -42,8 +46,11 @@ function renderCenter() {
 describe("ReportCenter", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+    recordReportOutputMock.mockResolvedValue(undefined);
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [{ id: 1, nameEn: "CT", nameAr: "CT" }] });
     fetchPatientDirectoryMock.mockResolvedValue({ patients: [], pagination: { page: 1, pageSize: 100, total: 0, totalPages: 0 } });
+    fetchAuditEntriesMock.mockResolvedValue({ entries: [], meta: {} });
     fetchAppointmentsMock.mockResolvedValue([
       {
         id: 1,
@@ -71,5 +78,23 @@ describe("ReportCenter", () => {
     await waitFor(() => {
       expect(fetchAppointmentsMock).toHaveBeenCalledWith(expect.objectContaining({ modalityId: "1" }));
     });
+  });
+
+  it("audits CSV exports and saves local presets", async () => {
+    renderCenter();
+
+    expect((await screen.findAllByText("Print & Reports Center")).length).toBeGreaterThan(0);
+    await userEvent.type(screen.getByLabelText("Preset name"), "Morning CT");
+    await userEvent.click(screen.getByRole("button", { name: "Save preset" }));
+    expect(screen.getByRole("option", { name: "Morning CT" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "CSV" }));
+    expect(recordReportOutputMock).toHaveBeenCalledWith(expect.objectContaining({
+      reportTemplate: "daily-appointments",
+      outputType: "csv",
+      rowCount: 1,
+      includePhoneNumbers: false,
+      includePatientIdentifiers: true,
+    }));
   });
 });

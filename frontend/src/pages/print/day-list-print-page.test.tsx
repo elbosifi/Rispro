@@ -8,6 +8,7 @@ const fetchAppointmentsMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
+  recordReportOutput: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/providers/language-provider", () => ({

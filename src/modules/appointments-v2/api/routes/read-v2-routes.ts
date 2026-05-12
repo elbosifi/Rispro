@@ -5,6 +5,7 @@ import { requirePageAccess } from "../../../../middleware/page-access.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import { createBooking } from "../../booking/services/create-booking.service.js";
 import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { logAuditEntry } from "../../../../services/audit-service.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
@@ -50,6 +51,37 @@ function parseBookingIdFromScan(scanValue: string): number | null {
   const n = Number(trimmed);
   return Number.isInteger(n) && n > 0 ? n : null;
 }
+
+function normalizeReportOutputType(value: unknown): "print" | "pdf" | "csv" | "copy" | "xlsx" {
+  const clean = String(value || "").trim().toLowerCase();
+  if (clean === "pdf" || clean === "csv" || clean === "copy" || clean === "xlsx") return clean;
+  return "print";
+}
+
+router.post(
+  "/reports/output-audit",
+  asyncRoute(async (req: AuthedRequest, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const outputType = normalizeReportOutputType(body.outputType);
+    const rowCount = Math.max(0, Math.min(Number(body.rowCount) || 0, 100_000));
+
+    await logAuditEntry({
+      entityType: "report_output",
+      actionType: outputType,
+      changedByUserId: req.user?.sub ?? null,
+      newValues: {
+        reportTemplate: String(body.reportTemplate || ""),
+        outputType,
+        rowCount,
+        filters: body.filters ?? {},
+        includePhoneNumbers: Boolean(body.includePhoneNumbers),
+        includePatientIdentifiers: Boolean(body.includePatientIdentifiers),
+      },
+    });
+
+    res.json({ ok: true });
+  })
+);
 
 router.get(
   "/appointments",

@@ -2034,6 +2034,20 @@ export async function fetchAppointments(params: Record<string, string | string[]
   return mapAppointmentsWithDetails(raw.appointments);
 }
 
+export async function recordReportOutput(payload: {
+  reportTemplate: string;
+  outputType: "print" | "pdf" | "csv" | "copy" | "xlsx";
+  filters: Record<string, unknown>;
+  rowCount: number;
+  includePhoneNumbers: boolean;
+  includePatientIdentifiers: boolean;
+}): Promise<void> {
+  await api<{ ok: true }>("/v2/read/reports/output-audit", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // -- Statistics --
 export async function fetchStatistics(date: string, modalityId: string): Promise<AppointmentStatistics> {
   const params = new URLSearchParams();
