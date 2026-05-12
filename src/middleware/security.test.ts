@@ -16,7 +16,7 @@ describe("securityHeaders", () => {
     assert.equal(headers["Content-Security-Policy"].includes("object-src 'none'"), true);
   });
 
-  it("keeps connect-src self-only when NAPS2 web scan is not configured", () => {
+  it("allows local NAPS2 scanner-sharing endpoints in connect-src without env config", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = false;
@@ -29,8 +29,12 @@ describe("securityHeaders", () => {
         },
       } as any, () => {});
 
-      assert.equal(headers["Content-Security-Policy"].includes("connect-src 'self';"), true);
-      assert.equal(headers["Content-Security-Policy"].includes("http://localhost:9801"), false);
+      const csp = headers["Content-Security-Policy"];
+      assert.equal(csp.includes("connect-src 'self'"), true);
+      assert.equal(csp.includes("http://127.0.0.1:9801"), true);
+      assert.equal(csp.includes("http://localhost:9801"), true);
+      assert.equal(csp.includes("http://127.0.0.1:9802"), true);
+      assert.equal(csp.includes("http://localhost:9802"), true);
     } finally {
       env.naps2WebscanEnabled = previousEnabled;
       env.naps2WebscanEndpoint = previousEndpoint;
@@ -41,7 +45,7 @@ describe("securityHeaders", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = true;
-    env.naps2WebscanEndpoint = "http://127.0.0.1:9801/eSCL/ScannerCapabilities";
+    env.naps2WebscanEndpoint = "http://naps2.example.test:9803/eSCL/ScannerCapabilities";
     try {
       const headers: Record<string, string> = {};
       securityHeaders({} as any, {
@@ -51,7 +55,13 @@ describe("securityHeaders", () => {
       } as any, () => {});
 
       const csp = headers["Content-Security-Policy"];
-      assert.equal(csp.includes("connect-src 'self' http://127.0.0.1:9801 http://localhost:9801"), true);
+      assert.equal(
+        csp.includes(
+          "connect-src 'self' http://127.0.0.1:9801 http://localhost:9801 http://127.0.0.1:9802 http://localhost:9802"
+        ),
+        true
+      );
+      assert.equal(csp.includes("http://naps2.example.test:9803"), true);
       assert.equal(csp.includes("script-src 'self'"), true);
       assert.equal(csp.includes("object-src 'none'"), true);
       assert.equal(csp.includes("frame-ancestors 'none'"), true);

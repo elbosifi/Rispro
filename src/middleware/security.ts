@@ -2,17 +2,22 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "../config/env.js";
 
 function buildConnectSources(): string[] {
-  const sources = ["'self'"];
-  if (env.naps2WebscanEnabled || env.naps2WebscanEndpoint) {
-    sources.push("http://127.0.0.1:9801", "http://localhost:9801");
-    if (env.naps2WebscanEndpoint) {
-      try {
-        sources.push(new URL(env.naps2WebscanEndpoint).origin);
-      } catch {
-        // Invalid optional endpoint should not break app startup or headers.
-      }
+  const sources = [
+    "'self'",
+    "http://127.0.0.1:9801",
+    "http://localhost:9801",
+    "http://127.0.0.1:9802",
+    "http://localhost:9802",
+  ];
+
+  if (env.naps2WebscanEndpoint) {
+    try {
+      sources.push(new URL(env.naps2WebscanEndpoint).origin);
+    } catch {
+      // Invalid optional endpoint should not break app startup or headers.
     }
   }
+
   return Array.from(new Set(sources));
 }
 
