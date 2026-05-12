@@ -17,6 +17,7 @@ import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import ModalityPage from "@/pages/modality/modality-page";
 import DoctorPage from "@/pages/doctor/doctor-page";
 import PrintPage from "@/pages/print/print-page";
+import DayListPrintPage from "@/pages/print/day-list-print-page";
 import StatisticsPage from "@/pages/statistics/statistics-page";
 import PacsPage from "@/pages/pacs/pacs-page";
 import PacsRemapPage from "@/pages/pacs/pacs-remap-page";
@@ -181,7 +182,7 @@ function AppContent() {
       case "doctor":
         return language === "ar" ? "واجهة الطبيب" : "Doctor";
       case "print":
-        return language === "ar" ? "الطباعة" : "Print";
+        return language === "ar" ? "الطباعة والتقارير" : "Print & Reports Center";
       case "statistics":
         return language === "ar" ? "الإحصاءات" : "Statistics";
       case "search":
@@ -313,6 +314,7 @@ function RouterConfig() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/public/appointment" element={<PublicCancelAppointmentPage />} />
       <Route path="/public/cancel-appointment" element={<PublicCancelAppointmentPage />} />
+      <Route path="/print/day-list" element={<ProtectedRoute><DayListPrintPage /></ProtectedRoute>} />
       <Route
         path="/queue/check-in"
         element={<QueueCheckInAccessRoute />}

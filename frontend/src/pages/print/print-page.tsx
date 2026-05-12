@@ -24,6 +24,7 @@ import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { Button, Card } from "@/components/shared";
+import { ReportCenter } from "./report-center";
 
 function describeQueryError(error: unknown): string {
   if (!error) return "";
@@ -45,6 +46,11 @@ function EditedBadge() {
 }
 
 export default function PrintPage() {
+  const [searchParams] = useSearchParams();
+  return searchParams.get("appointmentId") ? <DirectAppointmentPrintPage /> : <ReportCenter />;
+}
+
+function DirectAppointmentPrintPage() {
   const { language } = useLanguage();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();

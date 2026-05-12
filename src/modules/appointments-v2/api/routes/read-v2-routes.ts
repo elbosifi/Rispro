@@ -61,7 +61,14 @@ router.get(
     const dateTo = typeof query.dateTo === "string" ? query.dateTo : "";
     const modalityId = typeof query.modalityId === "string" ? Number(query.modalityId) : null;
     const patientId = typeof query.patientId === "string" ? Number(query.patientId) : null;
+    const examTypeId = typeof query.examTypeId === "string" ? Number(query.examTypeId) : null;
     const q = typeof query.q === "string" ? query.q.trim() : "";
+    const caseCategory = typeof query.caseCategory === "string" ? query.caseCategory.trim() : "";
+    const priority = typeof query.priority === "string" ? query.priority.trim() : "";
+    const walkIn = typeof query.walkIn === "string" ? query.walkIn.trim() : "";
+    const specialQuota = typeof query.specialQuota === "string" ? query.specialQuota.trim() : "";
+    const supervisorOverride = typeof query.supervisorOverride === "string" ? query.supervisorOverride.trim() : "";
+    const sort = typeof query.sort === "string" ? query.sort.trim() : "";
 
     const status = parseStatuses(query["status[]"] ?? query.status);
 
@@ -90,6 +97,38 @@ router.get(
     if (patientId && Number.isFinite(patientId)) {
       params.push(patientId);
       where.push(`b.patient_id = $${params.length}`);
+    }
+
+    if (examTypeId && Number.isFinite(examTypeId)) {
+      params.push(examTypeId);
+      where.push(`b.exam_type_id = $${params.length}`);
+    }
+
+    if (caseCategory === "oncology" || caseCategory === "non_oncology") {
+      params.push(caseCategory);
+      where.push(`b.case_category = $${params.length}`);
+    }
+
+    if (priority) {
+      params.push(`%${priority.replace(/%/g, "").replace(/_/g, "")}%`);
+      where.push(`(rp.name_en ilike $${params.length} or rp.name_ar ilike $${params.length})`);
+    }
+
+    if (walkIn === "true" || walkIn === "false") {
+      params.push(walkIn === "true");
+      where.push(`b.is_walk_in = $${params.length}`);
+    }
+
+    if (specialQuota === "true" || specialQuota === "false") {
+      params.push(specialQuota === "true");
+      where.push(`b.uses_special_quota = $${params.length}`);
+    }
+
+    if (supervisorOverride === "true" || supervisorOverride === "false") {
+      params.push(supervisorOverride === "true");
+      where.push(`(b.capacity_resolution_mode in ('category_override', 'total_capacity_override') or exists (
+        select 1 from appointments_v2.override_audit_events oae where oae.booking_id = b.id
+      )) = $${params.length}`);
     }
 
     if (status.length > 0) {
@@ -126,6 +165,10 @@ router.get(
           b.booking_time::text as booking_time,
           b.requires_report,
           b.study_instance_uid,
+          b.uses_special_quota,
+          b.capacity_resolution_mode,
+          b.special_reason_code,
+          b.special_reason_note,
           row_number() over (partition by b.booking_date order by b.created_at asc, b.id asc)::int as daily_sequence,
           b.status,
           b.is_walk_in,
@@ -169,7 +212,13 @@ router.get(
       )
       select *
       from filtered
-      order by appointment_date desc, daily_sequence desc, id desc
+      order by ${
+        sort === "time-asc"
+          ? "appointment_date asc, booking_time asc nulls last, daily_sequence asc, id asc"
+          : sort === "patient-asc"
+            ? "arabic_full_name asc, english_full_name asc, appointment_date asc, id asc"
+            : "appointment_date desc, daily_sequence desc, id desc"
+      }
     `;
 
     const result = await pool.query(sql, params);

@@ -10,6 +10,7 @@ import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { printDayListFromRoute } from "@/lib/day-list-printing";
 import { Button, Card, Badge, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, SectionLabel } from "@/components/shared";
 import { filterVisibleAppointments } from "@/lib/print-utils";
 
@@ -178,6 +179,18 @@ export default function CalendarPage() {
 
   const openRegistrationsForSelectedDay = () => {
     navigate(`/registrations?date=${selectedDate}`);
+  };
+
+  const printSelectedDayList = () => {
+    printDayListFromRoute({
+      date: selectedDate,
+      modalityId: modalityFilter,
+      status: statusFilter,
+      caseCategory: categoryFilter,
+      q: searchQuery.trim(),
+      sort: "time-asc",
+      columns: ["sequence", "patient", "accession", "time", "modality", "exam", "category", "priority", "status"],
+    });
   };
 
   return (
@@ -395,7 +408,7 @@ export default function CalendarPage() {
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button
                   size="sm"
-                  onClick={() => navigate(`/print?date=${selectedDate}`)}
+                  onClick={printSelectedDayList}
                   disabled={selectedAppointments.length === 0}
                 >
                   {t(language, "calendar.printDayList")}

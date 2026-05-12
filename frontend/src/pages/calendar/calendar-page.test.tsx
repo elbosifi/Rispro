@@ -7,6 +7,7 @@ import CalendarPage from "./calendar-page";
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
+const printDayListFromRouteMock = vi.fn();
 const navigateMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
@@ -20,6 +21,10 @@ vi.mock("@/providers/language-provider", () => ({
 
 vi.mock("@/lib/appointment-printing", () => ({
   printAppointmentSlipById: (...args: unknown[]) => printAppointmentSlipByIdMock(...args),
+}));
+
+vi.mock("@/lib/day-list-printing", () => ({
+  printDayListFromRoute: (...args: unknown[]) => printDayListFromRouteMock(...args),
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -215,5 +220,26 @@ describe("CalendarPage registration drilldown", () => {
     renderPage();
     await screen.findByText("2 total registrations");
     expect((screen.getByRole("button", { name: "Print day list" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("prints the selected day directly without navigating to the print tab", async () => {
+    renderPage();
+    await screen.findByText("2 total registrations");
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Modality" }), { target: { value: "1" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Category" }), { target: { value: "oncology" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Status" }), { target: { value: "scheduled" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Search" }), { target: { value: "Alpha" } });
+    fireEvent.click(screen.getByRole("button", { name: "Print day list" }));
+
+    expect(printDayListFromRouteMock).toHaveBeenCalledWith(expect.objectContaining({
+      date: "2026-05-02",
+      modalityId: "1",
+      caseCategory: "oncology",
+      status: "scheduled",
+      q: "Alpha",
+      sort: "time-asc",
+    }));
+    expect(navigateMock).not.toHaveBeenCalledWith(expect.stringContaining("/print"));
   });
 });
