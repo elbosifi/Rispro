@@ -26,7 +26,7 @@ import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
-import { SectionLabel, Button, Card } from "@/components/shared";
+import { Button, Card } from "@/components/shared";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
 import type { Role } from "@/types/api";
@@ -532,9 +532,6 @@ export function CreateAppointmentTab({
     <div className="max-w-[1600px] mx-auto space-y-4 sm:space-y-5">
       {/* Page Header */}
       <div className="space-y-2 sm:space-y-3 mb-3 sm:mb-4 lg:hidden">
-        <div className="flex items-center gap-3">
-          <SectionLabel pulsing>{t(language, "appointments.create.sectionLabel")}</SectionLabel>
-        </div>
         <h1 className="text-2xl sm:text-3xl font-display" style={{ color: "var(--foreground)" }}>
           {t(language, "appointments.create.title")}
         </h1>
@@ -547,9 +544,6 @@ export function CreateAppointmentTab({
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(380px,0.95fr)] gap-4 sm:gap-5">
         {/* Patient & Form Panel */}
         <div className="space-y-3 sm:space-y-4 order-1 xl:order-2">
-          <div className="flex items-center gap-3">
-            <SectionLabel>{t(language, "appointments.create.patientDetails")}</SectionLabel>
-          </div>
           <Card className="p-4 sm:p-5 lg:sticky lg:top-4 h-fit">
             <PatientSearchSection
               value={form.patient}
@@ -793,9 +787,6 @@ export function CreateAppointmentTab({
 
         {/* Availability Panel */}
         <div className="space-y-3 sm:space-y-4 order-2 xl:order-1">
-          <div className="flex items-center gap-3">
-            <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
-          </div>
           <Card className="p-4 sm:p-5">
             <div className="mb-4 sm:mb-5 flex items-start justify-between gap-3">
               <h3 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--foreground)" }}>
