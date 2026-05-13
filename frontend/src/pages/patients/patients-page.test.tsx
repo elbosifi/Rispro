@@ -190,7 +190,7 @@ describe("PatientsPage interactions", () => {
     await waitFor(() => {
       const probe = screen.getByTestId("location-probe");
       expect(probe.getAttribute("data-pathname")).toBe("/registrations");
-      expect(probe.getAttribute("data-search")).toBe("?appointmentId=44");
+      expect(probe.getAttribute("data-search")).toBe("?appointmentId=44&patientId=11");
     });
   });
 });

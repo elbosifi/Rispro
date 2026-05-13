@@ -4,6 +4,7 @@ export interface RegistrationsFilters {
   dateFrom: string;
   dateTo: string;
   modalityId: string;
+  patientId?: string;
   query: string;
   statuses: string[];
 }
@@ -14,6 +15,10 @@ export function buildRegistrationAppointmentQuery(filters: RegistrationsFilters)
     q: filters.query,
     status: filters.statuses,
   };
+
+  if (filters.patientId) {
+    query.patientId = filters.patientId;
+  }
 
   if (filters.dateMode === "single") {
     query.dateFrom = filters.date;

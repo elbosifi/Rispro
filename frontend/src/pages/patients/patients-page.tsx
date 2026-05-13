@@ -214,7 +214,7 @@ function PatientDrawer({
                 <button
                   key={appt.id}
                   type="button"
-                  onClick={() => navigate(`/registrations?appointmentId=${appt.id}`)}
+                  onClick={() => navigate(`/registrations?appointmentId=${appt.id}&patientId=${patientId}`)}
                   className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background p-3 text-start transition-colors hover:border-accent/30 hover:bg-accent/5 focus:outline-none focus:ring-2 focus:ring-accent/30"
                   aria-label={`${appt.date} ${appt.modalityName} ${t(language, "patients.directory.action.openInRegistrations")}`}
                 >

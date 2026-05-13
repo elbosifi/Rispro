@@ -33,6 +33,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "2026-04-20",
         dateTo: "2026-04-27",
         modalityId: "3",
+        patientId: "11",
         query: "abc",
         statuses: ["waiting", "arrived"],
       })
@@ -40,6 +41,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       dateFrom: "2026-04-20",
       dateTo: "2026-04-27",
       modalityId: "3",
+      patientId: "11",
       q: "abc",
       status: ["waiting", "arrived"],
     });
@@ -55,6 +57,7 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: today,
         dateTo: today,
         modalityId: "",
+        patientId: "11",
         query: "",
         statuses: ["scheduled", "arrived", "waiting"],
       })
@@ -62,6 +65,7 @@ describe("buildRegistrationAppointmentQuery", () => {
       dateFrom: today,
       dateTo: today,
       modalityId: "",
+      patientId: "11",
       q: "",
       status: ["scheduled", "arrived", "waiting"],
     });
@@ -75,11 +79,13 @@ describe("buildRegistrationAppointmentQuery", () => {
         dateFrom: "",
         dateTo: "",
         modalityId: "2",
+        patientId: "11",
         query: "MRN-123",
         statuses: ["scheduled", "waiting"],
       })
     ).toEqual({
       modalityId: "2",
+      patientId: "11",
       q: "MRN-123",
       status: ["scheduled", "waiting"],
     });

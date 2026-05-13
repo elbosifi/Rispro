@@ -228,9 +228,14 @@ describe("RegistrationsPage print actions", () => {
         publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=other-token",
       },
     ]);
-    renderRegistrationsPage(["/registrations?appointmentId=7"]);
+    renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
 
     await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          patientId: "1",
+        })
+      );
       expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
     });
 

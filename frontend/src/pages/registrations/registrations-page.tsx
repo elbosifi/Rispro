@@ -151,6 +151,7 @@ export default function RegistrationsPage() {
   const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
   const appointmentIdParam = searchParams.get("appointmentId");
+  const patientIdParam = searchParams.get("patientId");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -159,8 +160,8 @@ export default function RegistrationsPage() {
   });
 
   const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["registrations", filters],
-    queryFn: () => fetchAppointments(buildRegistrationAppointmentQuery(filters)),
+    queryKey: ["registrations", filters, patientIdParam],
+    queryFn: () => fetchAppointments(buildRegistrationAppointmentQuery({ ...filters, patientId: patientIdParam || undefined })),
     staleTime: 1000 * 30,
   });
   const {
