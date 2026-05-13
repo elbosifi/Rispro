@@ -222,6 +222,64 @@ test("searchPatients: ranks first-token matches before later-token matches for s
   }
 });
 
+test("searchPatients: matches multi-word names in order and prefers first-token matches", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const suffix = uniqueSuffix();
+  const receptionistHash = bcrypt.hashSync("test-pass", 10);
+  const receptionist = await pool.query<{ id: number }>(
+    `
+      insert into users (username, full_name, password_hash, role, is_active)
+      values ($1, $2, $3, 'receptionist', true)
+      returning id
+    `,
+    [`test_rcpt_multi_${suffix}`, `Receptionist ${suffix}`, receptionistHash]
+  );
+  const receptionistUserId = Number(receptionist.rows[0]?.id);
+  const createdPatientIds: number[] = [];
+
+  const insertPatient = async (englishFullName: string, arabicFullName: string) => {
+    const nationalId = uniqueNationalId("3");
+    const inserted = await pool.query<{ id: number }>(
+      `
+        insert into patients (
+          national_id, identifier_type, identifier_value,
+          arabic_full_name, english_full_name, normalized_arabic_name,
+          age_years, estimated_date_of_birth, sex, phone_1, address,
+          created_by_user_id, updated_by_user_id
+        )
+        values ($1::text, 'national_id', $1::text, $2, $3, $4, 31, '1995-01-01', 'F', '0912345678', 'city', $5, $5)
+        returning id
+      `,
+      [nationalId, arabicFullName, englishFullName, arabicFullName, receptionistUserId]
+    );
+    const id = Number(inserted.rows[0]?.id);
+    createdPatientIds.push(id);
+    return id;
+  };
+
+  try {
+    const exactFirstToken = await insertPatient("Ali Saleh Ahmed", "Ù…Ø±ÙŠØ¶ Ø¹Ù„ÙŠ ØµØ§Ù„Ø­ Ø£Ø­Ù…Ø¯");
+    const orderedLaterTokens = await insertPatient("Mohammed Ali Ahmed Saleh", "Ù…Ø±ÙŠØ¶ Ù…Ø­Ù…Ø¯ Ø¹Ù„ÙŠ Ø£Ø­Ù…Ø¯ ØµØ§Ù„Ø­");
+
+    const results = await searchPatients("Ali Saleh");
+    const rankedIds = results.map((row) => Number(row.id));
+
+    const idxExact = rankedIds.indexOf(exactFirstToken);
+    const idxOrderedLater = rankedIds.indexOf(orderedLaterTokens);
+
+    assert.ok(idxExact >= 0, "First-token match should appear");
+    assert.ok(idxOrderedLater >= 0, "Ordered later-token match should appear");
+    assert.ok(idxExact < idxOrderedLater, "First-token match should rank before later-token match");
+  } finally {
+    if (createdPatientIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdPatientIds]).catch(() => undefined);
+    }
+    await pool.query(`delete from audit_log where changed_by_user_id = $1`, [receptionistUserId]).catch(() => undefined);
+    await pool.query(`delete from users where id = $1`, [receptionistUserId]).catch(() => undefined);
+  }
+});
+
 test("createPatient: persists demographics_estimated flag", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const suffix = uniqueSuffix();
