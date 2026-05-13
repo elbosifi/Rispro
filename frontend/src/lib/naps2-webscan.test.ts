@@ -6,6 +6,7 @@ function response(input: {
   status?: number;
   headers?: Record<string, string>;
   blob?: Blob;
+  json?: unknown;
 } = {}): Response {
   return {
     ok: input.ok ?? true,
@@ -14,6 +15,7 @@ function response(input: {
       get: (name: string) => input.headers?.[name] ?? input.headers?.[name.toLowerCase()] ?? null,
     },
     blob: async () => input.blob ?? new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+    json: async () => input.json ?? {},
   } as Response;
 }
 
@@ -22,9 +24,9 @@ describe("naps2 webscan adapter", () => {
     vi.restoreAllMocks();
   });
 
-  it("checks localhost:9801 while probing default NAPS2 scanner-sharing endpoints", async () => {
+  it("checks the RISpro Scanner Bridge before diagnostic NAPS2 endpoints", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === "http://localhost:9801/eSCL/ScannerCapabilities") {
+      if (url === "http://localhost:9810/health") {
         return response();
       }
       throw new Error("not here");
@@ -33,90 +35,66 @@ describe("naps2 webscan adapter", () => {
 
     const status = await getNaps2WebScanStatus();
 
-    expect(status).toEqual({ available: true, endpoint: "http://localhost:9801" });
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9801/eSCL/ScannerCapabilities", expect.any(Object));
-    expect(fetchMock).toHaveBeenCalledWith("http://localhost:9801/eSCL/ScannerCapabilities", expect.any(Object));
+    expect(status).toEqual({ available: true, endpoint: "http://localhost:9810", kind: "rispro_bridge" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9810/health", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:9810/health", expect.any(Object));
   });
 
-  it("uses configured endpoint instead of default probes", async () => {
+  it("uses configured bridge endpoint instead of default probes", async () => {
     const fetchMock = vi.fn(async () => response());
     vi.stubGlobal("fetch", fetchMock);
 
-    const status = await getNaps2WebScanStatus("http://configured.local:9801/");
+    const status = await getNaps2WebScanStatus("http://configured.local:9810/");
 
-    expect(status.endpoint).toBe("http://configured.local:9801");
+    expect(status.endpoint).toBe("http://configured.local:9810");
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith("http://configured.local:9801/eSCL/ScannerCapabilities", expect.any(Object));
+    expect(fetchMock).toHaveBeenCalledWith("http://configured.local:9810/health", expect.any(Object));
   });
 
-  it("creates ESCL scan jobs with scan InputSource and PDF document format", async () => {
-    let scanJobBody = "";
-    let nextDocumentCount = 0;
+  it("scans through the RISpro Scanner Bridge /scan API", async () => {
+    let scanBody = "";
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "http://localhost:9801/eSCL/ScannerCapabilities") return response();
-      if (url === "http://localhost:9801/eSCL/ScanJobs") {
-        scanJobBody = String(init?.body || "");
-        return response({ status: 201, headers: { Location: "http://localhost:9801/eSCL/ScanJobs/job-1" } });
-      }
-      if (url === "http://localhost:9801/eSCL/ScanJobs/job-1/NextDocument") {
-        nextDocumentCount += 1;
-        return nextDocumentCount === 1
-          ? response({ blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }) })
-          : response({ ok: false, status: 404 });
+      if (url === "http://localhost:9810/health") return response();
+      if (url === "http://localhost:9810/scan") {
+        scanBody = String(init?.body || "");
+        return response({
+          headers: { "X-RISpro-Page-Count": "2" },
+          blob: new Blob(["%PDF-1.4"], { type: "application/pdf" }),
+        });
       }
       return response({ ok: false, status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const result = await scanAppointmentRequest({ endpoint: "http://localhost:9801", source: "feeder" });
+    const result = await scanAppointmentRequest({ endpoint: "http://localhost:9810", source: "feeder" });
 
     expect(result.file.type).toBe("application/pdf");
-    expect(scanJobBody).toContain("<pwg:Version>2.6</pwg:Version>");
-    expect(scanJobBody).toContain("<scan:Intent>Document</scan:Intent>");
-    expect(scanJobBody).toContain("<scan:InputSource>Feeder</scan:InputSource>");
-    expect(scanJobBody).not.toContain("<pwg:InputSource>");
-    expect(scanJobBody).toContain("<scan:ColorMode>Grayscale8</scan:ColorMode>");
-    expect(scanJobBody).toContain("<scan:XResolution>200</scan:XResolution>");
-    expect(scanJobBody).toContain("<scan:YResolution>200</scan:YResolution>");
-    expect(scanJobBody).toContain("<pwg:DocumentFormat>application/pdf</pwg:DocumentFormat>");
-    expect(scanJobBody).toContain("<scan:DocumentFormatExt>application/pdf</scan:DocumentFormatExt>");
+    expect(result.pageCount).toBe(2);
+    expect(JSON.parse(scanBody)).toEqual({ dpi: 200, colorMode: "grayscale", source: "feeder" });
   });
 
-  it("reports endpoint and HTTP status when capabilities work but scan job creation fails", async () => {
+  it("reports when NAPS2 is reachable but the RISpro Scanner Bridge is not running", async () => {
     const fetchMock = vi.fn(async (url: string) => {
-      if (url === "http://localhost:9801/eSCL/ScannerCapabilities") return response();
-      return response({ ok: false, status: 500 });
+      if (url === "http://127.0.0.1:9801/eSCL/ScannerCapabilities") return response();
+      throw new Error("bridge missing");
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(scanAppointmentRequest({ endpoint: "http://localhost:9801" }))
-      .rejects.toThrow("NAPS2.WebScan capabilities were reachable at http://localhost:9801, but scan job creation failed with HTTP 500 for application/pdf. JPEG fallback also failed: NAPS2.WebScan capabilities were reachable at http://localhost:9801, but scan job creation failed with HTTP 500 for image/jpeg.");
+    const status = await getNaps2WebScanStatus();
+
+    expect(status.available).toBe(false);
+    expect(status.kind).toBe("naps2_direct");
+    expect(status.message).toBe("NAPS2 is working, but RISpro Scanner Bridge is not running.");
   });
 
-  it("falls back to JPEG scan job creation when PDF is rejected", async () => {
-    const scanJobBodies: string[] = [];
-    let nextDocumentCount = 0;
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "http://localhost:9801/eSCL/ScannerCapabilities") return response();
-      if (url === "http://localhost:9801/eSCL/ScanJobs") {
-        scanJobBodies.push(String(init?.body || ""));
-        if (scanJobBodies.length === 1) return response({ ok: false, status: 400 });
-        return response({ status: 201, headers: { Location: "http://localhost:9801/eSCL/ScanJobs/job-jpeg" } });
-      }
-      if (url === "http://localhost:9801/eSCL/ScanJobs/job-jpeg/NextDocument") {
-        nextDocumentCount += 1;
-        return nextDocumentCount === 1
-          ? response({ blob: new Blob([new Uint8Array([0xff, 0xd8, 0xff, 0xd9])], { type: "image/jpeg" }) })
-          : response({ ok: false, status: 404 });
-      }
+  it("does not use the direct NAPS2 endpoint for scanning", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "http://127.0.0.1:9801/eSCL/ScannerCapabilities") return response();
       return response({ ok: false, status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await scanAppointmentRequest({ endpoint: "http://localhost:9801" });
-
-    expect(scanJobBodies[0]).toContain("<pwg:DocumentFormat>application/pdf</pwg:DocumentFormat>");
-    expect(scanJobBodies[1]).toContain("<pwg:DocumentFormat>image/jpeg</pwg:DocumentFormat>");
-    expect(scanJobBodies[1]).toContain("<scan:DocumentFormatExt>image/jpeg</scan:DocumentFormatExt>");
+    await expect(scanAppointmentRequest({ endpoint: "http://127.0.0.1:9801" }))
+      .rejects.toThrow("NAPS2 is working, but RISpro Scanner Bridge is not running.");
   });
 });

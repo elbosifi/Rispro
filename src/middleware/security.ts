@@ -4,10 +4,10 @@ import { env } from "../config/env.js";
 function buildConnectSources(): string[] {
   const sources = [
     "'self'",
+    "http://127.0.0.1:9810",
+    "http://localhost:9810",
     "http://127.0.0.1:9801",
     "http://localhost:9801",
-    "http://127.0.0.1:9802",
-    "http://localhost:9802",
   ];
 
   if (env.naps2WebscanEndpoint) {

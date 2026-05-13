@@ -17,6 +17,7 @@ end $$;
 insert into system_settings (category, setting_key, setting_value)
 values
   ('documents_and_uploads', 'naps2_webscan_enabled', '{"value":"disabled"}'::jsonb),
+  ('documents_and_uploads', 'scanner_bridge_endpoint', '{"value":""}'::jsonb),
   ('documents_and_uploads', 'naps2_webscan_endpoint', '{"value":""}'::jsonb)
 on conflict (category, setting_key) do nothing;
 

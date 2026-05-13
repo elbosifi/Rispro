@@ -274,7 +274,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(screen.getByRole("button", { name: "Attach Request" })).toBeTruthy();
   });
 
-  it("passes configured NAPS2 endpoint from integration status to scanner adapter", async () => {
+  it("passes configured RISpro Scanner Bridge endpoint from integration status to scanner adapter", async () => {
     mockFetchIntegrationStatus.mockResolvedValue({
       scanner: {
         referralUploadEnabled: true,
@@ -288,7 +288,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanFileFormat: "pdf",
         bridgeReady: true,
         naps2WebScanEnabled: true,
-        naps2WebScanEndpoint: "http://localhost:9801",
+        naps2WebScanEndpoint: "http://localhost:9810",
       },
     });
 
@@ -298,12 +298,12 @@ describe("RequestDocumentsPanel local scan flow", () => {
 
     await waitFor(() => {
       expect(mockScanAppointmentRequest).toHaveBeenCalledWith(
-        expect.objectContaining({ endpoint: "http://localhost:9801" })
+        expect.objectContaining({ endpoint: "http://localhost:9810" })
       );
     });
   });
 
-  it("shows scan action when a NAPS2 endpoint is configured even if enabled flag is stale", async () => {
+  it("keeps scan action hidden when only an endpoint is configured but scanning is disabled", async () => {
     mockFetchIntegrationStatus.mockResolvedValue({
       scanner: {
         referralUploadEnabled: true,
@@ -317,13 +317,15 @@ describe("RequestDocumentsPanel local scan flow", () => {
         scanFileFormat: "pdf",
         bridgeReady: false,
         naps2WebScanEnabled: false,
-        naps2WebScanEndpoint: "http://localhost:9801",
+        naps2WebScanEndpoint: "http://localhost:9810",
       },
     });
 
     renderPanel();
 
-    expect(await screen.findByRole("button", { name: "Scan Appointment Request" })).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Scan Appointment Request" })).toBeNull();
+    });
   });
 
   it("keeps failed scanned uploads retryable through the same upload API", async () => {

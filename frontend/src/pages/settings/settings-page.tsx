@@ -4059,7 +4059,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
     setAuthDomain(settings.storage_auth_domain || "");
     setFallbackEnabled(String(settings.storage_fallback_enabled || "true").toLowerCase() === "true");
     setNaps2WebScanEnabled(String(settings.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled");
-    setNaps2WebScanEndpoint(settings.naps2_webscan_endpoint || "");
+    setNaps2WebScanEndpoint(settings.scanner_bridge_endpoint || settings.naps2_webscan_endpoint || "");
     setScanDpi(settings.scan_dpi || "200");
     setScanColorMode(settings.scan_color_mode || "grayscale");
     setScannerSource(settings.scanner_source || "feeder");
@@ -4075,6 +4075,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           { key: "storage_auth_domain", value: { value: authDomain } },
           { key: "storage_fallback_enabled", value: { value: String(fallbackEnabled) } },
           { key: "naps2_webscan_enabled", value: { value: naps2WebScanEnabled ? "enabled" : "disabled" } },
+          { key: "scanner_bridge_endpoint", value: { value: naps2WebScanEndpoint } },
           { key: "naps2_webscan_endpoint", value: { value: naps2WebScanEndpoint } },
           { key: "scanner_bridge_mode", value: { value: naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
           { key: "scan_dpi", value: { value: scanDpi } },
@@ -4199,7 +4200,7 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
             <input
               value={naps2WebScanEndpoint}
               onChange={(e) => setNaps2WebScanEndpoint(e.target.value)}
-              placeholder="http://127.0.0.1:9801"
+              placeholder="http://127.0.0.1:9810"
               className="input-premium w-full"
             />
           </div>

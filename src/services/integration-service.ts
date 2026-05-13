@@ -189,10 +189,11 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
   const printSettings = settings.printing_and_labels || {};
   const documentSettings = settings.documents_and_uploads || {};
   const rawScannerMode = documentSettings.scanner_bridge_mode || "";
-  const naps2WebScanEndpoint = env.naps2WebscanEndpoint || String(documentSettings.naps2_webscan_endpoint || "").trim();
+  const naps2WebScanEndpoint =
+    env.naps2WebscanEndpoint ||
+    String(documentSettings.scanner_bridge_endpoint || documentSettings.naps2_webscan_endpoint || "").trim();
   const naps2WebScanEnabled =
     env.naps2WebscanEnabled ||
-    Boolean(naps2WebScanEndpoint) ||
     String(documentSettings.naps2_webscan_enabled || "").trim().toLowerCase() === "enabled";
   const scannerBridgeMode = naps2WebScanEnabled
     ? "naps2_webscan"

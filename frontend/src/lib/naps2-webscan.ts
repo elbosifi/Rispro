@@ -1,6 +1,7 @@
 export interface Naps2WebScanStatus {
   available: boolean;
   endpoint?: string;
+  kind?: "rispro_bridge" | "naps2_direct";
   message?: string;
 }
 
@@ -21,18 +22,16 @@ export interface Naps2ScanResult {
 type EsclDocumentFormat = "application/pdf" | "image/jpeg";
 
 const DEFAULT_ENDPOINTS = [
+  "http://127.0.0.1:9810",
+  "http://localhost:9810",
   "http://127.0.0.1:9801",
   "http://localhost:9801",
-  "http://127.0.0.1:9802",
-  "http://localhost:9802",
-  "http://127.0.0.1:9880",
-  "http://localhost:9880",
-  "https://127.0.0.1:9880",
-  "https://localhost:9880",
 ];
 
 const NAPS2_UNAVAILABLE_MESSAGE =
   "NAPS2.WebScan is not available on this workstation. Upload PDF/image instead.";
+const BRIDGE_NOT_RUNNING_MESSAGE = "NAPS2 is working, but RISpro Scanner Bridge is not running.";
+const BRIDGE_BLOCKED_MESSAGE = "Scanner bridge blocked by browser security; use manual upload.";
 
 function normalizeEndpoint(endpoint: string): string {
   return endpoint.trim().replace(/\/+$/, "");
@@ -56,7 +55,18 @@ function normalizeNaps2Error(error: unknown): Error {
   return new Error(NAPS2_UNAVAILABLE_MESSAGE);
 }
 
-async function fetchCapabilities(endpoint: string): Promise<Response> {
+function isBridgeEndpoint(endpoint: string): boolean {
+  return /:9810($|\/)/.test(endpoint);
+}
+
+async function fetchBridgeHealth(endpoint: string): Promise<Response> {
+  return fetch(`${endpoint}/health`, {
+    method: "GET",
+    signal: withTimeout(3000),
+  });
+}
+
+async function fetchDirectCapabilities(endpoint: string): Promise<Response> {
   return fetch(`${endpoint}/eSCL/ScannerCapabilities`, {
     method: "GET",
     signal: withTimeout(3000),
@@ -68,17 +78,37 @@ export async function getNaps2WebScanStatus(endpoint?: string): Promise<Naps2Web
     return { available: false, message: NAPS2_UNAVAILABLE_MESSAGE };
   }
 
+  let directNaps2Reachable = false;
+  let browserBlockedBridge = false;
+
   for (const candidate of candidateEndpoints(endpoint)) {
     try {
-      const response = await fetchCapabilities(candidate);
-      if (response.ok) {
-        return { available: true, endpoint: candidate };
+      if (isBridgeEndpoint(candidate)) {
+        const response = await fetchBridgeHealth(candidate);
+        if (response.ok) {
+          return { available: true, endpoint: candidate, kind: "rispro_bridge" };
+        }
+        continue;
       }
-    } catch {
+
+      const response = await fetchDirectCapabilities(candidate);
+      if (response.ok) {
+        directNaps2Reachable = true;
+      }
+    } catch (error) {
+      if (error instanceof TypeError && isBridgeEndpoint(candidate)) {
+        browserBlockedBridge = true;
+      }
       // Try the next loopback candidate.
     }
   }
 
+  if (directNaps2Reachable) {
+    return { available: false, kind: "naps2_direct", message: BRIDGE_NOT_RUNNING_MESSAGE };
+  }
+  if (browserBlockedBridge) {
+    return { available: false, message: BRIDGE_BLOCKED_MESSAGE };
+  }
   return { available: false, message: NAPS2_UNAVAILABLE_MESSAGE };
 }
 
@@ -138,6 +168,36 @@ async function createScanJob(
 
   const location = response.headers.get("Location") || response.headers.get("location") || "";
   return resolveJobId(location);
+}
+
+async function scanViaBridge(
+  endpoint: string,
+  options: Required<Pick<Naps2ScanOptions, "dpi" | "colorMode" | "source">>,
+  fileName?: string
+): Promise<Naps2ScanResult> {
+  const response = await fetch(`${endpoint}/scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options),
+    signal: withTimeout(90000),
+  });
+  if (!response.ok) {
+    let message = "RISpro Scanner Bridge could not complete the scan.";
+    try {
+      const body = await response.json();
+      if (body?.error) message = String(body.error);
+    } catch {
+      // Keep generic message.
+    }
+    throw new Error(message);
+  }
+  const blob = await response.blob();
+  const normalizedFileName = (fileName?.trim() || "appointment-request.pdf").replace(/\.[a-z0-9]+$/i, "");
+  return {
+    file: new File([blob], `${normalizedFileName}.pdf`, { type: "application/pdf" }),
+    pageCount: Number(response.headers.get("X-RISpro-Page-Count") || 1),
+    source: "naps2_webscan",
+  };
 }
 
 async function readScannedPages(endpoint: string, jobId: string): Promise<Blob[]> {
@@ -260,7 +320,7 @@ async function buildPdfFromJpegPages(pages: Blob[]): Promise<Blob> {
 
 export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Promise<Naps2ScanResult> {
   const status = await getNaps2WebScanStatus(options.endpoint);
-  if (!status.available || !status.endpoint) {
+  if (!status.available || !status.endpoint || status.kind !== "rispro_bridge") {
     throw new Error(status.message || NAPS2_UNAVAILABLE_MESSAGE);
   }
 
@@ -270,29 +330,7 @@ export async function scanAppointmentRequest(options: Naps2ScanOptions = {}): Pr
       colorMode: options.colorMode || "grayscale",
       source: options.source || "feeder",
     } as const;
-    let jobId: string;
-    try {
-      jobId = await createScanJob(status.endpoint, scanOptions, "application/pdf");
-    } catch (pdfError) {
-      try {
-        jobId = await createScanJob(status.endpoint, scanOptions, "image/jpeg");
-      } catch (jpegError) {
-        const pdfMessage = pdfError instanceof Error ? pdfError.message : "PDF scan job creation failed.";
-        const jpegMessage = jpegError instanceof Error ? jpegError.message : "JPEG scan job creation failed.";
-        throw new Error(`${pdfMessage} JPEG fallback also failed: ${jpegMessage}`);
-      }
-    }
-    const pages = await readScannedPages(status.endpoint, jobId);
-    if (pages.length === 0) throw new Error("No scanned pages were returned by NAPS2.WebScan.");
-
-    const pdf = pages.length === 1 && pages[0].type.toLowerCase().includes("pdf") ? pages[0] : await buildPdfFromJpegPages(pages);
-    const fileName = options.fileName?.trim() || "appointment-request.pdf";
-    const normalizedFileName = fileName.toLowerCase().endsWith(".pdf") ? fileName : `${fileName.replace(/\.[a-z0-9]+$/i, "")}.pdf`;
-    return {
-      file: new File([pdf], normalizedFileName, { type: "application/pdf" }),
-      pageCount: pages.length,
-      source: "naps2_webscan",
-    };
+    return await scanViaBridge(status.endpoint, scanOptions, options.fileName);
   } catch (error) {
     throw normalizeNaps2Error(error);
   }

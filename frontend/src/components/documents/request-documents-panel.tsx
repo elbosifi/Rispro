@@ -83,8 +83,7 @@ export function RequestDocumentsPanel({
     hasAppointmentContext &&
     Boolean(
       integrationStatus?.scanner?.naps2WebScanEnabled ||
-      integrationStatus?.scanner?.scannerBridgeMode === "naps2_webscan" ||
-      integrationStatus?.scanner?.naps2WebScanEndpoint
+      integrationStatus?.scanner?.scannerBridgeMode === "naps2_webscan"
     );
   const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
   const scanColorMode = integrationStatus?.scanner?.scanColorMode === "color" ? "color" : "grayscale";

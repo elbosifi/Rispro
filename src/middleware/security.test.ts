@@ -16,7 +16,7 @@ describe("securityHeaders", () => {
     assert.equal(headers["Content-Security-Policy"].includes("object-src 'none'"), true);
   });
 
-  it("allows local NAPS2 scanner-sharing endpoints in connect-src without env config", () => {
+  it("allows local scanner bridge and diagnostic NAPS2 endpoints in connect-src without env config", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = false;
@@ -31,17 +31,17 @@ describe("securityHeaders", () => {
 
       const csp = headers["Content-Security-Policy"];
       assert.equal(csp.includes("connect-src 'self'"), true);
+      assert.equal(csp.includes("http://127.0.0.1:9810"), true);
+      assert.equal(csp.includes("http://localhost:9810"), true);
       assert.equal(csp.includes("http://127.0.0.1:9801"), true);
       assert.equal(csp.includes("http://localhost:9801"), true);
-      assert.equal(csp.includes("http://127.0.0.1:9802"), true);
-      assert.equal(csp.includes("http://localhost:9802"), true);
     } finally {
       env.naps2WebscanEnabled = previousEnabled;
       env.naps2WebscanEndpoint = previousEndpoint;
     }
   });
 
-  it("allows local NAPS2 scanner-sharing endpoints in connect-src when configured", () => {
+  it("allows local scanner bridge endpoints in connect-src when configured", () => {
     const previousEnabled = env.naps2WebscanEnabled;
     const previousEndpoint = env.naps2WebscanEndpoint;
     env.naps2WebscanEnabled = true;
@@ -57,7 +57,7 @@ describe("securityHeaders", () => {
       const csp = headers["Content-Security-Policy"];
       assert.equal(
         csp.includes(
-          "connect-src 'self' http://127.0.0.1:9801 http://localhost:9801 http://127.0.0.1:9802 http://localhost:9802"
+          "connect-src 'self' http://127.0.0.1:9810 http://localhost:9810 http://127.0.0.1:9801 http://localhost:9801"
         ),
         true
       );
