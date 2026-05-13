@@ -43,6 +43,7 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
   const [isEditing, setIsEditing] = useState(defaultOpen);
   const [priorityId, setPriorityId] = useState("");
   const [notes, setNotes] = useState(String(appointment.notes ?? ""));
+  const [requiresReport, setRequiresReport] = useState(Boolean(appointment.requiresReport));
   const routinePriorityId = resolveRoutinePriorityId(lookups);
   const routinePriorityIdString = routinePriorityId != null ? String(routinePriorityId) : "";
 
@@ -50,8 +51,9 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
     setExamTypeId(String(appointment.examTypeId ?? ""));
     setPriorityId(String(appointment.reportingPriorityId ?? routinePriorityIdString));
     setNotes(String(appointment.notes ?? ""));
+    setRequiresReport(Boolean(appointment.requiresReport));
     setIsEditing(defaultOpen);
-  }, [appointment.id, appointment.examTypeId, appointment.reportingPriorityId, appointment.notes, defaultOpen, routinePriorityIdString]);
+  }, [appointment.id, appointment.examTypeId, appointment.reportingPriorityId, appointment.notes, appointment.requiresReport, defaultOpen, routinePriorityIdString]);
 
   const isEdited = Boolean(
     appointment.updatedAt &&
@@ -99,6 +101,7 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
       updateAppointment(appointment.id, {
         examTypeId: examTypeId ? Number(examTypeId) : null,
         reportingPriorityId: priorityId ? Number(priorityId) : null,
+        requiresReport,
         notes: notes.trim() ? notes.trim() : null
       }),
     meta: {
@@ -210,6 +213,23 @@ export function AppointmentEditor({ appointment, lookups, onUpdated, onDeleted, 
             ))}
           </select>
         </div>
+      </div>
+
+      <div>
+        <label className="flex items-start gap-3 rounded-lg border border-stone-200 bg-white px-3 py-2 text-sm text-stone-900 dark:border-stone-600 dark:bg-stone-800 dark:text-white">
+          <input
+            type="checkbox"
+            checked={requiresReport}
+            onChange={(e) => setRequiresReport(e.target.checked)}
+            className="mt-1 h-4 w-4 rounded border-stone-300 text-teal-600 focus:ring-teal-500"
+          />
+          <span>
+            <span className="block font-medium">{t(language, "appointmentEditor.requiresReport")}</span>
+            <span className="block text-xs text-stone-500 dark:text-stone-400">
+              {t(language, "appointmentEditor.requiresReportHint")}
+            </span>
+          </span>
+        </label>
       </div>
 
       <div>
