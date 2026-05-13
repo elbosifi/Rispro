@@ -47,6 +47,7 @@ export function AvailabilityPanel({
   }
 
   if (rows.length === 0) {
+    if (!emptyMessage) return null;
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{emptyMessage}</div>;
   }
 

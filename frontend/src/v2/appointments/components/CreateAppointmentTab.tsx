@@ -200,6 +200,14 @@ export function CreateAppointmentTab({
     days: AVAILABILITY_WINDOW_DAYS,
     offset: availabilityOffset,
   });
+  const availabilityStatusLabel =
+    !form.patientId
+      ? t(language, "appointments.create.availabilityNeedsPatient")
+      : !form.modalityId
+        ? t(language, "appointments.create.availabilityNeedsModality")
+        : !form.examTypeId
+          ? t(language, "appointments.create.availabilityNeedsExamType")
+          : t(language, "appointments.create.availabilityReady");
   const hasSpecialQuotaAvailable = (availability.rawItems ?? []).some(
     (item) =>
       item.date === form.appointmentDate &&
@@ -789,7 +797,14 @@ export function CreateAppointmentTab({
             <SectionLabel>{t(language, "appointments.create.availabilityLabel")}</SectionLabel>
           </div>
           <Card className="p-4 sm:p-5">
-            <h3 className="text-lg sm:text-xl font-semibold mb-4 sm:mb-5" style={{ color: "var(--foreground)" }}>{t(language, "appointments.create.evaluatedAvailability")}</h3>
+            <div className="mb-4 sm:mb-5 flex items-start justify-between gap-3">
+              <h3 className="text-lg sm:text-xl font-semibold" style={{ color: "var(--foreground)" }}>
+                {t(language, "appointments.create.evaluatedAvailability")}
+              </h3>
+              <span className="inline-flex shrink-0 items-center rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-blue-700">
+                {availabilityStatusLabel}
+              </span>
+            </div>
             <AvailabilityPanel
               rows={availability.rows}
               selectedDate={form.appointmentDate}
@@ -816,7 +831,7 @@ export function CreateAppointmentTab({
               emptyMessage={
                 availability.enabled
                   ? t(language, "appointments.create.noAvailabilityRows")
-                  : t(language, "appointments.create.loadAvailabilityHint")
+                  : ""
               }
             />
           </Card>
