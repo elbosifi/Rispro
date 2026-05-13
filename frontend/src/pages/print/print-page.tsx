@@ -16,7 +16,7 @@ import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
 import {
   filterVisibleAppointments,
   prepareAppointmentSlipHtml,
-  printAppointmentList,
+  printAppointmentListV2,
   printAppointmentSlip,
 } from "@/lib/print-utils";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
@@ -189,7 +189,7 @@ function DirectAppointmentPrintPage() {
     appointments: AppointmentWithDetails[],
     date: string,
   ) {
-    printAppointmentList(appointments, date);
+    printAppointmentListV2(appointments, date);
   }
 
   function todayList() {

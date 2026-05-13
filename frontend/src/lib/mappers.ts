@@ -77,6 +77,7 @@ export interface AppointmentWithDetails extends Appointment {
   demographicsEstimated?: boolean;
   sex: string;
   phone1: string | null;
+  address?: string | null;
   modalityNameAr: string;
   modalityNameEn: string;
   modalityCode: string;
@@ -271,6 +272,7 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     demographicsEstimated: bool(raw, 'demographics_estimated', bool(raw, 'demographicsEstimated', false)),
     sex: str(raw, 'sex'),
     phone1: strOrNull(raw, 'phone_1') ?? strOrNull(raw, 'phone1'),
+    address: strOrNull(raw, 'address'),
     // Modality fields
     modalityNameAr: str(raw, 'modality_name_ar') || str(raw, 'modalityNameAr'),
     modalityNameEn: str(raw, 'modality_name_en') || str(raw, 'modalityNameEn'),

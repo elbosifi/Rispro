@@ -29,7 +29,7 @@ vi.mock("@/providers/language-provider", () => ({
 }));
 
 vi.mock("@/lib/print-utils", () => ({
-  printAppointmentList: vi.fn(),
+  printAppointmentListV2: vi.fn(),
 }));
 
 vi.mock("@/lib/toast", () => ({

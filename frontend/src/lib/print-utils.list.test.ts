@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { filterVisibleAppointments, printAppointmentList } from "./print-utils";
+import { filterVisibleAppointments, printAppointmentListV2 } from "./print-utils";
 
 function makeAppointment(status: AppointmentWithDetails["status"]): AppointmentWithDetails {
   return {
@@ -35,6 +35,7 @@ function makeAppointment(status: AppointmentWithDetails["status"]): AppointmentW
     ageYears: 40,
     sex: "M",
     phone1: null,
+    address: "tripoli",
     modalityNameAr: "أشعة",
     modalityNameEn: "Radiology",
     modalityCode: "RAD",
@@ -81,12 +82,14 @@ describe("print list helpers", () => {
       print,
     } as unknown as Window);
 
-    printAppointmentList([makeAppointment("scheduled")], "2026-04-25");
+    printAppointmentListV2([makeAppointment("scheduled")], "2026-04-25");
 
     expect(open).toHaveBeenCalled();
     const html = write.mock.calls.map((call) => String(call[0] ?? "")).join("\n");
     expect(html).toContain("/assets/nccb-logo.png");
     expect(html).toContain("National Cancer Center Benghazi");
+    expect(html).toContain("Age: 40");
+    expect(html).toContain("City: Tripoli");
     expect(html).toContain("المركز الوطني للأورام بنغازي");
   });
 });

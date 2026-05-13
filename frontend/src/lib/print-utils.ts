@@ -1,5 +1,6 @@
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy } from "@/lib/date-format";
+import { LIBYAN_CITIES } from "@/lib/libyan-cities";
 import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   DEFAULT_PATIENT_QR_SETTINGS,
@@ -1233,7 +1234,11 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
       (apt, idx) => `
       <div class="row">
         <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
-        <div class="arabic"><div class="label">Patient</div><div class="value">${escapeHtml(apt.arabicFullName)}</div></div>
+        <div class="arabic">
+          <div class="label">Patient</div>
+          <div class="value">${escapeHtml(apt.arabicFullName)}</div>
+          <div class="meta">Age: ${escapeHtml(apt.ageYears ? String(apt.ageYears) : "â€”")} Â· City: ${escapeHtml(apt.address ? (LIBYAN_CITIES.find((city) => city.code === apt.address)?.nameEn ?? apt.address) : "â€”")}</div>
+        </div>
         <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
         <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
         <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
@@ -1274,6 +1279,7 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
           .row:nth-child(even) { background: #eef6f5; }
           .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
           .value { font-size: 11px; font-weight: 700; color: #111827; word-break: break-word; line-height: 1.25; }
+          .meta { margin-top: 2px; font-size: 8.5px; color: #4b5563; line-height: 1.2; }
           .arabic { direction: rtl; text-align: right; }
           .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
         </style>
@@ -1308,6 +1314,94 @@ export function printAppointmentList(list: AppointmentWithDetails[], listDate: s
   if (summary && summary.textContent) {
     summary.textContent = summary.textContent.replace(/Â·/g, "·");
   }
+  printWindow.focus();
+  printWindow.print();
+}
+
+export function printAppointmentListV2(list: AppointmentWithDetails[], listDate: string): void {
+  const visibleList = filterVisibleAppointments(list);
+  if (visibleList.length === 0) return;
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) return;
+
+  const now = new Date().toLocaleString();
+
+  const rows = visibleList
+    .map(
+      (apt, idx) => `
+      <div class="row">
+        <div class="arabic"><div class="label">${idx + 1}</div><div class="value">${apt.dailySequence ?? "—"}</div></div>
+        <div class="arabic">
+          <div class="label">Patient</div>
+          <div class="value">${escapeHtml(apt.arabicFullName)}</div>
+          <div class="meta">Age: ${escapeHtml(apt.ageYears ? String(apt.ageYears) : "N/A")} | City: ${escapeHtml(apt.address ? (LIBYAN_CITIES.find((city) => city.code === apt.address)?.nameEn ?? apt.address) : "N/A")}</div>
+        </div>
+        <div><div class="label">Accession</div><div class="value">${escapeHtml(apt.accessionNumber)}</div></div>
+        <div><div class="label">Date</div><div class="value">${escapeHtml(formatDateLy(apt.appointmentDate))}</div></div>
+        <div><div class="label">Modality</div><div class="value">${escapeHtml(apt.modalityNameEn || "—")}</div></div>
+        <div><div class="label">Exam</div><div class="value">${escapeHtml(apt.examNameEn || "—")}</div></div>
+        <div><div class="label">Priority</div><div class="value">${escapeHtml(apt.priorityNameEn || "Routine")}</div></div>
+        <div><div class="label">Status</div><div class="value">${escapeHtml(apt.status || "—")}</div></div>
+      </div>
+    `
+    )
+    .join("");
+
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>Appointment List</title>
+        <style>
+          @page { size: A4 landscape; margin: 8mm; }
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
+          .slip { width: 100%; min-height: 100%; border: 1.5px solid #0f766e; border-radius: 12px; padding: 10px; }
+          .header { display: flex; align-items: center; justify-content: center; gap: 12px; padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid #d1d5db; }
+          .logo { width: 20mm; height: 20mm; object-fit: contain; flex: 0 0 auto; }
+          .brand-wrap { text-align: center; }
+          .brand { margin: 0; font-size: 17px; font-weight: 800; color: #0f766e; }
+          .brand-ar { margin: 2px 0 0; font-size: 12px; font-weight: 700; color: #0f766e; direction: rtl; }
+          .title { margin: 3px 0 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.14em; }
+          .summary { margin: 0 0 8px; font-size: 10px; color: #374151; text-align: center; }
+          .row {
+            display: grid;
+            grid-template-columns: 22mm 2fr 22mm 1fr 22mm 1.1fr 22mm 1.5fr;
+            gap: 5px 7px;
+            align-items: center;
+            padding: 10px 12px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 11px;
+          }
+          .row:nth-child(odd) { background: #f8fafc; }
+          .row:nth-child(even) { background: #eef6f5; }
+          .label { font-size: 8.5px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.05em; }
+          .value { font-size: 11px; font-weight: 700; color: #111827; word-break: break-word; line-height: 1.25; }
+          .meta { margin-top: 2px; font-size: 8.5px; color: #4b5563; line-height: 1.2; }
+          .arabic { direction: rtl; text-align: right; }
+          .footer { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #d1d5db; display: flex; justify-content: space-between; gap: 12px; font-size: 8px; color: #6b7280; }
+        </style>
+      </head>
+      <body>
+        <div class="slip">
+          <div class="header">
+            <img class="logo" src="/assets/nccb-logo.png" alt="Hospital logo" />
+            <div class="brand-wrap">
+              <p class="brand">National Cancer Center Benghazi</p>
+              <p class="brand-ar">المركز الوطني للأورام بنغازي</p>
+              <p class="title">Appointment List</p>
+            </div>
+          </div>
+          <p class="summary">Date window: ${escapeHtml(listDate)} · Total: ${visibleList.length} · Printed: ${escapeHtml(now)}</p>
+          ${rows}
+          <div class="footer">
+            <span>Generated by RISpro</span>
+            <span>${escapeHtml(now)}</span>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
   printWindow.focus();
   printWindow.print();
 }

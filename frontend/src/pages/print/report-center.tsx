@@ -11,7 +11,7 @@ import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { useAuth } from "@/providers/auth-provider";
 import { useLanguage } from "@/providers/language-provider";
 import { pushToast } from "@/lib/toast";
-import { printAppointmentList } from "@/lib/print-utils";
+import { printAppointmentListV2 } from "@/lib/print-utils";
 
 type ReportSource = "appointments" | "patients" | "audit" | "disabled";
 
@@ -211,7 +211,7 @@ export function ReportCenter() {
   async function printReport() {
     if (!(await auditOutput("print"))) return;
     if (selectedTemplate.source === "appointments") {
-      printAppointmentList(appointmentRows, dateTo ? `${date} to ${dateTo}` : date);
+      printAppointmentListV2(appointmentRows, dateTo ? `${date} to ${dateTo}` : date);
       return;
     }
     window.print();

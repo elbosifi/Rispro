@@ -42,7 +42,7 @@ vi.mock("@/v2/appointments/api", () => ({
 
 vi.mock("@/lib/print-utils", () => ({
   prepareAppointmentSlipHtml: (...args: unknown[]) => prepareAppointmentSlipHtmlMock(...args),
-  printAppointmentList: vi.fn(),
+  printAppointmentListV2: vi.fn(),
 }));
 
 vi.mock("@/lib/appointment-printing", () => ({

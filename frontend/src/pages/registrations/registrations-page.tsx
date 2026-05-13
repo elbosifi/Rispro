@@ -25,7 +25,7 @@ import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
-  printAppointmentList,
+  printAppointmentListV2,
 } from "@/lib/print-utils";
 import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
@@ -522,7 +522,7 @@ export default function RegistrationsPage() {
   };
 
   const handlePrintVisibleList = () => {
-    printAppointmentList(appointments, listWindowLabel);
+    printAppointmentListV2(appointments, listWindowLabel);
   };
 
   const patientScopeName = selectedAppointment
