@@ -169,6 +169,17 @@ describe("PatientsPage interactions", () => {
     });
   });
 
+  it("defaults the directory sort to most recent", async () => {
+    renderPatientsPage();
+
+    await waitFor(() => {
+      expect(fetchPatientDirectoryMock).toHaveBeenCalled();
+    });
+
+    const firstCall = fetchPatientDirectoryMock.mock.calls[0]?.[0] as { sortBy?: string } | undefined;
+    expect(firstCall?.sortBy).toBe("recent");
+  });
+
   it("opens the selected appointment in registrations when clicking a recent appointment", async () => {
     renderPatientsPage();
 

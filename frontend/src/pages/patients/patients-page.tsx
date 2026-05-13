@@ -283,7 +283,7 @@ export default function PatientsPage() {
   const [sexFilter, setSexFilter] = useState<"male" | "female" | "">("");
   const [ageMin, setAgeMin] = useState<number | "">("");
   const [ageMax, setAgeMax] = useState<number | "">("");
-  const [sortBy, setSortBy] = useState<"name" | "recent" | "mrn">("name");
+  const [sortBy, setSortBy] = useState<"name" | "recent" | "mrn">("recent");
   const [page, setPage] = useState(1);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
 
@@ -316,7 +316,7 @@ export default function PatientsPage() {
   const patients = data?.patients || [];
   const pagination = data?.pagination;
   const totalPages = pagination?.totalPages || 1;
-  const hasActiveFilters = Boolean(searchQuery || categoryFilter || appointmentFilter || sexFilter || ageMin !== "" || ageMax !== "" || sortBy !== "name");
+  const hasActiveFilters = Boolean(searchQuery || categoryFilter || appointmentFilter || sexFilter || ageMin !== "" || ageMax !== "" || sortBy !== "recent");
   const visibleSummary = patients.reduce(
     (summary, patient) => {
       if (patient.category === "oncology") summary.oncology += 1;
@@ -342,7 +342,7 @@ export default function PatientsPage() {
     setSexFilter("");
     setAgeMin("");
     setAgeMax("");
-    setSortBy("name");
+    setSortBy("recent");
     setPage(1);
   };
 
@@ -471,6 +471,18 @@ export default function PatientsPage() {
           </div>
         </div>
 
+        <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4 text-xs text-muted-foreground">
+          <span className="font-semibold uppercase tracking-[0.14em]">{t(language, "patients.directory.colorHint")}</span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-rose-300" />
+            {t(language, "patients.directory.colorOncology")}
+          </span>
+          <span className="inline-flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-sky-300" />
+            {t(language, "patients.directory.colorNonOncology")}
+          </span>
+        </div>
+
         <div className="mt-4 grid grid-cols-2 gap-2 border-t border-border pt-4 lg:grid-cols-4">
           <DirectoryStat label={t(language, "patients.directory.filter.oncology")} value={visibleSummary.oncology} tone="rose" />
           <DirectoryStat label={t(language, "patients.directory.filter.nonOncology")} value={visibleSummary.nonOncology} tone="sky" />
@@ -541,10 +553,7 @@ export default function PatientsPage() {
                       >
                       <td className="p-3 font-mono text-xs">{patient.mrn || "—"}</td>
                       <td className="p-3 font-medium">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate max-w-[150px]">{patient.arabicFullName}</span>
-                          <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
-                        </div>
+                        <span className="truncate max-w-[150px]">{patient.arabicFullName}</span>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {(patient.warnings.missingPhone || patient.warnings.missingDob || patient.warnings.missingSex || patient.warnings.missingName || patient.warnings.noAppointment || patient.warnings.possibleDuplicate) && (
                             <>
@@ -646,10 +655,7 @@ export default function PatientsPage() {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="truncate font-semibold">{patient.arabicFullName}</p>
-                        <PatientCategoryBadge category={patient.category} showWhenUnset={false} />
-                      </div>
+                      <p className="truncate font-semibold">{patient.arabicFullName}</p>
                       <p className="mt-1 font-mono text-xs text-muted-foreground">{patient.mrn || "—"}</p>
                     </div>
                     <Badge variant={patient.nextAppointment ? "info" : "neutral"} size="sm">
