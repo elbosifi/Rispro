@@ -47,7 +47,7 @@ vi.mock("@/lib/toast", () => ({
   pushToast: (...args: unknown[]) => mockPushToast(...args),
 }));
 
-function renderRegistrationsPage() {
+function renderRegistrationsPage(initialEntries = ["/registrations"]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -55,7 +55,7 @@ function renderRegistrationsPage() {
   return render(
     <LanguageProvider>
       <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/registrations"]}>
+        <MemoryRouter initialEntries={initialEntries}>
           <Routes>
             <Route path="/registrations" element={<RegistrationsPage />} />
           </Routes>
@@ -199,6 +199,46 @@ describe("RegistrationsPage print actions", () => {
       .map((button) => button.getAttribute("aria-label"));
 
     expect(actionLabels).toEqual(["Print", "Link", "WhatsApp", "Notify", "Manage"]);
+  });
+
+  it("opens the appointment drawer from an appointmentId deep link", async () => {
+    fetchAppointmentsMock.mockResolvedValueOnce([
+      {
+        id: 99,
+        modalityId: 1,
+        examTypeId: 3,
+        accessionNumber: "ACC-99",
+        dailySequence: 1,
+        patientId: 2,
+        caseCategory: "non_oncology",
+        arabicFullName: "Other Patient",
+        englishFullName: "Other Patient",
+        modalityNameAr: "CT",
+        modalityNameEn: "CT",
+        examNameAr: "CT Chest",
+        examNameEn: "CT Chest",
+        priorityNameAr: null,
+        priorityNameEn: null,
+        appointmentDate: "2027-01-05",
+        status: "scheduled",
+        isWalkIn: false,
+        notes: null,
+        phone1: "0911111111",
+        patientWebPushSubscribed: false,
+        publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=other-token",
+      },
+    ]);
+    renderRegistrationsPage(["/registrations?appointmentId=7"]);
+
+    await waitFor(() => {
+      expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+      expect(screen.getByText("Test Patient")).toBeTruthy();
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
   });
 
   it("keeps WhatsApp and Notify action slots disabled when unavailable", async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useSearchParams } from "react-router-dom";
 import { Bell, ExternalLink, MoreHorizontal, Printer } from "lucide-react";
 import {
   cancelAppointment,
@@ -112,6 +113,7 @@ function offsetFromStartDate(isoDate: string): number {
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
   const { user } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const isRtl = language === "ar";
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
@@ -148,6 +150,7 @@ export default function RegistrationsPage() {
   const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
   const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
+  const appointmentIdParam = searchParams.get("appointmentId");
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -573,7 +576,45 @@ export default function RegistrationsPage() {
   const closeManageDrawer = () => {
     setSelectedAppointment(null);
     setManageTab("details");
+    if (appointmentIdParam) {
+      const nextSearchParams = new URLSearchParams(searchParams);
+      nextSearchParams.delete("appointmentId");
+      setSearchParams(nextSearchParams, { replace: true });
+    }
   };
+
+  useEffect(() => {
+    const rawAppointmentId = appointmentIdParam?.trim();
+    if (!rawAppointmentId) {
+      return;
+    }
+
+    const appointmentId = Number(rawAppointmentId);
+    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void getAppointmentById(appointmentId)
+      .then((appointment) => {
+        if (cancelled) return;
+        setSelectedAppointment(appointment);
+        setManageTab("details");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        pushToast({
+          type: "error",
+          title: t("registrations.appointmentLinkTitle"),
+          message: error instanceof Error ? error.message : t("registrations.appointmentLinkUnavailable"),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentIdParam, t]);
 
   useEffect(() => {
     setRescheduleDate("");

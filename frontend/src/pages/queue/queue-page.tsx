@@ -208,6 +208,16 @@ export default function QueuePage() {
             {inQueue ? entry.queueStatus : scheduledLabel}
           </Badge>
           {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
+          {!inQueue && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => scanMutation.mutate(entry.accessionNumber)}
+              disabled={scanMutation.isPending}
+            >
+              {scanMutation.isPending ? t("common.loading") : t("queue.enterToQueue")}
+            </Button>
+          )}
           {queue?.reviewActive && entry.appointmentStatus === "scheduled" && (
             <Button
               size="sm"

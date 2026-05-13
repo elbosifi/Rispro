@@ -1,4 +1,4 @@
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -8,6 +8,11 @@ import { LanguageProvider } from "@/providers/language-provider";
 
 const fetchPatientDirectoryMock = vi.fn();
 const fetchPatientDirectorySummaryMock = vi.fn();
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe" data-pathname={location.pathname} data-search={location.search} />;
+}
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchPatientDirectory: (...args: unknown[]) => fetchPatientDirectoryMock(...args),
@@ -33,6 +38,7 @@ function renderPatientsPage() {
         <MemoryRouter initialEntries={["/patients"]}>
           <Routes>
             <Route path="/patients" element={<PatientsPage />} />
+            <Route path="/registrations" element={<LocationProbe />} />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -103,9 +109,23 @@ describe("PatientsPage interactions", () => {
         possibleDuplicate: false,
         duplicateReasons: [],
       },
-      lastAppointment: null,
+      lastAppointment: {
+        id: 44,
+        date: "2027-01-02",
+        status: "scheduled",
+        modalityName: "MRI Abdomen",
+        examTypeName: "MRI Abdomen",
+      },
       nextAppointment: null,
-      recentAppointments: [],
+      recentAppointments: [
+        {
+          id: 44,
+          date: "2027-01-02",
+          status: "scheduled",
+          modalityName: "MRI Abdomen",
+          examTypeName: "MRI Abdomen",
+        },
+      ],
     });
   });
 
@@ -146,6 +166,31 @@ describe("PatientsPage interactions", () => {
     await waitFor(() => {
       const latestCall = fetchPatientDirectoryMock.mock.calls.at(-1)?.[0] as { sex?: string } | undefined;
       expect(latestCall?.sex).toBe("female");
+    });
+  });
+
+  it("opens the selected appointment in registrations when clicking a recent appointment", async () => {
+    renderPatientsPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Example").length).toBeGreaterThan(0);
+    });
+
+    const row = screen.getAllByText("Alice Example")[0]?.closest("tr");
+    expect(row).toBeTruthy();
+
+    await userEvent.click(row as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText("Patient Profile")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: /Open in registrations/i }));
+
+    await waitFor(() => {
+      const probe = screen.getByTestId("location-probe");
+      expect(probe.getAttribute("data-pathname")).toBe("/registrations");
+      expect(probe.getAttribute("data-search")).toBe("?appointmentId=44");
     });
   });
 });

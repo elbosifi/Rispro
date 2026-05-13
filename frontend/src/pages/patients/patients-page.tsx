@@ -211,15 +211,30 @@ function PatientDrawer({
           ) : (
             <div className="space-y-2">
               {summary.recentAppointments.slice(0, 5).map((appt) => (
-                <div key={appt.id} className="flex items-center justify-between text-sm p-2 bg-muted/30 rounded">
-                  <div>
+                <button
+                  key={appt.id}
+                  type="button"
+                  onClick={() => navigate(`/registrations?appointmentId=${appt.id}`)}
+                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background p-3 text-start transition-colors hover:border-accent/30 hover:bg-accent/5 focus:outline-none focus:ring-2 focus:ring-accent/30"
+                  aria-label={`${appt.date} ${appt.modalityName} ${t(language, "patients.directory.action.openInRegistrations")}`}
+                >
+                  <div className="min-w-0">
                     <div className="font-medium">{appt.date}</div>
                     <div className="text-muted-foreground text-xs">{appt.modalityName}</div>
                   </div>
-                  <Badge variant={appt.status === "completed" ? "success" : appt.status === "cancelled" ? "error" : "neutral"} size="sm">
-                    {appt.status}
-                  </Badge>
-                </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <Badge
+                      variant={appt.status === "completed" ? "success" : appt.status === "cancelled" ? "error" : "neutral"}
+                      size="sm"
+                    >
+                      {appt.status}
+                    </Badge>
+                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-accent">
+                      {t(language, "patients.directory.action.openInRegistrations")}
+                      <ChevronRight size={14} />
+                    </span>
+                  </div>
+                </button>
               ))}
             </div>
           )}
