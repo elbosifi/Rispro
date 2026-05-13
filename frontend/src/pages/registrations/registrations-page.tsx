@@ -116,7 +116,6 @@ export default function RegistrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isRtl = language === "ar";
   const queryClient = useQueryClient();
-  const [filters, setFilters] = useState<RegistrationsFilters>(DEFAULT_FILTERS);
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
@@ -152,6 +151,16 @@ export default function RegistrationsPage() {
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
   const appointmentIdParam = searchParams.get("appointmentId");
   const patientIdParam = searchParams.get("patientId");
+  const patientScopedDefaultFilters: RegistrationsFilters = patientIdParam
+    ? {
+        ...DEFAULT_FILTERS,
+        dateMode: "all",
+        date: "",
+        dateFrom: "",
+        dateTo: "",
+      }
+    : DEFAULT_FILTERS;
+  const [filters, setFilters] = useState<RegistrationsFilters>(() => patientScopedDefaultFilters);
 
   const { data: lookups } = useQuery({
     queryKey: ["lookups"],
@@ -182,6 +191,21 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
+  useEffect(() => {
+    if (!patientIdParam) return;
+
+    setFilters((current) =>
+      current.dateMode === "all" && current.date === "" && current.dateFrom === "" && current.dateTo === ""
+        ? current
+        : {
+            ...current,
+            dateMode: "all",
+            date: "",
+            dateFrom: "",
+            dateTo: "",
+          },
+    );
+  }, [patientIdParam]);
   const { data: specialReasonOptions = [] } = useV2SpecialReasonCodes();
   const selectedCanReschedule = Boolean(
     selectedAppointment && RESCHEDULABLE_STATUSES.includes(selectedAppointment.status as BookingStatus)
@@ -367,7 +391,35 @@ export default function RegistrationsPage() {
     setFilters((current) => ({ ...current, [key]: value }));
   };
 
+  const clearPatientScope = () => {
+    if (!patientIdParam) return;
+
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.delete("patientId");
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
+  const clearDeepLinkState = () => {
+    const nextSearchParams = new URLSearchParams(searchParams);
+    let changed = false;
+
+    if (nextSearchParams.has("patientId")) {
+      nextSearchParams.delete("patientId");
+      changed = true;
+    }
+
+    if (nextSearchParams.has("appointmentId")) {
+      nextSearchParams.delete("appointmentId");
+      changed = true;
+    }
+
+    if (changed) {
+      setSearchParams(nextSearchParams, { replace: true });
+    }
+  };
+
   const handleDateModeChange = (dateMode: RegistrationsFilters["dateMode"]) => {
+    clearPatientScope();
     setFilters((current) => {
       if (dateMode === "all") {
         return {
@@ -435,9 +487,11 @@ export default function RegistrationsPage() {
   const handleResetFilters = () => {
     setFilters(DEFAULT_FILTERS);
     setSelectedAppointment(null);
+    clearDeepLinkState();
   };
 
   const handleTodayShortcut = () => {
+    clearPatientScope();
     setFilters({
       ...DEFAULT_FILTERS,
       dateMode: "single",
@@ -453,6 +507,7 @@ export default function RegistrationsPage() {
 
   const handleTomorrowShortcut = () => {
     const value = isoDateDaysFromNow(1);
+    clearPatientScope();
     setFilters({
       ...DEFAULT_FILTERS,
       dateMode: "single",
@@ -469,6 +524,10 @@ export default function RegistrationsPage() {
   const handlePrintVisibleList = () => {
     printAppointmentList(appointments, listWindowLabel);
   };
+
+  const patientScopeName = selectedAppointment
+    ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)
+    : "";
 
   const handleViewAppointmentLink = async (appointment: AppointmentWithDetails) => {
     const url = String(appointment.publicAppointmentUrl || "").trim();
@@ -935,6 +994,11 @@ export default function RegistrationsPage() {
               {t("registrations.searchFilters")}
             </p>
             <p className="mt-1 text-xs sm:text-sm text-muted-foreground">{t("registrations.searchFiltersHint")}</p>
+            {patientIdParam && patientScopeName ? (
+              <div className="mt-3 rounded-2xl border border-accent/20 bg-accent/5 px-3 py-2 text-xs sm:text-sm text-foreground/80">
+                {t("registrations.patientScopeHint", { patient: patientScopeName })}
+              </div>
+            ) : null}
             <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-[10px] font-mono-data uppercase tracking-[0.08em] mb-1 text-muted-foreground">

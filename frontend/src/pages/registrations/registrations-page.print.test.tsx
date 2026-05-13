@@ -1,10 +1,11 @@
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import RegistrationsPage from "./registrations-page";
 import { LanguageProvider } from "@/providers/language-provider";
+import { todayIsoDateLy } from "@/lib/date-format";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
@@ -17,6 +18,11 @@ const rescheduleV2BookingMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
 const mockPrintAppointmentSlipById = vi.fn();
 const mockPushToast = vi.fn();
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location-probe" data-search={location.search} />;
+}
 
 vi.mock("@/lib/api-hooks", () => ({
   cancelAppointment: vi.fn(),
@@ -57,7 +63,15 @@ function renderRegistrationsPage(initialEntries = ["/registrations"]) {
       <QueryClientProvider client={queryClient}>
         <MemoryRouter initialEntries={initialEntries}>
           <Routes>
-            <Route path="/registrations" element={<RegistrationsPage />} />
+            <Route
+              path="/registrations"
+              element={
+                <>
+                  <RegistrationsPage />
+                  <LocationProbe />
+                </>
+              }
+            />
           </Routes>
         </MemoryRouter>
       </QueryClientProvider>
@@ -171,6 +185,22 @@ describe("RegistrationsPage print actions", () => {
     prepareAppointmentSlipHtmlMock.mockResolvedValue("<html><body>preview</body></html>");
   });
 
+  it("defaults to today's single-date registrations when opened normally", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(fetchAppointmentsMock).toHaveBeenCalled();
+    });
+
+    const firstQuery = fetchAppointmentsMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(firstQuery).toEqual(
+      expect.objectContaining({
+        dateFrom: todayIsoDateLy(),
+        dateTo: todayIsoDateLy(),
+      })
+    );
+  });
+
   it("prints directly from the row print button", async () => {
     renderRegistrationsPage();
 
@@ -239,10 +269,55 @@ describe("RegistrationsPage print actions", () => {
       expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
     });
 
+    const firstQuery = fetchAppointmentsMock.mock.calls[0]?.[0] as Record<string, unknown>;
+    expect(firstQuery).not.toHaveProperty("dateFrom");
+    expect(firstQuery).not.toHaveProperty("dateTo");
+
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
       expect(screen.getByText("Test Patient")).toBeTruthy();
       expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(screen.getByText(/Showing registrations for Test Patient\./i)).toBeTruthy();
+    });
+  });
+
+  it("clears the patient scope when switching to today", async () => {
+    renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
+
+    const probe = screen.getByTestId("location-probe");
+    await userEvent.click(screen.getByRole("button", { name: /Today/i }));
+
+    await waitFor(() => {
+      expect(probe.getAttribute("data-search")).toBe("?appointmentId=7");
+    });
+
+    const latestQuery = fetchAppointmentsMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(latestQuery).not.toHaveProperty("patientId");
+    expect(latestQuery).toEqual(
+      expect.objectContaining({
+        dateFrom: todayIsoDateLy(),
+        dateTo: todayIsoDateLy(),
+      })
+    );
+  });
+
+  it("resets the deep link and clears the selected patient", async () => {
+    renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
+
+    await waitFor(() => {
+      expect(screen.getByText("ACC-7")).toBeTruthy();
+    });
+
+    const probe = screen.getByTestId("location-probe");
+    await userEvent.click(screen.getByRole("button", { name: /Reset/i }));
+
+    await waitFor(() => {
+      expect(probe.getAttribute("data-search")).toBe("");
+      expect(screen.queryByRole("dialog", { name: "Manage" })).toBeNull();
     });
   });
 
