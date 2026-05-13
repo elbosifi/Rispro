@@ -3,8 +3,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowDown, ArrowUp, Plus, Save, Trash2, Loader2 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
-import { chooseLocalized } from "@/lib/i18n";
+import { chooseLocalized, type Language } from "@/lib/i18n";
 import { fetchModalitiesSettings, fetchPatientQrSettings, savePatientQrSettings, type PatientQrSettings } from "@/lib/api-hooks";
+import { fetchV2Modalities } from "@/v2/appointments/api";
 
 interface PatientQrSettingsSectionProps {
   onReAuthRequired: (key: string[]) => void;
@@ -201,6 +202,10 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     queryKey: ["modalities-settings", "active"],
     queryFn: () => fetchModalitiesSettings(false),
   });
+  const { data: lookupModalities, isLoading: lookupModalitiesLoading } = useQuery({
+    queryKey: ["v2-modalities", "patient-qr-settings"],
+    queryFn: fetchV2Modalities,
+  });
   const [draft, setDraft] = useState<PatientQrSettings>(DEFAULT_SETTINGS);
   const [newChecklistItemAr, setNewChecklistItemAr] = useState("");
   const [newChecklistItemEn, setNewChecklistItemEn] = useState("");
@@ -243,16 +248,24 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
   }, [draft]);
 
   const activeModalities = useMemo(() => {
-    const rows = (modalitiesData?.modalities ?? []) as Array<Record<string, unknown>>;
-    return rows
-      .map((row) => ({
-        id: Number(row.id ?? 0),
+    const rows = [
+      ...((modalitiesData?.modalities ?? []) as Array<Record<string, unknown>>),
+      ...((lookupModalities ?? []) as unknown as Array<Record<string, unknown>>),
+    ];
+    const byId = new Map<number, { id: number; nameAr: string; nameEn: string; code: string }>();
+    for (const row of rows) {
+      const id = Number(row.id ?? 0);
+      if (!Number.isFinite(id) || id <= 0 || byId.has(id)) continue;
+      byId.set(id, {
+        id,
         nameAr: String(row.nameAr ?? row.name_ar ?? ""),
         nameEn: String(row.nameEn ?? row.name_en ?? ""),
         code: String(row.code ?? ""),
-      }))
-      .filter((row) => Number.isFinite(row.id) && row.id > 0);
-  }, [modalitiesData]);
+      });
+    }
+    return Array.from(byId.values());
+  }, [lookupModalities, modalitiesData]);
+  const modalityChecklistLoading = !modalitiesData && lookupModalitiesLoading;
 
   const updateChecklistItemAr = (index: number, value: string) => {
     setDraft((current) => {
@@ -545,6 +558,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
               modalities={activeModalities}
               selected={draft.reportAccessModalityIds}
               language={language}
+              loading={modalityChecklistLoading}
               onToggle={(id, checked) =>
                 setDraft((current) => ({
                   ...current,
@@ -571,6 +585,7 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
               modalities={activeModalities}
               selected={draft.imageAccessModalityIds}
               language={language}
+              loading={modalityChecklistLoading}
               onToggle={(id, checked) =>
                 setDraft((current) => ({
                   ...current,
@@ -873,9 +888,26 @@ function SelectField(props: { label: string; value: string; onChange: (value: st
 function ModalityChecklist(props: {
   modalities: Array<{ id: number; nameAr: string; nameEn: string; code: string }>;
   selected: number[];
-  language: string;
+  language: Language;
+  loading?: boolean;
   onToggle: (id: number, checked: boolean) => void;
 }) {
+  if (props.loading) {
+    return (
+      <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-500">
+        {chooseLocalized(props.language, "جاري تحميل الأجهزة...", "Loading modalities...")}
+      </div>
+    );
+  }
+
+  if (props.modalities.length === 0) {
+    return (
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+        {chooseLocalized(props.language, "لا توجد أجهزة فعالة متاحة للاختيار.", "No active modalities are available to select.")}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
       {props.modalities.map((modality) => {

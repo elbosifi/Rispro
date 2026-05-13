@@ -11,6 +11,7 @@ const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchAppointmentSlipSettingsMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
+const fetchPublicAppointmentReportStatusMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
 const sendPatientWebPushNotificationMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
@@ -31,6 +32,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettingsMock(...args),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
+  fetchPublicAppointmentReportStatus: (...args: unknown[]) => fetchPublicAppointmentReportStatusMock(...args),
   sendPatientWebPushNotification: (...args: unknown[]) => sendPatientWebPushNotificationMock(...args),
 }));
 
@@ -38,6 +40,7 @@ vi.mock("@/v2/appointments/api", () => ({
   useV2Availability: (...args: unknown[]) => useV2AvailabilityMock(...args),
   rescheduleV2Booking: (...args: unknown[]) => rescheduleV2BookingMock(...args),
   useV2ExamTypes: () => ({ data: [], isLoading: false }),
+  useV2SpecialReasonCodes: () => ({ data: [], isLoading: false }),
 }));
 
 vi.mock("@/lib/print-utils", () => ({
@@ -51,6 +54,12 @@ vi.mock("@/lib/appointment-printing", () => ({
 
 vi.mock("@/lib/toast", () => ({
   pushToast: (...args: unknown[]) => mockPushToast(...args),
+}));
+
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({
+    user: { role: "super_admin" },
+  }),
 }));
 
 function renderRegistrationsPage(initialEntries = ["/registrations"]) {
@@ -79,6 +88,14 @@ function renderRegistrationsPage(initialEntries = ["/registrations"]) {
   );
 }
 
+function getFirstText(text: string): HTMLElement {
+  return screen.getAllByText(text)[0] as HTMLElement;
+}
+
+function getAppointmentRow(accessionNumber: string): HTMLElement {
+  return screen.getAllByText(accessionNumber).at(-1)!.closest('[role="button"]') as HTMLElement;
+}
+
 describe("RegistrationsPage print actions", () => {
   beforeEach(() => {
     localStorage.setItem("rispro-language", "en");
@@ -87,6 +104,15 @@ describe("RegistrationsPage print actions", () => {
     mockPushToast.mockReset();
     sendPatientWebPushNotificationMock.mockReset();
     sendPatientWebPushNotificationMock.mockResolvedValue({});
+    fetchPublicAppointmentReportStatusMock.mockReset();
+    fetchPublicAppointmentReportStatusMock.mockResolvedValue({
+      enabled: true,
+      state: "final",
+      canViewReport: true,
+      message: "Report is ready.",
+      checkButtonLabel: "Check report status",
+      viewButtonLabel: "Open report",
+    });
     getAppointmentByIdMock.mockReset();
     useV2AvailabilityMock.mockReset();
     rescheduleV2BookingMock.mockReset();
@@ -205,10 +231,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Print" }));
 
     await waitFor(() => {
@@ -220,15 +246,15 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     const actionLabels = within(row)
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
 
-    expect(actionLabels).toEqual(["Print", "Link", "WhatsApp", "Notify", "Manage"]);
+    expect(actionLabels).toEqual(["Print", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
   });
 
   it("opens the appointment drawer from an appointmentId deep link", async () => {
@@ -269,14 +295,16 @@ describe("RegistrationsPage print actions", () => {
       expect(getAppointmentByIdMock).toHaveBeenCalledWith(7);
     });
 
-    const firstQuery = fetchAppointmentsMock.mock.calls[0]?.[0] as Record<string, unknown>;
-    expect(firstQuery).not.toHaveProperty("dateFrom");
-    expect(firstQuery).not.toHaveProperty("dateTo");
+    const patientQuery = fetchAppointmentsMock.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((query) => query.patientId === "1");
+    expect(patientQuery).not.toHaveProperty("dateFrom");
+    expect(patientQuery).not.toHaveProperty("dateTo");
 
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
-      expect(screen.getByText("Test Patient")).toBeTruthy();
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(screen.getAllByText("Test Patient").length).toBeGreaterThan(0);
+      expect(getFirstText("ACC-7")).toBeTruthy();
       expect(screen.getByText(/Showing registrations for Test Patient\./i)).toBeTruthy();
     });
   });
@@ -285,7 +313,7 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
     const probe = screen.getByTestId("location-probe");
@@ -309,7 +337,7 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage(["/registrations?appointmentId=7&patientId=1"]);
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
     const probe = screen.getByTestId("location-probe");
@@ -352,33 +380,36 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-10")).toBeTruthy();
+      expect(getFirstText("ACC-10")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-10").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-10");
     const buttons = within(row).getAllByRole("button") as HTMLButtonElement[];
 
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Print",
       "Link",
+      "Report",
       "WhatsApp",
       "Notify",
       "Manage",
     ]);
     expect(buttons[2].disabled).toBe(true);
     expect(buttons[3].disabled).toBe(true);
-    expect(buttons[2].getAttribute("title")).toBe("No patient phone number is available for this registration.");
-    expect(buttons[3].getAttribute("title")).toBe("Web notifications not enabled");
+    expect(buttons[4].disabled).toBe(true);
+    expect(buttons[2].getAttribute("title")).toBe("No public appointment token is available for this registration.");
+    expect(buttons[3].getAttribute("title")).toBe("No patient phone number is available for this registration.");
+    expect(buttons[4].getAttribute("title")).toBe("Web notifications not enabled");
   });
 
   it("opens WhatsApp and Notify dialogs from the icon actions", async () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "WhatsApp" }));
     expect(screen.getByText("Send WhatsApp message")).toBeTruthy();
 
@@ -395,10 +426,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByText("ACC-7"));
+    await userEvent.click(getFirstText("ACC-7"));
 
     await waitFor(() => {
       expect(screen.getByTitle("Appointment slip preview")).toBeTruthy();
@@ -415,10 +446,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByText("ACC-7"));
+    await userEvent.click(getFirstText("ACC-7"));
 
     await waitFor(() => {
       expect(screen.getByTestId("slip-preview-backdrop")).toBeTruthy();
@@ -435,10 +466,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Link" }));
 
     await waitFor(() => {
@@ -477,10 +508,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Link" }));
 
     await waitFor(() => {
@@ -494,14 +525,56 @@ describe("RegistrationsPage print actions", () => {
     });
   });
 
+  it("checks report status from the row action and shows open report only when allowed", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    expect(within(row).getByRole("button", { name: "Report" })).toBeTruthy();
+    await userEvent.click(within(row).getByRole("button", { name: "Report" }));
+
+    await waitFor(() => {
+      expect(fetchPublicAppointmentReportStatusMock).toHaveBeenCalledWith("sample-token");
+      expect(screen.getByText("Report is ready.")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Open report" })).toBeTruthy();
+    });
+  });
+
+  it("does not show open report when status cannot be viewed", async () => {
+    fetchPublicAppointmentReportStatusMock.mockResolvedValueOnce({
+      enabled: true,
+      state: "draft",
+      canViewReport: false,
+      message: "Report is not final yet.",
+      checkButtonLabel: "Check report status",
+      viewButtonLabel: "Open report",
+    });
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    const row = getAppointmentRow("ACC-7");
+    await userEvent.click(within(row).getByRole("button", { name: "Report" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Report is not final yet.")).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: "Open report" })).toBeNull();
+  });
+
   it("keeps row reschedule absent and submits reschedule only from the manage drawer", async () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     expect(within(row).queryByRole("button", { name: "Reschedule" })).toBeNull();
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
@@ -523,11 +596,14 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
 
     await waitFor(() => {
-      expect(rescheduleV2BookingMock).toHaveBeenCalledWith(7, {
-        bookingDate: "2027-01-04",
-        bookingTime: null,
-        rescheduleReason: "Patient requested later date",
-      });
+      expect(rescheduleV2BookingMock).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({
+          bookingDate: "2027-01-04",
+          bookingTime: null,
+          rescheduleReason: "Patient requested later date",
+        })
+      );
     });
   });
 
@@ -560,11 +636,11 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-9")).toBeTruthy();
+      expect(getFirstText("ACC-9")).toBeTruthy();
     });
 
     expect(screen.getByLabelText("Patient category legend")).toBeTruthy();
-    const row = screen.getByText("ACC-9").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-9");
     expect(row.getAttribute("data-category")).toBe("oncology");
     expect(row.getAttribute("aria-label")).toContain("Oncology");
   });
@@ -573,10 +649,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-7")).toBeTruthy();
+      expect(getFirstText("ACC-7")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-7").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-7");
     await userEvent.click(within(row).getByRole("button", { name: "Manage" }));
     await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
 
@@ -614,10 +690,10 @@ describe("RegistrationsPage print actions", () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
-      expect(screen.getByText("ACC-8")).toBeTruthy();
+      expect(getFirstText("ACC-8")).toBeTruthy();
     });
 
-    const row = screen.getByText("ACC-8").closest('[role="button"]') as HTMLElement;
+    const row = getAppointmentRow("ACC-8");
     expect(within(row).queryByRole("button", { name: "Reschedule" })).toBeNull();
   });
 });

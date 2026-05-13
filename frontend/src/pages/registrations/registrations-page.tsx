@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { Bell, ExternalLink, MoreHorizontal, Printer } from "lucide-react";
+import { Bell, ExternalLink, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
 import {
   cancelAppointment,
   fetchAppointments,
   fetchAppointmentLookups,
   fetchAppointmentSlipSettings,
+  fetchPublicAppointmentReportStatus,
   getAppointmentById,
   fetchPatientQrSettings,
   sendPatientWebPushNotification,
+  type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
@@ -110,6 +112,20 @@ function offsetFromStartDate(isoDate: string): number {
   return clampAvailabilityOffset(Math.floor((selected - start) / DAY_MS));
 }
 
+function publicAppointmentToken(appointment: AppointmentWithDetails): string {
+  const directToken = String(appointment.publicCancelToken || "").trim();
+  if (directToken) return directToken;
+
+  const rawUrl = String(appointment.publicAppointmentUrl || "").trim();
+  if (!rawUrl) return "";
+
+  try {
+    return new URL(rawUrl).searchParams.get("t")?.trim() || "";
+  } catch {
+    return new URLSearchParams(rawUrl.split("?")[1] || "").get("t")?.trim() || "";
+  }
+}
+
 export default function RegistrationsPage() {
   const { language, t } = useLanguage();
   const { user } = useAuth();
@@ -122,7 +138,9 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [manageTab, setManageTab] = useState<"details" | "documents" | "reschedule" | "cancel">("details");
+  const [manageTab, setManageTab] = useState<"details" | "documents" | "report" | "reschedule" | "cancel">("details");
+  const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
+  const [reportError, setReportError] = useState("");
   const [notificationAppointment, setNotificationAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [notificationMode, setNotificationMode] = useState<"template" | "custom">("template");
@@ -529,6 +547,18 @@ export default function RegistrationsPage() {
     ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)
     : "";
 
+  const reportStatusMutation = useMutation({
+    mutationFn: (token: string) => fetchPublicAppointmentReportStatus(token),
+    onSuccess: (status) => {
+      setReportStatus(status);
+      setReportError("");
+    },
+    onError: (error) => {
+      setReportStatus(null);
+      setReportError(error instanceof Error ? error.message : t("registrations.reportStatusFailed"));
+    },
+  });
+
   const handleViewAppointmentLink = async (appointment: AppointmentWithDetails) => {
     const url = String(appointment.publicAppointmentUrl || "").trim();
     if (!url) {
@@ -560,6 +590,41 @@ export default function RegistrationsPage() {
   const manageAppointment = (appointment: AppointmentWithDetails) => {
     setSelectedAppointment(appointment);
     setManageTab("details");
+  };
+
+  const openReportPanel = (appointment: AppointmentWithDetails, checkNow = false) => {
+    const token = publicAppointmentToken(appointment);
+    setSelectedAppointment(appointment);
+    setManageTab("report");
+    setReportStatus(null);
+    setReportError("");
+
+    if (!token) {
+      setReportError(t("registrations.reportUnavailable"));
+      return;
+    }
+
+    if (checkNow) {
+      reportStatusMutation.mutate(token);
+    }
+  };
+
+  const checkSelectedReportStatus = () => {
+    if (!selectedAppointment) return;
+    const token = publicAppointmentToken(selectedAppointment);
+    if (!token) {
+      setReportStatus(null);
+      setReportError(t("registrations.reportUnavailable"));
+      return;
+    }
+    reportStatusMutation.mutate(token);
+  };
+
+  const openSelectedReport = () => {
+    if (!selectedAppointment) return;
+    const token = publicAppointmentToken(selectedAppointment);
+    if (!token) return;
+    window.location.href = `/api/public/appointments/report-open?t=${encodeURIComponent(token)}`;
   };
 
   const openPatientNotificationDialog = (appointment: AppointmentWithDetails) => {
@@ -636,6 +701,8 @@ export default function RegistrationsPage() {
   const closeManageDrawer = () => {
     setSelectedAppointment(null);
     setManageTab("details");
+    setReportStatus(null);
+    setReportError("");
     if (appointmentIdParam) {
       const nextSearchParams = new URLSearchParams(searchParams);
       nextSearchParams.delete("appointmentId");
@@ -1146,12 +1213,24 @@ export default function RegistrationsPage() {
                     <p className="mt-2 text-xs text-muted-foreground">
                       {[categoryLabel, modalityName, examName, formatDateLy(apt.appointmentDate)].filter(Boolean).join(" • ")}
                     </p>
-                    <div className="mt-3 grid grid-cols-4 gap-1" onClick={(event) => event.stopPropagation()}>
+                    <div className="mt-3 grid grid-cols-5 gap-1" onClick={(event) => event.stopPropagation()}>
                       <Button type="button" size="sm" variant="secondary" className="h-9 px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
                         <Printer size={15} />
                       </Button>
                       <Button type="button" size="sm" variant="ghost" className="h-9 px-0" onClick={() => void handleViewAppointmentLink(apt)}>
                         <ExternalLink size={15} />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        aria-label={t("registrations.report")}
+                        title={publicAppointmentToken(apt) ? t("registrations.report") : t("registrations.reportUnavailable")}
+                        className="h-9 px-0"
+                        disabled={!publicAppointmentToken(apt)}
+                        onClick={() => openReportPanel(apt, true)}
+                      >
+                        <FileText size={15} />
                       </Button>
                       <Button type="button" size="sm" variant="secondary" className="h-9 px-0" disabled={!apt.phone1} onClick={() => openWhatsappDialog(apt)}>
                         WA
@@ -1167,7 +1246,7 @@ export default function RegistrationsPage() {
           </div>
 
           <div className="hidden min-w-[1140px] lg:block">
-            <div className="grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(190px,0.62fr)] gap-2 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
+            <div className="grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(228px,0.72fr)] gap-2 border-b border-border bg-muted/40 px-3 py-2.5 text-[10px] font-semibold uppercase tracking-[0.04em] text-muted-foreground">
               <div>{t("registrations.patient")}</div>
               <div>{t("registrations.accession")}</div>
               <div>{t("registrations.modality")}</div>
@@ -1294,7 +1373,7 @@ export default function RegistrationsPage() {
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-5 justify-end gap-1" aria-label={language === "ar" ? "إجراءات الموعد" : "Appointment actions"}>
+                      <div className="grid grid-cols-6 justify-end gap-1" aria-label={language === "ar" ? "إجراءات الموعد" : "Appointment actions"}>
                         <Button
                           type="button"
                           size="sm"
@@ -1322,6 +1401,21 @@ export default function RegistrationsPage() {
                           }}
                         >
                           <ExternalLink size={15} strokeWidth={1.8} aria-hidden="true" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          aria-label={t("registrations.report")}
+                          title={publicAppointmentToken(apt) ? t("registrations.report") : t("registrations.reportUnavailable")}
+                          disabled={!publicAppointmentToken(apt)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReportPanel(apt, true);
+                          }}
+                          className={`!h-8 !min-h-8 !w-8 !p-0 ${publicAppointmentToken(apt) ? "" : "opacity-35"}`}
+                        >
+                          <FileText size={15} strokeWidth={1.8} aria-hidden="true" />
                         </Button>
                         <Button
                           type="button"
@@ -1501,6 +1595,19 @@ export default function RegistrationsPage() {
                 <Button
                   type="button"
                   size="sm"
+                  variant={manageTab === "report" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => {
+                    setManageTab("report");
+                    setReportStatus(null);
+                    setReportError("");
+                  }}
+                >
+                  {t("registrations.report")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   variant={manageTab === "reschedule" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
                   onClick={() => setManageTab("reschedule")}
@@ -1536,6 +1643,52 @@ export default function RegistrationsPage() {
                   appointmentRefType="v2_booking"
                   title={t("registrations.requestDocuments")}
                 />
+              ) : null}
+
+              {manageTab === "report" ? (
+                <div className="rounded-2xl border border-border bg-muted/20 p-3">
+                  <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <h4 className="text-sm font-semibold">{t("registrations.report")}</h4>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {selectedAppointment.accessionNumber} •{" "}
+                        {chooseLocalized(language, selectedAppointment.modalityNameAr, selectedAppointment.modalityNameEn)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!publicAppointmentToken(selectedAppointment) || reportStatusMutation.isPending}
+                      onClick={checkSelectedReportStatus}
+                    >
+                      {reportStatusMutation.isPending ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin" />
+                          {t("registrations.reportChecking")}
+                        </span>
+                      ) : (
+                        t("registrations.reportCheck")
+                      )}
+                    </Button>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-3 text-sm">
+                    {reportError ? (
+                      <p className="text-red-700">{reportError}</p>
+                    ) : reportStatus ? (
+                      <p className="text-muted-foreground">{reportStatus.message}</p>
+                    ) : (
+                      <p className="text-muted-foreground">{t("registrations.reportHint")}</p>
+                    )}
+                  </div>
+                  {reportStatus?.canViewReport ? (
+                    <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
+                      <Button type="button" size="sm" variant="secondary" onClick={openSelectedReport}>
+                        <ExternalLink size={14} className={isRtl ? "ml-2" : "mr-2"} />
+                        {reportStatus.viewButtonLabel || t("registrations.reportOpen")}
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
 
               {manageTab === "reschedule" ? (
