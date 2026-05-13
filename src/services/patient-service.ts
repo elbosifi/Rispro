@@ -1481,18 +1481,43 @@ export async function getPatientDirectory(params: PatientDirectoryParams): Promi
     limit ${pageSize} offset ${offset}
   `;
 
-  const { rows } = await pool.query<PatientDirectoryRowOutput>(query);
+  const { rows } = await pool.query<Record<string, unknown>>(query);
 
   return {
-    patients: rows.map(row => ({
-      ...row,
-      lastAppointment: row.lastAppointment || null,
-      nextAppointment: row.nextAppointment || null,
+    patients: rows.map(row => {
+      const warnings = (row.warnings as {
+        missingPhone?: boolean;
+        missingDob?: boolean;
+        missingSex?: boolean;
+        missingName?: boolean;
+        noAppointment?: boolean;
+        possibleDuplicate?: boolean;
+        duplicateReasons?: string[];
+      }) || {};
+
+      return {
+      id: Number(row.id ?? 0),
+      mrn: (row.mrn as string | null) ?? null,
+      arabicFullName: String(row.arabic_full_name ?? ""),
+      englishFullName: (row.english_full_name as string | null) ?? null,
+      sex: (row.sex as string | null) ?? null,
+      ageYears: Number(row.age_years ?? 0),
+      demographicsEstimated: Boolean(row.demographics_estimated),
+      phone1: (row.phone_1 as string | null) ?? null,
+      category: row.category as "oncology" | "non_oncology" | null,
+      lastAppointment: (row.last_appointment as PatientDirectoryRowOutput["lastAppointment"]) || null,
+      nextAppointment: (row.next_appointment as PatientDirectoryRowOutput["nextAppointment"]) || null,
       warnings: {
-        ...row.warnings,
-        duplicateReasons: row.warnings.duplicateReasons || []
+        missingPhone: Boolean(warnings.missingPhone),
+        missingDob: Boolean(warnings.missingDob),
+        missingSex: Boolean(warnings.missingSex),
+        missingName: Boolean(warnings.missingName),
+        noAppointment: Boolean(warnings.noAppointment),
+        possibleDuplicate: Boolean(warnings.possibleDuplicate),
+        duplicateReasons: warnings.duplicateReasons || []
       }
-    })),
+      };
+    }),
     pagination: {
       page,
       pageSize,

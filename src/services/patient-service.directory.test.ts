@@ -75,3 +75,99 @@ test("patient directory sex filter matches both male/female and stored sex codes
     await pool.query(`delete from users where id = $1`, [userId]).catch(() => undefined);
   }
 });
+
+test("patient directory maps next and last appointments into camelCase rows", async () => {
+  const poolWithQuery = pool as unknown as {
+    query: (sql: unknown, params?: unknown[]) => Promise<{ rows: unknown[] }>;
+  };
+  const originalQuery = poolWithQuery.query;
+
+  poolWithQuery.query = async (sql: unknown) => {
+    const normalizedSql = String(sql).replace(/\s+/g, " ").toLowerCase();
+
+    if (normalizedSql.includes("select count(*)::bigint as total from patients p")) {
+      return { rows: [{ total: "1" }] };
+    }
+
+    if (normalizedSql.includes("last_appointment") && normalizedSql.includes("next_appointment")) {
+      return {
+        rows: [
+          {
+            id: 77,
+            mrn: "MRN-77",
+            arabic_full_name: "Ù…Ø±ÙŠØ¶ Ù…Ø«Ø§Ù„",
+            english_full_name: "Sample Patient",
+            sex: "F",
+            age_years: 29,
+            demographics_estimated: false,
+            phone_1: "0912345678",
+            category: "oncology",
+            last_appointment: {
+              id: 101,
+              date: "2026-04-20",
+              status: "completed",
+              modalityName: "CT",
+            },
+            next_appointment: {
+              id: 102,
+              date: "2026-04-30",
+              status: "scheduled",
+              modalityName: "MRI",
+            },
+            warnings: {
+              missingPhone: false,
+              missingDob: false,
+              missingSex: false,
+              missingName: false,
+              noAppointment: false,
+              possibleDuplicate: false,
+              duplicateReasons: [],
+            },
+          },
+        ],
+      };
+    }
+
+    throw new Error(`Unexpected query: ${normalizedSql}`);
+  };
+
+  try {
+    const directory = await getPatientDirectory({ page: 1, pageSize: 25 });
+
+    assert.equal(directory.patients.length, 1);
+    assert.deepEqual(directory.patients[0], {
+      id: 77,
+      mrn: "MRN-77",
+      arabicFullName: "Ù…Ø±ÙŠØ¶ Ù…Ø«Ø§Ù„",
+      englishFullName: "Sample Patient",
+      sex: "F",
+      ageYears: 29,
+      demographicsEstimated: false,
+      phone1: "0912345678",
+      category: "oncology",
+      lastAppointment: {
+        id: 101,
+        date: "2026-04-20",
+        status: "completed",
+        modalityName: "CT",
+      },
+      nextAppointment: {
+        id: 102,
+        date: "2026-04-30",
+        status: "scheduled",
+        modalityName: "MRI",
+      },
+      warnings: {
+        missingPhone: false,
+        missingDob: false,
+        missingSex: false,
+        missingName: false,
+        noAppointment: false,
+        possibleDuplicate: false,
+        duplicateReasons: [],
+      },
+    });
+  } finally {
+    poolWithQuery.query = originalQuery;
+  }
+});
