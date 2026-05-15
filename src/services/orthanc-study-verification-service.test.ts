@@ -11,7 +11,7 @@ service = await import("./orthanc-study-verification-service.js");
 const baseBooking = {
   id: 42,
   modality_id: 7,
-  accession_number: "V2-42",
+  accession_number: "V2-000042",
   study_instance_uid: "1.2.3",
   appointment_date: "2026-05-04",
   booking_date: "2026-05-04",
@@ -65,7 +65,7 @@ function studyPayload(overrides: Record<string, unknown> = {}) {
     ID: "study-1",
     MainDicomTags: {
       StudyInstanceUID: "1.2.3",
-      AccessionNumber: "V2-42",
+      AccessionNumber: "V2-000042",
       StudyDate: "20260504",
       Modality: "CT",
       ...((overrides.MainDicomTags as Record<string, unknown>) || {}),
@@ -95,9 +95,11 @@ test("UID match returns matched", async () => {
 
 test("accession fallback single match returns matched", async () => {
   let findCount = 0;
-  service.__setOrthancFetchForTests(async (path) => {
+  const queries: unknown[] = [];
+  service.__setOrthancFetchForTests(async (path, options) => {
     if (path === "/tools/find") {
       findCount += 1;
+      queries.push(options?.body);
       return orthancResponse(findCount === 1 ? [] : ["study-1"]);
     }
     if (path === "/studies/study-1") return orthancResponse(studyPayload());
@@ -108,6 +110,30 @@ test("accession fallback single match returns matched", async () => {
   const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
   assert.equal(result.status, "matched");
   assert.equal(result.matchKey, "accession_number");
+  assert.deepEqual(queries.at(-1), { Level: "Study", Query: { AccessionNumber: "V2-000042" } });
+});
+
+test("legacy raw accession fallback is attempted only after padded accession not_found", async () => {
+  const accessionQueries: string[] = [];
+  service.__setOrthancFetchForTests(async (path, options) => {
+    if (path === "/tools/find") {
+      const query = options?.body as { Query?: { StudyInstanceUID?: string; AccessionNumber?: string } };
+      if (query.Query?.AccessionNumber) accessionQueries.push(query.Query.AccessionNumber);
+      if (query.Query?.StudyInstanceUID) return orthancResponse([]);
+      return orthancResponse(query.Query?.AccessionNumber === "V2-42" ? ["study-1"] : []);
+    }
+    if (path === "/studies/study-1") {
+      return orthancResponse(studyPayload({ MainDicomTags: { AccessionNumber: "V2-42" } }));
+    }
+    if (path === "/studies/study-1/statistics") return orthancResponse({ CountSeries: 1, CountInstances: 2 });
+    throw new Error(`Unexpected path ${path}`);
+  });
+
+  const result = await service.verifyBookingStudyWithOrthanc(baseBooking, baseSetting);
+  assert.equal(result.status, "matched");
+  assert.deepEqual(accessionQueries, ["V2-000042", "V2-42"]);
+  assert.equal(result.matchValue, "V2-42");
+  assert.equal(result.resultJson.legacyRawAccessionFallbackUsed, true);
 });
 
 test("accession fallback multiple matches is ambiguous", async () => {

@@ -2,6 +2,7 @@ import { pool } from "../db/pool.js";
 import { getOrthancSyncState } from "./mwl-sync-service.js";
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
 import { buildCanonicalMwlDataset, renderCanonicalMwlToOrthancJson } from "./mwl-dataset-builder.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 interface OrthancBookingProjection {
   id: number;
@@ -81,7 +82,7 @@ function buildOrthancWorklistPayload(
   stableId: string,
   stationAeTitle: string
 ): Record<string, unknown> {
-  const accessionNumber = `V2-${String(row.id).padStart(6, "0")}`;
+  const accessionNumber = formatV2AccessionNumber(row.id);
   const canonicalDataset = buildCanonicalMwlDataset(
     {
       modalityCode: row.modality_code,

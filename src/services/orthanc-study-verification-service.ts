@@ -1,4 +1,5 @@
 import { resolveOrthancSettings, type ResolvedOrthancSettings } from "./orthanc-settings-resolver.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 export type OrthancVerificationTargetType = "local" | "remote_modality";
 export type OrthancCompletionThreshold = "study_exists" | "series_exists" | "instance_exists";
@@ -210,7 +211,25 @@ function normalizeBookingDate(booking: OrthancBookingVerificationContext): strin
 function normalizeAccession(booking: OrthancBookingVerificationContext): string {
   const explicit = firstString(booking.accession_number);
   if (explicit) return explicit;
-  return `V2-${String(booking.id)}`;
+  return formatV2AccessionNumber(booking.id);
+}
+
+function legacyRawAccession(booking: OrthancBookingVerificationContext): string | null {
+  const id = Number(booking.id);
+  if (!Number.isInteger(id) || id < 0) return null;
+  const legacy = `V2-${String(id)}`;
+  return legacy === normalizeAccession(booking) ? null : legacy;
+}
+
+function markLegacyFallback(result: OrthancVerificationResult, canonicalAccession: string): OrthancVerificationResult {
+  return {
+    ...result,
+    resultJson: {
+      ...result.resultJson,
+      legacyRawAccessionFallbackUsed: true,
+      canonicalAccession,
+    },
+  };
 }
 
 function normalizeToken(value: unknown): string {
@@ -497,7 +516,20 @@ export async function verifyBookingStudyWithOrthanc(
       }
     }
 
-    return await runQuery(booking, setting, "accession_number", accessionNumber, orthancSettings);
+    const byAccession = await runQuery(booking, setting, "accession_number", accessionNumber, orthancSettings);
+    if (byAccession.status !== "not_found") {
+      return byAccession;
+    }
+
+    const legacyAccession = legacyRawAccession(booking);
+    if (!legacyAccession) {
+      return byAccession;
+    }
+
+    return markLegacyFallback(
+      await runQuery(booking, setting, "accession_number", legacyAccession, orthancSettings),
+      accessionNumber
+    );
   } catch (error) {
     return makeResult("error", {
       resultJson: { error: error instanceof Error ? error.message : String(error) },

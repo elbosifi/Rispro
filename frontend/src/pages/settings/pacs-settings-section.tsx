@@ -540,9 +540,9 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 <label className="block text-xs text-stone-600 dark:text-stone-300">
                   Booking ID to test
                   <input
-                    type="number"
-                    min={1}
-                    placeholder="Latest eligible booking"
+                    type="text"
+                    inputMode="text"
+                    placeholder="Latest eligible booking, or V2-123"
                     className="mt-1 px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full max-w-xs"
                     value={autoTestBookingIds[setting.modality_id] || ""}
                     onChange={(event) => setAutoTestBookingIds((current) => ({

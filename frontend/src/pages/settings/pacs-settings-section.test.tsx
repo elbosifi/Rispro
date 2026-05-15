@@ -240,17 +240,17 @@ describe("PacsSettingsSection auto-completion controls", () => {
     expect(screen.getByText("V2-42")).toBeTruthy();
   });
 
-  it("posts entered bookingId and renders backend diagnostics for not_found", async () => {
+  it("posts pasted V2 accession text and renders backend diagnostics for not_found", async () => {
     const user = userEvent.setup();
     renderComponent();
 
     await screen.findByText("Orthanc PACS auto-completion");
-    await user.type(screen.getByLabelText("Booking ID to test"), "123");
+    await user.type(screen.getByLabelText("Booking ID to test"), "V2-00123");
     await user.click(screen.getByRole("button", { name: "Test verification" }));
 
     await waitFor(() => {
       const testCall = vi.mocked(api).mock.calls.find((call) => call[0] === "/pacs/auto-completion-settings/7/test");
-      expect(JSON.parse(String(testCall?.[1]?.body || "{}"))).toEqual({ bookingId: "123" });
+      expect(JSON.parse(String(testCall?.[1]?.body || "{}"))).toEqual({ bookingId: "V2-00123" });
     });
 
     expect(await screen.findByText(/Test for modality 7: not_found/)).toBeTruthy();

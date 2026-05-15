@@ -50,4 +50,16 @@ test("manual PACS auto-completion test preserves response shape and adds diagnos
   assert.match(source, /export interface PacsAutoCompletionTestDiagnostics/);
   assert.match(source, /expectedAccession: booking\.accession_number/);
   assert.match(source, /candidateCount: readCandidateCount\(result\.resultJson\)/);
+  assert.match(source, /legacyRawAccessionFallbackUsed/);
+});
+
+test("manual PACS auto-completion test accepts pasted V2 accession text as bookingId input", () => {
+  assert.match(source, /function normalizeTestBookingId/);
+  assert.match(source, /\^V2-\(\\d\+\)\$/);
+  assert.match(source, /normalizePositiveInteger\(accessionMatch\[1\], "bookingId"\)/);
+});
+
+test("PACS auto-completion booking projections use canonical padded accession", () => {
+  assert.match(source, /\('V2-' \|\| lpad\(b\.id::text, 6, '0'\)\) as accession_number/);
+  assert.ok(!source.includes("('V2-' || b.id::text) as accession_number"));
 });

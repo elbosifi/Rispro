@@ -140,7 +140,7 @@ async function getV2BookingSummary(cleanAppointmentId: number): Promise<Appointm
       select
         bookings.id,
         bookings.patient_id,
-        concat('V2-', bookings.id)::text as accession_number,
+        ('V2-' || lpad(bookings.id::text, 6, '0')) as accession_number,
         bookings.booking_date as appointment_date,
         patients.arabic_full_name,
         patients.english_full_name

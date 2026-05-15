@@ -155,7 +155,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       const response = data as Record<string, unknown>;
       const appointment = response.appointment as Record<string, unknown>;
       assert.equal(Number(appointment.id), bookingId);
-      assert.equal(appointment.accession_number, `V2-${bookingId}`);
+      assert.equal(appointment.accession_number, `V2-${String(bookingId).padStart(6, "0")}`);
       assert.equal(appointment.appointment_date, "2026-05-03");
       assert.equal(Number(appointment.patient_id), testData.patientId);
       assert.equal(Number(appointment.modality_id), testData.modalityId);

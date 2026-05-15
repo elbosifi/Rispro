@@ -18,6 +18,7 @@ import {
   type OrthancVerificationTargetType,
 } from "./orthanc-study-verification-service.js";
 import type { UserId } from "../types/http.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 const ELIGIBLE_BOOKING_STATUSES = ["scheduled", "arrived", "waiting"] as const;
 const DEFAULT_WORKER_INTERVAL_MS = 60_000;
@@ -105,6 +106,7 @@ export interface PacsAutoCompletionTestDiagnostics {
   candidateCount: number | null;
   completionThreshold: OrthancCompletionThreshold;
   lastError: string | null;
+  legacyRawAccessionFallbackUsed: boolean;
 }
 
 export interface AppointmentsV2PacsAutoCompletionWorker {
@@ -206,7 +208,24 @@ function buildTestDiagnostics(booking: EligibleBookingRow, setting: PacsAutoComp
     candidateCount: readCandidateCount(result.resultJson),
     completionThreshold: setting.completion_threshold,
     lastError: result.lastError,
+    legacyRawAccessionFallbackUsed: Boolean(
+      result.resultJson &&
+      typeof result.resultJson === "object" &&
+      !Array.isArray(result.resultJson) &&
+      (result.resultJson as Record<string, unknown>).legacyRawAccessionFallbackUsed
+    ),
   };
+}
+
+function normalizeTestBookingId(value: unknown): number | null {
+  if (typeof value === "string") {
+    const clean = value.trim();
+    const accessionMatch = /^V2-(\d+)$/i.exec(clean);
+    if (accessionMatch) {
+      return normalizePositiveInteger(accessionMatch[1], "bookingId");
+    }
+  }
+  return normalizePositiveInteger(value, "bookingId");
 }
 
 export async function listPacsAutoCompletionSettings(): Promise<PacsAutoCompletionSettingListRow[]> {
@@ -313,7 +332,7 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
       select
         b.id,
         b.modality_id,
-        ('V2-' || b.id::text) as accession_number,
+        ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
         b.study_instance_uid,
         b.booking_date::text as appointment_date,
         b.booking_date::text as booking_date,
@@ -350,7 +369,7 @@ async function findLatestEligibleBookingForSetting(modalityId: number, setting: 
   return {
     id: 0,
     modality_id: modalityId,
-    accession_number: "V2-0",
+    accession_number: formatV2AccessionNumber(0),
     study_instance_uid: null,
     appointment_date: "",
     booking_date: "",
@@ -596,7 +615,7 @@ export async function testPacsAutoCompletionForModality({
 
   let booking: EligibleBookingRow | null = null;
   if (bookingId) {
-    const cleanBookingId = normalizePositiveInteger(bookingId, "bookingId");
+    const cleanBookingId = normalizeTestBookingId(bookingId);
     if (!cleanBookingId) {
       throw new HttpError(400, "bookingId is required.");
     }
@@ -605,7 +624,7 @@ export async function testPacsAutoCompletionForModality({
         select
           b.id,
           b.modality_id,
-          ('V2-' || b.id::text) as accession_number,
+          ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
           b.study_instance_uid,
           b.booking_date::text as appointment_date,
           b.booking_date::text as booking_date,
@@ -669,7 +688,7 @@ async function claimEligibleBookings(batchSize: number): Promise<EligibleBooking
       select
         b.id,
         b.modality_id,
-        ('V2-' || b.id::text) as accession_number,
+        ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
         b.study_instance_uid,
         b.booking_date::text as appointment_date,
         b.booking_date::text as booking_date,

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "crypto";
 import { normalizeDateValue } from "../utils/date.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 import type { ResolvedSanteWorklistSettings } from "./sante-worklist-settings-resolver.js";
 
 export type SanteOrderControl = "NW" | "XO" | "CA";
@@ -84,7 +85,7 @@ function sex(value: string | null): string {
 }
 
 export function buildAccessionNumber(bookingId: number): string {
-  return `V2-${String(bookingId).padStart(6, "0")}`;
+  return formatV2AccessionNumber(bookingId);
 }
 
 export function buildSanteOrmO01Message(input: {

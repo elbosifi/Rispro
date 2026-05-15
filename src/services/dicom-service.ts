@@ -21,6 +21,7 @@ import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-set
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
 import { enqueueSanteHl7ForBooking } from "./sante-hl7-outbox-service.js";
 import { buildCanonicalMwlDataset, renderCanonicalMwlToDump } from "./mwl-dataset-builder.js";
+import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -413,7 +414,7 @@ async function getBookingWorklistContext(
         bookings.patient_id,
         patients.identifier_value as patient_primary_id,
         bookings.modality_id,
-        ('V2-' || bookings.id::text) as accession_number,
+        ('V2-' || lpad(bookings.id::text, 6, '0')) as accession_number,
         bookings.booking_date::text as appointment_date,
         bookings.status,
         bookings.booking_time::text as booking_time,
@@ -481,7 +482,8 @@ export function buildWorklistDump({
       examNameEn: appointment.exam_name_en,
       examNameAr: appointment.exam_name_ar,
       modalityNameEn: appointment.modality_name_en,
-      modalityNameAr: appointment.modality_name_ar
+      modalityNameAr: appointment.modality_name_ar,
+      accessionNumber: appointment.accession_number || formatV2AccessionNumber(appointment.id)
     },
     { mwlProfile: "minimal" }
   );

@@ -57,3 +57,39 @@ test("validateDumpFile rejects dumps missing required SPS tags", async () => {
     assert.ok(result.missingTags.includes("(0040,0002)"));
   });
 });
+
+test("active MWL dump includes canonical accession from worklist context", () => {
+  process.env.DATABASE_URL ||= "postgres://user:password@localhost:5432/rispro_test";
+  process.env.JWT_SECRET ||= "test-secret";
+  return import("./dicom-service.js").then(({ buildWorklistDump }) => {
+  const dump = buildWorklistDump({
+    appointment: {
+      id: 123,
+      accession_number: "V2-000123",
+      modality_code: "CT",
+      appointment_date: "2030-01-01",
+      patient_primary_id: "P-1",
+      mrn: "MRN-1",
+      national_id: "NID-1",
+      patient_id: 1,
+      english_full_name: "Patient One",
+      arabic_full_name: "Patient One",
+      estimated_date_of_birth: "1980-01-01",
+      sex: "male",
+      exam_name_en: "CT Exam",
+      exam_name_ar: "CT Exam",
+      modality_name_en: "CT",
+      modality_name_ar: "CT",
+    } as never,
+  });
+
+  assert.equal(dump.includes("(0008,0050) SH [V2-000123]"), true);
+  });
+});
+
+test("active MWL manifest uses the same appointment accession", async () => {
+  const source = await fs.readFile(new URL("./dicom-service.ts", import.meta.url), "utf8");
+  assert.match(source, /accessionNumber: appointment\.accession_number/);
+  assert.match(source, /\('V2-' \|\| lpad\(bookings\.id::text, 6, '0'\)\) as accession_number/);
+  assert.ok(!source.includes("('V2-' || bookings.id::text) as accession_number"));
+});

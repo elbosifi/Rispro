@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildAccessionNumber,
   buildSanteOrmO01Message,
   buildSyntheticSanteTestProjection,
 } from "./sante-hl7-message-builder.js";
@@ -41,6 +42,10 @@ function settings(): ResolvedSanteWorklistSettings {
     windowsShareSourceHint: "storage/sante-hl7-output",
   };
 }
+
+test("buildAccessionNumber uses canonical padded V2 accession format", () => {
+  assert.equal(buildAccessionNumber(123), "V2-000123");
+});
 
 test("buildSanteOrmO01Message emits ORM O01 with configured identity and NW order", () => {
   const message = buildSanteOrmO01Message({
