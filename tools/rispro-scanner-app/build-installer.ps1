@@ -5,6 +5,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
+
 & "$root/build.ps1" -Configuration $Configuration
+
 dotnet tool restore --tool-manifest "$root/.config/dotnet-tools.json"
-dotnet tool run wix --project "$root/RISpro.Scanner.Installer/RISpro.Scanner.Installer.wixproj" -p:Configuration=$Configuration -p:ProductVersion=$Version
+
+dotnet build "$root/RISpro.Scanner.Installer/RISpro.Scanner.Installer.wixproj" -c $Configuration -p:ProductVersion=$Version
