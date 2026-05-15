@@ -1,0 +1,8 @@
+BuiltPdbOutput	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISproScannerSetup.wixpdb
+BuiltTargetOutput	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISproScannerSetup.msi
+Input	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\artifacts\app\RISpro.Scanner.App.deps.json
+Input	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\artifacts\app\RISpro.Scanner.App.dll
+Input	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\artifacts\app\RISpro.Scanner.App.exe
+Input	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\artifacts\app\RISpro.Scanner.App.runtimeconfig.json
+Input	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\artifacts\app\RISpro.Scanner.Core.dll
+Intermediate	C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\#cab1.cab

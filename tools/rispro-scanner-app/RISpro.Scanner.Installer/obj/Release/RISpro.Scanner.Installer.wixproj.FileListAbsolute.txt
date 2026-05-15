@@ -1,0 +1,6 @@
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\bin\Release\RISproScannerSetup.msi
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\bin\Release\RISproScannerSetup.wixpdb
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISpro.Scanner.Installer.wixproj.CoreCompileInputs.cache
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISproScannerSetup.msi
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISproScannerSetup.wixpdb
+C:\Users\elbos\Nextcloud\rispro1\tools\rispro-scanner-app\RISpro.Scanner.Installer\obj\Release\RISpro.Scanner.Installer.wixproj.BindTracking-neutral.txt
