@@ -1642,6 +1642,7 @@ export default function RegistrationsPage() {
                   patientId={selectedAppointment.patientId}
                   appointmentRefType="v2_booking"
                   title={t("registrations.requestDocuments")}
+                  enableLocalScan
                 />
               ) : null}
 

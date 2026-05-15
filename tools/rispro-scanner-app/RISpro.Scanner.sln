@@ -1,0 +1,30 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RISpro.Scanner.Core", "RISpro.Scanner.Core\RISpro.Scanner.Core.csproj", "{98F2CCFE-99E8-4A93-A3A8-102886159A15}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RISpro.Scanner.App", "RISpro.Scanner.App\RISpro.Scanner.App.csproj", "{99DE96D8-190C-43A9-997B-E6B96C31A19F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RISpro.Scanner.Tests", "RISpro.Scanner.Tests\RISpro.Scanner.Tests.csproj", "{B0E7B176-1B22-47B4-A34E-7377D09B279B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{98F2CCFE-99E8-4A93-A3A8-102886159A15}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{98F2CCFE-99E8-4A93-A3A8-102886159A15}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{98F2CCFE-99E8-4A93-A3A8-102886159A15}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{98F2CCFE-99E8-4A93-A3A8-102886159A15}.Release|Any CPU.Build.0 = Release|Any CPU
+		{99DE96D8-190C-43A9-997B-E6B96C31A19F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{99DE96D8-190C-43A9-997B-E6B96C31A19F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{99DE96D8-190C-43A9-997B-E6B96C31A19F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{99DE96D8-190C-43A9-997B-E6B96C31A19F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B0E7B176-1B22-47B4-A34E-7377D09B279B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B0E7B176-1B22-47B4-A34E-7377D09B279B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B0E7B176-1B22-47B4-A34E-7377D09B279B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B0E7B176-1B22-47B4-A34E-7377D09B279B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

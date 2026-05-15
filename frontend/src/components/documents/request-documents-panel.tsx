@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLanguage } from "@/providers/language-provider";
 import {
   deleteAppointmentDocument,
+  createScanSession,
   fetchCurrentSession,
   fetchIntegrationStatus,
   listAppointmentDocuments,
@@ -46,6 +47,9 @@ export function RequestDocumentsPanel({
   const [file, setFile] = useState<File | null>(null);
   const [selectedPreview, setSelectedPreview] = useState<RequestDocument | null>(null);
   const [scanUploading, setScanUploading] = useState(false);
+  const [scannerAppLaunching, setScannerAppLaunching] = useState(false);
+  const [lastScannerAppLaunchUrl, setLastScannerAppLaunchUrl] = useState("");
+  const [showScannerAppFallback, setShowScannerAppFallback] = useState(false);
   const [retryingFailedUploads, setRetryingFailedUploads] = useState(false);
   const [failedScanUploads, setFailedScanUploads] = useState<Array<{ file: File; error: string; documentType: string }>>([]);
   const resolvedTitle = title ?? t("documents.title");
@@ -85,6 +89,14 @@ export function RequestDocumentsPanel({
       integrationStatus?.scanner?.naps2WebScanEnabled ||
       integrationStatus?.scanner?.scannerBridgeMode === "naps2_webscan"
     );
+  const scannerAppEnabled =
+    enableLocalScan &&
+    canScanOrUpload &&
+    hasAppointmentContext &&
+    Boolean(integrationStatus?.scanner) &&
+    integrationStatus?.scanner?.scannerAppEnabled !== false;
+  const scannerAppDownloadUrl =
+    integrationStatus?.scanner?.scannerAppDownloadUrl || "/assets/downloads/RISproScannerSetup.msi";
   const scanDpi = Number(integrationStatus?.scanner?.scanDpi || 200);
   const scanColorMode = integrationStatus?.scanner?.scanColorMode === "color" ? "color" : "grayscale";
   const scanSource =
@@ -148,6 +160,52 @@ export function RequestDocumentsPanel({
       fileContentBase64,
       source,
     });
+  }
+
+  function launchScannerApp(launchUrl: string) {
+    setLastScannerAppLaunchUrl(launchUrl);
+    setShowScannerAppFallback(true);
+    try {
+      window.location.href = launchUrl;
+    } catch {
+      // Browsers cannot reliably report custom protocol launch failures.
+    }
+  }
+
+  async function handleLaunchScannerApp() {
+    if (scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending) return;
+    if (!scannerAppEnabled) {
+      pushToast({
+        type: "error",
+        title: t("documents.scanNotSupportedTitle"),
+        message: t("documents.scanNotSupportedMessage"),
+      });
+      return;
+    }
+
+    setScannerAppLaunching(true);
+    try {
+      const response = await createScanSession({
+        appointmentId,
+        patientId,
+        documentType,
+        appointmentRefType,
+      });
+      launchScannerApp(response.launchUrl);
+      pushToast({
+        type: "success",
+        title: t("documents.scannerAppLaunchTitle"),
+        message: t("documents.scannerAppLaunchMessage"),
+      });
+    } catch (err) {
+      pushToast({
+        type: "error",
+        title: t("documents.prepareFailedTitle"),
+        message: err instanceof Error ? err.message : t("documents.prepareFailedMessage"),
+      });
+    } finally {
+      setScannerAppLaunching(false);
+    }
   }
 
   async function handleScanAndAttach() {
@@ -290,7 +348,17 @@ export function RequestDocumentsPanel({
           className="input-premium"
         />
         <div className="flex gap-2">
-          {naps2ScannerEnabled && (
+          {scannerAppEnabled && (
+            <button
+              type="button"
+              onClick={handleLaunchScannerApp}
+              className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm"
+              disabled={scannerAppLaunching || scanUploading || retryingFailedUploads || uploadMutation.isPending}
+            >
+              {scannerAppLaunching ? t("documents.preparing") : t("documents.scanPaper")}
+            </button>
+          )}
+          {!scannerAppEnabled && naps2ScannerEnabled && (
             <button
               type="button"
               onClick={handleScanAndAttach}
@@ -312,6 +380,51 @@ export function RequestDocumentsPanel({
       </div>
       {enableLocalScan && canScanOrUpload && !naps2ScannerEnabled && (
         <p className="text-xs text-stone-500">{t("documents.scanNotSupportedMessage")}</p>
+      )}
+
+      {enableLocalScan && canScanOrUpload && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-stone-500">
+          {scannerAppEnabled ? (
+            <>
+              <a href={scannerAppDownloadUrl} className="underline" download>
+                {t("documents.downloadScannerApp")}
+              </a>
+              {showScannerAppFallback && (
+                <>
+                  <span>{t("documents.scannerAppFallbackMessage")}</span>
+                  <button
+                    type="button"
+                    className="underline"
+                    onClick={() => {
+                      if (lastScannerAppLaunchUrl) launchScannerApp(lastScannerAppLaunchUrl);
+                    }}
+                  >
+                    {t("documents.retryLaunchScannerApp")}
+                  </button>
+                  {naps2ScannerEnabled && (
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={handleScanAndAttach}
+                      disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+                    >
+                      {scanUploading ? t("documents.scanning") : t("documents.useNaps2WebScan")}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
+          ) : naps2ScannerEnabled ? (
+            <button
+              type="button"
+              className="underline"
+              onClick={handleScanAndAttach}
+              disabled={scanUploading || retryingFailedUploads || uploadMutation.isPending}
+            >
+              {scanUploading ? t("documents.scanning") : t("documents.useNaps2WebScan")}
+            </button>
+          ) : null}
+        </div>
       )}
 
       {failedScanUploads.length > 0 && (

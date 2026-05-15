@@ -9,6 +9,7 @@ import { usersRouter } from "./routes/users.js";
 import { patientsRouter } from "./routes/patients.js";
 import { queueRouter } from "./routes/queue.js";
 import { documentsRouter } from "./routes/documents.js";
+import { scanSessionsRouter } from "./routes/scan-sessions.js";
 import { integrationsRouter } from "./routes/integrations.js";
 import { adminRouter } from "./routes/admin.js";
 import { modalityRouter } from "./routes/modality.js";
@@ -75,6 +76,7 @@ export function createApp(): Application {
   const PACS_REMAP_UPLOAD_PATH = "/api/pacs/remap/jobs/upload";
   const PACS_REMAP_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/upload-multipart";
   const PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH = "/api/pacs/remap/jobs/process-multipart";
+  const SCAN_SESSION_UPLOAD_PATH = "/api/scan-sessions/upload";
   const ADMIN_RESTORE_PREFIX = "/api/admin/restore";
   app.use((req: Request, _res: Response, next: NextFunction) => {
     if (
@@ -83,6 +85,7 @@ export function createApp(): Application {
       req.path === PACS_REMAP_UPLOAD_PATH ||
       req.path === PACS_REMAP_MULTIPART_UPLOAD_PATH ||
       req.path === PACS_REMAP_PROCESS_MULTIPART_UPLOAD_PATH ||
+      req.path === SCAN_SESSION_UPLOAD_PATH ||
       req.path.startsWith(ADMIN_RESTORE_PREFIX)
     ) {
       // Let route-specific body parsers handle it.
@@ -117,6 +120,7 @@ export function createApp(): Application {
   app.use("/api/patients", patientsRouter);
   app.use("/api/queue", queueRouter);
   app.use("/api/documents", documentsRouter);
+  app.use("/api/scan-sessions", scanSessionsRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/admin", adminRouter);
   app.use("/api/modality", modalityRouter);

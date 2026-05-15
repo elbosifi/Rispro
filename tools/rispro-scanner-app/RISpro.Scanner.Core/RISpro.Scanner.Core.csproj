@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="NAPS2.Sdk" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Images.Wpf" Version="1.2.1" />
+    <PackageReference Include="NAPS2.Sdk.Worker.Win32" Version="1.2.1" />
+  </ItemGroup>
+</Project>

@@ -90,7 +90,12 @@ export interface RequestDocument {
   mimeType: string;
   fileSize: number;
   storageLocationType: "network" | "local_fallback";
-  source: "manual_upload" | "naps2_webscan";
+  source: "manual_upload" | "naps2_webscan" | "scanner_app";
+  scanSessionId?: number | null;
+  pageCount?: number | null;
+  scannerName?: string | null;
+  workstationName?: string | null;
+  appVersion?: string | null;
   lastMoveAttemptAt: string | null;
   lastMoveError: string | null;
   createdAt: string;
@@ -110,6 +115,9 @@ export interface IntegrationStatus {
     bridgeReady: boolean;
     naps2WebScanEnabled?: boolean;
     naps2WebScanEndpoint?: string;
+    scannerAppEnabled?: boolean;
+    scannerAppDownloadUrl?: string;
+    scanSessionExpiryMinutes?: string;
   };
 }
 
@@ -130,7 +138,18 @@ function mapRequestDocument(raw: RawRecord): RequestDocument {
       String(raw.storage_location_type ?? raw.storageLocationType ?? "local_fallback") === "network"
         ? "network"
         : "local_fallback",
-    source: String(raw.source ?? "manual_upload") === "naps2_webscan" ? "naps2_webscan" : "manual_upload",
+    source:
+      String(raw.source ?? "manual_upload") === "scanner_app"
+        ? "scanner_app"
+        : String(raw.source ?? "manual_upload") === "naps2_webscan"
+          ? "naps2_webscan"
+          : "manual_upload",
+    scanSessionId:
+      raw.scan_session_id == null ? (raw.scanSessionId == null ? null : Number(raw.scanSessionId)) : Number(raw.scan_session_id),
+    pageCount: raw.page_count == null ? (raw.pageCount == null ? null : Number(raw.pageCount)) : Number(raw.page_count),
+    scannerName: (raw.scanner_name ?? raw.scannerName ?? null) as string | null,
+    workstationName: (raw.workstation_name ?? raw.workstationName ?? null) as string | null,
+    appVersion: (raw.app_version ?? raw.appVersion ?? null) as string | null,
     lastMoveAttemptAt: (raw.last_move_attempt_at ?? raw.lastMoveAttemptAt ?? null) as string | null,
     lastMoveError: (raw.last_move_error ?? raw.lastMoveError ?? null) as string | null,
     createdAt: String(raw.created_at ?? raw.createdAt ?? ""),
@@ -167,7 +186,7 @@ export async function uploadAppointmentDocument(payload: {
   originalFilename: string;
   mimeType: string;
   fileContentBase64: string;
-  source?: "manual_upload" | "naps2_webscan";
+  source?: "manual_upload" | "naps2_webscan" | "scanner_app";
 }): Promise<RequestDocument> {
   const raw = await api<{ document: RawRecord }>("/documents", {
     method: "POST",
@@ -795,6 +814,18 @@ export async function prepareScanSession(payload: {
   appointmentRefType?: AppointmentRefType;
 }) {
   return api<{ preparation: RawRecord }>("/integrations/scan-prepare", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function createScanSession(payload: {
+  appointmentId: number;
+  patientId?: number | null;
+  documentType?: string;
+  appointmentRefType?: AppointmentRefType;
+}): Promise<{ launchUrl: string; expiresAt: string; fallbackUploadAllowed: true }> {
+  return api<{ launchUrl: string; expiresAt: string; fallbackUploadAllowed: true }>("/scan-sessions", {
     method: "POST",
     body: JSON.stringify(payload),
   });

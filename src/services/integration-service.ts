@@ -57,6 +57,9 @@ interface IntegrationStatus {
     bridgeReady: boolean;
     naps2WebScanEnabled: boolean;
     naps2WebScanEndpoint: string;
+    scannerAppEnabled: boolean;
+    scannerAppDownloadUrl: string;
+    scanSessionExpiryMinutes: string;
   };
   dicomGateway: {
     enabled: boolean;
@@ -226,7 +229,10 @@ export async function getIntegrationStatus(): Promise<IntegrationStatus> {
       scanFileFormat: documentSettings.scan_file_format || "pdf",
       bridgeReady: String(scannerBridgeMode || "") === "naps2_webscan",
       naps2WebScanEnabled,
-      naps2WebScanEndpoint
+      naps2WebScanEndpoint,
+      scannerAppEnabled: String(documentSettings.scanner_app_enabled || "enabled").trim().toLowerCase() === "enabled",
+      scannerAppDownloadUrl: String(documentSettings.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi").trim(),
+      scanSessionExpiryMinutes: String(documentSettings.scan_session_expiry_minutes || "15").trim(),
     },
     dicomGateway: {
       enabled: Boolean(dicomGateway.settings.enabled),

@@ -24,7 +24,13 @@ export interface DocumentUploadPayload {
   originalFilename?: string;
   mimeType?: string;
   fileContentBase64?: string;
+  fileContentBuffer?: Buffer;
   source?: string;
+  scanSessionId?: UserId;
+  pageCount?: number | null;
+  scannerName?: string | null;
+  workstationName?: string | null;
+  appVersion?: string | null;
 }
 
 export interface DocumentRow {
@@ -38,7 +44,12 @@ export interface DocumentRow {
   mime_type: string;
   file_size: number;
   storage_location_type: "network" | "local_fallback";
-  source: "manual_upload" | "naps2_webscan";
+  source: "manual_upload" | "naps2_webscan" | "scanner_app";
+  scan_session_id?: number | null;
+  page_count?: number | null;
+  scanner_name?: string | null;
+  workstation_name?: string | null;
+  app_version?: string | null;
   last_move_attempt_at: string | null;
   last_move_error: string | null;
   created_at: string;
@@ -77,7 +88,7 @@ interface StorageConfig {
   fallbackEnabled: boolean;
 }
 
-const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 function sanitizeFileName(fileName: unknown): string {
@@ -97,6 +108,13 @@ function decodeBase64File(fileContentBase64: unknown): Buffer {
 
   const normalized = raw.includes(",") ? raw.split(",").pop() : raw;
   return Buffer.from(normalized || "", "base64");
+}
+
+function resolveFileBuffer(payload: DocumentUploadPayload): Buffer {
+  if (payload.fileContentBuffer) {
+    return payload.fileContentBuffer;
+  }
+  return decodeBase64File(payload.fileContentBase64);
 }
 
 async function ensureRelatedRecords(patientId: number | null, appointmentId: number | null): Promise<void> {
@@ -198,8 +216,11 @@ function isTruthyFlag(raw: string): boolean {
   return ["true", "1", "yes", "enabled", "on"].includes(String(raw || "").trim().toLowerCase());
 }
 
-function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" {
-  return String(source || "").trim() === "naps2_webscan" ? "naps2_webscan" : "manual_upload";
+function normalizeDocumentSource(source: unknown): "manual_upload" | "naps2_webscan" | "scanner_app" {
+  const normalized = String(source || "").trim();
+  if (normalized === "naps2_webscan") return "naps2_webscan";
+  if (normalized === "scanner_app") return "scanner_app";
+  return "manual_upload";
 }
 
 async function loadDocumentStorageConfig(): Promise<StorageConfig> {
@@ -284,6 +305,11 @@ export async function listDocuments(
         file_size,
         storage_location_type,
         source,
+        scan_session_id,
+        page_count,
+        scanner_name,
+        workstation_name,
+        app_version,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -314,6 +340,11 @@ export async function getDocumentById(documentId: UserId): Promise<DocumentRow> 
         file_size,
         storage_location_type,
         source,
+        scan_session_id,
+        page_count,
+        scanner_name,
+        workstation_name,
+        app_version,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -379,6 +410,11 @@ async function selectDocumentsForScope(scope: DocumentsDeleteScope): Promise<Doc
         d.file_size,
         d.storage_location_type,
         d.source,
+        d.scan_session_id,
+        d.page_count,
+        d.scanner_name,
+        d.workstation_name,
+        d.app_version,
         d.last_move_attempt_at,
         d.last_move_error,
         d.created_at
@@ -417,7 +453,12 @@ export async function uploadDocument(
   const originalFilename = sanitizeFileName(payload.originalFilename || "document.bin");
   const mimeType = String(payload.mimeType || "application/octet-stream").trim().toLowerCase();
   const source = normalizeDocumentSource(payload.source);
-  const fileBuffer = decodeBase64File(payload.fileContentBase64);
+  const fileBuffer = resolveFileBuffer(payload);
+  const scanSessionId = normalizePositiveInteger(payload.scanSessionId, "scanSessionId", { required: false });
+  const pageCount = payload.pageCount == null ? null : Number(payload.pageCount);
+  const scannerName = String(payload.scannerName || "").trim() || null;
+  const workstationName = String(payload.workstationName || "").trim() || null;
+  const appVersion = String(payload.appVersion || "").trim() || null;
 
   if (fileBuffer.length === 0) {
     throw new HttpError(400, "Uploaded file is empty.");
@@ -474,9 +515,14 @@ export async function uploadDocument(
         storage_location_type,
         last_move_error,
         uploaded_by_user_id,
-        source
+        source,
+        scan_session_id,
+        page_count,
+        scanner_name,
+        workstation_name,
+        app_version
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
       returning
         id,
         patient_id,
@@ -489,6 +535,11 @@ export async function uploadDocument(
         file_size,
         storage_location_type,
         source,
+        scan_session_id,
+        page_count,
+        scanner_name,
+        workstation_name,
+        app_version,
         last_move_attempt_at,
         last_move_error,
         created_at
@@ -506,6 +557,11 @@ export async function uploadDocument(
       fallbackReason,
       currentUserId,
       source,
+      scanSessionId,
+      Number.isFinite(pageCount) && Number(pageCount) > 0 ? Math.floor(Number(pageCount)) : null,
+      scannerName,
+      workstationName,
+      appVersion,
     ]
   )) as DbQueryResult<DocumentRow>;
   const savedDocument = rows[0];

@@ -1,0 +1,59 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="RISpro Scanner"
+    Manufacturer="RISpro"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="8A4E5871-EC5C-49C3-BA39-58BB69B1A9B0"
+    Scope="perMachine">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RISpro Scanner is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <StandardDirectory Id="ProgramFilesFolder">
+      <Directory Id="INSTALLFOLDER" Name="RISpro Scanner">
+        <Component Id="AppFiles" Guid="B586F947-9D67-4328-A8C9-C63B2083A11A">
+          <Files Include="$(var.PublishDir)\**" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="CommonAppDataFolder">
+      <Directory Id="ProgramDataRisproScanner" Name="RISproScanner">
+        <Component Id="ProgramDataFolderComponent" Guid="D4E1BE36-5703-4F40-A8C4-3F8886E1B21F">
+          <CreateFolder />
+          <RegistryValue Root="HKLM" Key="Software\RISpro\Scanner" Name="ProgramDataInitialized" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="RISpro Scanner">
+        <Component Id="StartMenuShortcut" Guid="0E4094EB-B457-43DF-BCB7-31DAFF7339F0">
+          <Shortcut Id="StartMenuShortcut" Name="RISpro Scanner" Target="[INSTALLFOLDER]RISpro.Scanner.App.exe" WorkingDirectory="INSTALLFOLDER" />
+          <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+          <RegistryValue Root="HKLM" Key="Software\RISpro\Scanner" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <Component Id="ProtocolRegistration" Directory="INSTALLFOLDER" Guid="411F55DF-9B63-43A7-A25C-D7378B45CCB0">
+      <RegistryKey Root="HKCR" Key="rispro-scanner">
+        <RegistryValue Type="string" Value="URL:RISpro Scanner Protocol" />
+        <RegistryValue Name="URL Protocol" Type="string" Value="" />
+        <RegistryKey Key="DefaultIcon">
+          <RegistryValue Type="string" Value="[INSTALLFOLDER]RISpro.Scanner.App.exe,0" />
+        </RegistryKey>
+        <RegistryKey Key="shell\open\command">
+          <RegistryValue Type="string" Value="&quot;[INSTALLFOLDER]RISpro.Scanner.App.exe&quot; &quot;%1&quot;" />
+        </RegistryKey>
+      </RegistryKey>
+    </Component>
+
+    <Feature Id="Main" Title="RISpro Scanner" Level="1">
+      <ComponentRef Id="AppFiles" />
+      <ComponentRef Id="ProgramDataFolderComponent" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="ProtocolRegistration" />
+    </Feature>
+  </Package>
+</Wix>

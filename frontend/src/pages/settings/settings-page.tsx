@@ -4038,6 +4038,9 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
   const [fallbackEnabled, setFallbackEnabled] = useState(true);
   const [naps2WebScanEnabled, setNaps2WebScanEnabled] = useState(false);
   const [naps2WebScanEndpoint, setNaps2WebScanEndpoint] = useState("");
+  const [scannerAppEnabled, setScannerAppEnabled] = useState(true);
+  const [scannerAppDownloadUrl, setScannerAppDownloadUrl] = useState("/assets/downloads/RISproScannerSetup.msi");
+  const [scanSessionExpiryMinutes, setScanSessionExpiryMinutes] = useState("15");
   const [scanDpi, setScanDpi] = useState("200");
   const [scanColorMode, setScanColorMode] = useState("grayscale");
   const [scannerSource, setScannerSource] = useState("feeder");
@@ -4060,6 +4063,9 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
     setFallbackEnabled(String(settings.storage_fallback_enabled || "true").toLowerCase() === "true");
     setNaps2WebScanEnabled(String(settings.naps2_webscan_enabled || "disabled").toLowerCase() === "enabled");
     setNaps2WebScanEndpoint(settings.scanner_bridge_endpoint || settings.naps2_webscan_endpoint || "");
+    setScannerAppEnabled(String(settings.scanner_app_enabled || "enabled").toLowerCase() === "enabled");
+    setScannerAppDownloadUrl(settings.scanner_app_download_url || "/assets/downloads/RISproScannerSetup.msi");
+    setScanSessionExpiryMinutes(settings.scan_session_expiry_minutes || "15");
     setScanDpi(settings.scan_dpi || "200");
     setScanColorMode(settings.scan_color_mode || "grayscale");
     setScannerSource(settings.scanner_source || "feeder");
@@ -4078,6 +4084,9 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
           { key: "scanner_bridge_endpoint", value: { value: naps2WebScanEndpoint } },
           { key: "naps2_webscan_endpoint", value: { value: naps2WebScanEndpoint } },
           { key: "scanner_bridge_mode", value: { value: naps2WebScanEnabled ? "naps2_webscan" : "manual_browser_upload" } },
+          { key: "scanner_app_enabled", value: { value: scannerAppEnabled ? "enabled" : "disabled" } },
+          { key: "scanner_app_download_url", value: { value: scannerAppDownloadUrl } },
+          { key: "scan_session_expiry_minutes", value: { value: scanSessionExpiryMinutes } },
           { key: "scan_dpi", value: { value: scanDpi } },
           { key: "scan_color_mode", value: { value: scanColorMode } },
           { key: "scanner_source", value: { value: scannerSource } },
@@ -4185,6 +4194,33 @@ function DocumentsStorageSection({ onReAuthRequired }: { onReAuthRequired: (key:
       <div className="rounded-lg border border-stone-200 dark:border-stone-700 p-3 space-y-3">
         <h4 className="font-medium text-sm">{t("settings.documents.naps2Title")}</h4>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="flex items-end">
+            <label className="inline-flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={scannerAppEnabled}
+                onChange={(e) => setScannerAppEnabled(e.target.checked)}
+              />
+              {t("settings.documents.scannerAppEnabled")}
+            </label>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.scannerAppDownloadUrl")}</label>
+            <input
+              value={scannerAppDownloadUrl}
+              onChange={(e) => setScannerAppDownloadUrl(e.target.value)}
+              placeholder="/assets/downloads/RISproScannerSetup.msi"
+              className="input-premium w-full"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">{t("settings.documents.scanSessionExpiryMinutes")}</label>
+            <select value={scanSessionExpiryMinutes} onChange={(e) => setScanSessionExpiryMinutes(e.target.value)} className="input-premium w-full">
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="30">30</option>
+            </select>
+          </div>
           <div className="flex items-end">
             <label className="inline-flex items-center gap-2 text-sm">
               <input

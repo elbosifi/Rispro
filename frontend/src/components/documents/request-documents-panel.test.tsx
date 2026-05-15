@@ -33,6 +33,11 @@ const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<unknown>>(asy
     guidance: "Ready to scan",
   },
 }));
+const mockCreateScanSession = vi.fn<(payload: unknown) => Promise<unknown>>(async () => ({
+  launchUrl: "rispro-scanner://scan?token=test-token",
+  expiresAt: "2026-01-01T00:15:00.000Z",
+  fallbackUploadAllowed: true,
+}));
 const mockScanAppointmentRequest = vi.fn<(customOptions?: unknown) => Promise<{ file: File; pageCount: number; source: "naps2_webscan" }>>(
   async () => ({
     file: new File([new Blob(["page-1"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
@@ -60,6 +65,9 @@ const mockFetchIntegrationStatus = vi.fn(async () => ({
     bridgeReady: true,
     naps2WebScanEnabled: true,
     naps2WebScanEndpoint: "",
+    scannerAppEnabled: false,
+    scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+    scanSessionExpiryMinutes: "15",
   },
 }));
 
@@ -69,6 +77,7 @@ vi.mock("@/lib/api-hooks", () => ({
   uploadAppointmentDocument: (payload: unknown) => mockUploadAppointmentDocument(payload),
   deleteAppointmentDocument: (documentId: number) => mockDeleteAppointmentDocument(documentId),
   prepareScanSession: (payload: unknown) => mockPrepareScanSession(payload),
+  createScanSession: (payload: unknown) => mockCreateScanSession(payload),
   fetchCurrentSession: () => mockFetchCurrentSession(),
   fetchIntegrationStatus: () => mockFetchIntegrationStatus(),
 }));
@@ -139,6 +148,7 @@ describe("RequestDocumentsPanel local scan flow", () => {
     mockUploadAppointmentDocument.mockReset();
     mockDeleteAppointmentDocument.mockReset();
     mockPrepareScanSession.mockReset();
+    mockCreateScanSession.mockReset();
     mockScanAppointmentRequest.mockReset();
     mockFetchCurrentSession.mockClear();
     mockFetchIntegrationStatus.mockClear();
@@ -152,6 +162,11 @@ describe("RequestDocumentsPanel local scan flow", () => {
         sessionCode: "SCAN-TEST",
         guidance: "Ready to scan",
       },
+    });
+    mockCreateScanSession.mockResolvedValue({
+      launchUrl: "rispro-scanner://scan?token=test-token",
+      expiresAt: "2026-01-01T00:15:00.000Z",
+      fallbackUploadAllowed: true,
     });
     mockScanAppointmentRequest.mockResolvedValue({
       file: new File([new Blob(["page-1"], { type: "application/pdf" })], "scan.pdf", { type: "application/pdf" }),
@@ -193,6 +208,9 @@ describe("RequestDocumentsPanel local scan flow", () => {
         bridgeReady: true,
         naps2WebScanEnabled: true,
         naps2WebScanEndpoint: "",
+        scannerAppEnabled: false,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+        scanSessionExpiryMinutes: "15",
       },
     });
   });
@@ -241,6 +259,44 @@ describe("RequestDocumentsPanel local scan flow", () => {
     expect(await screen.findByRole("button", { name: "Scan Appointment Request" })).toBeTruthy();
   });
 
+  it("creates a durable scan session and shows scanner app fallback actions", async () => {
+    mockFetchIntegrationStatus.mockResolvedValue({
+      scanner: {
+        referralUploadEnabled: true,
+        allowedFileTypes: ["pdf", "jpg", "png"],
+        documentLinkScope: "patient_and_appointment",
+        scannerBridgeMode: "naps2_webscan",
+        scannerProfileName: "default",
+        scannerSource: "feeder",
+        scanDpi: "200",
+        scanColorMode: "grayscale",
+        scanFileFormat: "pdf",
+        bridgeReady: true,
+        naps2WebScanEnabled: true,
+        naps2WebScanEndpoint: "",
+        scannerAppEnabled: true,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+        scanSessionExpiryMinutes: "15",
+      },
+    });
+
+    renderPanel();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Scan Paper" }));
+
+    await waitFor(() => {
+      expect(mockCreateScanSession).toHaveBeenCalledWith({
+        appointmentId: 42,
+        patientId: 9,
+        documentType: "appointment_request",
+        appointmentRefType: "v2_booking",
+      });
+    });
+    expect(await screen.findByText("Download Scanner App")).toBeTruthy();
+    expect(await screen.findByText("Retry Launch")).toBeTruthy();
+    expect(await screen.findByText("Use NAPS2.WebScan")).toBeTruthy();
+  });
+
   it("does not show the NAPS2 scan action when local scan is disabled", async () => {
     renderPanelWithoutLocalScan();
 
@@ -264,6 +320,9 @@ describe("RequestDocumentsPanel local scan flow", () => {
         bridgeReady: false,
         naps2WebScanEnabled: false,
         naps2WebScanEndpoint: "",
+        scannerAppEnabled: false,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+        scanSessionExpiryMinutes: "15",
       },
     });
 
@@ -289,6 +348,9 @@ describe("RequestDocumentsPanel local scan flow", () => {
         bridgeReady: true,
         naps2WebScanEnabled: true,
         naps2WebScanEndpoint: "http://localhost:9810",
+        scannerAppEnabled: false,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+        scanSessionExpiryMinutes: "15",
       },
     });
 
@@ -318,6 +380,9 @@ describe("RequestDocumentsPanel local scan flow", () => {
         bridgeReady: false,
         naps2WebScanEnabled: false,
         naps2WebScanEndpoint: "http://localhost:9810",
+        scannerAppEnabled: false,
+        scannerAppDownloadUrl: "/assets/downloads/RISproScannerSetup.msi",
+        scanSessionExpiryMinutes: "15",
       },
     });
 
