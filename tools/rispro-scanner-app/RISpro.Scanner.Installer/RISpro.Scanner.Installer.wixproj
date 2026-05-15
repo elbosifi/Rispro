@@ -1,8 +1,9 @@
-<Project Sdk="WixToolset.Sdk/5.0.2">
+﻿<Project Sdk="WixToolset.Sdk/5.0.2">
   <PropertyGroup>
     <OutputName>RISproScannerSetup</OutputName>
     <OutputType>Package</OutputType>
-    <PublishDir>$(MSBuildThisFileDirectory)..\artifacts\app</PublishDir>
     <ProductVersion Condition="'$(ProductVersion)' == ''">0.1.0</ProductVersion>
+    <PublishDir>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\artifacts\app'))</PublishDir>
+    <DefineConstants>ProductVersion=$(ProductVersion);PublishDir=$(PublishDir)</DefineConstants>
   </PropertyGroup>
 </Project>
