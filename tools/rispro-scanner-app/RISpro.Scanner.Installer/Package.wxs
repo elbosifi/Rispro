@@ -12,12 +12,9 @@
     <StandardDirectory Id="ProgramFilesFolder">
       <Directory Id="INSTALLFOLDER" Name="RISpro Scanner">
         <Component Id="AppFiles" Guid="B586F947-9D67-4328-A8C9-C63B2083A11A">
-  <File Id="AppExe" Source="$(var.PublishDir)\RISpro.Scanner.App.exe" KeyPath="yes" />
-  <File Id="AppDll" Source="$(var.PublishDir)\RISpro.Scanner.App.dll" />
-  <File Id="CoreDll" Source="$(var.PublishDir)\RISpro.Scanner.Core.dll" />
-  <File Id="DepsJson" Source="$(var.PublishDir)\RISpro.Scanner.App.deps.json" />
-  <File Id="RuntimeConfigJson" Source="$(var.PublishDir)\RISpro.Scanner.App.runtimeconfig.json" />
-</Component>
+          <RegistryValue Root="HKLM" Key="Software\RISpro\Scanner" Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+          <Files Include="$(var.PublishDir)\**" />
+        </Component>
       </Directory>
     </StandardDirectory>
 
