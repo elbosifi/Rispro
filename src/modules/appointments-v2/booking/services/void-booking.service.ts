@@ -41,6 +41,18 @@ async function voidBookingInternal(
     throw new SchedulingError(400, "Void reason is required.", ["void_reason_required"]);
   }
 
+  if (userRole === "super_admin") {
+    await voidBooking(client, bookingId, reason, userId);
+    return {
+      booking: {
+        ...booking,
+        status: "voided",
+        voidReason: reason,
+      },
+      previousStatus: booking.status,
+    };
+  }
+
   if (booking.status === "voided") {
     throw new SchedulingError(409, `Booking ${bookingId} is already voided.`, ["booking_already_voided"]);
   }

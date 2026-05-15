@@ -537,7 +537,7 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
       }
     });
 
-    it("should reject voiding completed/no-show/cancelled/discontinued/already-voided bookings", async () => {
+    it("should reject non-super-admin voiding completed/no-show/cancelled/discontinued/already-voided bookings", async () => {
       guard();
       const { pool } = await import("../../../../db/pool.js");
       const statuses = ["completed", "no-show", "cancelled", "discontinued", "voided"] as const;
@@ -560,6 +560,39 @@ describe("Booking flow — integration tests", { skip: skipEnv }, () => {
           body: { voidReason: "Staff correction" },
         });
         assert.equal(status, 409);
+      }
+    });
+
+    it("should allow super_admin to void any appointment status", async () => {
+      guard();
+      const { pool } = await import("../../../../db/pool.js");
+      const statuses = ["completed", "no-show", "cancelled", "discontinued", "voided"] as const;
+
+      for (const statusToSet of statuses) {
+        const createResult = await fetch("/api/v2/appointments", {
+          method: "POST",
+          body: {
+            patientId: testData.patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: "2026-06-03",
+            caseCategory: "non_oncology",
+          },
+        });
+        const bookingId = ((createResult.data as Record<string, unknown>).booking as Record<string, unknown>).id as number;
+        await pool.query(`update appointments_v2.bookings set status = $2 where id = $1`, [bookingId, statusToSet]);
+
+        const { status, data } = await fetch(`/api/v2/appointments/${bookingId}/void`, {
+          method: "POST",
+          cookie: createTestAuthCookie(testData.userId, "super_admin"),
+          body: { voidReason: "Super admin correction" },
+        });
+
+        assert.equal(status, 200);
+        const result = data as Record<string, unknown>;
+        const booking = result.booking as Record<string, unknown>;
+        assert.equal(booking.status, "voided");
+        assert.equal(result.previousStatus, statusToSet);
       }
     });
   });
