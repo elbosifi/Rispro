@@ -1,3 +1,4 @@
+using System.IO;
 using NAPS2.Images.Wpf;
 using NAPS2.Images;
 using NAPS2.Pdf;

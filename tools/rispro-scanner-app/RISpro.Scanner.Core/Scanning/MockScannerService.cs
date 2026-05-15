@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace RISpro.Scanner.Core.Scanning;
 
 public sealed class MockScannerService : IScannerService
