@@ -90,6 +90,23 @@ interface VerificationHistoryRow {
   created_at: string;
 }
 
+export interface PacsAutoCompletionTestDiagnostics {
+  bookingId: number;
+  bookingStatus: string;
+  expectedAccession: string;
+  studyInstanceUid: string | null;
+  modalityId: number;
+  modalityCode: string;
+  orthancTargetType: OrthancVerificationTargetType;
+  orthancTargetKey: string | null;
+  orthancTargetLabel: string;
+  matchKey: string | null;
+  matchValue: string | null;
+  candidateCount: number | null;
+  completionThreshold: OrthancCompletionThreshold;
+  lastError: string | null;
+}
+
 export interface AppointmentsV2PacsAutoCompletionWorker {
   stop(): Promise<void>;
 }
@@ -163,6 +180,32 @@ function mapBooking(row: EligibleBookingRow): OrthancBookingVerificationContext 
     national_id: row.national_id,
     mrn: row.mrn,
     patient_primary_id: row.patient_primary_id,
+  };
+}
+
+function readCandidateCount(resultJson: unknown): number | null {
+  if (!resultJson || typeof resultJson !== "object" || Array.isArray(resultJson)) return null;
+  const value = (resultJson as Record<string, unknown>).candidateCount;
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function buildTestDiagnostics(booking: EligibleBookingRow, setting: PacsAutoCompletionSettingRow, result: OrthancVerificationResult): PacsAutoCompletionTestDiagnostics {
+  const orthancTargetKey = setting.orthanc_target_type === "local" ? null : setting.orthanc_target_key;
+  return {
+    bookingId: Number(booking.id),
+    bookingStatus: booking.status,
+    expectedAccession: booking.accession_number,
+    studyInstanceUid: booking.study_instance_uid,
+    modalityId: Number(booking.modality_id),
+    modalityCode: booking.modality_code,
+    orthancTargetType: setting.orthanc_target_type,
+    orthancTargetKey,
+    orthancTargetLabel: setting.orthanc_target_type === "local" ? "Local Orthanc index" : orthancTargetKey || "Remote Orthanc modality",
+    matchKey: result.matchKey,
+    matchValue: result.matchValue,
+    candidateCount: readCandidateCount(result.resultJson),
+    completionThreshold: setting.completion_threshold,
+    lastError: result.lastError,
   };
 }
 
@@ -544,7 +587,7 @@ export async function testPacsAutoCompletionForModality({
 }: {
   modalityId: number | string;
   bookingId?: number | string | null;
-}): Promise<{ result: OrthancVerificationResult; history: VerificationHistoryRow; bookingId: number | null }> {
+}): Promise<{ result: OrthancVerificationResult; history: VerificationHistoryRow; bookingId: number | null; diagnostics: PacsAutoCompletionTestDiagnostics }> {
   const cleanModalityId = normalizePositiveInteger(modalityId, "modalityId");
   if (!cleanModalityId) {
     throw new HttpError(400, "modalityId is required.");
@@ -608,7 +651,12 @@ export async function testPacsAutoCompletionForModality({
   });
   await updateSettingLastCheck(setting.id, result);
 
-  return { result, history, bookingId: Number(booking.id) };
+  return {
+    result,
+    history,
+    bookingId: Number(booking.id),
+    diagnostics: buildTestDiagnostics(booking, setting, result),
+  };
 }
 
 export async function listPacsAutoCompletionTargets(): Promise<{ targets: OrthancVerificationTarget[] }> {

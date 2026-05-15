@@ -44,3 +44,10 @@ test("worker records Orthanc failures without blocking manual completion paths",
   assert.ok(!source.includes("markAppointmentCompleted"));
   assert.ok(!source.includes("modality-service"));
 });
+
+test("manual PACS auto-completion test preserves response shape and adds diagnostics", () => {
+  assert.match(source, /return \{\s*result,\s*history,\s*bookingId: Number\(booking\.id\),\s*diagnostics: buildTestDiagnostics\(booking, setting, result\),\s*\}/);
+  assert.match(source, /export interface PacsAutoCompletionTestDiagnostics/);
+  assert.match(source, /expectedAccession: booking\.accession_number/);
+  assert.match(source, /candidateCount: readCandidateCount\(result\.resultJson\)/);
+});

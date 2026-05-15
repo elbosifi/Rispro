@@ -88,7 +88,51 @@ describe("PacsSettingsSection auto-completion controls", () => {
         return { setting: {} };
       }
       if (path === "/pacs/auto-completion-settings/7/test" && options?.method === "POST") {
-        return { result: { status: "matched", lastError: null }, bookingId: 42 };
+        const body = JSON.parse(String(options.body || "{}"));
+        if (body.bookingId) {
+          return {
+            result: { status: "not_found", lastError: "No matching study" },
+            history: { id: 9 },
+            bookingId: 123,
+            diagnostics: {
+              bookingId: 123,
+              bookingStatus: "scheduled",
+              expectedAccession: "V2-123",
+              studyInstanceUid: null,
+              modalityId: 7,
+              modalityCode: "CT",
+              orthancTargetType: "local",
+              orthancTargetKey: null,
+              orthancTargetLabel: "Local Orthanc index",
+              matchKey: "accession_number",
+              matchValue: "V2-123",
+              candidateCount: 3,
+              completionThreshold: "study_exists",
+              lastError: "No matching study",
+            },
+          };
+        }
+        return {
+          result: { status: "matched", lastError: null },
+          history: { id: 8 },
+          bookingId: 42,
+          diagnostics: {
+            bookingId: 42,
+            bookingStatus: "waiting",
+            expectedAccession: "V2-42",
+            studyInstanceUid: "1.2.3",
+            modalityId: 7,
+            modalityCode: "CT",
+            orthancTargetType: "local",
+            orthancTargetKey: null,
+            orthancTargetLabel: "Local Orthanc index",
+            matchKey: "study_instance_uid",
+            matchValue: "1.2.3",
+            candidateCount: null,
+            completionThreshold: "study_exists",
+            lastError: null,
+          },
+        };
       }
       throw new Error(`Unexpected API call ${path}`);
     });
@@ -174,7 +218,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     });
   });
 
-  it("calls the test endpoint without completing a booking", async () => {
+  it("posts no bookingId when the test booking field is empty", async () => {
     const user = userEvent.setup();
     renderComponent();
 
@@ -187,6 +231,44 @@ describe("PacsSettingsSection auto-completion controls", () => {
         expect.objectContaining({ method: "POST" })
       );
     });
+    const testCall = vi.mocked(api).mock.calls.find((call) => call[0] === "/pacs/auto-completion-settings/7/test");
+    expect(JSON.parse(String(testCall?.[1]?.body || "{}"))).toEqual({});
     expect(await screen.findByText(/Test for modality 7: matched/)).toBeTruthy();
+    expect(screen.getByText("Tested booking ID")).toBeTruthy();
+    expect(screen.getByText("42")).toBeTruthy();
+    expect(screen.getByText("Expected accession")).toBeTruthy();
+    expect(screen.getByText("V2-42")).toBeTruthy();
+  });
+
+  it("posts entered bookingId and renders backend diagnostics for not_found", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+
+    await screen.findByText("Orthanc PACS auto-completion");
+    await user.type(screen.getByLabelText("Booking ID to test"), "123");
+    await user.click(screen.getByRole("button", { name: "Test verification" }));
+
+    await waitFor(() => {
+      const testCall = vi.mocked(api).mock.calls.find((call) => call[0] === "/pacs/auto-completion-settings/7/test");
+      expect(JSON.parse(String(testCall?.[1]?.body || "{}"))).toEqual({ bookingId: "123" });
+    });
+
+    expect(await screen.findByText(/Test for modality 7: not_found/)).toBeTruthy();
+    expect(screen.getByText("Booking status")).toBeTruthy();
+    expect(screen.getByText("scheduled")).toBeTruthy();
+    expect(screen.getByText("Expected accession")).toBeTruthy();
+    expect(screen.getAllByText("V2-123").length).toBeGreaterThan(0);
+    expect(screen.getByText("Target")).toBeTruthy();
+    expect(screen.getAllByText("Local Orthanc index").length).toBeGreaterThan(0);
+    expect(screen.getByText("Match key")).toBeTruthy();
+    expect(screen.getByText("accession_number")).toBeTruthy();
+    expect(screen.getByText("Match value")).toBeTruthy();
+    expect(screen.getByText("Candidate count")).toBeTruthy();
+    expect(screen.getByText("3")).toBeTruthy();
+    expect(screen.getByText("Threshold")).toBeTruthy();
+    expect(screen.getAllByText("study_exists").length).toBeGreaterThan(0);
+    expect(screen.getByText("Result status")).toBeTruthy();
+    expect(screen.getByText("not_found")).toBeTruthy();
+    expect(screen.getAllByText("No matching study").length).toBeGreaterThan(0);
   });
 });

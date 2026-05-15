@@ -44,6 +44,30 @@ interface PacsAutoCompletionSetting {
   modality_is_active: boolean;
 }
 
+interface PacsAutoCompletionTestDiagnostics {
+  bookingId: number;
+  bookingStatus: string;
+  expectedAccession: string;
+  studyInstanceUid: string | null;
+  modalityId: number;
+  modalityCode: string;
+  orthancTargetType: OrthancTargetType;
+  orthancTargetKey: string | null;
+  orthancTargetLabel: string;
+  matchKey: string | null;
+  matchValue: string | null;
+  candidateCount: number | null;
+  completionThreshold: CompletionThreshold;
+  lastError: string | null;
+}
+
+interface PacsAutoCompletionTestResponse {
+  result: { status: string; lastError?: string | null };
+  history: unknown;
+  bookingId: number | null;
+  diagnostics: PacsAutoCompletionTestDiagnostics;
+}
+
 type OrthancModalityFormState = {
   key: string;
   aet: string;
@@ -85,6 +109,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const [autoDrafts, setAutoDrafts] = useState<Record<number, AutoCompletionDraft>>({});
   const [autoMessage, setAutoMessage] = useState<string | null>(null);
   const [autoTestingId, setAutoTestingId] = useState<number | null>(null);
+  const [autoTestBookingIds, setAutoTestBookingIds] = useState<Record<number, string>>({});
+  const [autoTestResults, setAutoTestResults] = useState<Record<number, PacsAutoCompletionTestResponse>>({});
 
   const emptyForm: OrthancModalityFormState = {
     key: "",
@@ -206,15 +232,17 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   });
 
   const testAutoMutation = useMutation({
-    mutationFn: async (modalityId: number) => {
+    mutationFn: async ({ modalityId, bookingId }: { modalityId: number; bookingId: string }) => {
       setAutoTestingId(modalityId);
-      return api<{ result: { status: string; lastError?: string | null }; bookingId: number | null }>(
+      const cleanBookingId = bookingId.trim();
+      return api<PacsAutoCompletionTestResponse>(
         `/pacs/auto-completion-settings/${modalityId}/test`,
-        { method: "POST", body: JSON.stringify({}) }
+        { method: "POST", body: JSON.stringify(cleanBookingId ? { bookingId: cleanBookingId } : {}) }
       );
     },
-    onSuccess: async (result, modalityId) => {
+    onSuccess: async (result, { modalityId }) => {
       setAutoMessage(`Test for modality ${modalityId}: ${result.result.status}${result.result.lastError ? ` (${result.result.lastError})` : ""}`);
+      setAutoTestResults((current) => ({ ...current, [modalityId]: result }));
       setAutoTestingId(null);
       await queryClient.invalidateQueries({ queryKey: ["pacs", "auto-completion-settings"] });
     },
@@ -388,6 +416,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                 [setting.modality_id]: { ...draft, ...patch }
               }));
             };
+            const testDetails = autoTestResults[setting.modality_id];
+            const diagnostics = testDetails?.diagnostics;
             return (
               <div key={setting.modality_id} className="p-4 rounded-lg border border-stone-200 dark:border-stone-700 bg-white dark:bg-stone-800 space-y-3">
                 <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
@@ -499,16 +529,56 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                     type="button"
                     className="px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 text-sm rounded hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors disabled:opacity-50"
                     disabled={autoTestingId === setting.modality_id}
-                    onClick={() => testAutoMutation.mutate(setting.modality_id)}
+                    onClick={() => testAutoMutation.mutate({
+                      modalityId: setting.modality_id,
+                      bookingId: autoTestBookingIds[setting.modality_id] || "",
+                    })}
                   >
                     {autoTestingId === setting.modality_id ? "Testing..." : "Test verification"}
                   </button>
                 </div>
+                <label className="block text-xs text-stone-600 dark:text-stone-300">
+                  Booking ID to test
+                  <input
+                    type="number"
+                    min={1}
+                    placeholder="Latest eligible booking"
+                    className="mt-1 px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm w-full max-w-xs"
+                    value={autoTestBookingIds[setting.modality_id] || ""}
+                    onChange={(event) => setAutoTestBookingIds((current) => ({
+                      ...current,
+                      [setting.modality_id]: event.target.value,
+                    }))}
+                  />
+                </label>
+                {diagnostics && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-xs text-stone-600 dark:text-stone-300">
+                    <DiagnosticValue label="Tested booking ID" value={diagnostics.bookingId} />
+                    <DiagnosticValue label="Booking status" value={diagnostics.bookingStatus} />
+                    <DiagnosticValue label="Expected accession" value={diagnostics.expectedAccession} />
+                    <DiagnosticValue label="Target" value={diagnostics.orthancTargetLabel} />
+                    <DiagnosticValue label="Match key" value={diagnostics.matchKey} />
+                    <DiagnosticValue label="Match value" value={diagnostics.matchValue} />
+                    <DiagnosticValue label="Candidate count" value={diagnostics.candidateCount} />
+                    <DiagnosticValue label="Threshold" value={diagnostics.completionThreshold} />
+                    <DiagnosticValue label="Result status" value={testDetails.result.status} />
+                    <DiagnosticValue label="Last error" value={diagnostics.lastError || testDetails.result.lastError || null} />
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DiagnosticValue({ label, value }: { label: string; value: string | number | null | undefined }) {
+  return (
+    <div className="rounded border border-stone-200 dark:border-stone-700 px-2 py-1.5">
+      <div className="text-stone-500 dark:text-stone-400">{label}</div>
+      <div className="font-mono text-stone-900 dark:text-white break-words">{value ?? "N/A"}</div>
     </div>
   );
 }
