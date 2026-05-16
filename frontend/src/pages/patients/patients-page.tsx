@@ -1,29 +1,19 @@
 import { useState, useMemo } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchPatientDirectory, fetchPatientDirectorySummary, type PatientDirectoryParams } from "@/lib/api-hooks";
+import { fetchPatientDirectory, type PatientDirectoryParams } from "@/lib/api-hooks";
 import PatientForm from "@/components/patients/patient-form";
+import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { useLanguage } from "@/providers/language-provider";
 import { t } from "@/lib/i18n";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
-import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
-import { UserPlus, Search, Pencil, CalendarPlus, Printer, X, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User, IdCard } from "lucide-react";
+import { UserPlus, Search, Pencil, CalendarPlus, Printer, ChevronLeft, ChevronRight, AlertTriangle, Phone, Calendar, User } from "lucide-react";
 import { Button, Card, Badge } from "@/components/shared";
-import type { PatientDirectoryRow, PatientDirectoryResponse, PatientDirectorySummary } from "@/types/api";
+import type { PatientDirectoryRow } from "@/types/api";
 
 type CategoryFilter = "oncology" | "non_oncology" | "";
 type AppointmentFilter = "has_future" | "today" | "no_future" | "";
-
-function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
-  if (!warning) return null;
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">
-      <AlertTriangle size={10} />
-      {label}
-    </span>
-  );
-}
 
 function DirectoryStat({
   label,
@@ -47,226 +37,6 @@ function DirectoryStat({
     <div className={`rounded-xl border p-3 ${toneClass}`}>
       <p className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-75">{label}</p>
       <p className="mt-1 text-xl font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function PatientDrawer({
-  patientId,
-  onClose
-}: {
-  patientId: number;
-  onClose: () => void;
-}) {
-  const { language } = useLanguage();
-  const navigate = useNavigate();
-  const isArabic = language === "ar";
-
-  const { data: summary, isLoading, error } = useQuery({
-    queryKey: ["patient-directory-summary", patientId],
-    queryFn: () => fetchPatientDirectorySummary(patientId),
-    staleTime: 1000 * 30,
-    retry: 1
-  });
-
-  if (isLoading) {
-    return (
-      <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
-        <div
-          className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex items-center justify-center"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="spinner-industrial h-8 w-8" />
-        </div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
-        <div
-          className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex items-center justify-center"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="text-center p-4">
-            <p className="text-red-500">Failed to load patient details</p>
-            <Button variant="outline" size="sm" onClick={onClose} className="mt-2">
-              Close
-            </Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!summary) return null;
-  const lastAppointmentId = summary.lastAppointment?.id ?? null;
-
-  return (
-    <div className="fixed inset-0 z-[70] bg-black/30" onClick={onClose} data-testid="patient-drawer-backdrop">
-      <div
-        className="fixed inset-y-0 right-0 w-full max-w-md bg-background border-l border-border shadow-xl z-[80] flex flex-col overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-bold">{t(language, "patients.directory.drawer.title")}</h2>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            <X size={18} />
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <section>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-            {t(language, "patients.directory.drawer.demographics")}
-          </h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.nameAr")}</span>
-              <span className="font-medium">{summary.demographics.arabicFullName}</span>
-            </div>
-            {summary.demographics.englishFullName && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t(language, "patients.nameEn")}</span>
-                <span>{summary.demographics.englishFullName}</span>
-              </div>
-            )}
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.mrn")}</span>
-              <span className="font-mono">{summary.demographics.mrn || "—"}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.sex")}</span>
-              <span>{summary.demographics.sex || "—"}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.age")}</span>
-              <span>{summary.demographics.ageYears}{summary.demographics.demographicsEstimated ? " (E)" : ""}</span>
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-            {t(language, "patients.directory.drawer.identifiers")}
-          </h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.nationalId")}</span>
-              <span className="font-mono">{summary.identifiers.nationalId || "—"}</span>
-            </div>
-          </div>
-        </section>
-
-        <section>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-            {t(language, "patients.directory.drawer.contact")}
-          </h3>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">{t(language, "patients.phone")}</span>
-              <span>{summary.contact.phone1 || "—"}</span>
-            </div>
-            {summary.contact.phone2 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t(language, "patients.phone")} 2</span>
-                <span>{summary.contact.phone2}</span>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {summary.category && (
-          <section>
-            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-              {t(language, "patients.directory.drawer.category")}
-            </h3>
-            <PatientCategoryBadge category={summary.category} />
-          </section>
-        )}
-
-        {(summary.warnings.missingPhone || summary.warnings.missingDob || summary.warnings.missingSex || summary.warnings.missingName || summary.warnings.incompleteData || summary.warnings.possibleDuplicate) && (
-          <section>
-            <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-              {t(language, "patients.directory.drawer.warnings")}
-            </h3>
-            <div className="flex flex-wrap gap-2">
-              <WarningBadge warning={summary.warnings.missingPhone} label={t(language, "patients.directory.warning.missingPhone")} />
-              <WarningBadge warning={summary.warnings.missingDob} label={t(language, "patients.directory.warning.missingDob")} />
-              <WarningBadge warning={summary.warnings.missingSex} label={t(language, "patients.directory.warning.missingSex")} />
-              <WarningBadge warning={summary.warnings.missingName} label={t(language, "patients.directory.warning.missingName")} />
-              <WarningBadge warning={summary.warnings.incompleteData} label={t(language, "patients.directory.warning.incomplete")} />
-              <WarningBadge warning={summary.warnings.possibleDuplicate} label={t(language, "patients.directory.warning.possibleDuplicate")} />
-            </div>
-          </section>
-        )}
-
-        <section>
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-            {t(language, "patients.directory.drawer.recentAppointments")}
-          </h3>
-          {summary.recentAppointments.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t(language, "patients.directory.noAppointments")}</p>
-          ) : (
-            <div className="space-y-2">
-              {summary.recentAppointments.slice(0, 5).map((appt) => (
-                <button
-                  key={appt.id}
-                  type="button"
-                  onClick={() => navigate(`/registrations?appointmentId=${appt.id}&patientId=${patientId}`)}
-                  className="flex w-full items-center justify-between gap-3 rounded-xl border border-border bg-background p-3 text-start transition-colors hover:border-accent/30 hover:bg-accent/5 focus:outline-none focus:ring-2 focus:ring-accent/30"
-                  aria-label={`${appt.date} ${appt.modalityName} ${t(language, "patients.directory.action.openInRegistrations")}`}
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium">{appt.date}</div>
-                    <div className="text-muted-foreground text-xs">{appt.modalityName}</div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <Badge
-                      variant={appt.status === "completed" ? "success" : appt.status === "cancelled" ? "error" : "neutral"}
-                      size="sm"
-                    >
-                      {appt.status}
-                    </Badge>
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-accent">
-                      {t(language, "patients.directory.action.openInRegistrations")}
-                      <ChevronRight size={14} />
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-      </div>
-
-        <div className="p-4 border-t border-border">
-          <h3 className="text-sm font-semibold uppercase tracking-[0.15em] text-muted-foreground mb-3">
-            {t(language, "patients.directory.drawer.quickActions")}
-          </h3>
-          <div className="grid grid-cols-2 gap-2">
-            <Button size="sm" variant="outline" onClick={() => navigate(`/patients/${patientId}/edit`)}>
-              <Pencil size={14} />
-              {t(language, "patients.directory.action.edit")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => navigate(`/appointments?patientId=${patientId}`)}>
-              <CalendarPlus size={14} />
-              {t(language, "patients.directory.action.createAppointment")}
-            </Button>
-            {lastAppointmentId != null && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => void printAppointmentSlipById(lastAppointmentId, language)}
-              >
-                <Printer size={14} />
-                {t(language, "patients.directory.action.print")}
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

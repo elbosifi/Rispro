@@ -168,13 +168,8 @@ export default function CalendarPage() {
     setIsModalityModalOpen(true);
   };
 
-  const openRegistrationsForSummary = (summary: ModalitySummary) => {
-    const params = new URLSearchParams();
-    params.set("date", selectedDate);
-    if (summary.modalityId != null) {
-      params.set("modalityId", String(summary.modalityId));
-    }
-    navigate(`/registrations?${params.toString()}`);
+  const openRegistrationForAppointment = (appointment: AppointmentWithDetails) => {
+    navigate(`/registrations?appointmentId=${appointment.id}&patientId=${appointment.patientId}`);
   };
 
   const openRegistrationsForSelectedDay = () => {
@@ -525,7 +520,7 @@ export default function CalendarPage() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={() => openRegistrationsForSummary(selectedModalitySummary)}
+                          onClick={() => openRegistrationForAppointment(appointment)}
                         >
                           {t(language, "calendar.openRegistrations")}
                         </Button>

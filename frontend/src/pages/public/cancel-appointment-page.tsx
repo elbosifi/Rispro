@@ -1471,7 +1471,7 @@ function AppointmentSlipCard(props: { isLoading: boolean; error: string; onView:
         </div>
         <div>
           <h3 className="text-base font-extrabold text-slate-900">ورقة الموعد</h3>
-          <p className="mt-1 text-sm leading-7 text-slate-600">يمكنك عرض ورقة الموعد وطباعتها حسب إعدادات صفحة QR.</p>
+          <p className="mt-1 text-sm leading-7 text-slate-600">يمكنك عرض ورقة الموعد وطباعتها</p>
         </div>
       </div>
       {props.error ? <p className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">{props.error}</p> : null}

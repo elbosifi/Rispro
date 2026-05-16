@@ -20,6 +20,7 @@ import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
 import { AppointmentEditor } from "@/components/appointments/appointment-editor";
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
+import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
@@ -134,6 +135,7 @@ export default function RegistrationsPage() {
   const queryClient = useQueryClient();
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const [slipPreviewAppointment, setSlipPreviewAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
@@ -585,6 +587,10 @@ export default function RegistrationsPage() {
 
   const openSlipPreview = (appointment: AppointmentWithDetails) => {
     setSlipPreviewAppointment(appointment);
+  };
+
+  const openPatientDrawer = (appointment: AppointmentWithDetails) => {
+    setSelectedPatientId(appointment.patientId);
   };
 
   const manageAppointment = (appointment: AppointmentWithDetails) => {
@@ -1203,7 +1209,16 @@ export default function RegistrationsPage() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate font-semibold">{patientName}</p>
+                        <button
+                          type="button"
+                          className="block max-w-full truncate text-start font-semibold text-foreground underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openPatientDrawer(apt);
+                          }}
+                        >
+                          {patientName}
+                        </button>
                         <p className="mt-1 font-mono text-xs text-muted-foreground">{apt.accessionNumber}</p>
                       </div>
                       <span className="inline-flex rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-semibold text-blue-700">
@@ -1316,9 +1331,16 @@ export default function RegistrationsPage() {
                       >
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <p className="truncate text-[13px] font-semibold leading-tight text-foreground">
+                          <button
+                            type="button"
+                            className="block max-w-full truncate text-start text-[13px] font-semibold leading-tight text-foreground underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openPatientDrawer(apt);
+                            }}
+                          >
                             {patientName}
-                          </p>
+                          </button>
                           {apt.patientWebPushSubscribed ? (
                             <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
                               {t("registrations.webPushBadge")}
@@ -1868,6 +1890,10 @@ export default function RegistrationsPage() {
             </div>
           </div>
         </div>
+      ) : null}
+
+      {selectedPatientId ? (
+        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
       ) : null}
 
       {whatsappAppointment ? (

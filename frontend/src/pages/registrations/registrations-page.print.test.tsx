@@ -10,6 +10,7 @@ import { todayIsoDateLy } from "@/lib/date-format";
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
 const fetchAppointmentSlipSettingsMock = vi.fn();
+const fetchPatientDirectorySummaryMock = vi.fn();
 const fetchPatientQrSettingsMock = vi.fn();
 const fetchPublicAppointmentReportStatusMock = vi.fn();
 const getAppointmentByIdMock = vi.fn();
@@ -30,6 +31,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
   fetchAppointmentSlipSettings: (...args: unknown[]) => fetchAppointmentSlipSettingsMock(...args),
+  fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => fetchPublicAppointmentReportStatusMock(...args),
@@ -114,6 +116,56 @@ describe("RegistrationsPage print actions", () => {
       viewButtonLabel: "Open report",
     });
     getAppointmentByIdMock.mockReset();
+    fetchPatientDirectorySummaryMock.mockReset();
+    fetchPatientDirectorySummaryMock.mockResolvedValue({
+      demographics: {
+        id: 1,
+        mrn: "MRN-1",
+        arabicFullName: "Test Patient",
+        englishFullName: "Test Patient",
+        sex: "F",
+        ageYears: 31,
+        demographicsEstimated: false,
+        dateOfBirth: "1995-01-01",
+      },
+      identifiers: {
+        nationalId: null,
+        identifierType: null,
+        identifierValue: null,
+      },
+      contact: {
+        phone1: "0912345678",
+        phone2: null,
+        address: null,
+      },
+      category: "non_oncology",
+      warnings: {
+        missingPhone: false,
+        missingDob: false,
+        missingSex: false,
+        missingName: false,
+        incompleteData: false,
+        possibleDuplicate: false,
+        duplicateReasons: [],
+      },
+      lastAppointment: {
+        id: 7,
+        date: "2027-01-03",
+        status: "scheduled",
+        modalityName: "CT",
+        examTypeName: "CT Head",
+      },
+      nextAppointment: null,
+      recentAppointments: [
+        {
+          id: 7,
+          date: "2027-01-03",
+          status: "scheduled",
+          modalityName: "CT",
+          examTypeName: "CT Head",
+        },
+      ],
+    });
     useV2AvailabilityMock.mockReset();
     rescheduleV2BookingMock.mockReset();
     fetchAppointmentsMock.mockResolvedValue([
@@ -254,7 +306,34 @@ describe("RegistrationsPage print actions", () => {
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
 
-    expect(actionLabels).toEqual(["Print", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
+    expect(actionLabels.filter(Boolean)).toEqual(["Print", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
+  });
+
+  it("opens the patient drawer from the patient name while keeping row preview behavior", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getAllByRole("button", { name: "Test Patient" })[0]!);
+
+    await waitFor(() => {
+      expect(fetchPatientDirectorySummaryMock).toHaveBeenCalledWith(1);
+      expect(screen.getByText("Patient Profile")).toBeTruthy();
+    });
+
+    await userEvent.click(screen.getByTestId("patient-drawer-backdrop"));
+
+    await waitFor(() => {
+      expect(screen.queryByText("Patient Profile")).toBeNull();
+    });
+
+    await userEvent.click(getAppointmentRow("ACC-7"));
+
+    await waitFor(() => {
+      expect(screen.getByTitle("Appointment slip preview")).toBeTruthy();
+    });
   });
 
   it("opens the appointment drawer from an appointmentId deep link", async () => {
@@ -384,7 +463,9 @@ describe("RegistrationsPage print actions", () => {
     });
 
     const row = getAppointmentRow("ACC-10");
-    const buttons = within(row).getAllByRole("button") as HTMLButtonElement[];
+    const buttons = within(row)
+      .getAllByRole("button")
+      .filter((button) => button.getAttribute("aria-label")) as HTMLButtonElement[];
 
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Print",

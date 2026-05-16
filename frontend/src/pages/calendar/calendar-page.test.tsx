@@ -162,7 +162,7 @@ describe("CalendarPage registration drilldown", () => {
     expect(screen.queryByText("ACC-3")).toBeNull();
   });
 
-  it("opens registrations with date and modality filters from the modal", async () => {
+  it("opens registrations for the selected appointment from the modal", async () => {
     renderPage();
 
     await screen.findByText("2 total registrations");
@@ -170,7 +170,7 @@ describe("CalendarPage registration drilldown", () => {
     await screen.findByText("Alpha One");
     fireEvent.click(screen.getAllByRole("button", { name: "Open registrations" })[0]!);
 
-    expect(navigateMock).toHaveBeenCalledWith("/registrations?date=2026-05-02&modalityId=1");
+    expect(navigateMock).toHaveBeenCalledWith("/registrations?appointmentId=1&patientId=11");
   });
 
   it("shows empty registration state when selected day has no visible registrations", async () => {
