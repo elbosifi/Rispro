@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("RISpro.Scanner.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4a9bb733e90a716e914a1ccd276fd4ea4f8ba5c9")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+183267ba26eaf20d3abc4dbfc356c5c2a9d8ca24")]
 [assembly: System.Reflection.AssemblyProductAttribute("RISpro.Scanner.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("RISpro.Scanner.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
