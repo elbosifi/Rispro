@@ -35,3 +35,14 @@ test("queue-only setting skips first Sante send until booking enters queue", () 
   assert.match(source, /QUEUE_STATUSES = new Set\(\["arrived", "waiting"\]\)/);
   assert.match(source, /waiting_for_patient_queue/);
 });
+
+test("detail replacement queues cancel before fresh create for queued synced bookings", () => {
+  assert.match(source, /enqueueSanteHl7ReplacementForBooking/);
+  assert.match(source, /booking_not_in_queue/);
+  const cancelIndex = source.indexOf(`eventType: "cancel"`);
+  const createIndex = source.indexOf(`eventType: "create"`, cancelIndex);
+  assert.ok(cancelIndex > 0, "replacement path enqueues cancel");
+  assert.ok(createIndex > cancelIndex, "replacement path enqueues create after cancel");
+  assert.match(source, /orderControl: "CA"/);
+  assert.match(source, /orderControl: "NW"/);
+});

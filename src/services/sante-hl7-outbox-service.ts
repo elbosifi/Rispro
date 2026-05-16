@@ -291,6 +291,64 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
   }
 }
 
+export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): Promise<{
+  enqueued: boolean;
+  jobIds: number[];
+  reason?: string;
+}> {
+  const settings = await resolveSanteWorklistSettings();
+  if (!settings.enabled || settings.mode === "disabled") {
+    return { enqueued: false, jobIds: [], reason: "sante_hl7_disabled" };
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const projection = await loadBookingProjection(client, bookingId);
+    if (!projection) {
+      await client.query("rollback");
+      return { enqueued: false, jobIds: [], reason: "booking_not_found" };
+    }
+    if (!QUEUE_STATUSES.has(projection.status)) {
+      await client.query("rollback");
+      return { enqueued: false, jobIds: [], reason: "booking_not_in_queue" };
+    }
+
+    const jobIds: number[] = [];
+    if (await hasPreviousSanteSync(client, bookingId)) {
+      const cancel = await insertOutboxRow({
+        client,
+        bookingId,
+        projection,
+        eventType: "cancel",
+        orderControl: "CA",
+        status: "pending",
+        settings,
+      });
+      jobIds.push(cancel.id);
+    }
+
+    const create = await insertOutboxRow({
+      client,
+      bookingId,
+      projection,
+      eventType: "create",
+      orderControl: "NW",
+      status: "pending",
+      settings,
+    });
+    jobIds.push(create.id);
+
+    await client.query("commit");
+    return { enqueued: true, jobIds };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function claimSanteOutboxBatch(limit = 20): Promise<SanteOutboxJob[]> {
   const { rows } = await pool.query<{
     id: number;

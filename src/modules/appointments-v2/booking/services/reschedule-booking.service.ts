@@ -39,7 +39,7 @@ import { RESCHEDULABLE_STATUSES } from "../../shared/types/common.js";
 import { findModalityById } from "../../catalog/repositories/modality-catalog.repo.js";
 import { findExamTypeById } from "../../catalog/repositories/exam-type-catalog.repo.js";
 import type { CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
-import { scheduleBookingWorklistSync } from "../../../../services/dicom-service.js";
+import { scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
 import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
@@ -98,7 +98,7 @@ export async function rescheduleBooking(
     operationName: "reschedule_booking",
   });
 
-  scheduleBookingWorklistSync(bookingId);
+  scheduleBookingWorklistDetailReplacement(bookingId);
   if (result.dateTimeChanged) {
     void safeEnqueuePatientNotificationEvent({
       bookingId,

@@ -1,4 +1,5 @@
 import { pool } from "../../db/pool.js";
+import { scheduleBookingWorklistDetailReplacement } from "../../services/dicom-service.js";
 import type { PoolClient } from "pg";
 import type {
   AppointmentProtocolRow,
@@ -204,6 +205,9 @@ export async function createProtocol(
     newValue: protocol,
     reason: input.reason ?? null,
   });
+  if (protocol.protocolStatus === "assigned") {
+    scheduleBookingWorklistDetailReplacement(protocol.appointmentId);
+  }
   return protocol;
 }
 
@@ -258,6 +262,9 @@ export async function updateProtocol(
     newValue: updated,
     reason: input.reason ?? null,
   });
+  if (existing.protocolStatus === "assigned" || updated.protocolStatus === "assigned") {
+    scheduleBookingWorklistDetailReplacement(appointmentId);
+  }
   return updated;
 }
 

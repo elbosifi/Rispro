@@ -19,7 +19,7 @@ import {
 import { loadSettingsMap } from "./settings-service.js";
 import { resolveGatewaySettings, ensureDicomDirectoriesExist } from "./dicom-settings-resolver.js";
 import { enqueueOrthancSyncForBooking } from "./mwl-sync-service.js";
-import { enqueueSanteHl7ForBooking } from "./sante-hl7-outbox-service.js";
+import { enqueueSanteHl7ForBooking, enqueueSanteHl7ReplacementForBooking } from "./sante-hl7-outbox-service.js";
 import { buildCanonicalMwlDataset, renderCanonicalMwlToDump } from "./mwl-dataset-builder.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
 
@@ -974,6 +974,35 @@ export function scheduleBookingWorklistSync(bookingId: UserId): void {
     .catch((error) => {
       console.warn(
         `[Sante HL7] Failed to enqueue delivery job for booking ${bookingId}.`,
+        error
+      );
+    });
+}
+
+export function scheduleBookingWorklistDetailReplacement(bookingId: UserId): void {
+  Promise.resolve()
+    .then(() => syncBookingWorklistSources(bookingId))
+    .catch((error) => {
+      console.warn(
+        `[DICOM Worklist] Failed to sync booking ${bookingId}. Will retry on next mutation.`,
+        error
+      );
+    });
+
+  Promise.resolve()
+    .then(() => enqueueOrthancSyncForBooking(Number(bookingId)))
+    .catch((error) => {
+      console.warn(
+        `[Orthanc MWL] Failed to enqueue sync job for booking ${bookingId}.`,
+        error
+      );
+    });
+
+  Promise.resolve()
+    .then(() => enqueueSanteHl7ReplacementForBooking(Number(bookingId)))
+    .catch((error) => {
+      console.warn(
+        `[Sante HL7] Failed to enqueue replacement delivery job for booking ${bookingId}.`,
         error
       );
     });

@@ -12,7 +12,7 @@ import {
   calculateAgeFromDob
 } from "../utils/national-id.js";
 import { ensureIdentifierValue, normalizeIdentifierValue } from "../utils/identifier.js";
-import { scheduleBookingWorklistSync } from "./dicom-service.js";
+import { scheduleBookingWorklistDetailReplacement } from "./dicom-service.js";
 import type { UserId, OptionalUserId, UnknownRecord } from "../types/http.js";
 import type { NullableDbNumeric } from "../types/db.js";
 import type { CategorySettings } from "../types/settings.js";
@@ -780,13 +780,16 @@ function normalizeIdentifierInputs(
 async function listV2BookingIdsForPatientSync(
   client: PoolClient,
   patientIds: number[],
-  options?: { activeOnly?: boolean }
+  options?: { activeOnly?: boolean; queueOnly?: boolean }
 ): Promise<number[]> {
   const ids = Array.from(new Set(patientIds)).filter((id) => Number.isInteger(id) && id > 0);
   if (ids.length === 0) return [];
 
-  const activeOnly = options?.activeOnly ?? false;
-  const statusSql = activeOnly ? `and b.status in ('scheduled', 'arrived', 'waiting')` : "";
+  const statusSql = options?.queueOnly
+    ? `and b.status in ('arrived', 'waiting')`
+    : options?.activeOnly
+      ? `and b.status in ('scheduled', 'arrived', 'waiting')`
+      : "";
 
   const { rows } = await client.query<{ id: number }>(
     `
@@ -804,7 +807,7 @@ async function listV2BookingIdsForPatientSync(
 
 function scheduleBookingSyncBatch(bookingIds: number[]): void {
   for (const bookingId of bookingIds) {
-    scheduleBookingWorklistSync(bookingId as UserId);
+    scheduleBookingWorklistDetailReplacement(bookingId as UserId);
   }
 }
 
@@ -1011,7 +1014,7 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
     const client = await pool.connect();
     try {
       await client.query("begin");
-      const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [cleanPatientId], { activeOnly: true });
+      const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [cleanPatientId], { queueOnly: true });
       const { rows } = await client.query<PersistedPatientRow>(
       `
         update patients
@@ -1238,7 +1241,7 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
 
   try {
     await client.query("begin");
-    const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [targetPatientId, sourcePatientId], { activeOnly: true });
+    const bookingIdsToSync = await listV2BookingIdsForPatientSync(client, [targetPatientId, sourcePatientId], { queueOnly: true });
 
     const { rows } = await client.query<{ id: number; arabic_full_name: string; english_full_name: string | null }>(
       `
