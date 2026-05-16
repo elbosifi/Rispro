@@ -64,6 +64,7 @@ export interface SanteHl7Summary {
     enabled: boolean;
     mode: string;
     deliveryMethod: string;
+    sendOnlyWhenPatientEntersQueue: boolean;
     outputFolderPath: string;
     allowedBasePaths: string[];
     hostOutboxHint: string;
@@ -78,6 +79,7 @@ export interface SanteHl7Summary {
 }
 
 const ACTIVE_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
+const QUEUE_STATUSES = new Set(["arrived", "waiting"]);
 
 async function loadBookingProjection(client: PoolClient, bookingId: number): Promise<SanteHl7BookingProjection | null> {
   const { rows } = await client.query<SanteHl7BookingProjection>(
@@ -258,6 +260,15 @@ export async function enqueueSanteHl7ForBooking(bookingId: number): Promise<{ en
       return { enqueued: false, jobId: null, reason: "booking_not_found" };
     }
     const previousSyncExists = await hasPreviousSanteSync(client, bookingId);
+    if (
+      settings.sendOnlyWhenPatientEntersQueue &&
+      !previousSyncExists &&
+      ACTIVE_STATUSES.has(projection.status) &&
+      !QUEUE_STATUSES.has(projection.status)
+    ) {
+      await client.query("rollback");
+      return { enqueued: false, jobId: null, reason: "waiting_for_patient_queue" };
+    }
     const event = deriveEvent(projection, previousSyncExists);
     const inserted = await insertOutboxRow({
       client,
@@ -945,6 +956,7 @@ export async function getSanteHl7Summary(): Promise<SanteHl7Summary> {
       enabled: settings.enabled,
       mode: settings.mode,
       deliveryMethod: settings.deliveryMethod,
+      sendOnlyWhenPatientEntersQueue: settings.sendOnlyWhenPatientEntersQueue,
       outputFolderPath: settings.outputFolderPath,
       allowedBasePaths: settings.allowedBasePaths,
       hostOutboxHint: settings.hostOutboxHint,

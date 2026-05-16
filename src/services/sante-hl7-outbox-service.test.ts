@@ -29,3 +29,9 @@ test("MLLP delivery records acknowledged, nack, and retryable send failure paths
   assert.match(source, /status = 'send_failed'/);
   assert.match(source, /markSanteOutboxFailure\(job, message, job\.attemptCount < job\.maxAttempts\)/);
 });
+
+test("queue-only setting skips first Sante send until booking enters queue", () => {
+  assert.match(source, /sendOnlyWhenPatientEntersQueue/);
+  assert.match(source, /QUEUE_STATUSES = new Set\(\["arrived", "waiting"\]\)/);
+  assert.match(source, /waiting_for_patient_queue/);
+});

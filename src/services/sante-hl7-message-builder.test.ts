@@ -25,6 +25,7 @@ function settings(): ResolvedSanteWorklistSettings {
     retryInitialDelaySeconds: 30,
     retryMaxDelaySeconds: 300,
     pendingImportTimeoutSeconds: 900,
+    sendOnlyWhenPatientEntersQueue: false,
     orderControlCreate: "NW",
     orderControlUpdate: "XO",
     orderControlCancel: "CA",

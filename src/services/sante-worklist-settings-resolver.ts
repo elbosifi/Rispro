@@ -34,6 +34,7 @@ export interface ResolvedSanteWorklistSettings {
   retryInitialDelaySeconds: number;
   retryMaxDelaySeconds: number;
   pendingImportTimeoutSeconds: number;
+  sendOnlyWhenPatientEntersQueue: boolean;
   orderControlCreate: "NW";
   orderControlUpdate: "XO";
   orderControlCancel: "CA";
@@ -68,6 +69,7 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
   pending_import_timeout_seconds: "900",
+  send_only_when_patient_enters_queue: "false",
   order_control_create: "NW",
   order_control_update: "XO",
   order_control_cancel: "CA",
@@ -286,6 +288,7 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
     retryInitialDelaySeconds: parsePositiveInteger(db.retry_initial_delay_seconds, 30),
     retryMaxDelaySeconds: parsePositiveInteger(db.retry_max_delay_seconds, 300),
     pendingImportTimeoutSeconds: parsePositiveInteger(db.pending_import_timeout_seconds, 900),
+    sendOnlyWhenPatientEntersQueue: parseBoolean(db.send_only_when_patient_enters_queue, false),
     orderControlCreate: "NW",
     orderControlUpdate: "XO",
     orderControlCancel: "CA",

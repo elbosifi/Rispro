@@ -24,6 +24,7 @@ type FormState = {
   retry_initial_delay_seconds: string;
   retry_max_delay_seconds: string;
   pending_import_timeout_seconds: string;
+  send_only_when_patient_enters_queue: string;
   sending_application: string;
   sending_facility: string;
   receiving_application: string;
@@ -52,6 +53,7 @@ type SummaryResponse = {
       enabled: boolean;
       mode: string;
       deliveryMethod: string;
+      sendOnlyWhenPatientEntersQueue: boolean;
       outputFolderPath: string;
       allowedBasePaths: string[];
       hostOutboxHint: string;
@@ -83,6 +85,7 @@ const DEFAULT_FORM: FormState = {
   retry_initial_delay_seconds: "30",
   retry_max_delay_seconds: "300",
   pending_import_timeout_seconds: "900",
+  send_only_when_patient_enters_queue: "false",
   sending_application: "RISPRO",
   sending_facility: "RISPRO",
   receiving_application: "SANTE_WORKLIST",
@@ -248,6 +251,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <Field label="Mode" type="select" value={form.mode} onChange={(value) => setValue("mode", value)} options={[["disabled", "Disabled"], ["shadow", "Shadow"], ["primary_with_internal_fallback", "Primary with internal fallback"], ["sante_only", "Sante only"]]} />
           <Field label="Keep internal MWL active" type="select" value={form.keep_internal_mwl_active} onChange={() => setValue("keep_internal_mwl_active", "true")} options={[["true", "Always true for rollout"]]} />
           <Field label="Delivery method" type="select" value={form.delivery_method} onChange={(value) => setValue("delivery_method", value)} options={[["file_drop", "File drop"], ["mllp", "MLLP"]]} />
+          <Field label="Send only when patient enters queue" type="select" value={form.send_only_when_patient_enters_queue} onChange={(value) => setValue("send_only_when_patient_enters_queue", value)} options={[["false", "No"], ["true", "Yes"]]} />
           <Field label="Retry max attempts" type="number" value={form.retry_max_attempts} onChange={(value) => setValue("retry_max_attempts", value)} />
           <Field label="Initial retry delay seconds" type="number" value={form.retry_initial_delay_seconds} onChange={(value) => setValue("retry_initial_delay_seconds", value)} />
           <Field label="Max retry delay seconds" type="number" value={form.retry_max_delay_seconds} onChange={(value) => setValue("retry_max_delay_seconds", value)} />
@@ -313,6 +317,7 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <div className="p-3 rounded-lg border border-stone-200 dark:border-stone-700 text-xs space-y-1">
             <p>Resolved mode: {summary?.settings.mode || "unknown"}</p>
             <p>Delivery method: {summary?.settings.deliveryMethod || "file_drop"}</p>
+            <p>Queue-only sending: {summary?.settings.sendOnlyWhenPatientEntersQueue ? "yes" : "no"}</p>
             {summary?.settings.deliveryMethod === "mllp" ? (
               <>
                 <p>MLLP target: {summary.settings.mllp.host || "(empty)"}:{summary.settings.mllp.port || "(empty)"}</p>

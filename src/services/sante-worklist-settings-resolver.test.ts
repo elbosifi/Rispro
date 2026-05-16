@@ -19,6 +19,13 @@ test("validateSanteSettingsEntries accepts configured file-drop settings", () =>
   assert.doesNotThrow(() => validateSanteSettingsEntries(baseEntries));
 });
 
+test("validateSanteSettingsEntries accepts queue-only send timing option", () => {
+  assert.doesNotThrow(() => validateSanteSettingsEntries([
+    ...baseEntries,
+    { key: "send_only_when_patient_enters_queue", value: { value: "true" } },
+  ]));
+});
+
 test("validateSanteSettingsEntries rejects file-drop settings without output folder", () => {
   assert.throws(
     () => validateSanteSettingsEntries([
