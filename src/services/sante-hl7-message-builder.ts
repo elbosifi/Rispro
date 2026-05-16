@@ -68,9 +68,7 @@ function patientName(row: SanteHl7BookingProjection, settings: ResolvedSanteWork
   const selected = settings.patientNameField === "arabic_full_name" ? row.arabic_full_name : row.english_full_name;
   const fallback = row.english_full_name || row.arabic_full_name || "TEST PATIENT";
   const clean = String(selected || fallback).trim();
-  const parts = clean.split(/\s+/).filter(Boolean);
-  if (parts.length <= 1) return escapeHl7(clean.replace(/\s+/g, "^"));
-  return parts.map(escapeHl7).join("^");
+  return escapeHl7(clean.replace(/\s+/g, " "));
 }
 
 function patientId(row: SanteHl7BookingProjection, settings: ResolvedSanteWorklistSettings): string {

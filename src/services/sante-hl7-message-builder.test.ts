@@ -101,14 +101,15 @@ test("buildSanteOrmO01Message escapes HL7 separators", () => {
   assert.match(message.message, /\rORC\|XO\|/);
 });
 
-test("buildSanteOrmO01Message keeps patient name components in entered order", () => {
+test("buildSanteOrmO01Message keeps full patient name in PID-5 component 1 for Sante", () => {
   const message = buildSanteOrmO01Message({
     booking: { ...buildSyntheticSanteTestProjection(), english_full_name: "First Second Third Fourth" },
     orderControl: "NW",
     settings: settings(),
   });
 
-  assert.match(message.message, /\rPID\|1\|\|TEST-SANTE-001\|\|First\^Second\^Third\^Fourth\|/);
+  const pid = segmentFields(message.message, "PID");
+  assert.equal(pid[5], "First Second Third Fourth");
 });
 
 test("buildSanteOrmO01Message leaves MSH-15 blank for file-drop delivery", () => {
