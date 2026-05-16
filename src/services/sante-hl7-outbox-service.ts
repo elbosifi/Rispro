@@ -80,7 +80,7 @@ export interface SanteHl7Summary {
 
 const ACTIVE_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 const QUEUE_STATUSES = new Set(["arrived", "waiting"]);
-const REPLACEMENT_CREATE_DELAY_SECONDS = 15;
+const REPLACEMENT_CREATE_DELAY_SECONDS = 2;
 
 async function loadBookingProjection(client: PoolClient, bookingId: number): Promise<SanteHl7BookingProjection | null> {
   const { rows } = await client.query<SanteHl7BookingProjection>(
@@ -128,6 +128,30 @@ async function hasPreviousSanteSync(client: PoolClient, bookingId: number): Prom
     [bookingId]
   );
   return Boolean(rows[0]?.exists);
+}
+
+async function loadPreviousSanteProjection(client: PoolClient, bookingId: number): Promise<SanteHl7BookingProjection | null> {
+  const { rows } = await client.query<{ last_projection_json: SanteHl7BookingProjection | null }>(
+    `
+      select last_projection_json
+      from sante_worklist_sync
+      where booking_id = $1::bigint
+        and sync_status <> 'skipped'
+      limit 1
+    `,
+    [bookingId]
+  );
+  const snapshot = rows[0]?.last_projection_json;
+  return snapshot && typeof snapshot === "object" && Number.isInteger(Number(snapshot.id)) ? snapshot : null;
+}
+
+async function loadOutboxProjectionSnapshot(client: PoolClient, outboxId: number): Promise<SanteHl7BookingProjection | null> {
+  const { rows } = await client.query<{ projection_json: SanteHl7BookingProjection | null }>(
+    `select projection_json from sante_hl7_outbox where id = $1 limit 1`,
+    [outboxId]
+  );
+  const snapshot = rows[0]?.projection_json;
+  return snapshot && typeof snapshot === "object" && Number.isInteger(Number(snapshot.id)) ? snapshot : null;
 }
 
 function deriveEvent(snapshot: SanteHl7BookingProjection, previousSyncExists: boolean): {
@@ -192,12 +216,13 @@ async function insertOutboxRow(input: {
         scheduled_date,
         modality_code,
         accession_number,
+        projection_json,
         created_by_user_id,
         next_attempt_at,
         created_at,
         updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, now() + ($14::text || ' seconds')::interval, now(), now())
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13::jsonb, $14, now() + ($15::text || ' seconds')::interval, now(), now())
       returning id
     `,
     [
@@ -213,6 +238,7 @@ async function insertOutboxRow(input: {
       input.projection.booking_date,
       input.projection.modality_code,
       built.accessionNumber,
+      JSON.stringify(input.projection),
       input.createdByUserId ?? null,
       String(Math.max(0, input.nextAttemptDelaySeconds ?? 0)),
     ]
@@ -227,22 +253,31 @@ async function insertOutboxRow(input: {
           sync_status,
           payload_hash,
           last_outbox_id,
+          last_projection_json,
           last_attempt_at,
           last_error,
           deleted_at,
           updated_at
         )
-        values ($1::bigint, $2, $3, $4, null, null, case when $5 = 'cancel' then now() else null end, now())
+        values ($1::bigint, $2, $3, $4, $5::jsonb, null, null, case when $6 = 'cancel' then now() else null end, now())
         on conflict (booking_id)
         do update set
           sync_status = excluded.sync_status,
           payload_hash = excluded.payload_hash,
           last_outbox_id = excluded.last_outbox_id,
+          last_projection_json = excluded.last_projection_json,
           last_error = null,
           deleted_at = excluded.deleted_at,
           updated_at = now()
       `,
-      [input.bookingId, input.status === "skipped" ? "skipped" : "pending", built.payloadHash, id, input.eventType]
+      [
+        input.bookingId,
+        input.status === "skipped" ? "skipped" : "pending",
+        built.payloadHash,
+        id,
+        JSON.stringify(input.projection),
+        input.eventType,
+      ]
     );
   }
 
@@ -320,10 +355,11 @@ export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): P
 
     const jobIds: number[] = [];
     if (await hasPreviousSanteSync(client, bookingId)) {
+      const previousProjection = await loadPreviousSanteProjection(client, bookingId);
       const cancel = await insertOutboxRow({
         client,
         bookingId,
-        projection,
+        projection: previousProjection ?? projection,
         eventType: "cancel",
         orderControl: "CA",
         status: "pending",
@@ -397,6 +433,8 @@ export async function claimSanteOutboxBatch(limit = 20): Promise<SanteOutboxJob[
 
 async function projectionForJob(job: SanteOutboxJob, client: PoolClient): Promise<SanteHl7BookingProjection> {
   if (job.eventType === "test" || job.bookingId == null) return buildSyntheticSanteTestProjection();
+  const snapshot = await loadOutboxProjectionSnapshot(client, job.id);
+  if (snapshot) return snapshot;
   const projection = await loadBookingProjection(client, job.bookingId);
   if (!projection) throw new Error(`Booking ${job.bookingId} not found for Sante HL7.`);
   return projection;
