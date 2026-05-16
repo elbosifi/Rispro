@@ -11,6 +11,8 @@ export interface SanteHl7BookingProjection {
   patient_primary_id: string | null;
   mrn: string | null;
   national_id: string | null;
+  phone_1: string | null;
+  address: string | null;
   arabic_full_name: string;
   english_full_name: string | null;
   estimated_date_of_birth: string | null;
@@ -18,8 +20,12 @@ export interface SanteHl7BookingProjection {
   modality_code: string;
   modality_name_en: string;
   modality_name_ar: string;
+  exam_type_code: string | null;
   exam_name_en: string | null;
   exam_name_ar: string | null;
+  protocol_text: string | null;
+  contrast_required: boolean | null;
+  contrast_phase_or_protocol: string | null;
   booking_date: string;
   booking_time: string | null;
   status: string;
@@ -84,6 +90,10 @@ function sex(value: string | null): string {
   return "";
 }
 
+function compactText(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
 export function buildAccessionNumber(bookingId: number): string {
   return formatV2AccessionNumber(bookingId);
 }
@@ -99,19 +109,50 @@ export function buildSanteOrmO01Message(input: {
   const messageControlId = input.messageControlId || `RISPRO-${randomUUID()}`;
   const accessionNumber = buildAccessionNumber(booking.id);
   const procedureDescription = booking.exam_name_en || booking.exam_name_ar || booking.modality_name_en || booking.modality_name_ar || booking.modality_code;
+  const procedureCode = compactText(booking.exam_type_code) || compactText(booking.modality_code) || procedureDescription;
   const scheduledDateTime = hl7DateTime(booking.booking_date, booking.booking_time);
   const timestamp = hl7Timestamp(input.now);
   const acceptAckType = settings.deliveryMethod === "mllp" && settings.mllpExpectAck ? "AL" : "";
-  const obr = Array<string>(25).fill("");
+  const procedureStatus = orderControl === "CA" ? "CA" : "SC";
+  const contrastText = booking.contrast_required
+    ? compactText(booking.contrast_phase_or_protocol) || compactText(booking.protocol_text) || "Contrast required"
+    : "";
+  const contrastComment = booking.contrast_required
+    ? compactText(booking.protocol_text) || compactText(booking.contrast_phase_or_protocol)
+    : "";
+
+  const pid = Array<string>(14).fill("");
+  pid[0] = "PID";
+  pid[1] = "1";
+  pid[3] = patientId(booking, settings);
+  pid[5] = patientName(booking, settings);
+  pid[7] = hl7Date(booking.estimated_date_of_birth);
+  pid[8] = sex(booking.sex);
+  pid[11] = escapeHl7(booking.address);
+  pid[13] = escapeHl7(booking.phone_1);
+
+  const orc = Array<string>(16).fill("");
+  orc[0] = "ORC";
+  orc[1] = orderControl;
+  orc[2] = escapeHl7(accessionNumber);
+  orc[5] = procedureStatus;
+  orc[9] = timestamp;
+  orc[15] = scheduledDateTime;
+
+  const obr = Array<string>(32).fill("");
   obr[0] = "OBR";
   obr[1] = "1";
   obr[2] = escapeHl7(accessionNumber);
-  obr[4] = `^${escapeHl7(procedureDescription)}`;
+  obr[4] = `${escapeHl7(procedureCode)}^${escapeHl7(procedureDescription)}`;
   obr[6] = scheduledDateTime;
   obr[7] = scheduledDateTime;
-  obr[18] = escapeHl7(accessionNumber);
+  obr[13] = escapeHl7(contrastText);
+  obr[18] = escapeHl7(booking.modality_code);
+  obr[20] = escapeHl7(procedureDescription);
   obr[21] = escapeHl7(settings.scheduledStationAeTitleDefault);
   obr[24] = escapeHl7(booking.modality_code);
+  obr[25] = escapeHl7(booking.modality_code);
+  obr[31] = escapeHl7(contrastComment);
 
   const segments = [
     [
@@ -133,33 +174,13 @@ export function buildSanteOrmO01Message(input: {
       "",
       escapeHl7(settings.charset),
     ].join("|"),
-    [
-      "PID",
-      "1",
-      "",
-      patientId(booking, settings),
-      "",
-      patientName(booking, settings),
-      "",
-      hl7Date(booking.estimated_date_of_birth),
-      sex(booking.sex),
-    ].join("|"),
+    pid.join("|"),
     [
       "PV1",
       "1",
       "O",
     ].join("|"),
-    [
-      "ORC",
-      orderControl,
-      escapeHl7(accessionNumber),
-      "",
-      "",
-      orderControl === "CA" ? "CA" : "SC",
-      "",
-      "",
-      timestamp,
-    ].join("|"),
+    orc.join("|"),
     obr.join("|"),
   ];
 
@@ -179,6 +200,8 @@ export function buildSyntheticSanteTestProjection(): SanteHl7BookingProjection {
     patient_primary_id: "TEST-SANTE-001",
     mrn: "TEST-MRN-001",
     national_id: null,
+    phone_1: null,
+    address: null,
     arabic_full_name: "Test Patient",
     english_full_name: "Test Patient",
     estimated_date_of_birth: "1980-01-01",
@@ -186,8 +209,12 @@ export function buildSyntheticSanteTestProjection(): SanteHl7BookingProjection {
     modality_code: "CT",
     modality_name_en: "CT",
     modality_name_ar: "CT",
+    exam_type_code: "SANTE_TEST",
     exam_name_en: "Synthetic Sante Worklist Test",
     exam_name_ar: "Synthetic Sante Worklist Test",
+    protocol_text: null,
+    contrast_required: null,
+    contrast_phase_or_protocol: null,
     booking_date: normalizeDateValue(new Date()) || "2026-01-01",
     booking_time: "08:00:00",
     status: "scheduled",

@@ -88,6 +88,8 @@ async function loadBookingProjection(client: PoolClient, bookingId: number): Pro
         p.identifier_value as patient_primary_id,
         p.mrn,
         p.national_id,
+        p.phone_1,
+        p.address,
         p.arabic_full_name,
         p.english_full_name,
         p.estimated_date_of_birth::text as estimated_date_of_birth,
@@ -95,8 +97,12 @@ async function loadBookingProjection(client: PoolClient, bookingId: number): Pro
         m.code as modality_code,
         m.name_en as modality_name_en,
         m.name_ar as modality_name_ar,
+        et.code as exam_type_code,
         et.name_en as exam_name_en,
         et.name_ar as exam_name_ar,
+        ap.protocol_text,
+        ap.contrast_required,
+        ap.contrast_phase_or_protocol,
         b.booking_date::text as booking_date,
         b.booking_time::text as booking_time,
         b.status
@@ -104,6 +110,7 @@ async function loadBookingProjection(client: PoolClient, bookingId: number): Pro
       join patients p on p.id = b.patient_id
       join modalities m on m.id = b.modality_id
       left join exam_types et on et.id = b.exam_type_id
+      left join doctor_portal.appointment_protocols ap on ap.appointment_id = b.id and ap.protocol_status = 'assigned'
       where b.id = $1::bigint
       limit 1
     `,

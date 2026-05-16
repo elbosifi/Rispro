@@ -43,6 +43,12 @@ function settings(): ResolvedSanteWorklistSettings {
   };
 }
 
+function segmentFields(message: string, segmentName: string): string[] {
+  const segment = message.split("\r").find((value) => value.startsWith(`${segmentName}|`));
+  assert.ok(segment, `${segmentName} segment is present`);
+  return segment.split("|");
+}
+
 test("buildAccessionNumber uses canonical padded V2 accession format", () => {
   assert.equal(buildAccessionNumber(123), "V2-000123");
 });
@@ -63,11 +69,20 @@ test("buildSanteOrmO01Message emits ORM O01 with configured identity and NW orde
   assert.equal(message.accessionNumber, "V2-000000");
   assert.equal(message.payloadHash.length, 64);
 
-  const obr = message.message.split("\r").find((segment) => segment.startsWith("OBR|"))?.split("|") || [];
+  const orc = segmentFields(message.message, "ORC");
+  const obr = segmentFields(message.message, "OBR");
+  assert.equal(orc[2], "V2-000000");
+  assert.equal(orc[5], "SC");
+  assert.equal(orc[15], "20260510080000");
+  assert.equal(obr[4], "SANTE_TEST^Synthetic Sante Worklist Test");
   assert.equal(obr[6], "20260510080000");
   assert.equal(obr[7], "20260510080000");
+  assert.equal(obr[18], "CT");
+  assert.notEqual(obr[18], "V2-000000");
+  assert.equal(obr[20], "Synthetic Sante Worklist Test");
   assert.equal(obr[21], "RISPRO_MWL");
   assert.equal(obr[24], "CT");
+  assert.equal(obr[25], "CT");
 });
 
 test("buildSanteOrmO01Message escapes HL7 separators", () => {
@@ -104,7 +119,7 @@ test("buildSanteOrmO01Message leaves MSH-15 blank for file-drop delivery", () =>
     messageControlId: "RISPRO-TEST-3",
   });
 
-  const msh = message.message.split("\r")[0].split("|");
+  const msh = segmentFields(message.message, "MSH");
   assert.equal(msh[14], "");
 });
 
@@ -116,8 +131,67 @@ test("buildSanteOrmO01Message requests accept ACK for MLLP when configured", () 
     messageControlId: "RISPRO-TEST-4",
   });
 
-  const msh = message.message.split("\r")[0].split("|");
+  const msh = segmentFields(message.message, "MSH");
   assert.equal(msh[14], "AL");
+});
+
+test("buildSanteOrmO01Message maps patient contact fields to Sante PID positions", () => {
+  const message = buildSanteOrmO01Message({
+    booking: {
+      ...buildSyntheticSanteTestProjection(),
+      phone_1: "0912345678",
+      address: "Tripoli|Center",
+    },
+    orderControl: "NW",
+    settings: settings(),
+  });
+
+  const pid = segmentFields(message.message, "PID");
+  assert.equal(pid[11], "Tripoli\\F\\Center");
+  assert.equal(pid[13], "0912345678");
+});
+
+test("buildSanteOrmO01Message maps assigned contrast protocol only when contrast is required", () => {
+  const withContrast = buildSanteOrmO01Message({
+    booking: {
+      ...buildSyntheticSanteTestProjection(),
+      protocol_text: "Portal venous phase",
+      contrast_required: true,
+      contrast_phase_or_protocol: "IV contrast",
+    },
+    orderControl: "NW",
+    settings: settings(),
+  });
+
+  const contrastObr = segmentFields(withContrast.message, "OBR");
+  assert.equal(contrastObr[13], "IV contrast");
+  assert.equal(contrastObr[31], "Portal venous phase");
+
+  const withoutContrast = buildSanteOrmO01Message({
+    booking: {
+      ...buildSyntheticSanteTestProjection(),
+      protocol_text: "Non-contrast protocol note",
+      contrast_required: false,
+      contrast_phase_or_protocol: "No IV contrast",
+    },
+    orderControl: "NW",
+    settings: settings(),
+  });
+
+  const plainObr = segmentFields(withoutContrast.message, "OBR");
+  assert.equal(plainObr[13], "");
+  assert.equal(plainObr[31], "");
+});
+
+test("buildSanteOrmO01Message maps cancellation status to Sante ORC-5", () => {
+  const message = buildSanteOrmO01Message({
+    booking: buildSyntheticSanteTestProjection(),
+    orderControl: "CA",
+    settings: settings(),
+  });
+
+  const orc = segmentFields(message.message, "ORC");
+  assert.equal(orc[5], "CA");
 });
 
 test("buildSanteOrmO01Message does not invent scheduled station when booking has none", () => {
