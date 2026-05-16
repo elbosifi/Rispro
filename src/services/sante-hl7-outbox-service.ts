@@ -80,6 +80,7 @@ export interface SanteHl7Summary {
 
 const ACTIVE_STATUSES = new Set(["scheduled", "arrived", "waiting"]);
 const QUEUE_STATUSES = new Set(["arrived", "waiting"]);
+const REPLACEMENT_CREATE_DELAY_SECONDS = 15;
 
 async function loadBookingProjection(client: PoolClient, bookingId: number): Promise<SanteHl7BookingProjection | null> {
   const { rows } = await client.query<SanteHl7BookingProjection>(
@@ -163,6 +164,7 @@ async function insertOutboxRow(input: {
   status: SanteOutboxStatus;
   settings: ResolvedSanteWorklistSettings;
   createdByUserId?: UserId | null;
+  nextAttemptDelaySeconds?: number;
 }): Promise<{ id: number; skipped: boolean }> {
   const built = buildSanteOrmO01Message({
     booking: input.projection,
@@ -191,10 +193,11 @@ async function insertOutboxRow(input: {
         modality_code,
         accession_number,
         created_by_user_id,
+        next_attempt_at,
         created_at,
         updated_at
       )
-      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, now(), now())
+      values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::date, $11, $12, $13, now() + ($14::text || ' seconds')::interval, now(), now())
       returning id
     `,
     [
@@ -211,6 +214,7 @@ async function insertOutboxRow(input: {
       input.projection.modality_code,
       built.accessionNumber,
       input.createdByUserId ?? null,
+      String(Math.max(0, input.nextAttemptDelaySeconds ?? 0)),
     ]
   );
 
@@ -328,15 +332,16 @@ export async function enqueueSanteHl7ReplacementForBooking(bookingId: number): P
       jobIds.push(cancel.id);
     }
 
-    const create = await insertOutboxRow({
-      client,
-      bookingId,
-      projection,
-      eventType: "create",
-      orderControl: "NW",
-      status: "pending",
-      settings,
-    });
+      const create = await insertOutboxRow({
+        client,
+        bookingId,
+        projection,
+        eventType: "create",
+        orderControl: "NW",
+        status: "pending",
+        settings,
+        nextAttemptDelaySeconds: jobIds.length > 0 ? REPLACEMENT_CREATE_DELAY_SECONDS : 0,
+      });
     jobIds.push(create.id);
 
     await client.query("commit");

@@ -45,4 +45,6 @@ test("detail replacement queues cancel before fresh create for queued synced boo
   assert.ok(createIndex > cancelIndex, "replacement path enqueues create after cancel");
   assert.match(source, /orderControl: "CA"/);
   assert.match(source, /orderControl: "NW"/);
+  assert.match(source, /REPLACEMENT_CREATE_DELAY_SECONDS = 15/);
+  assert.match(source, /nextAttemptDelaySeconds: jobIds\.length > 0 \? REPLACEMENT_CREATE_DELAY_SECONDS : 0/);
 });
