@@ -585,10 +585,6 @@ export default function RegistrationsPage() {
     });
   };
 
-  const openSlipPreview = (appointment: AppointmentWithDetails) => {
-    setSlipPreviewAppointment(appointment);
-  };
-
   const openPatientDrawer = (appointment: AppointmentWithDetails) => {
     setSelectedPatientId(appointment.patientId);
   };
@@ -1199,11 +1195,11 @@ export default function RegistrationsPage() {
                     role="button"
                     tabIndex={0}
                     className={`rounded-xl border border-border p-3 ${patientCategoryRowClass(apt.caseCategory, index, selectedAppointment?.id === apt.id)}`}
-                    onClick={() => openSlipPreview(apt)}
+                    onClick={() => manageAppointment(apt)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        openSlipPreview(apt);
+                        manageAppointment(apt);
                       }
                     }}
                   >
@@ -1317,14 +1313,14 @@ export default function RegistrationsPage() {
                       key={apt.id}
                       role="button"
                       tabIndex={0}
-                      onClick={() => openSlipPreview(apt)}
+                      onClick={() => manageAppointment(apt)}
                       title={rowTitle}
                       aria-label={`${patientName} ${apt.accessionNumber} ${categoryLabel} ${statusLabel(language, apt.status)}`}
                       data-category={apt.caseCategory || "unknown"}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          openSlipPreview(apt);
+                          manageAppointment(apt);
                         }
                       }}
                       className={`grid grid-cols-[minmax(270px,1.7fr)_minmax(120px,0.72fr)_minmax(210px,1.05fr)_minmax(116px,0.6fr)_minmax(112px,0.55fr)_minmax(88px,0.38fr)_minmax(190px,0.62fr)] items-center gap-2 px-3 py-2.5 transition-colors outline-none cursor-pointer ${categoryRowClass}`}

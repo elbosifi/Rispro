@@ -309,7 +309,7 @@ describe("RegistrationsPage print actions", () => {
     expect(actionLabels.filter(Boolean)).toEqual(["Print", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
   });
 
-  it("opens the patient drawer from the patient name while keeping row preview behavior", async () => {
+  it("opens the patient drawer from the patient name while row click opens manage drawer", async () => {
     renderRegistrationsPage();
 
     await waitFor(() => {
@@ -332,7 +332,8 @@ describe("RegistrationsPage print actions", () => {
     await userEvent.click(getAppointmentRow("ACC-7"));
 
     await waitFor(() => {
-      expect(screen.getByTitle("Appointment slip preview")).toBeTruthy();
+      expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
+      expect(screen.queryByTitle("Appointment slip preview")).toBeNull();
     });
   });
 
@@ -501,46 +502,6 @@ describe("RegistrationsPage print actions", () => {
 
     await userEvent.click(within(row).getByRole("button", { name: "Notify" }));
     expect(screen.getByText("Send patient notification")).toBeTruthy();
-  });
-
-  it("prints directly from the preview modal confirm button", async () => {
-    renderRegistrationsPage();
-
-    await waitFor(() => {
-      expect(getFirstText("ACC-7")).toBeTruthy();
-    });
-
-    await userEvent.click(getFirstText("ACC-7"));
-
-    await waitFor(() => {
-      expect(screen.getByTitle("Appointment slip preview")).toBeTruthy();
-    });
-
-    await userEvent.click(screen.getByRole("button", { name: "Confirm Print" }));
-
-    await waitFor(() => {
-      expect(mockPrintAppointmentSlipById).toHaveBeenCalledWith(7, "en");
-    });
-  });
-
-  it("dismisses the preview when clicking outside the slip", async () => {
-    renderRegistrationsPage();
-
-    await waitFor(() => {
-      expect(getFirstText("ACC-7")).toBeTruthy();
-    });
-
-    await userEvent.click(getFirstText("ACC-7"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("slip-preview-backdrop")).toBeTruthy();
-    });
-
-    await userEvent.click(screen.getByTestId("slip-preview-backdrop"));
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("slip-preview-backdrop")).toBeNull();
-    });
   });
 
   it("shows the appointment link from the row action button", async () => {
