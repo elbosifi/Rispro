@@ -7,6 +7,7 @@ import { SchedulingError } from "../../shared/errors/scheduling-error.js";
 import { getPublicCancelServiceUserId } from "../../public/utils/public-cancel-config.js";
 import { verifyPublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { isModalityAllowed, readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
+import { readAppointmentSlipSettings } from "../../public/utils/appointment-slip-settings.js";
 import { createRateLimiter } from "../../../../middleware/rate-limit.js";
 import {
   buildPublicSonicDicomImageUrl,
@@ -217,6 +218,34 @@ router.get(
         currentStatus: booking.status,
       },
       settings: patientQrSettings,
+    });
+  })
+);
+
+router.get(
+  "/slip",
+  asyncRoute(async (req: Request, res: Response) => {
+    const token = readToken(req);
+    const payload = verifyPublicCancelToken(token);
+    const patientQrSettings = await readPatientQrSettings();
+    if (!patientQrSettings.enabled) {
+      throw new HttpError(403, "Patient QR access is disabled.", { code: "patient_qr_disabled" });
+    }
+
+    const appointment = await getBookingDetails(payload.bookingId);
+    if (["cancelled", "discontinued", "voided"].includes(String(appointment.status || ""))) {
+      throw new HttpError(409, "Appointment slip is not available for this appointment.", { code: "slip_not_available" });
+    }
+
+    const slipSettings = await readAppointmentSlipSettings();
+    res.json({
+      appointment,
+      slipSettings: {
+        ...slipSettings,
+        paperMode: patientQrSettings.qrSlipPaperMode,
+        paperSize: patientQrSettings.qrSlipPaperSize,
+      },
+      patientQrSettings,
     });
   })
 );

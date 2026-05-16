@@ -59,6 +59,7 @@ const {
   };
   const mockSlipSettings = {
     paperMode: "blank",
+    paperSize: "a5",
     languageMode: "ar",
     safeTopMm: 12,
     safeBottomMm: 14,
@@ -124,6 +125,8 @@ const {
     enabled: true,
     risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
+    qrSlipPaperMode: "blank",
+    qrSlipPaperSize: "a4",
   };
   return { mockAppointmentData, mockAppointment42Updated, mockAppointment99, mockSlipSettings, mockPatientQrSettings };
 });

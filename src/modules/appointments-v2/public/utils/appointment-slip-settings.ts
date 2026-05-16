@@ -1,12 +1,14 @@
 import { getSettingsByCategory } from "../../../../services/settings-service.js";
 
 export type AppointmentSlipPaperMode = "blank" | "preprinted";
+export type AppointmentSlipPaperSize = "a5" | "a4";
 export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
 export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNumber" | "bookingId";
 export type AppointmentSlipQrModalityMode = "all" | "include" | "exclude";
 
 export interface AppointmentSlipSettings {
   paperMode: AppointmentSlipPaperMode;
+  paperSize: AppointmentSlipPaperSize;
   languageMode: AppointmentSlipLanguageMode;
   safeTopMm: number;
   safeBottomMm: number;
@@ -74,6 +76,7 @@ export interface AppointmentSlipSettings {
 
 const DEFAULT_SETTINGS: AppointmentSlipSettings = {
   paperMode: "preprinted",
+  paperSize: "a5",
   languageMode: "bilingual",
   safeTopMm: 58,
   safeBottomMm: 56,
@@ -173,6 +176,7 @@ function asNumber(value: unknown, fallback: number, bounds?: { min?: number; max
 export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipSettings {
   const record = (raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {}) as Record<string, unknown>;
   const paperMode = asString(record.paperMode, DEFAULT_SETTINGS.paperMode);
+  const paperSize = asString(record.paperSize, DEFAULT_SETTINGS.paperSize);
   const languageMode = asString(record.languageMode, DEFAULT_SETTINGS.languageMode);
   const barcodeValueMode = asString(record.barcodeValueMode, DEFAULT_SETTINGS.barcodeValueMode);
   const qrModalityMode = asString(record.qrModalityMode, DEFAULT_SETTINGS.qrModalityMode);
@@ -184,6 +188,7 @@ export function normalizeAppointmentSlipSettings(raw: unknown): AppointmentSlipS
 
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
+    paperSize: paperSize === "a4" ? "a4" : "a5",
     languageMode: languageMode === "ar" || languageMode === "en" ? languageMode : "bilingual",
     safeTopMm: asNumber(record.safeTopMm, DEFAULT_SETTINGS.safeTopMm, { min: 0, max: 120 }),
     safeBottomMm: asNumber(record.safeBottomMm, DEFAULT_SETTINGS.safeBottomMm, { min: 0, max: 120 }),

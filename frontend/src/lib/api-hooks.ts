@@ -14,6 +14,7 @@ import {
   mapNameDictionary,
   mapAuditEntries
 } from "@/lib/mappers";
+import type { AppointmentWithDetails } from "@/lib/mappers";
 import type {
   Patient,
   AppointmentLookups,
@@ -1233,6 +1234,22 @@ export async function fetchPublicAppointmentCancelPreview(token: string): Promis
   };
 }
 
+export interface PublicAppointmentSlipDetails {
+  appointment: AppointmentWithDetails;
+  slipSettings: AppointmentSlipSettings;
+  patientQrSettings: PatientQrSettings;
+}
+
+export async function fetchPublicAppointmentSlipDetails(token: string): Promise<PublicAppointmentSlipDetails> {
+  const query = new URLSearchParams({ t: token });
+  const raw = await api<{ appointment: RawRecord; slipSettings: RawRecord; patientQrSettings: RawRecord }>(`/public/appointments/slip?${query.toString()}`);
+  return {
+    appointment: mapAppointmentWithDetails(raw.appointment),
+    slipSettings: sanitizeAppointmentSlipTextEncoding(normalizeAppointmentSlipSettings(raw.slipSettings ?? {})),
+    patientQrSettings: sanitizePatientQrTextEncoding(normalizePatientQrSettings(raw.patientQrSettings ?? {})),
+  };
+}
+
 export async function cancelPublicAppointment(token: string): Promise<PublicAppointmentCancelResult> {
   const query = new URLSearchParams({ t: token });
   const raw = await api<RawRecord>(`/public/appointments/cancel?${query.toString()}`, {
@@ -1358,6 +1375,8 @@ export interface PatientQrSettings {
   enabled: boolean;
   risproPublicBaseUrl: string;
   printQrOnAppointmentSlip: boolean;
+  qrSlipPaperMode: AppointmentSlipPaperMode;
+  qrSlipPaperSize: AppointmentSlipPaperSize;
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
   showBookingTime: boolean;
@@ -1472,6 +1491,8 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
   enabled: true,
   risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
+  qrSlipPaperMode: "blank",
+  qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
   showBookingTime: true,
@@ -1616,12 +1637,14 @@ export const DEFAULT_PATIENT_QR_SETTINGS: PatientQrSettings = {
 };
 
 export type AppointmentSlipPaperMode = "blank" | "preprinted";
+export type AppointmentSlipPaperSize = "a5" | "a4";
 export type AppointmentSlipLanguageMode = "ar" | "en" | "bilingual";
 export type AppointmentSlipBarcodeValueMode = "accessionNumber" | "appointmentNumber" | "bookingId";
 export type AppointmentSlipQrModalityMode = "all" | "include" | "exclude";
 
 export interface AppointmentSlipSettings {
   paperMode: AppointmentSlipPaperMode;
+  paperSize: AppointmentSlipPaperSize;
   languageMode: AppointmentSlipLanguageMode;
   safeTopMm: number;
   safeBottomMm: number;
@@ -1689,6 +1712,7 @@ export interface AppointmentSlipSettings {
 
 export const DEFAULT_APPOINTMENT_SLIP_SETTINGS: AppointmentSlipSettings = {
   paperMode: "preprinted",
+  paperSize: "a5",
   languageMode: "bilingual",
   safeTopMm: 58,
   safeBottomMm: 56,
@@ -1786,6 +1810,8 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     if (normalized === "include" || normalized === "exclude") return normalized;
     return "all";
   };
+  const paperMode = (value: unknown): AppointmentSlipPaperMode => (str(value, "blank") === "preprinted" ? "preprinted" : "blank");
+  const paperSize = (value: unknown): AppointmentSlipPaperSize => (str(value, "a4") === "a5" ? "a5" : "a4");
   const numArray = (value: unknown): number[] =>
     Array.isArray(value)
       ? value
@@ -1797,6 +1823,8 @@ function normalizePatientQrSettings(raw: RawRecord): PatientQrSettings {
     enabled: bool(record.enabled, true),
     risproPublicBaseUrl: str(record.risproPublicBaseUrl, DEFAULT_PATIENT_QR_SETTINGS.risproPublicBaseUrl),
     printQrOnAppointmentSlip: bool(record.printQrOnAppointmentSlip, true),
+    qrSlipPaperMode: paperMode(record.qrSlipPaperMode),
+    qrSlipPaperSize: paperSize(record.qrSlipPaperSize),
     allowCancellation: bool(record.allowCancellation, true),
     allowAddToCalendar: bool(record.allowAddToCalendar, true),
     showBookingTime: bool(record.showBookingTime, true),
@@ -1971,6 +1999,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
   };
 
   const paperMode = str(record.paperMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.paperMode);
+  const paperSize = str(record.paperSize, DEFAULT_APPOINTMENT_SLIP_SETTINGS.paperSize);
   const languageMode = str(record.languageMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.languageMode);
   const barcodeValueMode = str(record.barcodeValueMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.barcodeValueMode);
   const qrModalityMode = str(record.qrModalityMode, DEFAULT_APPOINTMENT_SLIP_SETTINGS.qrModalityMode);
@@ -1982,6 +2011,7 @@ function normalizeAppointmentSlipSettings(raw: RawRecord): AppointmentSlipSettin
 
   return {
     paperMode: paperMode === "blank" ? "blank" : "preprinted",
+    paperSize: paperSize === "a4" ? "a4" : "a5",
     languageMode: languageMode === "ar" || languageMode === "en" ? languageMode : "bilingual",
     safeTopMm: num(record.safeTopMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeTopMm, 0, 120),
     safeBottomMm: num(record.safeBottomMm, DEFAULT_APPOINTMENT_SLIP_SETTINGS.safeBottomMm, 0, 120),

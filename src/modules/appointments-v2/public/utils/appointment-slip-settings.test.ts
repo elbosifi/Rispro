@@ -41,6 +41,13 @@ test("normalizeAppointmentSlipSettings defaults new slip flags to false", () => 
 
   assert.equal(normalized.showPatientCategory, false);
   assert.equal(normalized.boldAppointmentSlipText, false);
+  assert.equal(normalized.paperSize, "a5");
+});
+
+test("normalizeAppointmentSlipSettings accepts a4 paper size", () => {
+  const normalized = normalizeAppointmentSlipSettings({ paperSize: "a4" });
+
+  assert.equal(normalized.paperSize, "a4");
 });
 
 test("normalizeAppointmentSlipSettings normalizes qr modality scope safely", () => {

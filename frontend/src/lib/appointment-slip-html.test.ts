@@ -56,6 +56,7 @@ function makeAppointment(overrides: Partial<AppointmentWithDetails> = {}): Appoi
     priorityNameEn: "Routine",
     modalitySlotNumber: null,
     publicCancelToken: "signed-token",
+    publicAppointmentUrl: "https://rispro.nccb.com.ly/public/appointment?t=signed-token",
     ...overrides,
   };
 }
@@ -253,6 +254,18 @@ describe("appointment slip html renderer", () => {
     expect(html).toContain('data-header-visible="false"');
   });
 
+  it("renders a4 paper geometry when configured", async () => {
+    const html = await prepareAppointmentSlipHtml(makeAppointment(), {
+      slipSettings: makeSlipSettings({ paperMode: "blank", paperSize: "a4" }),
+      patientQrSettings: makePatientQrSettings(),
+    });
+
+    expect(html).toContain("@page { size: A4 portrait; margin: 0; }");
+    expect(html).toContain('data-paper-size="a4"');
+    expect(html).toContain('data-page-width-mm="210"');
+    expect(html).toContain('data-page-height-mm="297"');
+  });
+
   it("renders compact single-language cards for arabic and english modes", async () => {
     const arabicHtml = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings({ languageMode: "ar" }),
@@ -300,7 +313,7 @@ describe("appointment slip html renderer", () => {
     expect(html).not.toContain("0911111111");
   });
 
-  it("renders qr only when enabled and a token exists", async () => {
+  it("renders qr only when enabled and a public appointment URL exists", async () => {
     const enabledHtml = await prepareAppointmentSlipHtml(makeAppointment(), {
       slipSettings: makeSlipSettings(),
       patientQrSettings: makePatientQrSettings(),
@@ -309,7 +322,7 @@ describe("appointment slip html renderer", () => {
       slipSettings: makeSlipSettings({ showQrCode: false }),
       patientQrSettings: makePatientQrSettings(),
     });
-    const noTokenHtml = await prepareAppointmentSlipHtml(makeAppointment({ publicCancelToken: "" }), {
+    const noTokenHtml = await prepareAppointmentSlipHtml(makeAppointment({ publicCancelToken: "", publicAppointmentUrl: "" }), {
       slipSettings: makeSlipSettings(),
       patientQrSettings: makePatientQrSettings(),
     });

@@ -8,14 +8,26 @@ import PublicCancelAppointmentPage, { createCalendarBlob } from "./cancel-appoin
 import {
   cancelPublicAppointment,
   fetchPublicPushConfig,
+  fetchPublicAppointmentSlipDetails,
   fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   type PatientQrSettings,
   type PublicAppointmentCancelPreview,
 } from "@/lib/api-hooks";
 
+const printUtilsMocks = vi.hoisted(() => ({
+  prepareAppointmentSlipHtml: vi.fn(),
+  printAppointmentSlip: vi.fn(),
+}));
+
 vi.mock("@/lib/api-hooks", () => ({
+  DEFAULT_APPOINTMENT_SLIP_SETTINGS: {
+    paperMode: "preprinted",
+    paperSize: "a5",
+  },
   fetchPublicAppointmentCancelPreview: vi.fn(),
+  fetchPublicAppointmentSlipDetails: vi.fn(),
   fetchPublicAppointmentReportStatus: vi.fn(),
   cancelPublicAppointment: vi.fn(),
   fetchPublicPushConfig: vi.fn(),
@@ -24,11 +36,18 @@ vi.mock("@/lib/api-hooks", () => ({
   testPublicPush: vi.fn(),
 }));
 
+vi.mock("@/lib/print-utils", () => ({
+  prepareAppointmentSlipHtml: (...args: unknown[]) => printUtilsMocks.prepareAppointmentSlipHtml(...args),
+  printAppointmentSlip: (...args: unknown[]) => printUtilsMocks.printAppointmentSlip(...args),
+}));
+
 function baseSettings(overrides: Partial<PatientQrSettings> = {}): PatientQrSettings {
   return {
     enabled: true,
     risproPublicBaseUrl: "https://rispro.nccb.com.ly",
     printQrOnAppointmentSlip: true,
+    qrSlipPaperMode: "blank",
+    qrSlipPaperSize: "a4",
     allowCancellation: true,
     allowAddToCalendar: true,
     showBookingTime: true,
@@ -209,7 +228,46 @@ function renderPage(entry = "/public/appointment?t=test-token") {
 describe("PublicCancelAppointmentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    printUtilsMocks.prepareAppointmentSlipHtml.mockResolvedValue("<html><body>slip preview</body></html>");
     vi.mocked(fetchPublicAppointmentCancelPreview).mockResolvedValue(preview());
+    vi.mocked(fetchPublicAppointmentSlipDetails).mockResolvedValue({
+      appointment: {
+        id: 12,
+        patientId: 1,
+        accessionNumber: "V2-000012",
+        appointmentDate: "2026-07-01",
+        bookingTime: "10:30:00",
+        dailySequence: 1,
+        status: "scheduled",
+        isWalkIn: false,
+        caseCategory: "oncology",
+        arabicFullName: "Test Patient",
+        englishFullName: "Test Patient",
+        nationalId: null,
+        mrn: "MRN-1",
+        ageYears: 40,
+        sex: "F",
+        phone1: "0911111111",
+        modalityNameAr: "CT",
+        modalityNameEn: "CT",
+        modalityCode: "CT",
+        modalityGeneralInstructionAr: "",
+        modalityGeneralInstructionEn: "",
+        examNameAr: "CT Head",
+        examNameEn: "CT Head",
+        examSpecificInstructionAr: "",
+        examSpecificInstructionEn: "",
+        priorityNameAr: null,
+        priorityNameEn: null,
+        modalitySlotNumber: null,
+      } as never,
+      slipSettings: {
+        ...DEFAULT_APPOINTMENT_SLIP_SETTINGS,
+        paperMode: "blank",
+        paperSize: "a4",
+      } as never,
+      patientQrSettings: baseSettings(),
+    });
     vi.mocked(cancelPublicAppointment).mockResolvedValue({
       ok: true,
       alreadyCancelled: false,
@@ -272,6 +330,31 @@ describe("PublicCancelAppointmentPage", () => {
     expect(fetchPublicAppointmentReportStatus).not.toHaveBeenCalled();
     expect(screen.queryByText(/طلب موعد جديد/i)).toBeNull();
     expect(screen.queryByText("العودة للرئيسية")).toBeNull();
+  });
+
+  it("previews and prints the appointment slip with QR paper settings", async () => {
+    renderPage();
+
+    await userEvent.click(await screen.findByRole("button", { name: /عرض ورقة الموعد/i }));
+
+    await waitFor(() => expect(fetchPublicAppointmentSlipDetails).toHaveBeenCalledWith("test-token"));
+    expect(printUtilsMocks.prepareAppointmentSlipHtml).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 12 }),
+      expect.objectContaining({
+        slipSettings: expect.objectContaining({ paperMode: "blank", paperSize: "a4" }),
+        patientQrSettings: expect.objectContaining({ qrSlipPaperMode: "blank", qrSlipPaperSize: "a4" }),
+      })
+    );
+    expect(await screen.findByTitle("Appointment slip preview")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: /طباعة/i }));
+
+    expect(printUtilsMocks.printAppointmentSlip).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 12 }),
+      expect.objectContaining({
+        slipSettings: expect.objectContaining({ paperMode: "blank", paperSize: "a4" }),
+      })
+    );
   });
 
   it("shows View images button only when image access is eligible", async () => {

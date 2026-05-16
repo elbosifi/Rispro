@@ -211,6 +211,15 @@ export default function AppointmentSlipSettingsSection({ onReAuthRequired }: App
             ]}
           />
           <SelectField
+            label={chooseLocalized(language, "حجم الورق", "Paper size")}
+            value={draft.paperSize}
+            onChange={(value) => setDraft((current) => ({ ...current, paperSize: value as AppointmentSlipSettings["paperSize"] }))}
+            options={[
+              { value: "a5", label: "A5" },
+              { value: "a4", label: "A4" },
+            ]}
+          />
+          <SelectField
             label={chooseLocalized(language, "نمط اللغة", "Language mode")}
             value={draft.languageMode}
             onChange={(value) => setDraft((current) => ({ ...current, languageMode: value as AppointmentSlipSettings["languageMode"] }))}

@@ -31,6 +31,8 @@ export interface PatientQrSettings {
   enabled: boolean;
   risproPublicBaseUrl: string;
   printQrOnAppointmentSlip: boolean;
+  qrSlipPaperMode: "blank" | "preprinted";
+  qrSlipPaperSize: "a5" | "a4";
   allowCancellation: boolean;
   allowAddToCalendar: boolean;
   showBookingTime: boolean;
@@ -145,6 +147,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
   risproPublicBaseUrl: "",
   printQrOnAppointmentSlip: true,
+  qrSlipPaperMode: "blank",
+  qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
   showBookingTime: true,
@@ -330,6 +334,14 @@ function asMode(value: unknown, fallback: "all" | "include" | "exclude"): "all" 
   return fallback;
 }
 
+function asPaperMode(value: unknown, fallback: "blank" | "preprinted"): "blank" | "preprinted" {
+  return asString(value, fallback) === "preprinted" ? "preprinted" : "blank";
+}
+
+function asPaperSize(value: unknown, fallback: "a5" | "a4"): "a5" | "a4" {
+  return asString(value, fallback) === "a5" ? "a5" : "a4";
+}
+
 function asNumberArray(value: unknown): number[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -360,6 +372,8 @@ export function normalizePatientQrSettings(raw: unknown): PatientQrSettings {
     enabled: asBoolean(record.enabled, DEFAULT_SETTINGS.enabled),
     risproPublicBaseUrl: asString(record.risproPublicBaseUrl, DEFAULT_SETTINGS.risproPublicBaseUrl),
     printQrOnAppointmentSlip: asBoolean(record.printQrOnAppointmentSlip, DEFAULT_SETTINGS.printQrOnAppointmentSlip),
+    qrSlipPaperMode: asPaperMode(record.qrSlipPaperMode, DEFAULT_SETTINGS.qrSlipPaperMode),
+    qrSlipPaperSize: asPaperSize(record.qrSlipPaperSize, DEFAULT_SETTINGS.qrSlipPaperSize),
     allowCancellation: asBoolean(record.allowCancellation, DEFAULT_SETTINGS.allowCancellation),
     allowAddToCalendar: asBoolean(record.allowAddToCalendar, DEFAULT_SETTINGS.allowAddToCalendar),
     showBookingTime: asBoolean(record.showBookingTime, DEFAULT_SETTINGS.showBookingTime),

@@ -33,6 +33,8 @@ function escapeHtml(str: string = ""): string {
 const MM_TO_PT = 72 / 25.4;
 const A5_WIDTH_PT = 148 * MM_TO_PT;
 const A5_HEIGHT_PT = 210 * MM_TO_PT;
+const A4_WIDTH_PT = 210 * MM_TO_PT;
+const A4_HEIGHT_PT = 297 * MM_TO_PT;
 
 export interface AppointmentSlipData {
   hospitalName: string;
@@ -94,6 +96,12 @@ function formatAccessionFromBookingId(id: number): string {
 
 function mm(value: number): number {
   return value * MM_TO_PT;
+}
+
+function getPaperDimensions(settings: Pick<AppointmentSlipSettings, "paperSize">): { label: "A5" | "A4"; widthMm: number; heightMm: number; widthPt: number; heightPt: number } {
+  return settings.paperSize === "a4"
+    ? { label: "A4", widthMm: 210, heightMm: 297, widthPt: A4_WIDTH_PT, heightPt: A4_HEIGHT_PT }
+    : { label: "A5", widthMm: 148, heightMm: 210, widthPt: A5_WIDTH_PT, heightPt: A5_HEIGHT_PT };
 }
 
 function parseSlipDate(isoDate: string): Date | null {
@@ -227,7 +235,12 @@ function drawPdfText(
 }
 
 function sanitizeSettings(settings?: AppointmentSlipSettings): AppointmentSlipSettings {
-  return settings ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS };
+  const next = settings ? { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS, ...settings } : { ...DEFAULT_APPOINTMENT_SLIP_SETTINGS };
+  return {
+    ...next,
+    paperMode: next.paperMode === "blank" ? "blank" : "preprinted",
+    paperSize: next.paperSize === "a4" ? "a4" : "a5",
+  };
 }
 
 function sanitizePatientQrSettings(settings?: PatientQrSettings): PatientQrSettings {
@@ -532,7 +545,8 @@ export function buildAppointmentSlipLayoutModel(
   modeOverride?: AppointmentSlipPdfMode
 ): AppointmentSlipLayoutModel {
   const mode = modeOverride ?? settings.paperMode;
-  const page = { w: A5_WIDTH_PT, h: A5_HEIGHT_PT };
+  const paper = getPaperDimensions(settings);
+  const page = { w: paper.widthPt, h: paper.heightPt };
   const safeArea = {
     x: mm(mode === "preprinted" ? settings.safeLeftMm : 8),
     y: mm(mode === "preprinted" ? settings.safeTopMm : 8),
@@ -744,10 +758,11 @@ export async function createAppointmentSlipPdfBlob(
   const patientQrSettings = runtime.patientQrSettings;
   const slip = buildAppointmentSlipData(apt, runtime);
   const layout = buildAppointmentSlipLayoutModel(apt, slipSettings, patientQrSettings, mode);
+  const paper = getPaperDimensions(slipSettings);
   const doc = new jsPDF({
     orientation: "portrait",
     unit: "pt",
-    format: [A5_WIDTH_PT, A5_HEIGHT_PT],
+    format: [paper.widthPt, paper.heightPt],
     compress: true,
   });
   await ensureArabicFontsLoaded(doc);
@@ -997,6 +1012,7 @@ export async function prepareAppointmentSlipHtml(
   const instructions = buildInstructionText(apt, slipSettings);
   const languageMode = slipSettings.languageMode;
   const dir = languageMode === "en" ? "ltr" : "rtl";
+  const paper = getPaperDimensions(slipSettings);
   const qrSvg = slip.queueQrPayload
     ? await QRCode.toString(slip.queueQrPayload, { type: "svg", width: 160, margin: 1 })
     : "";
@@ -1032,14 +1048,14 @@ export async function prepareAppointmentSlipHtml(
       <head>
         <title>${escapeHtml(localizeText(slipSettings.slipTitleAr, slipSettings.slipTitleEn, languageMode))}</title>
         <style>
-          @page { size: A5 portrait; margin: 0; }
+          @page { size: ${paper.label} portrait; margin: 0; }
           @font-face { font-family: "Noto Naskh Arabic"; src: url("${NOTO_NASKH_REGULAR_URL}") format("truetype"); font-weight: 400; }
           @font-face { font-family: "Noto Naskh Arabic"; src: url("${NOTO_NASKH_BOLD_URL}") format("truetype"); font-weight: 700; }
           * { box-sizing: border-box; }
           html, body {
             margin: 0;
-            width: 148mm;
-            min-height: 210mm;
+            width: ${paper.widthMm}mm;
+            min-height: ${paper.heightMm}mm;
             direction: ${languageMode === "en" ? "ltr" : "rtl"};
             unicode-bidi: plaintext;
             font-family: "Noto Naskh Arabic", "Noto Sans Arabic", "Tahoma", "Arial", sans-serif;
@@ -1048,13 +1064,13 @@ export async function prepareAppointmentSlipHtml(
             print-color-adjust: exact;
             -webkit-print-color-adjust: exact;
           }
-          .sheet { width: 148mm; height: 210mm; position: relative; overflow: hidden; }
+          .sheet { width: ${paper.widthMm}mm; height: ${paper.heightMm}mm; position: relative; overflow: hidden; }
           .safe-area {
             position: absolute;
             top: ${slipSettings.paperMode === "preprinted" ? slipSettings.safeTopMm : 0}mm;
             left: ${slipSettings.paperMode === "preprinted" ? slipSettings.safeLeftMm : 0}mm;
-            width: ${slipSettings.paperMode === "preprinted" ? layout.safeArea.w / MM_TO_PT : 148}mm;
-            height: ${slipSettings.paperMode === "preprinted" ? layout.safeArea.h / MM_TO_PT : 210}mm;
+            width: ${slipSettings.paperMode === "preprinted" ? layout.safeArea.w / MM_TO_PT : paper.widthMm}mm;
+            height: ${slipSettings.paperMode === "preprinted" ? layout.safeArea.h / MM_TO_PT : paper.heightMm}mm;
             padding: ${slipSettings.contentPaddingMm}mm;
           }
           .content { width: 100%; height: 100%; display: flex; flex-direction: column; gap: 1.2mm; }
@@ -1097,7 +1113,7 @@ export async function prepareAppointmentSlipHtml(
         </style>
       </head>
       <body class="${slipSettings.boldAppointmentSlipText ? "appointment-slip-bold" : ""}">
-        <div class="sheet" data-paper-mode="${slipSettings.paperMode}" data-language-mode="${languageMode}" data-page-width-mm="148" data-page-height-mm="210">
+        <div class="sheet" data-paper-mode="${slipSettings.paperMode}" data-paper-size="${slipSettings.paperSize}" data-language-mode="${languageMode}" data-page-width-mm="${paper.widthMm}" data-page-height-mm="${paper.heightMm}">
           <div class="safe-area" data-safe-top-mm="${slipSettings.safeTopMm}" data-safe-bottom-mm="${slipSettings.safeBottomMm}" data-safe-left-mm="${slipSettings.safeLeftMm}" data-safe-right-mm="${slipSettings.safeRightMm}" data-content-padding-mm="${slipSettings.contentPaddingMm}" data-font-scale="${slipSettings.fontScale}">
             <div class="content">
               <header class="header" data-header-visible="${slipSettings.paperMode === "blank"}">

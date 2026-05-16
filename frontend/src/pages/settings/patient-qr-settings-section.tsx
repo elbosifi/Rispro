@@ -15,6 +15,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
   risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
+  qrSlipPaperMode: "blank",
+  qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
   showBookingTime: true,
@@ -425,6 +427,24 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
             error={errors.risproPublicBaseUrl}
           />
           <ToggleRow label={chooseLocalized(language, "طباعة رمز QR على ورقة الموعد", "Print QR Code on Appointment Slip")} checked={draft.printQrOnAppointmentSlip} onChange={(checked) => setDraft((current) => ({ ...current, printQrOnAppointmentSlip: checked }))} />
+          <SelectField
+            label={chooseLocalized(language, "نمط ورقة الموعد في صفحة QR", "QR appointment slip paper mode")}
+            value={draft.qrSlipPaperMode}
+            onChange={(value) => setDraft((current) => ({ ...current, qrSlipPaperMode: value as PatientQrSettings["qrSlipPaperMode"] }))}
+            options={[
+              { value: "blank", label: chooseLocalized(language, "ورق فارغ", "Blank paper") },
+              { value: "preprinted", label: chooseLocalized(language, "ورق مطبوع مسبقًا", "Preprinted") },
+            ]}
+          />
+          <SelectField
+            label={chooseLocalized(language, "حجم ورقة الموعد في صفحة QR", "QR appointment slip paper size")}
+            value={draft.qrSlipPaperSize}
+            onChange={(value) => setDraft((current) => ({ ...current, qrSlipPaperSize: value as PatientQrSettings["qrSlipPaperSize"] }))}
+            options={[
+              { value: "a4", label: "A4" },
+              { value: "a5", label: "A5" },
+            ]}
+          />
           <ToggleRow label={chooseLocalized(language, "السماح بإلغاء الموعد", "Allow Appointment Cancellation")} checked={draft.allowCancellation} onChange={(checked) => setDraft((current) => ({ ...current, allowCancellation: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إضافة إلى التقويم", "Add to Calendar")} checked={draft.allowAddToCalendar} onChange={(checked) => setDraft((current) => ({ ...current, allowAddToCalendar: checked }))} />
           <ToggleRow label={chooseLocalized(language, "إظهار وقت الموعد في صفحة QR", "Show Appointment Time on QR Page")} checked={draft.showBookingTime} onChange={(checked) => setDraft((current) => ({ ...current, showBookingTime: checked }))} />

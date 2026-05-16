@@ -4,6 +4,7 @@ import {
   DEFAULT_APPOINTMENT_SLIP_SETTINGS,
   DEFAULT_PATIENT_QR_SETTINGS,
   fetchAppointmentSlipSettings,
+  fetchPublicAppointmentSlipDetails,
   fetchPatientQrSettings,
   saveAppointmentSlipSettings,
   type AppointmentSlipSettings,
@@ -36,6 +37,7 @@ describe("appointment slip settings api hooks", () => {
     const settings = await fetchAppointmentSlipSettings();
 
     expect(settings.paperMode).toBe("preprinted");
+    expect(settings.paperSize).toBe("a5");
     expect(settings.languageMode).toBe("bilingual");
     expect(settings.safeTopMm).toBe(58);
     expect(settings.safeBottomMm).toBe(56);
@@ -57,6 +59,7 @@ describe("appointment slip settings api hooks", () => {
           setting_value: {
             value: {
               paperMode: "blank",
+              paperSize: "a4",
               languageMode: "ar",
               showTime: false,
             },
@@ -69,6 +72,7 @@ describe("appointment slip settings api hooks", () => {
 
     expect(api).toHaveBeenCalledWith("/settings/appointment_slip");
     expect(settings.paperMode).toBe("blank");
+    expect(settings.paperSize).toBe("a4");
     expect(settings.languageMode).toBe("ar");
     expect(settings.showTime).toBe(false);
   });
@@ -184,6 +188,50 @@ describe("appointment slip settings api hooks", () => {
     const settings = await fetchPatientQrSettings();
 
     expect(settings.risproPublicBaseUrl).toBe("https://custom.rispro.example");
+  });
+
+  it("normalizes patient QR slip paper defaults", async () => {
+    vi.mocked(api).mockResolvedValue({
+      settings: [{ setting_key: "config", setting_value: { value: {} } }],
+    });
+
+    const settings = await fetchPatientQrSettings();
+
+    expect(settings.qrSlipPaperMode).toBe("blank");
+    expect(settings.qrSlipPaperSize).toBe("a4");
+  });
+
+  it("normalizes public appointment slip details", async () => {
+    vi.mocked(api).mockResolvedValue({
+      appointment: {
+        id: 12,
+        patient_id: 1,
+        accession_number: "V2-000012",
+        appointment_date: "2026-07-01",
+        booking_time: "10:30:00",
+        daily_sequence: 1,
+        status: "scheduled",
+        is_walk_in: false,
+        arabic_full_name: "مريض",
+        english_full_name: "Patient",
+        age_years: 40,
+        sex: "F",
+        modality_name_ar: "CT",
+        modality_name_en: "CT",
+        modality_code: "CT",
+      },
+      slipSettings: { paperMode: "blank", paperSize: "a4" },
+      patientQrSettings: {},
+    });
+
+    const details = await fetchPublicAppointmentSlipDetails("signed-token");
+
+    expect(api).toHaveBeenCalledWith("/public/appointments/slip?t=signed-token");
+    expect(details.appointment.id).toBe(12);
+    expect(details.slipSettings.paperMode).toBe("blank");
+    expect(details.slipSettings.paperSize).toBe("a4");
+    expect(details.patientQrSettings.qrSlipPaperMode).toBe("blank");
+    expect(details.patientQrSettings.qrSlipPaperSize).toBe("a4");
   });
 
   it("normalizes patient QR modality scope fields safely", async () => {

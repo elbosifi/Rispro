@@ -18,6 +18,8 @@ import {
   StickyNote,
   FileText,
   MessageCircle,
+  Printer,
+  X,
 } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
 import { useLanguage } from "@/providers/language-provider";
@@ -26,6 +28,7 @@ import { buildPatientAppointmentUrl } from "@/lib/patient-appointment-link";
 import {
   cancelPublicAppointment,
   fetchPublicPushConfig,
+  fetchPublicAppointmentSlipDetails,
   fetchPublicAppointmentReportStatus,
   fetchPublicAppointmentCancelPreview,
   subscribePublicPush,
@@ -37,7 +40,9 @@ import {
   type PublicAppointmentCancelPreview,
   type PublicAppointmentCancelResult,
   type PublicReportStatusResponse,
+  type PublicAppointmentSlipDetails,
 } from "@/lib/api-hooks";
+import { prepareAppointmentSlipHtml, printAppointmentSlip } from "@/lib/print-utils";
 
 type LinkErrorState = "invalid" | "expired" | "unavailable" | "disabled";
 type FlowState = "landing" | "confirm" | "success" | "already_cancelled";
@@ -48,6 +53,8 @@ const DEFAULT_SETTINGS: PatientQrSettings = {
   enabled: true,
   risproPublicBaseUrl: "https://rispro.nccb.com.ly",
   printQrOnAppointmentSlip: true,
+  qrSlipPaperMode: "blank",
+  qrSlipPaperSize: "a4",
   allowCancellation: true,
   allowAddToCalendar: true,
   showBookingTime: true,
@@ -1002,6 +1009,9 @@ export default function PublicCancelAppointmentPage() {
   const [acknowledged, setAcknowledged] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [result, setResult] = useState<PublicAppointmentCancelResult | null>(null);
+  const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
+  const [slipDetails, setSlipDetails] = useState<PublicAppointmentSlipDetails | null>(null);
+  const [slipError, setSlipError] = useState("");
   const token = useMemo(() => String(searchParams.get("t") || "").trim(), [searchParams]);
 
   const previewQuery = useQuery({
@@ -1030,6 +1040,40 @@ export default function PublicCancelAppointmentPage() {
     preview && settings.showPreparationInstructions && !modalityInstructionsText && !examInstructionsText
       ? settings.genericPreparationTextAr || ""
       : "";
+  const canShowSlip = Boolean(preview && !["cancelled", "discontinued", "voided"].includes(preview.currentStatus));
+
+  const slipMutation = useMutation({
+    mutationFn: () => fetchPublicAppointmentSlipDetails(token),
+    onSuccess: async (value) => {
+      try {
+        const html = await prepareAppointmentSlipHtml(value.appointment, {
+          slipSettings: value.slipSettings,
+          patientQrSettings: value.patientQrSettings,
+        });
+        setSlipDetails(value);
+        setSlipPreviewHtml(html);
+        setSlipError("");
+      } catch {
+        setSlipError("تعذر تجهيز معاينة ورقة الموعد الآن.");
+      }
+    },
+    onError: () => {
+      setSlipError("تعذر تحميل ورقة الموعد الآن.");
+    },
+  });
+
+  const closeSlipPreview = () => {
+    setSlipPreviewHtml(null);
+    setSlipError("");
+  };
+
+  const printSlipPreview = () => {
+    if (!slipDetails) return;
+    printAppointmentSlip(slipDetails.appointment, {
+      slipSettings: slipDetails.slipSettings,
+      patientQrSettings: slipDetails.patientQrSettings,
+    });
+  };
 
   const cancelMutation = useMutation({
     mutationFn: () => cancelPublicAppointment(token),
@@ -1288,6 +1332,14 @@ export default function PublicCancelAppointmentPage() {
         <div className="space-y-5 p-5">
           <AppointmentSummaryCard preview={preview} canCancel={canCancel} showBookingTime={settings.showBookingTime} />
 
+          {canShowSlip ? (
+            <AppointmentSlipCard
+              isLoading={slipMutation.isPending}
+              error={slipError}
+              onView={() => slipMutation.mutate()}
+            />
+          ) : null}
+
           <ReportCard token={token} preview={preview} settings={settings} />
 
           <PushNotificationCard token={token} settings={settings} />
@@ -1381,6 +1433,10 @@ export default function PublicCancelAppointmentPage() {
           )}
         </div>
       </Card>
+
+      {slipPreviewHtml ? (
+        <AppointmentSlipPreviewModal html={slipPreviewHtml} onClose={closeSlipPreview} onPrint={printSlipPreview} />
+      ) : null}
     </PageShell>
   );
 }
@@ -1403,6 +1459,57 @@ function SafeNotice(props: { title: string; body: string }) {
         </ActionButton>
       </div>
     </Card>
+  );
+}
+
+function AppointmentSlipCard(props: { isLoading: boolean; error: string; onView: () => void }) {
+  return (
+    <Card className="p-4 sm:p-5">
+      <div className="mb-3 flex items-start gap-3">
+        <div className="rounded-full bg-teal-50 p-2 text-teal-700">
+          <FileText className="h-5 w-5" />
+        </div>
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900">ورقة الموعد</h3>
+          <p className="mt-1 text-sm leading-7 text-slate-600">يمكنك عرض ورقة الموعد وطباعتها حسب إعدادات صفحة QR.</p>
+        </div>
+      </div>
+      {props.error ? <p className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">{props.error}</p> : null}
+      <ActionButton
+        tone="primary"
+        disabled={props.isLoading}
+        onClick={props.onView}
+        icon={props.isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4" />}
+      >
+        {props.isLoading ? "جاري تجهيز الورقة..." : "عرض ورقة الموعد"}
+      </ActionButton>
+    </Card>
+  );
+}
+
+function AppointmentSlipPreviewModal(props: { html: string; onClose: () => void; onPrint: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-slate-950/60 p-0 sm:items-center sm:p-4" role="dialog" aria-modal="true">
+      <div className="mx-auto flex h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-t-3xl border border-slate-200 bg-white shadow-xl sm:rounded-3xl">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+          <h2 className="text-base font-extrabold text-slate-900">معاينة ورقة الموعد</h2>
+          <div className="flex gap-2">
+            <ActionButton tone="neutral" onClick={props.onPrint} icon={<Printer className="h-4 w-4" />}>
+              طباعة
+            </ActionButton>
+            <button
+              type="button"
+              onClick={props.onClose}
+              className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+              aria-label="إغلاق"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+        <iframe title="Appointment slip preview" srcDoc={props.html} className="h-full w-full flex-1 bg-slate-100" />
+      </div>
+    </div>
   );
 }
 
