@@ -6,6 +6,7 @@ import CalendarPage from "./calendar-page";
 
 const fetchAppointmentsMock = vi.fn();
 const fetchAppointmentLookupsMock = vi.fn();
+const fetchPatientDirectorySummaryMock = vi.fn();
 const printAppointmentSlipByIdMock = vi.fn();
 const printDayListFromRouteMock = vi.fn();
 const navigateMock = vi.fn();
@@ -13,6 +14,7 @@ const navigateMock = vi.fn();
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (...args: unknown[]) => fetchAppointmentsMock(...args),
   fetchAppointmentLookups: (...args: unknown[]) => fetchAppointmentLookupsMock(...args),
+  fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
 }));
 
 vi.mock("@/providers/language-provider", () => ({
@@ -57,6 +59,33 @@ function getSelectedDaySummaryContainer() {
 describe("CalendarPage registration drilldown", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    fetchPatientDirectorySummaryMock.mockResolvedValue({
+      demographics: {
+        id: 11,
+        mrn: "MRN1",
+        arabicFullName: "Alpha One",
+        englishFullName: "Alpha One",
+        sex: "M",
+        ageYears: 30,
+        demographicsEstimated: false,
+        dateOfBirth: "1996-01-01",
+      },
+      identifiers: { nationalId: "N1", identifierType: null, identifierValue: null },
+      contact: { phone1: null, phone2: null, address: null },
+      category: "oncology",
+      warnings: {
+        missingPhone: false,
+        missingDob: false,
+        missingSex: false,
+        missingName: false,
+        incompleteData: false,
+        possibleDuplicate: false,
+        duplicateReasons: [],
+      },
+      lastAppointment: null,
+      nextAppointment: null,
+      recentAppointments: [],
+    });
     const baseAppointments = [
       {
         id: 1,
@@ -168,7 +197,7 @@ describe("CalendarPage registration drilldown", () => {
     await screen.findByText("2 total registrations");
     fireEvent.click(getSidebarSummaryButton(/CT/i));
     await screen.findByText("Alpha One");
-    fireEvent.click(screen.getAllByRole("button", { name: "Open registrations" })[0]!);
+    fireEvent.click(screen.getAllByRole("button", { name: "Manage" })[0]!);
 
     expect(navigateMock).toHaveBeenCalledWith("/registrations?appointmentId=1&patientId=11");
   });

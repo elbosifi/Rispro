@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight, ListFilter, Search } from "lucide-react";
 import { fetchAppointments, fetchAppointmentLookups } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
 import { formatDateLy, todayIsoDateLy } from "@/lib/date-format";
+import { PatientDrawer } from "@/components/patients/patient-drawer";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { useLanguage } from "@/providers/language-provider";
@@ -48,6 +49,7 @@ export default function CalendarPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedModalitySummaryKey, setSelectedModalitySummaryKey] = useState<string | null>(null);
   const [isModalityModalOpen, setIsModalityModalOpen] = useState(false);
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
   const navigate = useNavigate();
 
   // Load appointments for the displayed month range
@@ -129,6 +131,10 @@ export default function CalendarPage() {
   const selectedModalitySummary = useMemo(
     () => selectedDateSummaries.find((summary) => summary.key === selectedModalitySummaryKey) || null,
     [selectedDateSummaries, selectedModalitySummaryKey]
+  );
+  const selectedModalityStatusCounts = useMemo(
+    () => selectedModalitySummary ? buildStatusCounts(selectedModalitySummary.appointments) : [],
+    [selectedModalitySummary]
   );
 
   const prevMonth = () => {
@@ -484,6 +490,15 @@ export default function CalendarPage() {
                 <SummaryStat label={t(language, "calendar.oncologyLabel")} value={selectedModalitySummary.oncology} />
                 <SummaryStat label={t(language, "calendar.nonOncologyLabel")} value={selectedModalitySummary.nonOncology} />
               </div>
+              {selectedModalityStatusCounts.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {selectedModalityStatusCounts.map(({ status, count }) => (
+                    <Badge key={status} variant="neutral" size="sm">
+                      {statusLabel(language, status)}: {count}
+                    </Badge>
+                  ))}
+                </div>
+              ) : null}
 
               <div className="mt-4 space-y-2 max-h-[55vh] overflow-y-auto">
                 {selectedModalitySummary.appointments.map((appointment, index) => (
@@ -495,7 +510,13 @@ export default function CalendarPage() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium">{chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}</p>
+                          <button
+                            type="button"
+                            className="font-medium underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
+                            onClick={() => setSelectedPatientId(appointment.patientId)}
+                          >
+                            {chooseLocalized(language, appointment.arabicFullName, appointment.englishFullName)}
+                          </button>
                           <PatientCategoryBadge category={appointment.caseCategory} showWhenUnset={false} size="sm" />
                           <StatusBadge language={language} status={appointment.status} />
                         </div>
@@ -522,7 +543,7 @@ export default function CalendarPage() {
                           size="sm"
                           onClick={() => openRegistrationForAppointment(appointment)}
                         >
-                          {t(language, "calendar.openRegistrations")}
+                          {t(language, "calendar.manageRegistration")}
                         </Button>
                       </div>
                     </div>
@@ -533,8 +554,19 @@ export default function CalendarPage() {
           )}
         </DialogContent>
       </Dialog>
+      {selectedPatientId ? (
+        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
+      ) : null}
     </div>
   );
+}
+
+function buildStatusCounts(appointments: AppointmentWithDetails[]) {
+  const counts = new Map<string, number>();
+  appointments.forEach((appointment) => {
+    counts.set(appointment.status, (counts.get(appointment.status) || 0) + 1);
+  });
+  return Array.from(counts, ([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count);
 }
 
 function buildSelectedDaySummaries(

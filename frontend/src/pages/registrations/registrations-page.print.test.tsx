@@ -306,7 +306,7 @@ describe("RegistrationsPage print actions", () => {
       .getAllByRole("button")
       .map((button) => button.getAttribute("aria-label"));
 
-    expect(actionLabels.filter(Boolean)).toEqual(["Print", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
+    expect(actionLabels.filter(Boolean)).toEqual(["Print", "Preview slip", "Link", "Report", "WhatsApp", "Notify", "Manage"]);
   });
 
   it("opens the patient drawer from the patient name while row click opens manage drawer", async () => {
@@ -334,6 +334,22 @@ describe("RegistrationsPage print actions", () => {
     await waitFor(() => {
       expect(screen.getByRole("dialog", { name: "Manage" })).toBeTruthy();
       expect(screen.queryByTitle("Appointment slip preview")).toBeNull();
+    });
+  });
+
+  it("opens the patient profile from the manage drawer", async () => {
+    renderRegistrationsPage();
+
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(getAppointmentRow("ACC-7"));
+    await userEvent.click(screen.getByRole("button", { name: "Patient profile" }));
+
+    await waitFor(() => {
+      expect(fetchPatientDirectorySummaryMock).toHaveBeenCalledWith(1);
+      expect(screen.getByText("Patient Profile")).toBeTruthy();
     });
   });
 
@@ -470,18 +486,19 @@ describe("RegistrationsPage print actions", () => {
 
     expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
       "Print",
+      "Preview slip",
       "Link",
       "Report",
       "WhatsApp",
       "Notify",
       "Manage",
     ]);
-    expect(buttons[2].disabled).toBe(true);
     expect(buttons[3].disabled).toBe(true);
     expect(buttons[4].disabled).toBe(true);
-    expect(buttons[2].getAttribute("title")).toBe("No public appointment token is available for this registration.");
-    expect(buttons[3].getAttribute("title")).toBe("No patient phone number is available for this registration.");
-    expect(buttons[4].getAttribute("title")).toBe("Web notifications not enabled");
+    expect(buttons[5].disabled).toBe(true);
+    expect(buttons[3].getAttribute("title")).toBe("No public appointment token is available for this registration.");
+    expect(buttons[4].getAttribute("title")).toBe("No patient phone number is available for this registration.");
+    expect(buttons[5].getAttribute("title")).toBe("Web notifications not enabled");
   });
 
   it("opens WhatsApp and Notify dialogs from the icon actions", async () => {

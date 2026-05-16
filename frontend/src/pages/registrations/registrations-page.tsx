@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { Bell, ExternalLink, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
+import { Bell, ExternalLink, Eye, FileText, Loader2, MoreHorizontal, Printer } from "lucide-react";
 import {
   cancelAppointment,
   fetchAppointments,
@@ -61,6 +61,8 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
 const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
 const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MANAGE_TABS = ["details", "documents", "report", "reschedule", "cancel"] as const;
+type ManageTab = (typeof MANAGE_TABS)[number];
 
 function RegistrationStat({
   label,
@@ -133,6 +135,10 @@ export default function RegistrationsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const isRtl = language === "ar";
   const queryClient = useQueryClient();
+  const appointmentIdParam = searchParams.get("appointmentId");
+  const patientIdParam = searchParams.get("patientId");
+  const tabParam = searchParams.get("tab");
+  const initialManageTab = MANAGE_TABS.includes(tabParam as ManageTab) ? (tabParam as ManageTab) : "details";
   const [selectedAppointment, setSelectedAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
@@ -140,7 +146,7 @@ export default function RegistrationsPage() {
     useState<AppointmentWithDetails | null>(null);
   const [slipPreviewHtml, setSlipPreviewHtml] = useState<string | null>(null);
   const [slipPreviewLoading, setSlipPreviewLoading] = useState(false);
-  const [manageTab, setManageTab] = useState<"details" | "documents" | "report" | "reschedule" | "cancel">("details");
+  const [manageTab, setManageTab] = useState<ManageTab>(initialManageTab);
   const [reportStatus, setReportStatus] = useState<PublicReportStatusResponse | null>(null);
   const [reportError, setReportError] = useState("");
   const [notificationAppointment, setNotificationAppointment] =
@@ -169,8 +175,6 @@ export default function RegistrationsPage() {
   const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
   const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
-  const appointmentIdParam = searchParams.get("appointmentId");
-  const patientIdParam = searchParams.get("patientId");
   const patientScopedDefaultFilters: RegistrationsFilters = patientIdParam
     ? {
         ...DEFAULT_FILTERS,
@@ -433,6 +437,11 @@ export default function RegistrationsPage() {
       changed = true;
     }
 
+    if (nextSearchParams.has("tab")) {
+      nextSearchParams.delete("tab");
+      changed = true;
+    }
+
     if (changed) {
       setSearchParams(nextSearchParams, { replace: true });
     }
@@ -589,15 +598,31 @@ export default function RegistrationsPage() {
     setSelectedPatientId(appointment.patientId);
   };
 
+  const openSlipPreview = (appointment: AppointmentWithDetails) => {
+    setSlipPreviewAppointment(appointment);
+  };
+
+  const setManageTabAndUrl = (tab: ManageTab) => {
+    setManageTab(tab);
+    if (!appointmentIdParam) return;
+    const nextSearchParams = new URLSearchParams(searchParams);
+    if (tab === "details") {
+      nextSearchParams.delete("tab");
+    } else {
+      nextSearchParams.set("tab", tab);
+    }
+    setSearchParams(nextSearchParams, { replace: true });
+  };
+
   const manageAppointment = (appointment: AppointmentWithDetails) => {
     setSelectedAppointment(appointment);
-    setManageTab("details");
+    setManageTabAndUrl("details");
   };
 
   const openReportPanel = (appointment: AppointmentWithDetails, checkNow = false) => {
     const token = publicAppointmentToken(appointment);
     setSelectedAppointment(appointment);
-    setManageTab("report");
+    setManageTabAndUrl("report");
     setReportStatus(null);
     setReportError("");
 
@@ -708,6 +733,7 @@ export default function RegistrationsPage() {
     if (appointmentIdParam) {
       const nextSearchParams = new URLSearchParams(searchParams);
       nextSearchParams.delete("appointmentId");
+      nextSearchParams.delete("tab");
       setSearchParams(nextSearchParams, { replace: true });
     }
   };
@@ -729,7 +755,7 @@ export default function RegistrationsPage() {
       .then((appointment) => {
         if (cancelled) return;
         setSelectedAppointment(appointment);
-        setManageTab("details");
+        setManageTab(initialManageTab);
       })
       .catch((error: unknown) => {
         if (cancelled) return;
@@ -743,7 +769,13 @@ export default function RegistrationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [appointmentIdParam, t]);
+  }, [appointmentIdParam, initialManageTab, t]);
+
+  useEffect(() => {
+    if (!selectedAppointment) return;
+    if (!MANAGE_TABS.includes(tabParam as ManageTab)) return;
+    setManageTab(tabParam as ManageTab);
+  }, [selectedAppointment, tabParam]);
 
   useEffect(() => {
     setRescheduleDate("");
@@ -832,10 +864,19 @@ export default function RegistrationsPage() {
       if (e.key === "Escape") {
         closeManageDrawer();
       }
+      if (e.key.toLowerCase() === "p") {
+        const target = e.target as HTMLElement | null;
+        const tagName = target?.tagName.toLowerCase();
+        if (tagName === "input" || tagName === "textarea" || tagName === "select" || target?.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        void printAppointmentSlipById(selectedAppointment.id, language);
+      }
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [selectedAppointment]);
+  }, [selectedAppointment, language]);
 
   function Field({ label, value }: { label: string; value: any }) {
     return (
@@ -1224,9 +1265,12 @@ export default function RegistrationsPage() {
                     <p className="mt-2 text-xs text-muted-foreground">
                       {[categoryLabel, modalityName, examName, formatDateLy(apt.appointmentDate)].filter(Boolean).join(" • ")}
                     </p>
-                    <div className="mt-3 grid grid-cols-5 gap-1" onClick={(event) => event.stopPropagation()}>
+                    <div className="mt-3 grid grid-cols-6 gap-1" onClick={(event) => event.stopPropagation()}>
                       <Button type="button" size="sm" variant="secondary" className="h-9 px-0" onClick={() => void printAppointmentSlipById(apt.id, language)}>
                         <Printer size={15} />
+                      </Button>
+                      <Button type="button" size="sm" variant="secondary" aria-label={t("registrations.previewSlip")} title={t("registrations.previewSlip")} className="h-9 px-0" onClick={() => openSlipPreview(apt)}>
+                        <Eye size={15} />
                       </Button>
                       <Button type="button" size="sm" variant="ghost" className="h-9 px-0" onClick={() => void handleViewAppointmentLink(apt)}>
                         <ExternalLink size={15} />
@@ -1391,7 +1435,7 @@ export default function RegistrationsPage() {
                         </span>
                       </div>
 
-                      <div className="grid grid-cols-6 justify-end gap-1" aria-label={language === "ar" ? "إجراءات الموعد" : "Appointment actions"}>
+                      <div className="grid grid-cols-7 justify-end gap-1" aria-label={language === "ar" ? "إجراءات الموعد" : "Appointment actions"}>
                         <Button
                           type="button"
                           size="sm"
@@ -1405,6 +1449,20 @@ export default function RegistrationsPage() {
                           className="!h-8 !min-h-8 !w-8 !p-0"
                         >
                           <Printer size={15} strokeWidth={1.8} aria-hidden="true" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          aria-label={t("registrations.previewSlip")}
+                          title={t("registrations.previewSlip")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openSlipPreview(apt);
+                          }}
+                          className="!h-8 !min-h-8 !w-8 !p-0"
+                        >
+                          <Eye size={15} strokeWidth={1.8} aria-hidden="true" />
                         </Button>
                         <Button
                           type="button"
@@ -1541,6 +1599,15 @@ export default function RegistrationsPage() {
                     variant="secondary"
                     size="sm"
                     className="h-8 px-2.5 text-[10px]"
+                    onClick={() => openPatientDrawer(selectedAppointment)}
+                  >
+                    {t("registrations.openPatientProfile")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-8 px-2.5 text-[10px]"
                     onClick={() => void printAppointmentSlipById(selectedAppointment.id, language)}
                   >
                     {t("registrations.print")}
@@ -1597,7 +1664,7 @@ export default function RegistrationsPage() {
                   size="sm"
                   variant={manageTab === "details" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTab("details")}
+                  onClick={() => setManageTabAndUrl("details")}
                 >
                   {t("registrations.detailsEdit")}
                 </Button>
@@ -1606,7 +1673,7 @@ export default function RegistrationsPage() {
                   size="sm"
                   variant={manageTab === "documents" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTab("documents")}
+                  onClick={() => setManageTabAndUrl("documents")}
                 >
                   {t("registrations.requestDocuments")}
                 </Button>
@@ -1616,7 +1683,7 @@ export default function RegistrationsPage() {
                   variant={manageTab === "report" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
                   onClick={() => {
-                    setManageTab("report");
+                    setManageTabAndUrl("report");
                     setReportStatus(null);
                     setReportError("");
                   }}
@@ -1628,7 +1695,7 @@ export default function RegistrationsPage() {
                   size="sm"
                   variant={manageTab === "reschedule" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTab("reschedule")}
+                  onClick={() => setManageTabAndUrl("reschedule")}
                 >
                   {t("registrations.reschedule")}
                 </Button>
@@ -1637,7 +1704,7 @@ export default function RegistrationsPage() {
                   size="sm"
                   variant={manageTab === "cancel" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
-                  onClick={() => setManageTab("cancel")}
+                  onClick={() => setManageTabAndUrl("cancel")}
                 >
                   {t("registrations.cancelAppointment")}
                 </Button>

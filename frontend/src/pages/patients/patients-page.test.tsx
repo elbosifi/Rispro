@@ -196,7 +196,7 @@ describe("PatientsPage interactions", () => {
       expect(screen.getByText("Patient Profile")).toBeTruthy();
     });
 
-    await userEvent.click(screen.getByRole("button", { name: /Open in registrations/i }));
+    await userEvent.click(screen.getAllByRole("button", { name: /Manage registration/i })[0]!);
 
     await waitFor(() => {
       const probe = screen.getByTestId("location-probe");
