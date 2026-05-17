@@ -1192,7 +1192,7 @@ export default function RegistrationsPage() {
               </span>
             </div>
             <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"].map(
+              {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"].map(
                 (status) => (
                   <button
                     key={status}

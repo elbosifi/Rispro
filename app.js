@@ -8439,7 +8439,7 @@ function renderStatusDropdown() {
 }
 
 function renderStatusOptions(selectedStatuses) {
-  const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"];
+  const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"];
   return allStatuses
     .map(
       (status) => `
@@ -11134,7 +11134,7 @@ function handleClick(event) {
 
   if (target.dataset.action === "select-all-statuses") {
     event.preventDefault();
-    const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled"];
+    const allStatuses = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"];
     state.registrationsFilters.status = [...allStatuses];
     state.registrationsStatusDropdownOpen = false;
     render();

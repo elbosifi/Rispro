@@ -269,7 +269,7 @@ export default function CalendarPage() {
                 aria-label={t(language, "calendar.statusFilter")}
               >
                 <option value="">{t(language, "calendar.allStatuses")}</option>
-                {["scheduled", "arrived", "waiting", "completed", "cancelled", "voided", "discontinued"].map((status) => (
+                {["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued", "voided"].map((status) => (
                   <option key={status} value={status}>
                     {statusLabel(language, status)}
                   </option>
