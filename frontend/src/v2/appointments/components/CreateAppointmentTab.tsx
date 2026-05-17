@@ -106,6 +106,13 @@ function isRoutinePriority(priority: { nameEn?: string | null; nameAr?: string |
   );
 }
 
+function localizeCreateAppointmentError(message: string, language: "ar" | "en"): string {
+  if (message.startsWith("This patient cannot be booked because they do not have a primary identifier.")) {
+    return t(language, "appointments.booking.patientIdentifierRequired");
+  }
+  return message;
+}
+
 export function CreateAppointmentTab({
   patientLookups: _patientLookups,
   modalityOptions,
@@ -458,7 +465,7 @@ export function CreateAppointmentTab({
 
       await createWithDecision(decision);
     } catch (error) {
-      setPageError(error instanceof Error ? error.message : t(language, "appointments.create.failedCreate"));
+      setPageError(error instanceof Error ? localizeCreateAppointmentError(error.message, language) : t(language, "appointments.create.failedCreate"));
     } finally {
       setSubmitLoading(false);
     }
@@ -877,7 +884,7 @@ export function CreateAppointmentTab({
                     try {
                       await createWithDecision(decision);
                     } catch (error) {
-                      setPageError(error instanceof Error ? error.message : t(language, "appointments.create.failedCreate"));
+                    setPageError(error instanceof Error ? localizeCreateAppointmentError(error.message, language) : t(language, "appointments.create.failedCreate"));
                     } finally {
                       setSubmitLoading(false);
                     }
