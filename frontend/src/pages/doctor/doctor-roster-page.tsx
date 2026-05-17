@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent } from "@dnd-kit/core";
 import {
@@ -69,6 +71,53 @@ function isAdmin(me: DoctorMe): boolean {
 
 function dutyLabel(value: string, dutyTypeLabels = new Map<string, string>()): string {
   return dutyTypeLabels.get(value) ?? value.replaceAll("_", " ");
+}
+
+function rosterStatusLabel(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1).replaceAll("_", " ");
+}
+
+function statusColor(status: string): string {
+  if (status === "draft") return "#0f766e";
+  if (status === "published") return "#2563eb";
+  if (status === "archived") return "#6b7280";
+  return "var(--text-muted)";
+}
+
+function RosterStatePanel({
+  title,
+  body,
+  tone = "info",
+  children,
+}: {
+  title: string;
+  body: string;
+  tone?: "info" | "warning";
+  children?: ReactNode;
+}) {
+  return (
+    <section
+      className="rounded-lg border p-4"
+      style={{
+        backgroundColor: tone === "warning" ? "#fffbeb" : "var(--card)",
+        borderColor: tone === "warning" ? "#f59e0b" : "var(--border)",
+      }}
+    >
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-1 text-sm leading-5" style={{ color: tone === "warning" ? "#92400e" : "var(--text-muted)" }}>
+        {body}
+      </p>
+      {children && <div className="mt-3 flex flex-wrap gap-2">{children}</div>}
+    </section>
+  );
+}
+
+function SecondaryLink({ to, children }: { to: string; children: ReactNode }) {
+  return (
+    <Link to={to} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+      {children}
+    </Link>
+  );
 }
 
 function DraggableDoctor({
@@ -416,6 +465,12 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
+  const assignments = roster?.assignments ?? [];
+  const isEmptyRoster = assignments.length === 0;
+  const hasNoWeek = canManage && !roster?.week;
+  const isEmptyDraft = canManage && roster?.week?.status === "draft" && isEmptyRoster;
+  const isEmptyPublished = canManage && roster?.week?.status === "published" && isEmptyRoster;
+  const isPublishedWithAssignments = canManage && roster?.week?.status === "published" && !isEmptyRoster;
   const conflictsQuery = useQuery({
     queryKey: ["doctor", "roster", "conflicts", roster?.week?.id],
     queryFn: () => fetchRosterWeekConflicts(roster!.week!.id),
@@ -453,6 +508,13 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
       }
     );
   };
+  const selectWeek = (nextWeekStart: string) => {
+    setWeekStart(nextWeekStart);
+    setAssignmentForm((current) => ({ ...current, date: nextWeekStart }));
+  };
+  const goToCurrentWeek = () => selectWeek(weekStartIso());
+  const goToPreviousWeek = () => selectWeek(addDays(weekStart, -7));
+  const goToNextWeek = () => selectWeek(addDays(weekStart, 7));
 
   return (
     <div className="space-y-4">
@@ -468,14 +530,23 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
           <input
             type="date"
             value={weekStart}
-            onChange={(event) => {
-              setWeekStart(event.target.value);
-              setAssignmentForm((current) => ({ ...current, date: event.target.value }));
-            }}
+            onChange={(event) => selectWeek(event.target.value)}
             className="mt-1 block rounded-lg border px-3 py-2 text-sm"
             style={{ borderColor: "var(--border)", backgroundColor: "var(--card)" }}
           />
         </label>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          Previous week
+        </button>
+        <button type="button" onClick={goToCurrentWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          Current week
+        </button>
+        <button type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+          Next week
+        </button>
       </div>
 
       {canManage && (
@@ -488,8 +559,8 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             )}
             {roster?.week && (
               <>
-                <span className="rounded-full border px-3 py-1 text-xs" style={{ borderColor: "var(--border)" }}>
-                  {roster.week.status}
+                <span className="rounded-full border px-3 py-1 text-xs font-semibold" style={{ borderColor: statusColor(roster.week.status), color: statusColor(roster.week.status) }}>
+                  {rosterStatusLabel(roster.week.status)}
                 </span>
                 {editable && (
                   <>
@@ -530,6 +601,54 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             </p>
           )}
         </section>
+      )}
+
+      {hasNoWeek && (
+        <RosterStatePanel
+          title="No roster week exists for selected week."
+          body="Create a draft roster week before adding shifts and assigning doctors."
+        >
+          <button type="button" onClick={() => createWeekMutation.mutate()} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+            Create draft week
+          </button>
+        </RosterStatePanel>
+      )}
+
+      {isEmptyDraft && roster?.week && (
+        <RosterStatePanel
+          title="Draft roster is empty."
+          body="Add an assignment below, copy the previous week, or use Advanced Setup for templates, XML import, and draft generation."
+        >
+          <button type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            Copy previous week
+          </button>
+          {!advanced && <SecondaryLink to="/doctor/advanced-setup">Open Advanced Setup</SecondaryLink>}
+        </RosterStatePanel>
+      )}
+
+      {isEmptyPublished && (
+        <RosterStatePanel
+          title="This roster week is published but has no assignments. Published weeks are read-only."
+          body="Choose another week to continue roster planning, or open Advanced Setup for low-frequency roster tools."
+          tone="warning"
+        >
+          {!advanced && <SecondaryLink to="/doctor/advanced-setup">Open Advanced Setup</SecondaryLink>}
+          <button type="button" onClick={goToPreviousWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            Previous week
+          </button>
+          <button type="button" onClick={goToNextWeek} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            Next week
+          </button>
+        </RosterStatePanel>
+      )}
+
+      {isPublishedWithAssignments && !advanced && (
+        <RosterStatePanel
+          title="Published roster is read-only."
+          body="Review assigned shifts below. Use another draft week for edits, or open Advanced Setup for exports and notifications."
+        >
+          <SecondaryLink to="/doctor/advanced-setup">Open Advanced Setup</SecondaryLink>
+        </RosterStatePanel>
       )}
 
       {showAdminRosterSetup && (

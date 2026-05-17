@@ -481,7 +481,64 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/admin/roster");
 
     expect((await screen.findAllByText("Roster Management")).length).toBeGreaterThan(0);
-    expect(screen.getByRole("button", { name: /Create draft week/i })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Create draft week/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText("No roster week exists for selected week.")).toBeTruthy();
+  });
+
+  it("draft empty roster shows empty-state guidance and add assignment path", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "draft",
+        createdBy: 1,
+        publishedBy: null,
+        publishedAt: null,
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/roster-planner");
+
+    expect(await screen.findByText("Draft roster is empty.")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Copy previous week/i }).length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /Open Advanced Setup/i })).toBeTruthy();
+    expect(screen.getAllByText("Add assignment").length).toBeGreaterThan(0);
+  });
+
+  it("published empty roster explains that the week is read-only", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "published",
+        createdBy: 1,
+        publishedBy: 1,
+        publishedAt: "2027-01-01",
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/roster-planner");
+
+    expect(await screen.findByText("This roster week is published but has no assignments. Published weeks are read-only.")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Open Advanced Setup/i })).toBeTruthy();
+    expect(screen.queryByText("Add assignment")).toBeNull();
+    expect(screen.queryByText("Add team member")).toBeNull();
   });
 
   it("publish action is visible only for supervisor draft roster", async () => {
@@ -625,10 +682,31 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/roster-planner");
 
-    expect(await screen.findByText("published")).toBeTruthy();
+    expect(await screen.findByText("Published")).toBeTruthy();
+    expect(screen.getByText("This roster week is published but has no assignments. Published weeks are read-only.")).toBeTruthy();
+    expect(screen.queryByText("Add assignment")).toBeNull();
+    expect(screen.queryByText("Add team member")).toBeNull();
     expect(screen.queryByRole("button", { name: /Notify assigned doctors/i })).toBeNull();
     expect(screen.queryByText("Export HTML")).toBeNull();
     expect(screen.queryByText("Export CSV")).toBeNull();
+  });
+
+  it("Previous and Next week buttons update selected week", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/roster-planner");
+
+    const weekInput = (await screen.findByLabelText("Week start")) as HTMLInputElement;
+    const initialWeek = weekInput.value;
+    const previousWeek = new Date(`${initialWeek}T00:00:00Z`);
+    previousWeek.setUTCDate(previousWeek.getUTCDate() - 7);
+    fireEvent.click(screen.getByRole("button", { name: /Previous week/i }));
+    expect(weekInput.value).toBe(previousWeek.toISOString().slice(0, 10));
+    fireEvent.click(screen.getByRole("button", { name: /Next week/i }));
+    expect(weekInput.value).toBe(initialWeek);
   });
 
   it("Advanced Setup exposes supervisor roster advanced tools", async () => {
