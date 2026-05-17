@@ -900,10 +900,15 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/cases");
 
-    expect(await screen.findByText("Report Worklist")).toBeTruthy();
+    expect(await screen.findByText("Today’s Cases")).toBeTruthy();
+    await waitFor(() => {
+      expect(fetchUnassignedDoctorCasesMock).toHaveBeenCalledWith(expect.objectContaining({ requiresReport: true }));
+    });
     expect(screen.queryByRole("button", { name: /Run assignment/i })).toBeNull();
     expect(screen.getByRole("button", { name: /Team cases/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /Unassigned cases/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Detailed view/i })).toBeTruthy();
+    expect(screen.queryByText("Roster assignment targets")).toBeNull();
   });
 
   it("supervisor can assign an unassigned report case to a doctor", async () => {
@@ -968,18 +973,138 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/cases");
 
-    expect(await screen.findByText("Roster assignment targets")).toBeTruthy();
-    expect(await screen.findByText(/Roster target #9/)).toBeTruthy();
-    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect(await screen.findByText("Case Patient")).toBeTruthy();
     const selects = screen.getAllByRole("combobox");
-    fireEvent.change(selects.at(-2)!, { target: { value: "9" } });
-    fireEvent.change(selects.at(-1)!, { target: { value: "5" } });
-    fireEvent.change(screen.getByPlaceholderText("Assignment reason"), { target: { value: "manual assignment" } });
-    fireEvent.click(screen.getByRole("button", { name: "Assign to doctor" }));
+    fireEvent.change(selects.at(-2)!, { target: { value: "5" } });
+    fireEvent.change(selects.at(-1)!, { target: { value: "9" } });
+    fireEvent.click(screen.getByRole("button", { name: "Assign" }));
 
     await waitFor(() => {
-      expect(assignDoctorCaseMock).toHaveBeenCalledWith(77, { doctorId: 5, rosterAssignmentId: 9, reason: "manual assignment" });
+      expect(assignDoctorCaseMock).toHaveBeenCalledWith(77, { doctorId: 5, rosterAssignmentId: 9, reason: "" });
     });
+  });
+
+  it("simplified reassignment requires a reason", async () => {
+    fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
+    fetchTeamDoctorCasesMock.mockResolvedValue([
+      {
+        appointmentId: 78,
+        appointmentDate: "2027-01-04",
+        appointmentTime: "10:00",
+        patientId: 6,
+        patientMrn: "MRN-6",
+        patientNationalId: "NID-6",
+        patientArabicName: null,
+        patientEnglishName: "Assigned Patient",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Chest",
+        caseCategory: "non_oncology",
+        requiresReport: true,
+        appointmentStatus: "scheduled",
+        rosterAssignmentId: null,
+        assignedDoctorId: 4,
+        assignedDoctorName: "Dr Current",
+        teamName: null,
+        dutyType: null,
+        expectedReportingDate: null,
+        assignmentType: "reporting",
+        assignmentStatus: "active",
+        workloadPoints: 2,
+        workloadDefaulted: false,
+        protocolStatus: null,
+        reportStatus: null,
+      },
+    ]);
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/cases");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Team cases/i }));
+    expect(await screen.findByText("Assigned Patient")).toBeTruthy();
+    const selects = screen.getAllByRole("combobox");
+    fireEvent.change(selects.at(-2)!, { target: { value: "5" } });
+    expect((screen.getByRole("button", { name: "Reassign" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText("Reassignment reason"), { target: { value: "coverage correction" } });
+    fireEvent.click(screen.getByRole("button", { name: "Reassign" }));
+    await waitFor(() => {
+      expect(assignDoctorCaseMock).toHaveBeenCalledWith(78, { doctorId: 5, rosterAssignmentId: null, reason: "coverage correction" });
+    });
+  });
+
+  it("detailed view still exposes roster targets and detailed table behavior", async () => {
+    fetchRosterDoctorsMock.mockResolvedValue([{ id: 5, userId: 50, displayName: "Dr Target", doctorRole: "specialist", active: true, canFinalizeReports: true, canAssignProtocols: true, canSupervise: false }]);
+    fetchUnassignedDoctorCasesMock.mockResolvedValue([
+      {
+        appointmentId: 77,
+        appointmentDate: "2027-01-04",
+        appointmentTime: "09:00",
+        patientId: 5,
+        patientMrn: "MRN-5",
+        patientNationalId: "NID-5",
+        patientArabicName: "Arabic Name",
+        patientEnglishName: "Case Patient",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityName: "CT",
+        examTypeId: 2,
+        examTypeName: "CT Brain",
+        caseCategory: "oncology",
+        requiresReport: true,
+        appointmentStatus: "scheduled",
+        rosterAssignmentId: null,
+        assignedDoctorId: null,
+        assignedDoctorName: null,
+        teamName: null,
+        dutyType: null,
+        expectedReportingDate: null,
+        assignmentType: null,
+        assignmentStatus: null,
+        workloadPoints: 1,
+        workloadDefaulted: false,
+        protocolStatus: null,
+        reportStatus: null,
+      },
+    ]);
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: null,
+      assignments: [{
+        id: 9,
+        rosterWeekId: 1,
+        date: "2027-01-04",
+        modalityId: 1,
+        modalityCode: "CT",
+        modalityNameEn: "CT",
+        modalityNameAr: "CT",
+        dutyType: "configured_reporting_duty",
+        sessionName: "day",
+        startTime: "08:00",
+        endTime: "14:00",
+        teamName: "CT Team",
+        status: "active",
+        members: [],
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      }],
+    });
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/cases");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Detailed view/i }));
+    expect(await screen.findByText("Roster assignment targets")).toBeTruthy();
+    expect(await screen.findByText(/Roster target #9/)).toBeTruthy();
+    expect(screen.getByText("Expected report")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Assign" }));
+    expect(screen.getByPlaceholderText("Assignment reason")).toBeTruthy();
   });
 
   it("normal doctor does not see drag/drop assignment controls", async () => {
@@ -998,7 +1123,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/cases");
 
-    expect(await screen.findByText("Report Worklist")).toBeTruthy();
+    expect(await screen.findByText("Today’s Cases")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Run assignment/i })).toBeNull();
   });
 

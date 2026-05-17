@@ -179,6 +179,102 @@ function CaseTable({
   );
 }
 
+function QuickAssignCaseCard({
+  row,
+  doctors,
+  rosterAssignments,
+  onAssignDoctor,
+}: {
+  row: DoctorCase;
+  doctors: DoctorProfile[];
+  rosterAssignments: Array<{ id: number; label: string }>;
+  onAssignDoctor: (appointmentId: number, doctorId: number, rosterAssignmentId: number | null, reason: string) => void;
+}) {
+  const [doctorId, setDoctorId] = useState(row.assignedDoctorId ? String(row.assignedDoctorId) : "");
+  const [rosterAssignmentId, setRosterAssignmentId] = useState(row.rosterAssignmentId ? String(row.rosterAssignmentId) : "");
+  const [reason, setReason] = useState("");
+  const needsReason = Boolean(row.assignedDoctorId);
+
+  return (
+    <article className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="grid gap-3 lg:grid-cols-[1fr_340px]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">{patientName(row)}</h3>
+            <span className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+              {row.assignedDoctorName ? `Assigned to ${row.assignedDoctorName}` : "Unassigned"}
+            </span>
+          </div>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            {row.patientMrn ?? "No MRN"} · {row.appointmentDate} {row.appointmentTime ?? ""} · {row.modalityName ?? row.modalityCode ?? row.modalityId}
+          </p>
+          <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+            {row.examTypeName ?? "No exam"} · {row.caseCategory ?? "No category"} · {row.workloadPoints ?? "No points"} points
+          </p>
+        </div>
+        <div className="grid gap-2">
+          <select value={doctorId} onChange={(event) => setDoctorId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="">Select doctor</option>
+            {doctors.map((doctor) => <option key={doctor.id} value={doctor.id}>{doctor.displayName}</option>)}
+          </select>
+          <select value={rosterAssignmentId} onChange={(event) => setRosterAssignmentId(event.target.value)} className="rounded-lg border px-3 py-2 text-sm">
+            <option value="">Optional roster slot</option>
+            {rosterAssignments.map((assignment) => <option key={assignment.id} value={assignment.id}>{assignment.label}</option>)}
+          </select>
+          {needsReason && (
+            <input value={reason} onChange={(event) => setReason(event.target.value)} placeholder="Reassignment reason" className="rounded-lg border px-3 py-2 text-sm" />
+          )}
+          <button
+            type="button"
+            disabled={!doctorId || (needsReason && !reason.trim())}
+            onClick={() => onAssignDoctor(row.appointmentId, Number(doctorId), rosterAssignmentId ? Number(rosterAssignmentId) : null, reason)}
+            className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400"
+          >
+            {needsReason ? "Reassign" : "Assign"}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function SimpleCaseAssignmentView({
+  cases,
+  doctors,
+  rosterAssignments,
+  onAssignDoctor,
+}: {
+  cases: DoctorCase[];
+  doctors: DoctorProfile[];
+  rosterAssignments: Array<{ id: number; label: string }>;
+  onAssignDoctor: (appointmentId: number, doctorId: number, rosterAssignmentId: number | null, reason: string) => void;
+}) {
+  if (cases.length === 0) {
+    return (
+      <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+        No unassigned report-required cases match these filters.
+      </div>
+    );
+  }
+
+  return (
+    <section className="space-y-3">
+      <div className="rounded-lg border p-3 text-sm" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)", color: "var(--text-muted)" }}>
+        Roster slots are optional for quick assignment. Use Detailed view for drag-and-drop roster reassignment.
+      </div>
+      {cases.map((row) => (
+        <QuickAssignCaseCard
+          key={`${row.appointmentId}-${row.assignmentType ?? "unassigned"}`}
+          row={row}
+          doctors={doctors}
+          rosterAssignments={rosterAssignments}
+          onAssignDoctor={onAssignDoctor}
+        />
+      ))}
+    </section>
+  );
+}
+
 export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const canManage = isManager(me);
   const queryClient = useQueryClient();
@@ -189,6 +285,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
   const [requiresReport, setRequiresReport] = useState("true");
   const [caseCategory, setCaseCategory] = useState("");
   const [view, setView] = useState<"my" | "team" | "unassigned">(canManage ? "unassigned" : "my");
+  const [detailedView, setDetailedView] = useState(false);
   const [dropTarget, setDropTarget] = useState<{ appointmentId: number; rosterAssignmentId: number } | null>(null);
   const [dropReason, setDropReason] = useState("");
   const [dropError, setDropError] = useState("");
@@ -275,8 +372,13 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
           <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
             {canManage ? "Team Cases" : "My Cases"}
           </p>
-          <h2 className="mt-1 text-2xl font-semibold text-foreground">Report Worklist</h2>
+          <h2 className="mt-1 text-2xl font-semibold text-foreground">{canManage ? "Today’s Cases" : "Report Worklist"}</h2>
         </div>
+        {canManage && (
+          <button type="button" onClick={() => setDetailedView((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            {detailedView ? "Simple view" : "Detailed view"}
+          </button>
+        )}
       </div>
 
       <section className="grid gap-3 rounded-lg border p-4 md:grid-cols-3 lg:grid-cols-6" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
@@ -330,7 +432,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </div>
       )}
 
-      {canManage && (
+      {canManage && detailedView && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Roster assignment targets</h3>
           <div className="mt-3 grid gap-2 lg:grid-cols-3">
@@ -343,7 +445,7 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         </section>
       )}
 
-      {dropTarget && (
+      {detailedView && dropTarget && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Reassignment reason</h3>
           <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
@@ -369,15 +471,23 @@ export function DoctorCasesPage({ me }: { me: DoctorMe }) {
         <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
           Loading cases...
         </div>
-      ) : (
-        <CaseTable
+      ) : canManage && !detailedView ? (
+        <SimpleCaseAssignmentView
           cases={cases}
-          canManage={canManage}
           doctors={doctorsQuery.data ?? []}
           rosterAssignments={rosterAssignments}
           onAssignDoctor={(appointmentId, doctorId, targetRosterAssignmentId, reason) =>
             assignDoctorMutation.mutate({ appointmentId, doctorId, rosterAssignmentId: targetRosterAssignmentId, reason })}
         />
+      ) : (
+          <CaseTable
+            cases={cases}
+            canManage={canManage}
+            doctors={doctorsQuery.data ?? []}
+            rosterAssignments={rosterAssignments}
+            onAssignDoctor={(appointmentId, doctorId, targetRosterAssignmentId, reason) =>
+              assignDoctorMutation.mutate({ appointmentId, doctorId, rosterAssignmentId: targetRosterAssignmentId, reason })}
+          />
       )}
       </div>
     </DndContext>
