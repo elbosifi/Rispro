@@ -128,6 +128,7 @@ function ShortcutCard({ title, body, to }: { title: string; body: string; to: st
 
 function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
   const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
+  const canManageRoster = canManageClinicalRoster(me);
   const canAccessManagementSetup = canManageClinicalRoster(me) || canAccessDoctorAdmin(me);
 
   return (
@@ -143,10 +144,11 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
           {canAccessClinical && (
             <ShortcutCard title="Team Workload" body="Open workload summaries and catalog tools." to="/doctor/team-workload" />
           )}
-          <ShortcutCard title="Roster advanced tools" body="Duty types, mappings, imports, templates, exports, and notifications will be moved here in next step." to="/doctor/roster-planner" />
+          <ShortcutCard title="Roster advanced tools" body="Manage duty types, mappings, imports, templates, exports, and notifications." to="/doctor/advanced-setup" />
           <ShortcutCard title="Doctor import/export" body="CSV/XLSX import and export tools will be moved here in next step." to="/doctor/doctors-directory" />
         </section>
       )}
+      {canManageRoster && <DoctorRosterPage me={me} management advanced />}
     </div>
   );
 }

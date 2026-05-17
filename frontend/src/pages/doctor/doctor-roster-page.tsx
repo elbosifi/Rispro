@@ -203,10 +203,12 @@ function AssignmentList({
   );
 }
 
-export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; management?: boolean }) {
+export function DoctorRosterPage({ me, management = false, advanced = false }: { me: DoctorMe; management?: boolean; advanced?: boolean }) {
   const queryClient = useQueryClient();
   const canManage = management && isManager(me);
   const canManageTemplates = canManage && isAdmin(me);
+  const showAdvancedRosterTools = canManage && advanced;
+  const showAdminRosterSetup = canManageTemplates && advanced;
   const [weekStart, setWeekStart] = useState(weekStartIso());
   const weekEnd = useMemo(() => addDays(weekStart, 6), [weekStart]);
   const rosterQueryKey = canManage ? ["doctor", "roster", "week", weekStart] : ["doctor", "roster", "my", weekStart];
@@ -231,7 +233,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
   const templatesQuery = useQuery({
     queryKey: ["doctor", "roster", "templates"],
     queryFn: fetchRosterTemplates,
-    enabled: canManage,
+    enabled: showAdvancedRosterTools,
   });
   const dutyTypesQuery = useQuery({
     queryKey: ["doctor", "roster", "duty-types"],
@@ -241,7 +243,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
   const shiftMappingsQuery = useQuery({
     queryKey: ["doctor", "roster", "shift-import-mappings"],
     queryFn: () => fetchRosterShiftImportMappings(true),
-    enabled: canManage,
+    enabled: showAdminRosterSetup,
   });
   const activeDutyTypes = useMemo(
     () => (dutyTypesQuery.data ?? []).filter((dutyType) => dutyType.active),
@@ -499,17 +501,21 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
                     </button>
                   </>
                 )}
-                {roster.week.status === "published" && (
+                {advanced && roster.week.status === "published" && (
                   <button type="button" onClick={() => notifyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
                     Notify assigned doctors
                   </button>
                 )}
-                <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=html&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                  Export HTML
-                </a>
-                <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=csv&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-                  Export CSV
-                </a>
+                {advanced && (
+                  <>
+                    <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=html&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                      Export HTML
+                    </a>
+                    <a href={`/api/doctor/roster/weeks/${roster.week.id}/export?format=csv&scope=${canManage ? "full" : "my"}`} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                      Export CSV
+                    </a>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -518,7 +524,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
               Publish blocked: roster has publish-blocking conflicts.
             </p>
           )}
-          {notifyResult && (
+          {advanced && notifyResult && (
             <p className="mt-3 text-sm" style={{ color: "var(--text-muted)" }}>
               Notification records: {notifyResult.createdCount} created, {notifyResult.alreadyExistingCount} already existed.
             </p>
@@ -526,7 +532,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
         </section>
       )}
 
-      {canManageTemplates && (
+      {showAdminRosterSetup && (
         <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <div className="space-y-3">
             <h3 className="font-semibold">Roster duty types</h3>
@@ -614,7 +620,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
         </section>
       )}
 
-      {canManageTemplates && (
+      {showAdminRosterSetup && (
         <section className="space-y-3 rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Import roster from ABC export</h3>
           <div className="grid gap-2 md:grid-cols-6">
@@ -788,7 +794,7 @@ export function DoctorRosterPage({ me, management = false }: { me: DoctorMe; man
         </section>
       )}
 
-      {canManage && (
+      {showAdvancedRosterTools && (
         <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <div className="space-y-3">
             <h3 className="font-semibold">Roster templates</h3>

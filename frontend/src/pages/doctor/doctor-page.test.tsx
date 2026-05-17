@@ -536,7 +536,7 @@ describe("Doctor Portal shell", () => {
     expect(await screen.findByText(/Dr Team/)).toBeTruthy();
   });
 
-  it("roster page shows conflict warnings and labels conflicted doctors", async () => {
+  it("supervisor Roster Planner keeps daily roster controls and hides advanced tools by default", async () => {
     fetchDoctorRosterWeekMock.mockResolvedValue({
       week: {
         id: 99,
@@ -577,11 +577,22 @@ describe("Doctor Portal shell", () => {
       canSupervise: true,
       moduleCapabilities: ["doctor", "doctor_supervisor"],
     });
-    renderDoctorPortal("/doctor/admin/roster");
+    renderDoctorPortal("/doctor/roster-planner");
 
     expect(await screen.findByText("Roster conflicts")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Copy previous week/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Publish week/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Add assignment$/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Add member$/i })).toBeTruthy();
+    expect(screen.getByText("Roster slots")).toBeTruthy();
     expect((await screen.findAllByText(/Dr Conflict is unavailable/)).length).toBeGreaterThan(0);
     expect(await screen.findByRole("option", { name: /Dr Conflict · conflict/i })).toBeTruthy();
+    expect(screen.queryByText("Roster duty types")).toBeNull();
+    expect(screen.queryByText("Import roster from ABC export")).toBeNull();
+    expect(screen.queryByText("Roster templates")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Generate draft roster/i })).toBeNull();
+    expect(screen.queryByText("Export HTML")).toBeNull();
+    expect(screen.queryByText("Export CSV")).toBeNull();
   });
 
   it("normal doctor does not see template management", async () => {
@@ -592,18 +603,49 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByText("Roster templates")).toBeNull();
   });
 
-  it("supervisor sees template controls and empty state", async () => {
+  it("supervisor Roster Planner does not show notify or export for published roster by default", async () => {
+    fetchDoctorRosterWeekMock.mockResolvedValue({
+      week: {
+        id: 99,
+        weekStartDate: "2027-01-04",
+        weekEndDate: "2027-01-10",
+        status: "published",
+        createdBy: 1,
+        publishedBy: 1,
+        publishedAt: "2027-01-01",
+        createdAt: "2027-01-01",
+        updatedAt: "2027-01-01",
+      },
+      assignments: [],
+    });
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,
       canSupervise: true,
       moduleCapabilities: ["doctor", "doctor_supervisor"],
     });
-    renderDoctorPortal("/doctor/admin/roster");
+    renderDoctorPortal("/doctor/roster-planner");
+
+    expect(await screen.findByText("published")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Notify assigned doctors/i })).toBeNull();
+    expect(screen.queryByText("Export HTML")).toBeNull();
+    expect(screen.queryByText("Export CSV")).toBeNull();
+  });
+
+  it("Advanced Setup exposes supervisor roster advanced tools", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor"],
+    });
+    renderDoctorPortal("/doctor/advanced-setup");
 
     expect(await screen.findByText("Roster templates")).toBeTruthy();
     expect(await screen.findByText("No roster templates yet.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Apply template/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Generate draft roster/i })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Create template/i })).toBeNull();
+    expect(screen.queryByText("Roster duty types")).toBeNull();
+    expect(screen.queryByText("Import roster from ABC export")).toBeNull();
   });
 
   it("admin can create and apply a template with conflict result", async () => {
@@ -632,9 +674,12 @@ describe("Doctor Portal shell", () => {
       skippedCount: 0,
       conflicts: [{ assignmentId: 44, memberId: null, doctorId: null, severity: "error", code: "required_team_empty", message: "Published roster has an empty required team slot." }],
     });
-    renderDoctorPortal("/doctor/admin/roster");
+    renderDoctorPortal("/doctor/advanced-setup");
 
     expect(await screen.findByRole("button", { name: /Create template/i })).toBeTruthy();
+    expect(screen.getByText("Roster duty types")).toBeTruthy();
+    expect(screen.getByText("ABC shift mappings")).toBeTruthy();
+    expect(screen.getByText("Import roster from ABC export")).toBeTruthy();
     await waitFor(() => {
       expect(fetchRosterTemplatesMock).toHaveBeenCalled();
     });
@@ -654,7 +699,7 @@ describe("Doctor Portal shell", () => {
       canSupervise: true,
       moduleCapabilities: ["doctor", "doctor_supervisor"],
     });
-    renderDoctorPortal("/doctor/admin/roster");
+    renderDoctorPortal("/doctor/advanced-setup");
 
     fireEvent.click(await screen.findByRole("button", { name: /Generate draft roster/i }));
 
@@ -684,7 +729,7 @@ describe("Doctor Portal shell", () => {
       canSupervise: true,
       moduleCapabilities: ["doctor", "doctor_supervisor"],
     });
-    renderDoctorPortal("/doctor/admin/roster");
+    renderDoctorPortal("/doctor/advanced-setup");
 
     fireEvent.click(await screen.findByRole("button", { name: /Notify assigned doctors/i }));
 
