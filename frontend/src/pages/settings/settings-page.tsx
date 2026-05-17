@@ -288,26 +288,30 @@ export default function SettingsPage() {
   const [settingsQuery, setSettingsQuery] = useState("");
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("all");
   const [showReAuthModal, setShowReAuthModal] = useState(false);
-  const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[]>([]);
+  const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[][]>([]);
   const [reauthVersion, setReauthVersion] = useState(0);
   const queryClient = useQueryClient();
   const backupRestoreRef = useRef<{ onReAuthSuccess: () => void }>(null);
 
-  const handleReAuthSuccess = () => {
+  const handleReAuthSuccess = async () => {
     setShowReAuthModal(false);
     setReauthVersion((prev) => prev + 1);
     // Notify backup/restore section to retry after re-auth
     backupRestoreRef.current?.onReAuthSuccess();
-    for (const key of pendingReAuthKeys) {
-      queryClient.invalidateQueries({ queryKey: key.split(",") });
-    }
+    const keys = pendingReAuthKeys;
     setPendingReAuthKeys([]);
-    queryClient.invalidateQueries({ queryKey: ["auth-session"] });
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["auth-session"] }),
+      ...keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
+    ]);
   };
 
   const requestReAuth = (queryKey: string[]) => {
-    const keyStr = queryKey.join(",");
-    setPendingReAuthKeys((prev) => (prev.includes(keyStr) ? prev : [...prev, keyStr]));
+    setPendingReAuthKeys((prev) =>
+      prev.some((key) => key.length === queryKey.length && key.every((part, index) => part === queryKey[index]))
+        ? prev
+        : [...prev, queryKey]
+    );
     setShowReAuthModal(true);
   };
 
