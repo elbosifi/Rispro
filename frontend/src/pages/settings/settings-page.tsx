@@ -58,6 +58,7 @@ import SanteWorklistSection from "./sante-worklist-section";
 import PacsSettingsSection from "./pacs-settings-section";
 import AppointmentSlipSettingsSection from "./appointment-slip-settings-section";
 import PatientQrSettingsSection from "./patient-qr-settings-section";
+import PatientDuplicateResolverSection from "./patient-duplicate-resolver-section";
 import SonicDicomReportsSection from "./sonicdicom-reports-section";
 import type {
   User,
@@ -182,6 +183,7 @@ type SettingsSection =
   | "menu"
   | "patient_registration"
   | "patient_import"
+  | "patient_duplicate_resolver"
   | "scheduling_and_capacity"
   | "queue_and_arrival"
   | "scheduling_engine_config"
@@ -206,6 +208,7 @@ type SettingsSection =
 const SECTION_KEYS: SettingsSection[] = [
   "patient_registration",
   "patient_import",
+  "patient_duplicate_resolver",
   "scheduling_and_capacity",
   "queue_and_arrival",
   "scheduling_engine_config",
@@ -234,6 +237,7 @@ type SettingsGroup = "all" | "clinical" | "scheduling" | "integrations" | "admin
 const SECTION_GROUPS: Record<SettingsMenuSection, Exclude<SettingsGroup, "all">> = {
   patient_registration: "clinical",
   patient_import: "clinical",
+  patient_duplicate_resolver: "clinical",
   exam_types: "clinical",
   modalities: "clinical",
   name_dictionary: "clinical",
@@ -262,6 +266,9 @@ const SETTINGS_MENU_SECTIONS = SECTION_KEYS as SettingsMenuSection[];
 function sectionLabel(_t: (key: TranslationKey, params?: Record<string, string | number>) => string, section: SettingsSection): string {
   if (section === "patient_import") {
     return "Patient Import";
+  }
+  if (section === "patient_duplicate_resolver") {
+    return "Patient Duplicate Resolver";
   }
   if (section === "patient_qr_self_service") {
     return "إعدادات صفحة المريض ورمز QR";
@@ -435,6 +442,7 @@ export default function SettingsPage() {
             {section === "name_dictionary" && <NameDictionarySection onReAuthRequired={requestReAuth} />}
             {section === "appointment_slip" && <AppointmentSlipSettingsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_qr_self_service" && <PatientQrSettingsSection onReAuthRequired={requestReAuth} />}
+            {section === "patient_duplicate_resolver" && <PatientDuplicateResolverSection onReAuthRequired={requestReAuth} />}
             {section === "sonicdicom_reports" && <SonicDicomReportsSection onReAuthRequired={requestReAuth} />}
             {section === "patient_import" && <PatientImportSection onReAuthRequired={requestReAuth} reauthVersion={reauthVersion} />}
             {section === "documents_and_uploads" && <DocumentsStorageSection onReAuthRequired={requestReAuth} />}

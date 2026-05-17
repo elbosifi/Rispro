@@ -1268,8 +1268,17 @@ export async function mergePatients(payload: MergePatientsPayload, updatedByUser
       updatedByUserId
     ]);
     await client.query(`update documents set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update scan_sessions set patient_id = $1, updated_at = now() where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update patient_web_push_booking_subscriptions set patient_id = $1, updated_at = now() where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update patient_notification_events set patient_id = $1, updated_at = now() where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update dicom_remap_jobs set rispro_patient_id = $1, updated_at = now() where rispro_patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update patient_import_staging_rows set matched_existing_patient_id = $1, updated_at = now() where matched_existing_patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update patient_import_staging_rows set migrated_patient_id = $1, updated_at = now() where migrated_patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update scheduling_override_audit_events set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
+    await client.query(`update appointments_v2.override_audit_events set patient_id = $1 where patient_id = $2`, [targetPatientId, sourcePatientId]);
     await client.query(`delete from patient_custom_values where patient_id = $1`, [sourcePatientId]);
     await mergePatientIdentifiers(client, targetPatientId, sourcePatientId, updatedByUserId);
+    await client.query(`delete from patient_duplicate_dismissals where patient_a_id = $1 or patient_b_id = $1`, [sourcePatientId]);
     await client.query(`delete from patients where id = $1`, [sourcePatientId]);
 
     const targetPatient = await client.query<PatientRow>(

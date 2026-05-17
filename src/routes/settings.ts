@@ -65,6 +65,13 @@ import {
 import { testSonicDicomSqlReadiness } from "../services/sonicdicom-report-service.js";
 import { readPageVisibilityMatrix, savePageVisibilityMatrix } from "../services/page-visibility-settings-service.js";
 import { ensurePatientWebPushConfig } from "../services/patient-web-push-service.js";
+import {
+  dismissPatientDuplicateCandidate,
+  getPatientDuplicateDetail,
+  listPatientDuplicateCandidates,
+  mergePatientDuplicateCandidate,
+  safeDeleteDuplicatePatient
+} from "../services/patient-duplicate-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
@@ -79,6 +86,8 @@ interface SettingsRequest {
     examTypeId?: string;
     deviceId?: string;
     batchId?: string;
+    patientAId?: string;
+    patientBId?: string;
   };
 }
 
@@ -174,6 +183,63 @@ settingsRouter.get(
   asyncRoute(async (_req: Request, res: Response) => {
     const settings = await listSettingsCatalog();
     res.json({ settings });
+  })
+);
+
+settingsRouter.get(
+  "/patient-duplicates",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const result = await listPatientDuplicateCandidates();
+    res.json(result);
+  })
+);
+
+settingsRouter.get(
+  "/patient-duplicates/:patientAId/:patientBId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const detail = await getPatientDuplicateDetail(Number(request.params?.patientAId), Number(request.params?.patientBId));
+    res.json(detail);
+  })
+);
+
+settingsRouter.post(
+  "/patient-duplicates/dismiss",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const dismissal = await dismissPatientDuplicateCandidate(
+      Number(body.patientAId),
+      Number(body.patientBId),
+      body.reason,
+      request.user.sub as UserId
+    );
+    res.json({ dismissal });
+  })
+);
+
+settingsRouter.post(
+  "/patient-duplicates/merge",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const patient = await mergePatientDuplicateCandidate(
+      body.targetPatientId as UserId,
+      body.sourcePatientId as UserId,
+      body.confirmationText,
+      request.user.sub as UserId
+    );
+    res.json({ patient });
+  })
+);
+
+settingsRouter.post(
+  "/patient-duplicates/safe-delete",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const result = await safeDeleteDuplicatePatient(Number(body.patientId), body.confirmationText, request.user.sub as UserId);
+    res.json(result);
   })
 );
 

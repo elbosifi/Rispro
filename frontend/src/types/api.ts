@@ -631,6 +631,55 @@ export interface PatientDirectorySummary {
   }>;
 }
 
+export interface PatientDuplicateSummary {
+  id: number;
+  mrn: string | null;
+  nationalId: string | null;
+  identifierType: string | null;
+  identifierValue: string | null;
+  arabicFullName: string;
+  englishFullName: string | null;
+  ageYears: number;
+  dateOfBirth: string | null;
+  sex: string | null;
+  phone1: string | null;
+  phone2: string | null;
+  category: "oncology" | "non_oncology" | null;
+}
+
+export interface PatientDuplicateBlockers {
+  legacyAppointments: number;
+  v2Bookings: number;
+  documents: number;
+  scanSessions: number;
+  patientImportRows: number;
+  dicomRemapJobs: number;
+  webPushRows: number;
+  total: number;
+}
+
+export interface PatientDuplicateCandidate {
+  patientA: PatientDuplicateSummary;
+  patientB: PatientDuplicateSummary;
+  score: number;
+  reasons: string[];
+  canSafeDeleteA: boolean;
+  canSafeDeleteB: boolean;
+  blockersA: PatientDuplicateBlockers;
+  blockersB: PatientDuplicateBlockers;
+}
+
+export interface PatientDuplicateListResponse {
+  candidates: PatientDuplicateCandidate[];
+  threshold: number;
+}
+
+export interface PatientDuplicateDetailResponse {
+  candidate: PatientDuplicateCandidate;
+  summaryA: PatientDirectorySummary;
+  summaryB: PatientDirectorySummary;
+}
+
 export interface PatientIdentifierTypeOption {
   code: string;
   labelAr: string;

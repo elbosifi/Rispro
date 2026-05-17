@@ -27,6 +27,8 @@ import type {
   PatientImportBatch,
   PatientImportStagingRow,
   PatientIdentifierTypeOption,
+  PatientDuplicateDetailResponse,
+  PatientDuplicateListResponse,
   PatientDirectoryResponse,
   PatientDirectorySummary,
   DoctorMe,
@@ -1083,6 +1085,36 @@ export async function mergePatients(targetPatientId: number, sourcePatientId: nu
   return api<{ patient: RawRecord }>("/patients/merge", {
     method: "POST",
     body: JSON.stringify({ targetPatientId, sourcePatientId, confirmationText })
+  });
+}
+
+export async function fetchPatientDuplicateCandidates(): Promise<PatientDuplicateListResponse> {
+  return api<PatientDuplicateListResponse>("/settings/patient-duplicates");
+}
+
+export async function fetchPatientDuplicateDetail(patientAId: number, patientBId: number): Promise<PatientDuplicateDetailResponse> {
+  return api<PatientDuplicateDetailResponse>(`/settings/patient-duplicates/${patientAId}/${patientBId}`);
+}
+
+export async function dismissPatientDuplicate(patientAId: number, patientBId: number, reason: string) {
+  return api<{ dismissal: RawRecord }>("/settings/patient-duplicates/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ patientAId, patientBId, reason })
+  });
+}
+
+export async function mergePatientDuplicate(targetPatientId: number, sourcePatientId: number, confirmationText = "MERGE") {
+  const raw = await api<{ patient: RawRecord }>("/settings/patient-duplicates/merge", {
+    method: "POST",
+    body: JSON.stringify({ targetPatientId, sourcePatientId, confirmationText })
+  });
+  return mapPatient(raw.patient);
+}
+
+export async function safeDeleteDuplicatePatient(patientId: number, confirmationText = "DELETE") {
+  return api<{ ok: boolean }>("/settings/patient-duplicates/safe-delete", {
+    method: "POST",
+    body: JSON.stringify({ patientId, confirmationText })
   });
 }
 
