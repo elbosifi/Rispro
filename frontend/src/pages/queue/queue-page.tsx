@@ -1,12 +1,17 @@
 import { useState, useRef, useCallback, useEffect, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
+import { ExternalLink, RefreshCw, Search, UserRound } from "lucide-react";
 import { fetchQueueSnapshot, scanIntoQueue, addWalkIn, confirmNoShow, cancelAppointment, searchPatients, fetchAppointmentLookups, fetchSettings } from "@/lib/api-hooks";
-import type { QueueSnapshot, Patient } from "@/types/api";
+import type { QueueEntry, QueueSnapshot, Patient } from "@/types/api";
 import { todayIsoDateLy } from "@/lib/date-format";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { Button, Card, Input, Badge, SectionLabel } from "@/components/shared";
+import { PatientDrawer } from "@/components/patients/patient-drawer";
+
+type QueueView = "all" | "entered" | "not_entered" | "walk_in";
 
 export default function QueuePage() {
   const { language, t } = useLanguage();
@@ -15,8 +20,13 @@ export default function QueuePage() {
   const [walkInResults, setWalkInResults] = useState<Patient[]>([]);
   const [selectedWalkIn, setSelectedWalkIn] = useState<Patient | null>(null);
   const [selectedModalityId, setSelectedModalityId] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState<number | null>(null);
+  const [queueSearch, setQueueSearch] = useState("");
+  const [queueView, setQueueView] = useState<QueueView>("all");
+  const [queueModalityId, setQueueModalityId] = useState("");
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   // Fetch modalities for walk-in form
   const { data: lookups } = useQuery({
@@ -68,7 +78,7 @@ export default function QueuePage() {
     };
   }, []);
 
-  const { data: queue } = useQuery<QueueSnapshot>({
+  const { data: queue, dataUpdatedAt, isFetching } = useQuery<QueueSnapshot>({
     queryKey: ["queue"],
     queryFn: fetchQueueSnapshot,
     refetchInterval: 1000 * 10
@@ -177,19 +187,57 @@ export default function QueuePage() {
     if (!window.confirm(t("common.confirmCancelAppointment"))) return;
     cancelMutation.mutate({ appointmentId });
   };
-  const enteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled") ?? [];
-  const notEnteredQueueEntries = queue?.queueEntries.filter((entry) => entry.appointmentStatus === "scheduled") ?? [];
+  const normalizeText = (value: unknown) => String(value ?? "").trim().toLowerCase();
+  const modalityKey = (nameAr: unknown, nameEn: unknown) => `${normalizeText(nameAr)}|${normalizeText(nameEn)}`;
+  const queueSearchTerm = normalizeText(queueSearch);
+  const filteredQueueEntries = (queue?.queueEntries ?? []).filter((entry) => {
+    if (queueView === "entered" && entry.appointmentStatus === "scheduled") return false;
+    if (queueView === "not_entered" && entry.appointmentStatus !== "scheduled") return false;
+    if (queueView === "walk_in" && !entry.isWalkIn) return false;
+    if (queueModalityId && modalityKey(entry.modalityNameAr, entry.modalityNameEn) !== queueModalityId) return false;
+    if (!queueSearchTerm) return true;
+
+    return [
+      entry.accessionNumber,
+      entry.queueNumber,
+      entry.arabicFullName,
+      entry.englishFullName,
+      entry.phone1,
+      entry.nationalId,
+      entry.modalityNameAr,
+      entry.modalityNameEn,
+      entry.examNameAr,
+      entry.examNameEn,
+      entry.notes,
+    ].some((value) => normalizeText(value).includes(queueSearchTerm));
+  });
+  const enteredQueueEntries = filteredQueueEntries.filter((entry) => entry.appointmentStatus !== "scheduled");
+  const notEnteredQueueEntries = filteredQueueEntries.filter((entry) => entry.appointmentStatus === "scheduled");
+  const queueEntries = queue?.queueEntries ?? [];
+  const enteredCount = queueEntries.filter((entry) => entry.appointmentStatus !== "scheduled").length;
+  const notEnteredCount = queueEntries.filter((entry) => entry.appointmentStatus === "scheduled").length;
+  const walkInCount = queueEntries.filter((entry) => entry.isWalkIn).length;
+  const lastUpdatedLabel = dataUpdatedAt
+    ? new Date(dataUpdatedAt).toLocaleTimeString(language === "ar" ? "ar-LY" : "en", { hour: "2-digit", minute: "2-digit" })
+    : t("queue.lastUpdatedUnknown");
   const enteredQueueLabel = language === "ar" ? "دخلوا إلى قائمة الإنتظار" : "Entered Queue";
   const notEnteredQueueLabel = language === "ar" ? "المريض لم يصل بعد" : "Not Entered Yet";
   const scheduledLabel = language === "ar" ? "مجدول" : "Scheduled";
   const walkInLabel = language === "ar" ? "دخول مباشر" : "Walk-in";
+  const openRegistration = (entry: QueueEntry) => {
+    navigate(`/registrations?appointmentId=${entry.appointmentId}&patientId=${entry.patientId}`);
+  };
   const renderQueueEntry = (entry: QueueSnapshot["queueEntries"][number], inQueue: boolean) => (
     <li key={entry.id} className="p-4 flex flex-col gap-3 hover:bg-muted/50 transition-colors">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
         <div>
-          <p className="font-medium text-lg">
+          <button
+            type="button"
+            className="text-start font-medium text-lg underline-offset-2 hover:text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent/30"
+            onClick={() => setSelectedPatientId(entry.patientId)}
+          >
             {chooseLocalized(language, entry.arabicFullName, entry.englishFullName)}
-          </p>
+          </button>
           <p className="text-sm text-muted-foreground font-mono">#{entry.queueNumber} - {entry.accessionNumber}</p>
           <p className="text-sm text-muted-foreground">
             {chooseLocalized(language, entry.modalityNameAr, entry.modalityNameEn)}
@@ -208,6 +256,22 @@ export default function QueuePage() {
             {inQueue ? entry.queueStatus : scheduledLabel}
           </Badge>
           {entry.isWalkIn && <Badge size="sm">{walkInLabel}</Badge>}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={() => openRegistration(entry)}
+          >
+            <ExternalLink size={14} />
+            {t("queue.manageRegistration")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setSelectedPatientId(entry.patientId)}
+          >
+            <UserRound size={14} />
+            {t("queue.patientProfile")}
+          </Button>
           {!inQueue && (
             <Button
               size="sm"
@@ -259,6 +323,13 @@ export default function QueuePage() {
             </p>
           </div>
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+        <QueueStat label={t("queue.totalAppointments")} value={queue?.summary.total_appointments ?? queueEntries.length} />
+        <QueueStat label={enteredQueueLabel} value={enteredCount} tone="amber" />
+        <QueueStat label={notEnteredQueueLabel} value={notEnteredCount} />
+        <QueueStat label={walkInLabel} value={walkInCount} tone="sky" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -359,6 +430,85 @@ export default function QueuePage() {
          </div>
 
          <div className="lg:col-span-2">
+           <Card className="mb-4 p-3 sm:p-4">
+             <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+               <div className="grid flex-1 grid-cols-1 gap-2 md:grid-cols-3">
+                 <label className="space-y-1">
+                   <span className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                     <Search size={12} />
+                     {t("queue.searchQueue")}
+                   </span>
+                   <Input
+                     value={queueSearch}
+                     onChange={(event) => setQueueSearch(event.target.value)}
+                     placeholder={t("queue.searchQueuePlaceholder")}
+                     className="h-10"
+                   />
+                 </label>
+                 <label className="space-y-1">
+                   <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                     {t("queue.view")}
+                   </span>
+                   <select
+                     value={queueView}
+                     onChange={(event) => setQueueView(event.target.value as QueueView)}
+                     className="input-premium h-10 w-full"
+                   >
+                     <option value="all">{t("queue.viewAll")}</option>
+                     <option value="entered">{enteredQueueLabel}</option>
+                     <option value="not_entered">{notEnteredQueueLabel}</option>
+                     <option value="walk_in">{walkInLabel}</option>
+                   </select>
+                 </label>
+                 <label className="space-y-1">
+                   <span className="text-[10px] font-mono uppercase tracking-[0.12em] text-muted-foreground">
+                     {t("queue.modality")}
+                   </span>
+                   <select
+                     value={queueModalityId}
+                     onChange={(event) => setQueueModalityId(event.target.value)}
+                     className="input-premium h-10 w-full"
+                   >
+                     <option value="">{t("registrations.all")}</option>
+                     {modalities.map((modality) => (
+                       <option key={modality.id} value={modalityKey(modality.nameAr, modality.nameEn)}>
+                         {chooseLocalized(language, modality.nameAr, modality.nameEn)}
+                       </option>
+                     ))}
+                   </select>
+                 </label>
+               </div>
+               <div className="flex flex-wrap items-center gap-2">
+                 <span className="text-xs text-muted-foreground">
+                   {t("queue.lastUpdated")}: {lastUpdatedLabel}
+                 </span>
+                 <Button
+                   type="button"
+                   variant="secondary"
+                   size="sm"
+                   onClick={() => void queryClient.invalidateQueries({ queryKey: ["queue"] })}
+                   disabled={isFetching}
+                 >
+                   <RefreshCw size={14} className={isFetching ? "animate-spin" : undefined} />
+                   {t("queue.refresh")}
+                 </Button>
+                 {(queueSearch || queueView !== "all" || queueModalityId) && (
+                   <Button
+                     type="button"
+                     variant="ghost"
+                     size="sm"
+                     onClick={() => {
+                       setQueueSearch("");
+                       setQueueView("all");
+                       setQueueModalityId("");
+                     }}
+                   >
+                     {t("calendar.clearFilters")}
+                   </Button>
+                 )}
+               </div>
+             </div>
+           </Card>
            <Card className="overflow-hidden mb-4">
              <div className="p-4 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                <h3 className="text-lg sm:text-xl font-semibold">{t("queue.todayQueue")} - {enteredQueueLabel}</h3>
@@ -392,6 +542,33 @@ export default function QueuePage() {
            </Card>
          </div>
        </div>
+      {selectedPatientId ? (
+        <PatientDrawer patientId={selectedPatientId} onClose={() => setSelectedPatientId(null)} />
+      ) : null}
      </div>
+  );
+}
+
+function QueueStat({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: number;
+  tone?: "neutral" | "amber" | "sky";
+}) {
+  const toneClass =
+    tone === "amber"
+      ? "border-amber-200 bg-amber-50 text-amber-700"
+      : tone === "sky"
+        ? "border-sky-200 bg-sky-50 text-sky-700"
+        : "border-border bg-muted/30 text-foreground";
+
+  return (
+    <div className={`rounded-xl border p-3 ${toneClass}`}>
+      <p className="text-[10px] font-mono uppercase tracking-[0.12em] opacity-75">{label}</p>
+      <p className="mt-1 text-xl font-semibold">{value}</p>
+    </div>
   );
 }
