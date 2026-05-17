@@ -50,6 +50,19 @@ const createRosterTemplateMock = vi.fn();
 const applyRosterTemplateMock = vi.fn();
 const generateDoctorRosterDraftMock = vi.fn();
 const notifyDoctorRosterWeekMock = vi.fn();
+const fetchDoctorProfilesForAdminMock = vi.fn();
+const fetchUsersMock = vi.fn();
+const fetchDoctorProfileModalitiesMock = vi.fn();
+const createDoctorWithUserForAdminMock = vi.fn();
+const createDoctorProfileForAdminMock = vi.fn();
+const updateDoctorProfileForAdminMock = vi.fn();
+const updateDoctorProfileModalitiesMock = vi.fn();
+const resetDoctorUserTemporaryPasswordMock = vi.fn();
+const forceDoctorUserPasswordChangeMock = vi.fn();
+const setDoctorUserActiveMock = vi.fn();
+const inspectDoctorImportMock = vi.fn();
+const previewDoctorImportMock = vi.fn();
+const confirmDoctorImportMock = vi.fn();
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchDoctorMe: () => fetchDoctorMeMock(),
@@ -96,6 +109,19 @@ vi.mock("@/lib/api-hooks", () => ({
   applyRosterTemplate: (...args: unknown[]) => applyRosterTemplateMock(...args),
   generateDoctorRosterDraft: (...args: unknown[]) => generateDoctorRosterDraftMock(...args),
   notifyDoctorRosterWeek: (...args: unknown[]) => notifyDoctorRosterWeekMock(...args),
+  fetchDoctorProfilesForAdmin: (...args: unknown[]) => fetchDoctorProfilesForAdminMock(...args),
+  fetchUsers: (...args: unknown[]) => fetchUsersMock(...args),
+  fetchDoctorProfileModalities: (...args: unknown[]) => fetchDoctorProfileModalitiesMock(...args),
+  createDoctorWithUserForAdmin: (...args: unknown[]) => createDoctorWithUserForAdminMock(...args),
+  createDoctorProfileForAdmin: (...args: unknown[]) => createDoctorProfileForAdminMock(...args),
+  updateDoctorProfileForAdmin: (...args: unknown[]) => updateDoctorProfileForAdminMock(...args),
+  updateDoctorProfileModalities: (...args: unknown[]) => updateDoctorProfileModalitiesMock(...args),
+  resetDoctorUserTemporaryPassword: (...args: unknown[]) => resetDoctorUserTemporaryPasswordMock(...args),
+  forceDoctorUserPasswordChange: (...args: unknown[]) => forceDoctorUserPasswordChangeMock(...args),
+  setDoctorUserActive: (...args: unknown[]) => setDoctorUserActiveMock(...args),
+  inspectDoctorImport: (...args: unknown[]) => inspectDoctorImportMock(...args),
+  previewDoctorImport: (...args: unknown[]) => previewDoctorImportMock(...args),
+  confirmDoctorImport: (...args: unknown[]) => confirmDoctorImportMock(...args),
   createDoctorRosterWeek: vi.fn(),
   copyPreviousDoctorRosterWeek: vi.fn(),
   publishDoctorRosterWeek: vi.fn(),
@@ -199,6 +225,19 @@ describe("Doctor Portal shell", () => {
     applyRosterTemplateMock.mockReset();
     generateDoctorRosterDraftMock.mockReset();
     notifyDoctorRosterWeekMock.mockReset();
+    fetchDoctorProfilesForAdminMock.mockReset();
+    fetchUsersMock.mockReset();
+    fetchDoctorProfileModalitiesMock.mockReset();
+    createDoctorWithUserForAdminMock.mockReset();
+    createDoctorProfileForAdminMock.mockReset();
+    updateDoctorProfileForAdminMock.mockReset();
+    updateDoctorProfileModalitiesMock.mockReset();
+    resetDoctorUserTemporaryPasswordMock.mockReset();
+    forceDoctorUserPasswordChangeMock.mockReset();
+    setDoctorUserActiveMock.mockReset();
+    inspectDoctorImportMock.mockReset();
+    previewDoctorImportMock.mockReset();
+    confirmDoctorImportMock.mockReset();
     fetchMyDoctorRosterMock.mockResolvedValue({ week: null, assignments: [] });
     fetchDoctorRosterWeekMock.mockResolvedValue({ week: null, assignments: [] });
     fetchAppointmentLookupsMock.mockResolvedValue({ modalities: [], examTypes: [] });
@@ -315,6 +354,28 @@ describe("Doctor Portal shell", () => {
       warnings: [],
     });
     notifyDoctorRosterWeekMock.mockResolvedValue({ createdCount: 1, alreadyExistingCount: 0, notifications: [] });
+    fetchDoctorProfilesForAdminMock.mockResolvedValue([]);
+    fetchUsersMock.mockResolvedValue({ users: [] });
+    fetchDoctorProfileModalitiesMock.mockResolvedValue([]);
+    createDoctorWithUserForAdminMock.mockResolvedValue({ user: {}, profile: {}, modalities: [] });
+    createDoctorProfileForAdminMock.mockResolvedValue({});
+    updateDoctorProfileForAdminMock.mockResolvedValue({});
+    updateDoctorProfileModalitiesMock.mockResolvedValue([]);
+    resetDoctorUserTemporaryPasswordMock.mockResolvedValue({});
+    forceDoctorUserPasswordChangeMock.mockResolvedValue({});
+    setDoctorUserActiveMock.mockResolvedValue({});
+    inspectDoctorImportMock.mockResolvedValue({ workbook: { format: "csv", columns: [], requiredColumns: [], rowCount: 0, missingColumns: [] } });
+    previewDoctorImportMock.mockResolvedValue({ rows: [], canConfirm: false });
+    confirmDoctorImportMock.mockResolvedValue({
+      createdUsers: 0,
+      updatedUsers: 0,
+      createdProfiles: 0,
+      updatedProfiles: 0,
+      disabledProfiles: 0,
+      modalityPermissionsUpdated: 0,
+      skippedRows: 0,
+      failedRows: [],
+    });
   });
 
   it("allows an active doctor to access /doctor", async () => {
@@ -393,6 +454,10 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("link", { name: /Team Workload/i }).getAttribute("href")).toBe("/doctor/team-workload");
     expect(screen.getByRole("link", { name: /Roster advanced tools/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /Doctor import\/export/i })).toBeTruthy();
+    expect(screen.getByText("Doctor CSV/XLSX import and export")).toBeTruthy();
+    expect(screen.getByText("Download CSV template")).toBeTruthy();
+    expect(screen.getByText("Export CSV")).toBeTruthy();
+    expect(screen.getByText("Import CSV/XLSX")).toBeTruthy();
   });
 
   it("normal doctors do not see admin-only Advanced Setup cards", async () => {

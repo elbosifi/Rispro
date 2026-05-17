@@ -129,6 +129,7 @@ function ShortcutCard({ title, body, to }: { title: string; body: string; to: st
 function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
   const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
   const canManageRoster = canManageClinicalRoster(me);
+  const canManageDoctors = canAccessDoctorAdmin(me);
   const canAccessManagementSetup = canManageClinicalRoster(me) || canAccessDoctorAdmin(me);
 
   return (
@@ -149,6 +150,7 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
         </section>
       )}
       {canManageRoster && <DoctorRosterPage me={me} management advanced />}
+      {canManageDoctors && <DoctorAdminDoctorsPage me={me} advanced />}
     </div>
   );
 }

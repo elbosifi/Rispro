@@ -77,11 +77,11 @@ const profiles: DoctorProfile[] = [
   },
 ];
 
-function renderPage(me: DoctorMe = adminMe) {
+function renderPage(me: DoctorMe = adminMe, options: { advanced?: boolean } = {}) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <DoctorAdminDoctorsPage me={me} />
+      <DoctorAdminDoctorsPage me={me} advanced={options.advanced} />
     </QueryClientProvider>
   );
 }
@@ -121,6 +121,33 @@ describe("DoctorAdminDoctorsPage", () => {
       userActive: true,
       modalityPermissions: [{ modalityId: 5, active: true }],
     });
+  });
+
+  it("hides doctor import and export controls in the default directory", async () => {
+    renderPage();
+
+    expect(await screen.findByText("Create Doctor")).toBeTruthy();
+    expect(screen.queryByText("Doctor CSV/XLSX import and export")).toBeNull();
+    expect(screen.queryByText("Download CSV template")).toBeNull();
+    expect(screen.queryByText("Download XLSX template")).toBeNull();
+    expect(screen.queryByText("Export CSV")).toBeNull();
+    expect(screen.queryByText("Export XLSX")).toBeNull();
+    expect(screen.queryByText("Import CSV/XLSX")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview import" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm import" })).toBeNull();
+  });
+
+  it("shows doctor import and export controls in advanced mode", async () => {
+    renderPage(adminMe, { advanced: true });
+
+    expect(await screen.findByText("Doctor CSV/XLSX import and export")).toBeTruthy();
+    expect(screen.getByText("Download CSV template")).toBeTruthy();
+    expect(screen.getByText("Download XLSX template")).toBeTruthy();
+    expect(screen.getByText("Export CSV")).toBeTruthy();
+    expect(screen.getByText("Export XLSX")).toBeTruthy();
+    expect(screen.getByText("Import CSV/XLSX")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Preview import" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Confirm import" })).toBeTruthy();
   });
 
   it("opens the edit form and saves role and capability changes", async () => {

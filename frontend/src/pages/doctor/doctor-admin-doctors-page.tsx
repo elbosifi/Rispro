@@ -78,7 +78,7 @@ function statusLabel(profile?: DoctorProfile): string {
   return profile.active ? "Doctor profile active" : "Doctor profile inactive";
 }
 
-export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
+export function DoctorAdminDoctorsPage({ me, advanced = false }: { me: DoctorMe; advanced?: boolean }) {
   const queryClient = useQueryClient();
   const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null);
   const [importFileBase64, setImportFileBase64] = useState("");
@@ -366,41 +366,47 @@ export function DoctorAdminDoctorsPage({ me }: { me: DoctorMe }) {
         </div>
       </section>
 
-      <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <a href="/api/doctor/admin/doctors/import/template?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download CSV template</a>
-          <a href="/api/doctor/admin/doctors/import/template?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download XLSX template</a>
-          <a href="/api/doctor/admin/doctors/export?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export CSV</a>
-          <a href="/api/doctor/admin/doctors/export?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export XLSX</a>
-          <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
-            Import CSV/XLSX
-            <input type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void readImportFile(file);
-            }} />
-          </label>
-          <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importPayload())} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview import</button>
-          <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importPayload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
-        </div>
-        {importInspect && (
-          <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
-            {importInspect.format.toUpperCase()} file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
-          </p>
-        )}
-        {importPreview && (
-          <div className="mb-3 max-h-56 overflow-auto rounded-lg border p-2 text-xs" style={{ borderColor: "var(--border)" }}>
-            {importPreview.rows.slice(0, 20).map((row) => (
-              <p key={row.rowNumber} className={row.errors.length ? "text-red-600" : ""}>
-                Row {row.rowNumber}: {row.action}{row.errors.length ? ` - ${row.errors.join("; ")}` : ""}
-              </p>
-            ))}
+      {advanced && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <h3 className="mb-3 font-semibold">Doctor CSV/XLSX import and export</h3>
+          <div className="mb-4 flex flex-wrap gap-2">
+            <a href="/api/doctor/admin/doctors/import/template?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download CSV template</a>
+            <a href="/api/doctor/admin/doctors/import/template?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Download XLSX template</a>
+            <a href="/api/doctor/admin/doctors/export?format=csv" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export CSV</a>
+            <a href="/api/doctor/admin/doctors/export?format=xlsx" className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>Export XLSX</a>
+            <label className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+              Import CSV/XLSX
+              <input type="file" accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void readImportFile(file);
+              }} />
+            </label>
+            <button type="button" disabled={!importFileBase64 || previewMutation.isPending} onClick={() => previewMutation.mutate(importPayload())} className="rounded-lg border px-3 py-2 text-sm font-semibold disabled:opacity-50" style={{ borderColor: "var(--border)" }}>Preview import</button>
+            <button type="button" disabled={!importPreview?.canConfirm || confirmMutation.isPending} onClick={() => confirmMutation.mutate(importPayload())} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Confirm import</button>
           </div>
-        )}
-        {importResult && (
-          <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
-            Import complete: {importResult.createdUsers} users created, {importResult.updatedUsers} users updated, {importResult.createdProfiles} profiles created, {importResult.updatedProfiles} profiles updated.
-          </p>
-        )}
+          {importInspect && (
+            <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
+              {importInspect.format.toUpperCase()} file: {importInspect.rowCount} rows, {importInspect.columns.length} columns. Missing: {importInspect.missingColumns.join(", ") || "none"}.
+            </p>
+          )}
+          {importPreview && (
+            <div className="mb-3 max-h-56 overflow-auto rounded-lg border p-2 text-xs" style={{ borderColor: "var(--border)" }}>
+              {importPreview.rows.slice(0, 20).map((row) => (
+                <p key={row.rowNumber} className={row.errors.length ? "text-red-600" : ""}>
+                  Row {row.rowNumber}: {row.action}{row.errors.length ? ` - ${row.errors.join("; ")}` : ""}
+                </p>
+              ))}
+            </div>
+          )}
+          {importResult && (
+            <p className="mb-3 text-sm" style={{ color: "var(--text-muted)" }}>
+              Import complete: {importResult.createdUsers} users created, {importResult.updatedUsers} users updated, {importResult.createdProfiles} profiles created, {importResult.updatedProfiles} profiles updated.
+            </p>
+          )}
+        </section>
+      )}
+
+      <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
         <h3 className="font-semibold">Create doctor profile for existing user</h3>
         <div className="mt-3 grid gap-2 md:grid-cols-4">
           <select value={draft.userId} onChange={(event) => {
