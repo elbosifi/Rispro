@@ -72,9 +72,6 @@ const BUILTIN_IDENTIFIER_TYPES: PatientIdentifierTypeOption[] = [
   { code: "other", labelAr: "أخرى", labelEn: "Other" }
 ];
 
-const PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
-  "Primary identifier is required. Enter a National ID, passport number, or other identifier before saving this patient.";
-
 type FormFieldKey =
   | "arabicFullName"
   | "englishFullName"
@@ -284,7 +281,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       onSuccess?.(patient);
     },
     onError: (err: any) => {
-      showToast(err?.message || (language === "ar" ? "تعذر تسجيل المريض" : "Could not register patient"), "error");
+      const message = err?.message?.startsWith("Primary identifier is required.")
+        ? t("patients.primaryIdentifierRequired")
+        : err?.message || t("patients.registerFailed");
+      showToast(message, "error");
     }
   });
   const updateMutation = useMutation({
@@ -295,7 +295,10 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       onSuccess?.(patient);
     },
     onError: (err: any) => {
-      showToast(err?.message || (language === "ar" ? "تعذر تحديث المريض" : "Could not update patient"), "error");
+      const message = err?.message?.startsWith("Primary identifier is required.")
+        ? t("patients.primaryIdentifierRequired")
+        : err?.message || t("patients.updateFailed");
+      showToast(message, "error");
     }
   });
   const deleteMutation = useMutation({
@@ -572,7 +575,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       return;
     }
     if (patientRegistrationSettings?.national_id_required === "required" && !form.identifierValue.trim()) {
-      showToast(PATIENT_IDENTIFIER_REQUIRED_MESSAGE, "error");
+      showToast(t("patients.primaryIdentifierRequired"), "error");
       identifierValueRef.current?.focus();
       return;
     }

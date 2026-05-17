@@ -34,9 +34,6 @@ interface Patient {
   phone?: string | null;
 }
 
-const BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
-  "This patient cannot be booked because they do not have a primary identifier. Open the patient record and add a National ID, passport number, or other identifier.";
-
 interface BookingFormProps {
   modalities: ModalityDto[];
   availability: AvailabilityDayDto[];
@@ -121,7 +118,7 @@ export function BookingForm({
       pushToast({
         type: "error",
         title: t(language, "appointments.booking.bookingFailed"),
-        message: BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
+        message: t(language, "appointments.booking.patientIdentifierRequired"),
       });
       return;
     }

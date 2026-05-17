@@ -44,9 +44,6 @@ function describeReason(code: string): string {
   return map[code] ?? code;
 }
 
-const BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
-  "This patient cannot be booked because they do not have a primary identifier. Open the patient record and add a National ID, passport number, or other identifier.";
-
 function formatDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
   return d.toLocaleDateString("en-LY", { weekday: "short", month: "short", day: "numeric" });
@@ -556,7 +553,7 @@ function BookingsList({
       currentUserRole !== "super_admin" &&
       !String(rescheduleTarget.patientIdentifierValue || rescheduleTarget.patientNationalId || "").trim()
     ) {
-      setRescheduleError(BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
+      setRescheduleError(t(language, "appointments.booking.patientIdentifierRequired"));
       return;
     }
     setReschedulePendingBookingId(rescheduleTarget.id);

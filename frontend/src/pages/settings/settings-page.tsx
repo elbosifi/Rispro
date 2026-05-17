@@ -1879,7 +1879,7 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "age_required", label: "العمر مطلوب" },
     { value: "dob_required", label: "تاريخ الميلاد مطلوب" }
   ]},
-  national_id_required: { label: "Identifier Required / المعرف مطلوب", type: "dropdown", options: [
+  national_id_required: { label: "", type: "dropdown", options: [
     { value: "required", label: "مطلوب" },
     { value: "optional", label: "اختياري" }
   ]},
@@ -1957,6 +1957,9 @@ function inferSettingControl(key: string, value: any): SettingControl {
 function friendlySettingLabel(category: string, key: string, t: (key: TranslationKey, params?: Record<string, string | number>) => string): string {
   if (category === "patient_registration" && key === "mrn_prefix") {
     return t("settings.patientRegistration.mrnPrefix");
+  }
+  if (category === "patient_registration" && key === "national_id_required") {
+    return t("settings.patientRegistration.identifierRequired");
   }
   return key.replace(/_/g, " ");
 }
