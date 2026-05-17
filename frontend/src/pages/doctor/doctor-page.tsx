@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -126,11 +126,41 @@ function ShortcutCard({ title, body, to }: { title: string; body: string; to: st
   );
 }
 
+function SetupSectionButton({
+  title,
+  body,
+  active,
+  onClick,
+}: {
+  title: string;
+  body: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-lg border p-4 text-left transition hover:border-teal-600"
+      style={{
+        backgroundColor: active ? "color-mix(in srgb, var(--accent) 8%, var(--card))" : "var(--card)",
+        borderColor: active ? "var(--accent)" : "var(--border)",
+      }}
+    >
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-2 text-sm leading-5" style={{ color: "var(--text-muted)" }}>
+        {body}
+      </p>
+    </button>
+  );
+}
+
 function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
   const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
   const canManageRoster = canManageClinicalRoster(me);
   const canManageDoctors = canAccessDoctorAdmin(me);
   const canAccessManagementSetup = canManageClinicalRoster(me) || canAccessDoctorAdmin(me);
+  const [selectedSection, setSelectedSection] = useState<"roster" | "doctors" | null>(null);
 
   return (
     <div className="space-y-4">
@@ -142,15 +172,35 @@ function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
       </div>
       {canAccessManagementSetup && (
         <section className="grid gap-3 md:grid-cols-3">
-          {canAccessClinical && (
-            <ShortcutCard title="Team Workload" body="Open workload summaries and catalog tools." to="/doctor/team-workload" />
+          {canManageRoster && (
+            <SetupSectionButton
+              title="Roster setup"
+              body="Duty types, ABC mappings, XML import, templates, draft generation, exports, and notifications."
+              active={selectedSection === "roster"}
+              onClick={() => setSelectedSection("roster")}
+            />
           )}
-          <ShortcutCard title="Roster advanced tools" body="Manage duty types, mappings, imports, templates, exports, and notifications." to="/doctor/advanced-setup" />
-          <ShortcutCard title="Doctor import/export" body="CSV/XLSX import and export tools will be moved here in next step." to="/doctor/doctors-directory" />
+          {canManageDoctors && (
+            <SetupSectionButton
+              title="Doctor import/export"
+              body="Download templates, export doctors, import CSV/XLSX, preview rows, and confirm imports."
+              active={selectedSection === "doctors"}
+              onClick={() => setSelectedSection("doctors")}
+            />
+          )}
+          {canAccessClinical && (
+            <ShortcutCard title="Workload setup" body="Open team workload summaries and workload catalog tools." to="/doctor/team-workload" />
+          )}
         </section>
       )}
-      {canManageRoster && <DoctorRosterPage me={me} management advanced />}
-      {canManageDoctors && <DoctorAdminDoctorsPage me={me} advanced />}
+      {!selectedSection && (
+        <PlaceholderPanel
+          title="Choose a setup area"
+          body="Select one of the setup cards above to open low-frequency roster or doctor import/export tools."
+        />
+      )}
+      {selectedSection === "roster" && canManageRoster && <DoctorRosterPage me={me} management advanced />}
+      {selectedSection === "doctors" && canManageDoctors && <DoctorAdminDoctorsPage me={me} advanced />}
     </div>
   );
 }

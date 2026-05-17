@@ -440,7 +440,7 @@ describe("Doctor Portal shell", () => {
     expect(screen.getByRole("link", { name: /My Cases/i }).getAttribute("href")).toBe("/doctor/today-cases");
   });
 
-  it("Advanced Setup shows Team Workload link for supervisors and admins", async () => {
+  it("Advanced Setup landing shows setup cards for supervisors and admins", async () => {
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,
       canSupervise: true,
@@ -451,12 +451,28 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/advanced-setup");
 
     expect(await screen.findByRole("heading", { name: "Advanced Setup" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Team Workload/i }).getAttribute("href")).toBe("/doctor/team-workload");
-    expect(screen.getByRole("link", { name: /Roster advanced tools/i })).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Doctor import\/export/i })).toBeTruthy();
-    expect(screen.getByText("Doctor CSV/XLSX import and export")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Roster setup/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Doctor import\/export/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Workload setup/i }).getAttribute("href")).toBe("/doctor/team-workload");
+    expect(screen.queryByText("Doctor CSV/XLSX import and export")).toBeNull();
+  });
+
+  it("Advanced Setup exposes doctor import/export after selecting Doctor import/export", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      canAccessDoctorAdmin: true,
+      canManageDoctorProfiles: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor", "doctor_admin"],
+    });
+    renderDoctorPortal("/doctor/advanced-setup");
+
+    fireEvent.click(await screen.findByRole("button", { name: /Doctor import\/export/i }));
+    expect(await screen.findByText("Doctor CSV/XLSX import and export")).toBeTruthy();
     expect(screen.getByText("Download CSV template")).toBeTruthy();
+    expect(screen.getByText("Download XLSX template")).toBeTruthy();
     expect(screen.getByText("Export CSV")).toBeTruthy();
+    expect(screen.getByText("Export XLSX")).toBeTruthy();
     expect(screen.getByText("Import CSV/XLSX")).toBeTruthy();
   });
 
@@ -465,9 +481,9 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/advanced-setup");
 
     expect(await screen.findByText("Dr Normal")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Team Workload/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Roster advanced tools/i })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Doctor import\/export/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Workload setup/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Roster setup/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Doctor import\/export/i })).toBeNull();
   });
 
   it("lets profileless admins manage doctors without clinical navigation", async () => {
@@ -782,6 +798,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/advanced-setup");
 
+    fireEvent.click(await screen.findByRole("button", { name: /Roster setup/i }));
     expect(await screen.findByText("Roster templates")).toBeTruthy();
     expect(await screen.findByText("No roster templates yet.")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Apply template/i })).toBeTruthy();
@@ -819,6 +836,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/advanced-setup");
 
+    fireEvent.click(await screen.findByRole("button", { name: /Roster setup/i }));
     expect(await screen.findByRole("button", { name: /Create template/i })).toBeTruthy();
     expect(screen.getByText("Roster duty types")).toBeTruthy();
     expect(screen.getByText("ABC shift mappings")).toBeTruthy();
@@ -844,6 +862,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/advanced-setup");
 
+    fireEvent.click(await screen.findByRole("button", { name: /Roster setup/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Generate draft roster/i }));
 
     await waitFor(() => {
@@ -874,6 +893,7 @@ describe("Doctor Portal shell", () => {
     });
     renderDoctorPortal("/doctor/advanced-setup");
 
+    fireEvent.click(await screen.findByRole("button", { name: /Roster setup/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Notify assigned doctors/i }));
 
     await waitFor(() => {
