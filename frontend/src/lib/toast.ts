@@ -15,7 +15,7 @@ export interface ToastItem {
   action?: ToastAction;
 }
 
-type ToastInput = Omit<ToastItem, "id">;
+type ToastInput = Omit<ToastItem, "id" | "message"> & { message?: string };
 
 const listeners = new Set<() => void>();
 let toasts: ToastItem[] = [];
@@ -28,7 +28,7 @@ function emit() {
 }
 
 export function pushToast(input: ToastInput, ttlMs = 5000) {
-  const toast: ToastItem = { ...input, id: nextId++ };
+  const toast: ToastItem = { ...input, message: input.message ?? "", id: nextId++ };
   toasts = [toast, ...toasts].slice(0, 4);
   emit();
 
