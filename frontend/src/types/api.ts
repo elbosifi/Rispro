@@ -741,9 +741,24 @@ export interface QueueSnapshot {
   queueDate: string;
   reviewTime: string;
   reviewActive: boolean;
+  noShowConfirmationRequired?: boolean;
+  autoNoShowCount?: number;
+  autoNoShowCleanupDays?: number;
   summary: QueueSummary;
   queueEntries: QueueEntry[];
   noShowCandidates: {
+    appointmentId: number;
+    accessionNumber: string;
+    appointmentDate: string;
+    notes?: string | null;
+    patientId: number;
+    arabicFullName: string;
+    englishFullName?: string | null;
+    phone1?: string | null;
+    modalityNameAr: string;
+    modalityNameEn: string;
+  }[];
+  oldNoShowCandidates: {
     appointmentId: number;
     accessionNumber: string;
     appointmentDate: string;

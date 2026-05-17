@@ -2312,6 +2312,13 @@ export async function updateAppointmentStatus(
   });
 }
 
+export async function confirmAllOldNoShows(reason: string) {
+  return api<{ ok: true; markedIds: number[]; count: number }>("/v2/read/queue/old-no-shows/confirm-all", {
+    method: "POST",
+    body: JSON.stringify({ reason })
+  });
+}
+
 // -- Modality --
 export async function fetchModalityWorklist(modalityId: string, date: string, scope: string) {
   const params = new URLSearchParams();

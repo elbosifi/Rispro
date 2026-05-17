@@ -322,6 +322,9 @@ export function mapQueueSnapshot(raw: RawRecord): QueueSnapshot {
     queueDate: str(raw, 'queue_date') || str(raw, 'queueDate'),
     reviewTime: str(raw, 'review_time') || str(raw, 'reviewTime'),
     reviewActive: bool(raw, 'review_active', bool(raw, 'reviewActive', false)),
+    noShowConfirmationRequired: bool(raw, 'no_show_confirmation_required', bool(raw, 'noShowConfirmationRequired', true)),
+    autoNoShowCount: num(raw, 'auto_no_show_count') || num(raw, 'autoNoShowCount'),
+    autoNoShowCleanupDays: num(raw, 'auto_no_show_cleanup_days') || num(raw, 'autoNoShowCleanupDays'),
     summary: {
       total_appointments: num(summary, 'total_appointments') || num(summary, 'totalAppointments'),
       scheduled_count: num(summary, 'scheduled_count') || num(summary, 'scheduledCount'),
@@ -334,7 +337,10 @@ export function mapQueueSnapshot(raw: RawRecord): QueueSnapshot {
       : rawArray(raw, 'queueEntries').map(mapQueueEntry),
     noShowCandidates: rawArray(raw, 'no_show_candidates').length > 0
       ? rawArray(raw, 'no_show_candidates').map(mapNoShowCandidate)
-      : rawArray(raw, 'noShowCandidates').map(mapNoShowCandidate)
+      : rawArray(raw, 'noShowCandidates').map(mapNoShowCandidate),
+    oldNoShowCandidates: rawArray(raw, 'old_no_show_candidates').length > 0
+      ? rawArray(raw, 'old_no_show_candidates').map(mapNoShowCandidate)
+      : rawArray(raw, 'oldNoShowCandidates').map(mapNoShowCandidate)
   };
 }
 

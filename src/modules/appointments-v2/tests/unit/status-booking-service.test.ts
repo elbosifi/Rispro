@@ -26,13 +26,13 @@ describe("status booking service source guards", () => {
     assert.doesNotMatch(source, /status in \('scheduled', 'arrived', 'waiting'\)/);
   });
 
-  it("cleanup only targets older scheduled bookings", () => {
+  it("bulk cleanup only targets older scheduled bookings", () => {
     assert.match(source, /booking_date < \(\$1::date - \(\$2::int \* interval '1 day'\)\)/);
-    assert.match(source, /auto_no_show_cleanup/);
+    assert.match(source, /old_no_show_bulk_confirm/);
   });
 
   it("syncs worklists after status changes", () => {
     assert.match(source, /scheduleBookingWorklistSync\(bookingId\)/);
-    assert.match(source, /for \(const bookingId of \[\.\.\.autoMarkedIds, \.\.\.cleanupMarkedIds\]\)/);
+    assert.match(source, /for \(const bookingId of markedIds\)/);
   });
 });

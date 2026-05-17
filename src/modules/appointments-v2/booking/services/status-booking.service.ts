@@ -189,11 +189,10 @@ export async function updateBookingStatusManual(
   }
 }
 
-export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings, today: string): Promise<{ autoMarkedIds: number[]; cleanupMarkedIds: number[] }> {
+export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings, today: string): Promise<{ autoMarkedIds: number[] }> {
   const autoMarkedIds: number[] = [];
-  const cleanupMarkedIds: number[] = [];
   if (!settings.reviewActive || settings.manualConfirmationRequired) {
-    return { autoMarkedIds, cleanupMarkedIds };
+    return { autoMarkedIds };
   }
 
   const client = await pool.connect();
@@ -215,22 +214,50 @@ export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings,
       await auditStatusChange(client, booking, "no-show", "Auto no-show after configured review time.", null, "auto_no_show");
     }
 
-    if (settings.cleanupDays > 0) {
-      const cleanupResult = await client.query<BookingStatusRow>(
-        `
-          update appointments_v2.bookings
-          set status = 'no-show', updated_at = now(), updated_by_user_id = null
-          where booking_date < ($1::date - ($2::int * interval '1 day'))
-            and status = 'scheduled'
-          returning id, 'scheduled'::text as status, booking_date::text
-        `,
-        [today, settings.cleanupDays]
-      );
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 
-      for (const booking of cleanupResult.rows) {
-        cleanupMarkedIds.push(Number(booking.id));
-        await auditStatusChange(client, booking, "no-show", "Auto cleanup of stale scheduled no-show candidate.", null, "auto_no_show_cleanup");
-      }
+  for (const bookingId of autoMarkedIds) {
+    scheduleBookingWorklistSync(bookingId);
+  }
+
+  return { autoMarkedIds };
+}
+
+export async function markOldNoShowCandidates(reason: string, userId: number | null): Promise<{ markedIds: number[] }> {
+  const settings = await getQueueNoShowSettings();
+  const today = getTripoliToday();
+  const cleanReason = String(reason || "").trim();
+  if (!cleanReason) {
+    throw new SchedulingError(400, "A reason is required.", ["status_reason_required"]);
+  }
+  if (settings.cleanupDays <= 0) {
+    return { markedIds: [] };
+  }
+
+  const markedIds: number[] = [];
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await client.query<BookingStatusRow>(
+      `
+        update appointments_v2.bookings
+        set status = 'no-show', updated_at = now(), updated_by_user_id = $3
+        where booking_date < ($1::date - ($2::int * interval '1 day'))
+          and status = 'scheduled'
+        returning id, 'scheduled'::text as status, booking_date::text
+      `,
+      [today, settings.cleanupDays, userId]
+    );
+
+    for (const booking of result.rows) {
+      markedIds.push(Number(booking.id));
+      await auditStatusChange(client, booking, "no-show", cleanReason, userId, "old_no_show_bulk_confirm");
     }
 
     await client.query("commit");
@@ -241,9 +268,9 @@ export async function finalizeAutoNoShowsForQueue(settings: QueueNoShowSettings,
     client.release();
   }
 
-  for (const bookingId of [...autoMarkedIds, ...cleanupMarkedIds]) {
+  for (const bookingId of markedIds) {
     scheduleBookingWorklistSync(bookingId);
   }
 
-  return { autoMarkedIds, cleanupMarkedIds };
+  return { markedIds };
 }

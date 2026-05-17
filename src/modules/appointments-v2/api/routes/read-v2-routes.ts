@@ -15,6 +15,7 @@ import {
   finalizeAutoNoShowsForQueue,
   getQueueNoShowSettings,
   getTripoliToday,
+  markOldNoShowCandidates,
   updateBookingStatusManual,
 } from "../../booking/services/status-booking.service.js";
 
@@ -608,7 +609,34 @@ router.get(
     const noShowSettings = await getQueueNoShowSettings();
     const autoNoShowResult = await finalizeAutoNoShowsForQueue(noShowSettings, today);
 
-    const [entries, summary] = await Promise.all([
+    const oldNoShowCandidatesQuery =
+      noShowSettings.cleanupDays > 0
+        ? pool.query(
+            `
+              select
+                b.id as appointment_id,
+                ('V2-' || lpad(b.id::text, 6, '0')) as accession_number,
+                b.booking_date::text as appointment_date,
+                b.notes,
+                p.id as patient_id,
+                p.arabic_full_name,
+                p.english_full_name,
+                p.phone_1,
+                m.name_ar as modality_name_ar,
+                m.name_en as modality_name_en
+              from appointments_v2.bookings b
+              join patients p on p.id = b.patient_id
+              join modalities m on m.id = b.modality_id
+              where b.booking_date < ($1::date - ($2::int * interval '1 day'))
+                and b.status = 'scheduled'
+              order by b.booking_date asc, b.created_at asc, b.id asc
+              limit 200
+            `,
+            [today, noShowSettings.cleanupDays]
+          )
+        : Promise.resolve({ rows: [] });
+
+    const [entries, summary, oldNoShowCandidates] = await Promise.all([
       pool.query(
         `
           select
@@ -667,6 +695,7 @@ router.get(
         `,
         [today]
       ),
+      oldNoShowCandidatesQuery,
     ]);
 
     const summaryRow = summary.rows[0] ?? {
@@ -683,7 +712,7 @@ router.get(
       review_active: noShowSettings.reviewActive,
       no_show_confirmation_required: noShowSettings.manualConfirmationRequired,
       auto_no_show_count: autoNoShowResult.autoMarkedIds.length,
-      auto_no_show_cleanup_count: autoNoShowResult.cleanupMarkedIds.length,
+      auto_no_show_cleanup_days: noShowSettings.cleanupDays,
       summary: summaryRow,
       queue_entries: entries.rows,
       no_show_candidates:
@@ -703,7 +732,18 @@ router.get(
                 modality_name_en: r.modality_name_en,
               }))
           : [],
+      old_no_show_candidates: oldNoShowCandidates.rows,
     });
+  })
+);
+
+router.post(
+  "/queue/old-no-shows/confirm-all",
+  requirePageAccess("queue"),
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const result = await markOldNoShowCandidates(String(body.reason || ""), Number((req as AuthedRequest).user?.sub ?? 0));
+    res.json({ ok: true, markedIds: result.markedIds, count: result.markedIds.length });
   })
 );
 
