@@ -664,16 +664,16 @@ export async function searchPatients(searchTerm = ""): Promise<PatientRow[]> {
     order by
       case
         when $1 = '' then 99
-        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 1
-        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 1
-        when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 2
-        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 2
-        when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 3
-        when $12 <> '' and p.normalized_arabic_name ~* $12 then 3
-        when p.normalized_arabic_name = $5 then 4
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 4
-        when p.normalized_arabic_name like $7 then 5
-        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 5
+        when p.normalized_arabic_name = $5 then 1
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) = $6 then 1
+        when p.normalized_arabic_name like $7 then 2
+        when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $8 then 2
+        when split_part(p.normalized_arabic_name, ' ', 1) = $5 then 3
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) = $6 then 3
+        when split_part(p.normalized_arabic_name, ' ', 1) like $7 then 4
+        when split_part(lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')), ' ', 1) like $8 then 4
+        when $11 <> '' and lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) ~* $11 then 5
+        when $12 <> '' and p.normalized_arabic_name ~* $12 then 5
         when p.normalized_arabic_name like $9 then 6
         when lower(regexp_replace(coalesce(p.english_full_name, ''), '\s+', ' ', 'g')) like $10 then 6
         else 7
