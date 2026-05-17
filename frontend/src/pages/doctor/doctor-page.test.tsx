@@ -323,7 +323,7 @@ describe("Doctor Portal shell", () => {
 
     expect(await screen.findByRole("heading", { name: "Doctor Portal" })).toBeTruthy();
     expect(await screen.findByText("Dr Normal")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Dashboard/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /My Work/i })).toBeTruthy();
   });
 
   it("redirects a non-doctor away from /doctor", async () => {
@@ -353,18 +353,20 @@ describe("Doctor Portal shell", () => {
 
     renderDoctorPortal("/doctor/dashboard");
 
-    expect(await screen.findByRole("button", { name: /Roster Management/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Team Workload/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Doctors\/Admin/i })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /Roster Planner/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Today’s Cases/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Doctors Directory/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Advanced Setup/i })).toBeTruthy();
   });
 
   it("does not show management menu items to normal doctors", async () => {
     fetchDoctorMeMock.mockResolvedValue(normalDoctor);
     renderDoctorPortal("/doctor/dashboard");
 
-    expect(await screen.findByRole("button", { name: /My Roster/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Team Workload/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Doctors\/Admin/i })).toBeNull();
+    expect(await screen.findByRole("button", { name: /My Work/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Today’s Cases/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Doctors Directory/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Advanced Setup/i })).toBeNull();
   });
 
   it("lets profileless admins manage doctors without clinical navigation", async () => {
@@ -386,10 +388,10 @@ describe("Doctor Portal shell", () => {
     renderDoctorPortal("/doctor/dashboard");
 
     expect(await screen.findByText("Doctor Portal admin")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Doctors\/Admin/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /My Roster/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Roster Management/i })).toBeNull();
-    expect(screen.queryByRole("button", { name: /My Cases/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /Doctors Directory/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Advanced Setup/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Roster Planner/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Today’s Cases/i })).toBeNull();
   });
 
   it("redirects profileless admins away from clinical routes", async () => {
@@ -600,6 +602,7 @@ describe("Doctor Portal shell", () => {
     await waitFor(() => {
       expect(fetchRosterTemplatesMock).toHaveBeenCalled();
     });
+    expect(await screen.findByDisplayValue("CT Weekly")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: /Apply template/i }));
 
     await waitFor(() => {

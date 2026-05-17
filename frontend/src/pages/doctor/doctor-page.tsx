@@ -2,10 +2,8 @@ import { useMemo } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Activity,
   BriefcaseMedical,
   CalendarDays,
-  ClipboardList,
   LayoutDashboard,
   LogOut,
   Settings,
@@ -30,17 +28,14 @@ type DoctorPortalNavItem = {
 };
 
 const DOCTOR_NAV: DoctorPortalNavItem[] = [
-  { path: "/doctor/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { path: "/doctor/roster", label: "My Roster", icon: CalendarDays },
-  { path: "/doctor/availability", label: "Availability", icon: CalendarDays },
-  { path: "/doctor/cases", label: "My Cases", icon: BriefcaseMedical },
-  { path: "/doctor/protocols", label: "Protocols", icon: ClipboardList },
-  { path: "/doctor/team-workload", label: "Team Workload", icon: Activity },
+  { path: "/doctor/my-work", label: "My Work", icon: LayoutDashboard },
+  { path: "/doctor/today-cases", label: "Today’s Cases", icon: BriefcaseMedical },
 ];
 
 const SUPERVISOR_NAV: DoctorPortalNavItem[] = [
-  { path: "/doctor/admin/roster", label: "Roster Management", icon: CalendarDays, management: true },
-  { path: "/doctor/admin/doctors", label: "Doctors/Admin", icon: Users, management: true },
+  { path: "/doctor/roster-planner", label: "Roster Planner", icon: CalendarDays, management: true },
+  { path: "/doctor/doctors-directory", label: "Doctors Directory", icon: Users, management: true },
+  { path: "/doctor/advanced-setup", label: "Advanced Setup", icon: Settings, management: true },
 ];
 
 function canAccessDoctorAdmin(me: DoctorMe): boolean {
@@ -76,7 +71,7 @@ function DoctorPortalHome({ me }: { me: DoctorMe }) {
         <SummaryTile label="Reporting permission" value={me.canFinalizeReports ? "Can finalize" : "Not enabled"} />
       </div>
       {!me.hasActiveDoctorProfile && me.canAccessDoctorAdmin ? (
-        <PlaceholderPanel title="Doctor Portal administration" body="Use Doctors/Admin to manage doctor profiles and modality permissions." />
+        <PlaceholderPanel title="Doctor Portal administration" body="Use Doctors Directory to manage doctor profiles and modality permissions." />
       ) : (
         <PlaceholderPanel title="Clinical coordination workspace" body="Roster, case basket, protocol assignment, and workload dashboards are available from the navigation." />
       )}
@@ -106,57 +101,71 @@ function PlaceholderPanel({ title, body }: { title: string; body: string }) {
   );
 }
 
+function DoctorAdvancedSetupPage() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.16em]" style={{ color: "var(--text-muted)" }}>
+          Doctor Portal
+        </p>
+        <h2 className="mt-1 text-2xl font-semibold text-foreground">Advanced Setup</h2>
+      </div>
+      <PlaceholderPanel
+        title="Advanced tools stay in their current pages for now"
+        body="Roster templates, imports, duty types, doctor import/export, notifications, exports, and workload catalog tools will move here in the next steps."
+      />
+    </div>
+  );
+}
+
 function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
   const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
   const canManageRoster = canManageClinicalRoster(me);
   const canManageDoctors = canAccessDoctorAdmin(me);
+  const canAccessAdvancedSetup = canManageRoster || canManageDoctors;
 
   return (
     <Routes>
-      <Route index element={<Navigate to="/doctor/dashboard" replace />} />
-      <Route path="" element={<Navigate to="/doctor/dashboard" replace />} />
-      <Route path="dashboard" element={<DoctorPortalHome me={me} />} />
+      <Route index element={<Navigate to="/doctor/my-work" replace />} />
+      <Route path="" element={<Navigate to="/doctor/my-work" replace />} />
+      <Route path="dashboard" element={<Navigate to="/doctor/my-work" replace />} />
+      <Route path="my-work" element={<DoctorPortalHome me={me} />} />
+      <Route
+        path="today-cases"
+        element={canAccessClinical ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route path="cases" element={<Navigate to="/doctor/today-cases" replace />} />
+      <Route
+        path="roster-planner"
+        element={canManageRoster ? <DoctorRosterPage me={me} management /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route path="admin/roster" element={<Navigate to="/doctor/roster-planner" replace />} />
+      <Route
+        path="doctors-directory"
+        element={canManageDoctors ? <DoctorAdminDoctorsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
+      />
+      <Route path="admin/doctors" element={<Navigate to="/doctor/doctors-directory" replace />} />
+      <Route
+        path="advanced-setup"
+        element={canAccessAdvancedSetup ? <DoctorAdvancedSetupPage /> : <Navigate to="/doctor/my-work" replace />}
+      />
       <Route
         path="roster"
-        element={canAccessClinical ? <DoctorRosterPage me={me} management={false} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorRosterPage me={me} management={false} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="availability"
-        element={canAccessClinical ? <DoctorAvailabilityPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
-      />
-      <Route
-        path="cases"
-        element={canAccessClinical ? <DoctorCasesPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorAvailabilityPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="protocols"
-        element={canAccessClinical ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorProtocolsPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="team-workload"
-        element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/dashboard" replace />}
+        element={canAccessClinical ? <DoctorTeamWorkloadPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
-      <Route
-        path="admin/roster"
-        element={
-          canManageRoster ? (
-            <DoctorRosterPage me={me} management />
-          ) : (
-            <Navigate to="/doctor/dashboard" replace />
-          )
-        }
-      />
-      <Route
-        path="admin/doctors"
-        element={
-          canManageDoctors ? (
-            <DoctorAdminDoctorsPage me={me} />
-          ) : (
-            <Navigate to="/doctor/dashboard" replace />
-          )
-        }
-      />
-      <Route path="*" element={<Navigate to="/doctor/dashboard" replace />} />
+      <Route path="*" element={<Navigate to="/doctor/my-work" replace />} />
     </Routes>
   );
 }
@@ -180,6 +189,7 @@ export default function DoctorPage() {
     baseNav.forEach((item) => byPath.set(item.path, item));
     if (canManageClinicalRoster(me)) byPath.set(SUPERVISOR_NAV[0].path, SUPERVISOR_NAV[0]);
     if (canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[1].path, SUPERVISOR_NAV[1]);
+    if (canManageClinicalRoster(me) || canAccessDoctorAdmin(me)) byPath.set(SUPERVISOR_NAV[2].path, SUPERVISOR_NAV[2]);
     return [...byPath.values()];
   }, [me]);
 
@@ -190,7 +200,7 @@ export default function DoctorPage() {
   }
 
   if (location.pathname === "/doctor") {
-    return <Navigate to="/doctor/dashboard" replace />;
+    return <Navigate to="/doctor/my-work" replace />;
   }
 
   return (
