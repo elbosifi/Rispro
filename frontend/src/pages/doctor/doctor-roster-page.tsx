@@ -154,26 +154,80 @@ function DraggableDoctor({
   );
 }
 
-function DroppableRosterSlot({ assignment, conflicts, dutyTypeLabels }: { assignment: DoctorRosterAssignment; conflicts: RosterConflict[]; dutyTypeLabels: Map<string, string> }) {
+function friendlyRosterConflictMessage(conflict: RosterConflict) {
+  if (conflict.code === "required_team_empty" || conflict.message.toLowerCase().includes("empty required team slot")) {
+    return "This assignment needs a specialist before publishing.";
+  }
+  return conflict.message;
+}
+
+function DroppableRosterSlot({
+  assignment,
+  conflicts,
+  dutyTypeLabels,
+  editable,
+  onDeleteAssignment,
+  onRemoveMember,
+}: {
+  assignment: DoctorRosterAssignment;
+  conflicts: RosterConflict[];
+  dutyTypeLabels: Map<string, string>;
+  editable: boolean;
+  onDeleteAssignment?: (assignmentId: number) => void;
+  onRemoveMember?: (assignmentId: number, memberId: number) => void;
+}) {
   const droppable = useDroppable({ id: `assignment-${assignment.id}`, data: { assignmentId: assignment.id } });
   const assignmentConflicts = conflicts.filter((conflict) => conflict.assignmentId === assignment.id);
   return (
-    <div ref={droppable.setNodeRef} className="min-h-36 rounded-lg border p-3" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)", backgroundColor: "var(--card)" }}>
+    <article ref={droppable.setNodeRef} className="min-h-48 rounded-lg border p-4" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)", backgroundColor: "var(--card)" }}>
       <div className="flex items-start justify-between gap-2">
         <div>
           <p className="text-sm font-semibold">{assignment.teamName}</p>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.date} · {assignment.modalityNameEn ?? "No modality"} · {dutyLabel(assignment.dutyType, dutyTypeLabels)}</p>
-          <p className="text-xs" style={{ color: "var(--text-muted)" }}>{assignment.startTime || "--"}-{assignment.endTime || "--"}</p>
+          <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+            {assignment.date} · {assignment.modalityNameEn ?? "No modality"}
+          </p>
+          <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+            {dutyLabel(assignment.dutyType, dutyTypeLabels)} · {assignment.sessionName || "No session"} · {assignment.startTime || "--"}-{assignment.endTime || "--"}
+          </p>
         </div>
-        {assignmentConflicts.length > 0 && <span className="rounded-full border px-2 py-0.5 text-xs text-red-600" style={{ borderColor: "var(--border)" }}>{assignmentConflicts.length} conflicts</span>}
+        {editable && onDeleteAssignment && (
+          <button
+            type="button"
+            onClick={() => onDeleteAssignment(assignment.id)}
+            className="rounded-lg border px-3 py-1.5 text-xs font-semibold"
+            style={{ borderColor: "var(--border)" }}
+          >
+            Delete
+          </button>
+        )}
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {assignment.members.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>Drop doctor here</span>}
+      {assignmentConflicts.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {assignmentConflicts.map((conflict, index) => (
+            <p key={`${conflict.code}-${index}`} className="rounded-lg border px-3 py-2 text-xs font-medium" style={{ borderColor: "var(--border)", color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>
+              {friendlyRosterConflictMessage(conflict)}
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="mt-4 flex min-h-14 flex-wrap gap-2 rounded-lg border border-dashed p-3" style={{ borderColor: droppable.isOver ? "var(--accent)" : "var(--border)" }}>
+        {assignment.members.length === 0 && <span className="text-xs" style={{ color: "var(--text-muted)" }}>{editable ? "Drop doctor here" : "No doctors assigned"}</span>}
         {assignment.members.map((member) => (
-          <DraggableDoctor key={member.id} id={member.doctorId} label={`${member.displayName} · ${member.teamRole}`} source={{ assignmentId: assignment.id, memberId: member.id }} />
+          <span key={member.id} className="inline-flex items-center gap-2">
+            {editable ? (
+              <DraggableDoctor id={member.doctorId} label={`${member.displayName} · ${member.teamRole}`} source={{ assignmentId: assignment.id, memberId: member.id }} />
+            ) : (
+              <span className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "var(--border)" }}>{member.displayName} · {member.teamRole}</span>
+            )}
+            {editable && onRemoveMember && (
+              <button type="button" onClick={() => onRemoveMember(assignment.id, member.id)} className="text-xs font-semibold text-red-600">
+                Remove
+              </button>
+            )}
+          </span>
         ))}
       </div>
-    </div>
+    </article>
   );
 }
 
@@ -206,7 +260,7 @@ function AssignmentList({
         <article key={assignment.id} className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           {(conflicts ?? []).filter((conflict) => conflict.assignmentId === assignment.id).map((conflict, index) => (
             <p key={`${conflict.code}-${index}`} className="mb-2 rounded-lg border px-3 py-2 text-xs font-medium" style={{ borderColor: "var(--border)", color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>
-              {conflict.severity.toUpperCase()}: {conflict.message}
+              {conflict.severity.toUpperCase()}: {friendlyRosterConflictMessage(conflict)}
             </p>
           ))}
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -404,6 +458,8 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
     endTime: "14:00",
     teamName: "",
   });
+  const [showAssignmentForm, setShowAssignmentForm] = useState(false);
+  const [showManualAddMember, setShowManualAddMember] = useState(false);
   const [memberForm, setMemberForm] = useState({ assignmentId: "", doctorId: "", teamRole: "specialist" as RosterTeamRole });
   const [templateForm, setTemplateForm] = useState({
     name: "",
@@ -462,6 +518,12 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
     setTemplateForm((current) => (current.dutyType ? current : { ...current, dutyType: firstDutyType }));
     setShiftMappingDraft((current) => (current.dutyTypeCode ? current : { ...current, dutyTypeCode: firstDutyType }));
   }, [activeDutyTypes]);
+  useEffect(() => {
+    setAssignmentForm((current) => {
+      if (current.date >= weekStart && current.date <= weekEnd) return current;
+      return { ...current, date: weekStart };
+    });
+  }, [weekEnd, weekStart]);
 
   const roster = rosterQuery.data;
   const editable = canManage && roster?.week?.status === "draft";
@@ -487,7 +549,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
   const conflictReasonByDoctorId = new Map<number, string>();
   for (const conflict of conflicts) {
     if (typeof conflict.doctorId === "number" && !conflictReasonByDoctorId.has(conflict.doctorId)) {
-      conflictReasonByDoctorId.set(conflict.doctorId, conflict.message);
+      conflictReasonByDoctorId.set(conflict.doctorId, friendlyRosterConflictMessage(conflict));
     }
   }
   const handleDragEnd = (event: DragEndEvent) => {
@@ -616,9 +678,12 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
 
       {isEmptyDraft && roster?.week && (
         <RosterStatePanel
-          title="Draft roster is empty."
-          body="Add an assignment below, copy the previous week, or use Advanced Setup for templates, XML import, and draft generation."
+          title="No assignments yet"
+          body="Create an assignment, then drag doctors into it."
         >
+          <button type="button" onClick={() => setShowAssignmentForm(true)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+            Create assignment
+          </button>
           <button type="button" onClick={() => copyMutation.mutate(roster.week!.id)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
             Copy previous week
           </button>
@@ -794,50 +859,85 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
         </section>
       )}
 
-      {canManage && conflicts.length > 0 && (
+      {canManage && advanced && conflicts.length > 0 && (
         <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <h3 className="font-semibold">Roster conflicts</h3>
           <div className="mt-3 space-y-2 text-sm">
             {conflicts.map((conflict, index) => (
               <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>
-                {conflict.severity.toUpperCase()}: {conflict.message}
+                {conflict.severity.toUpperCase()}: {friendlyRosterConflictMessage(conflict)}
               </p>
             ))}
           </div>
         </section>
       )}
 
-      {canManage && editable && (
+      {canManage && roster?.week && (
         <DndContext onDragEnd={handleDragEnd}>
-          <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-[260px_1fr]" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
-            <div>
-              <h3 className="font-semibold">Doctors</h3>
-              <div className="mt-3 grid gap-2">
-                {(doctorsQuery.data ?? []).map((doctor) => (
-                  <DraggableDoctor
-                    key={doctor.id}
-                    id={doctor.id}
-                    label={doctor.displayName}
-                    dimmed={conflictedDoctorIds.has(doctor.id)}
-                    reason={conflictReasonByDoctorId.get(doctor.id)}
-                  />
-                ))}
+          <section className={`grid gap-4 rounded-lg border p-4 ${editable ? "lg:grid-cols-[260px_1fr]" : ""}`} style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+            {editable && (
+              <div>
+                <h3 className="font-semibold">Doctors</h3>
+                <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>Drag a doctor onto an assignment card.</p>
+                <div className="mt-3 grid gap-2">
+                  {(doctorsQuery.data ?? []).map((doctor) => (
+                    <DraggableDoctor
+                      key={doctor.id}
+                      id={doctor.id}
+                      label={doctor.displayName}
+                      dimmed={conflictedDoctorIds.has(doctor.id)}
+                      reason={conflictReasonByDoctorId.get(doctor.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
             <div>
-              <h3 className="font-semibold">Roster slots</h3>
-              <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                {(roster?.assignments ?? []).map((assignment) => (
-                  <DroppableRosterSlot key={assignment.id} assignment={assignment} conflicts={conflicts} dutyTypeLabels={dutyTypeLabels} />
-                ))}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-semibold">Assignments</h3>
+                  <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>
+                    {editable ? "Create an assignment, then drag doctors into it." : "Published weeks are read-only."}
+                  </p>
+                </div>
+                {editable && (
+                  <button type="button" onClick={() => setShowAssignmentForm((current) => !current)} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+                    Create assignment
+                  </button>
+                )}
               </div>
+              {(roster.assignments ?? []).length === 0 ? (
+                <div className="mt-3 rounded-lg border border-dashed p-6 text-sm" style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}>
+                  <p className="font-semibold text-foreground">No assignments yet</p>
+                  <p className="mt-1">Create an assignment, then drag doctors into it.</p>
+                  {editable && (
+                    <button type="button" onClick={() => setShowAssignmentForm(true)} className="mt-3 rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">
+                      Create assignment
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  {roster.assignments.map((assignment) => (
+                    <DroppableRosterSlot
+                      key={assignment.id}
+                      assignment={assignment}
+                      conflicts={conflicts}
+                      dutyTypeLabels={dutyTypeLabels}
+                      editable={Boolean(editable)}
+                      onDeleteAssignment={(assignmentId) => deleteAssignmentMutation.mutate(assignmentId)}
+                      onRemoveMember={(assignmentId, memberId) => removeMemberMutation.mutate({ assignmentId, memberId })}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </section>
         </DndContext>
       )}
 
-      {canManage && editable && (
-        <section className="grid gap-4 rounded-lg border p-4 lg:grid-cols-2" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+      {canManage && editable && showAssignmentForm && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
           <form
             className="space-y-3"
             onSubmit={(event) => {
@@ -852,12 +952,25 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
                 startTime: assignmentForm.startTime || null,
                 endTime: assignmentForm.endTime || null,
                 teamName: assignmentForm.teamName || "Rostered team",
+              }, {
+                onSuccess: () => setShowAssignmentForm(false),
               });
             }}
           >
-            <h3 className="font-semibold">Add assignment</h3>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 className="font-semibold">Create assignment</h3>
+                <p className="mt-1 text-xs" style={{ color: "var(--text-muted)" }}>This creates the card doctors can be dragged into.</p>
+              </div>
+              <button type="button" onClick={() => setShowAssignmentForm(false)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+                Close
+              </button>
+            </div>
             <div className="grid gap-2 sm:grid-cols-2">
-              <input type="date" value={assignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm" />
+              <label className="text-sm font-medium">
+                Assignment date
+                <input type="date" min={weekStart} max={weekEnd} value={assignmentForm.date} onChange={(e) => setAssignmentForm((c) => ({ ...c, date: e.target.value }))} className="mt-1 block w-full rounded-lg border px-3 py-2 text-sm" />
+              </label>
               <select value={assignmentForm.modalityId} onChange={(e) => setAssignmentForm((c) => ({ ...c, modalityId: e.target.value }))} className="rounded-lg border px-3 py-2 text-sm">
                 <option value="">No modality</option>
                 {(lookupsQuery.data?.modalities ?? []).map((modality) => (
@@ -877,9 +990,17 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             </div>
             <button type="submit" disabled={!assignmentForm.dutyType || activeDutyTypes.length === 0} className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white disabled:bg-teal-400">Add assignment</button>
           </form>
+        </section>
+      )}
 
+      {canManage && editable && (roster?.assignments ?? []).length > 0 && (
+        <section className="rounded-lg border p-4" style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}>
+          <button type="button" onClick={() => setShowManualAddMember((current) => !current)} className="rounded-lg border px-3 py-2 text-sm font-semibold" style={{ borderColor: "var(--border)" }}>
+            Manual add
+          </button>
+          {showManualAddMember && (
           <form
-            className="space-y-3"
+            className="mt-4 space-y-3"
             onSubmit={(event) => {
               event.preventDefault();
               if (!memberForm.assignmentId || !memberForm.doctorId) return;
@@ -910,6 +1031,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
             </div>
             <button type="submit" className="rounded-lg bg-teal-600 px-3 py-2 text-sm font-semibold text-white">Add member</button>
           </form>
+          )}
         </section>
       )}
 
@@ -960,7 +1082,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
                 {templateApplyResult.conflicts.length > 0 && (
                   <div className="mt-2 space-y-1">
                     {templateApplyResult.conflicts.map((conflict, index) => (
-                      <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>{conflict.severity.toUpperCase()}: {conflict.message}</p>
+                      <p key={`${conflict.code}-${index}`} style={{ color: conflict.severity === "error" ? "#dc2626" : "var(--text-muted)" }}>{conflict.severity.toUpperCase()}: {friendlyRosterConflictMessage(conflict)}</p>
                     ))}
                   </div>
                 )}
@@ -1059,7 +1181,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
 
       {rosterQuery.isLoading ? (
         <div className="rounded-lg border p-6 text-sm" style={{ borderColor: "var(--border)" }}>Loading roster...</div>
-      ) : (
+      ) : (!canManage || advanced) ? (
         <AssignmentList
           assignments={roster?.assignments ?? []}
           canManage={Boolean(editable)}
@@ -1068,7 +1190,7 @@ export function DoctorRosterPage({ me, management = false, advanced = false }: {
           conflicts={conflicts}
           dutyTypeLabels={dutyTypeLabels}
         />
-      )}
+      ) : null}
     </div>
   );
 }
