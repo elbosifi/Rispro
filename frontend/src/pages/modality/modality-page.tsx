@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeCheck,
+  Ban,
   Building2,
   CheckCircle2,
   Clock3,
@@ -10,6 +11,7 @@ import {
   ScanLine,
   ShieldAlert,
   TimerReset,
+  XCircle,
 } from "lucide-react";
 import { DateInput } from "@/components/common/date-input";
 import { Select } from "@/components/common/select";
@@ -27,7 +29,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/shared";
-import { fetchAppointmentLookups, fetchModalityWorklist, fetchStatistics, completeAppointment } from "@/lib/api-hooks";
+import { fetchAppointmentLookups, fetchModalityWorklist, fetchStatistics, completeAppointment, updateAppointmentStatus } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { chooseLocalized, t } from "@/lib/i18n";
 import type { Language } from "@/lib/i18n";
@@ -135,6 +137,8 @@ export default function ModalityPage() {
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<number | null>(null);
   const [confirmTargetId, setConfirmTargetId] = useState<number | null>(null);
   const [confirmVerified, setConfirmVerified] = useState(false);
+  const [statusAction, setStatusAction] = useState<null | { appointment: AppointmentWithDetails; status: "cancelled" | "discontinued" }>(null);
+  const [statusReason, setStatusReason] = useState("");
 
   const { data: lookups } = useQuery<AppointmentLookups>({
     queryKey: ["lookups"],
@@ -185,8 +189,25 @@ export default function ModalityPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
       await queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
+      await queryClient.invalidateQueries({ queryKey: ["queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      await queryClient.invalidateQueries({ queryKey: ["registrations"] });
       setConfirmTargetId(null);
       setConfirmVerified(false);
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ appointmentId, status, reason }: { appointmentId: number; status: "cancelled" | "discontinued"; reason: string }) =>
+      updateAppointmentStatus(appointmentId, status, reason),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["modality-worklist"] });
+      await queryClient.invalidateQueries({ queryKey: ["modality-statistics"] });
+      await queryClient.invalidateQueries({ queryKey: ["queue"] });
+      await queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      await queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      setStatusAction(null);
+      setStatusReason("");
     },
   });
 
@@ -244,6 +265,7 @@ export default function ModalityPage() {
           : t(language, "modality.selectPrompt");
 
   const canComplete = Boolean(selectedAppointment && ACTIVE_STATUSES.has(selectedAppointment.status));
+  const canCloseAsProblem = Boolean(selectedAppointment && ACTIVE_STATUSES.has(selectedAppointment.status));
   const completionTarget = confirmTargetId == null ? null : appointments.find((appointment) => appointment.id === confirmTargetId) ?? null;
 
   const handleRefresh = () => {
@@ -263,6 +285,15 @@ export default function ModalityPage() {
   const handleConfirmCompletion = () => {
     if (!completionTarget || !confirmVerified || completeMutation.isPending) return;
     completeMutation.mutate(completionTarget.id);
+  };
+
+  const handleConfirmStatusAction = () => {
+    if (!statusAction || !statusReason.trim() || statusMutation.isPending) return;
+    statusMutation.mutate({
+      appointmentId: statusAction.appointment.id,
+      status: statusAction.status,
+      reason: statusReason.trim(),
+    });
   };
 
   const modalities = lookups?.modalities ?? [];
@@ -689,13 +720,36 @@ export default function ModalityPage() {
                       <ShieldAlert className="mt-0.5 h-5 w-5 text-[var(--accent)]" />
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-foreground">{chooseLocalized(language, "التعامل مع المشاكل", "Problem handling")}</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{chooseLocalized(language, "بلاغ مشكلة / لا يمكن التنفيذ / العودة إلى الاستقبال سيُوضع هنا لاحقاً.", "Report issue / cannot perform / return to reception will live here later.")}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{chooseLocalized(language, "استخدم هذه الإجراءات عندما لا يمكن إكمال الفحص.", "Use these actions when the exam cannot be completed.")}</p>
                       </div>
                     </div>
-                    <div className="mt-3">
-                      <Badge variant="neutral" size="sm">
-                        {chooseLocalized(language, "مساحة عمل مستقبلية", "Future action slot")}
-                      </Badge>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!canCloseAsProblem || statusMutation.isPending}
+                        onClick={() => {
+                          setStatusAction({ appointment: selectedAppointment, status: "discontinued" });
+                          setStatusReason("");
+                        }}
+                      >
+                        <Ban size={16} />
+                        <span>{chooseLocalized(language, "إيقاف الفحص", "Discontinue")}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={!canCloseAsProblem || statusMutation.isPending}
+                        onClick={() => {
+                          setStatusAction({ appointment: selectedAppointment, status: "cancelled" });
+                          setStatusReason("");
+                        }}
+                      >
+                        <XCircle size={16} />
+                        <span>{chooseLocalized(language, "إلغاء الموعد", "Cancel")}</span>
+                      </Button>
                     </div>
                   </div>
                 </>
@@ -739,6 +793,62 @@ export default function ModalityPage() {
           </aside>
         </main>
       </div>
+
+      <Dialog
+        open={Boolean(statusAction)}
+        onClose={() => {
+          setStatusAction(null);
+          setStatusReason("");
+        }}
+      >
+        <DialogContent maxWidth="560px">
+          {statusAction ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  {statusAction.status === "discontinued"
+                    ? chooseLocalized(language, "تأكيد إيقاف الفحص", "Confirm discontinuation")
+                    : chooseLocalized(language, "تأكيد إلغاء الموعد", "Confirm cancellation")}
+                </DialogTitle>
+                <DialogDescription>
+                  {chooseLocalized(language, statusAction.appointment.arabicFullName, statusAction.appointment.englishFullName)} • {statusAction.appointment.accessionNumber}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="mt-4 space-y-2">
+                <label className="text-sm font-medium">{chooseLocalized(language, "السبب", "Reason")}</label>
+                <textarea
+                  value={statusReason}
+                  onChange={(event) => setStatusReason(event.target.value)}
+                  rows={3}
+                  className="input-premium w-full resize-none"
+                  placeholder={chooseLocalized(language, "اكتب السبب قبل التأكيد", "Enter a reason before confirming")}
+                />
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setStatusAction(null);
+                    setStatusReason("");
+                  }}
+                >
+                  {t(language, "common.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={!statusReason.trim() || statusMutation.isPending}
+                  onClick={handleConfirmStatusAction}
+                >
+                  {statusMutation.isPending ? <RefreshCw size={18} className="animate-spin" /> : null}
+                  <span>{chooseLocalized(language, "تأكيد", "Confirm")}</span>
+                </Button>
+              </DialogFooter>
+            </>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={confirmTargetId != null}

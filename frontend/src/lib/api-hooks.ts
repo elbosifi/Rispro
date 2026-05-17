@@ -2301,6 +2301,17 @@ export async function confirmNoShow(appointmentId: number, reason: string) {
   });
 }
 
+export async function updateAppointmentStatus(
+  appointmentId: number,
+  status: string,
+  reason?: string | null
+) {
+  return api<RawRecord>(`/v2/read/appointments/${appointmentId}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status, reason: reason ?? null })
+  });
+}
+
 // -- Modality --
 export async function fetchModalityWorklist(modalityId: string, date: string, scope: string) {
   const params = new URLSearchParams();

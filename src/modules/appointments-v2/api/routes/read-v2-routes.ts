@@ -11,6 +11,12 @@ import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import { issuePublicCancelToken } from "../../public/utils/public-cancel-token.js";
 import { readPatientQrSettings } from "../../public/utils/patient-qr-settings.js";
 import { buildPublicAppointmentUrlFromSettings } from "../../public/utils/public-appointment-url-core.js";
+import {
+  finalizeAutoNoShowsForQueue,
+  getQueueNoShowSettings,
+  getTripoliToday,
+  updateBookingStatusManual,
+} from "../../booking/services/status-booking.service.js";
 
 const router = Router();
 router.use(requireAuth);
@@ -598,8 +604,9 @@ router.get(
   "/queue",
   requirePageAccess("queue"),
   asyncRoute(async (_req: Request, res: Response) => {
-    const todayResult = await pool.query(`select current_date::text as today`);
-    const today = String(todayResult.rows[0]?.today ?? "");
+    const today = getTripoliToday();
+    const noShowSettings = await getQueueNoShowSettings();
+    const autoNoShowResult = await finalizeAutoNoShowsForQueue(noShowSettings, today);
 
     const [entries, summary] = await Promise.all([
       pool.query(
@@ -672,24 +679,30 @@ router.get(
 
     res.json({
       queue_date: today,
-      review_time: "17:00",
-      review_active: true,
+      review_time: noShowSettings.reviewTime,
+      review_active: noShowSettings.reviewActive,
+      no_show_confirmation_required: noShowSettings.manualConfirmationRequired,
+      auto_no_show_count: autoNoShowResult.autoMarkedIds.length,
+      auto_no_show_cleanup_count: autoNoShowResult.cleanupMarkedIds.length,
       summary: summaryRow,
       queue_entries: entries.rows,
-      no_show_candidates: entries.rows
-        .filter((r) => r.appointment_status === "scheduled")
-        .map((r) => ({
-          appointment_id: r.appointment_id,
-          accession_number: r.accession_number,
-          appointment_date: today,
-          notes: r.notes,
-          patient_id: r.patient_id,
-          arabic_full_name: r.arabic_full_name,
-          english_full_name: r.english_full_name,
-          phone_1: r.phone_1,
-          modality_name_ar: r.modality_name_ar,
-          modality_name_en: r.modality_name_en,
-        })),
+      no_show_candidates:
+        noShowSettings.reviewActive && noShowSettings.manualConfirmationRequired
+          ? entries.rows
+              .filter((r) => r.appointment_status === "scheduled")
+              .map((r) => ({
+                appointment_id: r.appointment_id,
+                accession_number: r.accession_number,
+                appointment_date: today,
+                notes: r.notes,
+                patient_id: r.patient_id,
+                arabic_full_name: r.arabic_full_name,
+                english_full_name: r.english_full_name,
+                phone_1: r.phone_1,
+                modality_name_ar: r.modality_name_ar,
+                modality_name_en: r.modality_name_en,
+              }))
+          : [],
     });
   })
 );
@@ -776,23 +789,26 @@ router.post(
       return;
     }
 
-    const result = await pool.query(
-      `
-        update appointments_v2.bookings
-        set status = 'no-show', updated_at = now(), updated_by_user_id = $2
-        where id = $1 and status in ('scheduled', 'arrived', 'waiting')
-        returning id
-      `,
-      [bookingId, Number((req as AuthedRequest).user?.sub ?? 0)]
-    );
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    await updateBookingStatusManual(bookingId, "no-show", String(body.reason || "Manual no-show"), Number((req as AuthedRequest).user?.sub ?? 0));
+    res.json({ ok: true });
+  })
+);
 
-    if (!result.rowCount) {
-      res.status(409).json({ error: "Booking cannot be marked no-show in current status." });
+router.post(
+  "/appointments/:id/status",
+  asyncRoute(async (req: Request, res: Response) => {
+    const bookingId = Number(req.params.id);
+    if (!Number.isInteger(bookingId) || bookingId <= 0) {
+      res.status(400).json({ error: "Invalid booking ID" });
       return;
     }
 
-    scheduleBookingWorklistSync(bookingId);
-    res.json({ ok: true });
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const status = String(body.status || "").trim();
+    const reason = body.reason == null ? null : String(body.reason);
+    const result = await updateBookingStatusManual(bookingId, status, reason, Number((req as AuthedRequest).user?.sub ?? 0));
+    res.json({ ok: true, ...result });
   })
 );
 
@@ -880,22 +896,7 @@ router.post(
       return;
     }
 
-    const result = await pool.query(
-      `
-        update appointments_v2.bookings
-        set status = 'completed', updated_at = now(), updated_by_user_id = $2
-        where id = $1 and status in ('arrived', 'waiting')
-        returning id
-      `,
-      [bookingId, Number((req as AuthedRequest).user?.sub ?? 0)]
-    );
-
-    if (!result.rowCount) {
-      res.status(409).json({ error: "Booking cannot be completed in current status." });
-      return;
-    }
-
-    scheduleBookingWorklistSync(bookingId);
+    await updateBookingStatusManual(bookingId, "completed", null, Number((req as AuthedRequest).user?.sub ?? 0));
     res.json({ ok: true });
   })
 );

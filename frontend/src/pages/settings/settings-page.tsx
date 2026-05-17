@@ -1908,10 +1908,11 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "disabled", label: "غير مفعل" }
   ]},
   no_show_review_time: { label: "وقت مراجعة الغياب", type: "time" },
-  no_show_confirmation_required: { label: "اشتراط تأكيد الغياب", type: "dropdown", options: [
+  no_show_confirmation_required: { label: "Require manual no-show confirmation / اشتراط تأكيد الغياب يدوياً", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
-  ]}
+  ]},
+  auto_no_show_cleanup_days: { label: "Old no-show cleanup days / تنظيف مواعيد الغياب القديمة", type: "number", min: "0", max: "30" }
 };
 
 function inferSettingControl(key: string, value: any): SettingControl {
@@ -2027,7 +2028,7 @@ function SimpleSettingsSection({ category, onReAuthRequired }: { category: strin
         .filter(([key]) => !(category === "patient_registration" && key === "mrn_prefix"))
         .map(([key, value]: [string, any]) => {
         const control = inferSettingControl(key, value);
-        const label = friendlySettingLabel(category, key, t);
+        const label = control.label || friendlySettingLabel(category, key, t);
         const isPending = saveMutation.variables?.entries?.some((e) => e.key === key) && saveMutation.isPending;
         return (
           <div key={key} className="flex items-center justify-between p-3 bg-stone-50 dark:bg-stone-700 rounded-lg">

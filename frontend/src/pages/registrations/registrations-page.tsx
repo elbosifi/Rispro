@@ -11,6 +11,7 @@ import {
   getAppointmentById,
   fetchPatientQrSettings,
   sendPatientWebPushNotification,
+  updateAppointmentStatus,
   type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
@@ -61,8 +62,10 @@ const DEFAULT_FILTERS: RegistrationsFilters = {
 const ACTIVE_FILTER_PILL_CLASS = "border-accent/25 bg-accent/10 text-accent shadow-sm ring-1 ring-accent/15";
 const RESCHEDULE_AVAILABILITY_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
-const MANAGE_TABS = ["details", "documents", "report", "reschedule", "cancel"] as const;
+const MANAGE_TABS = ["details", "documents", "report", "reschedule", "status", "cancel"] as const;
 type ManageTab = (typeof MANAGE_TABS)[number];
+const MANUAL_STATUS_OPTIONS = ["scheduled", "arrived", "waiting", "completed", "no-show", "cancelled", "discontinued"] as const;
+const STATUS_REASON_REQUIRED = new Set<string>(["no-show", "cancelled", "discontinued"]);
 
 function RegistrationStat({
   label,
@@ -175,6 +178,8 @@ export default function RegistrationsPage() {
   const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
   const [rescheduleSpecialReasonConfirmed, setRescheduleSpecialReasonConfirmed] = useState(false);
   const [rescheduleSpecialReasonNote, setRescheduleSpecialReasonNote] = useState("");
+  const [manualStatus, setManualStatus] = useState<(typeof MANUAL_STATUS_OPTIONS)[number]>("scheduled");
+  const [manualStatusReason, setManualStatusReason] = useState("");
   const patientScopedDefaultFilters: RegistrationsFilters = patientIdParam
     ? {
         ...DEFAULT_FILTERS,
@@ -296,6 +301,36 @@ export default function RegistrationsPage() {
         type: "error",
         title: t("registrations.cancelFailedTitle"),
         message: err?.message || t("registrations.cancelFailedMessage"),
+      });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async (payload: { appointmentId: number; status: string; reason: string | null }) => {
+      await updateAppointmentStatus(payload.appointmentId, payload.status, payload.reason);
+      return getAppointmentById(payload.appointmentId);
+    },
+    meta: {
+      suppressGlobalToast: true,
+    },
+    onSuccess: (updated) => {
+      queryClient.invalidateQueries({ queryKey: ["registrations"] });
+      queryClient.invalidateQueries({ queryKey: ["queue"] });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      setSelectedAppointment(updated);
+      setManualStatus(updated.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
+      setManualStatusReason("");
+      pushToast({
+        type: "success",
+        title: chooseLocalized(language, "تم تحديث الحالة", "Status updated"),
+        message: statusLabel(language, updated.status),
+      });
+    },
+    onError: (err: any) => {
+      pushToast({
+        type: "error",
+        title: chooseLocalized(language, "تعذر تحديث الحالة", "Status update failed"),
+        message: err?.message || chooseLocalized(language, "حاول مرة أخرى.", "Please try again."),
       });
     },
   });
@@ -788,6 +823,10 @@ export default function RegistrationsPage() {
     setRescheduleSpecialReasonCode("");
     setRescheduleSpecialReasonConfirmed(false);
     setRescheduleSpecialReasonNote("");
+    if (selectedAppointment?.status && MANUAL_STATUS_OPTIONS.includes(selectedAppointment.status as (typeof MANUAL_STATUS_OPTIONS)[number])) {
+      setManualStatus(selectedAppointment.status as (typeof MANUAL_STATUS_OPTIONS)[number]);
+    }
+    setManualStatusReason("");
   }, [selectedAppointment?.id, manageTab]);
 
   useEffect(() => {
@@ -1702,6 +1741,15 @@ export default function RegistrationsPage() {
                 <Button
                   type="button"
                   size="sm"
+                  variant={manageTab === "status" ? "secondary" : "ghost"}
+                  className="h-8 px-2.5 text-[10px]"
+                  onClick={() => setManageTabAndUrl("status")}
+                >
+                  {chooseLocalized(language, "الحالة", "Status")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
                   variant={manageTab === "cancel" ? "secondary" : "ghost"}
                   className="h-8 px-2.5 text-[10px]"
                   onClick={() => setManageTabAndUrl("cancel")}
@@ -1922,6 +1970,78 @@ export default function RegistrationsPage() {
                     {t("registrations.rescheduleNotAllowed")}
                   </div>
                 )
+              ) : null}
+
+              {manageTab === "status" ? (
+                <div className="rounded-2xl border border-border bg-muted/20 p-3">
+                  <div className="mb-3">
+                    <h4 className="text-sm font-semibold">{chooseLocalized(language, "تغيير حالة الموعد", "Change appointment status")}</h4>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {chooseLocalized(language, "استخدمها لتصحيح حالة الموعد يدوياً عند الحاجة.", "Use this to correct the appointment status manually when needed.")}
+                    </p>
+                  </div>
+                  <div className="mb-3 rounded-xl border border-border bg-background p-3 text-sm">
+                    <span className="text-muted-foreground">{chooseLocalized(language, "الحالة الحالية", "Current status")}: </span>
+                    <span className="font-semibold">{statusLabel(language, selectedAppointment.status)}</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {MANUAL_STATUS_OPTIONS.map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className={`rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                          manualStatus === status
+                            ? "border-accent/40 bg-accent/10 text-accent"
+                            : "border-border bg-background text-foreground hover:border-accent/30"
+                        }`}
+                        onClick={() => setManualStatus(status)}
+                      >
+                        {statusLabel(language, status)}
+                      </button>
+                    ))}
+                  </div>
+                  {STATUS_REASON_REQUIRED.has(manualStatus) ? (
+                    <div className="mt-3">
+                      <label className="mb-1 block text-[10px] font-mono-data uppercase tracking-[0.08em] text-muted-foreground">
+                        {chooseLocalized(language, "السبب", "Reason")}
+                      </label>
+                      <textarea
+                        value={manualStatusReason}
+                        onChange={(event) => setManualStatusReason(event.target.value)}
+                        rows={3}
+                        className="input-premium w-full resize-none"
+                        placeholder={chooseLocalized(language, "اكتب سبب تغيير الحالة", "Enter a reason for this status change")}
+                      />
+                    </div>
+                  ) : null}
+                  <div className={isRtl ? "mt-3 flex justify-start" : "mt-3 flex justify-end"}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={
+                        statusMutation.isPending ||
+                        manualStatus === selectedAppointment.status ||
+                        (STATUS_REASON_REQUIRED.has(manualStatus) && !manualStatusReason.trim())
+                      }
+                      onClick={() =>
+                        statusMutation.mutate({
+                          appointmentId: selectedAppointment.id,
+                          status: manualStatus,
+                          reason: manualStatusReason.trim() || null,
+                        })
+                      }
+                    >
+                      {statusMutation.isPending ? (
+                        <span className="inline-flex items-center gap-2">
+                          <Loader2 size={14} className="animate-spin" />
+                          {chooseLocalized(language, "جار الحفظ", "Saving")}
+                        </span>
+                      ) : (
+                        chooseLocalized(language, "حفظ الحالة", "Save status")
+                      )}
+                    </Button>
+                  </div>
+                </div>
               ) : null}
 
               {manageTab === "cancel" ? (
