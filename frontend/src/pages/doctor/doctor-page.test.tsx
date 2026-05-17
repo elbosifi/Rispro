@@ -369,6 +369,42 @@ describe("Doctor Portal shell", () => {
     expect(screen.queryByRole("button", { name: /Advanced Setup/i })).toBeNull();
   });
 
+  it("My Work shows Availability and Protocols shortcuts for clinical doctors", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/my-work");
+
+    expect((await screen.findByRole("link", { name: /Availability/i })).getAttribute("href")).toBe("/doctor/availability");
+    expect(screen.getByRole("link", { name: /Protocols/i }).getAttribute("href")).toBe("/doctor/protocols");
+    expect(screen.getByRole("link", { name: /My Roster/i }).getAttribute("href")).toBe("/doctor/roster");
+    expect(screen.getByRole("link", { name: /My Cases/i }).getAttribute("href")).toBe("/doctor/today-cases");
+  });
+
+  it("Advanced Setup shows Team Workload link for supervisors and admins", async () => {
+    fetchDoctorMeMock.mockResolvedValue({
+      ...normalDoctor,
+      canSupervise: true,
+      canAccessDoctorAdmin: true,
+      canManageDoctorProfiles: true,
+      moduleCapabilities: ["doctor", "doctor_supervisor", "doctor_admin"],
+    });
+    renderDoctorPortal("/doctor/advanced-setup");
+
+    expect(await screen.findByRole("heading", { name: "Advanced Setup" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Team Workload/i }).getAttribute("href")).toBe("/doctor/team-workload");
+    expect(screen.getByRole("link", { name: /Roster advanced tools/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Doctor import\/export/i })).toBeTruthy();
+  });
+
+  it("normal doctors do not see admin-only Advanced Setup cards", async () => {
+    fetchDoctorMeMock.mockResolvedValue(normalDoctor);
+    renderDoctorPortal("/doctor/advanced-setup");
+
+    expect(await screen.findByText("Dr Normal")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: /Team Workload/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Roster advanced tools/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /Doctor import\/export/i })).toBeNull();
+  });
+
   it("lets profileless admins manage doctors without clinical navigation", async () => {
     fetchDoctorMeMock.mockResolvedValue({
       ...normalDoctor,

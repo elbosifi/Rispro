@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   BriefcaseMedical,
@@ -55,6 +55,8 @@ function LoadingShell() {
 }
 
 function DoctorPortalHome({ me }: { me: DoctorMe }) {
+  const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
+
   return (
     <div className="space-y-4">
       <div>
@@ -74,6 +76,14 @@ function DoctorPortalHome({ me }: { me: DoctorMe }) {
         <PlaceholderPanel title="Doctor Portal administration" body="Use Doctors Directory to manage doctor profiles and modality permissions." />
       ) : (
         <PlaceholderPanel title="Clinical coordination workspace" body="Roster, case basket, protocol assignment, and workload dashboards are available from the navigation." />
+      )}
+      {canAccessClinical && (
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <ShortcutCard title="My Roster" body="Review your published roster and assigned shifts." to="/doctor/roster" />
+          <ShortcutCard title="Availability" body="Update availability and leave for roster planning." to="/doctor/availability" />
+          <ShortcutCard title="My Cases" body="Open your report-required case worklist." to="/doctor/today-cases" />
+          <ShortcutCard title="Protocols" body="Review and manage protocol tasks." to="/doctor/protocols" />
+        </section>
       )}
     </div>
   );
@@ -101,7 +111,25 @@ function PlaceholderPanel({ title, body }: { title: string; body: string }) {
   );
 }
 
-function DoctorAdvancedSetupPage() {
+function ShortcutCard({ title, body, to }: { title: string; body: string; to: string }) {
+  return (
+    <Link
+      to={to}
+      className="rounded-lg border p-4 text-left transition hover:border-teal-600"
+      style={{ backgroundColor: "var(--card)", borderColor: "var(--border)" }}
+    >
+      <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+      <p className="mt-2 text-sm leading-5" style={{ color: "var(--text-muted)" }}>
+        {body}
+      </p>
+    </Link>
+  );
+}
+
+function DoctorAdvancedSetupPage({ me }: { me: DoctorMe }) {
+  const canAccessClinical = Boolean(me.canAccessClinicalDoctorPortal ?? me.hasActiveDoctorProfile);
+  const canAccessManagementSetup = canManageClinicalRoster(me) || canAccessDoctorAdmin(me);
+
   return (
     <div className="space-y-4">
       <div>
@@ -110,10 +138,15 @@ function DoctorAdvancedSetupPage() {
         </p>
         <h2 className="mt-1 text-2xl font-semibold text-foreground">Advanced Setup</h2>
       </div>
-      <PlaceholderPanel
-        title="Advanced tools stay in their current pages for now"
-        body="Roster templates, imports, duty types, doctor import/export, notifications, exports, and workload catalog tools will move here in the next steps."
-      />
+      {canAccessManagementSetup && (
+        <section className="grid gap-3 md:grid-cols-3">
+          {canAccessClinical && (
+            <ShortcutCard title="Team Workload" body="Open workload summaries and catalog tools." to="/doctor/team-workload" />
+          )}
+          <ShortcutCard title="Roster advanced tools" body="Duty types, mappings, imports, templates, exports, and notifications will be moved here in next step." to="/doctor/roster-planner" />
+          <ShortcutCard title="Doctor import/export" body="CSV/XLSX import and export tools will be moved here in next step." to="/doctor/doctors-directory" />
+        </section>
+      )}
     </div>
   );
 }
@@ -147,7 +180,7 @@ function DoctorPortalRoutes({ me }: { me: DoctorMe }) {
       <Route path="admin/doctors" element={<Navigate to="/doctor/doctors-directory" replace />} />
       <Route
         path="advanced-setup"
-        element={canAccessAdvancedSetup ? <DoctorAdvancedSetupPage /> : <Navigate to="/doctor/my-work" replace />}
+        element={canAccessAdvancedSetup ? <DoctorAdvancedSetupPage me={me} /> : <Navigate to="/doctor/my-work" replace />}
       />
       <Route
         path="roster"
