@@ -265,10 +265,19 @@ const LIST_BOOKINGS_SQL = `
     p.arabic_full_name as "patientArabicName",
     p.english_full_name as "patientEnglishName",
     p.national_id as "patientNationalId",
+    coalesce(primary_identifier.value, p.identifier_value, p.national_id) as "patientIdentifierValue",
     m.name_en as "modalityName",
     et.name_en as "examTypeName"
   from appointments_v2.bookings b
   left join patients p on p.id = b.patient_id
+  left join lateral (
+    select pi.value
+    from patient_identifiers pi
+    where pi.patient_id = p.id
+      and pi.is_primary = true
+    order by pi.id asc
+    limit 1
+  ) primary_identifier on true
   left join modalities m on m.id = b.modality_id
   left join exam_types et on et.id = b.exam_type_id
   where b.modality_id = $1
@@ -293,6 +302,7 @@ export interface BookingWithPatientInfo extends Booking {
   patientArabicName: string | null;
   patientEnglishName: string | null;
   patientNationalId: string | null;
+  patientIdentifierValue: string | null;
   modalityName: string | null;
   examTypeName: string | null;
 }

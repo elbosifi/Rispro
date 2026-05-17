@@ -25,6 +25,9 @@ export interface PatientRegistrationRules {
   mrnPrefix: string;
 }
 
+const PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
+  "Primary identifier is required. Enter a National ID, passport number, or other identifier before saving this patient.";
+
 export interface PatientRow {
   id: number;
   mrn: string | null;
@@ -152,6 +155,10 @@ function validateNationalIdField(
       return { nationalId: cleanId, identifierValue: cleanId };
     }
 
+    if (cleanId.length === 0) {
+      throw new HttpError(400, PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
+    }
+
     if (cleanId.length !== 12) {
       throw new HttpError(400, "National ID must contain exactly 12 digits.");
     }
@@ -165,6 +172,9 @@ function validateNationalIdField(
 
   // For passport or other types, just validate the identifier_value
   const cleanValue = String(identifierValue || '').trim();
+  if (rule !== "optional" && !cleanValue) {
+    throw new HttpError(400, PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
+  }
   return { nationalId: null, identifierValue: cleanValue || null };
 }
 

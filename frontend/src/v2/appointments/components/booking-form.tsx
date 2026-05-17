@@ -12,8 +12,10 @@ import { pushToast } from "@/lib/toast";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { useV2CreateBooking, evaluateV2Scheduling, useV2SpecialReasonCodes } from "../api";
+import { fetchSettings } from "@/lib/api-hooks";
 import { PatientSearch } from "./patient-search";
 import { OverrideDialog } from "./override-dialog";
+import { useAuth } from "@/providers/auth-provider";
 import type {
   AvailabilityDayDto,
   CreateBookingRequest,
@@ -27,9 +29,13 @@ interface Patient {
   arabicFullName: string;
   englishFullName?: string | null;
   nationalId?: string | null;
+  identifierValue?: string | null;
   medicalRecordNo?: string | null;
   phone?: string | null;
 }
+
+const BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
+  "This patient cannot be booked because they do not have a primary identifier. Open the patient record and add a National ID, passport number, or other identifier.";
 
 interface BookingFormProps {
   modalities: ModalityDto[];
@@ -49,6 +55,7 @@ export function BookingForm({
   onBookingSuccess,
 }: BookingFormProps) {
   const { language } = useLanguage();
+  const { user } = useAuth();
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
   const [selectedDate, setSelectedDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -63,6 +70,7 @@ export function BookingForm({
 
   const createBooking = useV2CreateBooking();
   const specialReasons = useV2SpecialReasonCodes();
+  const [identifierRequired, setIdentifierRequired] = useState(false);
 
   const modality = modalities.find((m) => m.id === selectedModalityId);
 
@@ -74,6 +82,20 @@ export function BookingForm({
     setUseSpecialQuota(false);
     setSpecialReasonCode("");
   }, [selectedModalityId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettings("patient_registration")
+      .then((settings) => {
+        if (!cancelled) setIdentifierRequired(settings.national_id_required === "required");
+      })
+      .catch(() => {
+        if (!cancelled) setIdentifierRequired(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const availableDates = availability
     .filter((d) => d.decision.displayStatus === "available" || d.decision.displayStatus === "restricted")
@@ -91,6 +113,15 @@ export function BookingForm({
         type: "error",
         title: t(language, "common.validationError"),
         message: t(language, "appointments.booking.selectPatientModalityDate"),
+      });
+      return;
+    }
+
+    if (identifierRequired && user?.role !== "super_admin" && !String(selectedPatient.identifierValue || selectedPatient.nationalId || "").trim()) {
+      pushToast({
+        type: "error",
+        title: t(language, "appointments.booking.bookingFailed"),
+        message: BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
       });
       return;
     }

@@ -7,6 +7,7 @@ import {
   searchPatients,
   fetchPatientMrnPreview,
   fetchPatientIdentifierTypes,
+  fetchSettings,
   fetchNameDictionary,
   upsertNameDictionaryEntry,
   fetchPatientById,
@@ -70,6 +71,9 @@ const BUILTIN_IDENTIFIER_TYPES: PatientIdentifierTypeOption[] = [
   { code: "passport", labelAr: "جواز سفر", labelEn: "Passport" },
   { code: "other", labelAr: "أخرى", labelEn: "Other" }
 ];
+
+const PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
+  "Primary identifier is required. Enter a National ID, passport number, or other identifier before saving this patient.";
 
 type FormFieldKey =
   | "arabicFullName"
@@ -224,6 +228,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     queryFn: fetchPatientIdentifierTypes,
     staleTime: 1000 * 60 * 5
   });
+  const { data: patientRegistrationSettings } = useQuery({
+    queryKey: ["settings", "patient_registration"],
+    queryFn: () => fetchSettings("patient_registration"),
+    staleTime: 1000 * 60
+  });
   const identifierTypeOptions = (() => {
     const incoming = Array.isArray(identifierTypesData) ? identifierTypesData.filter((row) => row.code) : [];
     if (incoming.length === 0) return BUILTIN_IDENTIFIER_TYPES;
@@ -273,6 +282,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
         setPostCreatePatient(patient);
       }
       onSuccess?.(patient);
+    },
+    onError: (err: any) => {
+      showToast(err?.message || (language === "ar" ? "تعذر تسجيل المريض" : "Could not register patient"), "error");
     }
   });
   const updateMutation = useMutation({
@@ -281,6 +293,9 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       queryClient.invalidateQueries({ queryKey: ["patient-by-id", patientId] });
       showToast(language === "ar" ? `تم تحديث المريض: ${patient.arabicFullName}` : `Patient updated: ${patient.arabicFullName}`);
       onSuccess?.(patient);
+    },
+    onError: (err: any) => {
+      showToast(err?.message || (language === "ar" ? "تعذر تحديث المريض" : "Could not update patient"), "error");
     }
   });
   const deleteMutation = useMutation({
@@ -554,6 +569,11 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const primaryCount = form.identifiers.filter((entry) => entry.isPrimary).length;
     if (primaryCount !== 1) {
       showToast(language === "ar" ? "يجب تحديد معرف أساسي واحد فقط." : "Exactly one primary identifier is required.", "error");
+      return;
+    }
+    if (patientRegistrationSettings?.national_id_required === "required" && !form.identifierValue.trim()) {
+      showToast(PATIENT_IDENTIFIER_REQUIRED_MESSAGE, "error");
+      identifierValueRef.current?.focus();
       return;
     }
     if (!form.sex) {

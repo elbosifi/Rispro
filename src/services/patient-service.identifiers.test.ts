@@ -20,6 +20,7 @@ interface FixtureContext {
   patientAId: number;
   patientBId: number;
   identifierTypeId: number;
+  identifierTypeCode: string;
   cleanup: () => Promise<void>;
 }
 
@@ -56,6 +57,7 @@ async function createFixture(): Promise<FixtureContext> {
     [`test_${suffix}`, `اختبار ${suffix}`, `Test ID ${suffix}`]
   );
   const identifierTypeId = Number(idType.rows[0]?.id);
+  const identifierTypeCode = `test_${suffix}`;
 
   const mkPatient = async (seed: string, identifiers?: { typeCode: string; value: string; isPrimary: boolean }[]) => {
     const result = await pool.query<{ id: number }>(
@@ -103,7 +105,7 @@ async function createFixture(): Promise<FixtureContext> {
     await pool.query(`delete from users where id = $1`, [receptionistUserId]);
   };
 
-  return { receptionistUserId, patientAId, patientBId, identifierTypeId, cleanup };
+  return { receptionistUserId, patientAId, patientBId, identifierTypeId, identifierTypeCode, cleanup };
 }
 
 async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<boolean> {
@@ -115,6 +117,115 @@ async function ensureDbOrSkip(t: { skip: (message?: string) => void }): Promise<
     return false;
   }
 }
+
+async function readIdentifierRequiredRule(): Promise<string> {
+  const { rows } = await pool.query<{ value: string | null }>(
+    `
+      select setting_value->>'value' as value
+      from system_settings
+      where category = 'patient_registration'
+        and setting_key = 'national_id_required'
+      limit 1
+    `
+  );
+  return String(rows[0]?.value || "optional");
+}
+
+async function setIdentifierRequiredRule(value: string): Promise<void> {
+  await pool.query(
+    `
+      insert into system_settings (category, setting_key, setting_value)
+      values ('patient_registration', 'national_id_required', jsonb_build_object('value', $1::text))
+      on conflict (category, setting_key)
+      do update set setting_value = excluded.setting_value
+    `,
+    [value]
+  );
+  invalidateAllCache();
+}
+
+function minimalPatientPayload(suffix: string, patch: Partial<PatientPayload> = {}): PatientPayload {
+  return {
+    arabicFullName: `مريض اختبار ${suffix}`,
+    englishFullName: `Test Patient ${suffix}`,
+    identifierType: "national_id",
+    identifierValue: "",
+    category: "non_oncology",
+    sex: "M",
+    ageYears: 30,
+    phone1: `09${String(Math.floor(Math.random() * 100000000)).padStart(8, "0")}`,
+    address: "city",
+    ...patch,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Test: required identifier setting applies to any primary identifier type
+// ---------------------------------------------------------------------------
+test("createPatient: required identifier setting rejects blank primary identifier with clear message", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const previousRule = await readIdentifierRequiredRule();
+  try {
+    await setIdentifierRequiredRule("required");
+    await assert.rejects(
+      () => createPatient(minimalPatientPayload(uniqueSuffix()), fx.receptionistUserId),
+      /Primary identifier is required\. Enter a National ID, passport number, or other identifier before saving this patient\./
+    );
+  } finally {
+    await setIdentifierRequiredRule(previousRule);
+    await fx.cleanup();
+  }
+});
+
+test("createPatient: required identifier setting accepts non-national primary identifier", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const createdIds: number[] = [];
+  const previousRule = await readIdentifierRequiredRule();
+  try {
+    await setIdentifierRequiredRule("required");
+    const suffix = uniqueSuffix();
+    const created = await createPatient(
+      minimalPatientPayload(suffix, {
+        identifierType: fx.identifierTypeCode,
+        identifierValue: `PASS-${suffix}`,
+        nationalId: undefined,
+        identifiers: [{ typeCode: fx.identifierTypeCode, value: `PASS-${suffix}`, isPrimary: true }],
+      }),
+      fx.receptionistUserId
+    );
+    createdIds.push(Number(created.id));
+    assert.equal(created.identifier_value, `PASS-${suffix}`);
+  } finally {
+    await setIdentifierRequiredRule(previousRule);
+    if (createdIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdIds]);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdIds]);
+    }
+    await fx.cleanup();
+  }
+});
+
+test("createPatient: optional identifier setting allows blank identifier", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const createdIds: number[] = [];
+  const previousRule = await readIdentifierRequiredRule();
+  try {
+    await setIdentifierRequiredRule("optional");
+    const created = await createPatient(minimalPatientPayload(uniqueSuffix()), fx.receptionistUserId);
+    createdIds.push(Number(created.id));
+    assert.equal(created.identifier_value, null);
+  } finally {
+    await setIdentifierRequiredRule(previousRule);
+    if (createdIds.length > 0) {
+      await pool.query(`delete from patient_identifiers where patient_id = any($1::bigint[])`, [createdIds]);
+      await pool.query(`delete from patients where id = any($1::bigint[])`, [createdIds]);
+    }
+    await fx.cleanup();
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test: search finds patients by secondary identifier

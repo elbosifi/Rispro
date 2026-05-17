@@ -8,6 +8,10 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { SchedulingError } from "../../shared/errors/scheduling-error.js";
+import {
+  assertPatientIdentifierAllowsBooking,
+  BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE,
+} from "../../booking/services/patient-identifier-requirement.js";
 
 describe("Create booking — validation", () => {
   it("SchedulingError includes reasonCodes for hard blocks", () => {
@@ -23,6 +27,39 @@ describe("Create booking — validation", () => {
   it("SchedulingError accepts empty reasonCodes", () => {
     const err = new SchedulingError(400, "Bad request");
     assert.deepEqual(err.reasonCodes, []);
+  });
+});
+
+describe("Create booking - patient identifier requirement", () => {
+  it("required identifier setting blocks booking when patient has no primary identifier", async () => {
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("system_settings")) return { rows: [{ value: "required" }] };
+        return { rows: [{ primary_identifier: "" }] };
+      },
+    };
+
+    await assert.rejects(
+      () => assertPatientIdentifierAllowsBooking(client as never, 1, "receptionist"),
+      (error: unknown) => {
+        assert.ok(error instanceof SchedulingError);
+        assert.equal(error.statusCode, 400);
+        assert.equal(error.message, BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
+        assert.deepEqual(error.reasonCodes, ["patient_primary_identifier_required"]);
+        return true;
+      }
+    );
+  });
+
+  it("super admins can bypass missing patient primary identifier for booking", async () => {
+    const client = {
+      query: async (sql: string) => {
+        if (sql.includes("system_settings")) return { rows: [{ value: "required" }] };
+        return { rows: [{ primary_identifier: "" }] };
+      },
+    };
+
+    await assert.doesNotReject(() => assertPatientIdentifierAllowsBooking(client as never, 1, "super_admin"));
   });
 });
 

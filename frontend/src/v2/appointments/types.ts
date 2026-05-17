@@ -250,6 +250,7 @@ export interface BookingWithPatientInfo {
   patientArabicName: string | null;
   patientEnglishName: string | null;
   patientNationalId: string | null;
+  patientIdentifierValue: string | null;
   modalityName: string | null;
   examTypeName: string | null;
 }

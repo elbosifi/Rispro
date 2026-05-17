@@ -6,9 +6,10 @@
  * Does not use or import any legacy scheduling code.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
+import { fetchSettings } from "@/lib/api-hooks";
 import { useAuth } from "@/providers/auth-provider";
 import { Button, Card, LoadingState } from "@/components/shared";
 import { chooseLocalized, statusLabel, t } from "@/lib/i18n";
@@ -42,6 +43,9 @@ function describeReason(code: string): string {
   };
   return map[code] ?? code;
 }
+
+const BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE =
+  "This patient cannot be booked because they do not have a primary identifier. Open the patient record and add a National ID, passport number, or other identifier.";
 
 function formatDate(dateStr: string): string {
   const d = new Date(`${dateStr}T00:00:00Z`);
@@ -476,6 +480,7 @@ function BookingsList({
   const [includeCancelled, setIncludeCancelled] = useState(false);
   const [cancelPendingBookingId, setCancelPendingBookingId] = useState<number | null>(null);
   const [reschedulePendingBookingId, setReschedulePendingBookingId] = useState<number | null>(null);
+  const [identifierRequired, setIdentifierRequired] = useState(false);
 
   // Compute date range from availability data
   const dateFrom = availabilityItems[0]?.date ?? "";
@@ -486,6 +491,20 @@ function BookingsList({
       ? { modalityId, dateFrom, dateTo, includeCancelled }
       : null
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSettings("patient_registration")
+      .then((settings) => {
+        if (!cancelled) setIdentifierRequired(settings.national_id_required === "required");
+      })
+      .catch(() => {
+        if (!cancelled) setIdentifierRequired(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleCancelConfirm = async () => {
     if (!cancelTarget) return;
@@ -530,6 +549,14 @@ function BookingsList({
     if (!RESCHEDULABLE_STATUSES.includes(rescheduleTarget.status)) {
       const msg = `Cannot reschedule a booking with status "${rescheduleTarget.status}"`;
       setRescheduleError(msg);
+      return;
+    }
+    if (
+      identifierRequired &&
+      currentUserRole !== "super_admin" &&
+      !String(rescheduleTarget.patientIdentifierValue || rescheduleTarget.patientNationalId || "").trim()
+    ) {
+      setRescheduleError(BOOKING_PATIENT_IDENTIFIER_REQUIRED_MESSAGE);
       return;
     }
     setReschedulePendingBookingId(rescheduleTarget.id);
