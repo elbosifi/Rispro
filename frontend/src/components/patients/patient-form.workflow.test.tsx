@@ -10,6 +10,7 @@ import {
   createPatient,
   searchPatients,
   fetchNameDictionary,
+  fetchPatientNotAllowedNameWords,
   upsertNameDictionaryEntry,
   fetchPatientById,
   fetchPatientMrnPreview,
@@ -22,6 +23,7 @@ vi.mock("@/lib/api-hooks", () => ({
   createPatient: vi.fn(),
   searchPatients: vi.fn(),
   fetchNameDictionary: vi.fn(),
+  fetchPatientNotAllowedNameWords: vi.fn(),
   upsertNameDictionaryEntry: vi.fn(),
   fetchPatientById: vi.fn(),
   fetchPatientMrnPreview: vi.fn(),
@@ -85,6 +87,7 @@ describe("PatientForm workflow hardening", () => {
         { arabicText: "حسن", englishText: "Hassan" }
       ]
     } as any);
+    vi.mocked(fetchPatientNotAllowedNameWords).mockResolvedValue({ entries: [{ id: 1, arabicText: "عبد", normalizedArabicText: "عبد", isActive: true }] } as any);
     vi.mocked(searchPatients).mockResolvedValue([]);
     vi.mocked(upsertNameDictionaryEntry).mockResolvedValue({ entry: { arabic_text: "محمد", english_text: "Mohamed" } } as any);
     vi.mocked(fetchPatientMrnPreview).mockResolvedValue({ mrn: "000123" });
@@ -144,6 +147,21 @@ describe("PatientForm workflow hardening", () => {
     await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
     await user.click(screen.getByRole("button", { name: /Register Patient/i }));
     expect(await screen.findByText(/either Date of Birth or Age/i)).toBeTruthy();
+  });
+
+  it("blocks submit when Arabic full name contains a not-allowed word", async () => {
+    const user = userEvent.setup();
+    renderPatientForm({ mode: "create" });
+
+    await user.type(screen.getByLabelText(/Arabic Full Name/i), "محمد عبد الله");
+    await user.selectOptions(screen.getByLabelText(/Patient Category/i), "oncology");
+    await user.selectOptions(screen.getByLabelText(/Sex/i), "M");
+    await user.type(screen.getByLabelText(/Age \(years\)/i), "30");
+    await user.type(screen.getByLabelText(/Phone 1/i), "0912345678");
+    await user.click(screen.getByRole("button", { name: /Register Patient/i }));
+
+    expect(await screen.findByText(/Arabic name contains a not-allowed word: عبد/i)).toBeTruthy();
+    expect(createPatient).not.toHaveBeenCalled();
   });
 
   it("blocks registering when Arabic full name has fewer than 3 names", async () => {

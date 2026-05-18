@@ -9,12 +9,14 @@ import {
   fetchPatientIdentifierTypes,
   fetchSettings,
   fetchNameDictionary,
+  fetchPatientNotAllowedNameWords,
   upsertNameDictionaryEntry,
   fetchPatientById,
   updatePatient,
   deletePatient
 } from "@/lib/api-hooks";
 import { generateEnglishFromDictionary, type DictionaryEntry } from "@/lib/name-generation";
+import { normalizeArabic } from "@/lib/arabic-normalize";
 import {
   deriveDemographicsFromNationalId,
   calculateAgeFromDob,
@@ -182,6 +184,12 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
   });
   const serverDictionary: DictionaryEntry[] = dictData?.entries ?? [];
   const dictionary: DictionaryEntry[] = [...serverDictionary, ...localDictionary];
+  const { data: notAllowedNameWordsData } = useQuery({
+    queryKey: ["patient-not-allowed-name-words"],
+    queryFn: fetchPatientNotAllowedNameWords,
+    staleTime: 1000 * 60 * 5
+  });
+  const notAllowedNameWords = notAllowedNameWordsData?.entries ?? [];
 
   // Load patient for edit
   const { data: existingPatient, isLoading: loadingPatient } = useQuery({
@@ -551,6 +559,14 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
+    const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
+    const blockedWords = new Set(notAllowedNameWords.map((entry) => normalizeArabic(entry.arabicText)).filter(Boolean));
+    const blockedWord = arabicNameParts.map((part) => normalizeArabic(part)).find((part) => blockedWords.has(part));
+    if (blockedWord) {
+      showToast(`Arabic name contains a not-allowed word: ${blockedWord}`, "error");
+      arabicFullNameRef.current?.focus();
+      return;
+    }
     const fullNameGeneration = generateEnglishFromDictionary(form.arabicFullName.trim(), dictionary);
     if (!englishNameManuallyEdited && fullNameGeneration.missingTokens.length > 0) {
       const tokensLabel = fullNameGeneration.missingTokens.join(", ");
@@ -563,7 +579,6 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       englishFullNameRef.current?.focus();
       return;
     }
-    const arabicNameParts = form.arabicFullName.trim().split(/\s+/).filter(Boolean);
     if (!isEdit && arabicNameParts.length < 3) {
       showToast(language === "ar" ? "يجب أن يحتوي الاسم العربي على 3 أجزاء على الأقل قبل التسجيل." : "Arabic full name must include at least 3 names before registering.", "error");
       arabicFullNameRef.current?.focus();

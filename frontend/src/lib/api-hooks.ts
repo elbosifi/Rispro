@@ -82,6 +82,15 @@ const CATALOG_IMPORT_TIMEOUT_MS = 180_000;
 
 export type AppointmentRefType = "legacy_appointment" | "v2_booking" | "auto";
 
+export interface PatientNotAllowedNameWord {
+  id: number;
+  arabicText: string;
+  normalizedArabicText: string;
+  isActive: boolean;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 export interface RequestDocument {
   id: number;
   patientId: number | null;
@@ -2541,6 +2550,38 @@ export async function importNameDictionary(entries: { arabicText: string; englis
     method: "POST",
     body: JSON.stringify({ entries })
   });
+}
+
+function mapPatientNotAllowedNameWord(raw: RawRecord): PatientNotAllowedNameWord {
+  return {
+    id: Number(raw.id || 0),
+    arabicText: String(raw.arabic_text || raw.arabicText || ""),
+    normalizedArabicText: String(raw.normalized_arabic_text || raw.normalizedArabicText || ""),
+    isActive: raw.is_active === undefined && raw.isActive === undefined
+      ? true
+      : Boolean(raw.is_active ?? raw.isActive),
+    createdAt: raw.created_at || raw.createdAt ? String(raw.created_at || raw.createdAt) : null,
+    updatedAt: raw.updated_at || raw.updatedAt ? String(raw.updated_at || raw.updatedAt) : null
+  };
+}
+
+export async function fetchPatientNotAllowedNameWords(): Promise<{ entries: PatientNotAllowedNameWord[]; meta: RawRecord }> {
+  const raw = await api<{ entries: RawRecord[]; meta?: RawRecord }>("/settings/not-allowed-name-words");
+  return {
+    entries: (raw.entries ?? []).map(mapPatientNotAllowedNameWord),
+    meta: raw.meta ?? {}
+  };
+}
+
+export async function upsertPatientNotAllowedNameWord(arabicText: string) {
+  return api<{ entry: RawRecord }>("/settings/not-allowed-name-words", {
+    method: "POST",
+    body: JSON.stringify({ arabicText })
+  });
+}
+
+export async function deletePatientNotAllowedNameWord(entryId: number) {
+  return api<{ entry: RawRecord }>(`/settings/not-allowed-name-words/${entryId}`, { method: "DELETE" });
 }
 
 export async function fetchDicomDevices(): Promise<{ devices: DicomDevice[]; meta: RawRecord }> {

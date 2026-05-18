@@ -40,6 +40,11 @@ import {
   upsertNameDictionary
 } from "../services/name-dictionary-service.js";
 import {
+  deletePatientNotAllowedNameWord,
+  listPatientNotAllowedNameWords,
+  upsertPatientNotAllowedNameWord
+} from "../services/patient-not-allowed-name-words-service.js";
+import {
   getSchedulingEngineConfiguration,
   saveSchedulingEngineConfiguration
 } from "../services/scheduling-settings-service.js";
@@ -84,6 +89,7 @@ interface SettingsRequest {
   params?: {
     category?: string;
     entryId?: string;
+    wordId?: string;
     modalityId?: string;
     examTypeId?: string;
     deviceId?: string;
@@ -135,6 +141,16 @@ settingsRouter.delete(
   })
 );
 
+settingsRouter.get(
+  "/not-allowed-name-words",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const includeInactive = asBooleanFlag(request.query?.includeInactive);
+    const entries = await listPatientNotAllowedNameWords({ includeInactive });
+    res.json({ entries });
+  })
+);
+
 // Printing flows must read these settings without supervisor re-auth.
 // Writes remain protected by the supervisor middleware below.
 settingsRouter.get(
@@ -164,6 +180,24 @@ settingsRouter.get(
 // Supervisor-only settings
 settingsRouter.use(requireAuth, requireSupervisor, requireRecentSupervisorReauth);
 settingsRouter.use("/patient-import", express.json({ limit: "25mb" }));
+
+settingsRouter.post(
+  "/not-allowed-name-words",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const entry = await upsertPatientNotAllowedNameWord(request.body ?? undefined, request.user.sub as UserId);
+    res.status(201).json({ entry });
+  })
+);
+
+settingsRouter.delete(
+  "/not-allowed-name-words/:wordId",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const entry = await deletePatientNotAllowedNameWord(asString(request.params?.wordId), request.user.sub as UserId);
+    res.json({ entry });
+  })
+);
 
 settingsRouter.put(
   "/users-and-roles/page-visibility",

@@ -4,6 +4,11 @@ import { normalizePositiveInteger, buildEstimatedDobFromAge, formatDateForSql, n
 import { validateIsoDate } from "../utils/date.js";
 import { getCached, setCached } from "../utils/cache.js";
 import { logAuditEntry } from "./audit-service.js";
+import {
+  findBlockedArabicNameWord,
+  listPatientNotAllowedNameWords,
+  type PatientNotAllowedNameWordRow
+} from "./patient-not-allowed-name-words-service.js";
 import { generateEnglishFromDictionary, NameDictionaryLookup } from "../utils/name-generation.js";
 import {
   isValidNationalId,
@@ -384,7 +389,8 @@ async function loadNameDictionary(): Promise<NameDictionaryLookup[]> {
 async function validatePatientPayload(
   payload: PatientPayload,
   rules: PatientRegistrationRules,
-  dictionary: NameDictionaryLookup[]
+  dictionary: NameDictionaryLookup[],
+  notAllowedNameWords: PatientNotAllowedNameWordRow[] = []
 ): Promise<ValidatedPatientPayload> {
   const {
     nationalId,
@@ -406,6 +412,11 @@ async function validatePatientPayload(
 
   if (!arabicFullName) {
     throw new HttpError(400, "arabicFullName is required.");
+  }
+
+  const blockedWord = findBlockedArabicNameWord(arabicFullName, notAllowedNameWords);
+  if (blockedWord) {
+    throw new HttpError(400, `Arabic name contains a not-allowed word: ${blockedWord}`);
   }
 
   const resolvedIdentifierType = identifierType || 'national_id';
@@ -901,7 +912,8 @@ async function syncPatientPrimaryIdentifierColumns(
 export async function createPatient(payload: PatientPayload, createdByUserId: OptionalUserId): Promise<PersistedPatientRow> {
   const rules = await loadPatientRegistrationSettings();
   const dictionary = await loadNameDictionary();
-  const validated = await validatePatientPayload(payload, rules, dictionary);
+  const notAllowedNameWords = await listPatientNotAllowedNameWords();
+  const validated = await validatePatientPayload(payload, rules, dictionary, notAllowedNameWords);
 
   try {
     const client = await pool.connect();
@@ -1018,7 +1030,8 @@ export async function updatePatient(patientId: UserId, payload: PatientPayload, 
   const previousPatient = await getPatientById(cleanPatientId);
   const rules = await loadPatientRegistrationSettings();
   const dictionary = await loadNameDictionary();
-  const validated = await validatePatientPayload(payload, rules, dictionary);
+  const notAllowedNameWords = await listPatientNotAllowedNameWords();
+  const validated = await validatePatientPayload(payload, rules, dictionary, notAllowedNameWords);
 
   try {
     const client = await pool.connect();

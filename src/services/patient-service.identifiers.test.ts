@@ -178,6 +178,68 @@ test("createPatient: required identifier setting rejects blank primary identifie
   }
 });
 
+test("createPatient: rejects a not-allowed Arabic name word as a separate word", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const previousRule = await readIdentifierRequiredRule();
+  try {
+    await setIdentifierRequiredRule("optional");
+    await pool.query(
+      `
+        insert into patient_not_allowed_name_words (arabic_text, normalized_arabic_text, is_active)
+        values ('عبد', 'عبد', true)
+        on conflict (normalized_arabic_text)
+        do update set arabic_text = excluded.arabic_text, is_active = true
+      `
+    );
+
+    await assert.rejects(
+      () => createPatient(minimalPatientPayload(uniqueSuffix(), { arabicFullName: "محمد عبد الله" }), fx.receptionistUserId),
+      /Arabic name contains a not-allowed word: عبد/
+    );
+
+    await assert.rejects(
+      () => createPatient(minimalPatientPayload(uniqueSuffix(), { arabicFullName: "محمد علي عبد الله" }), fx.receptionistUserId),
+      /Arabic name contains a not-allowed word: عبد/
+    );
+  } finally {
+    await setIdentifierRequiredRule(previousRule);
+    await fx.cleanup();
+  }
+});
+
+test("createPatient: allows joined spelling when blocked word is not separate", async (t) => {
+  if (!(await ensureDbOrSkip(t))) return;
+  const fx = await createFixture();
+  const previousRule = await readIdentifierRequiredRule();
+  let createdPatientId: number | null = null;
+  try {
+    await setIdentifierRequiredRule("optional");
+    await pool.query(
+      `
+        insert into patient_not_allowed_name_words (arabic_text, normalized_arabic_text, is_active)
+        values ('عبد', 'عبد', true)
+        on conflict (normalized_arabic_text)
+        do update set arabic_text = excluded.arabic_text, is_active = true
+      `
+    );
+
+    const patient = await createPatient(
+      minimalPatientPayload(uniqueSuffix(), { arabicFullName: "محمد عبدالله علي" }),
+      fx.receptionistUserId
+    );
+    createdPatientId = Number(patient.id);
+
+    assert.equal(patient.arabic_full_name, "محمد عبدالله علي");
+  } finally {
+    if (createdPatientId) {
+      await pool.query(`delete from patients where id = $1`, [createdPatientId]);
+    }
+    await setIdentifierRequiredRule(previousRule);
+    await fx.cleanup();
+  }
+});
+
 test("createPatient: required identifier setting accepts non-national primary identifier", async (t) => {
   if (!(await ensureDbOrSkip(t))) return;
   const fx = await createFixture();
