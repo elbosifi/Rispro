@@ -209,7 +209,7 @@ router.put(
     const result = await rescheduleBooking(
       bookingId,
       body.bookingDate ?? null,
-      body.bookingTime ?? null,
+      body.bookingTime,
       body.examTypeId ?? null,
       body.reportingPriorityId ?? null,
       body.notes ?? null,

@@ -59,7 +59,7 @@ export interface RescheduleBookingResult {
 export async function rescheduleBooking(
   bookingId: number,
   newDate: string | null,
-  newTime: string | null,
+  newTime: string | null | undefined,
   newExamTypeId: number | null,
   reportingPriorityId: number | null,
   notes: string | null,
@@ -120,7 +120,7 @@ async function rescheduleBookingInternal(
   client: PoolClient,
   bookingId: number,
   newDate: string | null,
-  newTime: string | null,
+  newTime: string | null | undefined,
   newExamTypeId: number | null,
   reportingPriorityId: number | null,
   notes: string | null,
@@ -142,29 +142,13 @@ async function rescheduleBookingInternal(
   }
   await assertPatientIdentifierAllowsBooking(client, booking.patientId, userRole);
 
-  if (booking.status === "cancelled") {
-    throw new SchedulingError(
-      409,
-      `Booking ${bookingId} is cancelled and cannot be rescheduled.`,
-      ["booking_cancelled"]
-    );
-  }
-
-  // Validate that the booking is in a reschedulable status
-  if (!RESCHEDULABLE_STATUSES.includes(booking.status as typeof RESCHEDULABLE_STATUSES[number])) {
-    throw new SchedulingError(
-      409,
-      `Booking ${bookingId} has status "${booking.status}" and cannot be rescheduled.`,
-      ["booking_not_reschedulable"]
-    );
-  }
-
   const previousDate = booking.bookingDate;
   const previousTime = booking.bookingTime;
   const previousExamTypeId = booking.examTypeId;
   const previousRequiresReport = booking.requiresReport;
   const bookingModalityId = Number(booking.modalityId);
   const effectiveDate = newDate ?? previousDate;
+  const effectiveTime = newTime === undefined ? previousTime : newTime;
   const effectiveExamTypeId = newExamTypeId ?? booking.examTypeId;
   const effectiveReportingPriorityId = reportingPriorityId ?? booking.reportingPriorityId;
   const effectiveNotes = notes ?? booking.notes;
@@ -189,13 +173,34 @@ async function rescheduleBookingInternal(
   }
 
   const dateUnchanged = previousDate === effectiveDate;
+  const timeUnchanged = String(previousTime ?? "") === String(effectiveTime ?? "");
   const examTypeUnchanged = Number(booking.examTypeId ?? -1) === Number(effectiveExamTypeId ?? -1);
-  // If date + exam type are unchanged, this is a time-only update.
-  if (dateUnchanged && examTypeUnchanged) {
+  const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged;
+
+  if (!scheduleUnchanged) {
+    if (booking.status === "cancelled") {
+      throw new SchedulingError(
+        409,
+        `Booking ${bookingId} is cancelled and cannot be rescheduled.`,
+        ["booking_cancelled"]
+      );
+    }
+
+    if (!RESCHEDULABLE_STATUSES.includes(booking.status as typeof RESCHEDULABLE_STATUSES[number])) {
+      throw new SchedulingError(
+        409,
+        `Booking ${bookingId} has status "${booking.status}" and cannot be rescheduled.`,
+        ["booking_not_reschedulable"]
+      );
+    }
+  }
+
+  // If schedule fields are unchanged, update editable booking details only.
+  if (scheduleUnchanged) {
     return rescheduleTimeOnly(
       client,
       bookingId,
-      newTime,
+      effectiveTime,
       userId,
       previousDate,
       previousTime,
@@ -437,7 +442,7 @@ async function rescheduleBookingInternal(
     client,
     bookingId,
     effectiveDate,
-    newTime,
+    effectiveTime,
     publishedVersion.id,
     userId,
     effectiveCapacityResolutionMode,
@@ -479,7 +484,7 @@ async function rescheduleBookingInternal(
     previousDate,
     previousTime,
     newDate: effectiveDate,
-    newTime,
+    newTime: effectiveTime,
     changedByUserId: userId,
     overrideUsed: wasOverride,
     supervisorUserId,
