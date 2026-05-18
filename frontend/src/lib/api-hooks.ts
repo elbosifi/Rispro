@@ -1047,6 +1047,7 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
     identifiers: RawRecord;
     contact: RawRecord;
     category: string | null;
+    registration: RawRecord;
     warnings: RawRecord;
     lastAppointment: RawRecord | null;
     nextAppointment: RawRecord | null;
@@ -1075,6 +1076,12 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
       address: raw.contact?.address as string | null
     },
     category: raw.category as "oncology" | "non_oncology" | null,
+    registration: {
+      createdAt: (raw.registration?.createdAt as string | null) ?? (raw.registration?.created_at as string | null) ?? null,
+      createdByUserId: raw.registration?.createdByUserId || raw.registration?.created_by_user_id ? Number(raw.registration?.createdByUserId ?? raw.registration?.created_by_user_id) : null,
+      createdByName: (raw.registration?.createdByName as string | null) ?? (raw.registration?.created_by_name as string | null) ?? null,
+      createdByUsername: (raw.registration?.createdByUsername as string | null) ?? (raw.registration?.created_by_username as string | null) ?? null
+    },
     warnings: {
       missingPhone: Boolean(raw.warnings?.missingPhone),
       missingDob: Boolean(raw.warnings?.missingDob),

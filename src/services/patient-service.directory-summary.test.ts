@@ -32,7 +32,11 @@ test("patient directory summary composes patient details and appointments withou
             phone_1: "0911111111",
             phone_2: null,
             address: "Tripoli",
-            estimated_date_of_birth: "1995-01-01"
+            estimated_date_of_birth: "1995-01-01",
+            created_at: "2026-05-19T08:15:00.000Z",
+            created_by_user_id: 42,
+            created_by_full_name: "Reception User",
+            created_by_username: "reception"
           }
         ]
       };
@@ -112,6 +116,12 @@ test("patient directory summary composes patient details and appointments withou
       address: "Tripoli"
     });
     assert.equal(summary.category, "oncology");
+    assert.deepEqual(summary.registration, {
+      createdAt: "2026-05-19T08:15:00.000Z",
+      createdByUserId: 42,
+      createdByName: "Reception User",
+      createdByUsername: "reception"
+    });
     assert.equal(summary.warnings.missingPhone, false);
     assert.equal(summary.warnings.missingDob, false);
     assert.equal(summary.warnings.missingSex, false);

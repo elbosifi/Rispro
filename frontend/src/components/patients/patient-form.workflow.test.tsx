@@ -19,6 +19,10 @@ import {
   deletePatient
 } from "@/lib/api-hooks";
 
+const authMock = vi.hoisted(() => ({
+  user: { role: "receptionist" }
+}));
+
 vi.mock("@/lib/api-hooks", () => ({
   createPatient: vi.fn(),
   searchPatients: vi.fn(),
@@ -30,6 +34,17 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPatientIdentifierTypes: vi.fn(),
   updatePatient: vi.fn(),
   deletePatient: vi.fn()
+}));
+
+vi.mock("@/providers/auth-provider", () => ({
+  useAuth: () => ({
+    user: authMock.user,
+    isLoading: false,
+    login: vi.fn(),
+    logout: vi.fn(),
+    reAuth: vi.fn(),
+    changePassword: vi.fn()
+  })
 }));
 
 function makePatient(overrides: Partial<Patient> = {}): Patient {
@@ -75,6 +90,7 @@ function renderPatientForm(props: { mode: "create" | "edit"; patientId?: number 
 describe("PatientForm workflow hardening", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authMock.user = { role: "receptionist" };
     localStorage.setItem("rispro-language", "en");
     vi.mocked(fetchNameDictionary).mockResolvedValue({
       entries: [
@@ -264,6 +280,18 @@ describe("PatientForm workflow hardening", () => {
     const updatePayload = vi.mocked(updatePatient).mock.calls[0]?.[1] as Record<string, unknown>;
     expect(updatePayload.demographicsEstimated).toBe(false);
     expect(updatePayload.category).toBe("oncology");
+  });
+
+  it("shows delete only to super_admin in edit mode", async () => {
+    renderPatientForm({ mode: "edit", patientId: 9 });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: /Update Patient/i })).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /Delete Patient/i })).toBeNull();
+
+    authMock.user = { role: "super_admin" };
+    renderPatientForm({ mode: "edit", patientId: 9 });
+
+    expect(await screen.findByRole("button", { name: /Delete Patient/i })).toBeTruthy();
   });
 
   it("submits identifierType/identifierValue from the selected primary identifier row", async () => {

@@ -30,6 +30,7 @@ import type { Patient, PatientIdentifierTypeOption } from "@/types/api";
 import { Button, Card } from "@/components/shared";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { useAuth } from "@/providers/auth-provider";
 
 type IdentifierType = string;
 type PatientFormMode = "create" | "edit";
@@ -139,6 +140,7 @@ interface PatientFormProps {
 
 export default function PatientForm({ mode, patientId, onSuccess, onCancel }: PatientFormProps) {
   const { language, t } = useLanguage();
+  const { user } = useAuth();
   const isEdit = mode === "edit";
   const [form, setForm] = useState<PatientFormState>(DEFAULT_FORM);
   // Track original national ID to know if it was edited (edit mode only)
@@ -321,6 +323,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     }
   });
   const mutation = isEdit ? updateMutation : createMutation;
+  const canDeletePatient = user?.role === "super_admin";
 
   const normalizePhoneInput = (value: string) => value.replace(/\D/g, "").slice(0, 10);
   const normalizeIdentifierForType = (type: IdentifierType, value: string) => {
@@ -1065,7 +1068,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
 
       {/* Actions */}
       <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
-        {isEdit && (
+        {isEdit && canDeletePatient && (
           <Button
             type="button"
             variant="secondary"

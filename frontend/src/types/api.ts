@@ -599,6 +599,12 @@ export interface PatientDirectorySummary {
     address: string | null;
   };
   category: "oncology" | "non_oncology" | null;
+  registration: {
+    createdAt: string | null;
+    createdByUserId: number | null;
+    createdByName: string | null;
+    createdByUsername: string | null;
+  };
   warnings: {
     missingPhone: boolean;
     missingDob: boolean;

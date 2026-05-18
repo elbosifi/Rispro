@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { AlertTriangle, CalendarPlus, ChevronRight, Copy, Pencil, Printer, X } from "lucide-react";
 import { fetchPatientDirectorySummary } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { formatDateTimeLy } from "@/lib/date-format";
 import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
@@ -74,6 +75,10 @@ export function PatientDrawer({
 
   if (!summary) return null;
   const lastAppointmentId = summary.lastAppointment?.id ?? null;
+  const registeredBy =
+    summary.registration.createdByName ||
+    summary.registration.createdByUsername ||
+    (summary.registration.createdByUserId ? `#${summary.registration.createdByUserId}` : "—");
   const copyValue = async (label: string, value: string | null | undefined) => {
     const text = String(value || "").trim();
     if (!text) return;
@@ -156,6 +161,14 @@ export function PatientDrawer({
                   {summary.demographics.ageYears}
                   {summary.demographics.demographicsEstimated ? " (E)" : ""}
                 </span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{t(language, "patients.directory.drawer.registeredAt")}</span>
+                <span className="text-end">{formatDateTimeLy(summary.registration.createdAt)}</span>
+              </div>
+              <div className="flex justify-between gap-3">
+                <span className="text-muted-foreground">{t(language, "patients.directory.drawer.registeredBy")}</span>
+                <span className="text-end">{registeredBy}</span>
               </div>
             </div>
           </section>

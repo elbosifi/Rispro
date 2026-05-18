@@ -1,5 +1,5 @@
 import express, { Request, Response, Router } from "express";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAnyRole, requireAuth } from "../middleware/auth.js";
 import { requirePageAccess } from "../middleware/page-access.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalString } from "../utils/request-coercion.js";
@@ -149,6 +149,7 @@ patientsRouter.put(
 
 patientsRouter.delete(
   "/:patientId",
+  requireAnyRole(["super_admin"]),
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as PatientsRequest;
     const patientId = asOptionalString(request.params?.patientId) ?? "";

@@ -57,6 +57,10 @@ export interface PatientRow {
   phone_2: string | null;
   address: string | null;
   estimated_date_of_birth: string | null;
+  created_at?: string | Date | null;
+  created_by_user_id?: number | null;
+  created_by_full_name?: string | null;
+  created_by_username?: string | null;
 }
 
 export interface PatientPayload {
@@ -542,6 +546,10 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
         p.phone_2,
         p.address,
         p.estimated_date_of_birth,
+        p.created_at,
+        p.created_by_user_id,
+        created_by_user.full_name as created_by_full_name,
+        created_by_user.username as created_by_username,
         (
           select coalesce(json_agg(json_build_object(
             'id', pi.id,
@@ -566,6 +574,7 @@ export async function getPatientById(patientId: UserId): Promise<PatientRow> {
         order by pi.is_primary desc, pi.id asc
         limit 1
       ) as primary_identifier on true
+      left join users created_by_user on created_by_user.id = p.created_by_user_id
       where p.id = $1
       limit 1
     `,
@@ -1140,6 +1149,13 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
     const appointmentIds = appointmentRows
       .map((row) => Number(row.id))
       .filter((id) => Number.isInteger(id) && id > 0);
+    const { rows: bookingRows } = await client.query<{ id: unknown }>(
+      `select id from appointments_v2.bookings where patient_id = $1`,
+      [cleanPatientId]
+    );
+    const bookingIds = bookingRows
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isInteger(id) && id > 0);
 
     if (appointmentIds.length > 0) {
       await client.query(`delete from queue_entries where appointment_id = any($1::bigint[])`, [appointmentIds]);
@@ -1150,6 +1166,17 @@ export async function deletePatient(patientId: UserId, deletedByUserId: Optional
       await client.query(`delete from documents where patient_id = $1`, [cleanPatientId]);
     }
 
+    if (bookingIds.length > 0) {
+      await client.query(`delete from documents where v2_booking_id = any($1::bigint[]) or patient_id = $2`, [bookingIds, cleanPatientId]);
+      await client.query(`delete from appointments_v2.bookings where patient_id = $1`, [cleanPatientId]);
+    }
+
+    await client.query(`delete from scan_sessions where patient_id = $1`, [cleanPatientId]);
+    await client.query(`update scheduling_override_audit_events set patient_id = null where patient_id = $1`, [cleanPatientId]);
+    await client.query(`update appointments_v2.override_audit_events set patient_id = null where patient_id = $1`, [cleanPatientId]);
+    await client.query(`update dicom_remap_jobs set rispro_patient_id = null, updated_at = now() where rispro_patient_id = $1`, [cleanPatientId]);
+    await client.query(`update patient_import_staging_rows set matched_existing_patient_id = null, updated_at = now() where matched_existing_patient_id = $1`, [cleanPatientId]);
+    await client.query(`update patient_import_staging_rows set migrated_patient_id = null, updated_at = now() where migrated_patient_id = $1`, [cleanPatientId]);
     await client.query(`delete from patient_custom_values where patient_id = $1`, [cleanPatientId]);
     await client.query(`delete from patient_identifiers where patient_id = $1`, [cleanPatientId]);
     await client.query(`delete from patients where id = $1`, [cleanPatientId]);
@@ -1618,6 +1645,12 @@ interface PatientDirectorySummaryOutput {
     address: string | null;
   };
   category: "oncology" | "non_oncology" | null;
+  registration: {
+    createdAt: string | null;
+    createdByUserId: number | null;
+    createdByName: string | null;
+    createdByUsername: string | null;
+  };
   warnings: {
     missingPhone: boolean;
     missingDob: boolean;
@@ -1773,6 +1806,12 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
       address: patient.address
     },
     category: patient.category,
+    registration: {
+      createdAt: patient.created_at ? new Date(patient.created_at).toISOString() : null,
+      createdByUserId: patient.created_by_user_id ? Number(patient.created_by_user_id) : null,
+      createdByName: patient.created_by_full_name ?? null,
+      createdByUsername: patient.created_by_username ?? null
+    },
     warnings: {
       missingPhone,
       missingDob,

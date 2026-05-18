@@ -32,14 +32,15 @@ function toDateOrNull(value: unknown): Date | null {
     return Number.isNaN(value.getTime()) ? null : value;
   }
 
+  const raw = String(value ?? "").trim();
   const isoDate = extractIsoDate(value);
-  if (isoDate) {
+  if (isoDate && raw === isoDate) {
     // Noon UTC avoids accidental date rollover when formatting across time zones.
     const date = new Date(`${isoDate}T12:00:00Z`);
     return Number.isNaN(date.getTime()) ? null : date;
   }
 
-  const date = new Date(String(value ?? ""));
+  const date = new Date(raw);
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
