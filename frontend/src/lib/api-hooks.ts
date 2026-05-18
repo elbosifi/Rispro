@@ -1096,6 +1096,13 @@ export async function fetchPatientDuplicateDetail(patientAId: number, patientBId
   return api<PatientDuplicateDetailResponse>(`/settings/patient-duplicates/${patientAId}/${patientBId}`);
 }
 
+export async function searchPatientsForDuplicateResolver(query: string): Promise<Patient[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("q", query);
+  const raw = await api<{ patients: RawRecord[] }>(`/settings/patient-duplicates/search?${params.toString()}`);
+  return mapPatients(raw.patients || []);
+}
+
 export async function dismissPatientDuplicate(patientAId: number, patientBId: number, reason: string) {
   return api<{ dismissal: RawRecord }>("/settings/patient-duplicates/dismiss", {
     method: "POST",
@@ -1109,6 +1116,14 @@ export async function mergePatientDuplicate(targetPatientId: number, sourcePatie
     body: JSON.stringify({ targetPatientId, sourcePatientId, confirmationText })
   });
   return mapPatient(raw.patient);
+}
+
+export async function mergePatientDuplicateGroup(targetPatientId: number, sourcePatientIds: number[], confirmationText = "MERGE") {
+  const raw = await api<{ patient: RawRecord; mergedSourceIds: number[] }>("/settings/patient-duplicates/merge-group", {
+    method: "POST",
+    body: JSON.stringify({ targetPatientId, sourcePatientIds, confirmationText })
+  });
+  return { patient: mapPatient(raw.patient), mergedSourceIds: raw.mergedSourceIds || [] };
 }
 
 export async function safeDeleteDuplicatePatient(patientId: number, confirmationText = "DELETE") {

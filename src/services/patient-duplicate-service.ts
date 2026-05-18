@@ -1,7 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
-import { getPatientDirectorySummary, mergePatients } from "./patient-service.js";
+import { getPatientDirectorySummary, mergePatients, searchPatients } from "./patient-service.js";
 import { scorePatientDuplicatePair } from "./patient-duplicate-scoring.js";
 import type { PoolClient } from "pg";
 import type { OptionalUserId, UnknownRecord, UserId } from "../types/http.js";
@@ -339,6 +339,37 @@ export async function dismissPatientDuplicateCandidate(patientAId: number, patie
 
 export async function mergePatientDuplicateCandidate(targetPatientId: UserId, sourcePatientId: UserId, confirmationText: unknown, updatedByUserId: OptionalUserId) {
   return mergePatients({ targetPatientId, sourcePatientId, confirmationText: String(confirmationText || "") }, updatedByUserId);
+}
+
+export async function searchPatientsForDuplicateResolver(query: unknown) {
+  const term = String(query || "").trim();
+  if (term.length < 2) return [];
+  return searchPatients(term);
+}
+
+export async function mergePatientDuplicateGroup(targetPatientId: UserId, sourcePatientIds: unknown, confirmationText: unknown, updatedByUserId: OptionalUserId) {
+  const cleanTargetId = Number(targetPatientId);
+  const cleanSourceIds = Array.isArray(sourcePatientIds)
+    ? sourcePatientIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0 && value !== cleanTargetId)
+    : [];
+  const uniqueSourceIds = [...new Set(cleanSourceIds)];
+
+  if (!Number.isInteger(cleanTargetId) || cleanTargetId <= 0) {
+    throw new HttpError(400, "targetPatientId is required.");
+  }
+  if (uniqueSourceIds.length === 0) {
+    throw new HttpError(400, "Choose at least one source patient to merge.");
+  }
+  if (String(confirmationText || "").trim().toUpperCase() !== "MERGE") {
+    throw new HttpError(400, "confirmationText must be MERGE.");
+  }
+
+  let patient = null;
+  for (const sourcePatientId of uniqueSourceIds) {
+    patient = await mergePatients({ targetPatientId: cleanTargetId, sourcePatientId, confirmationText: "MERGE" }, updatedByUserId);
+  }
+
+  return { patient, mergedSourceIds: uniqueSourceIds };
 }
 
 export async function safeDeleteDuplicatePatient(patientId: number, confirmationText: unknown, deletedByUserId: OptionalUserId): Promise<{ ok: boolean }> {

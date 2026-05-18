@@ -1,17 +1,19 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, GitMerge, Loader2, Search, ShieldCheck, Trash2, UserRoundCheck, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, GitMerge, Loader2, Search, ShieldCheck, Trash2, UserPlus, UserRoundCheck, Users, XCircle } from "lucide-react";
 import {
   dismissPatientDuplicate,
   fetchPatientDuplicateCandidates,
   fetchPatientDuplicateDetail,
   mergePatientDuplicate,
+  mergePatientDuplicateGroup,
   safeDeleteDuplicatePatient,
+  searchPatientsForDuplicateResolver,
 } from "@/lib/api-hooks";
 import { ApiError } from "@/lib/api-client";
 import { pushToast } from "@/lib/toast";
 import { Button, Badge } from "@/components/shared";
-import type { PatientDuplicateBlockers, PatientDuplicateCandidate, PatientDuplicateSummary } from "@/types/api";
+import type { Patient, PatientDuplicateBlockers, PatientDuplicateCandidate, PatientDuplicateSummary } from "@/types/api";
 
 interface PatientDuplicateResolverSectionProps {
   onReAuthRequired: (key: string[]) => void;
@@ -19,6 +21,7 @@ interface PatientDuplicateResolverSectionProps {
 
 type SelectedAction =
   | { type: "merge"; targetId: number; sourceId: number }
+  | { type: "mergeGroup"; targetId: number; sourceIds: number[] }
   | { type: "delete"; patientId: number }
   | null;
 
@@ -34,6 +37,42 @@ function displayPatientName(patient: PatientDuplicateSummary): string {
 
 function formatReason(reason: string): string {
   return reason.replace(/_/g, " ");
+}
+
+function patientToDuplicateSummary(patient: Patient): PatientDuplicateSummary {
+  return {
+    id: patient.id,
+    mrn: patient.mrn || null,
+    nationalId: patient.nationalId || null,
+    identifierType: patient.identifierType || null,
+    identifierValue: patient.identifierValue || null,
+    arabicFullName: patient.arabicFullName,
+    englishFullName: patient.englishFullName || null,
+    ageYears: patient.ageYears,
+    dateOfBirth: patient.estimatedDateOfBirth || null,
+    sex: patient.sex || null,
+    phone1: patient.phone1 || null,
+    phone2: patient.phone2 || null,
+    category: patient.category || null,
+  };
+}
+
+function duplicateSummaryToPatient(patient: PatientDuplicateSummary): Patient {
+  return {
+    id: patient.id,
+    mrn: patient.mrn,
+    nationalId: patient.nationalId,
+    identifierType: patient.identifierType,
+    identifierValue: patient.identifierValue,
+    category: patient.category,
+    arabicFullName: patient.arabicFullName,
+    englishFullName: patient.englishFullName,
+    ageYears: patient.ageYears,
+    estimatedDateOfBirth: patient.dateOfBirth,
+    sex: patient.sex || "",
+    phone1: patient.phone1 || "",
+    phone2: patient.phone2,
+  };
 }
 
 function PatientMiniCard({ patient }: { patient: PatientDuplicateSummary }) {
@@ -116,7 +155,10 @@ function CandidateButton({
 export default function PatientDuplicateResolverSection({ onReAuthRequired }: PatientDuplicateResolverSectionProps) {
   const queryClient = useQueryClient();
   const [selectedPair, setSelectedPair] = useState<[number, number] | null>(null);
-  const [query, setQuery] = useState("");
+  const [candidateQuery, setCandidateQuery] = useState("");
+  const [manualQuery, setManualQuery] = useState("");
+  const [manualSelection, setManualSelection] = useState<Patient[]>([]);
+  const [manualTargetId, setManualTargetId] = useState<number | null>(null);
   const [dismissReason, setDismissReason] = useState("");
   const [selectedAction, setSelectedAction] = useState<SelectedAction>(null);
   const [confirmationText, setConfirmationText] = useState("");
@@ -129,7 +171,7 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
 
   const candidates = candidatesQuery.data?.candidates || [];
   const filteredCandidates = useMemo(() => {
-    const needle = query.trim().toLowerCase();
+    const needle = candidateQuery.trim().toLowerCase();
     if (!needle) return candidates;
     return candidates.filter((candidate) => {
       const haystack = [
@@ -150,7 +192,15 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
       ].join(" ").toLowerCase();
       return haystack.includes(needle);
     });
-  }, [candidates, query]);
+  }, [candidates, candidateQuery]);
+
+  const manualSearchQuery = useQuery({
+    queryKey: ["settings", "patient-duplicates", "manual-search", manualQuery.trim()],
+    queryFn: () => searchPatientsForDuplicateResolver(manualQuery.trim()),
+    enabled: manualQuery.trim().length >= 2,
+    staleTime: 1000 * 30,
+    retry: false,
+  });
 
   const activePair = selectedPair || (filteredCandidates[0] ? [filteredCandidates[0].patientA.id, filteredCandidates[0].patientB.id] as [number, number] : null);
 
@@ -212,6 +262,44 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     },
   });
 
+  const mergeGroupMutation = useMutation({
+    mutationFn: (action: Extract<SelectedAction, { type: "mergeGroup" }>) => mergePatientDuplicateGroup(action.targetId, action.sourceIds, confirmationText),
+    onSuccess: async () => {
+      setSelectedAction(null);
+      setConfirmationText("");
+      setSelectedPair(null);
+      setManualSelection([]);
+      setManualTargetId(null);
+      pushToast({ type: "success", title: "Selected patients merged" });
+      await invalidateDuplicates();
+    },
+    onError: (error) => {
+      if (isReAuthError(error)) onReAuthRequired(REAUTH_QUERY_KEY);
+    },
+  });
+
+  const addManualPatient = (patient: Patient) => {
+    setManualSelection((current) => {
+      if (current.some((selected) => selected.id === patient.id)) return current;
+      const next = [...current, patient];
+      if (!manualTargetId) setManualTargetId(patient.id);
+      return next;
+    });
+  };
+
+  const addCandidateToManualSet = (candidate: PatientDuplicateCandidate) => {
+    addManualPatient(duplicateSummaryToPatient(candidate.patientA));
+    addManualPatient(duplicateSummaryToPatient(candidate.patientB));
+  };
+
+  const removeManualPatient = (patientId: number) => {
+    setManualSelection((current) => current.filter((patient) => patient.id !== patientId));
+    if (manualTargetId === patientId) {
+      const nextTarget = manualSelection.find((patient) => patient.id !== patientId)?.id ?? null;
+      setManualTargetId(nextTarget);
+    }
+  };
+
   if (isReAuthError(candidatesQuery.error) || isReAuthError(detailQuery.error)) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
@@ -229,8 +317,10 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
 
   const detail = detailQuery.data;
   const activeCandidate = detail?.candidate;
-  const actionLabel = selectedAction?.type === "merge" ? "MERGE" : selectedAction?.type === "delete" ? "DELETE" : "";
+  const actionLabel = selectedAction?.type === "merge" || selectedAction?.type === "mergeGroup" ? "MERGE" : selectedAction?.type === "delete" ? "DELETE" : "";
   const actionReady = selectedAction && confirmationText.trim().toUpperCase() === actionLabel;
+  const manualTarget = manualSelection.find((patient) => patient.id === manualTargetId) || null;
+  const manualSources = manualSelection.filter((patient) => patient.id !== manualTargetId);
 
   return (
     <div className="space-y-4">
@@ -241,7 +331,123 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
         </div>
         <div className="relative w-full lg:max-w-sm">
           <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} className="input-premium h-10 w-full pl-9" placeholder="Search candidates" />
+          <input value={candidateQuery} onChange={(event) => setCandidateQuery(event.target.value)} className="input-premium h-10 w-full pl-9" placeholder="Filter candidate queue" />
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-border bg-muted/20 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <Users size={18} className="text-accent" />
+              <p className="text-base font-semibold text-foreground">Manual merge workbench</p>
+            </div>
+            <p className="mt-1 text-sm text-muted-foreground">Search any patient, build a merge set, choose the survivor, then merge all selected duplicate records into that patient.</p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={!manualTarget || manualSources.length === 0}
+            onClick={() => {
+              if (!manualTarget || manualSources.length === 0) return;
+              setSelectedAction({ type: "mergeGroup", targetId: manualTarget.id, sourceIds: manualSources.map((patient) => patient.id) });
+              setConfirmationText("");
+            }}
+          >
+            <GitMerge size={15} />
+            Merge selected
+          </Button>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(260px,420px)_1fr]">
+          <div className="space-y-3">
+            <div className="relative">
+              <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={manualQuery}
+                onChange={(event) => setManualQuery(event.target.value)}
+                className="input-premium h-10 w-full pl-9"
+                placeholder="Search by name, MRN, ID, or phone"
+              />
+            </div>
+            <div className="max-h-64 space-y-2 overflow-y-auto">
+              {manualQuery.trim().length < 2 ? (
+                <div className="rounded-lg border border-dashed border-border bg-background p-3 text-sm text-muted-foreground">Type at least 2 characters to search manually.</div>
+              ) : manualSearchQuery.isLoading ? (
+                <div className="flex items-center gap-2 rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground"><Loader2 size={15} className="animate-spin" /> Searching...</div>
+              ) : (manualSearchQuery.data || []).length === 0 ? (
+                <div className="rounded-lg border border-border bg-background p-3 text-sm text-muted-foreground">No patients found.</div>
+              ) : (
+                (manualSearchQuery.data || []).map((patient) => {
+                  const isSelected = manualSelection.some((selected) => selected.id === patient.id);
+                  return (
+                    <button
+                      key={patient.id}
+                      type="button"
+                      onClick={() => addManualPatient(patient)}
+                      disabled={isSelected}
+                      className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                        isSelected ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-border bg-background hover:bg-muted/40"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{patient.arabicFullName}</p>
+                          <p className="truncate text-xs text-muted-foreground">{patient.englishFullName || "No English name"}</p>
+                        </div>
+                        {isSelected ? <CheckCircle2 size={16} className="shrink-0 text-emerald-600" /> : <UserPlus size={16} className="shrink-0 text-muted-foreground" />}
+                      </div>
+                      <p className="mt-2 truncate text-xs text-muted-foreground">#{patient.id} • {patient.mrn || "No MRN"} • {patient.nationalId || patient.identifierValue || "No ID"} • {patient.phone1 || "No phone"}</p>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm font-semibold text-foreground">Selected patients ({manualSelection.length})</p>
+              <Button type="button" variant="ghost" size="sm" disabled={manualSelection.length === 0} onClick={() => { setManualSelection([]); setManualTargetId(null); }}>
+                Clear
+              </Button>
+            </div>
+            {manualSelection.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground">No manual merge set yet. Add patients from search or from an automatic candidate.</div>
+            ) : (
+              <div className="grid gap-2 lg:grid-cols-2">
+                {manualSelection.map((patient) => {
+                  const isTarget = patient.id === manualTargetId;
+                  return (
+                    <div key={patient.id} className={`rounded-lg border p-3 ${isTarget ? "border-accent bg-accent/10" : "border-border bg-background"}`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">{patient.arabicFullName}</p>
+                          <p className="truncate text-xs text-muted-foreground">#{patient.id} • {patient.mrn || "No MRN"}</p>
+                        </div>
+                        <button type="button" className="text-muted-foreground hover:text-red-600" onClick={() => removeManualPatient(patient.id)} aria-label="Remove patient">
+                          <XCircle size={16} />
+                        </button>
+                      </div>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-2 text-xs font-semibold">
+                          <input
+                            type="radio"
+                            name="manual-merge-target"
+                            checked={isTarget}
+                            onChange={() => setManualTargetId(patient.id)}
+                          />
+                          Keep this record
+                        </label>
+                        {isTarget ? <Badge variant="accent">Survivor</Badge> : <Badge variant="warning">Source</Badge>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -279,6 +485,10 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                   <Button type="button" variant="ghost" size="sm" onClick={() => dismissMutation.mutate()} disabled={dismissMutation.isPending}>
                     <XCircle size={16} />
                     Dismiss
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => addCandidateToManualSet(activeCandidate)}>
+                    <UserPlus size={16} />
+                    Add both to merge set
                   </Button>
                 </div>
 
@@ -324,17 +534,23 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                 {selectedAction ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-950">
                     <p className="text-sm font-semibold">
-                      Type {actionLabel} to confirm {selectedAction.type === "merge" ? `merging patient #${selectedAction.sourceId} into #${selectedAction.targetId}` : `safe deleting patient #${selectedAction.patientId}`}.
+                      Type {actionLabel} to confirm{" "}
+                      {selectedAction.type === "merge"
+                        ? `merging patient #${selectedAction.sourceId} into #${selectedAction.targetId}`
+                        : selectedAction.type === "mergeGroup"
+                          ? `merging ${selectedAction.sourceIds.length} selected patient records into #${selectedAction.targetId}`
+                          : `safe deleting patient #${selectedAction.patientId}`}.
                     </p>
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <input value={confirmationText} onChange={(event) => setConfirmationText(event.target.value)} className="input-premium h-10 flex-1 bg-white" placeholder={actionLabel} />
                       <Button
                         type="button"
                         size="sm"
-                        disabled={!actionReady || mergeMutation.isPending || deleteMutation.isPending}
+                        disabled={!actionReady || mergeMutation.isPending || deleteMutation.isPending || mergeGroupMutation.isPending}
                         onClick={() => {
                           if (!selectedAction) return;
                           if (selectedAction.type === "merge") mergeMutation.mutate(selectedAction);
+                          if (selectedAction.type === "mergeGroup") mergeGroupMutation.mutate(selectedAction);
                           if (selectedAction.type === "delete") deleteMutation.mutate(selectedAction);
                         }}
                       >

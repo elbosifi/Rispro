@@ -70,13 +70,15 @@ import {
   getPatientDuplicateDetail,
   listPatientDuplicateCandidates,
   mergePatientDuplicateCandidate,
-  safeDeleteDuplicatePatient
+  mergePatientDuplicateGroup,
+  safeDeleteDuplicatePatient,
+  searchPatientsForDuplicateResolver
 } from "../services/patient-duplicate-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
-  query?: { includeInactive?: string };
+  query?: { includeInactive?: string; q?: string };
   user: AuthenticatedUserContext;
   body?: unknown;
   params?: {
@@ -195,6 +197,15 @@ settingsRouter.get(
 );
 
 settingsRouter.get(
+  "/patient-duplicates/search",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const patients = await searchPatientsForDuplicateResolver(request.query?.q);
+    res.json({ patients });
+  })
+);
+
+settingsRouter.get(
   "/patient-duplicates/:patientAId/:patientBId",
   asyncRoute(async (req: Request, res: Response) => {
     const request = req as SettingsRequest;
@@ -230,6 +241,21 @@ settingsRouter.post(
       request.user.sub as UserId
     );
     res.json({ patient });
+  })
+);
+
+settingsRouter.post(
+  "/patient-duplicates/merge-group",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const body = asUnknownRecord(request.body ?? {});
+    const result = await mergePatientDuplicateGroup(
+      body.targetPatientId as UserId,
+      body.sourcePatientIds,
+      body.confirmationText,
+      request.user.sub as UserId
+    );
+    res.json(result);
   })
 );
 
