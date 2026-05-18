@@ -97,6 +97,9 @@ export interface AppointmentWithDetails extends Appointment {
   patientWebPushSubscribed?: boolean;
   patientWebPushSubscriptionCount?: number;
   bookingTime?: string | null;
+  createdByUserId?: number | null;
+  createdByName?: string | null;
+  createdByUsername?: string | null;
 }
 
 export interface NoShowCandidate {
@@ -300,6 +303,9 @@ export function mapAppointmentWithDetails(raw: RawRecord): AppointmentWithDetail
     patientWebPushSubscribed:
       bool(raw, "patient_web_push_subscribed", bool(raw, "patientWebPushSubscribed", false)) ||
       (num(raw, "patient_web_push_subscription_count") || num(raw, "patientWebPushSubscriptionCount")) > 0,
+    createdByUserId: numOrNull(raw, "created_by_user_id") ?? numOrNull(raw, "createdByUserId"),
+    createdByName: strOrNull(raw, "created_by_full_name") ?? strOrNull(raw, "createdByName"),
+    createdByUsername: strOrNull(raw, "created_by_username") ?? strOrNull(raw, "createdByUsername"),
     dailySequence: num(raw, 'daily_sequence') || num(raw, 'dailySequence'),
     accessionNumber: str(raw, 'accession_number') || str(raw, 'accessionNumber'),
     appointmentDate: normalizeIsoDate(raw.appointment_date ?? raw.appointmentDate ?? ""),

@@ -15,7 +15,7 @@ import {
   type PublicReportStatusResponse,
 } from "@/lib/api-hooks";
 import type { AppointmentWithDetails } from "@/lib/mappers";
-import { formatDateLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
+import { formatDateLy, formatDateTimeLy, isoDateDaysFromNow, todayIsoDateLy } from "@/lib/date-format";
 import { DateInput } from "@/components/common/date-input";
 import { useLanguage } from "@/providers/language-provider";
 import { chooseLocalized, statusLabel } from "@/lib/i18n";
@@ -592,6 +592,11 @@ export default function RegistrationsPage() {
   const patientScopeName = selectedAppointment
     ? chooseLocalized(language, selectedAppointment.arabicFullName, selectedAppointment.englishFullName)
     : "";
+  const selectedAppointmentCreatedBy = selectedAppointment
+    ? selectedAppointment.createdByName ||
+      selectedAppointment.createdByUsername ||
+      (selectedAppointment.createdByUserId ? `#${selectedAppointment.createdByUserId}` : "—")
+    : "—";
 
   const reportStatusMutation = useMutation({
     mutationFn: (token: string) => fetchPublicAppointmentReportStatus(token),
@@ -1687,6 +1692,14 @@ export default function RegistrationsPage() {
                 <Field
                   label={t("registrations.date")}
                   value={formatDateLy(selectedAppointment.appointmentDate)}
+                />
+                <Field
+                  label={t("registrations.createdAt")}
+                  value={formatDateTimeLy(selectedAppointment.createdAt)}
+                />
+                <Field
+                  label={t("registrations.createdBy")}
+                  value={selectedAppointmentCreatedBy}
                 />
               </div>
               <div className="mt-2">

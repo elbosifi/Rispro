@@ -274,6 +274,9 @@ router.get(
           b.is_walk_in,
           b.notes,
           b.created_at,
+          b.created_by_user_id,
+          created_by_user.full_name as created_by_full_name,
+          created_by_user.username as created_by_username,
           b.updated_at,
           p.arabic_full_name,
           p.english_full_name,
@@ -309,6 +312,7 @@ router.get(
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
+        left join users created_by_user on created_by_user.id = b.created_by_user_id
         ${whereClause}
       )
       select *
@@ -375,6 +379,9 @@ router.get(
           b.is_walk_in,
           b.notes,
           b.created_at,
+          b.created_by_user_id,
+          created_by_user.full_name as created_by_full_name,
+          created_by_user.username as created_by_username,
           b.updated_at,
           p.arabic_full_name,
           p.english_full_name,
@@ -410,6 +417,7 @@ router.get(
         join modalities m on m.id = b.modality_id
         left join exam_types et on et.id = b.exam_type_id
         left join reporting_priorities rp on rp.id = b.reporting_priority_id
+        left join users created_by_user on created_by_user.id = b.created_by_user_id
         where b.id = $1
         limit 1
       `,
