@@ -9,6 +9,7 @@ import { fetchV2Modalities } from "@/v2/appointments/api";
 
 interface PatientQrSettingsSectionProps {
   onReAuthRequired: (key: string[]) => void;
+  reauthVersion?: number;
 }
 
 const DEFAULT_SETTINGS: PatientQrSettings = {
@@ -193,7 +194,7 @@ function isValidUrl(value: string): boolean {
   }
 }
 
-export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQrSettingsSectionProps) {
+export default function PatientQrSettingsSection({ onReAuthRequired, reauthVersion = 0 }: PatientQrSettingsSectionProps) {
   const { language } = useLanguage();
   const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
@@ -212,6 +213,10 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
   const [newChecklistItemAr, setNewChecklistItemAr] = useState("");
   const [newChecklistItemEn, setNewChecklistItemEn] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [pendingSaveAfterReAuth, setPendingSaveAfterReAuth] = useState<{
+    payload: PatientQrSettings;
+    requestedAtVersion: number;
+  } | null>(null);
 
   useEffect(() => {
     if (data) setDraft(cloneSettings(data));
@@ -221,12 +226,14 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
     mutationFn: (payload: PatientQrSettings) => savePatientQrSettings(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["patient-qr-settings"] });
+      setPendingSaveAfterReAuth(null);
       setErrors({});
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, payload) => {
       const status = err instanceof ApiError ? err.status : undefined;
       const message = err instanceof Error ? err.message : "";
       if (status === 401 || status === 403 || message.includes("re-authentication") || message.includes("403")) {
+        setPendingSaveAfterReAuth({ payload, requestedAtVersion: reauthVersion });
         onReAuthRequired(["settings", "patient_qr_self_service"]);
         return;
       }
@@ -236,6 +243,13 @@ export default function PatientQrSettingsSection({ onReAuthRequired }: PatientQr
       }));
     },
   });
+
+  useEffect(() => {
+    if (!pendingSaveAfterReAuth || reauthVersion <= pendingSaveAfterReAuth.requestedAtVersion || mutation.isPending) return;
+    const { payload } = pendingSaveAfterReAuth;
+    setPendingSaveAfterReAuth(null);
+    mutation.mutate(payload);
+  }, [reauthVersion, pendingSaveAfterReAuth, mutation]);
 
   const canSave = useMemo(() => {
     const nextErrors: Record<string, string> = {};

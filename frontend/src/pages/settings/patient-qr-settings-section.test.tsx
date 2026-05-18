@@ -231,6 +231,48 @@ describe.skip("PatientQrSettingsSection", () => {
     });
   });
 
+  it("retries the pending save after supervisor re-authentication succeeds", async () => {
+    const onReAuthRequired = vi.fn();
+    vi.mocked(savePatientQrSettings)
+      .mockRejectedValueOnce(new ApiError("Recent supervisor re-authentication is required.", 403, { code: "forbidden" }))
+      .mockResolvedValueOnce({});
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false },
+        mutations: { retry: false },
+      },
+    });
+
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <LanguageProvider>
+        <QueryClientProvider client={queryClient}>
+          <PatientQrSettingsSection onReAuthRequired={onReAuthRequired} reauthVersion={0} />
+        </QueryClientProvider>
+      </LanguageProvider>
+    );
+
+    await screen.findAllByRole("heading", { name: /QR/i });
+    await user.click(screen.getByRole("button", { name: /Ø­ÙØ¸/i }));
+
+    await waitFor(() => {
+      expect(onReAuthRequired).toHaveBeenCalledWith(["settings", "patient_qr_self_service"]);
+    });
+
+    rerender(
+      <LanguageProvider>
+        <QueryClientProvider client={queryClient}>
+          <PatientQrSettingsSection onReAuthRequired={onReAuthRequired} reauthVersion={1} />
+        </QueryClientProvider>
+      </LanguageProvider>
+    );
+
+    await waitFor(() => {
+      expect(savePatientQrSettings).toHaveBeenCalledTimes(2);
+    });
+  });
+
   it("saves report/image modality scope selections", async () => {
     const user = userEvent.setup();
     renderComponent();
