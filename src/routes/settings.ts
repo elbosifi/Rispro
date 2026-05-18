@@ -287,7 +287,8 @@ settingsRouter.post(
       body.targetPatientId as UserId,
       body.sourcePatientIds,
       body.confirmationText,
-      request.user.sub as UserId
+      request.user.sub as UserId,
+      body.targetPayload
     );
     res.json(result);
   })

@@ -17,4 +17,7 @@ test("duplicate resolver supports manual search and group merge UI", async () =>
   assert.match(source, /searchPatientsForDuplicateResolver/);
   assert.match(source, /mergePatientDuplicateGroup/);
   assert.match(source, /manualSelection/);
+  assert.match(source, /Final survivor details/);
+  assert.match(source, /usePatientField/);
+  assert.match(source, /draftToPatientPayload/);
 });

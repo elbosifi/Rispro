@@ -1127,10 +1127,10 @@ export async function mergePatientDuplicate(targetPatientId: number, sourcePatie
   return mapPatient(raw.patient);
 }
 
-export async function mergePatientDuplicateGroup(targetPatientId: number, sourcePatientIds: number[], confirmationText = "MERGE") {
+export async function mergePatientDuplicateGroup(targetPatientId: number, sourcePatientIds: number[], confirmationText = "MERGE", targetPayload?: Partial<Patient>) {
   const raw = await api<{ patient: RawRecord; mergedSourceIds: number[] }>("/settings/patient-duplicates/merge-group", {
     method: "POST",
-    body: JSON.stringify({ targetPatientId, sourcePatientIds, confirmationText })
+    body: JSON.stringify({ targetPatientId, sourcePatientIds, confirmationText, targetPayload })
   });
   return { patient: mapPatient(raw.patient), mergedSourceIds: raw.mergedSourceIds || [] };
 }

@@ -1,7 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
-import { getPatientDirectorySummary, mergePatients, searchPatients } from "./patient-service.js";
+import { getPatientDirectorySummary, mergePatients, searchPatients, updatePatient } from "./patient-service.js";
 import { scorePatientDuplicatePair } from "./patient-duplicate-scoring.js";
 import type { PoolClient } from "pg";
 import type { OptionalUserId, UnknownRecord, UserId } from "../types/http.js";
@@ -347,7 +347,13 @@ export async function searchPatientsForDuplicateResolver(query: unknown) {
   return searchPatients(term);
 }
 
-export async function mergePatientDuplicateGroup(targetPatientId: UserId, sourcePatientIds: unknown, confirmationText: unknown, updatedByUserId: OptionalUserId) {
+export async function mergePatientDuplicateGroup(
+  targetPatientId: UserId,
+  sourcePatientIds: unknown,
+  confirmationText: unknown,
+  updatedByUserId: OptionalUserId,
+  targetPayload?: unknown
+) {
   const cleanTargetId = Number(targetPatientId);
   const cleanSourceIds = Array.isArray(sourcePatientIds)
     ? sourcePatientIds.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0 && value !== cleanTargetId)
@@ -367,6 +373,10 @@ export async function mergePatientDuplicateGroup(targetPatientId: UserId, source
   let patient = null;
   for (const sourcePatientId of uniqueSourceIds) {
     patient = await mergePatients({ targetPatientId: cleanTargetId, sourcePatientId, confirmationText: "MERGE" }, updatedByUserId);
+  }
+
+  if (targetPayload && typeof targetPayload === "object" && !Array.isArray(targetPayload)) {
+    patient = await updatePatient(cleanTargetId, targetPayload, updatedByUserId);
   }
 
   return { patient, mergedSourceIds: uniqueSourceIds };

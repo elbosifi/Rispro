@@ -13,7 +13,7 @@ import {
 import { ApiError } from "@/lib/api-client";
 import { pushToast } from "@/lib/toast";
 import { Button, Badge } from "@/components/shared";
-import type { Patient, PatientDuplicateBlockers, PatientDuplicateCandidate, PatientDuplicateSummary } from "@/types/api";
+import type { Patient, PatientDirectorySummary, PatientDuplicateBlockers, PatientDuplicateCandidate, PatientDuplicateSummary } from "@/types/api";
 
 interface PatientDuplicateResolverSectionProps {
   onReAuthRequired: (key: string[]) => void;
@@ -26,6 +26,52 @@ type SelectedAction =
   | null;
 
 const REAUTH_QUERY_KEY = ["settings", "patient-duplicates"];
+
+type MergeField =
+  | "arabicFullName"
+  | "englishFullName"
+  | "nationalId"
+  | "identifierType"
+  | "identifierValue"
+  | "category"
+  | "ageYears"
+  | "estimatedDateOfBirth"
+  | "sex"
+  | "phone1"
+  | "phone2"
+  | "address";
+
+type MergeDraft = Record<MergeField, string>;
+
+const MERGE_FIELDS: Array<{ key: MergeField; label: string; type?: "number" | "select" }> = [
+  { key: "arabicFullName", label: "Arabic name" },
+  { key: "englishFullName", label: "English name" },
+  { key: "nationalId", label: "National ID" },
+  { key: "identifierType", label: "Identifier type", type: "select" },
+  { key: "identifierValue", label: "Identifier value" },
+  { key: "category", label: "Category", type: "select" },
+  { key: "ageYears", label: "Age", type: "number" },
+  { key: "estimatedDateOfBirth", label: "Date of birth" },
+  { key: "sex", label: "Sex", type: "select" },
+  { key: "phone1", label: "Phone 1" },
+  { key: "phone2", label: "Phone 2" },
+  { key: "address", label: "Address" },
+];
+
+const EMPTY_MERGE_DRAFT: MergeDraft = {
+  arabicFullName: "",
+  englishFullName: "",
+  nationalId: "",
+  identifierType: "national_id",
+  identifierValue: "",
+  category: "",
+  ageYears: "",
+  estimatedDateOfBirth: "",
+  sex: "",
+  phone1: "",
+  phone2: "",
+  address: "",
+};
 
 function isReAuthError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403 && error.message.includes("re-authentication");
@@ -72,6 +118,65 @@ function duplicateSummaryToPatient(patient: PatientDuplicateSummary): Patient {
     sex: patient.sex || "",
     phone1: patient.phone1 || "",
     phone2: patient.phone2,
+  };
+}
+
+function summaryToPatient(summary: PatientDirectorySummary): Patient {
+  return {
+    id: summary.demographics.id,
+    mrn: summary.demographics.mrn,
+    nationalId: summary.identifiers.nationalId,
+    identifierType: summary.identifiers.identifierType,
+    identifierValue: summary.identifiers.identifierValue,
+    category: summary.category,
+    arabicFullName: summary.demographics.arabicFullName,
+    englishFullName: summary.demographics.englishFullName,
+    ageYears: summary.demographics.ageYears,
+    demographicsEstimated: summary.demographics.demographicsEstimated,
+    estimatedDateOfBirth: summary.demographics.dateOfBirth,
+    sex: summary.demographics.sex || "",
+    phone1: summary.contact.phone1 || "",
+    phone2: summary.contact.phone2,
+    address: summary.contact.address,
+  };
+}
+
+function buildDraftFromPatient(patient: Patient): MergeDraft {
+  return {
+    arabicFullName: patient.arabicFullName || "",
+    englishFullName: patient.englishFullName || "",
+    nationalId: patient.nationalId || "",
+    identifierType: patient.identifierType || "national_id",
+    identifierValue: patient.identifierValue || patient.nationalId || "",
+    category: patient.category || "",
+    ageYears: patient.ageYears ? String(patient.ageYears) : "",
+    estimatedDateOfBirth: patient.estimatedDateOfBirth || "",
+    sex: patient.sex || "",
+    phone1: patient.phone1 || "",
+    phone2: patient.phone2 || "",
+    address: patient.address || "",
+  };
+}
+
+function fieldValue(patient: Patient, key: MergeField): string {
+  return buildDraftFromPatient(patient)[key] || "";
+}
+
+function draftToPatientPayload(draft: MergeDraft): Partial<Patient> & { nationalIdConfirmation?: string } {
+  return {
+    arabicFullName: draft.arabicFullName.trim(),
+    englishFullName: draft.englishFullName.trim(),
+    nationalId: draft.nationalId.trim(),
+    nationalIdConfirmation: draft.nationalId.trim(),
+    identifierType: draft.identifierType || "national_id",
+    identifierValue: draft.identifierValue.trim(),
+    category: draft.category === "oncology" || draft.category === "non_oncology" ? draft.category : null,
+    ageYears: Number(draft.ageYears || 0),
+    estimatedDateOfBirth: draft.estimatedDateOfBirth.trim(),
+    sex: draft.sex.trim(),
+    phone1: draft.phone1.trim(),
+    phone2: draft.phone2.trim(),
+    address: draft.address.trim(),
   };
 }
 
@@ -159,6 +264,8 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
   const [manualQuery, setManualQuery] = useState("");
   const [manualSelection, setManualSelection] = useState<Patient[]>([]);
   const [manualTargetId, setManualTargetId] = useState<number | null>(null);
+  const [mergeDraft, setMergeDraft] = useState<MergeDraft>(EMPTY_MERGE_DRAFT);
+  const [fieldSources, setFieldSources] = useState<Partial<Record<MergeField, number | "manual">>>({});
   const [dismissReason, setDismissReason] = useState("");
   const [selectedAction, setSelectedAction] = useState<SelectedAction>(null);
   const [confirmationText, setConfirmationText] = useState("");
@@ -263,13 +370,15 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
   });
 
   const mergeGroupMutation = useMutation({
-    mutationFn: (action: Extract<SelectedAction, { type: "mergeGroup" }>) => mergePatientDuplicateGroup(action.targetId, action.sourceIds, confirmationText),
+    mutationFn: (action: Extract<SelectedAction, { type: "mergeGroup" }>) => mergePatientDuplicateGroup(action.targetId, action.sourceIds, confirmationText, draftToPatientPayload(mergeDraft)),
     onSuccess: async () => {
       setSelectedAction(null);
       setConfirmationText("");
       setSelectedPair(null);
       setManualSelection([]);
       setManualTargetId(null);
+      setMergeDraft(EMPTY_MERGE_DRAFT);
+      setFieldSources({});
       pushToast({ type: "success", title: "Selected patients merged" });
       await invalidateDuplicates();
     },
@@ -282,12 +391,21 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     setManualSelection((current) => {
       if (current.some((selected) => selected.id === patient.id)) return current;
       const next = [...current, patient];
-      if (!manualTargetId) setManualTargetId(patient.id);
+      if (current.length === 0) {
+        setManualTargetId(patient.id);
+        setMergeDraft(buildDraftFromPatient(patient));
+        setFieldSources(Object.fromEntries(MERGE_FIELDS.map((field) => [field.key, patient.id])) as Partial<Record<MergeField, number | "manual">>);
+      }
       return next;
     });
   };
 
   const addCandidateToManualSet = (candidate: PatientDuplicateCandidate) => {
+    if (detail?.summaryA && detail?.summaryB) {
+      addManualPatient(summaryToPatient(detail.summaryA));
+      addManualPatient(summaryToPatient(detail.summaryB));
+      return;
+    }
     addManualPatient(duplicateSummaryToPatient(candidate.patientA));
     addManualPatient(duplicateSummaryToPatient(candidate.patientB));
   };
@@ -297,7 +415,25 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
     if (manualTargetId === patientId) {
       const nextTarget = manualSelection.find((patient) => patient.id !== patientId)?.id ?? null;
       setManualTargetId(nextTarget);
+      const nextPatient = manualSelection.find((patient) => patient.id !== patientId);
+      if (nextPatient) {
+        setMergeDraft(buildDraftFromPatient(nextPatient));
+        setFieldSources(Object.fromEntries(MERGE_FIELDS.map((field) => [field.key, nextPatient.id])) as Partial<Record<MergeField, number | "manual">>);
+      } else {
+        setMergeDraft(EMPTY_MERGE_DRAFT);
+        setFieldSources({});
+      }
     }
+  };
+
+  const usePatientField = (patient: Patient, key: MergeField) => {
+    setMergeDraft((current) => ({ ...current, [key]: fieldValue(patient, key) }));
+    setFieldSources((current) => ({ ...current, [key]: patient.id }));
+  };
+
+  const editDraftField = (key: MergeField, value: string) => {
+    setMergeDraft((current) => ({ ...current, [key]: value }));
+    setFieldSources((current) => ({ ...current, [key]: "manual" }));
   };
 
   if (isReAuthError(candidatesQuery.error) || isReAuthError(detailQuery.error)) {
@@ -409,14 +545,14 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm font-semibold text-foreground">Selected patients ({manualSelection.length})</p>
-              <Button type="button" variant="ghost" size="sm" disabled={manualSelection.length === 0} onClick={() => { setManualSelection([]); setManualTargetId(null); }}>
+              <Button type="button" variant="ghost" size="sm" disabled={manualSelection.length === 0} onClick={() => { setManualSelection([]); setManualTargetId(null); setMergeDraft(EMPTY_MERGE_DRAFT); setFieldSources({}); }}>
                 Clear
               </Button>
             </div>
             {manualSelection.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border bg-background p-4 text-sm text-muted-foreground">No manual merge set yet. Add patients from search or from an automatic candidate.</div>
             ) : (
-              <div className="grid gap-2 lg:grid-cols-2">
+              <div className="grid gap-3 lg:grid-cols-2">
                 {manualSelection.map((patient) => {
                   const isTarget = patient.id === manualTargetId;
                   return (
@@ -436,17 +572,96 @@ export default function PatientDuplicateResolverSection({ onReAuthRequired }: Pa
                             type="radio"
                             name="manual-merge-target"
                             checked={isTarget}
-                            onChange={() => setManualTargetId(patient.id)}
+                            onChange={() => {
+                              setManualTargetId(patient.id);
+                              if (Object.keys(fieldSources).length === 0) {
+                                setMergeDraft(buildDraftFromPatient(patient));
+                                setFieldSources(Object.fromEntries(MERGE_FIELDS.map((field) => [field.key, patient.id])) as Partial<Record<MergeField, number | "manual">>);
+                              }
+                            }}
                           />
                           Keep this record
                         </label>
                         {isTarget ? <Badge variant="accent">Survivor</Badge> : <Badge variant="warning">Source</Badge>}
+                      </div>
+                      <div className="mt-3 space-y-1 border-t border-border pt-3">
+                        {MERGE_FIELDS.map((field) => {
+                          const value = fieldValue(patient, field.key) || "-";
+                          const selected = fieldSources[field.key] === patient.id;
+                          return (
+                            <div key={field.key} className="grid grid-cols-[88px_1fr_auto] items-center gap-2 text-xs">
+                              <span className="text-muted-foreground">{field.label}</span>
+                              <span className="truncate font-medium text-foreground" title={value}>{value}</span>
+                              <button
+                                type="button"
+                                className={`rounded border px-2 py-1 font-semibold ${selected ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                                onClick={() => usePatientField(patient, field.key)}
+                              >
+                                {selected ? "Using" : "Use"}
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   );
                 })}
               </div>
             )}
+
+            {manualSelection.length > 0 ? (
+              <div className="rounded-lg border border-border bg-background p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">Final survivor details</p>
+                    <p className="text-xs text-muted-foreground">Pick fields from any selected patient or edit values manually before merge.</p>
+                  </div>
+                  {manualTarget ? <Badge variant="accent">Saving to #{manualTarget.id}</Badge> : null}
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  {MERGE_FIELDS.map((field) => {
+                    const source = fieldSources[field.key];
+                    const sourceLabel = source === "manual" ? "Manual edit" : source ? `From #${source}` : "Unset";
+                    return (
+                      <label key={field.key} className="space-y-1">
+                        <span className="flex items-center justify-between gap-2 text-xs font-semibold text-muted-foreground">
+                          {field.label}
+                          <span className="font-normal">{sourceLabel}</span>
+                        </span>
+                        {field.key === "identifierType" ? (
+                          <select value={mergeDraft.identifierType} onChange={(event) => editDraftField(field.key, event.target.value)} className="input-premium h-10 w-full text-sm">
+                            <option value="national_id">National ID</option>
+                            <option value="passport">Passport</option>
+                            <option value="other">Other</option>
+                          </select>
+                        ) : field.key === "category" ? (
+                          <select value={mergeDraft.category} onChange={(event) => editDraftField(field.key, event.target.value)} className="input-premium h-10 w-full text-sm">
+                            <option value="">Unset</option>
+                            <option value="oncology">Oncology</option>
+                            <option value="non_oncology">Non-oncology</option>
+                          </select>
+                        ) : field.key === "sex" ? (
+                          <select value={mergeDraft.sex} onChange={(event) => editDraftField(field.key, event.target.value)} className="input-premium h-10 w-full text-sm">
+                            <option value="">Unset</option>
+                            <option value="M">M</option>
+                            <option value="F">F</option>
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                          </select>
+                        ) : (
+                          <input
+                            type={field.type === "number" ? "number" : field.key === "estimatedDateOfBirth" ? "date" : "text"}
+                            value={mergeDraft[field.key]}
+                            onChange={(event) => editDraftField(field.key, event.target.value)}
+                            className="input-premium h-10 w-full text-sm"
+                          />
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       </div>
