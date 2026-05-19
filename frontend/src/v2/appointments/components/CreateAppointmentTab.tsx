@@ -7,6 +7,7 @@ import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/whatsapp";
 import type {
   BookingResponse,
   CapacityResolutionMode,
@@ -58,6 +59,7 @@ interface CreateAppointmentTabProps {
 interface SuccessSummary {
   bookingId: number;
   patientId: number | null;
+  patientPhone1: string | null;
   patientName: string;
   bookingDate: string;
   modalityName: string;
@@ -378,15 +380,19 @@ export function CreateAppointmentTab({
         fallback: examTypeRecord?.name || null,
       }) || null;
     let publicAppointmentUrl: string | null = null;
+    let patientPhone1: string | null = null;
     try {
       const appointmentDetails = await getAppointmentById(response.booking.id);
       publicAppointmentUrl = String(appointmentDetails.publicAppointmentUrl || "").trim() || null;
+      patientPhone1 = String(appointmentDetails.phone1 || "").trim() || null;
     } catch {
       publicAppointmentUrl = null;
+      patientPhone1 = null;
     }
     setSuccess({
       bookingId: response.booking.id,
       patientId: form.patientId,
+      patientPhone1,
       patientName: formatAppointmentPatientName(
         language,
         form.patient,
@@ -503,6 +509,7 @@ export function CreateAppointmentTab({
 
   if (success) {
     const currentSuccess = success;
+    const canSendWhatsapp = Boolean(currentSuccess.patientPhone1 && currentSuccess.publicAppointmentUrl);
 
     async function handlePrintNow() {
       if (printNowLoading) return;
@@ -514,6 +521,22 @@ export function CreateAppointmentTab({
       }
     }
 
+    const handleSendWhatsapp = () => {
+      if (!canSendWhatsapp) return;
+      const phone = normalizeWhatsappPhone(currentSuccess.patientPhone1);
+      const message = buildAppointmentWhatsappText(
+        "appointment_reminder",
+        {
+          bookingDate: currentSuccess.bookingDate,
+          publicAppointmentUrl: currentSuccess.publicAppointmentUrl,
+        },
+        language,
+        patientQrSettings
+      );
+      if (!phone || !message) return;
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, "_blank", "noopener,noreferrer");
+    };
+
     return (
       <div className="max-w-2xl mx-auto">
         <AppointmentSuccessState
@@ -521,6 +544,7 @@ export function CreateAppointmentTab({
           onPrintView={() => navigate(buildAppointmentPrintUrl(currentSuccess.bookingId))}
           onPrintNow={handlePrintNow}
           printNowDisabled={printNowLoading}
+          onSendWhatsapp={canSendWhatsapp ? handleSendWhatsapp : undefined}
           onViewDetails={() => navigate(buildAppointmentPrintUrl(currentSuccess.bookingId))}
           onCreateAnother={() => {
             setSuccess(null);

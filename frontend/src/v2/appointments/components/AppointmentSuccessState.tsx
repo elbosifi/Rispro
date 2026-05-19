@@ -16,6 +16,7 @@ interface Props {
   onPrintView: () => void;
   onPrintNow: () => void;
   printNowDisabled?: boolean;
+  onSendWhatsapp?: () => void;
   onCreateAnother: () => void;
   onViewDetails: () => void;
 }
@@ -25,6 +26,7 @@ export function AppointmentSuccessState({
   onPrintView,
   onPrintNow,
   printNowDisabled = false,
+  onSendWhatsapp,
   onCreateAnother,
   onViewDetails,
 }: Props) {
@@ -62,6 +64,11 @@ export function AppointmentSuccessState({
             onClick={() => window.open(publicAppointmentUrl, "_blank", "noopener,noreferrer")}
           >
             {t(language, "registrations.viewAppointmentLink")}
+          </button>
+        ) : null}
+        {onSendWhatsapp ? (
+          <button type="button" className="btn-secondary" onClick={onSendWhatsapp}>
+            {t(language, "registrations.whatsappOpen")}
           </button>
         ) : null}
         <button type="button" className="btn-secondary" onClick={onViewDetails}>{t(language, "appointments.create.viewDetails")}</button>

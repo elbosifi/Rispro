@@ -26,6 +26,7 @@ const mockFetchPatientQrSettings = vi.fn(async () => ({
 const mockGetAppointmentById = vi.fn(async (id: number) => ({
   id,
   publicAppointmentUrl: `https://rispro.nccb.com.ly/public/appointment?t=token-${id}`,
+  phone1: "0912345678",
 }));
 const mockQueueWalkInEnabled = { current: true };
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
@@ -367,6 +368,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockGetAppointmentById.mockImplementation(async (id: number) => ({
       id,
       publicAppointmentUrl: `https://rispro.nccb.com.ly/public/appointment?t=token-${id}`,
+      phone1: "0912345678",
     }));
     mockListAppointmentDocuments.mockReset();
     mockListAppointmentDocuments.mockResolvedValue([]);
@@ -882,6 +884,30 @@ describe("CreateAppointmentTab UI interactions", () => {
       await waitFor(() => {
         expect(screen.getByTestId("print-page").textContent).toContain("/print?appointmentId=42");
       });
+    });
+
+    it("Open WhatsApp composes the appointment reminder message", async () => {
+      setupSuccess();
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(await screen.findByRole("button", { name: /2027-01-03/i }));
+      await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Appointment Created Successfully")).toBeTruthy();
+      });
+
+      await userEvent.click(screen.getByRole("button", { name: "Open WhatsApp" }));
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      const [url, target, features] = openSpy.mock.calls[0] ?? [];
+      expect(url).toContain("https://wa.me/218912345678?text=");
+      expect(decodeURIComponent(String(url))).toContain("Reminder: you have an appointment on 2027-01-03.");
+      expect(decodeURIComponent(String(url))).toContain("https://rispro.nccb.com.ly/public/appointment?t=token-42");
+      expect(target).toBe("_blank");
+      expect(features).toBe("noopener,noreferrer");
     });
 
     it("Print View navigates to /print?appointmentId=<id>", async () => {

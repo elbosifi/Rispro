@@ -26,6 +26,7 @@ import { PatientCategoryBadge } from "@/components/patients/patient-category-bad
 import { patientCategoryRowClass } from "@/lib/patient-category-theme";
 import { pushToast } from "@/lib/toast";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
+import { buildAppointmentWhatsappText, normalizeWhatsappPhone } from "@/lib/whatsapp";
 import { Card, Button, SearchInput } from "@/components/shared";
 import {
   prepareAppointmentSlipHtml,
@@ -705,13 +706,6 @@ export default function RegistrationsPage() {
   const canSendCustomNotification =
     notificationMode === "template" || (notificationTitle.trim().length > 0 && notificationMessage.trim().length > 0);
 
-  const normalizeWhatsappPhone = (phone: string | null | undefined): string => {
-    let digits = String(phone || "").replace(/\D/g, "");
-    if (digits.startsWith("00")) digits = digits.slice(2);
-    if (digits.startsWith("0")) digits = `218${digits.slice(1)}`;
-    return digits;
-  };
-
   const openWhatsappDialog = (appointment: AppointmentWithDetails) => {
     if (!appointment.phone1) {
       pushToast({
@@ -735,25 +729,9 @@ export default function RegistrationsPage() {
     setWhatsappMessage("");
   };
 
-  const whatsappTemplateText = (template: string, appointment: AppointmentWithDetails): string => {
-    const link = String(appointment.publicAppointmentUrl || "").trim();
-    const date = formatDateLy(appointment.appointmentDate);
-    const settings = patientQrSettings;
-    const templates: Record<string, string> = {
-      qr_link: chooseLocalized(language, settings?.whatsappQrLinkMessageAr, settings?.whatsappQrLinkMessageEn) || t("registrations.whatsappMessageQrLink"),
-      appointment_reminder: chooseLocalized(language, settings?.whatsappReminderMessageAr, settings?.whatsappReminderMessageEn) || t("registrations.whatsappMessageReminder"),
-      appointment_rescheduled: chooseLocalized(language, settings?.whatsappRescheduledMessageAr, settings?.whatsappRescheduledMessageEn) || t("registrations.whatsappMessageRescheduled"),
-      appointment_changed: chooseLocalized(language, settings?.whatsappChangedMessageAr, settings?.whatsappChangedMessageEn) || t("registrations.whatsappMessageChanged"),
-      appointment_cancelled: chooseLocalized(language, settings?.whatsappCancelledMessageAr, settings?.whatsappCancelledMessageEn) || t("registrations.whatsappMessageCancelled"),
-    };
-    return String(templates[template] || templates.qr_link)
-      .replace(/\{link\}/g, link)
-      .replace(/\{date\}/g, date);
-  };
-
   const currentWhatsappMessage = whatsappAppointment
     ? whatsappMode === "template"
-      ? whatsappTemplateText(whatsappTemplate, whatsappAppointment)
+      ? buildAppointmentWhatsappText(whatsappTemplate, whatsappAppointment, language, patientQrSettings)
       : whatsappMessage.trim()
     : "";
 
