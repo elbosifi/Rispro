@@ -4,11 +4,12 @@ import { AlertTriangle, CalendarPlus, ChevronRight, Copy, Pencil, Printer, X } f
 import { fetchPatientDirectorySummary } from "@/lib/api-hooks";
 import { printAppointmentSlipById } from "@/lib/appointment-printing";
 import { formatDateTimeLy } from "@/lib/date-format";
-import { t } from "@/lib/i18n";
+import { t, type Language } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
 import { useLanguage } from "@/providers/language-provider";
 import { Badge, Button } from "@/components/shared";
 import { PatientCategoryBadge } from "@/components/patients/patient-category-badge";
+import type { PatientDirectorySummary } from "@/types/api";
 
 function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
   if (!warning) return null;
@@ -20,7 +21,7 @@ function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
   );
 }
 
-function formatIdentifierTypeLabel(type: string, language: string): string {
+function formatIdentifierTypeLabel(type: string, language: Language): string {
   if (type === "national_id") return t(language, "patients.nationalId");
   if (type === "passport") return language === "ar" ? "جواز سفر" : "Passport";
   if (type === "other") return language === "ar" ? "معرف آخر" : "Other";
@@ -28,27 +29,13 @@ function formatIdentifierTypeLabel(type: string, language: string): string {
 }
 
 function formatIdentifierValueLabel(
-  summary: {
-    identifiers: {
-      nationalId: string | null;
-      identifierType: string | null;
-      identifierValue: string | null;
-      items?: Array<{
-        id: number;
-        typeId: number;
-        typeCode: string;
-        value: string;
-        normalizedValue: string;
-        isPrimary: boolean;
-      }>;
-    };
-  },
-  language: string
+  summary: Pick<PatientDirectorySummary, "identifiers">,
+  language: Language
 ): Array<{ id: string; typeLabel: string; value: string; isPrimary: boolean }> {
   const items = summary.identifiers.items ?? [];
   if (items.length > 0) {
     return items.map((item) => ({
-      id: String(item.id),
+      id: String(item.id ?? `${item.typeCode}:${item.value}`),
       typeLabel: formatIdentifierTypeLabel(item.typeCode, language),
       value: item.value || (item.typeCode === "national_id" ? summary.identifiers.nationalId || "—" : "—"),
       isPrimary: item.isPrimary
