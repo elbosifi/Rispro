@@ -732,7 +732,15 @@ export default function RegistrationsPage() {
 
   const currentWhatsappMessage = whatsappAppointment
     ? whatsappMode === "template"
-      ? buildAppointmentWhatsappText(whatsappTemplate, whatsappAppointment, language, patientQrSettings)
+      ? buildAppointmentWhatsappText(
+          whatsappTemplate,
+          {
+            bookingDate: whatsappAppointment.appointmentDate,
+            publicAppointmentUrl: whatsappAppointment.publicAppointmentUrl,
+          },
+          language,
+          patientQrSettings
+        )
       : whatsappMessage.trim()
     : "";
 
@@ -2131,7 +2139,7 @@ export default function RegistrationsPage() {
                 </label>
                 <select
                   value={whatsappTemplate}
-                  onChange={(e) => setWhatsappTemplate(e.target.value)}
+                  onChange={(e) => setWhatsappTemplate(e.target.value as typeof whatsappTemplate)}
                   className="input-premium w-full min-h-10"
                 >
                   {whatsappTemplates.map((entry) => (
