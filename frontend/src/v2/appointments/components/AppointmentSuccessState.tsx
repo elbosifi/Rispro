@@ -1,6 +1,7 @@
 import { RequestDocumentsPanel } from "@/components/documents/request-documents-panel";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
+import { MessageCircle } from "lucide-react";
 
 interface Props {
   appointmentSummary: {
@@ -67,7 +68,13 @@ export function AppointmentSuccessState({
           </button>
         ) : null}
         {onSendWhatsapp ? (
-          <button type="button" className="btn-secondary" onClick={onSendWhatsapp}>
+          <button
+            type="button"
+            className="btn-secondary inline-flex items-center gap-2"
+            onClick={onSendWhatsapp}
+            style={{ backgroundColor: "#25D366", borderColor: "#25D366", color: "#fff" }}
+          >
+            <MessageCircle className="h-4 w-4" />
             {t(language, "registrations.whatsappOpen")}
           </button>
         ) : null}
