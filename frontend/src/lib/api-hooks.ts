@@ -1068,7 +1068,17 @@ export async function fetchPatientDirectorySummary(patientId: number): Promise<P
     identifiers: {
       nationalId: (raw.identifiers?.nationalId as string | null) ?? (raw.identifiers?.national_id as string | null),
       identifierType: (raw.identifiers?.identifierType as string | null) ?? (raw.identifiers?.identifier_type as string | null),
-      identifierValue: (raw.identifiers?.identifierValue as string | null) ?? (raw.identifiers?.identifier_value as string | null)
+      identifierValue: (raw.identifiers?.identifierValue as string | null) ?? (raw.identifiers?.identifier_value as string | null),
+      items: Array.isArray(raw.identifiers?.items)
+        ? (raw.identifiers.items as RawRecord[]).map((entry) => ({
+            id: Number(entry.id ?? 0),
+            typeId: Number(entry.typeId ?? entry.type_id ?? 0),
+            typeCode: String(entry.typeCode ?? entry.type_code ?? "other"),
+            value: String(entry.value ?? ""),
+            normalizedValue: (entry.normalizedValue as string | undefined) ?? (entry.normalized_value as string | undefined) ?? undefined,
+            isPrimary: Boolean(entry.isPrimary ?? entry.is_primary)
+          }))
+        : []
     },
     contact: {
       phone1: (raw.contact?.phone1 as string | null) ?? (raw.contact?.phone_1 as string | null),

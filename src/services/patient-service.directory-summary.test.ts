@@ -23,6 +23,24 @@ test("patient directory summary composes patient details and appointments withou
             national_id: "NAT-17",
             identifier_type: "national_id",
             identifier_value: "NAT-17",
+            identifiers: [
+              {
+                id: 1,
+                type_id: 1,
+                type_code: "national_id",
+                value: "NAT-17",
+                normalized_value: "NAT-17",
+                is_primary: true
+              },
+              {
+                id: 2,
+                type_id: 2,
+                type_code: "passport",
+                value: "P-12345",
+                normalized_value: "P-12345",
+                is_primary: false
+              }
+            ],
             category: "oncology",
             arabic_full_name: "مريض مثال",
             english_full_name: "Sample Patient",
@@ -108,7 +126,25 @@ test("patient directory summary composes patient details and appointments withou
     assert.deepEqual(summary.identifiers, {
       nationalId: "NAT-17",
       identifierType: "national_id",
-      identifierValue: "NAT-17"
+      identifierValue: "NAT-17",
+      items: [
+        {
+          id: 1,
+          typeId: 1,
+          typeCode: "national_id",
+          value: "NAT-17",
+          normalizedValue: "NAT-17",
+          isPrimary: true
+        },
+        {
+          id: 2,
+          typeId: 2,
+          typeCode: "passport",
+          value: "P-12345",
+          normalizedValue: "P-12345",
+          isPrimary: false
+        }
+      ]
     });
     assert.deepEqual(summary.contact, {
       phone1: "0911111111",

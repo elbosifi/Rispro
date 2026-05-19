@@ -592,6 +592,7 @@ export interface PatientDirectorySummary {
     nationalId: string | null;
     identifierType: string | null;
     identifierValue: string | null;
+    items: PatientIdentifier[];
   };
   contact: {
     phone1: string | null;

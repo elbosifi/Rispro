@@ -1638,6 +1638,14 @@ interface PatientDirectorySummaryOutput {
     nationalId: string | null;
     identifierType: string | null;
     identifierValue: string | null;
+    items: Array<{
+      id: number;
+      typeId: number;
+      typeCode: string;
+      value: string;
+      normalizedValue: string;
+      isPrimary: boolean;
+    }>;
   };
   contact: {
     phone1: string | null;
@@ -1798,7 +1806,15 @@ export async function getPatientDirectorySummary(patientId: UserId): Promise<Pat
     identifiers: {
       nationalId: patient.national_id,
       identifierType: patient.identifier_type,
-      identifierValue: patient.identifier_value
+      identifierValue: patient.identifier_value,
+      items: (patient.identifiers ?? []).map((identifier) => ({
+        id: identifier.id,
+        typeId: identifier.type_id,
+        typeCode: identifier.type_code,
+        value: identifier.value,
+        normalizedValue: identifier.normalized_value,
+        isPrimary: identifier.is_primary
+      }))
     },
     contact: {
       phone1: patient.phone_1,

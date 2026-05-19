@@ -93,6 +93,24 @@ describe("PatientsPage interactions", () => {
         nationalId: null,
         identifierType: null,
         identifierValue: null,
+        items: [
+          {
+            id: 1,
+            typeId: 1,
+            typeCode: "passport",
+            value: "P-12345",
+            normalizedValue: "P-12345",
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            typeId: 2,
+            typeCode: "other",
+            value: "ALT-678",
+            normalizedValue: "ALT-678",
+            isPrimary: false,
+          },
+        ],
       },
       contact: {
         phone1: "0911111111",
@@ -149,6 +167,80 @@ describe("PatientsPage interactions", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Patient Profile")).toBeNull();
+    });
+  });
+
+  it("shows the primary identifier when national id is missing", async () => {
+    fetchPatientDirectorySummaryMock.mockResolvedValueOnce({
+      demographics: {
+        id: 11,
+        mrn: "MRN-11",
+        arabicFullName: "Alice Example",
+        englishFullName: "Alice Example",
+        sex: "F",
+        ageYears: 31,
+        demographicsEstimated: false,
+        dateOfBirth: "1995-01-01",
+      },
+      identifiers: {
+        nationalId: null,
+        identifierType: "passport",
+        identifierValue: "P-12345",
+        items: [
+          {
+            id: 1,
+            typeId: 1,
+            typeCode: "passport",
+            value: "P-12345",
+            normalizedValue: "P-12345",
+            isPrimary: true,
+          },
+          {
+            id: 2,
+            typeId: 2,
+            typeCode: "other",
+            value: "ALT-678",
+            normalizedValue: "ALT-678",
+            isPrimary: false,
+          },
+        ],
+      },
+      contact: {
+        phone1: "0911111111",
+        phone2: null,
+        address: null,
+      },
+      category: null,
+      warnings: {
+        missingPhone: false,
+        missingDob: false,
+        missingSex: false,
+        missingName: false,
+        incompleteData: false,
+        possibleDuplicate: false,
+        duplicateReasons: [],
+      },
+      lastAppointment: null,
+      nextAppointment: null,
+      recentAppointments: [],
+    });
+
+    renderPatientsPage();
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Alice Example").length).toBeGreaterThan(0);
+    });
+
+    const row = screen.getAllByText("Alice Example")[0]?.closest("tr");
+    expect(row).toBeTruthy();
+
+    await userEvent.click(row as HTMLElement);
+
+    await waitFor(() => {
+      expect(screen.getByText("Passport")).toBeTruthy();
+      expect(screen.getByText("P-12345")).toBeTruthy();
+      expect(screen.getByText("ALT-678")).toBeTruthy();
+      expect(screen.getByText("Primary")).toBeTruthy();
     });
   });
 

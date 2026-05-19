@@ -20,6 +20,57 @@ function WarningBadge({ warning, label }: { warning: boolean; label: string }) {
   );
 }
 
+function formatIdentifierTypeLabel(type: string, language: string): string {
+  if (type === "national_id") return t(language, "patients.nationalId");
+  if (type === "passport") return language === "ar" ? "جواز سفر" : "Passport";
+  if (type === "other") return language === "ar" ? "معرف آخر" : "Other";
+  return type.replace(/_/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatIdentifierValueLabel(
+  summary: {
+    identifiers: {
+      nationalId: string | null;
+      identifierType: string | null;
+      identifierValue: string | null;
+      items?: Array<{
+        id: number;
+        typeId: number;
+        typeCode: string;
+        value: string;
+        normalizedValue: string;
+        isPrimary: boolean;
+      }>;
+    };
+  },
+  language: string
+): Array<{ id: string; typeLabel: string; value: string; isPrimary: boolean }> {
+  const items = summary.identifiers.items ?? [];
+  if (items.length > 0) {
+    return items.map((item) => ({
+      id: String(item.id),
+      typeLabel: formatIdentifierTypeLabel(item.typeCode, language),
+      value: item.value || (item.typeCode === "national_id" ? summary.identifiers.nationalId || "—" : "—"),
+      isPrimary: item.isPrimary
+    }));
+  }
+
+  const fallbackValue = summary.identifiers.identifierValue || summary.identifiers.nationalId;
+  if (!fallbackValue) return [];
+
+  return [
+    {
+      id: "primary",
+      typeLabel:
+        summary.identifiers.identifierType && summary.identifiers.identifierType !== "national_id"
+          ? formatIdentifierTypeLabel(summary.identifiers.identifierType, language)
+          : t(language, "patients.nationalId"),
+      value: fallbackValue,
+      isPrimary: true
+    }
+  ];
+}
+
 export function PatientDrawer({
   patientId,
   onClose,
@@ -76,9 +127,10 @@ export function PatientDrawer({
   if (!summary) return null;
   const lastAppointmentId = summary.lastAppointment?.id ?? null;
   const registeredBy =
-    summary.registration.createdByName ||
-    summary.registration.createdByUsername ||
-    (summary.registration.createdByUserId ? `#${summary.registration.createdByUserId}` : "—");
+    summary.registration?.createdByName ||
+    summary.registration?.createdByUsername ||
+    (summary.registration?.createdByUserId ? `#${summary.registration.createdByUserId}` : "—");
+  const identifierRows = formatIdentifierValueLabel(summary, language);
   const copyValue = async (label: string, value: string | null | undefined) => {
     const text = String(value || "").trim();
     if (!text) return;
@@ -164,7 +216,7 @@ export function PatientDrawer({
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">{t(language, "patients.directory.drawer.registeredAt")}</span>
-                <span className="text-end">{formatDateTimeLy(summary.registration.createdAt)}</span>
+                <span className="text-end">{formatDateTimeLy(summary.registration?.createdAt ?? null)}</span>
               </div>
               <div className="flex justify-between gap-3">
                 <span className="text-muted-foreground">{t(language, "patients.directory.drawer.registeredBy")}</span>
@@ -178,10 +230,23 @@ export function PatientDrawer({
               {t(language, "patients.directory.drawer.identifiers")}
             </h3>
             <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">{t(language, "patients.nationalId")}</span>
-                <span className="font-mono">{summary.identifiers.nationalId || "—"}</span>
-              </div>
+              {identifierRows.length > 0 ? (
+                identifierRows.map((identifier) => (
+                  <div key={identifier.id} className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-muted-foreground">{identifier.typeLabel}</span>
+                      {identifier.isPrimary ? (
+                        <Badge variant="neutral" className="text-[10px] uppercase tracking-[0.12em]">
+                          {language === "ar" ? "أساسي" : "Primary"}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 font-mono text-foreground">{identifier.value}</div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-muted-foreground">—</div>
+              )}
             </div>
           </section>
 
