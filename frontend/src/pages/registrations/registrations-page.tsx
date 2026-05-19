@@ -38,6 +38,7 @@ import {
   rescheduleV2Booking,
   useV2SpecialReasonCodes,
 } from "@/v2/appointments/api";
+import type { WhatsappTemplate } from "@/lib/whatsapp";
 import {
   RESCHEDULABLE_STATUSES,
   type BookingStatus,
@@ -162,7 +163,7 @@ export default function RegistrationsPage() {
   const [whatsappAppointment, setWhatsappAppointment] =
     useState<AppointmentWithDetails | null>(null);
   const [whatsappMode, setWhatsappMode] = useState<"template" | "custom">("template");
-  const [whatsappTemplate, setWhatsappTemplate] = useState("qr_link");
+  const [whatsappTemplate, setWhatsappTemplate] = useState<WhatsappTemplate>("qr_link");
   const [whatsappMessage, setWhatsappMessage] = useState("");
   const [rescheduleDate, setRescheduleDate] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");

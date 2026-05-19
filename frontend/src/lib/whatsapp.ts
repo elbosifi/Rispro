@@ -42,11 +42,11 @@ export function buildAppointmentWhatsappText(
   const link = String(appointment.publicAppointmentUrl || "").trim();
   const date = formatDateLy(appointment.bookingDate);
   const templates: Record<WhatsappTemplate, string> = {
-    qr_link: chooseLocalized(language, settings?.whatsappQrLinkMessageAr, settings?.whatsappQrLinkMessageEn) || t("registrations.whatsappMessageQrLink"),
-    appointment_reminder: chooseLocalized(language, settings?.whatsappReminderMessageAr, settings?.whatsappReminderMessageEn) || t("registrations.whatsappMessageReminder"),
-    appointment_rescheduled: chooseLocalized(language, settings?.whatsappRescheduledMessageAr, settings?.whatsappRescheduledMessageEn) || t("registrations.whatsappMessageRescheduled"),
-    appointment_changed: chooseLocalized(language, settings?.whatsappChangedMessageAr, settings?.whatsappChangedMessageEn) || t("registrations.whatsappMessageChanged"),
-    appointment_cancelled: chooseLocalized(language, settings?.whatsappCancelledMessageAr, settings?.whatsappCancelledMessageEn) || t("registrations.whatsappMessageCancelled"),
+    qr_link: chooseLocalized(language, settings?.whatsappQrLinkMessageAr, settings?.whatsappQrLinkMessageEn) || t(language, "registrations.whatsappMessageQrLink"),
+    appointment_reminder: chooseLocalized(language, settings?.whatsappReminderMessageAr, settings?.whatsappReminderMessageEn) || t(language, "registrations.whatsappMessageReminder"),
+    appointment_rescheduled: chooseLocalized(language, settings?.whatsappRescheduledMessageAr, settings?.whatsappRescheduledMessageEn) || t(language, "registrations.whatsappMessageRescheduled"),
+    appointment_changed: chooseLocalized(language, settings?.whatsappChangedMessageAr, settings?.whatsappChangedMessageEn) || t(language, "registrations.whatsappMessageChanged"),
+    appointment_cancelled: chooseLocalized(language, settings?.whatsappCancelledMessageAr, settings?.whatsappCancelledMessageEn) || t(language, "registrations.whatsappMessageCancelled"),
   };
 
   return String(templates[template] || templates.qr_link)
