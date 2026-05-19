@@ -17,6 +17,7 @@ export interface OrthancRemoteModality {
   aet: string;
   host: string;
   port: number | null;
+  isDefault: boolean;
   configurationError?: string | null;
 }
 
@@ -213,6 +214,15 @@ function normalizePort(value: unknown): number {
   return port;
 }
 
+function normalizeBoolean(value: unknown, fallback = false): boolean {
+  if (value === undefined || value === null) return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const clean = String(value).trim().toLowerCase();
+  if (!clean) return fallback;
+  return !["false", "0", "no", "off", "disabled"].includes(clean);
+}
+
 function parseOrthancPort(value: unknown): number | null {
   const port = Number(value);
   return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
@@ -323,6 +333,7 @@ function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModali
       aet: firstString(payload[0]),
       host: firstString(payload[1]),
       port,
+      isDefault: false,
       configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
     };
   }
@@ -333,6 +344,7 @@ function modalityFromPayload(key: string, payload: unknown): OrthancRemoteModali
     aet: firstString(data.AET, data.Aet, data.aet),
     host: firstString(data.Host, data.host),
     port,
+    isDefault: false,
     configurationError: port == null ? "Port is missing or invalid in Orthanc." : null,
   };
 }
@@ -346,6 +358,7 @@ function normalizeStoredModality(value: unknown): OrthancRemoteModality | null {
     aet: firstString(data.aet, data.AET),
     host: firstString(data.host, data.Host),
     port: parseOrthancPort(data.port ?? data.Port),
+    isDefault: normalizeBoolean(data.isDefault ?? data.is_default),
     configurationError: null,
   };
 }
@@ -373,8 +386,18 @@ async function saveStoredOrthancRemoteModalities(modalities: OrthancRemoteModali
       aet: modality.aet,
       host: modality.host,
       port: modality.port,
+      isDefault: Boolean(modality.isDefault),
     }))
     .sort((a, b) => a.key.localeCompare(b.key));
+
+  const defaultIndex = normalized.findIndex((modality) => modality.isDefault);
+  if (defaultIndex >= 0) {
+    normalized.forEach((modality, index) => {
+      modality.isDefault = index === defaultIndex;
+    });
+  } else if (normalized.length === 1) {
+    normalized[0]!.isDefault = true;
+  }
 
   await pool.query(
     `
@@ -433,12 +456,14 @@ export async function syncStoredOrthancRemoteModalitiesToOrthanc(): Promise<{ sy
 export async function listOrthancRemoteModalities(): Promise<{ modalities: OrthancRemoteModality[] }> {
   const settings = await resolveSettings();
   await syncStoredOrthancRemoteModalitiesToOrthanc().catch(() => undefined);
+  const stored = await loadStoredOrthancRemoteModalities();
+  const storedDefaultKey = stored.find((modality) => modality.isDefault)?.key ?? null;
   const keys = await listRemoteModalityKeys(settings);
   const modalities = await Promise.all(keys.map(async (key) => {
     try {
       const response = await orthancFetchForPacs(`/modalities/${encodeURIComponent(key)}/configuration`, { settings });
       if (!response.ok) {
-        return { key, aet: "", host: "", port: null, configurationError: `Orthanc read failed (status=${response.status}).` };
+        return { key, aet: "", host: "", port: null, isDefault: false, configurationError: `Orthanc read failed (status=${response.status}).` };
       }
       return modalityFromPayload(key, response.json);
     } catch (error) {
@@ -447,11 +472,21 @@ export async function listOrthancRemoteModalities(): Promise<{ modalities: Ortha
         aet: "",
         host: "",
         port: null,
+        isDefault: false,
         configurationError: error instanceof Error ? error.message : String(error),
       };
     }
   }));
-  return { modalities };
+  const resolvedDefaultKey = storedDefaultKey && modalities.some((modality) => modality.key === storedDefaultKey)
+    ? storedDefaultKey
+    : (modalities[0]?.key ?? null);
+
+  return {
+    modalities: modalities.map((modality) => ({
+      ...modality,
+      isDefault: modality.key === resolvedDefaultKey,
+    })),
+  };
 }
 
 export async function upsertOrthancRemoteModality({
@@ -469,6 +504,7 @@ export async function upsertOrthancRemoteModality({
     aet: normalizeAeTitle(payload.aet ?? payload.AET ?? payload.calledAeTitle),
     host: normalizeHost(payload.host ?? payload.Host),
     port: normalizePort(payload.port ?? payload.Port),
+    isDefault: normalizeBoolean(payload.isDefault ?? payload.is_default),
   };
   const settings = await resolveSettings();
   await putOrthancRemoteModality(modality, settings);
@@ -510,7 +546,11 @@ export async function deleteOrthancRemoteModality({
   }
 
   const stored = await loadStoredOrthancRemoteModalities();
-  await saveStoredOrthancRemoteModalities(stored.filter((item) => item.key !== cleanKey), currentUserId);
+  const next = stored.filter((item) => item.key !== cleanKey);
+  if (!next.some((item) => item.isDefault) && next.length > 0) {
+    next[0] = { ...next[0], isDefault: true };
+  }
+  await saveStoredOrthancRemoteModalities(next, currentUserId);
 
   await logOrthancPacsAuditEntry({
     entityType: "orthanc_remote_modality",

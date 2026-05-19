@@ -11,6 +11,7 @@ interface OrthancRemoteModality {
   aet: string;
   host: string;
   port: number | null;
+  isDefault: boolean;
   configurationError?: string | null;
 }
 
@@ -73,6 +74,7 @@ type OrthancModalityFormState = {
   aet: string;
   host: string;
   port: number | "";
+  isDefault: boolean;
 };
 
 type AutoCompletionDraft = {
@@ -116,7 +118,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
     key: "",
     aet: "",
     host: "",
-    port: 104
+    port: 104,
+    isDefault: false
   };
 
   const [createForm, setCreateForm] = useState<OrthancModalityFormState>(emptyForm);
@@ -147,7 +150,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
   const toOrthancPayload = (form: OrthancModalityFormState) => ({
     aet: form.aet,
     host: form.host,
-    port: Number(form.port)
+    port: Number(form.port),
+    isDefault: form.isDefault
   });
 
   const createMutation = useMutation({
@@ -270,7 +274,8 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
       key: modality.key,
       aet: modality.aet,
       host: modality.host,
-      port: modality.port ?? ""
+      port: modality.port ?? "",
+      isDefault: modality.isDefault
     });
   };
 
@@ -333,6 +338,11 @@ export default function PacsSettingsSection({ onReAuthRequired }: { onReAuthRequ
                   <div className="flex items-center gap-2">
                     <span className="font-medium text-stone-900 dark:text-white">{modality.key}</span>
                     <span className="px-1.5 py-0.5 text-xs bg-teal-100 dark:bg-teal-900/30 text-teal-700 dark:text-teal-400 rounded">Orthanc</span>
+                    {modality.isDefault && (
+                      <span className="px-1.5 py-0.5 text-xs bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded">
+                        Default
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-stone-600 dark:text-stone-400 mt-1 font-mono">
                     {modality.host || "missing-host"}:{modality.port ?? "invalid-port"} | AET: {modality.aet || "missing-aet"}
@@ -641,6 +651,14 @@ function OrthancModalityForm({
           />
         </label>
       </div>
+      <label className="inline-flex items-center gap-2 text-sm text-stone-700 dark:text-stone-300">
+        <input
+          type="checkbox"
+          checked={form.isDefault}
+          onChange={(e) => onChange({ ...form, isDefault: e.target.checked })}
+        />
+        Default destination
+      </label>
       <div className="flex gap-2">
         <button
           type="button"

@@ -36,7 +36,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     vi.clearAllMocks();
     vi.mocked(api).mockImplementation(async (path: string, options?: RequestInit) => {
       if (path === "/pacs/orthanc-modalities") {
-        return { modalities: [{ key: "CT_REMOTE", aet: "CTPACS", host: "10.0.0.5", port: 104 }] };
+        return { modalities: [{ key: "CT_REMOTE", aet: "CTPACS", host: "10.0.0.5", port: 104, isDefault: false }] };
       }
       if (path === "/pacs/orthanc-modalities/MR_REMOTE" && options?.method === "PUT") {
         return { modality: { key: "MR_REMOTE", aet: "MRPACS", host: "10.0.0.6", port: 104 } };
@@ -192,6 +192,7 @@ describe("PacsSettingsSection auto-completion controls", () => {
     await user.clear(screen.getByPlaceholderText("Port"));
     await user.type(screen.getByPlaceholderText("Port"), "104");
     await user.type(screen.getByPlaceholderText("Remote AET"), "MRPACS");
+    await user.click(screen.getByRole("checkbox", { name: "Default destination" }));
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
@@ -200,6 +201,9 @@ describe("PacsSettingsSection auto-completion controls", () => {
         expect.objectContaining({ method: "PUT" })
       );
     });
+    const saveCall = vi.mocked(api).mock.calls.find((call) => call[0] === "/pacs/orthanc-modalities/MR_REMOTE");
+    const savePayload = JSON.parse(String(saveCall?.[1]?.body || "{}"));
+    expect(savePayload.isDefault).toBe(true);
 
     await user.click(screen.getByRole("button", { name: "Test CT_REMOTE" }));
     await waitFor(() => {

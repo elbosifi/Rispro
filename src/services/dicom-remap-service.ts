@@ -11,6 +11,7 @@ import { HttpError } from "../utils/http-error.js";
 import { normalizeOptionalText, normalizePositiveInteger } from "../utils/normalize.js";
 import { logAuditEntry } from "./audit-service.js";
 import { resolveOrthancSettings } from "./orthanc-settings-resolver.js";
+import { listOrthancRemoteModalities } from "./orthanc-pacs-service.js";
 import { getPatientById } from "./patient-service.js";
 import type { OptionalUserId, UserId } from "../types/http.js";
 
@@ -2730,19 +2731,12 @@ export async function listMyDicomRemapJobs({
 }
 
 export async function listDicomRemapDestinations(): Promise<Array<{ key: string; id: string; name: string; isDefault: boolean }>> {
-  const response = await fetchOrthancForRemap("/modalities");
-  if (!response.ok) {
-    throw new HttpError(502, `Failed to list Orthanc PACS destinations (status=${response.status}).`);
-  }
-  const keys = Array.isArray(response.json)
-    ? response.json.map((value) => normalizeOptionalText(value)).filter(Boolean)
-    : Object.keys(response.json && typeof response.json === "object" ? response.json as Record<string, unknown> : {});
-
-  return keys.sort((a, b) => a.localeCompare(b)).map((key, index) => ({
-    key,
-    id: key,
-    name: key,
-    isDefault: index === 0,
+  const { modalities } = await listOrthancRemoteModalities();
+  return modalities.map((modality) => ({
+    key: modality.key,
+    id: modality.key,
+    name: modality.key,
+    isDefault: modality.isDefault,
   }));
 }
 
