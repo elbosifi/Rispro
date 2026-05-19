@@ -384,10 +384,10 @@ export function CreateAppointmentTab({
     try {
       const appointmentDetails = await getAppointmentById(response.booking.id);
       publicAppointmentUrl = String(appointmentDetails.publicAppointmentUrl || "").trim() || null;
-      patientPhone1 = String(appointmentDetails.phone1 || "").trim() || null;
+      patientPhone1 = String(appointmentDetails.phone1 || form.patient?.phone1 || "").trim() || null;
     } catch {
       publicAppointmentUrl = null;
-      patientPhone1 = null;
+      patientPhone1 = String(form.patient?.phone1 || "").trim() || null;
     }
     setSuccess({
       bookingId: response.booking.id,

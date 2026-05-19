@@ -116,6 +116,7 @@ vi.mock("../components/PatientSearchSection", () => ({
             mrn: "MRN-9",
             sex: "M",
             ageYears: 30,
+            phone1: "0912345678",
           })
         }
       >
