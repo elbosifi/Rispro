@@ -45,6 +45,7 @@ import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
 import { assertPatientIdentifierAllowsBooking } from "./patient-identifier-requirement.js";
+import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 
 export interface RescheduleBookingResult {
   booking: Booking;
@@ -114,7 +115,8 @@ export async function rescheduleBooking(
   rescheduleReason: string | null = null,
   requiresReport?: boolean,
   studyInstanceUid?: string | null,
-  policySetKey: string = "default"
+  policySetKey: string = "default",
+  approvedOverrideContext?: ApprovedOverrideContext
 ): Promise<RescheduleBookingResult> {
   const result = await withTransaction(async (client) => {
     return rescheduleBookingInternal(
@@ -134,7 +136,8 @@ export async function rescheduleBooking(
       rescheduleReason,
       requiresReport,
       studyInstanceUid,
-      policySetKey
+      policySetKey,
+      approvedOverrideContext
     );
   }, {
     isolationLevel: "serializable",
@@ -158,7 +161,7 @@ export async function rescheduleBooking(
   return result;
 }
 
-async function rescheduleBookingInternal(
+export async function rescheduleBookingInternal(
   client: PoolClient,
   bookingId: number,
   newDate: string | null,
@@ -175,7 +178,8 @@ async function rescheduleBookingInternal(
   rescheduleReason: string | null,
   requiresReport: boolean | undefined,
   studyInstanceUid: string | null | undefined,
-  policySetKey: string
+  policySetKey: string,
+  approvedOverrideContext?: ApprovedOverrideContext
 ): Promise<RescheduleBookingResult> {
   // 1. Find the existing booking
   const booking = await findBookingById(client, bookingId);
@@ -467,7 +471,10 @@ async function rescheduleBookingInternal(
   }
 
   if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
-    if (!override) {
+    if (approvedOverrideContext) {
+      supervisorUserId = approvedOverrideContext.approverUserId;
+      wasOverride = true;
+    } else if (!override) {
       if (examTypeChangeRequiresSupervisorAuth && !decision.requiresSupervisorOverride && requiredOverrideTypes.length === 0) {
         throw new SchedulingError(
           403,
@@ -480,24 +487,23 @@ async function rescheduleBookingInternal(
         "Supervisor override is required for this reschedule.",
         ["override_required"]
       );
-    }
-    if (!override.reason?.trim()) {
+    } else if (!override.reason?.trim()) {
       throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
+    } else {
+      const supervisor = await authenticateSupervisor(
+        client,
+        override.supervisorUsername,
+        override.supervisorPassword
+      );
+      console.info(JSON.stringify({
+        type: "appointments_v2_reschedule_override",
+        bookingId,
+        requestingUserId: userId,
+        supervisorUserId: supervisor.id,
+      }));
+      supervisorUserId = supervisor.id;
+      wasOverride = true;
     }
-
-    const supervisor = await authenticateSupervisor(
-      client,
-      override.supervisorUsername,
-      override.supervisorPassword
-    );
-    console.info(JSON.stringify({
-      type: "appointments_v2_reschedule_override",
-      bookingId,
-      requestingUserId: userId,
-      supervisorUserId: supervisor.id,
-    }));
-    supervisorUserId = supervisor.id;
-    wasOverride = true;
   }
 
   if (effectiveCapacityResolutionMode === "special_quota_extra" && !specialReasonCode) {
@@ -529,11 +535,12 @@ async function rescheduleBookingInternal(
 
   if (wasOverride && supervisorUserId != null) {
     const overrideType: SchedulingOverrideType =
-      requiredOverrideTypes.includes("total_capacity_override")
+      approvedOverrideContext?.overrideType ??
+      (requiredOverrideTypes.includes("total_capacity_override")
         ? "total_capacity_override"
         : requiredOverrideTypes.includes("category_override")
         ? "category_override"
-        : "closed_weekday_override";
+        : "closed_weekday_override");
     await recordOverrideAudit(client, {
       bookingId,
       patientId: booking.patientId,
@@ -542,9 +549,11 @@ async function rescheduleBookingInternal(
       bookingDate: effectiveDate,
       requestingUserId: userId,
       supervisorUserId,
-      overrideReason: override?.reason ?? null,
+      overrideReason: approvedOverrideContext?.reason ?? override?.reason ?? null,
       overrideType,
-      decisionSnapshot: { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
+      decisionSnapshot: approvedOverrideContext
+        ? { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId }
+        : { ...decision, capacityResolutionMode: effectiveCapacityResolutionMode },
       outcome: "approved_and_booked",
     });
   }
@@ -558,7 +567,7 @@ async function rescheduleBookingInternal(
     changedByUserId: userId,
     overrideUsed: wasOverride,
     supervisorUserId,
-    reason: rescheduleReason ?? override?.reason ?? null,
+    reason: rescheduleReason ?? approvedOverrideContext?.reason ?? override?.reason ?? null,
   });
 
   const updatedBooking = await findBookingById(client, bookingId);

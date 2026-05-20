@@ -104,11 +104,12 @@ export async function seedTestData(
 
   // Create test exam type (unique per prefix)
   const examTypeName = `${dataPrefix}${runSuffix} CT Head`;
+  const examTypeCode = `${dataPrefix}${runSuffix}EXAM`;
   const examTypeResult = await pool.query(
-    `insert into exam_types (modality_id, name_ar, name_en, is_active)
-     values ($1, $2, $3, true)
+    `insert into exam_types (modality_id, name_ar, name_en, code, is_active)
+     values ($1, $2, $3, $4, true)
      returning id`,
-    [modalityId, `${dataPrefix}${runSuffix}اشعة راس`, examTypeName]
+    [modalityId, `${dataPrefix}${runSuffix}اشعة راس`, examTypeName, examTypeCode]
   );
   const examTypeId = Number(examTypeResult.rows[0].id);
 
@@ -238,6 +239,20 @@ export async function cleanupTestData(dataPrefix: string = "TEST_"): Promise<voi
   );
   const bookingIds = bookingRows.rows.map((r) => Number(r.id));
 
+  await pool.query(
+    `
+      delete from appointments_v2.scheduling_override_requests
+      where coalesce(booking_id, -1) = any($1::bigint[])
+         or coalesce(requester_user_id, -1) = any($2::bigint[])
+         or coalesce(approver_user_id, -1) = any($2::bigint[])
+         or coalesce(patient_id, -1) = any($3::bigint[])
+         or coalesce(modality_id, -1) = any($4::bigint[])
+         or coalesce(exam_type_id, -1) = any($5::bigint[])
+         or coalesce(requested_policy_version_id, -1) = any($6::bigint[])
+         or coalesce(approved_policy_version_id, -1) = any($6::bigint[])
+    `,
+    [bookingIds, userIds, patientIds, modalityIds, examTypeIds, policyVersionIds]
+  );
   await pool.query(
     `delete from appointments_v2.reschedule_audit_events where booking_id = any($1::bigint[])`,
     [bookingIds]

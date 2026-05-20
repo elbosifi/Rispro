@@ -41,6 +41,7 @@ import type { Role } from "../../../../types/domain.js";
 import { loadClosedWeekdays } from "../../scheduler/services/closed-weekday-settings.js";
 import { resolveRequiredOverrideTypes, validateCapacityModeAuthority, validateDecisionAuthority } from "./override-authority.js";
 import { assertPatientIdentifierAllowsBooking } from "./patient-identifier-requirement.js";
+import type { ApprovedOverrideContext } from "../models/approved-override-context.js";
 
 export interface CreateBookingResult {
   booking: Booking;
@@ -52,10 +53,11 @@ export async function createBooking(
   payload: CreateBookingPayload,
   userId: number,
   userRole: Role | undefined,
-  policySetKey: string = "default"
+  policySetKey: string = "default",
+  approvedOverrideContext?: ApprovedOverrideContext
 ): Promise<CreateBookingResult> {
   const result = await withTransaction(async (client) => {
-    return createBookingInternal(client, payload, userId, userRole, policySetKey);
+    return createBookingInternal(client, payload, userId, userRole, policySetKey, approvedOverrideContext);
   }, {
     isolationLevel: "serializable",
     operationName: "create_booking",
@@ -93,12 +95,13 @@ async function resolveBookingCaseCategory(
   return normalized === "oncology" ? "oncology" : "non_oncology";
 }
 
-async function createBookingInternal(
+export async function createBookingInternal(
   client: PoolClient,
   payload: CreateBookingPayload,
   userId: number,
   userRole: Role | undefined,
-  policySetKey: string
+  policySetKey: string,
+  approvedOverrideContext?: ApprovedOverrideContext
 ): Promise<CreateBookingResult> {
   const capacityResolutionMode = normalizeCapacityResolutionMode(payload);
   validateCapacityModeAuthority(userRole, capacityResolutionMode);
@@ -314,32 +317,34 @@ async function createBookingInternal(
   }
 
   if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
-    // Override required — validate supervisor credentials
-    if (!payload.override) {
+    // Override required — validate supervisor credentials or backend-approved deferred context.
+    if (approvedOverrideContext) {
+      supervisorUserId = approvedOverrideContext.approverUserId;
+      wasOverride = true;
+    } else if (!payload.override) {
       throw new SchedulingError(
         403,
         "Override is required for this booking. Please provide supervisor credentials.",
         ["override_required"]
       );
-    }
-    if (!payload.override.reason?.trim()) {
+    } else if (!payload.override.reason?.trim()) {
       throw new SchedulingError(403, "Override reason is required.", ["override_reason_required"]);
+    } else {
+      const supervisor = await authenticateSupervisor(
+        client,
+        payload.override.supervisorUsername,
+        payload.override.supervisorPassword
+      );
+      console.info(JSON.stringify({
+        type: "appointments_v2_booking_override",
+        modalityId: payload.modalityId,
+        bookingDate: payload.bookingDate,
+        requestingUserId: userId,
+        supervisorUserId: supervisor.id,
+      }));
+      supervisorUserId = supervisor.id;
+      wasOverride = true;
     }
-
-    const supervisor = await authenticateSupervisor(
-      client,
-      payload.override.supervisorUsername,
-      payload.override.supervisorPassword
-    );
-    console.info(JSON.stringify({
-      type: "appointments_v2_booking_override",
-      modalityId: payload.modalityId,
-      bookingDate: payload.bookingDate,
-      requestingUserId: userId,
-      supervisorUserId: supervisor.id,
-    }));
-    supervisorUserId = supervisor.id;
-    wasOverride = true;
   }
 
   if (capacityResolutionMode === "special_quota_extra" && !payload.specialReasonCode) {
@@ -378,11 +383,12 @@ async function createBookingInternal(
   // 10. Record override audit if applicable
   if (wasOverride && supervisorUserId != null) {
     const overrideType: SchedulingOverrideType =
-      requiredOverrideTypes.includes("total_capacity_override")
+      approvedOverrideContext?.overrideType ??
+      (requiredOverrideTypes.includes("total_capacity_override")
         ? "total_capacity_override"
         : requiredOverrideTypes.includes("category_override")
         ? "category_override"
-        : "closed_weekday_override";
+        : "closed_weekday_override");
     await recordOverrideAudit(client, {
       bookingId: booking.id,
       patientId: payload.patientId,
@@ -391,9 +397,11 @@ async function createBookingInternal(
       bookingDate: payload.bookingDate,
       requestingUserId: userId,
       supervisorUserId,
-      overrideReason: payload.override?.reason ?? null,
+      overrideReason: approvedOverrideContext?.reason ?? payload.override?.reason ?? null,
       overrideType,
-      decisionSnapshot: { ...decision, capacityResolutionMode },
+      decisionSnapshot: approvedOverrideContext
+        ? { ...decision, capacityResolutionMode, deferredApprovalRequestId: approvedOverrideContext.requestId }
+        : { ...decision, capacityResolutionMode },
       outcome: "approved_and_booked",
     });
   }
