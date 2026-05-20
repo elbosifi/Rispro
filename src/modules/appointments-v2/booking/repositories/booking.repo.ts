@@ -260,6 +260,16 @@ const LIST_BOOKINGS_SQL = `
     b.is_walk_in as "isWalkIn",
     b.created_at as "createdAt",
     b.created_by_user_id as "createdByUserId",
+    created_by_user.role as "createdByRole",
+    (
+      created_by_user.role in ('supervisor', 'super_admin')
+      or exists (
+        select 1
+        from appointments_v2.override_audit_events oae
+        where oae.booking_id = b.id
+          and oae.outcome = 'approved_and_booked'
+      )
+    ) as "canBypassExamTypeChangeSupervisorAuth",
     b.updated_at as "updatedAt",
     b.updated_by_user_id as "updatedByUserId",
     p.arabic_full_name as "patientArabicName",
@@ -280,6 +290,7 @@ const LIST_BOOKINGS_SQL = `
   ) primary_identifier on true
   left join modalities m on m.id = b.modality_id
   left join exam_types et on et.id = b.exam_type_id
+  left join users created_by_user on created_by_user.id = b.created_by_user_id
   where b.modality_id = $1
     and b.booking_date >= $2
     and b.booking_date <= $3
@@ -299,6 +310,8 @@ export interface ListBookingsParams {
 }
 
 export interface BookingWithPatientInfo extends Booking {
+  createdByRole: string | null;
+  canBypassExamTypeChangeSupervisorAuth: boolean;
   patientArabicName: string | null;
   patientEnglishName: string | null;
   patientNationalId: string | null;

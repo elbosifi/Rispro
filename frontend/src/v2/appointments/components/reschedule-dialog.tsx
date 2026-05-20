@@ -92,7 +92,9 @@ export function RescheduleDialog({
       : "allowed_without_supervisor";
   const examTypeChanged = Number(selectedExamTypeId ?? -1) !== Number(examTypeId ?? -1);
   const examTypeChangeRequiresSupervisorAuth =
-    examTypeChanged && normalizedExamTypeChangePolicy === "supervisor_required";
+    examTypeChanged &&
+    normalizedExamTypeChangePolicy === "supervisor_required" &&
+    booking.canBypassExamTypeChangeSupervisorAuth !== true;
   const examTypeChangeIsDisabled = normalizedExamTypeChangePolicy === "disabled";
 
   const [overrideUsername, setOverrideUsername] = useState("");
@@ -413,17 +415,17 @@ export function RescheduleDialog({
                 ))}
               </select>
               <p style={{ fontSize: 12, marginTop: 6, color: "var(--text-muted, #64748b)" }}>
-                {normalizedExamTypeChangePolicy === "allowed_without_supervisor"
+                {normalizedExamTypeChangePolicy === "disabled"
+                  ? (language === "ar"
+                    ? "تغيير نوع الفحص غير مسموح حالياً."
+                    : "Changing the exam type is currently disabled.")
+                  : normalizedExamTypeChangePolicy === "allowed_without_supervisor" || booking.canBypassExamTypeChangeSupervisorAuth === true
                   ? (language === "ar"
                     ? "يمكن تغيير نوع الفحص بدون اعتماد مشرف."
                     : "You can change the exam type without supervisor approval.")
-                  : normalizedExamTypeChangePolicy === "supervisor_required"
-                  ? (language === "ar"
-                    ? "يتطلب تغيير نوع الفحص اعتماد مشرف."
-                    : "Changing the exam type requires supervisor approval.")
                   : (language === "ar"
-                    ? "تغيير نوع الفحص غير مسموح حالياً."
-                    : "Changing the exam type is currently disabled.")}
+                    ? "يتطلب تغيير نوع الفحص اعتماد مشرف."
+                    : "Changing the exam type requires supervisor approval.")}
               </p>
             </div>
 

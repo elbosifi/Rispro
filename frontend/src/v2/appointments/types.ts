@@ -245,6 +245,8 @@ export interface BookingWithPatientInfo {
   policyVersionId: number;
   createdAt: string;
   createdByUserId: number | null;
+  createdByRole?: string | null;
+  canBypassExamTypeChangeSupervisorAuth?: boolean;
   updatedAt: string;
   updatedByUserId: number | null;
   patientArabicName: string | null;

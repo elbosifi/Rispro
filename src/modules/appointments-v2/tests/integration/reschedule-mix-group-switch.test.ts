@@ -146,7 +146,17 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     const { pool } = await import("../../../../db/pool.js");
     const bookingDate = "2042-01-11";
     const patient = await createPatient();
-    const booking = await fetch("/api/v2/appointments", {
+    const receptionist = await pool.query<{ id: number }>(
+      `insert into users (username, password_hash, full_name, role, is_active)
+       values ($1, $2, $3, 'receptionist', true)
+       returning id`,
+      [`${TEST_PREFIX.toLowerCase()}receptionist_${patient}`, "test_hash", `${TEST_PREFIX}Receptionist`]
+    );
+    const receptionistCookie = createTestAuthCookie(Number(receptionist.rows[0].id), "receptionist");
+    const receptionistFetch = (path: string, opts: Record<string, unknown> = {}) =>
+      fetchJson(app.baseUrl, path, { cookie: receptionistCookie, ...opts });
+
+    const booking = await receptionistFetch("/api/v2/appointments", {
       method: "POST",
       body: {
         patientId: patient,
@@ -229,6 +239,63 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
       });
       assert.equal(approvedAttempt.status, 200);
       assert.equal(Number((approvedAttempt.data as any).booking.examTypeId), secondExamTypeId);
+
+      const supervisorBookedPatient = await createPatient();
+      const supervisorBooked = await fetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: supervisorBookedPatient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2042-01-12",
+          caseCategory: "non_oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(supervisorBooked.status, 201);
+
+      const supervisorBookedChange = await fetch(`/api/v2/appointments/${Number((supervisorBooked.data as any).booking.id)}`, {
+        method: "PUT",
+        body: {
+          bookingDate: "2042-01-12",
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(supervisorBookedChange.status, 200);
+      assert.equal(Number((supervisorBookedChange.data as any).booking.examTypeId), secondExamTypeId);
+
+      const overrideBookedPatient = await createPatient();
+      const overrideBooked = await receptionistFetch("/api/v2/appointments", {
+        method: "POST",
+        body: {
+          patientId: overrideBookedPatient,
+          modalityId: testData.modalityId,
+          examTypeId: testData.examTypeId,
+          bookingDate: "2042-01-13",
+          caseCategory: "non_oncology",
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(overrideBooked.status, 201);
+      const overrideBookedId = Number((overrideBooked.data as any).booking.id);
+      await pool.query(
+        `insert into appointments_v2.override_audit_events
+          (booking_id, patient_id, modality_id, exam_type_id, booking_date, requesting_user_id, supervisor_user_id, override_reason, override_type, decision_snapshot, outcome)
+         values ($1, $2, $3, $4, '2042-01-13', $5, $6, 'Previously approved', 'category_override', '{}'::jsonb, 'approved_and_booked')`,
+        [overrideBookedId, overrideBookedPatient, testData.modalityId, testData.examTypeId, Number(receptionist.rows[0].id), testData.userId]
+      );
+
+      const overrideBookedChange = await receptionistFetch(`/api/v2/appointments/${overrideBookedId}`, {
+        method: "PUT",
+        body: {
+          bookingDate: "2042-01-13",
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(overrideBookedChange.status, 200);
+      assert.equal(Number((overrideBookedChange.data as any).booking.examTypeId), secondExamTypeId);
     } finally {
       if (originalPolicyValue) {
         await setPolicy(originalPolicyValue);

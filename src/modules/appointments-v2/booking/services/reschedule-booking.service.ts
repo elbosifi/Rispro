@@ -75,6 +75,29 @@ async function getExamTypeChangePolicy(client: PoolClient): Promise<ExamTypeChan
   return "allowed_without_supervisor";
 }
 
+async function bookingHasPrivilegedOrigin(client: PoolClient, booking: Booking): Promise<boolean> {
+  const result = await client.query<{ allowed: boolean }>(
+    `
+      select (
+        exists (
+          select 1
+          from users u
+          where u.id = $1
+            and u.role in ('supervisor', 'super_admin')
+        )
+        or exists (
+          select 1
+          from appointments_v2.override_audit_events oae
+          where oae.booking_id = $2
+            and oae.outcome = 'approved_and_booked'
+        )
+      ) as allowed
+    `,
+    [booking.createdByUserId, booking.id]
+  );
+  return result.rows[0]?.allowed === true;
+}
+
 export async function rescheduleBooking(
   bookingId: number,
   newDate: string | null,
@@ -196,8 +219,12 @@ async function rescheduleBookingInternal(
   const timeUnchanged = String(previousTime ?? "") === String(effectiveTime ?? "");
   const examTypeUnchanged = Number(booking.examTypeId ?? -1) === Number(effectiveExamTypeId ?? -1);
   const examTypeChanged = !examTypeUnchanged;
+  const examTypeChangeBypassesSupervisorAuth =
+    examTypeChanged &&
+    examTypeChangePolicy === "supervisor_required" &&
+    await bookingHasPrivilegedOrigin(client, booking);
   const examTypeChangeRequiresSupervisorAuth =
-    examTypeChanged && examTypeChangePolicy === "supervisor_required";
+    examTypeChanged && examTypeChangePolicy === "supervisor_required" && !examTypeChangeBypassesSupervisorAuth;
   const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged;
 
   if (examTypeChanged && examTypeChangePolicy === "disabled") {
