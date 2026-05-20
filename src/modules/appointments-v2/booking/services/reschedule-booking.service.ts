@@ -56,6 +56,25 @@ export interface RescheduleBookingResult {
   patientVisibleDetailsChanged: boolean;
 }
 
+type ExamTypeChangePolicy = "allowed_without_supervisor" | "supervisor_required" | "disabled";
+
+async function getExamTypeChangePolicy(client: PoolClient): Promise<ExamTypeChangePolicy> {
+  const result = await client.query<{ setting_value: { value?: string } | null }>(
+    `
+      select setting_value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key = 'exam_type_change_policy'
+      limit 1
+    `
+  );
+  const raw = String(result.rows[0]?.setting_value?.value ?? "").trim().toLowerCase();
+  if (raw === "disabled" || raw === "supervisor_required" || raw === "allowed_without_supervisor") {
+    return raw;
+  }
+  return "allowed_without_supervisor";
+}
+
 export async function rescheduleBooking(
   bookingId: number,
   newDate: string | null,
@@ -156,6 +175,7 @@ async function rescheduleBookingInternal(
   const effectiveStudyInstanceUid = studyInstanceUid ?? booking.studyInstanceUid;
   const effectiveCapacityResolutionMode =
     capacityResolutionMode ?? booking.capacityResolutionMode ?? "standard";
+  const examTypeChangePolicy = await getExamTypeChangePolicy(client);
   validateCapacityModeAuthority(userRole, effectiveCapacityResolutionMode);
 
   if (effectiveExamTypeId != null) {
@@ -175,7 +195,18 @@ async function rescheduleBookingInternal(
   const dateUnchanged = previousDate === effectiveDate;
   const timeUnchanged = String(previousTime ?? "") === String(effectiveTime ?? "");
   const examTypeUnchanged = Number(booking.examTypeId ?? -1) === Number(effectiveExamTypeId ?? -1);
+  const examTypeChanged = !examTypeUnchanged;
+  const examTypeChangeRequiresSupervisorAuth =
+    examTypeChanged && examTypeChangePolicy === "supervisor_required";
   const scheduleUnchanged = dateUnchanged && timeUnchanged && examTypeUnchanged;
+
+  if (examTypeChanged && examTypeChangePolicy === "disabled") {
+    throw new SchedulingError(
+      403,
+      "Changing the exam type is disabled.",
+      ["exam_type_change_disabled"]
+    );
+  }
 
   if (!scheduleUnchanged) {
     if (booking.status === "cancelled") {
@@ -403,8 +434,15 @@ async function rescheduleBookingInternal(
     );
   }
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
     if (!override) {
+      if (examTypeChangeRequiresSupervisorAuth && !decision.requiresSupervisorOverride && requiredOverrideTypes.length === 0) {
+        throw new SchedulingError(
+          403,
+          "Supervisor override is required to change the exam type.",
+          ["exam_type_change_supervisor_required"]
+        );
+      }
       throw new SchedulingError(
         403,
         "Supervisor override is required for this reschedule.",

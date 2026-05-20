@@ -534,6 +534,7 @@ function BookingsList({
   const handleReschedule = async (
     newDate: string,
     _newTime: string | null,
+    examTypeId: number | null,
     override?: { supervisorUsername: string; supervisorPassword: string; reason: string },
     capacity?: {
       capacityResolutionMode: CapacityResolutionMode;
@@ -564,6 +565,7 @@ function BookingsList({
         input: {
           bookingDate: newDate,
           bookingTime: _newTime,
+          examTypeId,
           ...(capacity
             ? {
                 capacityResolutionMode: capacity.capacityResolutionMode,

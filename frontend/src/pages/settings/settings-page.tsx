@@ -2048,6 +2048,11 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "enabled", label: "مفعل" },
     { value: "disabled", label: "غير مفعل" }
   ]},
+  exam_type_change_policy: { label: "تغيير نوع الفحص", type: "dropdown", options: [
+    { value: "allowed_without_supervisor", label: "مسموح بدون مشرف" },
+    { value: "supervisor_required", label: "يتطلب اعتماد مشرف" },
+    { value: "disabled", label: "غير مسموح" }
+  ]},
   // Queue & Arrival
   barcode_check_in: { label: "تسجيل الوصول بالباركود", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },

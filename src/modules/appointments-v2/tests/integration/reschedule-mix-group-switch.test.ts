@@ -140,4 +140,107 @@ describe("Exam mix reschedule group switch — integration", { skip: skipEnv }, 
     assert.equal(fillB.status, 409);
     assert.ok(String((fillB.data as any).error ?? "").includes("not allowed"));
   });
+
+  it("respects exam type change policy settings for disabled and supervisor-required modes", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    const bookingDate = "2042-01-11";
+    const patient = await createPatient();
+    const booking = await fetch("/api/v2/appointments", {
+      method: "POST",
+      body: {
+        patientId: patient,
+        modalityId: testData.modalityId,
+        examTypeId: testData.examTypeId,
+        bookingDate,
+        caseCategory: "non_oncology",
+        policySetKey: testData.policySetKey,
+      },
+    });
+    assert.equal(booking.status, 201);
+    const bookingId = Number((booking.data as any).booking.id);
+
+    const usernameRow = await pool.query<{ username: string }>(
+      `select username from users where id = $1`,
+      [testData.userId]
+    );
+    const supervisorUsername = String(usernameRow.rows[0]?.username ?? "");
+
+    const originalPolicyRow = await pool.query<{ setting_value: { value?: string } | null }>(
+      `
+        select setting_value
+        from system_settings
+        where category = 'scheduling_and_capacity'
+          and setting_key = 'exam_type_change_policy'
+        limit 1
+      `
+    );
+    const originalPolicyValue = String(originalPolicyRow.rows[0]?.setting_value?.value ?? "");
+
+    async function setPolicy(value: string): Promise<void> {
+      await pool.query(
+        `
+          insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+          values ('scheduling_and_capacity', 'exam_type_change_policy', jsonb_build_object('value', $1), $2)
+          on conflict (category, setting_key)
+          do update set setting_value = excluded.setting_value, updated_by_user_id = excluded.updated_by_user_id, updated_at = now()
+        `,
+        [value, testData.userId]
+      );
+    }
+
+    try {
+      await setPolicy("disabled");
+      const disabledAttempt = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: {
+          bookingDate,
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(disabledAttempt.status, 403);
+      assert.ok(String((disabledAttempt.data as any).error ?? "").includes("Changing the exam type is disabled"));
+
+      await setPolicy("supervisor_required");
+      const supervisorRequiredAttempt = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: {
+          bookingDate,
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+        },
+      });
+      assert.equal(supervisorRequiredAttempt.status, 403);
+      assert.ok(String((supervisorRequiredAttempt.data as any).error ?? "").includes("Supervisor override is required"));
+
+      const approvedAttempt = await fetch(`/api/v2/appointments/${bookingId}`, {
+        method: "PUT",
+        body: {
+          bookingDate,
+          examTypeId: secondExamTypeId,
+          policySetKey: testData.policySetKey,
+          override: {
+            supervisorUsername,
+            supervisorPassword: "test_password",
+            reason: "Exam type change approved",
+          },
+        },
+      });
+      assert.equal(approvedAttempt.status, 200);
+      assert.equal(Number((approvedAttempt.data as any).booking.examTypeId), secondExamTypeId);
+    } finally {
+      if (originalPolicyValue) {
+        await setPolicy(originalPolicyValue);
+      } else {
+        await pool.query(
+          `
+            delete from system_settings
+            where category = 'scheduling_and_capacity'
+              and setting_key = 'exam_type_change_policy'
+          `
+        );
+      }
+    }
+  });
 });

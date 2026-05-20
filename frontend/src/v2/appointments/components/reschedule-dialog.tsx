@@ -8,11 +8,13 @@
  */
 
 import { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { CalendarClock } from "lucide-react";
-import { evaluateV2Scheduling } from "../api";
+import { evaluateV2Scheduling, useV2ExamTypes } from "../api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/shared/Dialog";
 import { Button } from "@/components/shared/Button";
 import { Input } from "@/components/shared/Input";
+import { fetchSettings } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
@@ -38,6 +40,7 @@ interface RescheduleDialogProps {
   onReschedule: (
     newDate: string,
     newTime: string | null,
+    examTypeId: number | null,
     override?: CreateBookingRequest["override"],
     capacity?: {
       capacityResolutionMode: CapacityResolutionMode;
@@ -64,6 +67,7 @@ export function RescheduleDialog({
 }: RescheduleDialogProps) {
   const { language } = useLanguage();
   const [newDate, setNewDate] = useState("");
+  const [selectedExamTypeId, setSelectedExamTypeId] = useState<number | null>(examTypeId);
   const [decision, setDecision] = useState<SchedulingDecisionDto | null>(null);
   const [evaluationError, setEvaluationError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -73,13 +77,32 @@ export function RescheduleDialog({
   const [specialReasonCode, setSpecialReasonCode] = useState("");
   const [specialReasonConfirmed, setSpecialReasonConfirmed] = useState(false);
   const [specialReasonNote, setSpecialReasonNote] = useState("");
-
-  // Override state
   const [showOverride, setShowOverride] = useState(false);
+
+  const examTypes = useV2ExamTypes(booking.modalityId);
+  const { data: schedulingCapacitySettings } = useQuery({
+    queryKey: ["settings", "scheduling_and_capacity"],
+    queryFn: () => fetchSettings("scheduling_and_capacity"),
+    staleTime: 60_000,
+  });
+  const examTypeChangePolicy = String(schedulingCapacitySettings?.exam_type_change_policy ?? "allowed_without_supervisor").trim();
+  const normalizedExamTypeChangePolicy =
+    examTypeChangePolicy === "disabled" || examTypeChangePolicy === "supervisor_required" || examTypeChangePolicy === "allowed_without_supervisor"
+      ? examTypeChangePolicy
+      : "allowed_without_supervisor";
+  const examTypeChanged = Number(selectedExamTypeId ?? -1) !== Number(examTypeId ?? -1);
+  const examTypeChangeRequiresSupervisorAuth =
+    examTypeChanged && normalizedExamTypeChangePolicy === "supervisor_required";
+  const examTypeChangeIsDisabled = normalizedExamTypeChangePolicy === "disabled";
+
   const [overrideUsername, setOverrideUsername] = useState("");
   const [overridePassword, setOverridePassword] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
   const overridePasswordRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSelectedExamTypeId(examTypeId);
+  }, [booking.id, examTypeId]);
 
   useEffect(() => {
     overridePasswordRef.current?.focus();
@@ -121,7 +144,7 @@ export function RescheduleDialog({
     evaluateV2Scheduling({
       patientId: booking.patientId,
       modalityId: booking.modalityId,
-      examTypeId,
+      examTypeId: selectedExamTypeId,
       scheduledDate: newDate,
       caseCategory,
       capacityResolutionMode: effectiveCapacityResolutionMode,
@@ -134,7 +157,7 @@ export function RescheduleDialog({
         const selectedCapacityModeNeedsOverrideAuth =
           effectiveCapacityResolutionMode === "category_override" ||
           effectiveCapacityResolutionMode === "total_capacity_override";
-        if (result.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) {
+        if (result.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth || examTypeChangeRequiresSupervisorAuth) {
           setShowOverride(true);
         }
       })
@@ -146,7 +169,7 @@ export function RescheduleDialog({
       .finally(() => {
         setEvaluating(false);
       });
-  }, [newDate, booking, examTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language, availabilityItems, currentUserRole]);
+  }, [newDate, booking, selectedExamTypeId, caseCategory, capacityResolutionMode, specialReasonCode, canUseNonStandardCapacityModes, language, availabilityItems, currentUserRole, examTypeChangeRequiresSupervisorAuth]);
 
   const selectedAvailabilityItem = availabilityItems.find((item) => item.date === newDate);
   const hasSpecialQuotaAvailable = (selectedAvailabilityItem?.specialQuotaSummary?.remaining ?? 0) > 0;
@@ -162,6 +185,8 @@ export function RescheduleDialog({
     effectiveCapacityResolutionMode === "category_override" ||
     effectiveCapacityResolutionMode === "total_capacity_override";
   const specialQuotaNeedsDetails = effectiveCapacityResolutionMode === "special_quota_extra";
+  const needsSupervisorAuth =
+    Boolean(decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth || examTypeChangeRequiresSupervisorAuth);
 
   useEffect(() => {
     if (capacityResolutionMode === "special_quota_extra" && !evaluating && !hasSpecialQuotaAvailable) {
@@ -172,6 +197,22 @@ export function RescheduleDialog({
     }
   }, [capacityResolutionMode, evaluating, hasSpecialQuotaAvailable]);
 
+  useEffect(() => {
+    if (examTypeChangeIsDisabled) {
+      setSelectedExamTypeId(examTypeId);
+      return;
+    }
+  }, [examTypeChangeIsDisabled, examTypeId]);
+
+  useEffect(() => {
+    setShowOverride(needsSupervisorAuth);
+    if (!needsSupervisorAuth) {
+      setOverrideUsername("");
+      setOverridePassword("");
+      setOverrideReason("");
+    }
+  }, [needsSupervisorAuth]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -181,7 +222,7 @@ export function RescheduleDialog({
     }
 
     // If override is required, validate supervisor fields
-    if (decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) {
+    if (needsSupervisorAuth) {
       if (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()) {
         return;
       }
@@ -190,7 +231,7 @@ export function RescheduleDialog({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const override = decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth
+      const override = needsSupervisorAuth
         ? {
             supervisorUsername: overrideUsername.trim(),
             supervisorPassword: overridePassword,
@@ -198,7 +239,7 @@ export function RescheduleDialog({
           }
         : undefined;
 
-      await onReschedule(newDate, null, override, {
+      await onReschedule(newDate, null, selectedExamTypeId, override, {
         capacityResolutionMode: effectiveCapacityResolutionMode,
         useSpecialQuota: effectiveCapacityResolutionMode === "special_quota_extra",
         specialReasonCode: effectiveCapacityResolutionMode === "special_quota_extra" ? specialReasonCode || null : null,
@@ -334,6 +375,58 @@ export function RescheduleDialog({
               )}
             </div>
 
+            <div>
+              <label
+                style={{
+                  display: "block",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  marginBottom: 4,
+                  color: "var(--text-primary, #1e293b)",
+                }}
+              >
+                {language === "ar" ? "نوع الفحص" : "Exam type"}
+              </label>
+              <select
+                value={selectedExamTypeId ?? ""}
+                onChange={(e) => {
+                  const nextValue = e.target.value ? Number(e.target.value) : null;
+                  setSelectedExamTypeId(nextValue);
+                  setDecision(null);
+                  setEvaluationError(null);
+                  setSubmitError(null);
+                }}
+                disabled={normalizedExamTypeChangePolicy === "disabled" || examTypes.isLoading}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  border: "1px solid var(--border-color, #e2e8f0)",
+                  fontSize: 14,
+                }}
+              >
+                <option value="">{language === "ar" ? "بدون نوع فحص" : "No exam type"}</option>
+                {(examTypes.data ?? []).map((examType) => (
+                  <option key={examType.id} value={examType.id}>
+                    {chooseLocalized(language, examType.nameAr, examType.nameEn) || examType.name}
+                  </option>
+                ))}
+              </select>
+              <p style={{ fontSize: 12, marginTop: 6, color: "var(--text-muted, #64748b)" }}>
+                {normalizedExamTypeChangePolicy === "allowed_without_supervisor"
+                  ? (language === "ar"
+                    ? "يمكن تغيير نوع الفحص بدون اعتماد مشرف."
+                    : "You can change the exam type without supervisor approval.")
+                  : normalizedExamTypeChangePolicy === "supervisor_required"
+                  ? (language === "ar"
+                    ? "يتطلب تغيير نوع الفحص اعتماد مشرف."
+                    : "Changing the exam type requires supervisor approval.")
+                  : (language === "ar"
+                    ? "تغيير نوع الفحص غير مسموح حالياً."
+                    : "Changing the exam type is currently disabled.")}
+              </p>
+            </div>
+
             {(canUseNonStandardCapacityModes || canUseSpecialQuotaMode) && (
               <SpecialQuotaSection
                 capacityResolutionMode={capacityResolutionMode}
@@ -420,7 +513,7 @@ export function RescheduleDialog({
             )}
 
             {/* Override Fields */}
-            {showOverride && (decision?.requiresSupervisorOverride || selectedCapacityModeNeedsOverrideAuth) && (
+            {showOverride && needsSupervisorAuth && (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div>
                   <label
@@ -504,7 +597,7 @@ export function RescheduleDialog({
                    evaluating ||
                    submitting ||
                    (specialQuotaNeedsDetails && (!specialReasonCode || !specialReasonConfirmed)) ||
-                   (showOverride &&
+                   (needsSupervisorAuth &&
                      (!overrideUsername.trim() || !overridePassword.trim() || !overrideReason.trim()))
                  }
                  style={{

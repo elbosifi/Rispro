@@ -82,7 +82,7 @@ describe("RescheduleDialog", () => {
       availableDates: ["2026-04-13", "2026-04-14", "2026-04-15", "2026-04-16"],
       caseCategory: "non_oncology" as const,
       examTypeId: 50,
-      onReschedule: async (_date: string, _time: string | null, _override?: unknown) => {},
+      onReschedule: async (_date: string, _time: string | null, _examTypeId: number | null, _override?: unknown) => {},
       onCancel: () => {},
       error: null,
     };
@@ -102,7 +102,7 @@ describe("RescheduleDialog", () => {
       availableDates: ["2026-04-13"],
       caseCategory: "oncology" as const,
       examTypeId: null,
-      onReschedule: async (_date: string, _time: string | null, _override?: unknown) => {},
+      onReschedule: async (_date: string, _time: string | null, _examTypeId: number | null, _override?: unknown) => {},
       onCancel: () => {},
       error: "Something went wrong",
     };
@@ -118,14 +118,16 @@ describe("RescheduleDialog", () => {
     const onReschedule = async (
       date: string,
       time: string | null,
+      examTypeId: number | null,
       override?: unknown
     ) => {
       calledDate = date;
       calledTime = time;
+      assert.strictEqual(examTypeId, null);
       calledOverride = override;
     };
 
-    await onReschedule("2026-04-16", null, { supervisorUsername: "admin", supervisorPassword: "pass", reason: "test" });
+    await onReschedule("2026-04-16", null, null, { supervisorUsername: "admin", supervisorPassword: "pass", reason: "test" });
 
     assert.strictEqual(calledDate, "2026-04-16");
     assert.strictEqual(calledTime, null);
