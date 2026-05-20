@@ -356,18 +356,21 @@ async function rescheduleBookingInternal(
     bookingModalityId
   );
 
-  // 5. Load current booked count for the NEW date (after lock)
-  // Note: the old booking is still counted here because it hasn't been updated yet
+  // 5. Load current booked count for the NEW date (after lock).
+  // For same-date edits, evaluate the replacement state without double-counting this booking.
+  const excludeBookingIdFromTargetCounts = previousDate === effectiveDate ? bookingId : null;
   const currentBookedCount = await getBookedCountForDate(
     client,
     bookingModalityId,
     effectiveDate,
-    booking.caseCategory
+    booking.caseCategory,
+    excludeBookingIdFromTargetCounts
   );
   const bookedCounts = await getBookedCountsByCategoryForDate(
     client,
     bookingModalityId,
-    effectiveDate
+    effectiveDate,
+    excludeBookingIdFromTargetCounts
   );
 
   // 6. Load special quota booked count for the NEW date (only when examTypeId is provided)
@@ -377,6 +380,7 @@ async function rescheduleBookingInternal(
       modalityId: bookingModalityId,
       bookingDate: effectiveDate,
       examTypeId: effectiveExamTypeId,
+      excludeBookingId: excludeBookingIdFromTargetCounts,
     });
   }
   const currentExamMixConsumedByRuleId = await getExamMixConsumedCountsByRule(client, {
@@ -384,6 +388,7 @@ async function rescheduleBookingInternal(
     modalityId: bookingModalityId,
     bookingDate: effectiveDate,
     ruleIds: examMixQuotaRules.map((row) => Number(row.id)),
+    excludeBookingId: excludeBookingIdFromTargetCounts,
   });
   const closedWeekdays = await loadClosedWeekdays(client);
 
