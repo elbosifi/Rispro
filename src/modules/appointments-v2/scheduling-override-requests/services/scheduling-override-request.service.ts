@@ -62,7 +62,7 @@ function canSeeAll(role: Role | undefined): boolean {
 
 function assertVisible(request: SchedulingOverrideRequestRow, userId: number, role: Role | undefined): void {
   if (canSeeAll(role)) return;
-  if (request.requesterUserId === userId) return;
+  if (Number(request.requesterUserId) === userId) return;
   throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
 }
 
@@ -433,7 +433,7 @@ export async function approveSchedulingOverrideRequest(
         role,
         payload.policySetKey,
         requiredOverrideType
-          ? { approverUserId, approverRole: role, overrideType: request.overrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
+          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: request.overrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined
       );
       booking = bookingResult.booking;
@@ -477,7 +477,7 @@ export async function approveSchedulingOverrideRequest(
         reschedule.studyInstanceUid ?? undefined,
         payload.policySetKey,
         requiredOverrideType
-          ? { approverUserId, approverRole: role, overrideType: request.overrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
+          ? { requesterUserId: Number(request.requesterUserId), approverUserId, approverRole: role, overrideType: request.overrideType, reason: approvalReason, source: "deferred_approval", requestId: request.id }
           : undefined
       );
       booking = rescheduleResult.booking;
@@ -557,7 +557,7 @@ export async function cancelSchedulingOverrideRequest(
     const request = await lockSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
-    const canCancel = request.requesterUserId === userId || canSeeAll(role);
+    const canCancel = Number(request.requesterUserId) === userId || canSeeAll(role);
     if (!canCancel) throw new SchedulingError(403, "You do not have permission to cancel this request.", ["override_cancel_forbidden"]);
     return markSchedulingOverrideRequestCancelled(client, id, canSeeAll(role) ? userId : null);
   }, { isolationLevel: "serializable", operationName: "cancel_scheduling_override_request" });

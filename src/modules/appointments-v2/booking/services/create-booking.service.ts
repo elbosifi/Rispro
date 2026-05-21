@@ -395,7 +395,7 @@ export async function createBookingInternal(
       modalityId: payload.modalityId,
       examTypeId: payload.examTypeId ?? null,
       bookingDate: payload.bookingDate,
-      requestingUserId: userId,
+      requestingUserId: approvedOverrideContext?.requesterUserId ?? userId,
       supervisorUserId,
       overrideReason: approvedOverrideContext?.reason ?? payload.override?.reason ?? null,
       overrideType,

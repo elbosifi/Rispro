@@ -2,6 +2,7 @@ import type { Role } from "../../../../types/domain.js";
 import type { SchedulingOverrideType } from "../../shared/types/common.js";
 
 export interface ApprovedOverrideContext {
+  requesterUserId: number;
   approverUserId: number;
   approverRole: Role;
   overrideType: SchedulingOverrideType;

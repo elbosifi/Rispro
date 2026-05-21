@@ -547,7 +547,7 @@ export async function rescheduleBookingInternal(
       modalityId: bookingModalityId,
       examTypeId: effectiveExamTypeId,
       bookingDate: effectiveDate,
-      requestingUserId: userId,
+      requestingUserId: approvedOverrideContext?.requesterUserId ?? userId,
       supervisorUserId,
       overrideReason: approvedOverrideContext?.reason ?? override?.reason ?? null,
       overrideType,
