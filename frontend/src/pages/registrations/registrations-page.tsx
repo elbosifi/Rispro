@@ -35,6 +35,7 @@ import {
 import { buildRegistrationAppointmentQuery } from "./registration-query";
 import type { RegistrationsFilters } from "./registration-query";
 import {
+  useCreateSchedulingOverrideRequest,
   rescheduleV2Booking,
   useV2SpecialReasonCodes,
 } from "@/v2/appointments/api";
@@ -44,11 +45,14 @@ import {
   type BookingStatus,
   type CapacityResolutionMode,
   type RescheduleBookingRequest,
+  type SchedulingOverrideType,
 } from "@/v2/appointments/types";
 import { AvailabilityPanel } from "@/v2/appointments/components/AvailabilityPanel";
 import { SpecialQuotaSection } from "@/v2/appointments/components/SpecialQuotaSection";
 import { SupervisorOverrideModal } from "@/v2/appointments/components/SupervisorOverrideModal";
+import { SchedulingOverrideRequestModal } from "@/v2/appointments/components/SchedulingOverrideRequestModal";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "@/v2/appointments/hooks/useAppointmentAvailability";
+import { inferSupportedOverrideType } from "@/v2/appointments/utils/scheduling-override-requests";
 import { useAuth } from "@/providers/auth-provider";
 
 const DEFAULT_FILTERS: RegistrationsFilters = {
@@ -175,6 +179,9 @@ export default function RegistrationsPage() {
   const [rescheduleOverrideError, setRescheduleOverrideError] = useState<string | null>(null);
   const [rescheduleOverrideLoading, setRescheduleOverrideLoading] = useState(false);
   const [pendingReschedulePayload, setPendingReschedulePayload] = useState<RescheduleBookingRequest | null>(null);
+  const [rescheduleRequestOpen, setRescheduleRequestOpen] = useState(false);
+  const [rescheduleRequestError, setRescheduleRequestError] = useState<string | null>(null);
+  const [rescheduleRequestOverrideType, setRescheduleRequestOverrideType] = useState<SchedulingOverrideType | null>(null);
   const [rescheduleCapacityResolutionMode, setRescheduleCapacityResolutionMode] =
     useState<CapacityResolutionMode>("standard");
   const [rescheduleSpecialReasonCode, setRescheduleSpecialReasonCode] = useState("");
@@ -284,6 +291,7 @@ export default function RegistrationsPage() {
       rescheduleCapacityResolutionMode === "total_capacity_override");
   const rescheduleSpecialQuotaNeedsDetails =
     canUseRescheduleSpecialQuota && rescheduleCapacityResolutionMode === "special_quota_extra";
+  const createRescheduleOverrideRequestMutation = useCreateSchedulingOverrideRequest();
 
   const cancelMutation = useMutation({
     mutationFn: (id: number) => cancelAppointment(id, "Cancelled from registrations"),
@@ -961,12 +969,20 @@ export default function RegistrationsPage() {
     if (!selectedAppointment || !canSubmitReschedule) return;
     const payload = buildReschedulePayload();
     if (!payload) return;
+    const supportedOverrideType = inferSupportedOverrideType(rescheduleSelectedRow?.reasonCodes);
     if (
       rescheduleSelectedRow?.requiresSupervisorOverride ||
       rescheduleSelectedRow?.status === "restricted" ||
       rescheduleSelectedRow?.status === "full" ||
       rescheduleCapacityModeNeedsOverrideAuth
     ) {
+      if (user?.role === "receptionist" && supportedOverrideType) {
+        setPendingReschedulePayload(payload);
+        setRescheduleRequestOverrideType(supportedOverrideType);
+        setRescheduleRequestError(null);
+        setRescheduleRequestOpen(true);
+        return;
+      }
       setPendingReschedulePayload(payload);
       setRescheduleOverrideError(null);
       setRescheduleOverrideOpen(true);
@@ -1001,6 +1017,33 @@ export default function RegistrationsPage() {
       setPendingReschedulePayload(null);
     } finally {
       setRescheduleOverrideLoading(false);
+    }
+  };
+
+  const submitRescheduleOverrideRequest = async (requesterReason: string) => {
+    if (!selectedAppointment || !pendingReschedulePayload) return;
+    setRescheduleRequestError(null);
+    try {
+      await createRescheduleOverrideRequestMutation.mutateAsync({
+        requestType: "reschedule_booking",
+        bookingId: selectedAppointment.id,
+        requesterReason,
+        createdFromContext: "registrations_reschedule",
+        requestPayload: {
+          ...pendingReschedulePayload,
+          capacityResolutionMode: "standard",
+        },
+      });
+      setRescheduleRequestOpen(false);
+      setPendingReschedulePayload(null);
+      pushToast({
+        type: "success",
+        title: "Override request submitted",
+        message: "Override request submitted. The appointment is not rescheduled until approval.",
+      });
+      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
+    } catch (error) {
+      setRescheduleRequestError(error instanceof Error ? error.message : "Failed to submit override request.");
     }
   };
 
@@ -1951,7 +1994,25 @@ export default function RegistrationsPage() {
                           </div>
                         ) : null}
 
-                        <div className={isRtl ? "flex justify-start" : "flex justify-end"}>
+                        <div className={`flex flex-wrap gap-2 ${isRtl ? "justify-start" : "justify-end"}`}>
+                          {user?.role === "receptionist" && rescheduleSelectedRow && inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="secondary"
+                              disabled={!canSubmitReschedule || createRescheduleOverrideRequestMutation.isPending}
+                              onClick={() => {
+                                const payload = buildReschedulePayload();
+                                if (!payload) return;
+                                setPendingReschedulePayload(payload);
+                                setRescheduleRequestOverrideType(inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes));
+                                setRescheduleRequestError(null);
+                                setRescheduleRequestOpen(true);
+                              }}
+                            >
+                              Request override approval
+                            </Button>
+                          ) : null}
                           <Button
                             type="submit"
                             size="sm"
@@ -2323,6 +2384,25 @@ export default function RegistrationsPage() {
         onConfirm={handleRescheduleOverrideConfirm}
         loading={rescheduleOverrideLoading || rescheduleMutation.isPending}
         authError={rescheduleOverrideError}
+      />
+
+      <SchedulingOverrideRequestModal
+        open={rescheduleRequestOpen}
+        requestType="reschedule_booking"
+        overrideType={rescheduleRequestOverrideType}
+        patientLabel={selectedAppointment?.englishFullName || selectedAppointment?.arabicFullName || `Patient #${selectedAppointment?.patientId ?? ""}`}
+        modalityLabel={selectedAppointment?.modalityNameEn || selectedAppointment?.modalityNameAr || `Modality #${selectedAppointment?.modalityId ?? ""}`}
+        examTypeLabel={selectedAppointment?.examNameEn || selectedAppointment?.examNameAr || `Exam #${selectedAppointment?.examTypeId ?? ""}`}
+        requestedDate={rescheduleDate}
+        requestedTime={null}
+        decision={selectedRescheduleAvailabilityItem?.decision ?? null}
+        loading={createRescheduleOverrideRequestMutation.isPending}
+        error={rescheduleRequestError}
+        onClose={() => {
+          setRescheduleRequestOpen(false);
+          setRescheduleRequestError(null);
+        }}
+        onSubmit={submitRescheduleOverrideRequest}
       />
 
       {slipPreviewAppointment ? (

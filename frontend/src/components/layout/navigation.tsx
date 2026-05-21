@@ -269,6 +269,7 @@ export function TopBar({
   isRtl,
   pageTitle,
   pageAction,
+  extraActions,
   onUndo,
   onRedo,
   onToggleLanguage,
@@ -280,6 +281,7 @@ export function TopBar({
   isRtl: boolean;
   pageTitle?: string;
   pageAction?: ReactNode;
+  extraActions?: ReactNode;
   onUndo: () => void;
   onRedo: () => void;
   onToggleLanguage: () => void;
@@ -354,6 +356,7 @@ export function TopBar({
         {/* Actions */}
         <div className={`flex flex-shrink-0 items-center gap-2 ${isRtl ? "flex-row-reverse" : ""}`}>
           {pageAction && <div className="pointer-events-auto">{pageAction}</div>}
+          {extraActions}
 
           {/* Undo */}
           {!pageAction && (

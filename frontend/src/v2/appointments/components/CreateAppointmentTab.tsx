@@ -15,9 +15,10 @@ import type {
   ExamTypeDto,
   ModalityDto,
   SchedulingDecisionDto,
+  SchedulingOverrideType,
   SpecialReasonCodeDto,
 } from "../types";
-import { useV2ExamTypes } from "../api";
+import { useCreateSchedulingOverrideRequest, useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
@@ -26,10 +27,12 @@ import { ExamTypeSelect } from "./ExamTypeSelect";
 import { AvailabilityPanel } from "./AvailabilityPanel";
 import { SpecialQuotaSection } from "./SpecialQuotaSection";
 import { SupervisorOverrideModal } from "./SupervisorOverrideModal";
+import { SchedulingOverrideRequestModal } from "./SchedulingOverrideRequestModal";
 import { AppointmentSuccessState } from "./AppointmentSuccessState";
 import { Button, Card } from "@/components/shared";
 import { formatAppointmentPatientName } from "../utils/patient-display-name";
 import { formatEntityLabel, type EntityDisplayMode } from "../utils/entity-display";
+import { formatOverrideType, inferSupportedOverrideType, inferSupportedOverrideTypeFromDecision } from "../utils/scheduling-override-requests";
 import type { Role } from "@/types/api";
 
 interface CreateAppointmentTabProps {
@@ -147,6 +150,10 @@ export function CreateAppointmentTab({
   const [availabilitySelectedRow, setAvailabilitySelectedRow] = useState<AvailabilityRowViewModel | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
   const [pendingDecision, setPendingDecision] = useState<SchedulingDecisionDto | null>(null);
+  const [pendingRequestDecision, setPendingRequestDecision] = useState<SchedulingDecisionDto | null>(null);
+  const [requestOverrideOpen, setRequestOverrideOpen] = useState(false);
+  const [requestOverrideError, setRequestOverrideError] = useState<string | null>(null);
+  const [requestOverrideType, setRequestOverrideType] = useState<SchedulingOverrideType | null>(null);
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [overrideError, setOverrideError] = useState<string | null>(null);
   const [overrideLoading, setOverrideLoading] = useState(false);
@@ -170,6 +177,7 @@ export function CreateAppointmentTab({
   const initialPatientAppliedRef = useRef(false);
   const isReceptionist = currentUserRole === "receptionist";
   const isSuperAdmin = currentUserRole === "super_admin";
+  const createOverrideRequestMutation = useCreateSchedulingOverrideRequest();
   const walkInSettingRaw = String(queueArrivalSettings?.walk_in_queue ?? "disabled").trim().toLowerCase();
   const isWalkInEnabled = queueArrivalSettings != null && ["enabled", "on", "true", "yes", "1"].includes(walkInSettingRaw);
 
@@ -197,6 +205,25 @@ export function CreateAppointmentTab({
   );
   const modalityExamTypes = useV2ExamTypes(form.modalityId);
   const effectiveExamTypes = modalityExamTypes.data ?? filteredExamTypes;
+  const selectedExamType = effectiveExamTypes.find((et) => et.id === form.examTypeId);
+  const selectedPatientLabel = formatAppointmentPatientName(
+    language,
+    form.patient,
+    chooseLocalized(language, `المريض #${form.patientId ?? ""}`, `Patient #${form.patientId ?? ""}`)
+  );
+  const selectedModalityLabel = formatEntityLabel({
+    mode: entityDisplayMode,
+    nameAr: selectedModality?.nameAr,
+    nameEn: selectedModality?.nameEn,
+    fallback: selectedModality?.name || "—",
+  });
+  const selectedExamTypeLabel =
+    formatEntityLabel({
+      mode: entityDisplayMode,
+      nameAr: selectedExamType?.nameAr,
+      nameEn: selectedExamType?.nameEn,
+      fallback: selectedExamType?.name || null,
+    }) || "—";
 
   const availability = useAppointmentAvailability({
     patientId: form.patientId,
@@ -302,7 +329,8 @@ export function CreateAppointmentTab({
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     const hasRowSpecialQuota = (row.specialQuotaRemaining ?? 0) > 0;
-    if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota)) {
+    const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
+    if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota) && !supportedOverrideType) {
       return;
     }
     if (row.status === "blocked") {
@@ -456,8 +484,16 @@ export function CreateAppointmentTab({
       const selectedCapacityModeNeedsOverrideAuth =
         form.capacityResolutionMode === "category_override" ||
         form.capacityResolutionMode === "total_capacity_override";
+      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
 
       if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || selectedCapacityModeNeedsOverrideAuth) {
+        if (isReceptionist && supportedOverrideType) {
+          setPendingRequestDecision(decision);
+          setRequestOverrideType(supportedOverrideType);
+          setRequestOverrideError(null);
+          setRequestOverrideOpen(true);
+          return;
+        }
         setPendingDecision(decision);
         setShowOverrideModal(true);
         return;
@@ -504,6 +540,40 @@ export function CreateAppointmentTab({
       setOverrideError(error instanceof Error ? `${t(language, "appointments.create.supervisorAuthFailed")}: ${error.message}` : t(language, "appointments.create.supervisorAuthFailed"));
     } finally {
       setOverrideLoading(false);
+    }
+  }
+
+  async function submitCreateOverrideRequest(requesterReason: string) {
+    if (!form.patientId || !form.modalityId || !form.appointmentDate) return;
+    setRequestOverrideError(null);
+    try {
+      await createOverrideRequestMutation.mutateAsync({
+        requestType: "create_booking",
+        requesterReason,
+        createdFromContext: "appointments_create",
+        requestPayload: {
+          patientId: form.patientId,
+          modalityId: form.modalityId,
+          examTypeId: form.examTypeId,
+          reportingPriorityId: form.reportingPriorityId,
+          bookingDate: form.appointmentDate,
+          bookingTime: null,
+          caseCategory: form.caseCategory,
+          requiresReport: form.requiresReport,
+          notes: form.notes.trim() || null,
+          isWalkIn: form.isWalkIn,
+        },
+      });
+      setRequestOverrideOpen(false);
+      setPendingRequestDecision(null);
+      pushToast({
+        type: "success",
+        title: "Override request submitted",
+        message: "Override request submitted. The appointment is not booked until approval.",
+      });
+      void availability.refetch();
+    } catch (error) {
+      setRequestOverrideError(error instanceof Error ? error.message : "Failed to submit override request.");
     }
   }
 
@@ -761,7 +831,7 @@ export function CreateAppointmentTab({
                     setOverrideError(null);
                   }}
                   specialQuotaAvailable={hasSpecialQuotaAvailable}
-                  supervisorMode={canUseNonStandardCapacityModes || canUseSpecialQuotaMode}
+                  supervisorMode={!isReceptionist && (canUseNonStandardCapacityModes || canUseSpecialQuotaMode)}
                   superAdminMode={isSuperAdmin}
                   allowCategoryOverride={canUseNonStandardCapacityModes}
                   specialReasonCode={form.specialReasonCode}
@@ -783,7 +853,12 @@ export function CreateAppointmentTab({
 
               {form.overrideRequired && (
                 <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
-                  {t(language, "appointments.create.overrideRequired")}
+                  <div>{t(language, "appointments.create.overrideRequired")}</div>
+                  {isReceptionist && inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ? (
+                    <div className="mt-1 text-xs">
+                      {formatOverrideType(inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes))}
+                    </div>
+                  ) : null}
                 </div>
               )}
 
@@ -811,6 +886,22 @@ export function CreateAppointmentTab({
                 >
                   {submitLoading ? t(language, "appointments.create.creating") : t(language, "appointments.create.create")}
                 </Button>
+                {isReceptionist && availabilitySelectedRow && inferSupportedOverrideType(availabilitySelectedRow.reasonCodes) ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => {
+                      const overrideType = inferSupportedOverrideType(availabilitySelectedRow.reasonCodes);
+                      setRequestOverrideType(overrideType);
+                      setPendingRequestDecision(availability.rawItems.find((item) => item.date === form.appointmentDate)?.decision ?? null);
+                      setRequestOverrideError(null);
+                      setRequestOverrideOpen(true);
+                    }}
+                    disabled={createOverrideRequestMutation.isPending}
+                  >
+                    Request override approval
+                  </Button>
+                ) : null}
               </div>
             </div>
           </Card>
@@ -870,6 +961,25 @@ export function CreateAppointmentTab({
         onConfirm={handleOverrideConfirm}
         loading={overrideLoading}
         authError={overrideError}
+      />
+
+      <SchedulingOverrideRequestModal
+        open={requestOverrideOpen}
+        requestType="create_booking"
+        overrideType={requestOverrideType}
+        patientLabel={selectedPatientLabel}
+        modalityLabel={selectedModalityLabel}
+        examTypeLabel={selectedExamTypeLabel}
+        requestedDate={form.appointmentDate}
+        requestedTime={null}
+        decision={pendingRequestDecision}
+        loading={createOverrideRequestMutation.isPending}
+        error={requestOverrideError}
+        onClose={() => {
+          setRequestOverrideOpen(false);
+          setRequestOverrideError(null);
+        }}
+        onSubmit={submitCreateOverrideRequest}
       />
 
       {showSafetyModal && (

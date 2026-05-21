@@ -6,6 +6,9 @@
 
 export type CaseCategory = "oncology" | "non_oncology";
 export type CapacityResolutionMode = "standard" | "category_override" | "total_capacity_override" | "special_quota_extra";
+export type SchedulingOverrideRequestType = "create_booking" | "reschedule_booking";
+export type SchedulingOverrideType = "closed_weekday_override" | "category_override" | "total_capacity_override";
+export type SchedulingOverrideRequestStatus = "pending" | "approved" | "rejected" | "cancelled" | "failed" | "expired";
 export type DecisionStatus = "available" | "restricted" | "blocked";
 export type BookingStatus =
   | "scheduled"
@@ -311,6 +314,64 @@ export interface RescheduleBookingResponse {
   decision: unknown;
   wasOverride: boolean;
   previousDate: string;
+}
+
+export interface SchedulingOverrideStoredPayload {
+  version: 1;
+  requestType: SchedulingOverrideRequestType;
+  policySetKey?: string;
+  bookingId?: number | null;
+  createPayload?: Partial<CreateBookingRequest>;
+  reschedulePayload?: Partial<RescheduleBookingRequest>;
+}
+
+export interface SchedulingOverrideRequestDto {
+  id: number | string;
+  requestType: SchedulingOverrideRequestType;
+  overrideType: SchedulingOverrideType;
+  status: SchedulingOverrideRequestStatus;
+  requesterUserId: number | string;
+  approverUserId: number | string | null;
+  patientId: number | string;
+  modalityId: number | string;
+  examTypeId: number | string | null;
+  requestedBookingDate: string;
+  requestedBookingTime: string | null;
+  bookingId: number | string | null;
+  requestedPolicyVersionId: number | string | null;
+  approvedPolicyVersionId: number | string | null;
+  requestPayloadJson: SchedulingOverrideStoredPayload;
+  originalDecisionSnapshotJson: SchedulingDecisionDto | Record<string, unknown>;
+  approvalDecisionSnapshotJson: SchedulingDecisionDto | Record<string, unknown> | null;
+  requesterReason: string;
+  approverReason: string | null;
+  failureCode: string | null;
+  failureMessage: string | null;
+  expiresAt: string;
+  createdFromContext: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  cancelledAt: string | null;
+  failedAt: string | null;
+  expiredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSchedulingOverrideRequestInput {
+  requestType: SchedulingOverrideRequestType;
+  bookingId?: number | null;
+  requestPayload: Record<string, unknown>;
+  requesterReason: string;
+  createdFromContext?: string | null;
+}
+
+export interface SchedulingOverrideRequestFilters {
+  status?: SchedulingOverrideRequestStatus;
+  requestType?: SchedulingOverrideRequestType;
+  overrideType?: SchedulingOverrideType;
+  modalityId?: number;
+  requestedBookingDate?: string;
 }
 
 export interface FieldValidationErrorDto {

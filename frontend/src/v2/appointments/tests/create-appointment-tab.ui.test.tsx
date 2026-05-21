@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import { LanguageProvider } from "@/providers/language-provider";
@@ -40,6 +40,7 @@ const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<{ preparation
   async () => ({ preparation: {} })
 );
 const mockPrintAppointmentSlipById = vi.fn<(appointmentId: number) => Promise<void>>(async () => {});
+const mockCreateSchedulingOverrideRequest = vi.fn(async () => ({ request: { id: 1, status: "pending" } }));
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
@@ -160,6 +161,18 @@ const availabilityRows: AvailabilityRowViewModel[] = [
     specialQuotaRemaining: null,
     reasonText: "Supervisor required",
     requiresSupervisorOverride: true,
+    reasonCodes: ["category_capacity_exhausted"],
+    examMixQuotaSummaries: [
+      {
+        ruleId: 501,
+        title: "Brain MRI group",
+        dailyLimit: 2,
+        consumed: 2,
+        remaining: 0,
+        isBlocking: true,
+        isPrimaryBlocking: true,
+      },
+    ],
   },
   {
     date: "2027-01-03",
@@ -177,6 +190,7 @@ const availabilityRows: AvailabilityRowViewModel[] = [
     specialQuotaRemaining: null,
     reasonText: "Full but overridable",
     requiresSupervisorOverride: true,
+    reasonCodes: ["category_capacity_exhausted"],
   },
 ];
 
@@ -226,6 +240,10 @@ vi.mock("../hooks/useAppointmentAvailability", () => ({
 }));
 
 vi.mock("../api", () => ({
+  useCreateSchedulingOverrideRequest: () => ({
+    mutateAsync: mockCreateSchedulingOverrideRequest,
+    isPending: false,
+  }),
   useV2ExamTypes: (modalityId: number | null) => {
     if (modalityId === 1) {
       return {
@@ -287,7 +305,8 @@ function setup(
   modalityOptions: ModalityDto[] = [
     { id: 1, name: "CT", nameAr: "Ø£Ø´Ø¹Ø© Ù…Ù‚Ø·Ø¹ÙŠØ©", nameEn: "CT", code: "CT", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
     { id: 2, name: "MRI", nameAr: "Ø±Ù†ÙŠÙ† Ù…ØºÙ†Ø§Ø·ÙŠØ³ÙŠ", nameEn: "MRI", code: "MRI", isActive: true, safetyWarningEn: null, safetyWarningAr: null, safetyWarningEnabled: false },
-  ]
+  ],
+  currentUserRole: "receptionist" | "supervisor" | "super_admin" = "supervisor"
 ) {
   const onCreateAppointment = vi.fn(async (payload: CreateBookingRequest): Promise<BookingResponse> => ({
     booking: {
@@ -341,6 +360,7 @@ function setup(
               priorityOptions={priorityOptions}
               schedulingEngineEnabled
               canUseNonStandardCapacityModes={canUseNonStandardCapacityModes}
+              currentUserRole={currentUserRole}
               onCreateAppointment={onCreateAppointment}
               onEvaluateAvailability={onEvaluateAvailability}
             />
@@ -381,6 +401,9 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockPrepareScanSession.mockResolvedValue({ preparation: {} });
     mockPrintAppointmentSlipById.mockReset();
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
+    mockCreateSchedulingOverrideRequest.mockReset();
+    mockCreateSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
+    mockRowsRef.current = availabilityRows;
     mockRawItemsRef.current = [
       {
         date: "2027-01-02",
@@ -403,6 +426,12 @@ describe("CreateAppointmentTab UI interactions", () => {
         ],
       },
     ];
+  });
+
+  afterEach(() => {
+    if (vi.isMockFunction(window.open)) {
+      vi.mocked(window.open).mockRestore();
+    }
   });
 
   it("renders entity display mode control with default both mode", async () => {
@@ -496,6 +525,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-01 blocked/i }));
 
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
@@ -522,7 +552,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     fireEvent.change(screen.getByLabelText("Appointment Date"), { target: { value: "2027-01-02" } });
-    expect(screen.getByText(/Exam mix:/)).toBeTruthy();
+    expect(screen.getByText(/Exam mix groups:/)).toBeTruthy();
     expect(screen.getByText(/Brain MRI group 2\/2/)).toBeTruthy();
   });
 
@@ -621,7 +651,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
   it("uses sticky booking controls pane styling", async () => {
     setup();
-    const stickyPane = document.querySelector('div[style*="position: sticky"]');
+    const stickyPane = document.querySelector(".lg\\:sticky");
     expect(stickyPane).toBeTruthy();
   });
 
@@ -631,7 +661,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
-    const startDateInput = screen.getByLabelText("Availability Start Date") as HTMLInputElement;
+    const startDateInput = screen.getByLabelText("Start date") as HTMLInputElement;
     fireEvent.change(startDateInput, { target: { value: "2027-01-15" } });
     expect(startDateInput.value).toBe("2027-01-15");
 
@@ -650,11 +680,11 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
 
-    fireEvent.change(screen.getByPlaceholderText("Supervisor username"), { target: { value: "sup" } });
-    fireEvent.change(screen.getByPlaceholderText("Supervisor password"), { target: { value: "pass" } });
-    fireEvent.change(screen.getByPlaceholderText("Override reason"), { target: { value: "urgent" } });
+    fireEvent.change(await screen.findByPlaceholderText("Supervisor Username"), { target: { value: "sup" } });
+    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
+    fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "urgent" } });
 
-    await userEvent.click(screen.getByRole("button", { name: "Confirm Override" }));
+    await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
 
     await waitFor(() => {
       expect(onCreateAppointment).toHaveBeenCalled();
@@ -666,6 +696,42 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(callArg.override!.reason).toBe("urgent");
   });
 
+  it("lets receptionist request override approval without booking", async () => {
+    const { onCreateAppointment } = setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+
+    expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+    expect(await screen.findByRole("heading", { name: "Request override approval" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByText("Requester reason is required.")).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText("Explain why this appointment needs override approval"), {
+      target: { value: "Urgent clinical request" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() => {
+      expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalled();
+    });
+    expect(onCreateAppointment).not.toHaveBeenCalled();
+    expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+      requestType: "create_booking",
+      requesterReason: "Urgent clinical request",
+      requestPayload: {
+        patientId: 9,
+        modalityId: 1,
+        examTypeId: 101,
+        bookingDate: "2027-01-02",
+        caseCategory: "oncology",
+      },
+    });
+  });
+
   it("requires special reason when special quota mode is selected", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
@@ -673,7 +739,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
-    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+    fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
       target: { value: "special_quota_extra" },
     });
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
@@ -688,7 +754,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
-    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+    fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
       target: { value: "special_quota_extra" },
     });
     fireEvent.change(screen.getByLabelText("Special Reason"), { target: { value: "urgent" } });
@@ -704,7 +770,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
-    fireEvent.change(screen.getByLabelText("Capacity Resolution Action"), {
+    fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
       target: { value: "special_quota_extra" },
     });
     const selects = screen.getAllByRole("combobox");
@@ -716,10 +782,10 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
     expect(await screen.findByText("Supervisor Override Required")).toBeTruthy();
 
-    fireEvent.change(screen.getByPlaceholderText("Supervisor username"), { target: { value: "sup" } });
-    fireEvent.change(screen.getByPlaceholderText("Supervisor password"), { target: { value: "pass" } });
-    fireEvent.change(screen.getByPlaceholderText("Override reason"), { target: { value: "approved" } });
-    await userEvent.click(screen.getByRole("button", { name: "Confirm Override" }));
+    fireEvent.change(await screen.findByPlaceholderText("Supervisor Username"), { target: { value: "sup" } });
+    fireEvent.change(screen.getByPlaceholderText("Password"), { target: { value: "pass" } });
+    fireEvent.change(screen.getByPlaceholderText("Override Reason"), { target: { value: "approved" } });
+    await userEvent.click(screen.getByRole("button", { name: "Approve & Book" }));
 
     await waitFor(() => {
       expect(onCreateAppointment).toHaveBeenCalled();
@@ -738,7 +804,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-    const select = screen.getByLabelText("Capacity Resolution Action") as HTMLSelectElement;
+    const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
     const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
     expect(option?.disabled).toBe(true);
   });
@@ -760,17 +826,17 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
-    const select = screen.getByLabelText("Capacity Resolution Action") as HTMLSelectElement;
+    const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
     const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");
     expect(option?.disabled).toBe(true);
   });
 
   it("non-supervisor UI does not show capacity resolution selector", async () => {
-    setup(false);
+    setup(false, [], undefined, "receptionist");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
-    expect(screen.queryByLabelText("Capacity Resolution Action")).toBeNull();
+    expect(screen.queryByLabelText(/Capacity Resolution Action/)).toBeNull();
   });
 
   describe("success state actions", () => {
@@ -905,7 +971,8 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(openSpy).toHaveBeenCalledTimes(1);
       const [url, target, features] = openSpy.mock.calls[0] ?? [];
       expect(url).toContain("https://wa.me/218912345678?text=");
-      expect(decodeURIComponent(String(url))).toContain("Reminder: you have an appointment on 2027-01-03.");
+      expect(decodeURIComponent(String(url))).toContain("Reminder: you have an appointment on");
+      expect(decodeURIComponent(String(url))).toContain("03/01/2027");
       expect(decodeURIComponent(String(url))).toContain("https://rispro.nccb.com.ly/public/appointment?t=token-42");
       expect(target).toBe("_blank");
       expect(features).toBe("noopener,noreferrer");

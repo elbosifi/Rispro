@@ -25,6 +25,7 @@ import SettingsPage from "@/pages/settings/settings-page";
 import LegacyAccessViewerPage from "@/pages/legacy-access-viewer/legacy-access-viewer-page";
 import PublicCancelAppointmentPage from "@/pages/public/cancel-appointment-page";
 import { AppointmentsV3CreatePage, SchedulingAdminV2Page } from "@/v2/appointments";
+import { SchedulingOverrideApprovalCenter } from "@/v2/appointments/components/SchedulingOverrideApprovalCenter";
 import { TopBar, SideNav, MobileDrawer } from "@/components/layout/navigation";
 import { ToastViewport } from "@/components/common/toast-viewport";
 import { QueryProvider } from "@/providers/query-provider";
@@ -244,6 +245,7 @@ function AppContent() {
             <span className="leading-none">{language === "ar" ? "رجوع" : "Back"}</span>
           </button>
         ) : undefined}
+        extraActions={<SchedulingOverrideApprovalCenter user={user} />}
         onUndo={() => navigate(-1)}
         onRedo={() => navigate(1)}
         onToggleLanguage={toggleLanguage}

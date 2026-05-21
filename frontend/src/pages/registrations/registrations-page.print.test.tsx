@@ -17,9 +17,11 @@ const getAppointmentByIdMock = vi.fn();
 const sendPatientWebPushNotificationMock = vi.fn();
 const useV2AvailabilityMock = vi.fn();
 const rescheduleV2BookingMock = vi.fn();
+const createSchedulingOverrideRequestMock = vi.fn();
 const prepareAppointmentSlipHtmlMock = vi.fn();
 const mockPrintAppointmentSlipById = vi.fn();
 const mockPushToast = vi.fn();
+let mockAuthRole: "receptionist" | "supervisor" | "super_admin" = "super_admin";
 
 function LocationProbe() {
   const location = useLocation();
@@ -41,6 +43,10 @@ vi.mock("@/lib/api-hooks", () => ({
 vi.mock("@/v2/appointments/api", () => ({
   useV2Availability: (...args: unknown[]) => useV2AvailabilityMock(...args),
   rescheduleV2Booking: (...args: unknown[]) => rescheduleV2BookingMock(...args),
+  useCreateSchedulingOverrideRequest: () => ({
+    mutateAsync: createSchedulingOverrideRequestMock,
+    isPending: false,
+  }),
   useV2ExamTypes: () => ({ data: [], isLoading: false }),
   useV2SpecialReasonCodes: () => ({ data: [], isLoading: false }),
 }));
@@ -60,7 +66,7 @@ vi.mock("@/lib/toast", () => ({
 
 vi.mock("@/providers/auth-provider", () => ({
   useAuth: () => ({
-    user: { role: "super_admin" },
+    user: { id: 91, role: mockAuthRole },
   }),
 }));
 
@@ -168,6 +174,9 @@ describe("RegistrationsPage print actions", () => {
     });
     useV2AvailabilityMock.mockReset();
     rescheduleV2BookingMock.mockReset();
+    createSchedulingOverrideRequestMock.mockReset();
+    createSchedulingOverrideRequestMock.mockResolvedValue({ request: { id: 99, status: "pending" } });
+    mockAuthRole = "super_admin";
     fetchAppointmentsMock.mockResolvedValue([
       {
         id: 7,
@@ -664,6 +673,77 @@ describe("RegistrationsPage print actions", () => {
         })
       );
     });
+  });
+
+  it("submits a deferred reschedule override request with bookingId", async () => {
+    mockAuthRole = "receptionist";
+    useV2AvailabilityMock.mockReturnValue({
+      data: {
+        items: [
+          {
+            date: "2027-01-05",
+            bucketMode: "partitioned",
+            modalityTotalCapacity: 10,
+            bookedTotal: 2,
+            oncology: { reserved: 2, filled: 0, remaining: 2 },
+            nonOncology: { reserved: 8, filled: 2, remaining: 6 },
+            specialQuotaSummary: null,
+            dailyCapacity: 10,
+            bookedCount: 2,
+            remainingCapacity: 8,
+            isFull: false,
+            decision: {
+              isAllowed: true,
+              requiresSupervisorOverride: true,
+              displayStatus: "restricted",
+              suggestedBookingMode: "override",
+              consumedCapacityMode: "override",
+              remainingStandardCapacity: 8,
+              remainingSpecialQuota: null,
+              matchedRuleIds: [],
+              reasons: [{ code: "closed_weekday_override_required", severity: "warning", message: "Closed weekday requires approval" }],
+              policy: { policySetKey: "default", versionId: 1, versionNo: 1, configHash: "hash" },
+              decisionTrace: { evaluatedAt: "2026-01-01T00:00:00Z", input: null },
+            },
+          },
+        ],
+      },
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    renderRegistrationsPage();
+    await waitFor(() => {
+      expect(getFirstText("ACC-7")).toBeTruthy();
+    });
+
+    await userEvent.click(within(getAppointmentRow("ACC-7")).getByRole("button", { name: "Manage" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "Reschedule" }).at(-1)!);
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-05 restricted/i }));
+    await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+    expect(await screen.findByText("Requester reason is required.")).toBeTruthy();
+
+    await userEvent.type(screen.getByPlaceholderText("Explain why this appointment needs override approval"), "Patient cannot attend original date");
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() => {
+      expect(createSchedulingOverrideRequestMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          requestType: "reschedule_booking",
+          bookingId: 7,
+          requesterReason: "Patient cannot attend original date",
+          requestPayload: expect.objectContaining({
+            bookingDate: "2027-01-05",
+            bookingTime: null,
+          }),
+        })
+      );
+    });
+    expect(rescheduleV2BookingMock).not.toHaveBeenCalled();
   });
 
   it("shows the category legend and marks oncology rows for color coding", async () => {

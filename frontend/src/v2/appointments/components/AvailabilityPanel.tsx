@@ -39,7 +39,7 @@ export function AvailabilityPanel({
   const { language } = useLanguage();
   const baseRows = showWeekendDays ? rows : rows.filter((row) => !row.hideAlways);
   const visibleRows = baseRows.filter(
-    (row) => row.status === "available" || showFullDays || (showWeekendDays && row.hideAlways)
+    (row) => row.status === "available" || row.status === "restricted" || showFullDays || (showWeekendDays && row.hideAlways)
   );
 
   if (loading) {

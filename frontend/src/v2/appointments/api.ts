@@ -20,6 +20,9 @@ import type {
   ListBookingsResponse,
   RescheduleBookingRequest,
   RescheduleBookingResponse,
+  SchedulingOverrideRequestDto,
+  SchedulingOverrideRequestFilters,
+  CreateSchedulingOverrideRequestInput,
   PolicyStatusDto,
   PolicySnapshotDto,
   PolicyPreviewDto,
@@ -187,6 +190,64 @@ export async function rescheduleV2Booking(
   return api<RescheduleBookingResponse>(`/v2/appointments/${bookingId}`, {
     method: "PUT",
     body: JSON.stringify(input),
+  });
+}
+
+function schedulingOverrideRequestQuery(params?: SchedulingOverrideRequestFilters): string {
+  const searchParams = new URLSearchParams();
+  if (params?.status) searchParams.set("status", params.status);
+  if (params?.requestType) searchParams.set("requestType", params.requestType);
+  if (params?.overrideType) searchParams.set("overrideType", params.overrideType);
+  if (params?.modalityId != null) searchParams.set("modalityId", String(params.modalityId));
+  if (params?.requestedBookingDate) searchParams.set("requestedBookingDate", params.requestedBookingDate);
+  const query = searchParams.toString();
+  return query ? `?${query}` : "";
+}
+
+export async function createSchedulingOverrideRequest(
+  input: CreateSchedulingOverrideRequestInput
+): Promise<{ request: SchedulingOverrideRequestDto }> {
+  return api<{ request: SchedulingOverrideRequestDto }>("/v2/scheduling-override-requests", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function listSchedulingOverrideRequests(
+  params?: SchedulingOverrideRequestFilters
+): Promise<{ requests: SchedulingOverrideRequestDto[] }> {
+  return api<{ requests: SchedulingOverrideRequestDto[] }>(
+    `/v2/scheduling-override-requests${schedulingOverrideRequestQuery(params)}`
+  );
+}
+
+export async function getSchedulingOverrideRequest(id: number | string): Promise<{ request: SchedulingOverrideRequestDto }> {
+  return api<{ request: SchedulingOverrideRequestDto }>(`/v2/scheduling-override-requests/${id}`);
+}
+
+export async function approveSchedulingOverrideRequest(
+  id: number | string,
+  approverReason?: string | null
+): Promise<{ request: SchedulingOverrideRequestDto; booking?: unknown }> {
+  return api<{ request: SchedulingOverrideRequestDto; booking?: unknown }>(`/v2/scheduling-override-requests/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({ approverReason: approverReason?.trim() || null }),
+  });
+}
+
+export async function rejectSchedulingOverrideRequest(
+  id: number | string,
+  approverReason: string
+): Promise<{ request: SchedulingOverrideRequestDto }> {
+  return api<{ request: SchedulingOverrideRequestDto }>(`/v2/scheduling-override-requests/${id}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ approverReason }),
+  });
+}
+
+export async function cancelSchedulingOverrideRequest(id: number | string): Promise<{ request: SchedulingOverrideRequestDto }> {
+  return api<{ request: SchedulingOverrideRequestDto }>(`/v2/scheduling-override-requests/${id}/cancel`, {
+    method: "POST",
   });
 }
 
@@ -377,6 +438,58 @@ export function useV2RescheduleBooking() {
       // Invalidate availability and bookings cache after reschedule
       queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
       queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
+    },
+  });
+}
+
+export function useCreateSchedulingOverrideRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: createSchedulingOverrideRequest,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
+    },
+  });
+}
+
+export function useSchedulingOverrideRequests(params?: SchedulingOverrideRequestFilters) {
+  return useQuery({
+    queryKey: ["v2-scheduling-override-requests", params] as const,
+    queryFn: () => listSchedulingOverrideRequests(params),
+    staleTime: 15_000,
+  });
+}
+
+export function useApproveSchedulingOverrideRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, approverReason }: { id: number | string; approverReason?: string | null }) =>
+      approveSchedulingOverrideRequest(id, approverReason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-availability"] });
+      queryClient.invalidateQueries({ queryKey: ["v2-bookings"] });
+    },
+  });
+}
+
+export function useRejectSchedulingOverrideRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, approverReason }: { id: number | string; approverReason: string }) =>
+      rejectSchedulingOverrideRequest(id, approverReason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
+    },
+  });
+}
+
+export function useCancelSchedulingOverrideRequest() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelSchedulingOverrideRequest,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
     },
   });
 }
