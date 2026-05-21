@@ -66,6 +66,15 @@ function request(overrides: Partial<SchedulingOverrideRequestDto> = {}): Schedul
     expiredAt: null,
     createdAt: "2042-02-01T08:00:00Z",
     updatedAt: "2042-02-01T08:00:00Z",
+    patientDisplayName: "Nadia Test",
+    patientIdentifier: "P-20",
+    modalityName: "MRI",
+    modalityCode: "MR",
+    examTypeName: "MRI Brain",
+    requesterDisplayName: "Reception User",
+    requesterUsername: "reception",
+    approverDisplayName: null,
+    approverUsername: null,
     ...overrides,
   };
 }
@@ -95,7 +104,10 @@ describe("SchedulingOverrideApprovalCenter", () => {
     render(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
-    expect(screen.getByText("Patient #20")).toBeTruthy();
+    expect(screen.getByText("Nadia Test")).toBeTruthy();
+    expect(screen.getByText("P-20 · ID 20")).toBeTruthy();
+    expect(screen.getByText("MRI Brain")).toBeTruthy();
+    expect(screen.getByText("Reception User")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 11"), { target: { value: "Approved note" } });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
     expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Approved note" });

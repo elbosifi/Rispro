@@ -237,12 +237,35 @@ function RequestCard({
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs">
-        <Info label="Patient" value={`Patient #${request.patientId}`} />
-        <Info label="Modality" value={`Modality #${request.modalityId}`} />
-        <Info label="Exam" value={request.examTypeId ? `Exam #${request.examTypeId}` : "—"} />
+        <Info
+          label="Patient"
+          value={request.patientDisplayName || `Patient #${request.patientId}`}
+          meta={request.patientIdentifier ? `${request.patientIdentifier} · ID ${request.patientId}` : `ID ${request.patientId}`}
+        />
+        <Info
+          label="Modality"
+          value={request.modalityName || request.modalityCode || `Modality #${request.modalityId}`}
+          meta={request.modalityCode ? `${request.modalityCode} · ID ${request.modalityId}` : `ID ${request.modalityId}`}
+        />
+        <Info
+          label="Exam"
+          value={request.examTypeName || (request.examTypeId ? `Exam #${request.examTypeId}` : "—")}
+          meta={request.examTypeId ? `ID ${request.examTypeId}` : undefined}
+        />
         <Info label="Date/time" value={`${request.requestedBookingDate}${request.requestedBookingTime ? ` ${request.requestedBookingTime}` : ""}`} />
         <Info label="Request type" value={formatRequestType(request.requestType)} />
-        <Info label="Requester" value={`User #${request.requesterUserId}`} />
+        <Info
+          label="Requester"
+          value={request.requesterDisplayName || request.requesterUsername || `User #${request.requesterUserId}`}
+          meta={request.requesterUsername ? `${request.requesterUsername} · ID ${request.requesterUserId}` : `ID ${request.requesterUserId}`}
+        />
+        {request.approverUserId ? (
+          <Info
+            label="Approver"
+            value={request.approverDisplayName || request.approverUsername || `User #${request.approverUserId}`}
+            meta={request.approverUsername ? `${request.approverUsername} · ID ${request.approverUserId}` : `ID ${request.approverUserId}`}
+          />
+        ) : null}
       </div>
 
       <p className="mt-3 text-sm text-foreground">{request.requesterReason}</p>
@@ -297,11 +320,12 @@ function RequestCard({
   );
 }
 
-function Info({ label, value }: { label: string; value: string }) {
+function Info({ label, value, meta }: { label: string; value: string; meta?: string }) {
   return (
     <div className="rounded-lg bg-muted/40 p-2">
       <p className="font-mono text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{label}</p>
       <p className="truncate text-xs font-medium text-foreground">{value}</p>
+      {meta ? <p className="truncate text-[10px] text-muted-foreground">{meta}</p> : null}
     </div>
   );
 }

@@ -41,6 +41,98 @@ interface RescheduleNotificationInfo {
   newTime: string | null;
 }
 
+async function hydrateRequestDisplayNames(
+  client: PoolClient,
+  requests: SchedulingOverrideRequestRow[]
+): Promise<SchedulingOverrideRequestRow[]> {
+  if (requests.length === 0) return requests;
+  const patientIds = [...new Set(requests.map((request) => Number(request.patientId)).filter((id) => id > 0))];
+  const modalityIds = [...new Set(requests.map((request) => Number(request.modalityId)).filter((id) => id > 0))];
+  const examTypeIds = [...new Set(requests.map((request) => Number(request.examTypeId)).filter((id) => id > 0))];
+  const userIds = [...new Set(requests.flatMap((request) => [request.requesterUserId, request.approverUserId]).map(Number).filter((id) => id > 0))];
+
+  const [patients, modalities, examTypes, users] = await Promise.all([
+    patientIds.length
+      ? client.query<{
+          id: number;
+          displayName: string | null;
+          identifier: string | null;
+        }>(
+          `
+            select id,
+                   coalesce(nullif(english_full_name, ''), nullif(arabic_full_name, '')) as "displayName",
+                   coalesce(nullif(identifier_value, ''), nullif(national_id, ''), mrn) as identifier
+            from patients
+            where id = any($1::bigint[])
+          `,
+          [patientIds]
+        )
+      : Promise.resolve({ rows: [] }),
+    modalityIds.length
+      ? client.query<{ id: number; name: string | null; code: string | null }>(
+          `
+            select id, coalesce(nullif(name_en, ''), nullif(name_ar, ''), name) as name, code
+            from modalities
+            where id = any($1::bigint[])
+          `,
+          [modalityIds]
+        )
+      : Promise.resolve({ rows: [] }),
+    examTypeIds.length
+      ? client.query<{ id: number; name: string | null }>(
+          `
+            select id, coalesce(nullif(name_en, ''), nullif(name_ar, ''), name) as name
+            from exam_types
+            where id = any($1::bigint[])
+          `,
+          [examTypeIds]
+        )
+      : Promise.resolve({ rows: [] }),
+    userIds.length
+      ? client.query<{ id: number; displayName: string | null; username: string | null }>(
+          `
+            select id, nullif(full_name, '') as "displayName", username
+            from users
+            where id = any($1::bigint[])
+          `,
+          [userIds]
+        )
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  const patientById = new Map(patients.rows.map((row) => [Number(row.id), row]));
+  const modalityById = new Map(modalities.rows.map((row) => [Number(row.id), row]));
+  const examTypeById = new Map(examTypes.rows.map((row) => [Number(row.id), row]));
+  const userById = new Map(users.rows.map((row) => [Number(row.id), row]));
+
+  return requests.map((request) => {
+    const patient = patientById.get(Number(request.patientId));
+    const modality = modalityById.get(Number(request.modalityId));
+    const examType = request.examTypeId == null ? null : examTypeById.get(Number(request.examTypeId));
+    const requester = userById.get(Number(request.requesterUserId));
+    const approver = request.approverUserId == null ? null : userById.get(Number(request.approverUserId));
+    return {
+      ...request,
+      patientDisplayName: patient?.displayName ?? null,
+      patientIdentifier: patient?.identifier ?? null,
+      modalityName: modality?.name ?? null,
+      modalityCode: modality?.code ?? null,
+      examTypeName: examType?.name ?? null,
+      requesterDisplayName: requester?.displayName ?? null,
+      requesterUsername: requester?.username ?? null,
+      approverDisplayName: approver?.displayName ?? null,
+      approverUsername: approver?.username ?? null,
+    };
+  });
+}
+
+async function hydrateRequestDisplayName(
+  client: PoolClient,
+  request: SchedulingOverrideRequestRow
+): Promise<SchedulingOverrideRequestRow> {
+  return (await hydrateRequestDisplayNames(client, [request]))[0] ?? request;
+}
+
 function assertKnownRole(role: Role | undefined): Role {
   if (!role) throw new SchedulingError(401, "Authentication required.", ["authentication_required"]);
   return role;
@@ -310,7 +402,7 @@ export async function createSchedulingOverrideRequest(
     }
 
     const expiresAt = new Date(Date.now() + DEFAULT_EXPIRY_HOURS * 60 * 60 * 1000);
-    return insertSchedulingOverrideRequest(client, {
+    const request = await insertSchedulingOverrideRequest(client, {
       requestType,
       overrideType,
       requesterUserId: userId,
@@ -327,6 +419,7 @@ export async function createSchedulingOverrideRequest(
       expiresAt,
       createdFromContext: input.createdFromContext ?? null,
     });
+    return hydrateRequestDisplayName(client, request);
   }, { isolationLevel: "serializable", operationName: "create_scheduling_override_request" });
 }
 
@@ -337,9 +430,10 @@ export async function listSchedulingOverrideRequestsForUser(
 ): Promise<SchedulingOverrideRequestRow[]> {
   const client = await pool.connect();
   try {
-    return listSchedulingOverrideRequests(client, filters, {
+    const requests = await listSchedulingOverrideRequests(client, filters, {
       requesterUserId: canSeeAll(role) ? null : userId,
     });
+    return hydrateRequestDisplayNames(client, requests);
   } finally {
     client.release();
   }
@@ -355,7 +449,7 @@ export async function getSchedulingOverrideRequestForUser(
     const request = await findSchedulingOverrideRequestById(client, id);
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertVisible(request, userId, role);
-    return request;
+    return hydrateRequestDisplayName(client, request);
   } finally {
     client.release();
   }
@@ -386,7 +480,7 @@ export async function approveSchedulingOverrideRequest(
     if (!request) throw new SchedulingError(404, "Scheduling override request not found.", ["override_request_not_found"]);
     assertPending(request);
     if (isExpired(request)) {
-      const expired = await markSchedulingOverrideRequestExpired(client, id);
+      const expired = await hydrateRequestDisplayName(client, await markSchedulingOverrideRequestExpired(client, id));
       return { request: expired };
     }
     if (!canApproveOverride(role, request.overrideType)) {
@@ -407,7 +501,7 @@ export async function approveSchedulingOverrideRequest(
       if (!payload.createPayload) throw new SchedulingError(400, "Stored create request payload is invalid.", ["invalid_stored_request_payload"]);
       decision = await evaluateCreatePayload(client, payload.createPayload);
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
-      if (inferred.failedRequest) return { request: inferred.failedRequest };
+      if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideType = inferred.requiredOverrideType;
       if (requiredOverrideType && requiredOverrideType !== request.overrideType) {
         const failed = await markSchedulingOverrideRequestFailed(client, id, {
@@ -416,7 +510,7 @@ export async function approveSchedulingOverrideRequest(
           failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
           approvalDecisionSnapshot: decision,
         });
-        return { request: failed };
+        return { request: await hydrateRequestDisplayName(client, failed) };
       }
       const capacityResolutionMode = requiredOverrideType ? capacityModeForOverride(request.overrideType) : "standard";
       const createPayload: CreateAppointmentDto = {
@@ -445,7 +539,7 @@ export async function approveSchedulingOverrideRequest(
       const evaluated = await evaluateReschedulePayload(client, payload.bookingId, payload.reschedulePayload);
       decision = evaluated.decision;
       const inferred = await inferApprovalOverrideTypeOrFail(client, id, approverUserId, decision);
-      if (inferred.failedRequest) return { request: inferred.failedRequest };
+      if (inferred.failedRequest) return { request: await hydrateRequestDisplayName(client, inferred.failedRequest) };
       requiredOverrideType = inferred.requiredOverrideType;
       if (requiredOverrideType && requiredOverrideType !== request.overrideType) {
         const failed = await markSchedulingOverrideRequestFailed(client, id, {
@@ -454,7 +548,7 @@ export async function approveSchedulingOverrideRequest(
           failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
           approvalDecisionSnapshot: decision,
         });
-        return { request: failed };
+        return { request: await hydrateRequestDisplayName(client, failed) };
       }
       const capacityResolutionMode = requiredOverrideType ? capacityModeForOverride(request.overrideType) : undefined;
       const reschedule = payload.reschedulePayload;
@@ -496,7 +590,7 @@ export async function approveSchedulingOverrideRequest(
       approvedPolicyVersionId: policyVersionId(decision),
       approvalDecisionSnapshot: decision,
     });
-    return { request: approved, booking };
+    return { request: await hydrateRequestDisplayName(client, approved), booking };
   }, { isolationLevel: "serializable", operationName: "approve_scheduling_override_request" });
 
   if (result.request.status === "failed") {
@@ -544,7 +638,7 @@ export async function rejectSchedulingOverrideRequest(
     if (!canApproveOverride(role, request.overrideType)) {
       throw new SchedulingError(403, "You do not have permission to reject this override type.", ["override_rejection_forbidden"]);
     }
-    return markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim());
+    return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestRejected(client, id, approverUserId, approverReason.trim()));
   }, { isolationLevel: "serializable", operationName: "reject_scheduling_override_request" });
 }
 
@@ -559,7 +653,7 @@ export async function cancelSchedulingOverrideRequest(
     assertPending(request);
     const canCancel = Number(request.requesterUserId) === userId || canSeeAll(role);
     if (!canCancel) throw new SchedulingError(403, "You do not have permission to cancel this request.", ["override_cancel_forbidden"]);
-    return markSchedulingOverrideRequestCancelled(client, id, canSeeAll(role) ? userId : null);
+    return hydrateRequestDisplayName(client, await markSchedulingOverrideRequestCancelled(client, id, canSeeAll(role) ? userId : null));
   }, { isolationLevel: "serializable", operationName: "cancel_scheduling_override_request" });
 }
 

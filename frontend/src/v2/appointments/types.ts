@@ -356,6 +356,15 @@ export interface SchedulingOverrideRequestDto {
   expiredAt: string | null;
   createdAt: string;
   updatedAt: string;
+  patientDisplayName?: string | null;
+  patientIdentifier?: string | null;
+  modalityName?: string | null;
+  modalityCode?: string | null;
+  examTypeName?: string | null;
+  requesterDisplayName?: string | null;
+  requesterUsername?: string | null;
+  approverDisplayName?: string | null;
+  approverUsername?: string | null;
 }
 
 export interface CreateSchedulingOverrideRequestInput {

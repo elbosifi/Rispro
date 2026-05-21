@@ -178,6 +178,10 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(requested.status, 201);
     assert.equal((requested.data as any).request.status, "pending");
     assert.equal((requested.data as any).request.overrideType, "category_override");
+    assert.ok((requested.data as any).request.patientDisplayName);
+    assert.ok((requested.data as any).request.modalityName);
+    assert.ok((requested.data as any).request.examTypeName);
+    assert.equal((requested.data as any).request.requesterDisplayName, `${TEST_PREFIX}Receptionist`);
 
     const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
       method: "POST",
@@ -209,6 +213,100 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     assert.equal(audit.rows[0].override_reason, "Approved for urgent clinical need");
     assert.equal(audit.rows[0].outcome, "approved_and_booked");
     assert.equal(Number(audit.rows[0].decision_snapshot.deferredApprovalRequestId), Number((requested.data as any).request.id));
+  });
+
+  it("approves a closed weekday deferred request without bypassing capacity rules", async () => {
+    if (!testData) return;
+    await setCapacityLimits(10, 5);
+    const { pool } = await import("../../../../db/pool.js");
+    const friday = "2042-02-07";
+    const patientId = await createPatient();
+    const existingSetting = await pool.query<{ setting_value: unknown }>(
+      `
+        select setting_value
+        from system_settings
+        where category = 'scheduling_and_capacity'
+          and setting_key = 'allow_friday_appointments'
+        limit 1
+      `
+    );
+
+    try {
+      await pool.query(
+        `
+          insert into system_settings (category, setting_key, setting_value, updated_by_user_id)
+          values ('scheduling_and_capacity', 'allow_friday_appointments', '{"value":"false"}'::jsonb, $1)
+          on conflict (category, setting_key) do update set
+            setting_value = excluded.setting_value,
+            updated_by_user_id = excluded.updated_by_user_id,
+            updated_at = now()
+        `,
+        [testData.userId]
+      );
+
+      const requested = await fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {
+        method: "POST",
+        body: {
+          requestType: "create_booking",
+          requesterReason: "Friday booking needs approval",
+          requestPayload: {
+            patientId,
+            modalityId: testData.modalityId,
+            examTypeId: testData.examTypeId,
+            bookingDate: friday,
+            bookingTime: null,
+            caseCategory: "non_oncology",
+            policySetKey: testData.policySetKey,
+          },
+          createdFromContext: "integration_test_closed_weekday",
+        },
+      });
+      assert.equal(requested.status, 201);
+      assert.equal((requested.data as any).request.overrideType, "closed_weekday_override");
+
+      const approved = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((requested.data as any).request.id)}/approve`, {
+        method: "POST",
+        body: { approverReason: "Approved closed weekday exception" },
+      });
+      assert.equal(approved.status, 200);
+      assert.equal((approved.data as any).request.status, "approved");
+      const bookingId = Number((approved.data as any).booking.id);
+      assert.ok(bookingId > 0);
+      assert.equal(await countBookings(friday, patientId), 1);
+
+      const audit = await pool.query<{ override_type: string; outcome: string; decision_snapshot: any }>(
+        `
+          select override_type, outcome, decision_snapshot
+          from appointments_v2.override_audit_events
+          where booking_id = $1
+        `,
+        [bookingId]
+      );
+      assert.equal(audit.rows.length, 1);
+      assert.equal(audit.rows[0].override_type, "closed_weekday_override");
+      assert.equal(audit.rows[0].outcome, "approved_and_booked");
+      assert.equal(Number(audit.rows[0].decision_snapshot.deferredApprovalRequestId), Number((requested.data as any).request.id));
+    } finally {
+      if (existingSetting.rows.length > 0) {
+        await pool.query(
+          `
+            update system_settings
+            set setting_value = $1::jsonb, updated_by_user_id = null, updated_at = now()
+            where category = 'scheduling_and_capacity'
+              and setting_key = 'allow_friday_appointments'
+          `,
+          [JSON.stringify(existingSetting.rows[0].setting_value)]
+        );
+      } else {
+        await pool.query(
+          `
+            delete from system_settings
+            where category = 'scheduling_and_capacity'
+              and setting_key = 'allow_friday_appointments'
+          `
+        );
+      }
+    }
   });
 
   it("rejects without approver reason and lets a receptionist see only their own requests", async () => {

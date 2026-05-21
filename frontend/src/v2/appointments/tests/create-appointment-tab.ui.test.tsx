@@ -5,7 +5,7 @@ import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { CreateAppointmentTab } from "../components/CreateAppointmentTab";
 import { LanguageProvider } from "@/providers/language-provider";
 import type { AvailabilityRowViewModel } from "../hooks/availability-row-mapper";
-import type { BookingResponse, CreateBookingRequest, SchedulingDecisionDto } from "../types";
+import type { BookingResponse, CreateBookingRequest, CreateSchedulingOverrideRequestInput, SchedulingDecisionDto } from "../types";
 import type { ModalityDto } from "../types";
 
 type MockNoShowAppointment = {
@@ -40,7 +40,9 @@ const mockPrepareScanSession = vi.fn<(payload: unknown) => Promise<{ preparation
   async () => ({ preparation: {} })
 );
 const mockPrintAppointmentSlipById = vi.fn<(appointmentId: number) => Promise<void>>(async () => {});
-const mockCreateSchedulingOverrideRequest = vi.fn(async () => ({ request: { id: 1, status: "pending" } }));
+const mockCreateSchedulingOverrideRequest = vi.fn<
+  (input: CreateSchedulingOverrideRequestInput) => Promise<{ request: { id: number; status: "pending" } }>
+>(async () => ({ request: { id: 1, status: "pending" } }));
 
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
@@ -510,13 +512,15 @@ describe("CreateAppointmentTab UI interactions", () => {
   it("changing display mode keeps selected modalityId and examTypeId", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
-    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
-    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.selectOptions(screen.getByLabelText("Modality"), "1");
+    await userEvent.selectOptions(screen.getByLabelText("Exam Type"), "101");
 
-    fireEvent.change(screen.getByLabelText("Entity Display"), { target: { value: "ar" } });
+    await userEvent.selectOptions(screen.getByLabelText("Entity Display"), "ar");
 
-    expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("1");
-    expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).value).toBe("101");
+    await waitFor(() => {
+      expect((screen.getByLabelText("Modality") as HTMLSelectElement).value).toBe("1");
+      expect((screen.getByLabelText("Exam Type") as HTMLSelectElement).value).toBe("101");
+    });
   });
 
   it("keeps blocked row non-clickable", async () => {
@@ -719,7 +723,8 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalled();
     });
     expect(onCreateAppointment).not.toHaveBeenCalled();
-    expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+    const [requestPayload] = mockCreateSchedulingOverrideRequest.mock.calls[0];
+    expect(requestPayload).toMatchObject({
       requestType: "create_booking",
       requesterReason: "Urgent clinical request",
       requestPayload: {
@@ -730,6 +735,19 @@ describe("CreateAppointmentTab UI interactions", () => {
         caseCategory: "oncology",
       },
     });
+  });
+
+  it("keeps non-overridable blocked rows non-actionable for receptionists", async () => {
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-01 blocked/i }));
+
+    expect((screen.queryByRole("button", { name: "Request override approval" }))).toBeNull();
+    expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("oncology");
   });
 
   it("requires special reason when special quota mode is selected", async () => {

@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { NAV_ITEMS, SideNav } from "./navigation";
+import { NAV_ITEMS, SideNav, TopBar } from "./navigation";
 import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
 
 vi.mock("lucide-react", () => {
@@ -55,6 +56,42 @@ describe("Navigation governance", () => {
     );
 
     expect(screen.queryByText("Create appointment (V3)")).toBeNull();
+  });
+
+  it("keeps receptionist appointment navigation on the appointments route", async () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    const onNavigate = vi.fn();
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        onNavigate={onNavigate}
+      />
+    );
+
+    await userEvent.click(screen.getByText("Create appointment"));
+    expect(onNavigate).toHaveBeenCalledWith("appointments");
+  });
+
+  it("renders top-bar extra actions without adding navigation entries", () => {
+    render(
+      <TopBar
+        user={{ id: 1, username: "rec", fullName: "Reception", role: "receptionist" }}
+        language="en"
+        isRtl={false}
+        extraActions={<button type="button">Override requests</button>}
+        onUndo={() => {}}
+        onRedo={() => {}}
+        onToggleLanguage={() => {}}
+        onLogout={() => {}}
+        onMobileNavToggle={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Override requests" })).toBeTruthy();
+    expect(NAV_ITEMS.some((item) => item.route === "scheduling-override-requests")).toBe(false);
   });
 
   it("receptionist does not see doctor/modality/statistics/settings by default", () => {
