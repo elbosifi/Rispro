@@ -12,6 +12,7 @@ import PatientsPage from "@/pages/patients/patients-page";
 import EditPatientPage from "@/pages/patients/edit-patient-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
+import SchedulingOverrideRequestsPage from "@/pages/scheduling-override-requests/scheduling-override-requests-page";
 import QueuePage from "@/pages/queue/queue-page";
 import QueueCheckInPage from "@/pages/queue/queue-check-in-page";
 import ModalityPage from "@/pages/modality/modality-page";
@@ -43,6 +44,7 @@ const ROUTE_PATHS: Record<string, string> = {
   patients: "/patients",
   "patients.new": "/patients/new",
   appointments: "/appointments",
+  "scheduling.override.requests": "/scheduling/override-requests",
   calendar: "/calendar",
   registrations: "/registrations",
   queue: "/queue",
@@ -172,6 +174,8 @@ function AppContent() {
           return language === "ar" ? "المرضى" : "Patients";
       case "appointments":
         return language === "ar" ? "إنشاء موعد" : "Create Appointment";
+      case "scheduling.override.requests":
+        return language === "ar" ? "طلبات التجاوز" : "Override Requests";
       case "calendar":
         return language === "ar" ? "التقويم" : "Calendar";
       case "registrations":
@@ -270,6 +274,7 @@ function AppContent() {
             <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/:id/edit" element={guardedPage("patients", <EditPatientPage />)} />
             <Route path="/appointments" element={guardedPage("appointments", <AppointmentsV3CreatePage />)} />
+            <Route path="/scheduling/override-requests" element={guardedPage("scheduling.override.requests", <SchedulingOverrideRequestsPage />)} />
             <Route path="/appointments/legacy" element={<Navigate to="/appointments" replace />} />
             <Route path="/calendar" element={guardedPage("calendar", <CalendarPage />)} />
             <Route path="/registrations" element={guardedPage("registrations", <RegistrationsPage />)} />

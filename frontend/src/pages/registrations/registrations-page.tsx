@@ -1039,7 +1039,7 @@ export default function RegistrationsPage() {
       pushToast({
         type: "success",
         title: "Override request submitted",
-        message: "Override request submitted. The appointment is not rescheduled until approval.",
+        message: "Override request submitted. The appointment is not rescheduled until approval. Track it in Override Requests.",
       });
       queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
     } catch (error) {

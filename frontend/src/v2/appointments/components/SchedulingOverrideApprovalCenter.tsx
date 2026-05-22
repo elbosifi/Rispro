@@ -23,6 +23,61 @@ const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_w
 
 export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }) {
   const [open, setOpen] = useState(false);
+  const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
+
+  const actionableCount = badgeQuery.data?.requests.filter((request) => {
+    if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
+    if (user?.role === "supervisor") return canRoleApproveSchedulingOverride(user.role, request.overrideType);
+    return user?.role === "super_admin";
+  }).length ?? 0;
+
+  if (!user) return null;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-ghost relative"
+        onClick={() => setOpen(true)}
+        aria-label="Override requests"
+      >
+        <Bell className="h-4 w-4" />
+        {actionableCount > 0 ? (
+          <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+            {actionableCount}
+          </span>
+        ) : null}
+      </button>
+
+      {open ? (
+        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
+          <aside className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Override requests</h2>
+                <p className="text-xs text-muted-foreground">Pending override requests are not confirmed bookings.</p>
+              </div>
+              <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label="Close override requests">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <SchedulingOverrideRequestsWorkspace user={user} variant="drawer" />
+          </aside>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+export function SchedulingOverrideRequestsWorkspace({
+  user,
+  variant = "page",
+}: {
+  user: User | null;
+  variant?: "page" | "drawer";
+}) {
   const defaultStatus: SchedulingOverrideRequestStatus | undefined =
     user?.role === "supervisor" || user?.role === "super_admin" ? "pending" : undefined;
   const [status, setStatus] = useState<SchedulingOverrideRequestStatus | "">(defaultStatus ?? "");
@@ -37,7 +92,6 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
     ...(requestedDate ? { requestedBookingDate: requestedDate } : {}),
   };
   const listQuery = useSchedulingOverrideRequests(listFilters);
-  const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
   const approveMutation = useApproveSchedulingOverrideRequest();
   const rejectMutation = useRejectSchedulingOverrideRequest();
   const cancelMutation = useCancelSchedulingOverrideRequest();
@@ -45,12 +99,6 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   const [rejectReason, setRejectReason] = useState("");
   const [approveReasonById, setApproveReasonById] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const actionableCount = badgeQuery.data?.requests.filter((request) => {
-    if (user?.role === "receptionist") return Number(request.requesterUserId) === Number(user.id);
-    if (user?.role === "supervisor") return canRoleApproveSchedulingOverride(user.role, request.overrideType);
-    return user?.role === "super_admin";
-  }).length ?? 0;
 
   const requests = useMemo(() => listQuery.data?.requests ?? [], [listQuery.data?.requests]);
 
@@ -102,90 +150,59 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
   }
 
   return (
-    <>
-      <button
-        type="button"
-        className="btn-ghost relative"
-        onClick={() => setOpen(true)}
-        aria-label="Override requests"
-      >
-        <Bell className="h-4 w-4" />
-        {actionableCount > 0 ? (
-          <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
-            {actionableCount}
-          </span>
-        ) : null}
-      </button>
+    <div className={variant === "page" ? "space-y-4" : "flex min-h-0 flex-1 flex-col"}>
+      <div className={`grid grid-cols-2 gap-2 ${variant === "drawer" ? "border-b border-border p-3 sm:grid-cols-4" : "rounded-2xl border border-border bg-card p-3 shadow-sm sm:grid-cols-4"}`}>
+        <select aria-label="Override request status filter" className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
+          {STATUS_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value || "All statuses"}</option>)}
+        </select>
+        <select aria-label="Override request type filter" className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
+          {REQUEST_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatRequestType(value) : "All request types"}</option>)}
+        </select>
+        <select aria-label="Override type filter" className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
+          {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : "All override types"}</option>)}
+        </select>
+        <input aria-label="Override requested date filter" type="date" className="input-premium h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+      </div>
 
-      {open ? (
-        <div className="fixed inset-0 z-[60]" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setOpen(false)} />
-          <aside className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-xl">
-            <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <div>
-                <h2 className="text-base font-semibold text-foreground">Override requests</h2>
-                <p className="text-xs text-muted-foreground">Pending override requests are not confirmed bookings.</p>
-              </div>
-              <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label="Close override requests">
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 border-b border-border p-3 sm:grid-cols-4">
-              <select aria-label="Override request status filter" className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
-                {STATUS_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value || "All statuses"}</option>)}
-              </select>
-              <select aria-label="Override request type filter" className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
-                {REQUEST_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatRequestType(value) : "All request types"}</option>)}
-              </select>
-              <select aria-label="Override type filter" className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
-                {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : "All override types"}</option>)}
-              </select>
-              <input aria-label="Override requested date filter" type="date" className="input-premium h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
-            </div>
-
-            {actionError ? (
-              <div className="mx-3 mt-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {actionError}
-              </div>
-            ) : null}
-
-            <div className="flex-1 overflow-y-auto p-3">
-              {listQuery.isLoading ? (
-                <p className="p-4 text-sm text-muted-foreground">Loading override requests...</p>
-              ) : requests.length === 0 ? (
-                <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">No override requests found.</p>
-              ) : (
-                <div className="space-y-3">
-                  {requests.map((request) => (
-                    <RequestCard
-                      key={String(request.id)}
-                      request={request}
-                      user={user}
-                      approveReason={approveReasonById[String(request.id)] ?? ""}
-                      onChangeApproveReason={(value) => setApproveReasonById((current) => ({ ...current, [String(request.id)]: value }))}
-                      rejecting={rejectingId === request.id}
-                      rejectReason={rejectReason}
-                      onStartReject={() => {
-                        setRejectingId(request.id);
-                        setRejectReason("");
-                        setActionError(null);
-                      }}
-                      onChangeRejectReason={setRejectReason}
-                      onApprove={() => approve(request)}
-                      onReject={() => reject(request)}
-                      onCancelReject={() => setRejectingId(null)}
-                      onCancel={() => cancel(request)}
-                      busy={approveMutation.isPending || rejectMutation.isPending || cancelMutation.isPending}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </aside>
+      {actionError ? (
+        <div className={`${variant === "drawer" ? "mx-3 mt-3" : ""} rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700`}>
+          {actionError}
         </div>
       ) : null}
-    </>
+
+      <div className={variant === "drawer" ? "flex-1 overflow-y-auto p-3" : ""}>
+        {listQuery.isLoading ? (
+          <p className="p-4 text-sm text-muted-foreground">Loading override requests...</p>
+        ) : requests.length === 0 ? (
+          <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">No override requests found.</p>
+        ) : (
+          <div className={variant === "page" ? "grid gap-3 lg:grid-cols-2" : "space-y-3"}>
+            {requests.map((request) => (
+              <RequestCard
+                key={String(request.id)}
+                request={request}
+                user={user}
+                approveReason={approveReasonById[String(request.id)] ?? ""}
+                onChangeApproveReason={(value) => setApproveReasonById((current) => ({ ...current, [String(request.id)]: value }))}
+                rejecting={rejectingId === request.id}
+                rejectReason={rejectReason}
+                onStartReject={() => {
+                  setRejectingId(request.id);
+                  setRejectReason("");
+                  setActionError(null);
+                }}
+                onChangeRejectReason={setRejectReason}
+                onApprove={() => approve(request)}
+                onReject={() => reject(request)}
+                onCancelReject={() => setRejectingId(null)}
+                onCancel={() => cancel(request)}
+                busy={approveMutation.isPending || rejectMutation.isPending || cancelMutation.isPending}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 

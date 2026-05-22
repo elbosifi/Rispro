@@ -4044,6 +4044,7 @@ const PAGE_LABELS: Record<PageVisibilityRouteKey, string> = {
   dashboard: "Dashboard",
   patients: "Patients",
   appointments: "Appointments",
+  "scheduling.override.requests": "Override Requests",
   "v2.appointments.admin": "Appointments Admin (V2)",
   calendar: "Calendar",
   registrations: "Registrations",

@@ -1,8 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { PageAccessRoute } from "@/components/auth/page-access-route";
 import { NAV_ITEMS, SideNav, TopBar } from "./navigation";
-import { DEFAULT_PAGE_VISIBILITY_MATRIX } from "@/lib/page-visibility";
+import { DEFAULT_PAGE_VISIBILITY_MATRIX, type PageVisibilityMatrix } from "@/lib/page-visibility";
 
 vi.mock("lucide-react", () => {
   const Icon = () => null;
@@ -91,7 +93,81 @@ describe("Navigation governance", () => {
     );
 
     expect(screen.getByRole("button", { name: "Override requests" })).toBeTruthy();
-    expect(NAV_ITEMS.some((item) => item.route === "scheduling-override-requests")).toBe(false);
+    expect(NAV_ITEMS.some((item) => item.route === "scheduling.override.requests")).toBe(true);
+  });
+
+  it("shows Override Requests nav for receptionist, supervisor, and superadmin by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    for (const role of ["receptionist", "supervisor", "super_admin"] as const) {
+      const { unmount } = render(
+        <SideNav
+          currentRoute="dashboard"
+          user={{ id: 1, username: role, fullName: role, role }}
+          language="en"
+          isRtl={false}
+          onNavigate={() => {}}
+        />
+      );
+      expect(screen.queryByText("Override Requests")).not.toBeNull();
+      unmount();
+    }
+  });
+
+  it("hides Override Requests nav for non-configured roles by default", () => {
+    matrixState.value = DEFAULT_PAGE_VISIBILITY_MATRIX;
+    for (const role of ["doctor", "modality_staff", "administrative"] as const) {
+      const { unmount } = render(
+        <SideNav
+          currentRoute="dashboard"
+          user={{ id: 1, username: role, fullName: role, role }}
+          language="en"
+          isRtl={false}
+          onNavigate={() => {}}
+        />
+      );
+      expect(screen.queryByText("Override Requests")).toBeNull();
+      unmount();
+    }
+  });
+
+  it("shows Override Requests when page visibility config grants access", () => {
+    matrixState.value = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      "scheduling.override.requests": ["doctor"],
+    };
+    render(
+      <SideNav
+        currentRoute="dashboard"
+        user={{ id: 2, username: "doc", fullName: "Doctor", role: "doctor" }}
+        language="en"
+        isRtl={false}
+        onNavigate={() => {}}
+      />
+    );
+    expect(screen.queryByText("Override Requests")).not.toBeNull();
+  });
+
+  it("guards Override Requests route with page access config", () => {
+    const user = { id: 2, username: "doc", fullName: "Doctor", role: "doctor" } as const;
+    const matrix: PageVisibilityMatrix = {
+      ...DEFAULT_PAGE_VISIBILITY_MATRIX,
+      "scheduling.override.requests": ["doctor"],
+    };
+    render(
+      <MemoryRouter initialEntries={["/scheduling/override-requests"]}>
+        <Routes>
+          <Route
+            path="/scheduling/override-requests"
+            element={
+              <PageAccessRoute routeKey="scheduling.override.requests" user={user} matrix={matrix} defaultLandingPath="/doctor">
+                <div>Override Requests Page</div>
+              </PageAccessRoute>
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    );
+    expect(screen.getByText("Override Requests Page")).toBeTruthy();
   });
 
   it("receptionist does not see doctor/modality/statistics/settings by default", () => {

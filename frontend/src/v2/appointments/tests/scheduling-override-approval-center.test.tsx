@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { SchedulingOverrideApprovalCenter } from "../components/SchedulingOverrideApprovalCenter";
+import { SchedulingOverrideApprovalCenter, SchedulingOverrideRequestsWorkspace } from "../components/SchedulingOverrideApprovalCenter";
 import type { SchedulingOverrideRequestDto } from "../types";
 import type { User } from "@/types/api";
 
@@ -118,6 +118,16 @@ describe("SchedulingOverrideApprovalCenter", () => {
     fireEvent.change(screen.getByLabelText("Rejection reason for request 11"), { target: { value: "Not justified" } });
     await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
     expect(mockReject).toHaveBeenCalledWith({ id: 11, approverReason: "Not justified" });
+  });
+
+  it("renders the full page workspace with the same approval actions", async () => {
+    render(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
+
+    expect(screen.getByText("Nadia Test")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Approval note for request 11"), { target: { value: "Page approval" } });
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Page approval" });
   });
 
   it("does not allow supervisor to approve total capacity but superadmin can", async () => {

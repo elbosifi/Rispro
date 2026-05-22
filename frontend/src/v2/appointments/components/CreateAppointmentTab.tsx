@@ -569,7 +569,7 @@ export function CreateAppointmentTab({
       pushToast({
         type: "success",
         title: "Override request submitted",
-        message: "Override request submitted. The appointment is not booked until approval.",
+        message: "Override request submitted. The appointment is not booked until approval. Track it in Override Requests.",
       });
       void availability.refetch();
     } catch (error) {
