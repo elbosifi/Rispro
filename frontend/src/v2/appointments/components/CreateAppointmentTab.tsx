@@ -359,7 +359,7 @@ export function CreateAppointmentTab({
     ? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes)
     : null;
   const selectedRowRequiresOverride =
-    Boolean(availabilitySelectedRow) &&
+    availabilitySelectedRow != null &&
     availabilitySelectedRow.status !== "available" &&
     Boolean(selectedRowSupportedOverrideType);
   const selectedRowCanBookNormally =
