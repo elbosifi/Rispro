@@ -339,6 +339,9 @@ async function getAvailabilityInternal(
           : decision.displayStatus === "blocked" &&
               decision.reasons.some((r) => r.code === "category_capacity_exhausted")
             ? "restricted"
+          : decision.displayStatus === "blocked" &&
+              decision.reasons.some((r) => r.code === "exam_mix_quota_exhausted")
+            ? "restricted"
           : decision.displayStatus,
       decision,
     });

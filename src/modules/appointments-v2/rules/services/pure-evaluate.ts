@@ -602,9 +602,9 @@ function checkExamMixQuota(
   matchedIds: number[];
   summaries: EvaluatedExamMixQuotaSummary[];
 } {
-  // Explicit semantics: special_quota_extra bypasses exam-mix blocking and
-  // does not consume exam-mix counts (counts are pre-filtered in DB loader).
-  if (input.capacityResolutionMode === "special_quota_extra") {
+  // Explicit semantics: special_quota_extra and approved exam-mix overrides
+  // bypass exam-mix blocking and do not consume exam-mix counts.
+  if (input.capacityResolutionMode === "special_quota_extra" || input.bypassExamMixQuota) {
     return { blocked: false, reasons: [], matchedIds: [], summaries: [] };
   }
 

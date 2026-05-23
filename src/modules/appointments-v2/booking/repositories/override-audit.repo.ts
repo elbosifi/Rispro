@@ -5,6 +5,7 @@
  */
 
 import type { PoolClient } from "pg";
+import type { SchedulingOverrideType } from "../../shared/types/common.js";
 
 const INSERT_SQL = `
   insert into appointments_v2.override_audit_events (
@@ -48,7 +49,7 @@ export async function recordOverrideAudit(
     requestingUserId: number | null;
     supervisorUserId: number | null;
     overrideReason: string | null;
-    overrideType: "closed_weekday_override" | "category_override" | "total_capacity_override";
+    overrideType: SchedulingOverrideType;
     decisionSnapshot: unknown;
     outcome: "approved_and_booked" | "approved_but_failed" | "denied" | "cancelled";
   }

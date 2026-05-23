@@ -78,6 +78,7 @@ export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityR
     const reasonCodes = new Set(day.decision.reasons.map((reason) => reason.code));
     if (reasonCodes.has("modality_daily_capacity_exhausted")) return "full";
     if (reasonCodes.has("category_capacity_exhausted")) return "restricted";
+    if (reasonCodes.has("exam_mix_quota_exhausted")) return "restricted";
     return "blocked";
   }
 

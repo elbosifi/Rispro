@@ -2,7 +2,7 @@
  * Appointments V2 — Appointment DTOs.
  */
 
-import type { BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
+import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
 
 export interface CreateAppointmentDto {
   patientId: number;
@@ -25,6 +25,7 @@ export interface CreateAppointmentDto {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideType?: SchedulingOverrideType;
   };
 }
 
@@ -47,6 +48,7 @@ export interface UpdateAppointmentDto {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideType?: SchedulingOverrideType;
   };
 }
 

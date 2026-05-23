@@ -271,6 +271,7 @@ export async function createBookingInternal(
     requesterUserId: userId,
   };
 
+  const requestedOverrideType = approvedOverrideContext?.overrideType ?? payload.override?.overrideType ?? null;
   const pureInput: PureEvaluateInput = {
     patientId: payload.patientId,
     modalityId: payload.modalityId,
@@ -283,6 +284,7 @@ export async function createBookingInternal(
     // standalone scheduling rule input at this stage.
     specialReasonCode: payload.specialReasonCode ?? null,
     includeOverrideEvaluation: payload.override != null,
+    bypassExamMixQuota: requestedOverrideType === "exam_mix_override",
     context,
   };
 
@@ -305,6 +307,9 @@ export async function createBookingInternal(
   let wasOverride = false;
   let supervisorUserId: number | null = null;
   const requiredOverrideTypes = resolveRequiredOverrideTypes(decision, capacityResolutionMode);
+  if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
+    requiredOverrideTypes.push("exam_mix_override");
+  }
 
   if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
     // Hard block — cannot book even with override
@@ -316,7 +321,7 @@ export async function createBookingInternal(
     );
   }
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0) {
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || approvedOverrideContext) {
     // Override required — validate supervisor credentials or backend-approved deferred context.
     if (approvedOverrideContext) {
       supervisorUserId = approvedOverrideContext.approverUserId;
@@ -386,6 +391,8 @@ export async function createBookingInternal(
       approvedOverrideContext?.overrideType ??
       (requiredOverrideTypes.includes("total_capacity_override")
         ? "total_capacity_override"
+        : requiredOverrideTypes.includes("exam_mix_override")
+        ? "exam_mix_override"
         : requiredOverrideTypes.includes("category_override")
         ? "category_override"
         : "closed_weekday_override");

@@ -25,6 +25,7 @@ export type CapacityResolutionMode =
 export type SchedulingOverrideType =
   | "closed_weekday_override"
   | "category_override"
+  | "exam_mix_override"
   | "total_capacity_override";
 
 export type DecisionStatus = "available" | "restricted" | "blocked";

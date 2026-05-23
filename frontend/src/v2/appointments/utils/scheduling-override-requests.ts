@@ -4,6 +4,7 @@ import type { SchedulingDecisionDto, SchedulingOverrideType } from "../types";
 const SUPPORTED_OVERRIDE_TYPES = new Set<SchedulingOverrideType>([
   "closed_weekday_override",
   "category_override",
+  "exam_mix_override",
   "total_capacity_override",
 ]);
 
@@ -20,10 +21,12 @@ export function inferSupportedOverrideType(reasonCodes: readonly string[] | unde
     codes.has("category_override_required") ||
     codes.has("category_override_forbidden") ||
     codes.has("category_capacity_exhausted");
+  const examMix = codes.has("exam_mix_quota_exhausted");
 
-  if (closed && (total || category)) return null;
+  if ([closed, total, category, examMix].filter(Boolean).length > 1) return null;
   if (total) return "total_capacity_override";
   if (category) return "category_override";
+  if (examMix) return "exam_mix_override";
   if (closed) return "closed_weekday_override";
   return null;
 }
@@ -38,6 +41,8 @@ export function formatOverrideType(type: SchedulingOverrideType | string | null 
       return "Closed weekday override";
     case "category_override":
       return "Category capacity override";
+    case "exam_mix_override":
+      return "Exam mix override";
     case "total_capacity_override":
       return "Total modality capacity override";
     default:
@@ -52,7 +57,7 @@ export function formatRequestType(type: string): string {
 export function canRoleApproveSchedulingOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
-  return overrideType === "closed_weekday_override" || overrideType === "category_override";
+  return overrideType === "closed_weekday_override" || overrideType === "category_override" || overrideType === "exam_mix_override";
 }
 
 export function isSupportedOverrideType(value: string | null | undefined): value is SchedulingOverrideType {

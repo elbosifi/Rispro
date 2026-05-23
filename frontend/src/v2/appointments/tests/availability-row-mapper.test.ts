@@ -76,6 +76,20 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(row.remainingCapacity).toBe(3);
   });
 
+  it("maps exam-mix exhaustion as restricted, not unavailable", () => {
+    const day = baseDay();
+    day.rowDisplayStatus = undefined;
+    day.decision.displayStatus = "blocked";
+    day.decision.reasons = [{ code: "exam_mix_quota_exhausted", severity: "error", message: "Exam mix is full" }];
+    day.remainingCapacity = 3;
+    day.decision.remainingStandardCapacity = 0;
+
+    const row = mapAvailabilityRow(day, "en");
+
+    expect(row.status).toBe("restricted");
+    expect(row.remainingCapacity).toBe(0);
+  });
+
   it("uses effective standard capacity before total modality capacity", () => {
     const day = baseDay();
     day.rowDisplayStatus = "restricted";

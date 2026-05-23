@@ -119,5 +119,6 @@ export interface PureEvaluateInput {
   useSpecialQuota: boolean;
   specialReasonCode: string | null;
   includeOverrideEvaluation: boolean;
+  bypassExamMixQuota?: boolean;
   context: RuleEvaluationContext;
 }

@@ -425,6 +425,7 @@ export async function rescheduleBookingInternal(
     requesterUserId: userId,
   };
 
+  const requestedOverrideType = approvedOverrideContext?.overrideType ?? override?.overrideType ?? null;
   const pureInput: PureEvaluateInput = {
     patientId: booking.patientId,
     modalityId: bookingModalityId,
@@ -437,6 +438,7 @@ export async function rescheduleBookingInternal(
     // not create independent scheduling policy behavior.
     specialReasonCode,
     includeOverrideEvaluation: override != null,
+    bypassExamMixQuota: requestedOverrideType === "exam_mix_override",
     context,
   };
 
@@ -460,6 +462,9 @@ export async function rescheduleBookingInternal(
   let wasOverride = false;
   let supervisorUserId: number | null = null;
   const requiredOverrideTypes = resolveRequiredOverrideTypes(decision, effectiveCapacityResolutionMode);
+  if (requestedOverrideType === "exam_mix_override" && !requiredOverrideTypes.includes("exam_mix_override")) {
+    requiredOverrideTypes.push("exam_mix_override");
+  }
 
   if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
     throw new SchedulingError(
@@ -470,7 +475,7 @@ export async function rescheduleBookingInternal(
     );
   }
 
-  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth) {
+  if (decision.requiresSupervisorOverride || requiredOverrideTypes.length > 0 || examTypeChangeRequiresSupervisorAuth || approvedOverrideContext) {
     if (approvedOverrideContext) {
       supervisorUserId = approvedOverrideContext.approverUserId;
       wasOverride = true;
@@ -538,6 +543,8 @@ export async function rescheduleBookingInternal(
       approvedOverrideContext?.overrideType ??
       (requiredOverrideTypes.includes("total_capacity_override")
         ? "total_capacity_override"
+        : requiredOverrideTypes.includes("exam_mix_override")
+        ? "exam_mix_override"
         : requiredOverrideTypes.includes("category_override")
         ? "category_override"
         : "closed_weekday_override");

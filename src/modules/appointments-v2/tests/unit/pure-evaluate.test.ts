@@ -762,4 +762,37 @@ describe("pureEvaluate — exam mix quota", () => {
     assert.equal(decision.displayStatus, "available");
     assert.ok(!decision.reasons.some((r) => r.code === "exam_mix_quota_exhausted"));
   });
+
+  it("bypasses exam-mix blocking when exam-mix override is approved", async () => {
+    const decision = await pureEvaluate(
+      makeInput({
+        examTypeId: 50,
+        bypassExamMixQuota: true,
+        context: makeContext({
+          examMixQuotaRules: [
+            {
+              id: 901,
+              policyVersionId: 1,
+              modalityId: 10,
+              title: "Brain MRI",
+              ruleType: "specific_date",
+              specificDate: "2026-04-15",
+              startDate: null,
+              endDate: null,
+              weekday: null,
+              alternateWeeks: false,
+              recurrenceAnchorDate: null,
+              dailyLimit: 1,
+              isActive: true,
+            },
+          ],
+          examMixQuotaRuleItems: [{ ruleId: 901, examTypeId: 50 }],
+          currentExamMixConsumedByRuleId: { 901: 1 },
+        }),
+      })
+    );
+
+    assert.equal(decision.displayStatus, "available");
+    assert.ok(!decision.reasons.some((r) => r.code === "exam_mix_quota_exhausted"));
+  });
 });

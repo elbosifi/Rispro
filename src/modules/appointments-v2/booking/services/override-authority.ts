@@ -19,6 +19,9 @@ export function resolveRequiredOverrideTypes(
   if (capacityResolutionMode === "total_capacity_override") {
     required.add("total_capacity_override");
   }
+  if (reasonCodes.has("exam_mix_quota_exhausted")) {
+    required.add("exam_mix_override");
+  }
 
   return [...required];
 }

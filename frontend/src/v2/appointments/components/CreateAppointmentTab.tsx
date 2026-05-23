@@ -618,6 +618,7 @@ export function CreateAppointmentTab({
         supervisorUsername: payload.supervisorUsername,
         supervisorPassword: payload.supervisorPassword,
         reason: payload.overrideReason,
+        overrideType: inferSupportedOverrideTypeFromDecision(pendingDecision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ?? undefined,
       });
 
       setShowOverrideModal(false);

@@ -2,7 +2,7 @@
  * Appointments V2 — Booking model.
  */
 
-import type { BookingStatus, CaseCategory, CapacityResolutionMode } from "../../shared/types/common.js";
+import type { BookingStatus, CaseCategory, CapacityResolutionMode, SchedulingOverrideType } from "../../shared/types/common.js";
 
 export interface Booking {
   id: number;
@@ -52,5 +52,6 @@ export interface CreateBookingPayload {
     supervisorUsername: string;
     supervisorPassword: string;
     reason: string;
+    overrideType?: SchedulingOverrideType;
   };
 }
