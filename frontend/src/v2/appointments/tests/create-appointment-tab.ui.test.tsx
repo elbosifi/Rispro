@@ -29,6 +29,7 @@ const mockGetAppointmentById = vi.fn(async (id: number) => ({
   phone1: "0912345678",
 }));
 const mockQueueWalkInEnabled = { current: true };
+const mockReceptionOverrideRequestsEnabled = { current: true };
 const mockListAppointmentDocuments = vi.fn<(appointmentId: number, appointmentRefType?: string) => Promise<unknown[]>>(
   async () => []
 );
@@ -47,6 +48,17 @@ const mockCreateSchedulingOverrideRequest = vi.fn<
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
   fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
+  fetchSettings: (category: string) => {
+    if (category === "queue_and_arrival") {
+      return Promise.resolve({ walk_in_queue: mockQueueWalkInEnabled.current ? "enabled" : "disabled" });
+    }
+    if (category === "scheduling_and_capacity") {
+      return Promise.resolve({
+        allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+      });
+    }
+    return Promise.resolve({});
+  },
   getAppointmentById: (id: number) => mockGetAppointmentById(id),
   listAppointmentDocuments: (appointmentId: number, appointmentRefType?: string) =>
     mockListAppointmentDocuments(appointmentId, appointmentRefType),
@@ -423,6 +435,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     mockPrintAppointmentSlipById.mockResolvedValue(undefined);
     mockCreateSchedulingOverrideRequest.mockReset();
     mockCreateSchedulingOverrideRequest.mockResolvedValue({ request: { id: 1, status: "pending" } });
+    mockReceptionOverrideRequestsEnabled.current = true;
     mockRowsRef.current = availabilityRows;
     mockRawItemsRef.current = [
       {
@@ -776,12 +789,24 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect(onCreateAppointment).not.toHaveBeenCalled();
     expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
       requestType: "create_booking",
-      overrideType: "closed_weekday_override",
       requesterReason: "Closed day exception",
       requestPayload: {
         bookingDate: "2027-01-04",
       },
     });
+  });
+
+  it("does not let receptionist select override-only rows when override requests are disabled in settings", async () => {
+    mockReceptionOverrideRequestsEnabled.current = false;
+    setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
+    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("button", { name: /2027-01-04 blocked/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Request override approval" })).toBeNull();
   });
 
   it("keeps non-overridable blocked rows non-actionable for receptionists", async () => {

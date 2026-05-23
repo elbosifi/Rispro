@@ -19,6 +19,7 @@ interface Props {
   onPreviousPage: () => void;
   onNextPage: () => void;
   canGoPrevious: boolean;
+  allowOverrideRequests?: boolean;
 }
 
 export function AvailabilityPanel({
@@ -36,11 +37,12 @@ export function AvailabilityPanel({
   onPreviousPage,
   onNextPage,
   canGoPrevious,
+  allowOverrideRequests = true,
 }: Props) {
   const { language } = useLanguage();
   const baseRows = showWeekendDays ? rows : rows.filter((row) => !row.hideAlways);
   const visibleRows = baseRows.filter((row) => {
-    const requestableOverride = Boolean(inferSupportedOverrideType(row.reasonCodes));
+    const requestableOverride = allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes));
     return row.status === "available" || row.status === "restricted" || requestableOverride || showFullDays || (showWeekendDays && row.hideAlways);
   });
 
@@ -88,7 +90,7 @@ export function AvailabilityPanel({
           {t(language, "appointments.create.noNonFullDays")}
         </div>
       ) : visibleRows.map((row) => {
-        const requestableOverride = Boolean(inferSupportedOverrideType(row.reasonCodes));
+        const requestableOverride = allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes));
         return (
           <AvailabilityDateRow
             key={row.date}

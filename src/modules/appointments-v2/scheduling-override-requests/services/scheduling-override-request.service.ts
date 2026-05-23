@@ -71,7 +71,7 @@ async function hydrateRequestDisplayNames(
     modalityIds.length
       ? client.query<{ id: number; name: string | null; code: string | null }>(
           `
-            select id, coalesce(nullif(name_en, ''), nullif(name_ar, ''), name) as name, code
+            select id, coalesce(nullif(name_en, ''), nullif(name_ar, '')) as name, code
             from modalities
             where id = any($1::bigint[])
           `,
@@ -81,7 +81,7 @@ async function hydrateRequestDisplayNames(
     examTypeIds.length
       ? client.query<{ id: number; name: string | null }>(
           `
-            select id, coalesce(nullif(name_en, ''), nullif(name_ar, ''), name) as name
+            select id, coalesce(nullif(name_en, ''), nullif(name_ar, '')) as name
             from exam_types
             where id = any($1::bigint[])
           `,
