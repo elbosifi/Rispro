@@ -615,12 +615,11 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
 
-    expect(screen.queryByRole("button", { name: /2027-01-03 full/i })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-03 full/i }));
     expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
 
@@ -642,10 +641,11 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(screen.getByRole("button", { name: /2027-01-05 available/i })).toBeTruthy();
 
       await userEvent.click(screen.getByRole("button", { name: "Show hidden days" }));
-      expect(screen.getByRole("button", { name: /2027-01-01 blocked/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /2027-01-01 blocked/i })).toBeNull();
       expect(screen.queryByRole("button", { name: /2027-01-02 full/i })).toBeNull();
 
       await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      expect(screen.getByRole("button", { name: /2027-01-01 blocked/i })).toBeTruthy();
       expect(screen.getByRole("button", { name: /2027-01-02 full/i })).toBeTruthy();
     } finally {
       mockRowsRef.current = previousRows;
@@ -699,6 +699,7 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("non_oncology");
@@ -799,6 +800,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     await userEvent.click(screen.getByRole("button", { name: "Create Appointment" }));
@@ -826,6 +828,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
@@ -863,6 +866,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+    await userEvent.click(screen.getByRole("button", { name: "Show hidden days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-04 blocked/i }));
 
     expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
@@ -928,7 +933,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
     await waitFor(() => {
-      expect((screen.getByRole("button", { name: /2027-01-02 restricted/i }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryByRole("button", { name: /2027-01-02 restricted/i })).toBeNull();
     });
     expect(screen.queryByRole("button", { name: /2027-01-04 blocked/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request override approval" })).toBeNull();
@@ -952,6 +957,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
@@ -967,6 +973,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
@@ -983,6 +990,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
 
     fireEvent.change(screen.getByLabelText(/Capacity Resolution Action/), {
@@ -1040,6 +1048,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     const select = screen.getByLabelText(/Capacity Resolution Action/) as HTMLSelectElement;
     const option = Array.from(select.options).find((o) => o.value === "special_quota_extra");

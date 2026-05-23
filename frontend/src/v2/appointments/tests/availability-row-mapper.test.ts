@@ -137,13 +137,17 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(mapAvailabilityRow(day, "en").status).toBe("available");
   });
 
-  it("full-day visibility only affects full rows", () => {
+  it("full-day visibility controls full and approval-needed rows", () => {
     const restricted = mapAvailabilityRow(baseDay(), "en");
     const full = { ...restricted, date: "2027-01-03", status: "full" as const };
+    const requestableBlocked = { ...restricted, date: "2027-01-04", status: "blocked" as const };
 
-    expect(isAvailabilityRowVisible(restricted, { showFullDays: false, showPolicyHiddenDays: false })).toBe(true);
+    expect(isAvailabilityRowVisible(restricted, { showFullDays: false, showPolicyHiddenDays: false })).toBe(false);
+    expect(isAvailabilityRowVisible(restricted, { showFullDays: true, showPolicyHiddenDays: false })).toBe(true);
     expect(isAvailabilityRowVisible(full, { showFullDays: false, showPolicyHiddenDays: false })).toBe(false);
     expect(isAvailabilityRowVisible(full, { showFullDays: true, showPolicyHiddenDays: false })).toBe(true);
+    expect(isAvailabilityRowVisible(requestableBlocked, { showFullDays: false, showPolicyHiddenDays: false, requestableOverride: true })).toBe(false);
+    expect(isAvailabilityRowVisible(requestableBlocked, { showFullDays: true, showPolicyHiddenDays: false, requestableOverride: true })).toBe(true);
   });
 
   it("policy-hidden visibility does not show full rows when full days are hidden", () => {
