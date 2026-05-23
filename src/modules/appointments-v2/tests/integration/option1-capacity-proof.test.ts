@@ -342,6 +342,9 @@ describe("Option-1 capacity semantics — DB-backed proof", { skip: skipEnv }, (
       assert.equal(day.bucketMode, "total_only");
       assert.equal(day.modalityTotalCapacity, 5);
       assert.equal(day.bookedTotal, 1);
+      assert.equal(day.remainingCapacity, 4);
+      assert.equal(day.isFull, false);
+      assert.notEqual(day.rowDisplayStatus, "full");
       assert.equal(day.oncology.filled, 1);
       assert.equal(day.nonOncology.filled, 0);
       assert.equal(day.oncology.reserved, null);

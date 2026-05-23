@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapAvailabilityRow } from "../hooks/availability-row-mapper";
+import { isAvailabilityRowVisible, mapAvailabilityRow } from "../hooks/availability-row-mapper";
 import type { AvailabilityDayDto } from "../types";
 
 function baseDay(): AvailabilityDayDto {
@@ -89,13 +89,57 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(row.status).toBe("full");
   });
 
-  it("marks Friday and Saturday rows as weekend-hidden candidates", () => {
+  it("keeps Friday and Saturday as metadata only unless policy hides them", () => {
     const friday = baseDay();
     friday.date = "2027-01-01";
+    friday.decision.displayStatus = "available";
+    friday.decision.reasons = [];
     const saturday = baseDay();
     saturday.date = "2027-01-02";
+    saturday.decision.displayStatus = "available";
+    saturday.decision.reasons = [];
 
-    expect(mapAvailabilityRow(friday, "en").hideAlways).toBe(true);
-    expect(mapAvailabilityRow(saturday, "en").hideAlways).toBe(true);
+    expect(mapAvailabilityRow(friday, "en").isWeekend).toBe(true);
+    expect(mapAvailabilityRow(friday, "en").hideAlways).toBe(false);
+    expect(mapAvailabilityRow(saturday, "en").isWeekend).toBe(true);
+    expect(mapAvailabilityRow(saturday, "en").hideAlways).toBe(false);
+  });
+
+  it("marks rows policy-hidden only when backend sends weekday disabled reason", () => {
+    const day = baseDay();
+    day.date = "2027-01-03";
+    day.decision.reasons = [{ code: "weekday_appointments_disabled", severity: "error", message: "Disabled weekday" }];
+
+    expect(mapAvailabilityRow(day, "en").hideAlways).toBe(true);
+  });
+
+  it("does not display a row with remaining capacity as full", () => {
+    const day = baseDay();
+    day.rowDisplayStatus = "full";
+    day.decision.displayStatus = "available";
+    day.decision.reasons = [];
+    day.remainingCapacity = 1;
+    day.decision.remainingStandardCapacity = 1;
+
+    expect(mapAvailabilityRow(day, "en").status).toBe("available");
+  });
+
+  it("full-day visibility only affects full rows", () => {
+    const restricted = mapAvailabilityRow(baseDay(), "en");
+    const full = { ...restricted, date: "2027-01-03", status: "full" as const };
+
+    expect(isAvailabilityRowVisible(restricted, { showFullDays: false, showPolicyHiddenDays: false })).toBe(true);
+    expect(isAvailabilityRowVisible(full, { showFullDays: false, showPolicyHiddenDays: false })).toBe(false);
+    expect(isAvailabilityRowVisible(full, { showFullDays: true, showPolicyHiddenDays: false })).toBe(true);
+  });
+
+  it("policy-hidden visibility does not show full rows when full days are hidden", () => {
+    const row = {
+      ...mapAvailabilityRow(baseDay(), "en"),
+      status: "full" as const,
+      hideAlways: true,
+    };
+
+    expect(isAvailabilityRowVisible(row, { showFullDays: false, showPolicyHiddenDays: true })).toBe(false);
   });
 });

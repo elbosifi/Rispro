@@ -3,6 +3,7 @@ import { useV2Availability } from "../api";
 import { mapAvailabilityRow } from "./availability-row-mapper";
 import type { CapacityResolutionMode } from "../types";
 import { useLanguage } from "@/providers/language-provider";
+export { isAvailabilityRowVisible } from "./availability-row-mapper";
 export type { AvailabilityRowStatus, AvailabilityRowViewModel } from "./availability-row-mapper";
 
 interface UseAppointmentAvailabilityArgs {

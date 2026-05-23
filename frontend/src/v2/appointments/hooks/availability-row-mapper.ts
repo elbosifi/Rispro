@@ -46,6 +46,13 @@ export interface AvailabilityRowViewModel {
   isWeekend?: boolean;
 }
 
+export interface AvailabilityRowVisibilityOptions {
+  showFullDays: boolean;
+  showPolicyHiddenDays: boolean;
+  selected?: boolean;
+  requestableOverride?: boolean;
+}
+
 function toDayLabel(isoDate: string, language: Language): string {
   const d = new Date(`${isoDate}T00:00:00Z`);
   return d.toLocaleDateString(language === "ar" ? "ar-LY" : "en-LY", {
@@ -63,7 +70,9 @@ function isWeekendDate(isoDate: string): boolean {
 }
 
 export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityRowStatus {
-  if (day.rowDisplayStatus) return day.rowDisplayStatus;
+  if (day.rowDisplayStatus && !(day.rowDisplayStatus === "full" && (day.remainingCapacity ?? 0) > 0)) {
+    return day.rowDisplayStatus;
+  }
 
   if (day.decision.displayStatus === "blocked") {
     const reasonCodes = new Set(day.decision.reasons.map((reason) => reason.code));
@@ -90,7 +99,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
   const reasonText = matchedExamRuleSummary ? "" : day.decision.reasons[0]?.message ?? "";
   const reasonCodes = day.decision.reasons.map((reason) => reason.code);
   const isWeekend = isWeekendDate(day.date);
-  const hideAlways = isWeekend || reasonCodes.includes("weekday_appointments_disabled");
+  const hideAlways = reasonCodes.includes("weekday_appointments_disabled");
 
   const hideRawCapacity = status === "blocked";
 
@@ -133,4 +142,14 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
     hideAlways,
     isWeekend,
   };
+}
+
+export function isAvailabilityRowVisible(
+  row: AvailabilityRowViewModel,
+  options: AvailabilityRowVisibilityOptions
+): boolean {
+  if (options.selected) return true;
+  if (row.status === "full") return options.showFullDays;
+  if (row.hideAlways && !options.showPolicyHiddenDays) return false;
+  return row.status === "available" || row.status === "restricted" || Boolean(options.requestableOverride);
 }

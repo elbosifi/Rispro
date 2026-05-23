@@ -628,7 +628,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("keeps full and weekend visibility filters independent", async () => {
+  it("keeps full and policy-hidden visibility filters independent", async () => {
     const previousRows = mockRowsRef.current;
     mockRowsRef.current = availabilityRowsWithHiddenAndAvailable;
     try {
@@ -641,7 +641,7 @@ describe("CreateAppointmentTab UI interactions", () => {
       expect(screen.queryByRole("button", { name: /2027-01-02 full/i })).toBeNull();
       expect(screen.getByRole("button", { name: /2027-01-05 available/i })).toBeTruthy();
 
-      await userEvent.click(screen.getByRole("button", { name: "Show weekend" }));
+      await userEvent.click(screen.getByRole("button", { name: "Show hidden days" }));
       expect(screen.getByRole("button", { name: /2027-01-01 blocked/i })).toBeTruthy();
       expect(screen.queryByRole("button", { name: /2027-01-02 full/i })).toBeNull();
 

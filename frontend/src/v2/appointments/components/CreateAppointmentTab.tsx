@@ -20,6 +20,7 @@ import type {
 } from "../types";
 import { useCreateSchedulingOverrideRequest, useV2ExamTypes } from "../api";
 import { useCreateAppointmentForm, type SelectedPatient } from "../hooks/useCreateAppointmentForm";
+import { isAvailabilityRowVisible } from "../hooks/availability-row-mapper";
 import { useAppointmentAvailability, type AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { PatientSearchSection } from "./PatientSearchSection";
 import { ModalitySelect } from "./ModalitySelect";
@@ -174,7 +175,7 @@ export function CreateAppointmentTab({
   const [noShowLoading, setNoShowLoading] = useState(false);
   const [availabilityOffset, setAvailabilityOffset] = useState(0);
   const [showFullDays, setShowFullDays] = useState(false);
-  const [showWeekendDays, setShowWeekendDays] = useState(false);
+  const [showPolicyHiddenDays, setShowPolicyHiddenDays] = useState(false);
   const [entityDisplayMode, setEntityDisplayMode] = useState<EntityDisplayMode>(() => {
     if (typeof window === "undefined") return "both";
     const stored = window.localStorage.getItem(ENTITY_DISPLAY_MODE_STORAGE_KEY);
@@ -337,16 +338,12 @@ export function CreateAppointmentTab({
   }, [entityDisplayMode, form.patientId]);
 
   function visibleInAvailabilityPanel(row: AvailabilityRowViewModel, selected = false): boolean {
-    const requestableOverride = canRequestDeferredOverride(inferSupportedOverrideType(row.reasonCodes), row);
-    if (selected) return true;
-    if (row.hideAlways && !showWeekendDays) return false;
-    if (row.status === "full" && !showFullDays) return false;
-    return (
-      row.status === "available" ||
-      row.status === "restricted" ||
-      (requestableOverride && row.status !== "full") ||
-      (row.status === "full" && showFullDays)
-    );
+    return isAvailabilityRowVisible(row, {
+      showFullDays,
+      showPolicyHiddenDays,
+      selected,
+      requestableOverride: canRequestDeferredOverride(inferSupportedOverrideType(row.reasonCodes), row),
+    });
   }
 
   function canRequestDeferredOverride(
@@ -432,7 +429,7 @@ export function CreateAppointmentTab({
     availabilitySelectedRow,
     form.appointmentDate,
     showFullDays,
-    showWeekendDays,
+    showPolicyHiddenDays,
   ]);
 
   function validateBaseFields(): string | null {
@@ -1014,8 +1011,8 @@ export function CreateAppointmentTab({
               loading={availability.isLoading}
               showFullDays={showFullDays}
               onToggleShowFullDays={() => setShowFullDays((current) => !current)}
-              showWeekendDays={showWeekendDays}
-              onToggleShowWeekendDays={() => setShowWeekendDays((current) => !current)}
+              showPolicyHiddenDays={showPolicyHiddenDays}
+              onToggleShowPolicyHiddenDays={() => setShowPolicyHiddenDays((current) => !current)}
               startDate={startDateFromOffset(availabilityOffset)}
               onChangeStartDate={(nextDate) => {
                 setAvailabilityOffset(offsetFromStartDate(nextDate));

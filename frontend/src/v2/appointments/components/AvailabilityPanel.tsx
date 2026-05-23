@@ -1,3 +1,4 @@
+import { isAvailabilityRowVisible } from "../hooks/availability-row-mapper";
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
 import { inferSupportedOverrideType } from "../utils/scheduling-override-requests";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
@@ -12,8 +13,8 @@ interface Props {
   emptyMessage: string;
   showFullDays: boolean;
   onToggleShowFullDays: () => void;
-  showWeekendDays: boolean;
-  onToggleShowWeekendDays: () => void;
+  showPolicyHiddenDays: boolean;
+  onToggleShowPolicyHiddenDays: () => void;
   startDate: string;
   onChangeStartDate: (isoDate: string) => void;
   onPreviousPage: () => void;
@@ -30,8 +31,8 @@ export function AvailabilityPanel({
   emptyMessage,
   showFullDays,
   onToggleShowFullDays,
-  showWeekendDays,
-  onToggleShowWeekendDays,
+  showPolicyHiddenDays,
+  onToggleShowPolicyHiddenDays,
   startDate,
   onChangeStartDate,
   onPreviousPage,
@@ -41,17 +42,12 @@ export function AvailabilityPanel({
 }: Props) {
   const { language } = useLanguage();
   const visibleRows = rows.filter((row) => {
-    const requestableOverride = allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes));
-    const selected = row.date === selectedDate;
-    if (selected) return true;
-    if (row.hideAlways && !showWeekendDays) return false;
-    if (row.status === "full" && !showFullDays) return false;
-    return (
-      row.status === "available" ||
-      row.status === "restricted" ||
-      (requestableOverride && row.status !== "full") ||
-      (row.status === "full" && showFullDays)
-    );
+    return isAvailabilityRowVisible(row, {
+      showFullDays,
+      showPolicyHiddenDays,
+      selected: row.date === selectedDate,
+      requestableOverride: allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes)),
+    });
   });
 
   if (loading) {
@@ -88,8 +84,8 @@ export function AvailabilityPanel({
           <button type="button" onClick={onToggleShowFullDays} className="btn-ghost text-xs h-8 px-2">
             {showFullDays ? t(language, "appointments.create.hideFullDays") : t(language, "appointments.create.showFullDays")}
           </button>
-          <button type="button" onClick={onToggleShowWeekendDays} className="btn-ghost text-xs h-8 px-2">
-            {showWeekendDays ? t(language, "appointments.create.hideWeekendDays") : t(language, "appointments.create.showWeekendDays")}
+          <button type="button" onClick={onToggleShowPolicyHiddenDays} className="btn-ghost text-xs h-8 px-2">
+            {showPolicyHiddenDays ? t(language, "appointments.create.hideWeekendDays") : t(language, "appointments.create.showWeekendDays")}
           </button>
         </div>
       </div>
