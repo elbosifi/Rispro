@@ -1937,8 +1937,8 @@ export default function RegistrationsPage() {
                             emptyMessage={t("registrations.rescheduleNoDates")}
                             showFullDays={rescheduleShowFullDays}
                             onToggleShowFullDays={() => setRescheduleShowFullDays((current) => !current)}
-                            showWeekendDays={rescheduleShowWeekendDays}
-                            onToggleShowWeekendDays={() => setRescheduleShowWeekendDays((current) => !current)}
+                            showPolicyHiddenDays={rescheduleShowWeekendDays}
+                            onToggleShowPolicyHiddenDays={() => setRescheduleShowWeekendDays((current) => !current)}
                             startDate={startDateFromOffset(rescheduleOffset)}
                             onChangeStartDate={(nextDate) => {
                               setRescheduleOffset(offsetFromStartDate(nextDate));
