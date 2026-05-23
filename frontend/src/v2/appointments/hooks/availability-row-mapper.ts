@@ -43,6 +43,7 @@ export interface AvailabilityRowViewModel {
   requiresSupervisorOverride: boolean;
   reasonCodes?: string[];
   hideAlways?: boolean;
+  isWeekend?: boolean;
 }
 
 function toDayLabel(isoDate: string, language: Language): string {
@@ -55,14 +56,20 @@ function toDayLabel(isoDate: string, language: Language): string {
   });
 }
 
+function isWeekendDate(isoDate: string): boolean {
+  const d = new Date(`${isoDate}T00:00:00Z`);
+  const day = d.getUTCDay();
+  return day === 5 || day === 6;
+}
+
 export function getAvailabilityRowStatus(day: AvailabilityDayDto): AvailabilityRowStatus {
   if (day.rowDisplayStatus) return day.rowDisplayStatus;
 
   if (day.decision.displayStatus === "blocked") {
-    const hasCapacityExhaustedReason = day.decision.reasons.some(
-      (r) => r.code === "modality_daily_capacity_exhausted" || r.code === "category_capacity_exhausted"
-    );
-    return hasCapacityExhaustedReason ? "full" : "blocked";
+    const reasonCodes = new Set(day.decision.reasons.map((reason) => reason.code));
+    if (reasonCodes.has("modality_daily_capacity_exhausted")) return "full";
+    if (reasonCodes.has("category_capacity_exhausted")) return "restricted";
+    return "blocked";
   }
 
   return day.decision.displayStatus;
@@ -82,7 +89,8 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
       : matchedExamRuleSummary?.effectMode ?? "";
   const reasonText = matchedExamRuleSummary ? "" : day.decision.reasons[0]?.message ?? "";
   const reasonCodes = day.decision.reasons.map((reason) => reason.code);
-  const hideAlways = reasonCodes.includes("weekday_appointments_disabled");
+  const isWeekend = isWeekendDate(day.date);
+  const hideAlways = isWeekend || reasonCodes.includes("weekday_appointments_disabled");
 
   const hideRawCapacity = status === "blocked";
 
@@ -123,5 +131,6 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
     requiresSupervisorOverride: day.decision.requiresSupervisorOverride,
     reasonCodes,
     hideAlways,
+    isWeekend,
   };
 }

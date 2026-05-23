@@ -334,10 +334,11 @@ async function getAvailabilityInternal(
       isFull,
       rowDisplayStatus:
         decision.displayStatus === "blocked" &&
-        decision.reasons.some((r) =>
-          r.code === "modality_daily_capacity_exhausted" || r.code === "category_capacity_exhausted"
-        )
+        decision.reasons.some((r) => r.code === "modality_daily_capacity_exhausted")
           ? "full"
+          : decision.displayStatus === "blocked" &&
+              decision.reasons.some((r) => r.code === "category_capacity_exhausted")
+            ? "restricted"
           : decision.displayStatus,
       decision,
     });

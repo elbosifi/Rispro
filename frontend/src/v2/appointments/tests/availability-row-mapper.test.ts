@@ -61,4 +61,41 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(row.dayLabel).toContain("السبت");
     expect(row.dayLabel).toContain("يناير");
   });
+
+  it("maps category-only exhaustion as restricted, not a full modality day", () => {
+    const day = baseDay();
+    day.rowDisplayStatus = undefined;
+    day.decision.displayStatus = "blocked";
+    day.decision.reasons = [{ code: "category_capacity_exhausted", severity: "error", message: "Category is full" }];
+    day.remainingCapacity = 3;
+    day.decision.remainingStandardCapacity = 3;
+
+    const row = mapAvailabilityRow(day, "en");
+
+    expect(row.status).toBe("restricted");
+    expect(row.remainingCapacity).toBe(3);
+  });
+
+  it("maps total modality exhaustion as full", () => {
+    const day = baseDay();
+    day.rowDisplayStatus = undefined;
+    day.decision.displayStatus = "blocked";
+    day.decision.reasons = [{ code: "modality_daily_capacity_exhausted", severity: "error", message: "Modality is full" }];
+    day.remainingCapacity = 0;
+    day.decision.remainingStandardCapacity = 0;
+
+    const row = mapAvailabilityRow(day, "en");
+
+    expect(row.status).toBe("full");
+  });
+
+  it("marks Friday and Saturday rows as weekend-hidden candidates", () => {
+    const friday = baseDay();
+    friday.date = "2027-01-01";
+    const saturday = baseDay();
+    saturday.date = "2027-01-02";
+
+    expect(mapAvailabilityRow(friday, "en").hideAlways).toBe(true);
+    expect(mapAvailabilityRow(saturday, "en").hideAlways).toBe(true);
+  });
 });
