@@ -346,6 +346,35 @@ const availabilityRowsWithAvailable: AvailabilityRowViewModel[] = [
   },
 ];
 
+const availabilityRowsWithHiddenAndAvailable: AvailabilityRowViewModel[] = [
+  {
+    ...availabilityRows[3],
+    date: "2027-01-01",
+    dayLabel: "Fri, Jan 1",
+    hideAlways: true,
+  },
+  {
+    ...availabilityRows[2],
+    date: "2027-01-02",
+    dayLabel: "Sat, Jan 2",
+  },
+  {
+    ...availabilityRowsWithAvailable[0],
+    date: "2027-01-05",
+    dayLabel: "Tue, Jan 5",
+  },
+];
+
+const supervisorTotalCapacityRows: AvailabilityRowViewModel[] = [
+  {
+    ...availabilityRows[2],
+    date: "2027-01-06",
+    dayLabel: "Wed, Jan 6",
+    reasonText: "Total modality capacity exhausted",
+    reasonCodes: ["modality_daily_capacity_exhausted"],
+  },
+];
+
 function setup(
   canUseNonStandardCapacityModes: boolean = true,
   priorityOptions: Array<{ id: number; nameEn: string; nameAr: string }> = [],
@@ -576,9 +605,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
     await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
-    await userEvent.click(screen.getByRole("button", { name: /2027-01-01 blocked/i }));
 
-    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("button", { name: /2027-01-01 blocked/i })).toBeNull();
   });
 
   it("allows receptionist to select restricted, full, and closed rows when override is requestable", async () => {
@@ -598,6 +626,49 @@ describe("CreateAppointmentTab UI interactions", () => {
 
     await userEvent.click(screen.getByRole("button", { name: /2027-01-04 blocked/i }));
     expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps full and weekend visibility filters independent", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = availabilityRowsWithHiddenAndAvailable;
+    try {
+      setup(false, [], undefined, "supervisor");
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+      expect(screen.queryByRole("button", { name: /2027-01-01 blocked/i })).toBeNull();
+      expect(screen.queryByRole("button", { name: /2027-01-02 full/i })).toBeNull();
+      expect(screen.getByRole("button", { name: /2027-01-05 available/i })).toBeTruthy();
+
+      await userEvent.click(screen.getByRole("button", { name: "Show weekend" }));
+      expect(screen.getByRole("button", { name: /2027-01-01 blocked/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /2027-01-02 full/i })).toBeNull();
+
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      expect(screen.getByRole("button", { name: /2027-01-02 full/i })).toBeTruthy();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
+  it("auto-selects the closest normally bookable visible day", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = availabilityRowsWithHiddenAndAvailable;
+    try {
+      setup(false, [], undefined, "receptionist");
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+
+      await waitFor(() => {
+        expect((screen.getByRole("button", { name: /2027-01-05 available/i }) as HTMLButtonElement).style.border).toContain("var(--blue)");
+      });
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(screen.queryByRole("button", { name: "Request override approval" })).toBeNull();
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
   });
 
   it("shows primary exam-mix group in top summary strip", async () => {
@@ -814,6 +885,41 @@ describe("CreateAppointmentTab UI interactions", () => {
     });
   });
 
+  it("lets supervisor request total capacity override approval without immediate booking", async () => {
+    const previousRows = mockRowsRef.current;
+    mockRowsRef.current = supervisorTotalCapacityRows;
+    const { onCreateAppointment } = setup(true, [], undefined, "supervisor");
+    try {
+      await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+      fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+      fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+      await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
+      await userEvent.click(screen.getByRole("button", { name: /2027-01-06 full/i }));
+
+      expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+      fireEvent.change(await screen.findByPlaceholderText("Explain why this appointment needs override approval"), {
+        target: { value: "Need superadmin total capacity approval" },
+      });
+      await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+      await waitFor(() => {
+        expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalled();
+      });
+      expect(onCreateAppointment).not.toHaveBeenCalled();
+      expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+        requestType: "create_booking",
+        requesterReason: "Need superadmin total capacity approval",
+        requestPayload: {
+          bookingDate: "2027-01-06",
+        },
+      });
+    } finally {
+      mockRowsRef.current = previousRows;
+    }
+  });
+
   it("does not let receptionist select override-only rows when override requests are disabled in settings", async () => {
     mockReceptionOverrideRequestsEnabled.current = false;
     setup(false, [], undefined, "receptionist");
@@ -835,8 +941,8 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
     await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
-    await userEvent.click(screen.getByRole("button", { name: /2027-01-01 blocked/i }));
 
+    expect(screen.queryByRole("button", { name: /2027-01-01 blocked/i })).toBeNull();
     expect((screen.queryByRole("button", { name: "Request override approval" }))).toBeNull();
     expect((screen.getByLabelText("Case Category") as HTMLSelectElement).value).toBe("oncology");
   });

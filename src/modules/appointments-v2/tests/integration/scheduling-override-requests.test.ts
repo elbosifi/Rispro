@@ -119,9 +119,9 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     }
   }
 
-  async function requestCategoryOverride(date: string, patientId = 0) {
+  async function requestCategoryOverride(date: string, patientId = 0, cookie = receptionistCookie) {
     const targetPatientId = patientId || await createPatient();
-    return fetchAs(receptionistCookie, "/api/v2/scheduling-override-requests", {
+    return fetchAs(cookie, "/api/v2/scheduling-override-requests", {
       method: "POST",
       body: {
         requestType: "create_booking",
@@ -512,6 +512,15 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     });
     assert.equal(superAdminApproval.status, 200);
     assert.equal(await countBookings(date, targetPatientId), beforeTotalApprovalCount + 1);
+
+    const supervisorRequestedTotal = await requestCategoryOverride(date, 0, supervisorCookie);
+    assert.equal(supervisorRequestedTotal.status, 201);
+    assert.equal((supervisorRequestedTotal.data as any).request.overrideType, "total_capacity_override");
+    const supervisorRequestApproval = await fetchAs(supervisorCookie, `/api/v2/scheduling-override-requests/${Number((supervisorRequestedTotal.data as any).request.id)}/approve`, {
+      method: "POST",
+      body: { approverReason: "supervisor still cannot approve total" },
+    });
+    assert.equal(supervisorRequestApproval.status, 403);
   });
 
   it("fails cleanly when current scheduling state needs a stronger override than requested", async () => {
