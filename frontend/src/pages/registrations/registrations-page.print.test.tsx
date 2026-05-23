@@ -36,6 +36,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPatientDirectorySummary: (...args: unknown[]) => fetchPatientDirectorySummaryMock(...args),
   getAppointmentById: (...args: unknown[]) => getAppointmentByIdMock(...args),
   fetchPatientQrSettings: (...args: unknown[]) => fetchPatientQrSettingsMock(...args),
+  fetchPublicSchedulingCapacitySettings: () => Promise.resolve({ allow_reception_override_requests_from_availability: "enabled" }),
   fetchPublicAppointmentReportStatus: (...args: unknown[]) => fetchPublicAppointmentReportStatusMock(...args),
   sendPatientWebPushNotification: (...args: unknown[]) => sendPatientWebPushNotificationMock(...args),
 }));

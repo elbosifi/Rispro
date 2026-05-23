@@ -10,6 +10,7 @@ import {
   fetchPublicAppointmentReportStatus,
   getAppointmentById,
   fetchPatientQrSettings,
+  fetchPublicSchedulingCapacitySettings,
   sendPatientWebPushNotification,
   updateAppointmentStatus,
   type PublicReportStatusResponse,
@@ -229,6 +230,13 @@ export default function RegistrationsPage() {
     queryFn: fetchPatientQrSettings,
     staleTime: 1000 * 60,
   });
+  const { data: schedulingCapacitySettings } = useQuery({
+    queryKey: ["settings", "scheduling_and_capacity", "public"],
+    queryFn: fetchPublicSchedulingCapacitySettings,
+    staleTime: 60_000,
+  });
+  const allowReceptionOverrideRequestsFromAvailability =
+    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled";
   useEffect(() => {
     if (!patientIdParam) return;
 
@@ -969,7 +977,9 @@ export default function RegistrationsPage() {
     if (!selectedAppointment || !canSubmitReschedule) return;
     const payload = buildReschedulePayload();
     if (!payload) return;
-    const supportedOverrideType = inferSupportedOverrideType(rescheduleSelectedRow?.reasonCodes);
+    const supportedOverrideType = allowReceptionOverrideRequestsFromAvailability
+      ? inferSupportedOverrideType(rescheduleSelectedRow?.reasonCodes)
+      : null;
     if (
       rescheduleSelectedRow?.requiresSupervisorOverride ||
       rescheduleSelectedRow?.status === "restricted" ||
@@ -1912,7 +1922,9 @@ export default function RegistrationsPage() {
                             rows={rescheduleAvailability.rows.filter(
                               (row) =>
                                 row.date !== selectedAppointment.appointmentDate &&
-                                row.status !== "blocked"
+                                (row.status !== "blocked" ||
+                                  ((allowReceptionOverrideRequestsFromAvailability || user?.role !== "receptionist") &&
+                                    Boolean(inferSupportedOverrideType(row.reasonCodes))))
                             )}
                             selectedDate={rescheduleDate}
                             onSelectDate={(row) => {
@@ -1945,6 +1957,7 @@ export default function RegistrationsPage() {
                               setRescheduleSelectedRow(null);
                             }}
                             canGoPrevious={rescheduleOffset > 0}
+                            allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || user?.role !== "receptionist"}
                           />
                         </div>
 
@@ -1996,7 +2009,7 @@ export default function RegistrationsPage() {
                         ) : null}
 
                         <div className={`flex flex-wrap gap-2 ${isRtl ? "justify-start" : "justify-end"}`}>
-                          {user?.role === "receptionist" && rescheduleSelectedRow && inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes) ? (
+                          {user?.role === "receptionist" && allowReceptionOverrideRequestsFromAvailability && rescheduleSelectedRow && inferSupportedOverrideType(rescheduleSelectedRow.reasonCodes) ? (
                             <Button
                               type="button"
                               size="sm"

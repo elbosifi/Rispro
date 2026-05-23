@@ -170,6 +170,18 @@ settingsRouter.get(
 );
 
 settingsRouter.get(
+  "/scheduling-and-capacity/public",
+  asyncRoute(async (_req: Request, res: Response) => {
+    const settings = await getSettingsByCategory("scheduling_and_capacity");
+    res.json({
+      settings: settings.filter((setting) =>
+        setting.setting_key === "allow_reception_override_requests_from_availability"
+      ),
+    });
+  })
+);
+
+settingsRouter.get(
   "/users-and-roles/page-visibility",
   asyncRoute(async (_req: Request, res: Response) => {
     const matrix = await readPageVisibilityMatrix();

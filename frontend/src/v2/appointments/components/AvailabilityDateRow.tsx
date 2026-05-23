@@ -41,6 +41,7 @@ interface Props {
   reasonText: string;
   requiresSupervisorOverride: boolean;
   requestableOverride?: boolean;
+  allowNonAvailableSelection?: boolean;
   selected: boolean;
   onClick: () => void;
 }
@@ -161,15 +162,16 @@ export function AvailabilityDateRow({
   reasonText,
   requiresSupervisorOverride,
   requestableOverride = false,
+  allowNonAvailableSelection = true,
   selected,
   onClick,
 }: Props) {
   const { language } = useLanguage();
   const isClickable =
     status === "available" ||
-    status === "restricted" ||
+    (status === "restricted" && allowNonAvailableSelection) ||
     requestableOverride ||
-    (status === "full" && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
+    (status === "full" && allowNonAvailableSelection && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
   const isBlockedLike = status === "blocked" && !requestableOverride;
 
   const statusColor =

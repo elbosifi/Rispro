@@ -142,6 +142,19 @@ function canCreateRequest(role: Role | undefined): boolean {
   return role === "receptionist" || role === "supervisor" || role === "super_admin";
 }
 
+async function canReceptionRequestOverrideFromAvailability(client: PoolClient): Promise<boolean> {
+  const result = await client.query<{ value: string | null }>(
+    `
+      select setting_value->>'value' as value
+      from system_settings
+      where category = 'scheduling_and_capacity'
+        and setting_key = 'allow_reception_override_requests_from_availability'
+      limit 1
+    `
+  );
+  return String(result.rows[0]?.value ?? "enabled").trim().toLowerCase() !== "disabled";
+}
+
 function canApproveOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
   if (role === "super_admin") return true;
   if (role !== "supervisor") return false;
@@ -346,6 +359,10 @@ export async function createSchedulingOverrideRequest(
   }
 
   return withTransaction(async (client) => {
+    if (role === "receptionist" && !(await canReceptionRequestOverrideFromAvailability(client))) {
+      throw new SchedulingError(403, "Reception override requests are disabled in settings.", ["override_requests_disabled"]);
+    }
+
     const requestType = normalizeRequestType(input.requestType);
     const rawPayload = input.requestPayload ?? {};
     const payloadRecord = typeof rawPayload === "object" && rawPayload !== null && !Array.isArray(rawPayload)

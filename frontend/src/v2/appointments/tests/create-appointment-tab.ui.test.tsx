@@ -48,6 +48,9 @@ const mockCreateSchedulingOverrideRequest = vi.fn<
 vi.mock("@/lib/api-hooks", () => ({
   fetchAppointments: (params: unknown) => mockFetchAppointments(params),
   fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
+  fetchPublicSchedulingCapacitySettings: () => Promise.resolve({
+    allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+  }),
   fetchSettings: (category: string) => {
     if (category === "queue_and_arrival") {
       return Promise.resolve({ walk_in_queue: mockQueueWalkInEnabled.current ? "enabled" : "disabled" });
@@ -77,6 +80,14 @@ vi.mock("@tanstack/react-query", () => ({
     if (key.includes("queue_and_arrival")) {
       return {
         data: { walk_in_queue: mockQueueWalkInEnabled.current ? "enabled" : "disabled" },
+        isLoading: false,
+        isError: false,
+        error: null,
+      };
+    }
+    if (key.includes("scheduling_and_capacity")) {
+      return {
+        data: { allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled" },
         isLoading: false,
         isError: false,
         error: null,
@@ -803,8 +814,9 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
-    await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
-    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: /2027-01-02 restricted/i }) as HTMLButtonElement).disabled).toBe(true);
+    });
     expect(screen.queryByRole("button", { name: /2027-01-04 blocked/i })).toBeNull();
     expect(screen.queryByRole("button", { name: "Request override approval" })).toBeNull();
   });

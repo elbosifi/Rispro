@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { pushToast } from "@/lib/toast";
-import { fetchAppointments, fetchPatientQrSettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
+import { fetchAppointments, fetchPatientQrSettings, fetchPublicSchedulingCapacitySettings, fetchSettings, getAppointmentById } from "@/lib/api-hooks";
 import { chooseLocalized, t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
 import { buildAppointmentPrintUrl } from "@/lib/print-routing";
@@ -141,6 +141,13 @@ export function CreateAppointmentTab({
     queryFn: () => fetchSettings("queue_and_arrival"),
     staleTime: 60_000,
   });
+  const { data: schedulingCapacitySettings } = useQuery({
+    queryKey: ["settings", "scheduling_and_capacity", "public"],
+    queryFn: fetchPublicSchedulingCapacitySettings,
+    staleTime: 60_000,
+  });
+  const allowReceptionOverrideRequestsFromAvailability =
+    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled";
   const { form, actions } = useCreateAppointmentForm({
     oncology: patientQrSettings?.defaultReportRequiredForOncology ?? true,
     nonOncology: patientQrSettings?.defaultReportRequiredForNonOncology ?? false,
@@ -329,7 +336,7 @@ export function CreateAppointmentTab({
 
   function handleSelectAvailabilityRow(row: AvailabilityRowViewModel) {
     const hasRowSpecialQuota = (row.specialQuotaRemaining ?? 0) > 0;
-    const supportedOverrideType = inferSupportedOverrideType(row.reasonCodes);
+    const supportedOverrideType = allowReceptionOverrideRequestsFromAvailability ? inferSupportedOverrideType(row.reasonCodes) : null;
     if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota) && !supportedOverrideType) {
       return;
     }
@@ -471,7 +478,9 @@ export function CreateAppointmentTab({
         includeOverrideEvaluation: true,
       });
 
-      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
+      const supportedOverrideType = allowReceptionOverrideRequestsFromAvailability
+        ? inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes)
+        : null;
 
       if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !(isReceptionist && supportedOverrideType)) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
@@ -854,7 +863,7 @@ export function CreateAppointmentTab({
               {form.overrideRequired && (
                 <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
                   <div>{t(language, "appointments.create.overrideRequired")}</div>
-                  {isReceptionist && inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ? (
+                  {isReceptionist && allowReceptionOverrideRequestsFromAvailability && inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ? (
                     <div className="mt-1 text-xs">
                       {formatOverrideType(inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes))}
                     </div>
@@ -886,7 +895,7 @@ export function CreateAppointmentTab({
                 >
                   {submitLoading ? t(language, "appointments.create.creating") : t(language, "appointments.create.create")}
                 </Button>
-                {isReceptionist && availabilitySelectedRow && inferSupportedOverrideType(availabilitySelectedRow.reasonCodes) ? (
+                {isReceptionist && allowReceptionOverrideRequestsFromAvailability && availabilitySelectedRow && inferSupportedOverrideType(availabilitySelectedRow.reasonCodes) ? (
                   <Button
                     type="button"
                     variant="secondary"
@@ -941,6 +950,7 @@ export function CreateAppointmentTab({
                 setAvailabilitySelectedRow(null);
               }}
               canGoPrevious={availabilityOffset > 0}
+              allowOverrideRequests={allowReceptionOverrideRequestsFromAvailability || !isReceptionist}
               emptyMessage={
                 availability.enabled
                   ? t(language, "appointments.create.noAvailabilityRows")

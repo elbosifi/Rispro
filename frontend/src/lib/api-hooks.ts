@@ -2415,6 +2415,11 @@ export async function fetchSettings(category: string) {
   return mapSettings(raw.settings ?? []);
 }
 
+export async function fetchPublicSchedulingCapacitySettings() {
+  const raw = await api<{ settings: RawRecord[] }>("/settings/scheduling-and-capacity/public");
+  return mapSettings(raw.settings ?? []);
+}
+
 export async function fetchPageVisibilityMatrix(): Promise<PageVisibilityMatrix> {
   const raw = await api<{ matrix?: unknown }>("/settings/users-and-roles/page-visibility");
   return normalizePageVisibilityMatrix(raw.matrix ?? {});

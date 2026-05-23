@@ -168,6 +168,37 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     };
   }
 
+  it("rejects receptionist override requests when disabled in settings", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    await setCapacityLimits();
+    const date = "2042-01-31";
+    await fillNonOncologyCategory(date);
+    await pool.query(
+      `
+        insert into system_settings (category, setting_key, setting_value)
+        values ('scheduling_and_capacity', 'allow_reception_override_requests_from_availability', '{"value":"disabled"}'::jsonb)
+        on conflict (category, setting_key)
+        do update set setting_value = excluded.setting_value
+      `
+    );
+
+    try {
+      const requested = await requestCategoryOverride(date);
+      assert.equal(requested.status, 403);
+      assert.match(String((requested.data as any).error?.message ?? ""), /disabled/i);
+    } finally {
+      await pool.query(
+        `
+          update system_settings
+          set setting_value = '{"value":"enabled"}'::jsonb
+          where category = 'scheduling_and_capacity'
+            and setting_key = 'allow_reception_override_requests_from_availability'
+        `
+      );
+    }
+  });
+
   it("receptionist creates a pending create-booking request and supervisor approves it", async () => {
     if (!testData) return;
     await setCapacityLimits();

@@ -113,6 +113,7 @@ export function AvailabilityPanel({
             reasonText={row.reasonText}
             requiresSupervisorOverride={row.requiresSupervisorOverride}
             requestableOverride={requestableOverride}
+            allowNonAvailableSelection={allowOverrideRequests}
             selected={selectedDate === row.date}
             onClick={() => onSelectDate(row)}
           />

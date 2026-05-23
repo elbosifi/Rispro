@@ -2053,6 +2053,10 @@ const SETTINGS_CATALOG: Record<string, SettingControl> = {
     { value: "supervisor_required", label: "يتطلب اعتماد مشرف" },
     { value: "disabled", label: "غير مسموح" }
   ]},
+  allow_reception_override_requests_from_availability: { label: "Reception override requests from availability / طلبات تجاوز الاستقبال من شاشة التوفر", type: "dropdown", options: [
+    { value: "enabled", label: "Enabled / مفعل" },
+    { value: "disabled", label: "Disabled / غير مفعل" }
+  ]},
   // Queue & Arrival
   barcode_check_in: { label: "تسجيل الوصول بالباركود", type: "dropdown", options: [
     { value: "enabled", label: "مفعل" },
