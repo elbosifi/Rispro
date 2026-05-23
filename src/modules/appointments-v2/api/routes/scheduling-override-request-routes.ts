@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { requireAuth } from "../../../../middleware/auth.js";
+import { requireAuth, requireRecentSupervisorReauth } from "../../../../middleware/auth.js";
 import { asyncRoute } from "../../../../utils/async-route.js";
 import type { AuthenticatedUserContext } from "../../../../types/http.js";
 import {
@@ -71,6 +71,7 @@ schedulingOverrideRequestRouter.get(
 
 schedulingOverrideRequestRouter.post(
   "/:id/approve",
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const body = (req.body ?? {}) as Record<string, unknown>;
@@ -86,6 +87,7 @@ schedulingOverrideRequestRouter.post(
 
 schedulingOverrideRequestRouter.post(
   "/:id/reject",
+  requireRecentSupervisorReauth,
   asyncRoute(async (req: AuthenticatedRequest, res: Response) => {
     const id = requestId(req);
     const body = (req.body ?? {}) as Record<string, unknown>;

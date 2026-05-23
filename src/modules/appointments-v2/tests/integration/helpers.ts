@@ -37,6 +37,12 @@ export function createTestAuthCookie(userId: number, role: string = "supervisor"
   return `${env.cookieName}=${token}`;
 }
 
+export function createTestSupervisorReauthCookie(userId: number, role: "supervisor" | "super_admin" = "supervisor"): string {
+  const payload = { sub: userId, role, purpose: "supervisor-reauth", username: "test_user", fullName: "Test User" };
+  const token = jwt.sign(payload, env.jwtSecret, { expiresIn: "10m" });
+  return `${env.reauthCookieName}=${token}`;
+}
+
 export async function setupTestDatabase(
   dataPrefix: string = "TEST_"
 ): Promise<{ cleanup: () => Promise<void>; schemaName: string }> {

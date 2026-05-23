@@ -1,7 +1,10 @@
 import { useMemo, useState } from "react";
 import { Bell, X } from "lucide-react";
+import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { Button, Badge } from "@/components/shared";
+import { t } from "@/lib/i18n";
 import { pushToast } from "@/lib/toast";
+import { useLanguage } from "@/providers/language-provider";
 import type { User } from "@/types/api";
 import {
   useApproveSchedulingOverrideRequest,
@@ -22,6 +25,7 @@ const REQUEST_TYPE_OPTIONS = ["", "create_booking", "reschedule_booking"] as con
 const OVERRIDE_TYPE_OPTIONS: Array<SchedulingOverrideType | ""> = ["", "closed_weekday_override", "category_override", "total_capacity_override"];
 
 export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }) {
+  const { language } = useLanguage();
   const [open, setOpen] = useState(false);
   const badgeQuery = useSchedulingOverrideRequests({ status: "pending" });
 
@@ -39,7 +43,7 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
         type="button"
         className="btn-ghost relative"
         onClick={() => setOpen(true)}
-        aria-label="Override requests"
+        aria-label={t(language, "overrideRequests.title")}
       >
         <Bell className="h-4 w-4" />
         {actionableCount > 0 ? (
@@ -55,10 +59,10 @@ export function SchedulingOverrideApprovalCenter({ user }: { user: User | null }
           <aside className="absolute bottom-0 right-0 top-0 flex w-full max-w-xl flex-col border-l border-border bg-background shadow-xl">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <div>
-                <h2 className="text-base font-semibold text-foreground">Override requests</h2>
-                <p className="text-xs text-muted-foreground">Pending override requests are not confirmed bookings.</p>
+                <h2 className="text-base font-semibold text-foreground">{t(language, "overrideRequests.title")}</h2>
+                <p className="text-xs text-muted-foreground">{t(language, "overrideRequests.pendingNotConfirmed")}</p>
               </div>
-              <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label="Close override requests">
+              <button type="button" className="btn-ghost" onClick={() => setOpen(false)} aria-label={t(language, "overrideRequests.close")}>
                 <X className="h-4 w-4" />
               </button>
             </div>
@@ -78,6 +82,7 @@ export function SchedulingOverrideRequestsWorkspace({
   user: User | null;
   variant?: "page" | "drawer";
 }) {
+  const { language } = useLanguage();
   const defaultStatus: SchedulingOverrideRequestStatus | undefined =
     user?.role === "supervisor" || user?.role === "super_admin" ? "pending" : undefined;
   const [status, setStatus] = useState<SchedulingOverrideRequestStatus | "">(defaultStatus ?? "");
@@ -99,69 +104,78 @@ export function SchedulingOverrideRequestsWorkspace({
   const [rejectReason, setRejectReason] = useState("");
   const [approveReasonById, setApproveReasonById] = useState<Record<string, string>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingReauthAction, setPendingReauthAction] = useState<null | (() => void)>(null);
 
   const requests = useMemo(() => listQuery.data?.requests ?? [], [listQuery.data?.requests]);
 
   if (!user) return null;
 
-  async function approve(request: SchedulingOverrideRequestDto) {
+  async function approveAfterReauth(request: SchedulingOverrideRequestDto) {
     setActionError(null);
     try {
       await approveMutation.mutateAsync({
         id: request.id,
         approverReason: approveReasonById[String(request.id)] || null,
       });
-      pushToast({ type: "success", title: "Override request approved", message: "Appointment state has been updated." });
+      pushToast({ type: "success", title: t(language, "overrideRequests.approvedTitle"), message: t(language, "overrideRequests.approvedMessage") });
     } catch (error) {
-      const message = error instanceof Error ? overrideFailureMessage(error.message) : "Approval failed.";
+      const message = error instanceof Error ? overrideFailureMessage(error.message) : t(language, "overrideRequests.approvalFailed");
       setActionError(message);
-      pushToast({ type: "error", title: "Approval failed", message });
+      pushToast({ type: "error", title: t(language, "overrideRequests.approvalFailed"), message });
     }
   }
 
-  async function reject(request: SchedulingOverrideRequestDto) {
-    if (!rejectReason.trim()) {
-      setActionError("Rejection reason is required.");
-      return;
-    }
+  function approve(request: SchedulingOverrideRequestDto) {
+    setPendingReauthAction(() => () => void approveAfterReauth(request));
+  }
+
+  async function rejectAfterReauth(request: SchedulingOverrideRequestDto) {
     setActionError(null);
     try {
       await rejectMutation.mutateAsync({ id: request.id, approverReason: rejectReason.trim() });
       setRejectingId(null);
       setRejectReason("");
-      pushToast({ type: "success", title: "Override request rejected", message: "The requester can see the rejection." });
+      pushToast({ type: "success", title: t(language, "overrideRequests.rejectedTitle"), message: t(language, "overrideRequests.rejectedMessage") });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Rejection failed.";
+      const message = error instanceof Error ? error.message : t(language, "overrideRequests.rejectionFailed");
       setActionError(message);
-      pushToast({ type: "error", title: "Rejection failed", message });
+      pushToast({ type: "error", title: t(language, "overrideRequests.rejectionFailed"), message });
     }
+  }
+
+  function reject(request: SchedulingOverrideRequestDto) {
+    if (!rejectReason.trim()) {
+      setActionError(t(language, "overrideRequests.rejectionReasonRequired"));
+      return;
+    }
+    setPendingReauthAction(() => () => void rejectAfterReauth(request));
   }
 
   async function cancel(request: SchedulingOverrideRequestDto) {
     setActionError(null);
     try {
       await cancelMutation.mutateAsync(request.id);
-      pushToast({ type: "success", title: "Override request cancelled", message: "The pending request was cancelled." });
+      pushToast({ type: "success", title: t(language, "overrideRequests.cancelledTitle"), message: t(language, "overrideRequests.cancelledMessage") });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Cancellation failed.";
+      const message = error instanceof Error ? error.message : t(language, "overrideRequests.cancellationFailed");
       setActionError(message);
-      pushToast({ type: "error", title: "Cancellation failed", message });
+      pushToast({ type: "error", title: t(language, "overrideRequests.cancellationFailed"), message });
     }
   }
 
   return (
     <div className={variant === "page" ? "space-y-4" : "flex min-h-0 flex-1 flex-col"}>
       <div className={`grid grid-cols-2 gap-2 ${variant === "drawer" ? "border-b border-border p-3 sm:grid-cols-4" : "rounded-2xl border border-border bg-card p-3 shadow-sm sm:grid-cols-4"}`}>
-        <select aria-label="Override request status filter" className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
-          {STATUS_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value || "All statuses"}</option>)}
+        <select aria-label={t(language, "overrideRequests.statusFilter")} className="input-premium h-9 text-xs" value={status} onChange={(e) => setStatus(e.target.value as SchedulingOverrideRequestStatus | "")}>
+          {STATUS_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value || t(language, "calendar.allStatuses")}</option>)}
         </select>
-        <select aria-label="Override request type filter" className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
-          {REQUEST_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatRequestType(value) : "All request types"}</option>)}
+        <select aria-label={t(language, "overrideRequests.requestTypeFilter")} className="input-premium h-9 text-xs" value={requestType} onChange={(e) => setRequestType(e.target.value as typeof requestType)}>
+          {REQUEST_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatRequestType(value) : t(language, "overrideRequests.allRequestTypes")}</option>)}
         </select>
-        <select aria-label="Override type filter" className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
-          {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : "All override types"}</option>)}
+        <select aria-label={t(language, "overrideRequests.overrideTypeFilter")} className="input-premium h-9 text-xs" value={overrideType} onChange={(e) => setOverrideType(e.target.value as SchedulingOverrideType | "")}>
+          {OVERRIDE_TYPE_OPTIONS.map((value) => <option key={value || "all"} value={value}>{value ? formatOverrideType(value) : t(language, "overrideRequests.allOverrideTypes")}</option>)}
         </select>
-        <input aria-label="Override requested date filter" type="date" className="input-premium h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
+        <input aria-label={t(language, "overrideRequests.requestedDateFilter")} type="date" className="input-premium h-9 text-xs" value={requestedDate} onChange={(e) => setRequestedDate(e.target.value)} />
       </div>
 
       {actionError ? (
@@ -172,9 +186,9 @@ export function SchedulingOverrideRequestsWorkspace({
 
       <div className={variant === "drawer" ? "flex-1 overflow-y-auto p-3" : ""}>
         {listQuery.isLoading ? (
-          <p className="p-4 text-sm text-muted-foreground">Loading override requests...</p>
+          <p className="p-4 text-sm text-muted-foreground">{t(language, "overrideRequests.loading")}</p>
         ) : requests.length === 0 ? (
-          <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">No override requests found.</p>
+          <p className="rounded-xl border border-border bg-muted/30 p-4 text-sm text-muted-foreground">{t(language, "overrideRequests.empty")}</p>
         ) : (
           <div className={variant === "page" ? "grid gap-3 lg:grid-cols-2" : "space-y-3"}>
             {requests.map((request) => (
@@ -202,6 +216,16 @@ export function SchedulingOverrideRequestsWorkspace({
           </div>
         )}
       </div>
+      {pendingReauthAction ? (
+        <SupervisorReAuthModal
+          onClose={() => setPendingReauthAction(null)}
+          onSuccess={() => {
+            const action = pendingReauthAction;
+            setPendingReauthAction(null);
+            action?.();
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -235,6 +259,7 @@ function RequestCard({
   onCancel: () => void;
   busy: boolean;
 }) {
+  const { language } = useLanguage();
   const isPending = request.status === "pending";
   const canApprove = isPending && canRoleApproveSchedulingOverride(user.role, request.overrideType);
   const isOwn = Number(request.requesterUserId) === Number(user.id);
@@ -255,32 +280,32 @@ function RequestCard({
 
       <div className="grid grid-cols-2 gap-2 text-xs">
         <Info
-          label="Patient"
-          value={request.patientDisplayName || `Patient #${request.patientId}`}
-          meta={request.patientIdentifier ? `${request.patientIdentifier} · ID ${request.patientId}` : `ID ${request.patientId}`}
+          label={t(language, "overrideRequests.patient")}
+          value={request.patientDisplayName || t(language, "overrideRequests.patientFallback", { id: request.patientId })}
+          meta={request.patientIdentifier ? `${request.patientIdentifier} · ${t(language, "overrideRequests.idMeta", { id: request.patientId })}` : t(language, "overrideRequests.idMeta", { id: request.patientId })}
         />
         <Info
-          label="Modality"
-          value={request.modalityName || request.modalityCode || `Modality #${request.modalityId}`}
-          meta={request.modalityCode ? `${request.modalityCode} · ID ${request.modalityId}` : `ID ${request.modalityId}`}
+          label={t(language, "overrideRequests.modality")}
+          value={request.modalityName || request.modalityCode || t(language, "overrideRequests.modalityFallback", { id: request.modalityId })}
+          meta={request.modalityCode ? `${request.modalityCode} · ${t(language, "overrideRequests.idMeta", { id: request.modalityId })}` : t(language, "overrideRequests.idMeta", { id: request.modalityId })}
         />
         <Info
-          label="Exam"
-          value={request.examTypeName || (request.examTypeId ? `Exam #${request.examTypeId}` : "—")}
-          meta={request.examTypeId ? `ID ${request.examTypeId}` : undefined}
+          label={t(language, "overrideRequests.exam")}
+          value={request.examTypeName || (request.examTypeId ? t(language, "overrideRequests.examFallback", { id: request.examTypeId }) : "—")}
+          meta={request.examTypeId ? t(language, "overrideRequests.idMeta", { id: request.examTypeId }) : undefined}
         />
-        <Info label="Date/time" value={`${request.requestedBookingDate}${request.requestedBookingTime ? ` ${request.requestedBookingTime}` : ""}`} />
-        <Info label="Request type" value={formatRequestType(request.requestType)} />
+        <Info label={t(language, "overrideRequests.dateTime")} value={`${request.requestedBookingDate}${request.requestedBookingTime ? ` ${request.requestedBookingTime}` : ""}`} />
+        <Info label={t(language, "overrideRequests.requestType")} value={formatRequestType(request.requestType)} />
         <Info
-          label="Requester"
-          value={request.requesterDisplayName || request.requesterUsername || `User #${request.requesterUserId}`}
-          meta={request.requesterUsername ? `${request.requesterUsername} · ID ${request.requesterUserId}` : `ID ${request.requesterUserId}`}
+          label={t(language, "overrideRequests.requester")}
+          value={request.requesterDisplayName || request.requesterUsername || t(language, "overrideRequests.userFallback", { id: request.requesterUserId })}
+          meta={request.requesterUsername ? `${request.requesterUsername} · ${t(language, "overrideRequests.idMeta", { id: request.requesterUserId })}` : t(language, "overrideRequests.idMeta", { id: request.requesterUserId })}
         />
         {request.approverUserId ? (
           <Info
-            label="Approver"
-            value={request.approverDisplayName || request.approverUsername || `User #${request.approverUserId}`}
-            meta={request.approverUsername ? `${request.approverUsername} · ID ${request.approverUserId}` : `ID ${request.approverUserId}`}
+            label={t(language, "overrideRequests.approver")}
+            value={request.approverDisplayName || request.approverUsername || t(language, "overrideRequests.userFallback", { id: request.approverUserId })}
+            meta={request.approverUsername ? `${request.approverUsername} · ${t(language, "overrideRequests.idMeta", { id: request.approverUserId })}` : t(language, "overrideRequests.idMeta", { id: request.approverUserId })}
           />
         ) : null}
       </div>
@@ -292,21 +317,21 @@ function RequestCard({
         </p>
       ) : null}
       {isSupervisorBlockedTotal ? (
-        <p className="mt-2 text-xs text-muted-foreground">Supervisor cannot approve total capacity overrides. Superadmin approval is required.</p>
+        <p className="mt-2 text-xs text-muted-foreground">{t(language, "overrideRequests.supervisorTotalCapacityBlocked")}</p>
       ) : null}
 
       {canApprove ? (
         <div className="mt-3 space-y-2">
           <input
-            aria-label={`Approval note for request ${request.id}`}
+            aria-label={t(language, "overrideRequests.approvalNoteForRequest", { id: request.id })}
             className="input-premium h-9 text-xs"
             value={approveReason}
             onChange={(event) => onChangeApproveReason(event.target.value)}
-            placeholder="Optional approval note"
+            placeholder={t(language, "overrideRequests.optionalApprovalNote")}
           />
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" size="sm" onClick={onApprove} disabled={busy}>Approve</Button>
-            <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>Reject</Button>
+            <Button type="button" size="sm" onClick={onApprove} disabled={busy}>{t(language, "overrideRequests.approve")}</Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onStartReject} disabled={busy}>{t(language, "overrideRequests.reject")}</Button>
           </div>
         </div>
       ) : null}
@@ -314,23 +339,23 @@ function RequestCard({
       {rejecting ? (
         <div className="mt-3 rounded-xl border border-border bg-muted/30 p-2">
           <textarea
-            aria-label={`Rejection reason for request ${request.id}`}
+            aria-label={t(language, "overrideRequests.rejectionReasonForRequest", { id: request.id })}
             className="input-premium w-full resize-none text-xs"
             rows={2}
             value={rejectReason}
             onChange={(event) => onChangeRejectReason(event.target.value)}
-            placeholder="Rejection reason is required"
+            placeholder={t(language, "overrideRequests.rejectionReasonPlaceholder")}
           />
           <div className="mt-2 flex justify-end gap-2">
-            <Button type="button" size="sm" variant="secondary" onClick={onCancelReject} disabled={busy}>Keep pending</Button>
-            <Button type="button" size="sm" onClick={onReject} disabled={busy}>Confirm rejection</Button>
+            <Button type="button" size="sm" variant="secondary" onClick={onCancelReject} disabled={busy}>{t(language, "overrideRequests.keepPending")}</Button>
+            <Button type="button" size="sm" onClick={onReject} disabled={busy}>{t(language, "overrideRequests.confirmRejection")}</Button>
           </div>
         </div>
       ) : null}
 
       {!canApprove && canCancel ? (
         <div className="mt-3 flex justify-end">
-          <Button type="button" size="sm" variant="secondary" onClick={onCancel} disabled={busy}>Cancel request</Button>
+          <Button type="button" size="sm" variant="secondary" onClick={onCancel} disabled={busy}>{t(language, "overrideRequests.cancelRequest")}</Button>
         </div>
       ) : null}
     </article>

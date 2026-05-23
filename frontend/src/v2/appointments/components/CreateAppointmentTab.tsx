@@ -355,6 +355,26 @@ export function CreateAppointmentTab({
     setPageError(null);
   }
 
+  const selectedRowSupportedOverrideType = allowReceptionOverrideRequestsFromAvailability
+    ? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes)
+    : null;
+  const selectedRowRequiresOverride =
+    Boolean(availabilitySelectedRow) &&
+    availabilitySelectedRow.status !== "available" &&
+    Boolean(selectedRowSupportedOverrideType);
+  const selectedRowCanBookNormally =
+    !isReceptionist ||
+    !availabilitySelectedRow ||
+    availabilitySelectedRow.status === "available" ||
+    ((availabilitySelectedRow.specialQuotaRemaining ?? 0) > 0 && !selectedRowRequiresOverride);
+  const canSubmitCreate = Boolean(schedulingEngineEnabled && !submitLoading && selectedRowCanBookNormally);
+  const canRequestOverrideApproval = Boolean(
+    isReceptionist &&
+    availabilitySelectedRow &&
+    availabilitySelectedRow.status !== "available" &&
+    selectedRowSupportedOverrideType
+  );
+
   function validateBaseFields(): string | null {
     if (!form.patientId) return t(language, "appointments.create.missingPatient");
     if (!form.modalityId) return t(language, "appointments.create.missingModality");
@@ -578,12 +598,12 @@ export function CreateAppointmentTab({
       setPendingRequestDecision(null);
       pushToast({
         type: "success",
-        title: "Override request submitted",
-        message: "Override request submitted. The appointment is not booked until approval. Track it in Override Requests.",
+        title: t(language, "overrideRequests.submittedTitle"),
+        message: t(language, "overrideRequests.createSubmittedMessage"),
       });
       void availability.refetch();
     } catch (error) {
-      setRequestOverrideError(error instanceof Error ? error.message : "Failed to submit override request.");
+      setRequestOverrideError(error instanceof Error ? error.message : t(language, "overrideRequests.submitFailed"));
     }
   }
 
@@ -864,9 +884,9 @@ export function CreateAppointmentTab({
               {form.overrideRequired && (
                 <div className="text-sm font-medium border border-amber-200 p-3 rounded-lg xl:col-span-2" style={{ background: "rgba(245, 158, 11, 0.05)", color: "var(--amber)" }}>
                   <div>{t(language, "appointments.create.overrideRequired")}</div>
-                  {isReceptionist && allowReceptionOverrideRequestsFromAvailability && inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes) ? (
+                  {isReceptionist && selectedRowSupportedOverrideType ? (
                     <div className="mt-1 text-xs">
-                      {formatOverrideType(inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes))}
+                      {formatOverrideType(selectedRowSupportedOverrideType)}
                     </div>
                   ) : null}
                 </div>
@@ -892,24 +912,24 @@ export function CreateAppointmentTab({
                 </Button>
                 <Button
                   onClick={runSubmitFlow}
-                  disabled={submitLoading || !schedulingEngineEnabled}
+                  disabled={!canSubmitCreate}
                 >
                   {submitLoading ? t(language, "appointments.create.creating") : t(language, "appointments.create.create")}
                 </Button>
-                {isReceptionist && allowReceptionOverrideRequestsFromAvailability && availabilitySelectedRow && inferSupportedOverrideType(availabilitySelectedRow.reasonCodes) ? (
+                {canRequestOverrideApproval ? (
                   <Button
                     type="button"
                     variant="secondary"
                     onClick={() => {
-                      const overrideType = inferSupportedOverrideType(availabilitySelectedRow.reasonCodes);
-                      setRequestOverrideType(overrideType);
+                      if (!selectedRowSupportedOverrideType) return;
+                      setRequestOverrideType(selectedRowSupportedOverrideType);
                       setPendingRequestDecision(availability.rawItems.find((item) => item.date === form.appointmentDate)?.decision ?? null);
                       setRequestOverrideError(null);
                       setRequestOverrideOpen(true);
                     }}
                     disabled={createOverrideRequestMutation.isPending}
                   >
-                    Request override approval
+                    {t(language, "overrideRequests.requestApproval")}
                   </Button>
                 ) : null}
               </div>

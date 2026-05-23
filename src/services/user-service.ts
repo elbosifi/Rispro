@@ -319,7 +319,10 @@ export async function updateUserPassword(
 
   const currentResult = await pool.query(
     `
-      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      select id, username, full_name, role, is_active,
+             coalesce(must_change_password, false) as must_change_password,
+             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+             created_at, updated_at
       from users
       where id = $1
       limit 1
@@ -338,7 +341,10 @@ export async function updateUserPassword(
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active,
+                coalesce(must_change_password, false) as must_change_password,
+                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                created_at, updated_at
     `,
     [cleanUserId, passwordHash]
   );
@@ -377,7 +383,10 @@ export async function resetUserTemporaryPassword(
 
   const currentResult = await pool.query(
     `
-      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      select id, username, full_name, role, is_active,
+             coalesce(must_change_password, false) as must_change_password,
+             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+             created_at, updated_at
       from users
       where id = $1
       limit 1
@@ -395,7 +404,10 @@ export async function resetUserTemporaryPassword(
       update users
       set password_hash = $2, must_change_password = true, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active,
+                coalesce(must_change_password, false) as must_change_password,
+                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                created_at, updated_at
     `,
     [cleanUserId, passwordHash]
   );
@@ -431,7 +443,10 @@ export async function setUserMustChangePassword(
       update users
       set must_change_password = true, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active,
+                coalesce(must_change_password, false) as must_change_password,
+                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                created_at, updated_at
     `,
     [cleanUserId]
   );
@@ -468,7 +483,10 @@ export async function updateUserActiveState(
 
   const currentResult = await pool.query<UserRow>(
     `
-      select id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      select id, username, full_name, role, is_active,
+             coalesce(must_change_password, false) as must_change_password,
+             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+             created_at, updated_at
       from users
       where id = $1
       limit 1
@@ -522,7 +540,10 @@ export async function updateUserActiveState(
       update users
       set is_active = $2, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active,
+                coalesce(must_change_password, false) as must_change_password,
+                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                created_at, updated_at
     `,
     [cleanUserId, isActive]
   );
@@ -561,7 +582,10 @@ export async function updateOwnPassword(
 
   const currentResult = await pool.query<UserRow & { password_hash: string }>(
     `
-      select id, username, full_name, role, password_hash, is_active, must_change_password, created_at, updated_at
+      select id, username, full_name, role, password_hash, is_active,
+             coalesce(must_change_password, false) as must_change_password,
+             coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+             created_at, updated_at
       from users
       where id = $1
       limit 1
@@ -580,7 +604,10 @@ export async function updateOwnPassword(
       update users
       set password_hash = $2, must_change_password = false, updated_at = now()
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active,
+                coalesce(must_change_password, false) as must_change_password,
+                coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+                created_at, updated_at
     `,
     [cleanUserId, passwordHash]
   );

@@ -43,7 +43,15 @@ export function AvailabilityPanel({
   const baseRows = showWeekendDays ? rows : rows.filter((row) => !row.hideAlways);
   const visibleRows = baseRows.filter((row) => {
     const requestableOverride = allowOverrideRequests && Boolean(inferSupportedOverrideType(row.reasonCodes));
-    return row.status === "available" || row.status === "restricted" || requestableOverride || showFullDays || (showWeekendDays && row.hideAlways);
+    const selected = row.date === selectedDate;
+    return (
+      row.status === "available" ||
+      row.status === "restricted" ||
+      (requestableOverride && row.status !== "full") ||
+      showFullDays ||
+      selected ||
+      (showWeekendDays && row.hideAlways)
+    );
   });
 
   if (loading) {

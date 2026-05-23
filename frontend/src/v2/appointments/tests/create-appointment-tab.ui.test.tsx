@@ -582,19 +582,22 @@ describe("CreateAppointmentTab UI interactions", () => {
   });
 
   it("allows receptionist to select restricted, full, and closed rows when override is requestable", async () => {
-    setup();
+    setup(false, [], undefined, "receptionist");
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
 
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
-    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-02");
+    expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
 
+    expect(screen.queryByRole("button", { name: /2027-01-03 full/i })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-03 full/i }));
-    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-03");
+    expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
 
     await userEvent.click(screen.getByRole("button", { name: /2027-01-04 blocked/i }));
-    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-04");
+    expect((screen.getByRole("button", { name: "Create Appointment" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows primary exam-mix group in top summary strip", async () => {

@@ -8,6 +8,7 @@ import {
   createTestApp,
   fetchJson,
   createTestAuthCookie,
+  createTestSupervisorReauthCookie,
   type TestData,
 } from "./helpers.js";
 
@@ -31,7 +32,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
     testDb = await setupTestDatabase(TEST_PREFIX);
     testData = await seedTestData(testDb.schemaName, TEST_PREFIX);
     app = await createTestApp();
-    supervisorCookie = createTestAuthCookie(testData.userId, "supervisor");
+    supervisorCookie = `${createTestAuthCookie(testData.userId, "supervisor")}; ${createTestSupervisorReauthCookie(testData.userId, "supervisor")}`;
 
     const { pool } = await import("../../../../db/pool.js");
     const supervisor = await pool.query<{ username: string }>(`select username from users where id = $1`, [testData.userId]);
@@ -66,7 +67,8 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
        returning id`,
       [`${TEST_PREFIX.toLowerCase()}superadmin`, bcryptHash, `${TEST_PREFIX}SuperAdmin`]
     );
-    superAdminCookie = createTestAuthCookie(Number(superAdmin.rows[0].id), "super_admin");
+    const superAdminId = Number(superAdmin.rows[0].id);
+    superAdminCookie = `${createTestAuthCookie(superAdminId, "super_admin")}; ${createTestSupervisorReauthCookie(superAdminId, "super_admin")}`;
   });
 
   after(async () => {

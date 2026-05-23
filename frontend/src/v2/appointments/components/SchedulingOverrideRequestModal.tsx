@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/shared";
+import { t } from "@/lib/i18n";
+import { useLanguage } from "@/providers/language-provider";
 import type { SchedulingDecisionDto, SchedulingOverrideRequestType, SchedulingOverrideType } from "../types";
 import { formatOverrideType, formatRequestType } from "../utils/scheduling-override-requests";
 
@@ -34,13 +36,14 @@ export function SchedulingOverrideRequestModal({
   onClose,
   onSubmit,
 }: Props) {
+  const { language } = useLanguage();
   const [reason, setReason] = useState("");
   const [localError, setLocalError] = useState<string | null>(null);
   const reasons = decision?.reasons ?? [];
 
   async function submit() {
     if (!reason.trim()) {
-      setLocalError("Requester reason is required.");
+      setLocalError(t(language, "overrideRequests.requesterReasonRequired"));
       return;
     }
     setLocalError(null);
@@ -52,26 +55,26 @@ export function SchedulingOverrideRequestModal({
       <DialogContent maxWidth="640px">
         <DialogHeader>
           <div>
-            <DialogTitle>Request override approval</DialogTitle>
+            <DialogTitle>{t(language, "overrideRequests.requestApproval")}</DialogTitle>
             <DialogDescription>
-              The appointment is not booked until a supervisor or superadmin approves this request.
+              {t(language, "overrideRequests.notBookedUntilApproval")}
             </DialogDescription>
           </div>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <Summary label="Patient" value={patientLabel} />
-            <Summary label="Modality" value={modalityLabel} />
-            <Summary label="Exam type" value={examTypeLabel} />
-            <Summary label="Requested date/time" value={`${requestedDate}${requestedTime ? ` ${requestedTime}` : ""}`} />
-            <Summary label="Request type" value={formatRequestType(requestType)} />
-            <Summary label="Override type" value={formatOverrideType(overrideType)} />
+            <Summary label={t(language, "overrideRequests.patient")} value={patientLabel} />
+            <Summary label={t(language, "overrideRequests.modality")} value={modalityLabel} />
+            <Summary label={t(language, "overrideRequests.examType")} value={examTypeLabel} />
+            <Summary label={t(language, "overrideRequests.requestedDateTime")} value={`${requestedDate}${requestedTime ? ` ${requestedTime}` : ""}`} />
+            <Summary label={t(language, "overrideRequests.requestType")} value={formatRequestType(requestType)} />
+            <Summary label={t(language, "overrideRequests.overrideType")} value={formatOverrideType(overrideType)} />
           </div>
 
           <Card className="p-3">
             <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Scheduling decision
+              {t(language, "overrideRequests.schedulingDecision")}
             </p>
             {reasons.length ? (
               <ul className="space-y-1 text-sm text-foreground">
@@ -83,13 +86,13 @@ export function SchedulingOverrideRequestModal({
                 ))}
               </ul>
             ) : (
-              <p className="text-sm text-muted-foreground">No detailed decision reason was provided by the current view.</p>
+              <p className="text-sm text-muted-foreground">{t(language, "overrideRequests.noDecisionReason")}</p>
             )}
           </Card>
 
           <div>
             <label htmlFor="override-request-reason" className="mb-1 block text-sm font-semibold text-foreground">
-              Requester reason
+              {t(language, "overrideRequests.requesterReason")}
             </label>
             <textarea
               id="override-request-reason"
@@ -97,7 +100,7 @@ export function SchedulingOverrideRequestModal({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
               className="input-premium w-full resize-none"
-              placeholder="Explain why this appointment needs override approval"
+              placeholder={t(language, "overrideRequests.requesterReasonPlaceholder")}
             />
           </div>
 
@@ -110,10 +113,10 @@ export function SchedulingOverrideRequestModal({
 
         <DialogFooter>
           <Button type="button" variant="secondary" onClick={onClose} disabled={loading}>
-            Cancel
+            {t(language, "common.cancel")}
           </Button>
           <Button type="button" onClick={submit} disabled={loading || !overrideType}>
-            {loading ? "Submitting..." : "Submit request"}
+            {loading ? t(language, "overrideRequests.submitting") : t(language, "overrideRequests.submitRequest")}
           </Button>
         </DialogFooter>
       </DialogContent>

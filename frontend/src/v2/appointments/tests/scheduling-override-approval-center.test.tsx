@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SchedulingOverrideApprovalCenter, SchedulingOverrideRequestsWorkspace } from "../components/SchedulingOverrideApprovalCenter";
+import { LanguageProvider } from "@/providers/language-provider";
 import type { SchedulingOverrideRequestDto } from "../types";
 import type { User } from "@/types/api";
 
@@ -12,6 +14,12 @@ let mockRequests: SchedulingOverrideRequestDto[] = [];
 
 vi.mock("@/lib/toast", () => ({
   pushToast: vi.fn(),
+}));
+
+vi.mock("@/components/auth/supervisor-reauth-modal", () => ({
+  SupervisorReAuthModal: ({ onSuccess }: { onSuccess: () => void }) => (
+    <button type="button" onClick={onSuccess}>Mock re-auth</button>
+  ),
 }));
 
 vi.mock("../api", () => ({
@@ -89,8 +97,13 @@ function user(role: User["role"], id = 1): User {
   } as User;
 }
 
+function renderWithLanguage(ui: ReactElement) {
+  return render(<LanguageProvider>{ui}</LanguageProvider>);
+}
+
 describe("SchedulingOverrideApprovalCenter", () => {
   beforeEach(() => {
+    localStorage.setItem("rispro-language", "en");
     mockApprove.mockReset();
     mockReject.mockReset();
     mockCancel.mockReset();
@@ -101,7 +114,7 @@ describe("SchedulingOverrideApprovalCenter", () => {
   });
 
   it("shows pending requests and calls approve/reject for supervisor", async () => {
-    render(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
     expect(screen.getByText("Nadia Test")).toBeTruthy();
@@ -110,6 +123,8 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect(screen.getByText("Reception User")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 11"), { target: { value: "Approved note" } });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(mockApprove).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
     expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Approved note" });
 
     await userEvent.click(screen.getByRole("button", { name: "Reject" }));
@@ -117,15 +132,18 @@ describe("SchedulingOverrideApprovalCenter", () => {
     expect(screen.getByText("Rejection reason is required.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Rejection reason for request 11"), { target: { value: "Not justified" } });
     await userEvent.click(screen.getByRole("button", { name: "Confirm rejection" }));
+    expect(mockReject).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
     expect(mockReject).toHaveBeenCalledWith({ id: 11, approverReason: "Not justified" });
   });
 
   it("renders the full page workspace with the same approval actions", async () => {
-    render(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
+    renderWithLanguage(<SchedulingOverrideRequestsWorkspace user={user("supervisor")} variant="page" />);
 
     expect(screen.getByText("Nadia Test")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Approval note for request 11"), { target: { value: "Page approval" } });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mock re-auth" }));
 
     expect(mockApprove).toHaveBeenCalledWith({ id: 11, approverReason: "Page approval" });
   });
@@ -133,12 +151,12 @@ describe("SchedulingOverrideApprovalCenter", () => {
   it("does not allow supervisor to approve total capacity but superadmin can", async () => {
     mockRequests = [request({ id: 12, overrideType: "total_capacity_override" })];
 
-    const { rerender } = render(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
+    const { rerender } = renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("supervisor")} />);
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
     expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
     expect(screen.getByText("Supervisor cannot approve total capacity overrides. Superadmin approval is required.")).toBeTruthy();
 
-    rerender(<SchedulingOverrideApprovalCenter user={user("super_admin")} />);
+    rerender(<LanguageProvider><SchedulingOverrideApprovalCenter user={user("super_admin")} /></LanguageProvider>);
     expect(screen.getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 
@@ -152,7 +170,7 @@ describe("SchedulingOverrideApprovalCenter", () => {
         failureMessage: "The current scheduling state has changed. A different or stronger override is now required.",
       }),
     ];
-    render(<SchedulingOverrideApprovalCenter user={user("receptionist", 7)} />);
+    renderWithLanguage(<SchedulingOverrideApprovalCenter user={user("receptionist", 7)} />);
 
     await userEvent.click(screen.getByRole("button", { name: "Override requests" }));
     expect(screen.getByText("The scheduling state has changed. This request can no longer be approved with the original override type.")).toBeTruthy();

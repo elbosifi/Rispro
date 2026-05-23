@@ -530,7 +530,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
       queryClient.invalidateQueries({ queryKey: ["users"] });
       setMutationError(null);
     },
-    onError: (err: Error) => { setMutationError(err?.message || "Permission update failed"); }
+    onError: (err: Error) => { setMutationError(err?.message || t("overrideRequests.permissionUpdateFailed")); }
   });
   if (error) {
     const msg = (error as Error).message;
@@ -601,7 +601,7 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
                         })
                       }
                     />
-                    Override requests
+                    {t("overrideRequests.permissionLabel")}
                   </label>
                 )}
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>

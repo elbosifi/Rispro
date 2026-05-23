@@ -1050,12 +1050,12 @@ export default function RegistrationsPage() {
       setPendingReschedulePayload(null);
       pushToast({
         type: "success",
-        title: "Override request submitted",
-        message: "Override request submitted. The appointment is not rescheduled until approval. Track it in Override Requests.",
+        title: t("overrideRequests.submittedTitle"),
+        message: t("overrideRequests.rescheduleSubmittedMessage"),
       });
       queryClient.invalidateQueries({ queryKey: ["v2-scheduling-override-requests"] });
     } catch (error) {
-      setRescheduleRequestError(error instanceof Error ? error.message : "Failed to submit override request.");
+      setRescheduleRequestError(error instanceof Error ? error.message : t("overrideRequests.submitFailed"));
     }
   };
 
@@ -2025,7 +2025,7 @@ export default function RegistrationsPage() {
                                 setRescheduleRequestOpen(true);
                               }}
                             >
-                              Request override approval
+                              {t("overrideRequests.requestApproval")}
                             </Button>
                           ) : null}
                           <Button
