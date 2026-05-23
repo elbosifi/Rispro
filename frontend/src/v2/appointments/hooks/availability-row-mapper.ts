@@ -108,7 +108,7 @@ export function mapAvailabilityRow(day: AvailabilityDayDto, language: Language):
     dayLabel: toDayLabel(day.date, language),
     status,
     bucketMode: day.bucketMode ?? "total_only",
-    remainingCapacity: hideRawCapacity ? null : Math.max(0, day.remainingCapacity ?? day.decision.remainingStandardCapacity ?? 0),
+    remainingCapacity: hideRawCapacity ? null : Math.max(0, day.decision.remainingStandardCapacity ?? day.remainingCapacity ?? 0),
     dailyCapacity: hideRawCapacity ? null : (day.modalityTotalCapacity ?? day.dailyCapacity),
     oncologyReserved: day.oncology?.reserved ?? null,
     oncologyFilled: day.oncology?.filled ?? 0,

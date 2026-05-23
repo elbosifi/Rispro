@@ -76,6 +76,19 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     expect(row.remainingCapacity).toBe(3);
   });
 
+  it("uses effective standard capacity before total modality capacity", () => {
+    const day = baseDay();
+    day.rowDisplayStatus = "restricted";
+    day.remainingCapacity = 8;
+    day.decision.remainingStandardCapacity = 0;
+    day.decision.reasons = [{ code: "category_capacity_exhausted", severity: "error", message: "Category is full" }];
+
+    const row = mapAvailabilityRow(day, "en");
+
+    expect(row.status).toBe("restricted");
+    expect(row.remainingCapacity).toBe(0);
+  });
+
   it("maps total modality exhaustion as full", () => {
     const day = baseDay();
     day.rowDisplayStatus = undefined;
