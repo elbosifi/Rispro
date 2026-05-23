@@ -1,4 +1,5 @@
 import type { AvailabilityRowViewModel } from "../hooks/useAppointmentAvailability";
+import { inferSupportedOverrideType } from "../utils/scheduling-override-requests";
 import { AvailabilityDateRow } from "./AvailabilityDateRow";
 import { t } from "@/lib/i18n";
 import { useLanguage } from "@/providers/language-provider";
@@ -38,9 +39,10 @@ export function AvailabilityPanel({
 }: Props) {
   const { language } = useLanguage();
   const baseRows = showWeekendDays ? rows : rows.filter((row) => !row.hideAlways);
-  const visibleRows = baseRows.filter(
-    (row) => row.status === "available" || row.status === "restricted" || showFullDays || (showWeekendDays && row.hideAlways)
-  );
+  const visibleRows = baseRows.filter((row) => {
+    const requestableOverride = Boolean(inferSupportedOverrideType(row.reasonCodes));
+    return row.status === "available" || row.status === "restricted" || requestableOverride || showFullDays || (showWeekendDays && row.hideAlways);
+  });
 
   if (loading) {
     return <div className="text-center text-sm" style={{ color: "var(--text-muted)" }}>{t(language, "appointments.create.loadingAvailability")}</div>;
@@ -85,31 +87,35 @@ export function AvailabilityPanel({
         <div className="text-sm text-center" style={{ color: "var(--text-muted)" }}>
           {t(language, "appointments.create.noNonFullDays")}
         </div>
-      ) : visibleRows.map((row) => (
-        <AvailabilityDateRow
-          key={row.date}
-          date={row.date}
-          dayLabel={row.dayLabel}
-          status={row.status}
-          bucketMode={row.bucketMode}
-          remainingCapacity={row.remainingCapacity}
-          dailyCapacity={row.dailyCapacity}
-          oncologyReserved={row.oncologyReserved}
-          oncologyFilled={row.oncologyFilled}
-          oncologyRemaining={row.oncologyRemaining}
-          nonOncologyReserved={row.nonOncologyReserved}
-          nonOncologyFilled={row.nonOncologyFilled}
-          nonOncologyRemaining={row.nonOncologyRemaining}
-          specialQuotaRemaining={row.specialQuotaRemaining}
-          examMixQuotaSummaries={row.examMixQuotaSummaries}
-          primaryExamMixBlocking={row.primaryExamMixBlocking}
-          matchedExamRuleSummary={row.matchedExamRuleSummary}
-          reasonText={row.reasonText}
-          requiresSupervisorOverride={row.requiresSupervisorOverride}
-          selected={selectedDate === row.date}
-          onClick={() => onSelectDate(row)}
-        />
-      ))}
+      ) : visibleRows.map((row) => {
+        const requestableOverride = Boolean(inferSupportedOverrideType(row.reasonCodes));
+        return (
+          <AvailabilityDateRow
+            key={row.date}
+            date={row.date}
+            dayLabel={row.dayLabel}
+            status={row.status}
+            bucketMode={row.bucketMode}
+            remainingCapacity={row.remainingCapacity}
+            dailyCapacity={row.dailyCapacity}
+            oncologyReserved={row.oncologyReserved}
+            oncologyFilled={row.oncologyFilled}
+            oncologyRemaining={row.oncologyRemaining}
+            nonOncologyReserved={row.nonOncologyReserved}
+            nonOncologyFilled={row.nonOncologyFilled}
+            nonOncologyRemaining={row.nonOncologyRemaining}
+            specialQuotaRemaining={row.specialQuotaRemaining}
+            examMixQuotaSummaries={row.examMixQuotaSummaries}
+            primaryExamMixBlocking={row.primaryExamMixBlocking}
+            matchedExamRuleSummary={row.matchedExamRuleSummary}
+            reasonText={row.reasonText}
+            requiresSupervisorOverride={row.requiresSupervisorOverride}
+            requestableOverride={requestableOverride}
+            selected={selectedDate === row.date}
+            onClick={() => onSelectDate(row)}
+          />
+        );
+      })}
     </div>
   );
 }

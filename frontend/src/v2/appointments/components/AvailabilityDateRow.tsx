@@ -40,6 +40,7 @@ interface Props {
   } | null;
   reasonText: string;
   requiresSupervisorOverride: boolean;
+  requestableOverride?: boolean;
   selected: boolean;
   onClick: () => void;
 }
@@ -159,6 +160,7 @@ export function AvailabilityDateRow({
   matchedExamRuleSummary,
   reasonText,
   requiresSupervisorOverride,
+  requestableOverride = false,
   selected,
   onClick,
 }: Props) {
@@ -166,15 +168,16 @@ export function AvailabilityDateRow({
   const isClickable =
     status === "available" ||
     status === "restricted" ||
+    requestableOverride ||
     (status === "full" && (requiresSupervisorOverride || (specialQuotaRemaining ?? 0) > 0));
-  const isBlockedLike = status === "blocked";
+  const isBlockedLike = status === "blocked" && !requestableOverride;
 
   const statusColor =
     status === "available"
       ? "var(--green)"
       : status === "restricted"
       ? "var(--amber)"
-      : status === "full"
+      : status === "full" || requestableOverride
       ? "var(--amber)"
       : "var(--accent)";
   const slotSegments = buildSlotSegments({
@@ -214,7 +217,9 @@ export function AvailabilityDateRow({
           <div style={{ fontSize: 12, color: "var(--text-muted)" }}>{date}</div>
         </div>
         <div style={{ fontSize: 12, fontWeight: 700, color: statusColor, textTransform: "capitalize" }}>
-          {status === "blocked"
+          {status === "blocked" && requestableOverride
+            ? t(language, "appointments.create.needsApproval")
+            : status === "blocked"
             ? t(language, "appointments.create.notAvailable")
             : status === "available"
             ? t(language, "appointments.create.available")

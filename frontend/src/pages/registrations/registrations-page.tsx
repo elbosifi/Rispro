@@ -974,6 +974,7 @@ export default function RegistrationsPage() {
       rescheduleSelectedRow?.requiresSupervisorOverride ||
       rescheduleSelectedRow?.status === "restricted" ||
       rescheduleSelectedRow?.status === "full" ||
+      (rescheduleSelectedRow?.status === "blocked" && supportedOverrideType) ||
       rescheduleCapacityModeNeedsOverrideAuth
     ) {
       if (user?.role === "receptionist" && supportedOverrideType) {

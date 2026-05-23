@@ -333,15 +333,15 @@ export function CreateAppointmentTab({
     if (isReceptionist && row.status !== "available" && !(row.status === "full" && hasRowSpecialQuota) && !supportedOverrideType) {
       return;
     }
-    if (row.status === "blocked") {
+    if (row.status === "blocked" && !supportedOverrideType) {
       return;
     }
 
-    if (row.status === "full" && !row.requiresSupervisorOverride && !hasRowSpecialQuota) {
+    if (row.status === "full" && !row.requiresSupervisorOverride && !hasRowSpecialQuota && !supportedOverrideType) {
       return;
     }
 
-    const requiresOverride = row.status === "restricted" || (row.status === "full" && row.requiresSupervisorOverride);
+    const requiresOverride = row.status === "restricted" || (row.status !== "available" && Boolean(supportedOverrideType)) || (row.status === "full" && row.requiresSupervisorOverride);
     actions.setAppointmentDate(row.date, requiresOverride);
     setAvailabilitySelectedRow(row);
     setPageError(null);
@@ -471,12 +471,14 @@ export function CreateAppointmentTab({
         includeOverrideEvaluation: true,
       });
 
-      if (availabilitySelectedRow && (decision.displayStatus === "blocked")) {
+      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
+
+      if (availabilitySelectedRow && (decision.displayStatus === "blocked") && !(isReceptionist && supportedOverrideType)) {
         setPageError(t(language, "appointments.create.availabilityChanged"));
         return;
       }
 
-      if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride) {
+      if (decision.displayStatus === "blocked" && !decision.requiresSupervisorOverride && !(isReceptionist && supportedOverrideType)) {
         setPageError(t(language, "appointments.create.selectedDateNotAllowed"));
         return;
       }
@@ -484,9 +486,7 @@ export function CreateAppointmentTab({
       const selectedCapacityModeNeedsOverrideAuth =
         form.capacityResolutionMode === "category_override" ||
         form.capacityResolutionMode === "total_capacity_override";
-      const supportedOverrideType = inferSupportedOverrideTypeFromDecision(decision) ?? inferSupportedOverrideType(availabilitySelectedRow?.reasonCodes);
-
-      if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || selectedCapacityModeNeedsOverrideAuth) {
+      if (decision.requiresSupervisorOverride || decision.displayStatus === "restricted" || (decision.displayStatus === "blocked" && supportedOverrideType) || selectedCapacityModeNeedsOverrideAuth) {
         if (isReceptionist && supportedOverrideType) {
           setPendingRequestDecision(decision);
           setRequestOverrideType(supportedOverrideType);

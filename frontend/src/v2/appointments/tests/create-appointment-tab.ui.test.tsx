@@ -194,6 +194,24 @@ const availabilityRows: AvailabilityRowViewModel[] = [
     requiresSupervisorOverride: true,
     reasonCodes: ["category_capacity_exhausted"],
   },
+  {
+    date: "2027-01-04",
+    dayLabel: "Mon, Jan 4",
+    status: "blocked",
+    bucketMode: "partitioned",
+    remainingCapacity: null,
+    dailyCapacity: null,
+    oncologyReserved: null,
+    oncologyFilled: 0,
+    oncologyRemaining: null,
+    nonOncologyReserved: null,
+    nonOncologyFilled: 0,
+    nonOncologyRemaining: null,
+    specialQuotaRemaining: null,
+    reasonText: "Closed weekday",
+    requiresSupervisorOverride: false,
+    reasonCodes: ["closed_weekday_override_forbidden"],
+  },
 ];
 
 const mockRowsRef = { current: availabilityRows };
@@ -535,7 +553,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("");
   });
 
-  it("allows restricted row selection and full row only after showing full days", async () => {
+  it("allows receptionist to select restricted, full, and closed rows when override is requestable", async () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
@@ -544,10 +562,11 @@ describe("CreateAppointmentTab UI interactions", () => {
     await userEvent.click(screen.getByRole("button", { name: /2027-01-02 restricted/i }));
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-02");
 
-    expect(screen.queryByRole("button", { name: /2027-01-03 full/i })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     await userEvent.click(screen.getByRole("button", { name: /2027-01-03 full/i }));
     expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-03");
+
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-04 blocked/i }));
+    expect((screen.getByLabelText("Appointment Date") as HTMLInputElement).value).toBe("2027-01-04");
   });
 
   it("shows primary exam-mix group in top summary strip", async () => {
@@ -733,6 +752,34 @@ describe("CreateAppointmentTab UI interactions", () => {
         examTypeId: 101,
         bookingDate: "2027-01-02",
         caseCategory: "oncology",
+      },
+    });
+  });
+
+  it("lets receptionist request closed weekday override approval without booking", async () => {
+    const { onCreateAppointment } = setup(false, [], undefined, "receptionist");
+    await userEvent.click(screen.getByRole("button", { name: "Select Test Patient" }));
+    fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
+    await userEvent.click(screen.getByRole("button", { name: /2027-01-04 blocked/i }));
+
+    expect(screen.getByRole("button", { name: "Request override approval" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Request override approval" }));
+    fireEvent.change(await screen.findByPlaceholderText("Explain why this appointment needs override approval"), {
+      target: { value: "Closed day exception" },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Submit request" }));
+
+    await waitFor(() => {
+      expect(mockCreateSchedulingOverrideRequest).toHaveBeenCalled();
+    });
+    expect(onCreateAppointment).not.toHaveBeenCalled();
+    expect(mockCreateSchedulingOverrideRequest.mock.calls[0][0]).toMatchObject({
+      requestType: "create_booking",
+      overrideType: "closed_weekday_override",
+      requesterReason: "Closed day exception",
+      requestPayload: {
+        bookingDate: "2027-01-04",
       },
     });
   });
