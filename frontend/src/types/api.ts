@@ -30,6 +30,7 @@ export interface User {
   updatedAt?: string;
   recentSupervisorReauth?: boolean;
   mustChangePassword?: boolean;
+  canRequestSchedulingOverride?: boolean;
 }
 
 export interface AuthSession {

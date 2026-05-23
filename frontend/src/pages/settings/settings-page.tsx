@@ -14,6 +14,7 @@ import {
   fetchPageVisibilityMatrix,
   deleteUser,
   createUser,
+  updateUserSchedulingOverridePermission,
   updateUserPassword,
   exportAuditCSV,
   deleteNameDictionaryEntry,
@@ -522,6 +523,15 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
     },
     onError: (err: Error) => { setMutationError(err?.message || "Password update failed"); }
   });
+  const updateSchedulingOverridePermissionMutation = useMutation({
+    mutationFn: (payload: { userId: number; canRequestSchedulingOverride: boolean }) =>
+      updateUserSchedulingOverridePermission(payload.userId, payload.canRequestSchedulingOverride),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setMutationError(null);
+    },
+    onError: (err: Error) => { setMutationError(err?.message || "Permission update failed"); }
+  });
   if (error) {
     const msg = (error as Error).message;
     if (msg?.includes("re-authentication") || msg?.includes("403")) return <ReAuthPrompt onReAuthRequired={() => onReAuthRequired(["users"])} />;
@@ -578,6 +588,22 @@ function UsersSection({ onReAuthRequired }: { onReAuthRequired: (key: string[]) 
                 <p className="text-sm description-center">@{u.username} - {u.role}</p>
               </div>
               <div className="flex items-center gap-2">
+                {u.role === "receptionist" && (
+                  <label className="flex items-center gap-1 rounded-full border border-stone-200 px-2 py-1 text-xs text-stone-700 dark:border-stone-600 dark:text-stone-200">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(u.canRequestSchedulingOverride)}
+                      disabled={updateSchedulingOverridePermissionMutation.isPending}
+                      onChange={(event) =>
+                        updateSchedulingOverridePermissionMutation.mutate({
+                          userId: u.id,
+                          canRequestSchedulingOverride: event.target.checked,
+                        })
+                      }
+                    />
+                    Override requests
+                  </label>
+                )}
                 <span className={`px-2 py-1 rounded-full text-xs font-medium ${u.isActive ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400" : "bg-stone-100 dark:bg-stone-700 text-stone-600 dark:text-stone-400"}`}>
                   {u.isActive ? t("settings.active") : t("settings.inactive")}
                 </span>

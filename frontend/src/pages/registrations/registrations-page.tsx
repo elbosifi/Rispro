@@ -236,7 +236,8 @@ export default function RegistrationsPage() {
     staleTime: 60_000,
   });
   const allowReceptionOverrideRequestsFromAvailability =
-    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled";
+    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled" &&
+    String(schedulingCapacitySettings?.can_request_scheduling_override ?? "disabled") === "enabled";
   useEffect(() => {
     if (!patientIdParam) return;
 

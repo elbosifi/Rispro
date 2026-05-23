@@ -147,7 +147,8 @@ export function CreateAppointmentTab({
     staleTime: 60_000,
   });
   const allowReceptionOverrideRequestsFromAvailability =
-    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled";
+    String(schedulingCapacitySettings?.allow_reception_override_requests_from_availability ?? "enabled") !== "disabled" &&
+    String(schedulingCapacitySettings?.can_request_scheduling_override ?? "disabled") === "enabled";
   const { form, actions } = useCreateAppointmentForm({
     oncology: patientQrSettings?.defaultReportRequiredForOncology ?? true,
     nonOncology: patientQrSettings?.defaultReportRequiredForNonOncology ?? false,

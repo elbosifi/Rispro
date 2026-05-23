@@ -50,6 +50,7 @@ vi.mock("@/lib/api-hooks", () => ({
   fetchPatientQrSettings: () => mockFetchPatientQrSettings(),
   fetchPublicSchedulingCapacitySettings: () => Promise.resolve({
     allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+    can_request_scheduling_override: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
   }),
   fetchSettings: (category: string) => {
     if (category === "queue_and_arrival") {
@@ -87,7 +88,10 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key.includes("scheduling_and_capacity")) {
       return {
-        data: { allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled" },
+        data: {
+          allow_reception_override_requests_from_availability: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+          can_request_scheduling_override: mockReceptionOverrideRequestsEnabled.current ? "enabled" : "disabled",
+        },
         isLoading: false,
         isError: false,
         error: null,

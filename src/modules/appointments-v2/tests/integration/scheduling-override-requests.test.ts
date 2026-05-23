@@ -45,6 +45,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       [`${TEST_PREFIX.toLowerCase()}receptionist`, bcryptHash, `${TEST_PREFIX}Receptionist`]
     );
     receptionistId = Number(receptionist.rows[0].id);
+    await pool.query(`update users set can_request_scheduling_override = true where id = $1`, [receptionistId]);
     receptionistCookie = createTestAuthCookie(receptionistId, "receptionist");
 
     const secondReceptionist = await pool.query<{ id: number }>(
@@ -55,6 +56,7 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
       [`${TEST_PREFIX.toLowerCase()}receptionist2`, bcryptHash, `${TEST_PREFIX}Receptionist 2`]
     );
     secondReceptionistId = Number(secondReceptionist.rows[0].id);
+    await pool.query(`update users set can_request_scheduling_override = true where id = $1`, [secondReceptionistId]);
     secondReceptionistCookie = createTestAuthCookie(secondReceptionistId, "receptionist");
 
     const superAdmin = await pool.query<{ id: number }>(
@@ -196,6 +198,24 @@ describe("Scheduling override requests — integration", { skip: skipEnv }, () =
             and setting_key = 'allow_reception_override_requests_from_availability'
         `
       );
+    }
+  });
+
+  it("rejects receptionist override requests when the user is not individually allowed", async () => {
+    if (!testData) return;
+    const { pool } = await import("../../../../db/pool.js");
+    await setCapacityLimits();
+    const date = "2042-01-30";
+    await fillNonOncologyCategory(date);
+    await pool.query(`update users set can_request_scheduling_override = false where id = $1`, [receptionistId]);
+
+    try {
+      const requested = await requestCategoryOverride(date);
+
+      assert.equal(requested.status, 403);
+      assert.match(String((requested.data as any).error?.message ?? ""), /not allowed/i);
+    } finally {
+      await pool.query(`update users set can_request_scheduling_override = true where id = $1`, [receptionistId]);
     }
   });
 

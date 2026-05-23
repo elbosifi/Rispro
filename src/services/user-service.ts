@@ -13,6 +13,7 @@ export interface UserRow {
   role: Role;
   is_active: boolean;
   must_change_password: boolean;
+  can_request_scheduling_override: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -24,6 +25,7 @@ export interface UserCreatePayload {
   role?: Role | string;
   isActive?: boolean;
   mustChangePassword?: boolean;
+  canRequestSchedulingOverride?: boolean;
 }
 
 interface UserActorContext {
@@ -49,7 +51,10 @@ async function auditSuperAdminAttempt(input: {
 
 export async function listUsers(): Promise<UserRow[]> {
   const { rows } = await pool.query(`
-    select id, username, full_name, role, is_active, coalesce(must_change_password, false) as must_change_password, created_at, updated_at
+    select id, username, full_name, role, is_active,
+           coalesce(must_change_password, false) as must_change_password,
+           coalesce(can_request_scheduling_override, false) as can_request_scheduling_override,
+           created_at, updated_at
     from users
     order by created_at asc
   `);
@@ -58,7 +63,7 @@ export async function listUsers(): Promise<UserRow[]> {
 }
 
 export async function createUser(
-  { username, fullName, password, role, isActive = true, mustChangePassword = false }: UserCreatePayload,
+  { username, fullName, password, role, isActive = true, mustChangePassword = false, canRequestSchedulingOverride = false }: UserCreatePayload,
   actor: UserActorContext = { userId: null, role: "supervisor" }
 ): Promise<UserRow> {
   if (!username || !fullName || !password || !role) {
@@ -90,11 +95,11 @@ export async function createUser(
   try {
     const { rows } = await pool.query(
       `
-        insert into users (username, full_name, password_hash, role, is_active, must_change_password)
-        values ($1, $2, $3, $4, $5, $6)
-        returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+        insert into users (username, full_name, password_hash, role, is_active, must_change_password, can_request_scheduling_override)
+        values ($1, $2, $3, $4, $5, $6, $7)
+        returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
       `,
-      [username, fullName, passwordHash, role, isActive, mustChangePassword]
+      [username, fullName, passwordHash, role, isActive, mustChangePassword, role === "receptionist" && canRequestSchedulingOverride]
     );
 
     const createdUser = rows[0] as UserRow | undefined;
@@ -214,7 +219,7 @@ export async function deleteUser(
     `
       delete from users
       where id = $1
-      returning id, username, full_name, role, is_active, must_change_password, created_at, updated_at
+      returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
     `,
     [cleanUserId]
   );
@@ -247,6 +252,54 @@ export async function deleteUser(
   }
 
   return removed;
+}
+
+export async function updateUserSchedulingOverridePermission(
+  userId: string,
+  canRequestSchedulingOverride: boolean,
+  actor: UserActorContext = { userId: null, role: "supervisor" }
+): Promise<UserRow> {
+  const cleanUserId = Number(userId);
+  if (!Number.isInteger(cleanUserId) || cleanUserId <= 0) {
+    throw new HttpError(400, "Invalid user ID.");
+  }
+
+  const { rows } = await pool.query(
+    `
+      update users
+      set can_request_scheduling_override = case when role = 'receptionist' then $2 else false end,
+          updated_at = now()
+      where id = $1
+      returning id, username, full_name, role, is_active, must_change_password, can_request_scheduling_override, created_at, updated_at
+    `,
+    [cleanUserId, canRequestSchedulingOverride]
+  );
+  const updated = rows[0] as UserRow | undefined;
+  if (!updated) throw new HttpError(404, "User not found.");
+
+  await logAuditEntry({
+    entityType: "user",
+    entityId: updated.id,
+    actionType: "update_scheduling_override_permission",
+    oldValues: null,
+    newValues: { canRequestSchedulingOverride: updated.can_request_scheduling_override },
+    changedByUserId: actor.userId
+  });
+
+  return updated;
+}
+
+export async function getUserSchedulingOverridePermission(userId: UserId): Promise<boolean> {
+  const { rows } = await pool.query<{ can_request_scheduling_override: boolean }>(
+    `
+      select coalesce(can_request_scheduling_override, false) as can_request_scheduling_override
+      from users
+      where id = $1
+      limit 1
+    `,
+    [userId]
+  );
+  return Boolean(rows[0]?.can_request_scheduling_override);
 }
 
 export async function updateUserPassword(

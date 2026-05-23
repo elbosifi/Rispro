@@ -80,6 +80,7 @@ import {
   searchPatientsForDuplicateResolver
 } from "../services/patient-duplicate-service.js";
 import { readPatientQrSettings } from "../modules/appointments-v2/public/utils/patient-qr-settings.js";
+import { getUserSchedulingOverridePermission } from "../services/user-service.js";
 import type { AuthenticatedUserContext, UnknownRecord, UserId } from "../types/http.js";
 
 interface SettingsRequest {
@@ -171,12 +172,23 @@ settingsRouter.get(
 
 settingsRouter.get(
   "/scheduling-and-capacity/public",
-  asyncRoute(async (_req: Request, res: Response) => {
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
     const settings = await getSettingsByCategory("scheduling_and_capacity");
+    const userCanRequest = await getUserSchedulingOverridePermission(request.user.sub);
     res.json({
-      settings: settings.filter((setting) =>
-        setting.setting_key === "allow_reception_override_requests_from_availability"
-      ),
+      settings: [
+        ...settings.filter((setting) =>
+          setting.setting_key === "allow_reception_override_requests_from_availability"
+        ),
+        {
+          id: 0,
+          category: "scheduling_and_capacity",
+          setting_key: "can_request_scheduling_override",
+          setting_value: { value: userCanRequest ? "enabled" : "disabled" },
+          updated_at: new Date(0).toISOString(),
+        },
+      ],
     });
   })
 );

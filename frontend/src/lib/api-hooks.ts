@@ -2504,6 +2504,14 @@ export async function createUser(payload: { username: string; fullName: string; 
   });
 }
 
+export async function updateUserSchedulingOverridePermission(userId: number, canRequestSchedulingOverride: boolean) {
+  const raw = await api<{ user: RawRecord }>(`/users/${userId}/scheduling-override-permission`, {
+    method: "PUT",
+    body: JSON.stringify({ canRequestSchedulingOverride })
+  });
+  return mapUser(raw.user);
+}
+
 export async function deleteUser(userId: number) {
   return api<{ user: RawRecord }>(`/users/${userId}`, { method: "DELETE" });
 }

@@ -12,6 +12,7 @@ import { createBookingInternal } from "../../booking/services/create-booking.ser
 import { rescheduleBookingInternal } from "../../booking/services/reschedule-booking.service.js";
 import { scheduleBookingWorklistSync, scheduleBookingWorklistDetailReplacement } from "../../../../services/dicom-service.js";
 import { safeEnqueuePatientNotificationEvent } from "../../../../services/patient-web-push-service.js";
+import { getUserSchedulingOverridePermission } from "../../../../services/user-service.js";
 import {
   findSchedulingOverrideRequestById,
   insertSchedulingOverrideRequest,
@@ -153,6 +154,10 @@ async function canReceptionRequestOverrideFromAvailability(client: PoolClient): 
     `
   );
   return String(result.rows[0]?.value ?? "enabled").trim().toLowerCase() !== "disabled";
+}
+
+async function canReceptionistCreateOverrideRequest(client: PoolClient, userId: number): Promise<boolean> {
+  return (await canReceptionRequestOverrideFromAvailability(client)) && await getUserSchedulingOverridePermission(userId);
 }
 
 function canApproveOverride(role: Role | undefined, overrideType: SchedulingOverrideType): boolean {
@@ -359,8 +364,8 @@ export async function createSchedulingOverrideRequest(
   }
 
   return withTransaction(async (client) => {
-    if (role === "receptionist" && !(await canReceptionRequestOverrideFromAvailability(client))) {
-      throw new SchedulingError(403, "Reception override requests are disabled in settings.", ["override_requests_disabled"]);
+    if (role === "receptionist" && !(await canReceptionistCreateOverrideRequest(client, userId))) {
+      throw new SchedulingError(403, "This reception user is not allowed to request scheduling override approval.", ["override_requests_disabled"]);
     }
 
     const requestType = normalizeRequestType(input.requestType);

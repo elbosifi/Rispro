@@ -3,7 +3,7 @@ import { requireAuth, requireRecentSupervisorReauth, requireSupervisor } from ".
 import { asyncRoute } from "../utils/async-route.js";
 import { asOptionalBoolean, asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
-import { createUser, deleteUser, listUsers, updateUserPassword } from "../services/user-service.js";
+import { createUser, deleteUser, listUsers, updateUserPassword, updateUserSchedulingOverridePermission } from "../services/user-service.js";
 
 export const usersRouter = express.Router();
 
@@ -27,7 +27,8 @@ usersRouter.post(
         fullName: asString(body.fullName),
         password: asString(body.password),
         role: asString(body.role),
-        isActive: asOptionalBoolean(body.isActive)
+        isActive: asOptionalBoolean(body.isActive),
+        canRequestSchedulingOverride: asOptionalBoolean(body.canRequestSchedulingOverride)
       },
       { userId: req.user!.sub, role: req.user!.role }
     );
@@ -39,6 +40,19 @@ usersRouter.delete(
   "/:userId",
   asyncRoute(async (req: Request, res: Response) => {
     const user = await deleteUser(asString(req.params.userId), { userId: req.user!.sub, role: req.user!.role });
+    res.json({ user });
+  })
+);
+
+usersRouter.put(
+  "/:userId/scheduling-override-permission",
+  asyncRoute(async (req: Request, res: Response) => {
+    const body = asUnknownRecord(req.body);
+    const user = await updateUserSchedulingOverridePermission(
+      asString(req.params.userId),
+      asOptionalBoolean(body.canRequestSchedulingOverride) === true,
+      { userId: req.user!.sub, role: req.user!.role }
+    );
     res.json({ user });
   })
 );
