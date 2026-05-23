@@ -148,10 +148,10 @@ export function isAvailabilityRowVisible(
   row: AvailabilityRowViewModel,
   options: AvailabilityRowVisibilityOptions
 ): boolean {
-  if (options.selected) return true;
   if (row.status === "full" || row.status === "restricted" || options.requestableOverride) {
     return options.showFullDays;
   }
+  if (options.selected) return true;
   if (row.hideAlways && !options.showPolicyHiddenDays) return false;
   return row.status === "available";
 }

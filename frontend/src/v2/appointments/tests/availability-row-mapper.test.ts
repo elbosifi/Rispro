@@ -143,6 +143,7 @@ describe("availability-row-mapper exam-rule summary precedence", () => {
     const requestableBlocked = { ...restricted, date: "2027-01-04", status: "blocked" as const };
 
     expect(isAvailabilityRowVisible(restricted, { showFullDays: false, showPolicyHiddenDays: false })).toBe(false);
+    expect(isAvailabilityRowVisible(restricted, { showFullDays: false, showPolicyHiddenDays: false, selected: true })).toBe(false);
     expect(isAvailabilityRowVisible(restricted, { showFullDays: true, showPolicyHiddenDays: false })).toBe(true);
     expect(isAvailabilityRowVisible(full, { showFullDays: false, showPolicyHiddenDays: false })).toBe(false);
     expect(isAvailabilityRowVisible(full, { showFullDays: true, showPolicyHiddenDays: false })).toBe(true);

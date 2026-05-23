@@ -677,6 +677,7 @@ describe("CreateAppointmentTab UI interactions", () => {
     fireEvent.change(screen.getByLabelText("Modality"), { target: { value: "1" } });
     fireEvent.change(screen.getByLabelText("Exam Type"), { target: { value: "101" } });
     fireEvent.change(screen.getByLabelText("Appointment Date"), { target: { value: "2027-01-02" } });
+    await userEvent.click(screen.getByRole("button", { name: "Show full days" }));
     expect(screen.getByText(/Exam mix groups:/)).toBeTruthy();
     expect(screen.getByText(/Brain MRI group 2\/2/)).toBeTruthy();
   });
