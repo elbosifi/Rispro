@@ -133,6 +133,11 @@ export default function DicomGatewaySettingsSection({ onReAuthRequired }: DicomG
       {/* Gateway Settings */}
       <div className="space-y-4">
         <h4 className="text-lg font-semibold text-stone-900 dark:text-white">{language === "ar" ? "بوابة DICOM" : "DICOM Gateway"}</h4>
+        <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-3 text-sm text-amber-800 dark:text-amber-200">
+          {language === "ar"
+            ? "قائمة العمل المضمنة قديمة وتبقى للتوافق فقط. اضبط توافق قائمة العمل من قسم Orthanc MWL أو Sante Worklist."
+            : "Embedded MWL is deprecated and remains for backward compatibility. Tune worklist compatibility in Orthanc MWL Sync or Sante Worklist."}
+        </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <SettingField

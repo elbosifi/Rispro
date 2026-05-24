@@ -80,7 +80,8 @@ function buildStableOrthancWorklistId(bookingId: number): string {
 function buildOrthancWorklistPayload(
   row: OrthancBookingProjection,
   stableId: string,
-  stationAeTitle: string
+  stationAeTitle: string,
+  settings: ResolvedOrthancSettings
 ): Record<string, unknown> {
   const accessionNumber = formatV2AccessionNumber(row.id);
   const canonicalDataset = buildCanonicalMwlDataset(
@@ -101,7 +102,7 @@ function buildOrthancWorklistPayload(
       modalityNameAr: row.modality_name_ar,
       accessionNumber,
     },
-    { mwlProfile: "minimal" }
+    { mwlProfile: "minimal", compatibility: settings.mwlCompatibility }
   );
 
   const dicomPayload = renderCanonicalMwlToOrthancJson(canonicalDataset);
@@ -373,7 +374,7 @@ export async function upsertBookingToOrthanc(bookingId: number): Promise<Orthanc
   }
 
   const stableId = buildStableOrthancWorklistId(bookingId);
-  const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL");
+  const fullPayload = buildOrthancWorklistPayload(projection, stableId, settings.worklistTarget || "RISPRO_MWL", settings);
 
   // For new worklists plugin, strip custom fields that aren't valid DICOM tags
   const { RISproProjection, ...dicomOnlyPayload } = fullPayload;

@@ -86,3 +86,31 @@ test("validateSanteSettingsEntries rejects unsafe traversal outside allowed base
     /allowed backend-visible base path/
   );
 });
+
+test("validateSanteSettingsEntries accepts HL7 compatibility JSON settings", () => {
+  assert.doesNotThrow(() => validateSanteSettingsEntries([
+    ...baseEntries,
+    { key: "hl7_enabled_fields_json", value: { value: "{\"PID.11\":false,\"OBR.20\":true}" } },
+    { key: "hl7_field_limits_json", value: { value: "{\"PID.5\":32,\"OBR.20\":64}" } },
+    { key: "hl7_overflow_policy_json", value: { value: "{\"PID.3\":\"reject\",\"OBR.20\":\"truncate\"}" } },
+    { key: "hl7_extra_fields_json", value: { value: "[{\"segment\":\"OBR\",\"field\":27,\"value\":\"routine\"}]" } },
+  ]));
+});
+
+test("validateSanteSettingsEntries rejects invalid HL7 compatibility JSON", () => {
+  assert.throws(
+    () => validateSanteSettingsEntries([
+      ...baseEntries,
+      { key: "hl7_enabled_fields_json", value: { value: "{\"PID-11\":false}" } },
+    ]),
+    /HL7 field key/
+  );
+
+  assert.throws(
+    () => validateSanteSettingsEntries([
+      ...baseEntries,
+      { key: "hl7_overflow_policy_json", value: { value: "{\"PID.3\":\"silently_cut\"}" } },
+    ]),
+    /overflow policy/
+  );
+});

@@ -18,6 +18,7 @@ beforeEach(() => {
     verifyTls: true,
     worklistTarget: "",
     strategyPreference: "put_first",
+    mwlCompatibility: {},
   });
   service.__setOrthancPacsAuditLoggerForTests(async () => null);
 });

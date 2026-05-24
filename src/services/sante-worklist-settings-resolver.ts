@@ -16,6 +16,15 @@ export const SANTE_HL7_CATEGORY = "sante_worklist_hl7";
 export type SanteWorklistMode = "disabled" | "shadow" | "primary_with_internal_fallback" | "sante_only";
 export type SanteSuccessBehavior = "auto_detect" | "deleted" | "don";
 export type SanteDeliveryMethod = "file_drop" | "mllp";
+export type SanteHl7OverflowPolicy = "reject" | "truncate" | "omit";
+
+export interface SanteHl7ExtraField {
+  segment: "PID" | "ORC" | "OBR" | "MSH" | "PV1";
+  field: number;
+  value: string;
+  maxLength?: number;
+  policy?: SanteHl7OverflowPolicy;
+}
 
 export interface ResolvedSanteWorklistSettings {
   enabled: boolean;
@@ -47,6 +56,10 @@ export interface ResolvedSanteWorklistSettings {
   patientIdField: "identifier_value" | "mrn" | "national_id" | "patient_id";
   patientNameField: "english_full_name" | "arabic_full_name";
   scheduledStationAeTitleDefault: string;
+  hl7EnabledFields: Record<string, boolean>;
+  hl7FieldLimits: Record<string, number>;
+  hl7OverflowPolicy: Record<string, SanteHl7OverflowPolicy>;
+  hl7ExtraFields: SanteHl7ExtraField[];
   allowedBasePaths: string[];
   hostOutboxHint: string;
   windowsShareSourceHint: string;
@@ -82,6 +95,10 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
   scheduled_station_ae_title_default: "RISPRO_MWL",
+  hl7_enabled_fields_json: "{}",
+  hl7_field_limits_json: "{}",
+  hl7_overflow_policy_json: "{}",
+  hl7_extra_fields_json: "[]",
 };
 
 const ALLOWED_KEYS = new Set(Object.keys(SANTE_HL7_DEFAULTS));
@@ -104,6 +121,86 @@ function extractSettingString(value: unknown): string {
     return String((value as Record<string, unknown>).value ?? "").trim();
   }
   return String(value ?? "").trim();
+}
+
+function parseJsonSetting(raw: string, key: string): unknown {
+  const clean = raw.trim();
+  if (!clean) return key.includes("extra") ? [] : {};
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be valid JSON.`);
+  }
+}
+
+function ensureHl7FieldKey(key: string): void {
+  if (!/^(MSH|PID|PV1|ORC|OBR)\.\d+$/.test(key)) {
+    throw new HttpError(400, `Invalid HL7 field key: ${key}`);
+  }
+}
+
+function validateBooleanMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    ensureHl7FieldKey(field);
+    if (typeof value !== "boolean") {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key}.${field} must be boolean.`);
+    }
+  }
+}
+
+function validatePositiveIntegerMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    ensureHl7FieldKey(field);
+    if (!Number.isInteger(Number(value)) || Number(value) <= 0) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key}.${field} must be a positive integer.`);
+    }
+  }
+}
+
+function validateOverflowPolicyMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    ensureHl7FieldKey(field);
+    if (!["reject", "truncate", "omit"].includes(String(value))) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key}.${field} has invalid overflow policy.`);
+    }
+  }
+}
+
+function validateExtraFields(raw: string): void {
+  const parsed = parseJsonSetting(raw, "hl7_extra_fields_json");
+  if (!Array.isArray(parsed)) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json must be a JSON array.`);
+  }
+  for (const item of parsed) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json entries must be objects.`);
+    }
+    const row = item as Record<string, unknown>;
+    if (!["MSH", "PID", "PV1", "ORC", "OBR"].includes(String(row.segment))) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json segment is invalid.`);
+    }
+    if (!Number.isInteger(Number(row.field)) || Number(row.field) <= 0) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json field must be a positive integer.`);
+    }
+    if (row.policy != null && !["reject", "truncate", "omit"].includes(String(row.policy))) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json has invalid overflow policy.`);
+    }
+    if (row.maxLength != null && (!Number.isInteger(Number(row.maxLength)) || Number(row.maxLength) <= 0)) {
+      throw new HttpError(400, `${SANTE_HL7_CATEGORY}.hl7_extra_fields_json maxLength must be a positive integer.`);
+    }
+  }
 }
 
 function resolvePathForBackend(value: string): string {
@@ -196,6 +293,11 @@ export function validateSanteSettingsEntries(entries: Array<{ key: string; value
       throw new HttpError(400, `${SANTE_HL7_CATEGORY}.success_behavior is invalid.`);
     }
   }
+
+  if (incoming.has("hl7_enabled_fields_json")) validateBooleanMap(incoming.get("hl7_enabled_fields_json") || "", "hl7_enabled_fields_json");
+  if (incoming.has("hl7_field_limits_json")) validatePositiveIntegerMap(incoming.get("hl7_field_limits_json") || "", "hl7_field_limits_json");
+  if (incoming.has("hl7_overflow_policy_json")) validateOverflowPolicyMap(incoming.get("hl7_overflow_policy_json") || "", "hl7_overflow_policy_json");
+  if (incoming.has("hl7_extra_fields_json")) validateExtraFields(incoming.get("hl7_extra_fields_json") || "");
 
   for (const key of ["retry_max_attempts", "retry_initial_delay_seconds", "retry_max_delay_seconds", "pending_import_timeout_seconds", "mllp_timeout_seconds"]) {
     if (incoming.has(key) && parsePositiveInteger(incoming.get(key), 0) <= 0) {
@@ -303,10 +405,23 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
       : "identifier_value",
     patientNameField: db.patient_name_field === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
     scheduledStationAeTitleDefault: normalizeOptionalText(db.scheduled_station_ae_title_default) || "RISPRO_MWL",
+    hl7EnabledFields: parseRuntimeJson<Record<string, boolean>>(db.hl7_enabled_fields_json, {}),
+    hl7FieldLimits: parseRuntimeJson<Record<string, number>>(db.hl7_field_limits_json, {}),
+    hl7OverflowPolicy: parseRuntimeJson<Record<string, SanteHl7OverflowPolicy>>(db.hl7_overflow_policy_json, {}),
+    hl7ExtraFields: parseRuntimeJson<SanteHl7ExtraField[]>(db.hl7_extra_fields_json, []),
     allowedBasePaths,
     hostOutboxHint: normalizeOptionalText(env.santeHl7HostOutboxHint),
     windowsShareSourceHint: normalizeOptionalText(env.santeHl7WindowsShareSourceHint || env.santeHl7HostOutboxHint),
   };
+}
+
+function parseRuntimeJson<T>(raw: string | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
 }
 
 export async function testSanteOutputFolderAccess(folderPath?: string): Promise<{ ok: boolean; path: string; message: string }> {

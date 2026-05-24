@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "crypto";
 import { normalizeDateValue } from "../utils/date.js";
 import { formatV2AccessionNumber } from "../modules/appointments-v2/shared/utils/accession.js";
-import type { ResolvedSanteWorklistSettings } from "./sante-worklist-settings-resolver.js";
+import type { ResolvedSanteWorklistSettings, SanteHl7OverflowPolicy } from "./sante-worklist-settings-resolver.js";
 
 export type SanteOrderControl = "NW" | "XO" | "CA";
 
@@ -92,6 +92,94 @@ function compactText(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+const DEFAULT_HL7_FIELD_LIMITS: Record<string, number> = {
+  "PID.3": 64,
+  "PID.5": 64,
+  "OBR.13": 64,
+  "OBR.20": 64,
+  "OBR.31": 64,
+};
+
+const DEFAULT_HL7_OVERFLOW_POLICY: Record<string, SanteHl7OverflowPolicy> = {
+  "PID.3": "reject",
+  "PID.5": "reject",
+  "OBR.13": "truncate",
+  "OBR.20": "truncate",
+  "OBR.31": "truncate",
+};
+
+function logHl7CompatibilityEvent(type: string, field: string, originalLength: number, maxLength: number): void {
+  console.warn(JSON.stringify({ type, field, originalLength, maxLength }));
+}
+
+function fieldKey(segment: string, field: number): string {
+  return `${segment}.${field}`;
+}
+
+function applyHl7FieldCompatibility(
+  value: string,
+  key: string,
+  settings: ResolvedSanteWorklistSettings,
+  fallbackPolicy?: SanteHl7OverflowPolicy
+): string {
+  if (settings.hl7EnabledFields?.[key] === false) {
+    if (value) {
+      logHl7CompatibilityEvent("hl7_value_omitted", key, value.length, 0);
+    }
+    return "";
+  }
+
+  const maxLength = settings.hl7FieldLimits?.[key] || DEFAULT_HL7_FIELD_LIMITS[key];
+  if (!maxLength || value.length <= maxLength) {
+    return value;
+  }
+
+  const policy = settings.hl7OverflowPolicy?.[key] || DEFAULT_HL7_OVERFLOW_POLICY[key] || fallbackPolicy || "reject";
+  if (policy === "omit") {
+    logHl7CompatibilityEvent("hl7_value_omitted", key, value.length, maxLength);
+    return "";
+  }
+  if (policy === "truncate") {
+    logHl7CompatibilityEvent("hl7_value_truncated", key, value.length, maxLength);
+    return value.slice(0, maxLength);
+  }
+  throw new Error(`${key} exceeds maximum length ${maxLength}.`);
+}
+
+function applySegmentCompatibility(
+  segment: string[],
+  settings: ResolvedSanteWorklistSettings
+): string[] {
+  const name = segment[0];
+  for (let index = 1; index < segment.length; index += 1) {
+    const key = fieldKey(name, index);
+    segment[index] = applyHl7FieldCompatibility(segment[index] || "", key, settings);
+  }
+
+  for (const extraField of settings.hl7ExtraFields || []) {
+    if (extraField.segment !== name) continue;
+    const key = fieldKey(name, extraField.field);
+    const maxLength = extraField.maxLength || settings.hl7FieldLimits?.[key];
+    const originalLimits = settings.hl7FieldLimits || {};
+    const originalPolicy = settings.hl7OverflowPolicy || {};
+    const compatibilitySettings = {
+      ...settings,
+      hl7FieldLimits: maxLength ? { ...originalLimits, [key]: maxLength } : originalLimits,
+      hl7OverflowPolicy: extraField.policy ? { ...originalPolicy, [key]: extraField.policy } : originalPolicy,
+    };
+    while (segment.length <= extraField.field) {
+      segment.push("");
+    }
+    segment[extraField.field] = applyHl7FieldCompatibility(
+      escapeHl7(extraField.value),
+      key,
+      compatibilitySettings
+    );
+  }
+
+  return segment;
+}
+
 export function buildAccessionNumber(bookingId: number): string {
   return formatV2AccessionNumber(bookingId);
 }
@@ -153,7 +241,7 @@ export function buildSanteOrmO01Message(input: {
   obr[31] = escapeHl7(contrastComment);
 
   const segments = [
-    [
+    applySegmentCompatibility([
       "MSH",
       "^~\\&",
       escapeHl7(settings.sendingApplication),
@@ -171,15 +259,15 @@ export function buildSanteOrmO01Message(input: {
       acceptAckType,
       "",
       escapeHl7(settings.charset),
-    ].join("|"),
-    pid.join("|"),
-    [
+    ], settings).join("|"),
+    applySegmentCompatibility(pid, settings).join("|"),
+    applySegmentCompatibility([
       "PV1",
       "1",
       "O",
-    ].join("|"),
-    orc.join("|"),
-    obr.join("|"),
+    ], settings).join("|"),
+    applySegmentCompatibility(orc, settings).join("|"),
+    applySegmentCompatibility(obr, settings).join("|"),
   ];
 
   const message = `${segments.join("\r")}\r`;

@@ -19,6 +19,14 @@ type OrthancSettingsForm = {
   verify_tls: string;
   worklist_target: string;
   strategy_preference: string;
+  mwl_specific_character_set: string;
+  mwl_patient_id_source: string;
+  mwl_patient_name_source: string;
+  mwl_procedure_description_source: string;
+  mwl_enabled_tags_json: string;
+  mwl_tag_limits_json: string;
+  mwl_overflow_policy_json: string;
+  mwl_extra_tags_json: string;
 };
 
 type SyncSummaryResponse = {
@@ -103,6 +111,14 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
     verify_tls: map.verify_tls || "true",
     worklist_target: worklistTarget,
     strategy_preference: map.strategy_preference || "put_first",
+    mwl_specific_character_set: map.mwl_specific_character_set || "ISO_IR 192",
+    mwl_patient_id_source: map.mwl_patient_id_source || "identifier_value",
+    mwl_patient_name_source: map.mwl_patient_name_source || "english_full_name",
+    mwl_procedure_description_source: map.mwl_procedure_description_source || "exam_name_en",
+    mwl_enabled_tags_json: map.mwl_enabled_tags_json || "{}",
+    mwl_tag_limits_json: map.mwl_tag_limits_json || "{}",
+    mwl_overflow_policy_json: map.mwl_overflow_policy_json || "{}",
+    mwl_extra_tags_json: map.mwl_extra_tags_json || "[]",
   };
 }
 
@@ -388,6 +404,107 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
             ]}
           />
         </div>
+
+        <section className="space-y-3">
+          <h4 className="text-lg font-semibold text-stone-900 dark:text-white">DICOM Tag Compatibility</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <SettingField
+              label="Specific Character Set"
+              value={form.mwl_specific_character_set}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_specific_character_set: value }));
+                setDirty(true);
+              }}
+              placeholder="ISO_IR 192"
+            />
+            <SettingField
+              label="Patient ID source"
+              type="select"
+              value={form.mwl_patient_id_source}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_patient_id_source: value }));
+                setDirty(true);
+              }}
+              options={[
+                { value: "identifier_value", label: "Primary identifier" },
+                { value: "mrn", label: "MRN" },
+                { value: "national_id", label: "National ID" },
+                { value: "patient_id", label: "RISpro patient ID" },
+              ]}
+            />
+            <SettingField
+              label="Patient name source"
+              type="select"
+              value={form.mwl_patient_name_source}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_patient_name_source: value }));
+                setDirty(true);
+              }}
+              options={[
+                { value: "english_full_name", label: "English full name" },
+                { value: "arabic_full_name", label: "Arabic full name" },
+              ]}
+            />
+            <SettingField
+              label="Procedure description source"
+              type="select"
+              value={form.mwl_procedure_description_source}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_procedure_description_source: value }));
+                setDirty(true);
+              }}
+              options={[
+                { value: "exam_name_en", label: "Exam name English" },
+                { value: "exam_name_ar", label: "Exam name Arabic" },
+                { value: "modality_name_en", label: "Modality name English" },
+                { value: "modality_name_ar", label: "Modality name Arabic" },
+              ]}
+            />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Length Safeguards</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <JsonSettingField
+              label="Enabled tags JSON"
+              value={form.mwl_enabled_tags_json}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_enabled_tags_json: value }));
+                setDirty(true);
+              }}
+              placeholder='{"PatientBirthDate":false}'
+            />
+            <JsonSettingField
+              label="Tag max lengths JSON"
+              value={form.mwl_tag_limits_json}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_tag_limits_json: value }));
+                setDirty(true);
+              }}
+              placeholder='{"PatientID":64,"ScheduledProcedureStepDescription":64}'
+            />
+            <JsonSettingField
+              label="Overflow policy JSON"
+              value={form.mwl_overflow_policy_json}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_overflow_policy_json: value }));
+                setDirty(true);
+              }}
+              placeholder='{"PatientID":"reject","ScheduledProcedureStepDescription":"truncate"}'
+            />
+            <JsonSettingField
+              label="Advanced extra tags JSON"
+              value={form.mwl_extra_tags_json}
+              onChange={(value) => {
+                setForm((prev) => ({ ...prev, mwl_extra_tags_json: value }));
+                setDirty(true);
+              }}
+              placeholder='[{"tag":"RequestedProcedureDescription","vr":"LO","value":"MRI Brain"}]'
+            />
+          </div>
+        </section>
+
         <div className="flex gap-2">
           <button
             type="button"
@@ -557,6 +674,31 @@ function SettingField({
           className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
         />
       )}
+    </div>
+  );
+}
+
+function JsonSettingField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>
+      <textarea
+        value={value}
+        placeholder={placeholder}
+        rows={4}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-xs font-mono"
+      />
     </div>
   );
 }

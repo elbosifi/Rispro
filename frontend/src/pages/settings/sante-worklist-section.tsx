@@ -34,6 +34,10 @@ type FormState = {
   patient_id_field: string;
   patient_name_field: string;
   scheduled_station_ae_title_default: string;
+  hl7_enabled_fields_json: string;
+  hl7_field_limits_json: string;
+  hl7_overflow_policy_json: string;
+  hl7_extra_fields_json: string;
 };
 
 type SummaryResponse = {
@@ -95,6 +99,10 @@ const DEFAULT_FORM: FormState = {
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
   scheduled_station_ae_title_default: "RISPRO_MWL",
+  hl7_enabled_fields_json: "{}",
+  hl7_field_limits_json: "{}",
+  hl7_overflow_policy_json: "{}",
+  hl7_extra_fields_json: "[]",
 };
 
 function toForm(settings: Record<string, string> | null | undefined): FormState {
@@ -296,6 +304,36 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
         </div>
       </section>
 
+      <section className="space-y-3">
+        <h4 className="text-lg font-semibold text-stone-900 dark:text-white">HL7 Field Mapping</h4>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <JsonField
+            label="Enabled fields JSON"
+            value={form.hl7_enabled_fields_json}
+            onChange={(value) => setValue("hl7_enabled_fields_json", value)}
+            placeholder='{"PID.11":false,"OBR.20":true}'
+          />
+          <JsonField
+            label="Field max lengths JSON"
+            value={form.hl7_field_limits_json}
+            onChange={(value) => setValue("hl7_field_limits_json", value)}
+            placeholder='{"PID.3":64,"OBR.20":64}'
+          />
+          <JsonField
+            label="Overflow policy JSON"
+            value={form.hl7_overflow_policy_json}
+            onChange={(value) => setValue("hl7_overflow_policy_json", value)}
+            placeholder='{"PID.3":"reject","OBR.20":"truncate"}'
+          />
+          <JsonField
+            label="Advanced extra fields JSON"
+            value={form.hl7_extra_fields_json}
+            onChange={(value) => setValue("hl7_extra_fields_json", value)}
+            placeholder='[{"segment":"OBR","field":27,"value":"routine"}]'
+          />
+        </div>
+      </section>
+
       <div className="flex flex-wrap gap-2">
         <button type="button" className="btn-primary text-sm disabled:opacity-50" disabled={!dirty || saveMutation.isPending} onClick={() => saveMutation.mutate()}>
           {saveMutation.isPending ? "Saving..." : "Save Sante Settings"}
@@ -412,6 +450,31 @@ function Field({
       ) : (
         <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" />
       )}
+    </label>
+  );
+}
+
+function JsonField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <label className="space-y-1 text-sm">
+      <span className="block font-medium text-stone-700 dark:text-stone-300">{label}</span>
+      <textarea
+        value={value}
+        placeholder={placeholder}
+        rows={4}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-xs font-mono"
+      />
     </label>
   );
 }

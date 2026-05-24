@@ -66,3 +66,36 @@ test("validateOrthancSettingsEntries requires base_url when enabled=true in same
     /base_url is required when enabled=true/
   );
 });
+
+test("validateOrthancSettingsEntries accepts MWL compatibility JSON settings", () => {
+  assert.doesNotThrow(() =>
+    validateOrthancSettingsEntries([
+      { key: "mwl_specific_character_set", value: { value: "ISO_IR 100" } },
+      { key: "mwl_patient_id_source", value: { value: "mrn" } },
+      { key: "mwl_patient_name_source", value: { value: "arabic_full_name" } },
+      { key: "mwl_procedure_description_source", value: { value: "exam_name_ar" } },
+      { key: "mwl_enabled_tags_json", value: { value: "{\"PatientBirthDate\":false}" } },
+      { key: "mwl_tag_limits_json", value: { value: "{\"PatientID\":32}" } },
+      { key: "mwl_overflow_policy_json", value: { value: "{\"PatientID\":\"reject\",\"ScheduledProcedureStepDescription\":\"truncate\"}" } },
+      { key: "mwl_extra_tags_json", value: { value: "[{\"tag\":\"RequestedProcedureDescription\",\"vr\":\"LO\",\"value\":\"MRI Brain\"}]" } },
+    ])
+  );
+});
+
+test("validateOrthancSettingsEntries rejects invalid MWL compatibility JSON", () => {
+  assert.throws(
+    () =>
+      validateOrthancSettingsEntries([
+        { key: "mwl_extra_tags_json", value: { value: "[{\"tag\":\"Bad Tag\",\"vr\":\"LO\",\"value\":\"x\"}]" } },
+      ]),
+    /Invalid DICOM tag key/
+  );
+
+  assert.throws(
+    () =>
+      validateOrthancSettingsEntries([
+        { key: "mwl_overflow_policy_json", value: { value: "{\"PatientID\":\"silently_cut\"}" } },
+      ]),
+    /overflow policy/
+  );
+});

@@ -38,6 +38,10 @@ function settings(): ResolvedSanteWorklistSettings {
     patientIdField: "identifier_value",
     patientNameField: "english_full_name",
     scheduledStationAeTitleDefault: "RISPRO_MWL",
+    hl7EnabledFields: {},
+    hl7FieldLimits: {},
+    hl7OverflowPolicy: {},
+    hl7ExtraFields: [],
     allowedBasePaths: ["storage/sante-hl7-output"],
     hostOutboxHint: "storage/sante-hl7-output",
     windowsShareSourceHint: "storage/sante-hl7-output",
@@ -204,4 +208,62 @@ test("buildSanteOrmO01Message does not invent scheduled station when booking has
   });
 
   assert.doesNotMatch(message.message, /\rZSS\|/);
+});
+
+test("buildSanteOrmO01Message rejects over-limit patient identifiers by default", () => {
+  assert.throws(
+    () => buildSanteOrmO01Message({
+      booking: { ...buildSyntheticSanteTestProjection(), patient_primary_id: "P".repeat(65) },
+      orderControl: "NW",
+      settings: {
+        ...settings(),
+        hl7FieldLimits: { "PID.3": 64 },
+        hl7OverflowPolicy: { "PID.3": "reject" },
+      },
+    }),
+    /PID\.3 exceeds maximum length/
+  );
+});
+
+test("buildSanteOrmO01Message truncates configured display fields and logs the action", () => {
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (message?: unknown) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    const message = buildSanteOrmO01Message({
+      booking: { ...buildSyntheticSanteTestProjection(), exam_name_en: "Long Procedure ".repeat(10) },
+      orderControl: "NW",
+      settings: {
+        ...settings(),
+        hl7FieldLimits: { "OBR.20": 20 },
+        hl7OverflowPolicy: { "OBR.20": "truncate" },
+      },
+    });
+
+    const obr = segmentFields(message.message, "OBR");
+    assert.equal(obr[20], "Long Procedure Long ");
+    assert.equal(warnings.some((message) => message.includes("hl7_value_truncated")), true);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("buildSanteOrmO01Message omits disabled fields and applies extra fields", () => {
+  const message = buildSanteOrmO01Message({
+    booking: buildSyntheticSanteTestProjection(),
+    orderControl: "NW",
+    settings: {
+      ...settings(),
+      hl7EnabledFields: { "PID.11": false },
+      hl7ExtraFields: [{ segment: "OBR", field: 27, value: "routine" }],
+    },
+  });
+
+  const pid = segmentFields(message.message, "PID");
+  const obr = segmentFields(message.message, "OBR");
+  assert.equal(pid[11], "");
+  assert.equal(obr[27], "routine");
 });

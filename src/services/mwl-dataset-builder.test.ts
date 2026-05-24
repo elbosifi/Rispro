@@ -136,3 +136,75 @@ test("renderers include Orthanc-friendly identifiers when provided", () => {
   assert.equal("ScheduledStationAETitle" in sps, false);
   assert.equal("ScheduledProcedureStepID" in sps, false);
 });
+
+test("Orthanc compatibility settings can change character set without affecting defaults", () => {
+  const dataset = buildCanonicalMwlDataset(
+    baseInput(),
+    { mwlProfile: "minimal", compatibility: { specificCharacterSet: "ISO_IR 100" } }
+  );
+
+  const orthancJson = renderCanonicalMwlToOrthancJson(dataset) as Record<string, unknown>;
+  assert.equal(orthancJson.SpecificCharacterSet, "ISO_IR 100");
+});
+
+test("Orthanc compatibility settings reject over-limit identity values by default", () => {
+  assert.throws(
+    () => buildCanonicalMwlDataset(
+      baseInput({ patientPrimaryId: "P".repeat(65) }),
+      { mwlProfile: "minimal", compatibility: { enforceDicomVrLimits: true } }
+    ),
+    /PatientID exceeds DICOM LO maximum/
+  );
+});
+
+test("Orthanc compatibility settings truncate display fields and log the action", () => {
+  const originalWarn = console.warn;
+  const warnings: string[] = [];
+  console.warn = (message?: unknown) => {
+    warnings.push(String(message));
+  };
+
+  try {
+    const dataset = buildCanonicalMwlDataset(
+      baseInput({ examNameEn: "Brain MRI ".repeat(10) }),
+      { mwlProfile: "minimal", compatibility: { enforceDicomVrLimits: true } }
+    );
+
+    assert.equal(dataset.scheduledProcedureStepSequence[0].scheduledProcedureStepDescription.length, 64);
+    assert.equal(warnings.some((message) => message.includes("mwl_value_truncated")), true);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test("Orthanc compatibility settings validate advanced extra tags", () => {
+  const dataset = buildCanonicalMwlDataset(
+    baseInput(),
+    {
+      mwlProfile: "minimal",
+      compatibility: {
+        extraTags: [
+          { tag: "RequestedProcedureDescription", vr: "LO", value: "MRI Brain With Contrast" },
+        ],
+      },
+    }
+  );
+
+  const orthancJson = renderCanonicalMwlToOrthancJson(dataset) as Record<string, unknown>;
+  assert.equal(orthancJson.RequestedProcedureDescription, "MRI Brain With Contrast");
+
+  assert.throws(
+    () => buildCanonicalMwlDataset(
+      baseInput(),
+      {
+        mwlProfile: "minimal",
+        compatibility: {
+          extraTags: [
+            { tag: "Bad Tag", vr: "LO", value: "x" },
+          ],
+        },
+      }
+    ),
+    /Invalid DICOM tag key/
+  );
+});

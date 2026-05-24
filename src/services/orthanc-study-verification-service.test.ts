@@ -43,6 +43,7 @@ beforeEach(() => {
     verifyTls: true,
     worklistTarget: "",
     strategyPreference: "put_first",
+    mwlCompatibility: {},
   });
 });
 

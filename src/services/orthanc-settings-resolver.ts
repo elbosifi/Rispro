@@ -3,6 +3,7 @@ import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { loadSettingsMap } from "./settings-service.js";
 import { normalizeOptionalText } from "../utils/normalize.js";
+import type { MwlCompatibilityOptions, MwlExtraTag, WorklistOverflowPolicy } from "./mwl-dataset-builder.js";
 
 export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
   enabled: "false",
@@ -15,6 +16,14 @@ export const ORTHANC_MWL_DEFAULTS: Record<string, string> = {
   verify_tls: "true",
   worklist_target: "",
   strategy_preference: "put_first",
+  mwl_specific_character_set: "ISO_IR 192",
+  mwl_patient_id_source: "identifier_value",
+  mwl_patient_name_source: "english_full_name",
+  mwl_procedure_description_source: "exam_name_en",
+  mwl_enabled_tags_json: "{}",
+  mwl_tag_limits_json: "{}",
+  mwl_overflow_policy_json: "{}",
+  mwl_extra_tags_json: "[]",
 };
 
 export interface ResolvedOrthancSettings {
@@ -28,6 +37,7 @@ export interface ResolvedOrthancSettings {
   verifyTls: boolean;
   worklistTarget: string;
   strategyPreference: "put_first" | "post_first";
+  mwlCompatibility: MwlCompatibilityOptions;
 }
 
 export interface OrthancSettingsEntryInput {
@@ -37,6 +47,11 @@ export interface OrthancSettingsEntryInput {
 
 const ORTHANC_BOOLEAN_KEYS = new Set(["enabled", "shadow_mode", "verify_tls"]);
 const ORTHANC_ALLOWED_KEYS = new Set(Object.keys(ORTHANC_MWL_DEFAULTS));
+const ORTHANC_PATIENT_ID_SOURCES = new Set(["identifier_value", "mrn", "national_id", "patient_id"]);
+const ORTHANC_PATIENT_NAME_SOURCES = new Set(["english_full_name", "arabic_full_name"]);
+const ORTHANC_DESCRIPTION_SOURCES = new Set(["exam_name_en", "exam_name_ar", "modality_name_en", "modality_name_ar"]);
+const ORTHANC_OVERFLOW_POLICIES = new Set(["reject", "truncate", "omit"]);
+const ORTHANC_DICOM_VRS = new Set(["AE", "CS", "DA", "LO", "PN", "SH", "UI"]);
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (!normalized) return fallback;
@@ -95,6 +110,87 @@ function extractSettingString(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function parseJsonSetting(raw: string, key: string): unknown {
+  const clean = raw.trim();
+  if (!clean) return key.endsWith("_json") && key.includes("extra") ? [] : {};
+  try {
+    return JSON.parse(clean);
+  } catch {
+    throw new HttpError(400, `orthanc_mwl_sync.${key} must be valid JSON.`);
+  }
+}
+
+function validateBooleanMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `orthanc_mwl_sync.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!/^[A-Za-z][A-Za-z0-9.]*$/.test(field)) {
+      throw new HttpError(400, `Invalid DICOM tag key: ${field}`);
+    }
+    if (typeof value !== "boolean") {
+      throw new HttpError(400, `orthanc_mwl_sync.${key}.${field} must be boolean.`);
+    }
+  }
+}
+
+function validatePositiveIntegerMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `orthanc_mwl_sync.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!/^[A-Za-z][A-Za-z0-9.]*$/.test(field)) {
+      throw new HttpError(400, `Invalid DICOM tag key: ${field}`);
+    }
+    if (!Number.isInteger(Number(value)) || Number(value) <= 0) {
+      throw new HttpError(400, `orthanc_mwl_sync.${key}.${field} must be a positive integer.`);
+    }
+  }
+}
+
+function validateOverflowPolicyMap(raw: string, key: string): void {
+  const parsed = parseJsonSetting(raw, key);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new HttpError(400, `orthanc_mwl_sync.${key} must be a JSON object.`);
+  }
+  for (const [field, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!/^[A-Za-z][A-Za-z0-9.]*$/.test(field)) {
+      throw new HttpError(400, `Invalid DICOM tag key: ${field}`);
+    }
+    if (!ORTHANC_OVERFLOW_POLICIES.has(String(value))) {
+      throw new HttpError(400, `orthanc_mwl_sync.${key}.${field} has invalid overflow policy.`);
+    }
+  }
+}
+
+function validateExtraTags(raw: string): void {
+  const parsed = parseJsonSetting(raw, "mwl_extra_tags_json");
+  if (!Array.isArray(parsed)) {
+    throw new HttpError(400, "orthanc_mwl_sync.mwl_extra_tags_json must be a JSON array.");
+  }
+  for (const item of parsed) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      throw new HttpError(400, "orthanc_mwl_sync.mwl_extra_tags_json entries must be objects.");
+    }
+    const row = item as Record<string, unknown>;
+    const tag = String(row.tag || "");
+    if (!/^[A-Za-z][A-Za-z0-9]*$/.test(tag)) {
+      throw new HttpError(400, `Invalid DICOM tag key: ${tag}`);
+    }
+    if (!ORTHANC_DICOM_VRS.has(String(row.vr))) {
+      throw new HttpError(400, `Unsupported DICOM VR: ${String(row.vr || "")}`);
+    }
+    if (row.policy != null && !ORTHANC_OVERFLOW_POLICIES.has(String(row.policy))) {
+      throw new HttpError(400, `orthanc_mwl_sync.mwl_extra_tags_json.${tag} has invalid overflow policy.`);
+    }
+    if (row.maxLength != null && (!Number.isInteger(Number(row.maxLength)) || Number(row.maxLength) <= 0)) {
+      throw new HttpError(400, `orthanc_mwl_sync.mwl_extra_tags_json.${tag}.maxLength must be a positive integer.`);
+    }
+  }
+}
+
 function normalizeWorklistTargetValue(raw: string): string {
   const normalized = raw.trim().toUpperCase();
   if (!normalized || normalized === "RISPRO_MWL") {
@@ -146,6 +242,21 @@ export function validateOrthancSettingsEntries(entries: OrthancSettingsEntryInpu
       throw new HttpError(400, `orthanc_mwl_sync.connection_mode must be "internal" or "external".`);
     }
   }
+
+  if (incoming.has("mwl_patient_id_source") && !ORTHANC_PATIENT_ID_SOURCES.has(incoming.get("mwl_patient_id_source") || "")) {
+    throw new HttpError(400, "orthanc_mwl_sync.mwl_patient_id_source is invalid.");
+  }
+  if (incoming.has("mwl_patient_name_source") && !ORTHANC_PATIENT_NAME_SOURCES.has(incoming.get("mwl_patient_name_source") || "")) {
+    throw new HttpError(400, "orthanc_mwl_sync.mwl_patient_name_source is invalid.");
+  }
+  if (incoming.has("mwl_procedure_description_source") && !ORTHANC_DESCRIPTION_SOURCES.has(incoming.get("mwl_procedure_description_source") || "")) {
+    throw new HttpError(400, "orthanc_mwl_sync.mwl_procedure_description_source is invalid.");
+  }
+
+  if (incoming.has("mwl_enabled_tags_json")) validateBooleanMap(incoming.get("mwl_enabled_tags_json") || "", "mwl_enabled_tags_json");
+  if (incoming.has("mwl_tag_limits_json")) validatePositiveIntegerMap(incoming.get("mwl_tag_limits_json") || "", "mwl_tag_limits_json");
+  if (incoming.has("mwl_overflow_policy_json")) validateOverflowPolicyMap(incoming.get("mwl_overflow_policy_json") || "", "mwl_overflow_policy_json");
+  if (incoming.has("mwl_extra_tags_json")) validateExtraTags(incoming.get("mwl_extra_tags_json") || "");
 
   if (incoming.has("timeout_seconds")) {
     const timeoutRaw = incoming.get("timeout_seconds") || "";
@@ -203,6 +314,21 @@ function parseConnectionMode(value: string | undefined, fallback: "internal" | "
   return fallback;
 }
 
+function parseRecord<T>(raw: string | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseExtraTagArray(raw: string | undefined): MwlExtraTag[] {
+  const parsed = parseRecord<unknown>(raw, []);
+  if (!Array.isArray(parsed)) return [];
+  return parsed as MwlExtraTag[];
+}
+
 export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings> {
   const map = await loadSettingsMap(["orthanc_mwl_sync"]);
   const db = map.orthanc_mwl_sync || {};
@@ -234,5 +360,20 @@ export async function resolveOrthancSettings(): Promise<ResolvedOrthancSettings>
     verifyTls: parseBoolean(db.verify_tls, env.orthancVerifyTls),
     worklistTarget: normalizeWorklistTargetValue(normalizeOptionalText(db.worklist_target) || env.orthancWorklistTarget),
     strategyPreference: parseStrategyPreference(db.strategy_preference, "put_first"),
+    mwlCompatibility: {
+      specificCharacterSet: normalizeOptionalText(db.mwl_specific_character_set) || "ISO_IR 192",
+      enforceDicomVrLimits: true,
+      patientIdSource: ORTHANC_PATIENT_ID_SOURCES.has(db.mwl_patient_id_source || "")
+        ? db.mwl_patient_id_source as MwlCompatibilityOptions["patientIdSource"]
+        : "identifier_value",
+      patientNameSource: db.mwl_patient_name_source === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
+      procedureDescriptionSource: ORTHANC_DESCRIPTION_SOURCES.has(db.mwl_procedure_description_source || "")
+        ? db.mwl_procedure_description_source as MwlCompatibilityOptions["procedureDescriptionSource"]
+        : "exam_name_en",
+      enabledTags: parseRecord<Record<string, boolean>>(db.mwl_enabled_tags_json, {}),
+      tagLimits: parseRecord<Record<string, number>>(db.mwl_tag_limits_json, {}),
+      overflowPolicy: parseRecord<Record<string, WorklistOverflowPolicy>>(db.mwl_overflow_policy_json, {}),
+      extraTags: parseExtraTagArray(db.mwl_extra_tags_json),
+    },
   };
 }
