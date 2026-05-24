@@ -13,22 +13,22 @@ test("settings page exposes the patient duplicate resolver section", async () =>
 test("duplicate resolver supports manual search and group merge UI", async () => {
   const source = await readFile(new URL("../../../frontend/src/pages/settings/patient-duplicate-resolver-section.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /Manual merge workbench/);
+  assert.match(source, /patientMerge\.manualWorkbench/);
   assert.match(source, /searchPatientsForDuplicateResolver/);
   assert.match(source, /mergePatientDuplicateGroup/);
   assert.match(source, /manualSelection/);
-  assert.match(source, /Final survivor details/);
+  assert.match(source, /patientMerge\.finalSurvivorDetails/);
   assert.match(source, /usePatientField/);
   assert.match(source, /draftToPatientPayload/);
   assert.match(source, /dateInputValue/);
-  assert.match(source, /Merge failed/);
+  assert.match(source, /patientMerge\.toast\.mergeFailed/);
 });
 
 test("duplicate resolver exposes matching controls and conflict review", async () => {
   const source = await readFile(new URL("../../../frontend/src/pages/settings/patient-duplicate-resolver-section.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /Match threshold/);
-  assert.match(source, /Refresh candidates/);
+  assert.match(source, /patientMerge\.matchThreshold/);
+  assert.match(source, /patientMerge\.refreshCandidates/);
   assert.match(source, /candidateSort/);
   assert.match(source, /SignalBadges/);
   assert.match(source, /ConflictSummary/);
@@ -44,4 +44,17 @@ test("patient merge workbench is available as a role-controlled page", async () 
   assert.match(appSource, /PatientMergePage/);
   assert.match(navSource, /nav\.patientMerge/);
   assert.match(visibilitySource, /patients\.merge/);
+});
+
+test("patient merge UI strings use i18n keys", async () => {
+  const resolverSource = await readFile(new URL("../../../frontend/src/pages/settings/patient-duplicate-resolver-section.tsx", import.meta.url), "utf8");
+  const pageSource = await readFile(new URL("../../../frontend/src/pages/patient-merge/patient-merge-page.tsx", import.meta.url), "utf8");
+  const i18nSource = await readFile(new URL("../../../frontend/src/lib/i18n.ts", import.meta.url), "utf8");
+
+  assert.match(pageSource, /patientMerge\.title/);
+  assert.match(pageSource, /patientMerge\.description/);
+  assert.match(resolverSource, /useLanguage/);
+  assert.match(resolverSource, /patientMerge\.field\.dob/);
+  assert.match(i18nSource, /"patientMerge\.manualWorkbench"/);
+  assert.match(i18nSource, /"patientMerge\.toast\.mergeFailed"/);
 });

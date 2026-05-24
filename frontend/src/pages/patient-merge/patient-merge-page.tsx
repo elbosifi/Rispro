@@ -3,9 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { GitMerge } from "lucide-react";
 import { SupervisorReAuthModal } from "@/components/auth/supervisor-reauth-modal";
 import { Card } from "@/components/shared/Card";
+import { useLanguage } from "@/providers/language-provider";
 import PatientDuplicateResolverSection from "@/pages/settings/patient-duplicate-resolver-section";
 
 export default function PatientMergePage() {
+  const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [showReAuthModal, setShowReAuthModal] = useState(false);
   const [pendingReAuthKeys, setPendingReAuthKeys] = useState<string[][]>([]);
@@ -34,8 +36,8 @@ export default function PatientMergePage() {
       <div className="flex items-center gap-2">
         <GitMerge size={22} className="text-accent" />
         <div>
-          <h2 className="text-xl font-bold text-foreground">Patient Merge</h2>
-          <p className="text-sm text-muted-foreground">Review duplicate candidates, select the survivor, and merge duplicate patient records.</p>
+          <h2 className="text-xl font-bold text-foreground">{t("patientMerge.title")}</h2>
+          <p className="text-sm text-muted-foreground">{t("patientMerge.description")}</p>
         </div>
       </div>
       <Card className="p-4 sm:p-5">
