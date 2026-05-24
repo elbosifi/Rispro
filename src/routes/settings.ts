@@ -37,7 +37,8 @@ import {
   deleteNameDictionaryEntry,
   listNameDictionary,
   updateNameDictionaryEntry,
-  upsertNameDictionary
+  upsertNameDictionary,
+  applyNameDictionaryToPatients
 } from "../services/name-dictionary-service.js";
 import {
   deletePatientNotAllowedNameWord,
@@ -139,6 +140,15 @@ settingsRouter.delete(
     const request = req as SettingsRequest;
     const entry = await deleteNameDictionaryEntry(asString(request.params?.entryId), request.user.sub as UserId);
     res.json({ entry });
+  })
+);
+
+settingsRouter.post(
+  "/name-dictionary/apply-to-patients",
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as SettingsRequest;
+    const result = await applyNameDictionaryToPatients(request.user.sub as UserId);
+    res.json(result);
   })
 );
 

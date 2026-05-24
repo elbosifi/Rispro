@@ -1,6 +1,7 @@
 import { pool } from "../db/pool.js";
 import { HttpError } from "../utils/http-error.js";
 import { logAuditEntry } from "./audit-service.js";
+import { generateEnglishFromDictionary } from "../utils/name-generation.js";
 import type { UserId } from "../types/http.js";
 
 export interface NameDictionaryRow {
@@ -208,4 +209,72 @@ export async function importNameDictionaryEntries(
   }
 
   return imported;
+}
+
+export async function applyNameDictionaryToPatients(currentUserId: UserId): Promise<{
+  scannedCount: number;
+  updatedCount: number;
+  skippedMissingTokensCount: number;
+}> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const { rows: dictionaryRows } = await client.query<NameDictionaryRow>(
+      `
+        select id, arabic_text, english_text, is_active, created_at
+        from name_dictionary
+        where is_active = true
+        order by arabic_text asc
+      `
+    );
+    const { rows: patientRows } = await client.query<{ id: number; arabic_full_name: string; english_full_name: string | null }>(
+      `
+        select id, arabic_full_name, english_full_name
+        from patients
+        where coalesce(arabic_full_name, '') <> ''
+      `
+    );
+
+    let updatedCount = 0;
+    let skippedMissingTokensCount = 0;
+
+    for (const patient of patientRows) {
+      const generated = generateEnglishFromDictionary(patient.arabic_full_name, dictionaryRows);
+      if (generated.missingTokens.length > 0 || !generated.englishName.trim()) {
+        skippedMissingTokensCount += 1;
+        continue;
+      }
+      if (String(patient.english_full_name || "").trim() === generated.englishName.trim()) continue;
+
+      await client.query(
+        `
+          update patients
+          set english_full_name = $2
+          where id = $1
+        `,
+        [patient.id, generated.englishName.trim()]
+      );
+      updatedCount += 1;
+    }
+
+    await logAuditEntry(
+      {
+        entityType: "name_dictionary",
+        entityId: 0,
+        actionType: "apply_to_patients",
+        oldValues: null,
+        newValues: { scannedCount: patientRows.length, updatedCount, skippedMissingTokensCount },
+        changedByUserId: currentUserId
+      },
+      client
+    );
+
+    await client.query("commit");
+    return { scannedCount: patientRows.length, updatedCount, skippedMissingTokensCount };
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
 }

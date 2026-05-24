@@ -155,6 +155,13 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     setToast({ message, type });
     setTimeout(() => setToast(null), 4500);
   };
+  const localizedPatientError = (error: unknown, fallbackKey: "patients.registerFailed" | "patients.updateFailed" | "patients.deleteFailed") => {
+    const message = error instanceof Error ? error.message : String((error as any)?.message || "");
+    if (message.startsWith("Primary identifier is required.")) return t("patients.primaryIdentifierRequired");
+    const blockedWordMatch = message.match(/^Arabic name contains a not-allowed word:\s*(.+)$/i);
+    if (blockedWordMatch) return t("patients.arabicNameNotAllowedWord", { word: blockedWordMatch[1] || "" });
+    return message || t(fallbackKey);
+  };
   const [missingTokenInputs, setMissingTokenInputs] = useState<Record<string, string>>({});
   const [addingToken, setAddingToken] = useState<string | null>(null);
   const [addTokenError, setAddTokenError] = useState<string | null>(null);
@@ -291,10 +298,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       onSuccess?.(patient);
     },
     onError: (err: any) => {
-      const message = err?.message?.startsWith("Primary identifier is required.")
-        ? t("patients.primaryIdentifierRequired")
-        : err?.message || t("patients.registerFailed");
-      showToast(message, "error");
+      showToast(localizedPatientError(err, "patients.registerFailed"), "error");
     }
   });
   const updateMutation = useMutation({
@@ -305,10 +309,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
       onSuccess?.(patient);
     },
     onError: (err: any) => {
-      const message = err?.message?.startsWith("Primary identifier is required.")
-        ? t("patients.primaryIdentifierRequired")
-        : err?.message || t("patients.updateFailed");
-      showToast(message, "error");
+      showToast(localizedPatientError(err, "patients.updateFailed"), "error");
     }
   });
   const deleteMutation = useMutation({
@@ -566,7 +567,7 @@ export default function PatientForm({ mode, patientId, onSuccess, onCancel }: Pa
     const blockedWords = new Set(notAllowedNameWords.map((entry) => normalizeArabic(entry.arabicText)).filter(Boolean));
     const blockedWord = arabicNameParts.map((part) => normalizeArabic(part)).find((part) => blockedWords.has(part));
     if (blockedWord) {
-      showToast(`Arabic name contains a not-allowed word: ${blockedWord}`, "error");
+      showToast(t("patients.arabicNameNotAllowedWord", { word: blockedWord }), "error");
       arabicFullNameRef.current?.focus();
       return;
     }

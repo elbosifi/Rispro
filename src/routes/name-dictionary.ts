@@ -5,6 +5,7 @@ import { asString } from "../utils/request-coercion.js";
 import { asUnknownRecord } from "../utils/records.js";
 import {
   deleteNameDictionaryEntry,
+  applyNameDictionaryToPatients,
   importNameDictionaryEntries,
   listNameDictionary,
   updateNameDictionaryEntry,
@@ -35,6 +36,17 @@ nameDictionaryRouter.post(
     const request = req as AuthRequest;
     const entry = await upsertNameDictionary(request.body ?? undefined, request.user!.sub as UserId);
     res.status(201).json({ entry });
+  })
+);
+
+nameDictionaryRouter.post(
+  "/apply-to-patients",
+  requireSupervisor,
+  requireRecentSupervisorReauth,
+  asyncRoute(async (req: Request, res: Response) => {
+    const request = req as AuthRequest;
+    const result = await applyNameDictionaryToPatients(request.user!.sub as UserId);
+    res.json(result);
   })
 );
 

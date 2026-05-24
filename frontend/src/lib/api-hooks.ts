@@ -2594,6 +2594,13 @@ export async function deleteNameDictionaryEntry(entryId: number) {
   return api<{ entry: RawRecord }>(`/settings/name-dictionary/${entryId}`, { method: "DELETE" });
 }
 
+export async function applyNameDictionaryToPatients() {
+  return api<{ scannedCount: number; updatedCount: number; skippedMissingTokensCount: number }>("/settings/name-dictionary/apply-to-patients", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
 export async function importNameDictionary(entries: { arabicText: string; englishText: string }[]) {
   return api<{ entries: RawRecord[] }>("/name-dictionary/import", {
     method: "POST",

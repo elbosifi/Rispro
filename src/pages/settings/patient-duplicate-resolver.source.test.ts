@@ -58,3 +58,25 @@ test("patient merge UI strings use i18n keys", async () => {
   assert.match(i18nSource, /"patientMerge\.manualWorkbench"/);
   assert.match(i18nSource, /"patientMerge\.toast\.mergeFailed"/);
 });
+
+test("patient form not-allowed word errors use i18n keys", async () => {
+  const source = await readFile(new URL("../../../frontend/src/components/patients/patient-form.tsx", import.meta.url), "utf8");
+  const i18nSource = await readFile(new URL("../../../frontend/src/lib/i18n.ts", import.meta.url), "utf8");
+
+  assert.match(source, /patients\.arabicNameNotAllowedWord/);
+  assert.match(source, /localizedPatientError/);
+  assert.match(i18nSource, /"patients\.arabicNameNotAllowedWord"/);
+});
+
+test("name dictionary is a role-controlled navigation page with advanced controls", async () => {
+  const appSource = await readFile(new URL("../../../frontend/src/App.tsx", import.meta.url), "utf8");
+  const navSource = await readFile(new URL("../../../frontend/src/components/layout/navigation.tsx", import.meta.url), "utf8");
+  const visibilitySource = await readFile(new URL("../../../frontend/src/lib/page-visibility.ts", import.meta.url), "utf8");
+  const pageSource = await readFile(new URL("../../../frontend/src/pages/name-dictionary/name-dictionary-page.tsx", import.meta.url), "utf8");
+
+  assert.match(appSource, /name\.dictionary/);
+  assert.match(navSource, /nav\.nameDictionary/);
+  assert.match(visibilitySource, /name\.dictionary/);
+  assert.match(pageSource, /sortMode/);
+  assert.match(pageSource, /applyNameDictionaryToPatients/);
+});

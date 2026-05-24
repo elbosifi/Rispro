@@ -11,6 +11,7 @@ import SearchPage from "@/pages/search/search-page";
 import PatientsPage from "@/pages/patients/patients-page";
 import EditPatientPage from "@/pages/patients/edit-patient-page";
 import PatientMergePage from "@/pages/patient-merge/patient-merge-page";
+import NameDictionaryPage from "@/pages/name-dictionary/name-dictionary-page";
 import CalendarPage from "@/pages/calendar/calendar-page";
 import RegistrationsPage from "@/pages/registrations/registrations-page";
 import SchedulingOverrideRequestsPage from "@/pages/scheduling-override-requests/scheduling-override-requests-page";
@@ -44,6 +45,7 @@ const ROUTE_PATHS: Record<string, string> = {
   dashboard: "/",
   patients: "/patients",
   "patients.merge": "/patients/merge",
+  "name.dictionary": "/name-dictionary",
   "patients.new": "/patients/new",
   appointments: "/appointments",
   "scheduling.override.requests": "/scheduling/override-requests",
@@ -161,6 +163,9 @@ function AppContent() {
     if (pathname.startsWith("/patients/merge")) {
       return "patients.merge";
     }
+    if (pathname.startsWith("/name-dictionary")) {
+      return "name.dictionary";
+    }
     return PATH_TO_ROUTE[pathname === "/" ? "/" : pathname.slice(1)] || "dashboard";
   })();
 
@@ -179,6 +184,8 @@ function AppContent() {
           return language === "ar" ? "المرضى" : "Patients";
         case "patients.merge":
           return language === "ar" ? "Ø¯Ù…Ø¬ Ø§Ù„Ù…Ø±Ø¶Ù‰" : "Patient Merge";
+        case "name.dictionary":
+          return language === "ar" ? "Ù‚Ø§Ù…ÙˆØ³ Ø§Ù„Ø£Ø³Ù…Ø§Ø¡" : "Name Dictionary";
       case "appointments":
         return language === "ar" ? "إنشاء موعد" : "Create Appointment";
       case "scheduling.override.requests":
@@ -279,6 +286,7 @@ function AppContent() {
             <Route path="/dashboard" element={guardedPage("dashboard", <DashboardPage />)} />
             <Route path="/patients" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/merge" element={guardedPage("patients.merge", <PatientMergePage />)} />
+            <Route path="/name-dictionary" element={guardedPage("name.dictionary", <NameDictionaryPage />)} />
             <Route path="/patients/new" element={guardedPage("patients", <PatientsPage />)} />
             <Route path="/patients/:id/edit" element={guardedPage("patients", <EditPatientPage />)} />
             <Route path="/appointments" element={guardedPage("appointments", <AppointmentsV3CreatePage />)} />
