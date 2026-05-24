@@ -29,6 +29,50 @@ type OrthancSettingsForm = {
   mwl_extra_tags_json: string;
 };
 
+type OverflowPolicy = "reject" | "truncate" | "omit";
+type DicomVr = "AE" | "CS" | "DA" | "LO" | "PN" | "SH" | "UI";
+
+type DicomExtraTag = {
+  tag: string;
+  vr: DicomVr;
+  value: string;
+  maxLength?: number;
+  policy?: OverflowPolicy;
+};
+
+const CHARACTER_SET_OPTIONS = [
+  { value: "ISO_IR 192", label: "UTF-8 (ISO_IR 192)" },
+  { value: "ISO_IR 6", label: "ASCII (ISO_IR 6)" },
+  { value: "ISO_IR 100", label: "Latin-1 Western European (ISO_IR 100)" },
+  { value: "ISO_IR 101", label: "Latin-2 Central European (ISO_IR 101)" },
+  { value: "ISO_IR 109", label: "Latin-3 South European (ISO_IR 109)" },
+  { value: "ISO_IR 144", label: "Cyrillic (ISO_IR 144)" },
+  { value: "ISO_IR 126", label: "Greek (ISO_IR 126)" },
+  { value: "ISO_IR 127", label: "Arabic (ISO_IR 127)" },
+  { value: "ISO_IR 138", label: "Hebrew (ISO_IR 138)" },
+  { value: "GB18030", label: "Chinese GB18030" },
+];
+
+const OVERFLOW_POLICY_OPTIONS: Array<{ value: OverflowPolicy; label: string }> = [
+  { value: "reject", label: "Reject" },
+  { value: "truncate", label: "Truncate" },
+  { value: "omit", label: "Omit" },
+];
+
+const DICOM_VR_OPTIONS: DicomVr[] = ["AE", "CS", "DA", "LO", "PN", "SH", "UI"];
+
+const ORTHANC_TAG_FIELDS: Array<{ key: string; label: string; defaultMax: number; defaultPolicy: OverflowPolicy }> = [
+  { key: "SpecificCharacterSet", label: "Specific Character Set", defaultMax: 16, defaultPolicy: "reject" },
+  { key: "PatientName", label: "Patient Name", defaultMax: 64, defaultPolicy: "reject" },
+  { key: "PatientID", label: "Patient ID", defaultMax: 64, defaultPolicy: "reject" },
+  { key: "PatientBirthDate", label: "Patient Birth Date", defaultMax: 8, defaultPolicy: "reject" },
+  { key: "PatientSex", label: "Patient Sex", defaultMax: 16, defaultPolicy: "reject" },
+  { key: "AccessionNumber", label: "Accession Number", defaultMax: 16, defaultPolicy: "reject" },
+  { key: "Modality", label: "Modality", defaultMax: 16, defaultPolicy: "reject" },
+  { key: "ScheduledProcedureStepStartDate", label: "SPS Start Date", defaultMax: 8, defaultPolicy: "reject" },
+  { key: "ScheduledProcedureStepDescription", label: "SPS Description", defaultMax: 64, defaultPolicy: "truncate" },
+];
+
 type SyncSummaryResponse = {
   ok: boolean;
   summary: {
@@ -120,6 +164,28 @@ function toInitialForm(settings: Record<string, string> | null | undefined): Ort
     mwl_overflow_policy_json: map.mwl_overflow_policy_json || "{}",
     mwl_extra_tags_json: map.mwl_extra_tags_json || "[]",
   };
+}
+
+function parseJsonObject<T extends Record<string, unknown>>(value: string, fallback: T): T {
+  try {
+    const parsed = JSON.parse(value || "");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonArray<T>(value: string, fallback: T[]): T[] {
+  try {
+    const parsed = JSON.parse(value || "");
+    return Array.isArray(parsed) ? parsed as T[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function jsonStringify(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectionProps) {
@@ -266,6 +332,32 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
   const recentOutboxFailures = summaryData?.summary?.recentFailures?.outbox || [];
   const orthancProbe = summaryData?.summary?.orthancProbe;
   const isInternalMode = form.connection_mode === "internal";
+  const enabledTags = parseJsonObject<Record<string, boolean>>(form.mwl_enabled_tags_json, {});
+  const tagLimits = parseJsonObject<Record<string, number>>(form.mwl_tag_limits_json, {});
+  const overflowPolicies = parseJsonObject<Record<string, OverflowPolicy>>(form.mwl_overflow_policy_json, {});
+  const extraTags = parseJsonArray<DicomExtraTag>(form.mwl_extra_tags_json, []);
+
+  const updateJsonMap = <T extends string | number | boolean>(
+    key: keyof OrthancSettingsForm,
+    field: string,
+    value: T | null,
+    current: Record<string, T>
+  ) => {
+    const next = { ...current };
+    if (value === null || value === "") {
+      delete next[field];
+    } else {
+      next[field] = value;
+    }
+    setForm((prev) => ({ ...prev, [key]: jsonStringify(next) }));
+    setDirty(true);
+  };
+
+  const updateExtraTag = (index: number, patch: Partial<DicomExtraTag>) => {
+    const next = extraTags.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item);
+    setForm((prev) => ({ ...prev, mwl_extra_tags_json: jsonStringify(next) }));
+    setDirty(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -410,12 +502,13 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <SettingField
               label="Specific Character Set"
+              type="select"
               value={form.mwl_specific_character_set}
               onChange={(value) => {
                 setForm((prev) => ({ ...prev, mwl_specific_character_set: value }));
                 setDirty(true);
               }}
-              placeholder="ISO_IR 192"
+              options={CHARACTER_SET_OPTIONS}
             />
             <SettingField
               label="Patient ID source"
@@ -465,43 +558,130 @@ export default function OrthancMwlSection({ onReAuthRequired }: OrthancMwlSectio
 
         <section className="space-y-3">
           <h4 className="text-lg font-semibold text-stone-900 dark:text-white">Length Safeguards</h4>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <JsonSettingField
-              label="Enabled tags JSON"
-              value={form.mwl_enabled_tags_json}
-              onChange={(value) => {
-                setForm((prev) => ({ ...prev, mwl_enabled_tags_json: value }));
-                setDirty(true);
-              }}
-              placeholder='{"PatientBirthDate":false}'
-            />
-            <JsonSettingField
-              label="Tag max lengths JSON"
-              value={form.mwl_tag_limits_json}
-              onChange={(value) => {
-                setForm((prev) => ({ ...prev, mwl_tag_limits_json: value }));
-                setDirty(true);
-              }}
-              placeholder='{"PatientID":64,"ScheduledProcedureStepDescription":64}'
-            />
-            <JsonSettingField
-              label="Overflow policy JSON"
-              value={form.mwl_overflow_policy_json}
-              onChange={(value) => {
-                setForm((prev) => ({ ...prev, mwl_overflow_policy_json: value }));
-                setDirty(true);
-              }}
-              placeholder='{"PatientID":"reject","ScheduledProcedureStepDescription":"truncate"}'
-            />
-            <JsonSettingField
-              label="Advanced extra tags JSON"
-              value={form.mwl_extra_tags_json}
-              onChange={(value) => {
-                setForm((prev) => ({ ...prev, mwl_extra_tags_json: value }));
-                setDirty(true);
-              }}
-              placeholder='[{"tag":"RequestedProcedureDescription","vr":"LO","value":"MRI Brain"}]'
-            />
+          <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700">
+            <table className="w-full text-sm">
+              <thead className="bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">Tag</th>
+                  <th className="px-3 py-2 text-left font-semibold">Sync</th>
+                  <th className="px-3 py-2 text-left font-semibold">Max</th>
+                  <th className="px-3 py-2 text-left font-semibold">Overflow</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ORTHANC_TAG_FIELDS.map((field) => (
+                  <tr key={field.key} className="border-t border-stone-200 dark:border-stone-700">
+                    <td className="px-3 py-2 text-stone-800 dark:text-stone-100">{field.label}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={enabledTags[field.key] !== false}
+                        onChange={(event) => updateJsonMap(
+                          "mwl_enabled_tags_json",
+                          field.key,
+                          event.target.checked ? null : false,
+                          enabledTags
+                        )}
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={tagLimits[field.key] || field.defaultMax}
+                        onChange={(event) => {
+                          const parsed = Number(event.target.value);
+                          updateJsonMap(
+                            "mwl_tag_limits_json",
+                            field.key,
+                            Number.isInteger(parsed) && parsed > 0 && parsed !== field.defaultMax ? parsed : null,
+                            tagLimits
+                          );
+                        }}
+                        className="w-24 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                      />
+                    </td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={overflowPolicies[field.key] || field.defaultPolicy}
+                        onChange={(event) => updateJsonMap(
+                          "mwl_overflow_policy_json",
+                          field.key,
+                          event.target.value === field.defaultPolicy ? null : event.target.value as OverflowPolicy,
+                          overflowPolicies
+                        )}
+                        className="w-full px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                      >
+                        {OVERFLOW_POLICY_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <h5 className="text-sm font-semibold text-stone-900 dark:text-white">Advanced Optional Tags</h5>
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => {
+                  setForm((prev) => ({
+                    ...prev,
+                    mwl_extra_tags_json: jsonStringify([...extraTags, { tag: "", vr: "LO", value: "", policy: "reject" }]),
+                  }));
+                  setDirty(true);
+                }}
+              >
+                Add Tag
+              </button>
+            </div>
+            {extraTags.length === 0 ? (
+              <p className="text-xs text-stone-500 dark:text-stone-400">No advanced tags configured.</p>
+            ) : (
+              <div className="space-y-2">
+                {extraTags.map((extraTag, index) => (
+                  <div key={`${index}-${extraTag.tag}`} className="grid grid-cols-1 md:grid-cols-[1fr_90px_1.5fr_110px_130px_auto] gap-2 items-end">
+                    <SettingField label="Tag" value={extraTag.tag || ""} onChange={(value) => updateExtraTag(index, { tag: value })} placeholder="RequestedProcedureDescription" />
+                    <SettingField
+                      label="VR"
+                      type="select"
+                      value={extraTag.vr || "LO"}
+                      onChange={(value) => updateExtraTag(index, { vr: value as DicomVr })}
+                      options={DICOM_VR_OPTIONS.map((vr) => ({ value: vr, label: vr }))}
+                    />
+                    <SettingField label="Value" value={extraTag.value || ""} onChange={(value) => updateExtraTag(index, { value })} />
+                    <SettingField
+                      label="Max"
+                      type="number"
+                      value={extraTag.maxLength ? String(extraTag.maxLength) : ""}
+                      onChange={(value) => updateExtraTag(index, { maxLength: value ? Number(value) : undefined })}
+                    />
+                    <SettingField
+                      label="Policy"
+                      type="select"
+                      value={extraTag.policy || "reject"}
+                      onChange={(value) => updateExtraTag(index, { policy: value as OverflowPolicy })}
+                      options={OVERFLOW_POLICY_OPTIONS}
+                    />
+                    <button
+                      type="button"
+                      className="btn-secondary text-xs"
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, mwl_extra_tags_json: jsonStringify(extraTags.filter((_, itemIndex) => itemIndex !== index)) }));
+                        setDirty(true);
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 
@@ -674,31 +854,6 @@ function SettingField({
           className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-sm"
         />
       )}
-    </div>
-  );
-}
-
-function JsonSettingField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <div className="space-y-1">
-      <label className="text-sm font-medium text-stone-700 dark:text-stone-300">{label}</label>
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        rows={4}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-stone-900 dark:text-white text-xs font-mono"
-      />
     </div>
   );
 }

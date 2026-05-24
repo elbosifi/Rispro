@@ -55,6 +55,8 @@ export interface ResolvedSanteWorklistSettings {
   charset: string;
   patientIdField: "identifier_value" | "mrn" | "national_id" | "patient_id";
   patientNameField: "english_full_name" | "arabic_full_name";
+  procedureCodeField: "exam_type_code" | "modality_code";
+  procedureDescriptionField: "exam_name_en" | "exam_name_ar" | "modality_name_en" | "modality_name_ar" | "modality_code";
   scheduledStationAeTitleDefault: string;
   hl7EnabledFields: Record<string, boolean>;
   hl7FieldLimits: Record<string, number>;
@@ -94,6 +96,8 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
   charset: "UNICODE UTF-8",
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
+  procedure_code_field: "exam_type_code",
+  procedure_description_field: "exam_name_en",
   scheduled_station_ae_title_default: "RISPRO_MWL",
   hl7_enabled_fields_json: "{}",
   hl7_field_limits_json: "{}",
@@ -102,6 +106,8 @@ export const SANTE_HL7_DEFAULTS: Record<string, string> = {
 };
 
 const ALLOWED_KEYS = new Set(Object.keys(SANTE_HL7_DEFAULTS));
+const PROCEDURE_CODE_FIELDS = new Set(["exam_type_code", "modality_code"]);
+const PROCEDURE_DESCRIPTION_FIELDS = new Set(["exam_name_en", "exam_name_ar", "modality_name_en", "modality_name_ar", "modality_code"]);
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   const normalized = String(value ?? "").trim().toLowerCase();
@@ -299,6 +305,14 @@ export function validateSanteSettingsEntries(entries: Array<{ key: string; value
   if (incoming.has("hl7_overflow_policy_json")) validateOverflowPolicyMap(incoming.get("hl7_overflow_policy_json") || "", "hl7_overflow_policy_json");
   if (incoming.has("hl7_extra_fields_json")) validateExtraFields(incoming.get("hl7_extra_fields_json") || "");
 
+  if (incoming.has("procedure_code_field") && !PROCEDURE_CODE_FIELDS.has(incoming.get("procedure_code_field") || "")) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.procedure_code_field is invalid.`);
+  }
+
+  if (incoming.has("procedure_description_field") && !PROCEDURE_DESCRIPTION_FIELDS.has(incoming.get("procedure_description_field") || "")) {
+    throw new HttpError(400, `${SANTE_HL7_CATEGORY}.procedure_description_field is invalid.`);
+  }
+
   for (const key of ["retry_max_attempts", "retry_initial_delay_seconds", "retry_max_delay_seconds", "pending_import_timeout_seconds", "mllp_timeout_seconds"]) {
     if (incoming.has(key) && parsePositiveInteger(incoming.get(key), 0) <= 0) {
       throw new HttpError(400, `${SANTE_HL7_CATEGORY}.${key} must be a positive integer.`);
@@ -404,6 +418,12 @@ export async function resolveSanteWorklistSettings(): Promise<ResolvedSanteWorkl
       ? db.patient_id_field as ResolvedSanteWorklistSettings["patientIdField"]
       : "identifier_value",
     patientNameField: db.patient_name_field === "arabic_full_name" ? "arabic_full_name" : "english_full_name",
+    procedureCodeField: PROCEDURE_CODE_FIELDS.has(db.procedure_code_field || "")
+      ? db.procedure_code_field as ResolvedSanteWorklistSettings["procedureCodeField"]
+      : "exam_type_code",
+    procedureDescriptionField: PROCEDURE_DESCRIPTION_FIELDS.has(db.procedure_description_field || "")
+      ? db.procedure_description_field as ResolvedSanteWorklistSettings["procedureDescriptionField"]
+      : "exam_name_en",
     scheduledStationAeTitleDefault: normalizeOptionalText(db.scheduled_station_ae_title_default) || "RISPRO_MWL",
     hl7EnabledFields: parseRuntimeJson<Record<string, boolean>>(db.hl7_enabled_fields_json, {}),
     hl7FieldLimits: parseRuntimeJson<Record<string, number>>(db.hl7_field_limits_json, {}),

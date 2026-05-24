@@ -33,12 +33,57 @@ type FormState = {
   charset: string;
   patient_id_field: string;
   patient_name_field: string;
+  procedure_code_field: string;
+  procedure_description_field: string;
   scheduled_station_ae_title_default: string;
   hl7_enabled_fields_json: string;
   hl7_field_limits_json: string;
   hl7_overflow_policy_json: string;
   hl7_extra_fields_json: string;
 };
+
+type OverflowPolicy = "reject" | "truncate" | "omit";
+
+type Hl7ExtraField = {
+  segment: "MSH" | "PID" | "PV1" | "ORC" | "OBR";
+  field: number;
+  value: string;
+  maxLength?: number;
+  policy?: OverflowPolicy;
+};
+
+const CHARSET_OPTIONS = [
+  { value: "UNICODE UTF-8", label: "UTF-8 (UNICODE UTF-8)" },
+  { value: "ASCII", label: "ASCII" },
+  { value: "8859/1", label: "Latin-1 (8859/1)" },
+  { value: "ISO IR14", label: "Arabic ISO IR14" },
+  { value: "UNICODE", label: "Unicode" },
+];
+
+const OVERFLOW_POLICY_OPTIONS: Array<{ value: OverflowPolicy; label: string }> = [
+  { value: "reject", label: "Reject" },
+  { value: "truncate", label: "Truncate" },
+  { value: "omit", label: "Omit" },
+];
+
+const HL7_SEGMENTS: Hl7ExtraField["segment"][] = ["MSH", "PID", "PV1", "ORC", "OBR"];
+
+const HL7_FIELD_ROWS: Array<{ key: string; label: string; defaultMax: number; defaultPolicy: OverflowPolicy }> = [
+  { key: "PID.3", label: "PID-3 Patient ID", defaultMax: 64, defaultPolicy: "reject" },
+  { key: "PID.5", label: "PID-5 Patient Name", defaultMax: 64, defaultPolicy: "reject" },
+  { key: "PID.7", label: "PID-7 Birth Date", defaultMax: 8, defaultPolicy: "reject" },
+  { key: "PID.8", label: "PID-8 Sex", defaultMax: 1, defaultPolicy: "reject" },
+  { key: "PID.11", label: "PID-11 Address", defaultMax: 64, defaultPolicy: "truncate" },
+  { key: "PID.13", label: "PID-13 Phone", defaultMax: 40, defaultPolicy: "truncate" },
+  { key: "ORC.2", label: "ORC-2 Placer Order", defaultMax: 64, defaultPolicy: "reject" },
+  { key: "ORC.5", label: "ORC-5 Order Status", defaultMax: 8, defaultPolicy: "reject" },
+  { key: "ORC.15", label: "ORC-15 Scheduled Date/Time", defaultMax: 14, defaultPolicy: "reject" },
+  { key: "OBR.4", label: "OBR-4 Procedure Code/Text", defaultMax: 128, defaultPolicy: "truncate" },
+  { key: "OBR.13", label: "OBR-13 Contrast Text", defaultMax: 64, defaultPolicy: "truncate" },
+  { key: "OBR.20", label: "OBR-20 Description", defaultMax: 64, defaultPolicy: "truncate" },
+  { key: "OBR.21", label: "OBR-21 Scheduled Station AE", defaultMax: 16, defaultPolicy: "reject" },
+  { key: "OBR.31", label: "OBR-31 Comment", defaultMax: 64, defaultPolicy: "truncate" },
+];
 
 type SummaryResponse = {
   ok: boolean;
@@ -98,6 +143,8 @@ const DEFAULT_FORM: FormState = {
   charset: "UNICODE UTF-8",
   patient_id_field: "identifier_value",
   patient_name_field: "english_full_name",
+  procedure_code_field: "exam_type_code",
+  procedure_description_field: "exam_name_en",
   scheduled_station_ae_title_default: "RISPRO_MWL",
   hl7_enabled_fields_json: "{}",
   hl7_field_limits_json: "{}",
@@ -107,6 +154,28 @@ const DEFAULT_FORM: FormState = {
 
 function toForm(settings: Record<string, string> | null | undefined): FormState {
   return { ...DEFAULT_FORM, ...(settings || {}) };
+}
+
+function parseJsonObject<T extends Record<string, unknown>>(value: string, fallback: T): T {
+  try {
+    const parsed = JSON.parse(value || "");
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as T : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function parseJsonArray<T>(value: string, fallback: T[]): T[] {
+  try {
+    const parsed = JSON.parse(value || "");
+    return Array.isArray(parsed) ? parsed as T[] : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function jsonStringify(value: unknown): string {
+  return JSON.stringify(value);
 }
 
 export default function SanteWorklistSection({ onReAuthRequired }: Props) {
@@ -237,6 +306,30 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
   const summary = summaryQuery.data?.summary;
   const isFileDrop = form.delivery_method !== "mllp";
   const syntheticTestLabel = form.delivery_method === "mllp" ? "Send Synthetic Test HL7 via MLLP" : "Send Synthetic Test HL7";
+  const enabledFields = parseJsonObject<Record<string, boolean>>(form.hl7_enabled_fields_json, {});
+  const fieldLimits = parseJsonObject<Record<string, number>>(form.hl7_field_limits_json, {});
+  const overflowPolicies = parseJsonObject<Record<string, OverflowPolicy>>(form.hl7_overflow_policy_json, {});
+  const extraFields = parseJsonArray<Hl7ExtraField>(form.hl7_extra_fields_json, []);
+
+  const updateJsonMap = <T extends string | number | boolean>(
+    key: keyof FormState,
+    field: string,
+    value: T | null,
+    current: Record<string, T>
+  ) => {
+    const next = { ...current };
+    if (value === null || value === "") {
+      delete next[field];
+    } else {
+      next[field] = value;
+    }
+    setValue(key, jsonStringify(next));
+  };
+
+  const updateExtraField = (index: number, patch: Partial<Hl7ExtraField>) => {
+    const next = extraFields.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item);
+    setValue("hl7_extra_fields_json", jsonStringify(next));
+  };
 
   return (
     <div className="space-y-6">
@@ -297,40 +390,128 @@ export default function SanteWorklistSection({ onReAuthRequired }: Props) {
           <Field label="Receiving application" value={form.receiving_application} onChange={(value) => setValue("receiving_application", value)} />
           <Field label="Receiving facility" value={form.receiving_facility} onChange={(value) => setValue("receiving_facility", value)} />
           <Field label="HL7 version" value={form.hl7_version} onChange={(value) => setValue("hl7_version", value)} />
-          <Field label="Charset" value={form.charset} onChange={(value) => setValue("charset", value)} />
+          <Field label="Charset" type="select" value={form.charset} onChange={(value) => setValue("charset", value)} options={CHARSET_OPTIONS.map((option) => [option.value, option.label])} />
           <Field label="Patient ID field" type="select" value={form.patient_id_field} onChange={(value) => setValue("patient_id_field", value)} options={[["identifier_value", "Primary identifier"], ["mrn", "MRN"], ["national_id", "National ID"], ["patient_id", "RISpro patient ID"]]} />
           <Field label="Patient name field" type="select" value={form.patient_name_field} onChange={(value) => setValue("patient_name_field", value)} options={[["english_full_name", "English name"], ["arabic_full_name", "Arabic name"]]} />
+          <Field label="Procedure code field" type="select" value={form.procedure_code_field} onChange={(value) => setValue("procedure_code_field", value)} options={[["exam_type_code", "Exam type code"], ["modality_code", "Modality code"]]} />
+          <Field label="Procedure description field" type="select" value={form.procedure_description_field} onChange={(value) => setValue("procedure_description_field", value)} options={[["exam_name_en", "Exam name English"], ["exam_name_ar", "Exam name Arabic"], ["modality_name_en", "Modality name English"], ["modality_name_ar", "Modality name Arabic"], ["modality_code", "Modality code"]]} />
           <Field label="Scheduled Station AE Title default" value={form.scheduled_station_ae_title_default} onChange={(value) => setValue("scheduled_station_ae_title_default", value)} placeholder="RISPRO_MWL" />
         </div>
       </section>
 
       <section className="space-y-3">
         <h4 className="text-lg font-semibold text-stone-900 dark:text-white">HL7 Field Mapping</h4>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <JsonField
-            label="Enabled fields JSON"
-            value={form.hl7_enabled_fields_json}
-            onChange={(value) => setValue("hl7_enabled_fields_json", value)}
-            placeholder='{"PID.11":false,"OBR.20":true}'
-          />
-          <JsonField
-            label="Field max lengths JSON"
-            value={form.hl7_field_limits_json}
-            onChange={(value) => setValue("hl7_field_limits_json", value)}
-            placeholder='{"PID.3":64,"OBR.20":64}'
-          />
-          <JsonField
-            label="Overflow policy JSON"
-            value={form.hl7_overflow_policy_json}
-            onChange={(value) => setValue("hl7_overflow_policy_json", value)}
-            placeholder='{"PID.3":"reject","OBR.20":"truncate"}'
-          />
-          <JsonField
-            label="Advanced extra fields JSON"
-            value={form.hl7_extra_fields_json}
-            onChange={(value) => setValue("hl7_extra_fields_json", value)}
-            placeholder='[{"segment":"OBR","field":27,"value":"routine"}]'
-          />
+        <div className="overflow-x-auto rounded-lg border border-stone-200 dark:border-stone-700">
+          <table className="w-full text-sm">
+            <thead className="bg-stone-50 dark:bg-stone-800 text-stone-600 dark:text-stone-300">
+              <tr>
+                <th className="px-3 py-2 text-left font-semibold">Field</th>
+                <th className="px-3 py-2 text-left font-semibold">Send</th>
+                <th className="px-3 py-2 text-left font-semibold">Max</th>
+                <th className="px-3 py-2 text-left font-semibold">Overflow</th>
+              </tr>
+            </thead>
+            <tbody>
+              {HL7_FIELD_ROWS.map((field) => (
+                <tr key={field.key} className="border-t border-stone-200 dark:border-stone-700">
+                  <td className="px-3 py-2 text-stone-800 dark:text-stone-100">{field.label}</td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={enabledFields[field.key] !== false}
+                      onChange={(event) => updateJsonMap("hl7_enabled_fields_json", field.key, event.target.checked ? null : false, enabledFields)}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={fieldLimits[field.key] || field.defaultMax}
+                      onChange={(event) => {
+                        const parsed = Number(event.target.value);
+                        updateJsonMap(
+                          "hl7_field_limits_json",
+                          field.key,
+                          Number.isInteger(parsed) && parsed > 0 && parsed !== field.defaultMax ? parsed : null,
+                          fieldLimits
+                        );
+                      }}
+                      className="w-24 px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={overflowPolicies[field.key] || field.defaultPolicy}
+                      onChange={(event) => updateJsonMap(
+                        "hl7_overflow_policy_json",
+                        field.key,
+                        event.target.value === field.defaultPolicy ? null : event.target.value as OverflowPolicy,
+                        overflowPolicies
+                      )}
+                      className="w-full px-2 py-1 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600"
+                    >
+                      {OVERFLOW_POLICY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>{option.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <h5 className="text-sm font-semibold text-stone-900 dark:text-white">Advanced Extra Fields</h5>
+            <button type="button" className="btn-secondary text-xs" onClick={() => setValue("hl7_extra_fields_json", jsonStringify([...extraFields, { segment: "OBR", field: 27, value: "", policy: "reject" }]))}>
+              Add Field
+            </button>
+          </div>
+          {extraFields.length === 0 ? (
+            <p className="text-xs text-stone-500">No advanced fields configured.</p>
+          ) : (
+            <div className="space-y-2">
+              {extraFields.map((extraField, index) => (
+                <div key={`${index}-${extraField.segment}.${extraField.field}`} className="grid grid-cols-1 md:grid-cols-[100px_100px_1.5fr_110px_130px_auto] gap-2 items-end">
+                  <Field
+                    label="Segment"
+                    type="select"
+                    value={extraField.segment || "OBR"}
+                    onChange={(value) => updateExtraField(index, { segment: value as Hl7ExtraField["segment"] })}
+                    options={HL7_SEGMENTS.map((segment) => [segment, segment])}
+                  />
+                  <Field
+                    label="Field"
+                    type="number"
+                    value={extraField.field ? String(extraField.field) : ""}
+                    onChange={(value) => updateExtraField(index, { field: Number(value) })}
+                  />
+                  <Field label="Value" value={extraField.value || ""} onChange={(value) => updateExtraField(index, { value })} />
+                  <Field
+                    label="Max"
+                    type="number"
+                    value={extraField.maxLength ? String(extraField.maxLength) : ""}
+                    onChange={(value) => updateExtraField(index, { maxLength: value ? Number(value) : undefined })}
+                  />
+                  <Field
+                    label="Policy"
+                    type="select"
+                    value={extraField.policy || "reject"}
+                    onChange={(value) => updateExtraField(index, { policy: value as OverflowPolicy })}
+                    options={OVERFLOW_POLICY_OPTIONS.map((option) => [option.value, option.label])}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary text-xs"
+                    onClick={() => setValue("hl7_extra_fields_json", jsonStringify(extraFields.filter((_, itemIndex) => itemIndex !== index)))}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -450,31 +631,6 @@ function Field({
       ) : (
         <input type={type} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600" />
       )}
-    </label>
-  );
-}
-
-function JsonField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="space-y-1 text-sm">
-      <span className="block font-medium text-stone-700 dark:text-stone-300">{label}</span>
-      <textarea
-        value={value}
-        placeholder={placeholder}
-        rows={4}
-        onChange={(event) => onChange(event.target.value)}
-        className="w-full px-3 py-1.5 rounded border bg-white dark:bg-stone-800 border-stone-300 dark:border-stone-600 text-xs font-mono"
-      />
     </label>
   );
 }

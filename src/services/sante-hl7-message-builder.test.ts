@@ -37,6 +37,8 @@ function settings(): ResolvedSanteWorklistSettings {
     charset: "UNICODE UTF-8",
     patientIdField: "identifier_value",
     patientNameField: "english_full_name",
+    procedureCodeField: "exam_type_code",
+    procedureDescriptionField: "exam_name_en",
     scheduledStationAeTitleDefault: "RISPRO_MWL",
     hl7EnabledFields: {},
     hl7FieldLimits: {},
@@ -198,6 +200,30 @@ test("buildSanteOrmO01Message maps cancellation status to Sante ORC-5", () => {
 
   const orc = segmentFields(message.message, "ORC");
   assert.equal(orc[5], "CA");
+});
+
+test("buildSanteOrmO01Message uses configured procedure code and description sources", () => {
+  const message = buildSanteOrmO01Message({
+    booking: {
+      ...buildSyntheticSanteTestProjection(),
+      exam_type_code: "XR-CHEST",
+      exam_name_en: "Chest X-Ray",
+      exam_name_ar: "أشعة صدر",
+      modality_code: "CR",
+      modality_name_en: "Computed Radiography",
+      modality_name_ar: "أشعة",
+    },
+    orderControl: "NW",
+    settings: {
+      ...settings(),
+      procedureCodeField: "modality_code",
+      procedureDescriptionField: "exam_name_ar",
+    },
+  });
+
+  const obr = segmentFields(message.message, "OBR");
+  assert.equal(obr[4], "CR^أشعة صدر");
+  assert.equal(obr[20], "أشعة صدر");
 });
 
 test("buildSanteOrmO01Message does not invent scheduled station when booking has none", () => {

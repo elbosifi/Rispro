@@ -26,6 +26,24 @@ test("validateSanteSettingsEntries accepts queue-only send timing option", () =>
   ]));
 });
 
+test("validateSanteSettingsEntries accepts procedure source selectors", () => {
+  assert.doesNotThrow(() => validateSanteSettingsEntries([
+    ...baseEntries,
+    { key: "procedure_code_field", value: { value: "modality_code" } },
+    { key: "procedure_description_field", value: { value: "exam_name_ar" } },
+  ]));
+});
+
+test("validateSanteSettingsEntries rejects invalid procedure source selectors", () => {
+  assert.throws(
+    () => validateSanteSettingsEntries([
+      ...baseEntries,
+      { key: "procedure_code_field", value: { value: "patient_name" } },
+    ]),
+    /procedure_code_field/
+  );
+});
+
 test("validateSanteSettingsEntries rejects file-drop settings without output folder", () => {
   assert.throws(
     () => validateSanteSettingsEntries([

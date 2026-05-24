@@ -11,5 +11,7 @@ values
   ('sante_worklist_hl7', 'hl7_enabled_fields_json', '{"value":"{}"}'::jsonb),
   ('sante_worklist_hl7', 'hl7_field_limits_json', '{"value":"{}"}'::jsonb),
   ('sante_worklist_hl7', 'hl7_overflow_policy_json', '{"value":"{}"}'::jsonb),
-  ('sante_worklist_hl7', 'hl7_extra_fields_json', '{"value":"[]"}'::jsonb)
+  ('sante_worklist_hl7', 'hl7_extra_fields_json', '{"value":"[]"}'::jsonb),
+  ('sante_worklist_hl7', 'procedure_code_field', '{"value":"exam_type_code"}'::jsonb),
+  ('sante_worklist_hl7', 'procedure_description_field', '{"value":"exam_name_en"}'::jsonb)
 on conflict (category, setting_key) do nothing;

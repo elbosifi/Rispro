@@ -92,6 +92,23 @@ function compactText(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function selectProcedureCode(row: SanteHl7BookingProjection, settings: ResolvedSanteWorklistSettings): string {
+  if (settings.procedureCodeField === "modality_code") {
+    return compactText(row.modality_code);
+  }
+  return compactText(row.exam_type_code) || compactText(row.modality_code);
+}
+
+function selectProcedureDescription(row: SanteHl7BookingProjection, settings: ResolvedSanteWorklistSettings): string {
+  switch (settings.procedureDescriptionField) {
+    case "exam_name_ar": return compactText(row.exam_name_ar);
+    case "modality_name_en": return compactText(row.modality_name_en);
+    case "modality_name_ar": return compactText(row.modality_name_ar);
+    case "modality_code": return compactText(row.modality_code);
+    default: return compactText(row.exam_name_en);
+  }
+}
+
 const DEFAULT_HL7_FIELD_LIMITS: Record<string, number> = {
   "PID.3": 64,
   "PID.5": 64,
@@ -194,8 +211,13 @@ export function buildSanteOrmO01Message(input: {
   const { booking, orderControl, settings } = input;
   const messageControlId = input.messageControlId || `RISPRO-${randomUUID()}`;
   const accessionNumber = buildAccessionNumber(booking.id);
-  const procedureDescription = booking.exam_name_en || booking.exam_name_ar || booking.modality_name_en || booking.modality_name_ar || booking.modality_code;
-  const procedureCode = compactText(booking.exam_type_code) || compactText(booking.modality_code) || procedureDescription;
+  const procedureDescription = selectProcedureDescription(booking, settings)
+    || booking.exam_name_en
+    || booking.exam_name_ar
+    || booking.modality_name_en
+    || booking.modality_name_ar
+    || booking.modality_code;
+  const procedureCode = selectProcedureCode(booking, settings) || procedureDescription;
   const scheduledDateTime = hl7DateTime(booking.booking_date, booking.booking_time);
   const timestamp = hl7Timestamp(input.now);
   const acceptAckType = settings.deliveryMethod === "mllp" && settings.mllpExpectAck ? "AL" : "";
